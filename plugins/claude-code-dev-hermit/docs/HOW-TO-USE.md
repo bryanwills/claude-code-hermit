@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- [Claude Code](https://code.claude.com) v2.1.80+
+- [Claude Code](https://code.claude.com) v2.1.110+
 - [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) v1.0.16+ (installed and hatched)
 - Node.js 24+ (for the git-push-guard hook at strict profile)
 

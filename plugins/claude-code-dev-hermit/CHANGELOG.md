@@ -4,6 +4,25 @@
 
 ### Changed
 
+- **docs: bump Claude Code prerequisite to v2.1.110+** — dep resolver and `claude plugin tag` both require v2.1.110+; operators on older versions can't install this plugin cleanly. Updated `docs/HOW-TO-USE.md` and `CONTRIBUTING.md`.
+- **plugin.json: tighten `dependencies` range to `^1.0.18`** — caret range (`^1.0.18` = `>=1.0.18 <2.0.0`) is the conventional semver signal for "tested against this major version, expect patch-compat"; was `>=1.0.18` (open-ended upwards). `required_core_version` and `requires` remain `>=` for runtime minimum-version checks.
+- **remove per-plugin release skill** — `.claude/skills/release/SKILL.md` deleted; the root `/release claude-code-dev-hermit` skill covers the full validation suite (tests, auditor, branch guard, stale refs). Per-plugin skill was a lower-fidelity duplicate with zero audience (standalone repo is a zombie redirect per CLAUDE.md).
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `plugins/claude-code-dev-hermit/docs/HOW-TO-USE.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
+| `plugins/claude-code-dev-hermit/CONTRIBUTING.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
+| `plugins/claude-code-dev-hermit/.claude-plugin/plugin.json` | `dependencies[0].version`: `>=1.0.18` → `^1.0.18` |
+| `plugins/claude-code-dev-hermit/.claude/skills/release/SKILL.md` | Deleted |
+
+### Upgrade Instructions
+
+No operator action required.
+
+No `config.json` changes required.
+
 - **CLAUDE.md tightened for contributor audience** — dropped the "This Repo is a Plugin" install block (duplicated in README) and the "Built-in Claude Code Skills Used" section (its actionable delegation guidance folded into Constraints); rewrote Core Contracts as 6 dense load-bearing items (profile values, `/session-close` is operator-only, ambient-rules meta-rule, learning loop, proposal-gate pointer, authoritative session-state path).
 - **plugin.json: native `dependencies` field added** — `dependencies: [{ name: "claude-code-hermit", version: ">=1.0.18" }]` enables Claude Code's native dependency resolver to auto-install core; the hermit-internal `requires` field remains for runtime version gating.
 - **release skill: double-dash tag format** — tag step now uses `claude plugin tag --push` (produces `claude-code-dev-hermit--vX.Y.Z`), which validates manifest/marketplace version agreement before tagging; `git tag vNEW` removed.
