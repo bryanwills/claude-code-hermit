@@ -1,0 +1,47 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "mcp__strava__check-strava-connection",
+      "mcp__strava__get-athlete-profile",
+      "mcp__strava__get-athlete-stats",
+      "mcp__strava__get-athlete-zones",
+      "mcp__strava__get-recent-activities",
+      "mcp__strava__get-all-activities",
+      "mcp__strava__get-activity-details",
+      "mcp__strava__get-activity-streams",
+      "mcp__strava__get-activity-laps",
+      "mcp__strava__get-activity-photos",
+      "mcp__strava__get-route",
+      "mcp__strava__get-segment",
+      "mcp__strava__get-segment-effort",
+      "mcp__strava__get-server-version",
+      "mcp__strava__list-athlete-clubs",
+      "mcp__strava__list-athlete-routes",
+      "mcp__strava__list-segment-efforts",
+      "mcp__strava__list-starred-segments",
+      "mcp__strava__explore-segments",
+      "mcp__strava__export-route-gpx",
+      "mcp__strava__export-route-tcx",
+      "Edit(.claude-code-hermit/**)",
+      "Write(.claude-code-hermit/**)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(chmod 777*)",
+      "Bash(curl * | bash*)",
+      "Bash(wget * | bash*)",
+      "Edit(**/.claude-code-hermit/OPERATOR.md)",
+      "Write(**/.claude-code-hermit/OPERATOR.md)",
+      "Edit(.env)",
+      "Write(.env)",
+      "mcp__strava__star-segment",
+      "mcp__strava__connect-strava",
+      "mcp__strava__disconnect-strava"
+    ]
+  }
+}
