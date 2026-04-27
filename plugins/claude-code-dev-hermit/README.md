@@ -22,9 +22,10 @@ Your hermit already knows how to manage sessions, learn from its work, and keep 
 Both core and dev hermit ship from the same monorepo marketplace:
 
 ```bash
-claude plugin marketplace add gtapps/claude-code-hermit # Add the marketplace
-claude plugin install claude-code-dev-hermit@claude-code-hermit --scope project # install the plugin
+/plugin marketplace add gtapps/claude-code-hermit # Add the marketplace
+/plugin install claude-code-dev-hermit@claude-code-hermit --scope project # install the plugin
 /claude-code-dev-hermit:hatch # initialize
+
 ```
 
 The setup wizard asks about your branch naming, deploy process, and hook profile. It also offers companion plugins (code-review — optional, for PR review; feature-dev; context7) and suggests dev-specific heartbeat checks.
