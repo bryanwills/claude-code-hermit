@@ -4,6 +4,7 @@
 
 ### Changed
 
+- **CLAUDE.md tightened for contributor audience** — dropped the "This Repo is a Plugin" install block (duplicated in README) and the "Built-in Claude Code Skills Used" section (its actionable delegation guidance folded into Constraints); rewrote Core Contracts as 6 dense load-bearing items (profile values, `/session-close` is operator-only, ambient-rules meta-rule, learning loop, proposal-gate pointer, authoritative session-state path).
 - **plugin.json: native `dependencies` field added** — `dependencies: [{ name: "claude-code-hermit", version: ">=1.0.18" }]` enables Claude Code's native dependency resolver to auto-install core; the hermit-internal `requires` field remains for runtime version gating.
 - **release skill: double-dash tag format** — tag step now uses `claude plugin tag --push` (produces `claude-code-dev-hermit--vX.Y.Z`), which validates manifest/marketplace version agreement before tagging; `git tag vNEW` removed.
 - **release skill: branch-agnostic push** — branch push uses plain `git push` so releases from non-main branches work correctly.
