@@ -9,12 +9,13 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 - **docs: bump Claude Code prerequisite to v2.1.110+** — dep resolver and `claude plugin tag` both require v2.1.110+; operators on older versions can't install this plugin cleanly. Updated `README.md`.
 - **plugin.json: tighten `dependencies` range to `^1.0.17`** — caret range is the conventional semver signal for "tested against this major version, expect patch-compat"; was `>=1.0.17` (open-ended). `required_core_version` and `requires` remain `>=` for runtime minimum-version checks.
 - **remove per-plugin release skill** — `.claude/skills/release/SKILL.md` deleted; the root `/release claude-code-homeassistant-hermit` skill covers the full validation suite. Per-plugin skill was a lower-fidelity duplicate with zero audience.
+- **README architecture diagram: core version pin updated to `≥ 1.0.17`** — was a stale `≥ 1.0.15` left over from the v0.0.4 bump.
 
 ### Files affected
 
 | File | Change |
 |------|--------|
-| `plugins/claude-code-homeassistant-hermit/README.md` | Prerequisite: v2.1.98+ → v2.1.110+ |
+| `plugins/claude-code-homeassistant-hermit/README.md` | Prerequisite: v2.1.98+ → v2.1.110+; architecture block core pin: `≥ 1.0.15` → `≥ 1.0.17` |
 | `plugins/claude-code-homeassistant-hermit/.claude-plugin/plugin.json` | `dependencies[0].version`: `>=1.0.17` → `^1.0.17` |
 | `plugins/claude-code-homeassistant-hermit/.claude/skills/release/SKILL.md` | Deleted |
 

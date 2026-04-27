@@ -128,7 +128,7 @@ claude-code-homeassistant-hermit (this plugin)
   ├── src/ha_agent_lab/   Python package (REST client, policy, simulation, apply)
   └── state-templates/    CLAUDE-APPEND.md (injected by hatch)
 
-claude-code-hermit (core, required ≥ 1.0.15)
+claude-code-hermit (core, required ≥ 1.0.17)
   └── Session lifecycle, proposals, reflect, memory, cost tracking
 ```
 
