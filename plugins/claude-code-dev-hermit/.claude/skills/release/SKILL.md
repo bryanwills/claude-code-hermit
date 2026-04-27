@@ -75,31 +75,30 @@ Run `claude plugin validate .` in the repo root. If it reports errors, fix them 
 
 ```bash
 git add .claude-plugin/plugin.json .claude-plugin/marketplace.json README.md CHANGELOG.md
-git commit -m "vNEW — <one-line summary from first line of changelog body>"
-git tag vNEW
-git push
-git push origin vNEW
+git commit -m "claude-code-dev-hermit--vNEW — <one-line summary from first line of changelog body>"
+claude plugin tag --push
+git push origin main
 ```
 
-If no upstream is set: `git push --set-upstream origin main` before pushing the tag.
+If no upstream is set: `git push --set-upstream origin main` before tagging.
 
 ### 5. Create GitHub release
 
 ```bash
-gh release create vNEW \
-  --title "vNEW" \
+gh release create "claude-code-dev-hermit--vNEW" \
+  --title "claude-code-dev-hermit--vNEW" \
   --notes "<full changelog body for this release>"
 ```
 
 ### 6. Confirm
 
 ```
-Released vNEW
+Released claude-code-dev-hermit--vNEW
   plugin.json       ✓
   marketplace.json  ✓
   README.md badge   ✓
   CHANGELOG.md      ✓
-  Git tag vNEW      ✓
+  Git tag claude-code-dev-hermit--vNEW  ✓
   GitHub release    ✓
   Pushed            ✓
 ```

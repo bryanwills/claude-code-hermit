@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **plugin.json: native `dependencies` field added** — `dependencies: [{ name: "claude-code-hermit", version: ">=1.0.18" }]` enables Claude Code's native dependency resolver to auto-install core; the hermit-internal `requires` field remains for runtime version gating.
+- **release skill: double-dash tag format** — tag step now uses `claude plugin tag --push` (produces `claude-code-dev-hermit--vX.Y.Z`), which validates manifest/marketplace version agreement before tagging; `git tag vNEW` removed.
+
 ## [0.1.9] - 2026-04-27
 
 ### Changed
