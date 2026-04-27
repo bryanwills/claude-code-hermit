@@ -5,9 +5,9 @@ Git safety, quality workflow, and dev conventions for claude-code-hermit.
 ## Plugin Structure
 
 - `agents/` — implementer agent (worktree-isolated code writing)
-- `skills/` — hatch, dev-adapt, dev-branch, dev-up, dev-down, dev-log-watch, dev-status, dev-quality, dev-cleanup, dev-doctor, create-pr
+- `skills/` — hatch, dev-adapt, dev-branch, dev-up, dev-down, dev-log-watch, dev-status, dev-quality, dev-cleanup, dev-doctor
 - `hooks/hooks.json` — git-push-guard hook (strict profile only)
-- `scripts/` — hook scripts; `scripts/lib/` — shared Node helpers (resolve-command, port-check, health-poll, log-watch-builder) with co-located `.test.js` runners
+- `scripts/` — hook scripts; `scripts/lib/` — shared Node helpers (resolve-command, port-check, health-poll, log-watch-builder, shell-utils) with co-located `.test.js` runners
 - `state-templates/` — CLAUDE-APPEND.md (dev workflow rules appended to CLAUDE.md)
 - `docs/` — DEV-LOG-WATCH.md, SKILLS.md, WORKFLOW.md, etc.
 - `.claude-plugin/plugin.json` — plugin manifest

@@ -24,6 +24,7 @@
 - **CHANGELOG hygiene: duplicate `[Unreleased]` block removed** — orphan block that had been hanging around since pre-0.1.7 (all 13 entries already shipped in 0.1.7 / 0.1.8, cross-checked against the upstream subtree merge `72fd9a1`). The release skill only ever rewrites the canonical top-of-file `[Unreleased]`, leaving the duplicate untouched across multiple releases. Cleared for posterity.
 - **`CLAUDE-APPEND.md`: dev-branch step inserted** — the Implement step now directs the main session to run `/dev-branch` first when on a protected branch. Reach caveat: existing projects pick up this change on next `/hermit-evolve` after the 0.1.10 release.
 - **README skills table + hatch Available-skills report** — list `/dev-branch` so it is discoverable post-install.
+- **README "How It Works": Implement step and Skills preamble updated** — Implement step now names `/dev-branch` explicitly; a preamble above the Skills table frames the five lifecycle skills for operators scanning the narrative.
 - **docs: bump Claude Code prerequisite to v2.1.110+** — dep resolver and `claude plugin tag` both require v2.1.110+; operators on older versions can't install this plugin cleanly. Updated `docs/HOW-TO-USE.md` and `CONTRIBUTING.md`.
 - **plugin.json: tighten `dependencies` range to `^1.0.18`** — caret range (`^1.0.18` = `>=1.0.18 <2.0.0`) is the conventional semver signal for "tested against this major version, expect patch-compat"; was `>=1.0.18` (open-ended upwards). `required_core_version` and `requires` remain `>=` for runtime minimum-version checks.
 - **remove per-plugin release skill** — `.claude/skills/release/SKILL.md` deleted; the root `/release claude-code-dev-hermit` skill covers the full validation suite (tests, auditor, branch guard, stale refs). Per-plugin skill was a lower-fidelity duplicate with zero audience (standalone repo is a zombie redirect per CLAUDE.md).
@@ -50,7 +51,7 @@
 | `skills/dev-doctor/SKILL.md` | Check #4 WARN → FAIL; check #14 added (env-leakage scan) |
 | `skills/hatch/SKILL.md` | dev-branch + dev-up/dev-down/dev-log-watch added to Available-skills report |
 | `state-templates/CLAUDE-APPEND.md` | dev-branch step inserted into Implement (unconditional); Local Dev Environment subsection added |
-| `README.md` | dev-branch + dev-up + dev-down + dev-log-watch rows added to skills table; DEV-LOG-WATCH link |
+| `README.md` | dev-branch + dev-up + dev-down + dev-log-watch + dev-status rows added to skills table; DEV-LOG-WATCH link; Implement step updated; lifecycle-skills preamble added |
 | `CLAUDE.md` (plugin-local) | Plugin Structure refreshed — full skill list, `scripts/lib/` mention, `docs/` mention |
 | `docs/HOW-TO-USE.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
 | `CONTRIBUTING.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
