@@ -454,19 +454,16 @@ run_test "doctor-check (missing config → fail, exits 0)" bash -c \
 cleanup
 
 # -------------------------------------------------------
-# 47. Sibling manifest invariant — required_core_version vs requires.claude-code-hermit agree
-# Checks both plugin.json (legacy layout) and hermit-meta.json (sidecar layout).
-# Skips plugins missing either field in whichever source they use.
+# 47. Sibling manifest invariant — hermit-meta.json required_core_version vs requires.claude-code-hermit agree
+# Walks live monorepo plugins/*/.claude-plugin/hermit-meta.json. Skips plugins missing either field.
 # -------------------------------------------------------
 run_test "sibling manifests: required_core_version vs requires consistency" bash -c '
-  for pj in "$1"/plugins/*/.claude-plugin/plugin.json; do
-    [ -f "$pj" ] || continue
-    meta="$(dirname "$pj")/hermit-meta.json"
-    src="$pj"; [ -f "$meta" ] && src="$meta"
-    rcv=$(jq -r ".required_core_version // empty" "$src")
-    req=$(jq -r ".requires[\"claude-code-hermit\"] // empty" "$src")
+  for meta in "$1"/plugins/*/.claude-plugin/hermit-meta.json; do
+    [ -f "$meta" ] || continue
+    rcv=$(jq -r ".required_core_version // empty" "$meta")
+    req=$(jq -r ".requires[\"claude-code-hermit\"] // empty" "$meta")
     if [ -n "$rcv" ] && [ -n "$req" ] && [ "$rcv" != "$req" ]; then
-      echo "MISMATCH in $src: required_core_version=$rcv requires.claude-code-hermit=$req" >&2
+      echo "MISMATCH in $meta: required_core_version=$rcv requires.claude-code-hermit=$req" >&2
       exit 1
     fi
   done
@@ -479,7 +476,8 @@ workdir="$(setup_workdir)"
 cd "$workdir"
 mkdir -p "$workdir/plugins/claude-code-hermit/.claude-plugin" "$workdir/plugins/example-sibling/.claude-plugin"
 echo '{"name":"claude-code-hermit","version":"1.0.20"}' > "$workdir/plugins/claude-code-hermit/.claude-plugin/plugin.json"
-echo '{"name":"example-sibling","version":"0.1.0","required_core_version":">=2.0.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/plugin.json"
+echo '{"name":"example-sibling","version":"0.1.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/plugin.json"
+echo '{"required_core_version":">=2.0.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/hermit-meta.json"
 mkdir -p "$workdir/.claude-code-hermit/proposals"
 cat > "$workdir/.claude-code-hermit/config.json" <<'EOF'
 {"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}
@@ -495,7 +493,8 @@ workdir="$(setup_workdir)"
 cd "$workdir"
 mkdir -p "$workdir/plugins/claude-code-hermit/.claude-plugin" "$workdir/plugins/example-sibling/.claude-plugin"
 echo '{"name":"claude-code-hermit","version":"1.0.20"}' > "$workdir/plugins/claude-code-hermit/.claude-plugin/plugin.json"
-echo '{"name":"example-sibling","version":"0.1.0","required_core_version":">=1.0.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/plugin.json"
+echo '{"name":"example-sibling","version":"0.1.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/plugin.json"
+echo '{"required_core_version":">=1.0.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/hermit-meta.json"
 mkdir -p "$workdir/.claude-code-hermit/proposals"
 cat > "$workdir/.claude-code-hermit/config.json" <<'EOF'
 {"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}
@@ -542,7 +541,8 @@ workdir="$(setup_workdir)"
 cd "$workdir"
 mkdir -p "$workdir/plugins/claude-code-hermit/.claude-plugin" "$workdir/plugins/example-sibling/.claude-plugin"
 echo '{"name":"claude-code-hermit","version":"1.0.20"}' > "$workdir/plugins/claude-code-hermit/.claude-plugin/plugin.json"
-echo '{"name":"example-sibling","version":"0.1.0","required_core_version":"~1.0.20"}' > "$workdir/plugins/example-sibling/.claude-plugin/plugin.json"
+echo '{"name":"example-sibling","version":"0.1.0"}' > "$workdir/plugins/example-sibling/.claude-plugin/plugin.json"
+echo '{"required_core_version":"~1.0.20"}' > "$workdir/plugins/example-sibling/.claude-plugin/hermit-meta.json"
 mkdir -p "$workdir/.claude-code-hermit/proposals"
 cat > "$workdir/.claude-code-hermit/config.json" <<'EOF'
 {"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}

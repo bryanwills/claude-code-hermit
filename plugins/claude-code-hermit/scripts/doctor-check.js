@@ -236,7 +236,7 @@ function checkDependencies() {
       const metaPath = path.join(siblingsRoot, ent.name, '.claude-plugin', 'hermit-meta.json');
       let meta = {};
       try { if (fs.existsSync(metaPath)) meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch {}
-      const range = meta.required_core_version ?? manifest.required_core_version;
+      const range = meta.required_core_version;
       if (!range) continue;
       checked++;
       if (!satisfiesRange(coreVersion, range)) {
