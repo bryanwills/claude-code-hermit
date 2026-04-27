@@ -62,6 +62,7 @@ The implementer never touches main. It commits to feature branches, runs tests, 
 |-------|-------------|
 | `hatch` | One-time project setup — appends dev workflow to CLAUDE.md, configures git safety, installs companion plugins |
 | `dev-adapt` | Profile the project's test commands, protected branches, and stack; persists findings to config |
+| `dev-branch` | Create a feature branch with gates — clean tree, base from protected_branches, no collisions |
 | `dev-quality` | Post-implementation quality pass — tests, simplify, tests |
 | `dev-cleanup` | Lists stale/merged branches and offers to clean them up safely |
 | `dev-doctor` | Diagnose dev-hermit setup issues; safe for weekly scheduled checks |
@@ -105,6 +106,7 @@ These are Claude Code built-ins — no installation needed:
 - [Task Workflow](docs/WORKFLOW.md) — end-to-end mechanics: what fires, in what order, what state it writes
 - [Skills Reference](docs/SKILLS.md) — detailed skill documentation
 - [Git Safety](docs/GIT-SAFETY.md) — hook details and profile configuration
+- [Dev Log Watch](docs/DEV-LOG-WATCH.md) — recipe for tailing rotating dev logs into a /watch monitor
 - [Recommended Plugins](docs/RECOMMENDED-PLUGINS.md) — companion plugins offered during setup
 
 ## Contributing

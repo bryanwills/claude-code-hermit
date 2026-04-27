@@ -2,8 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`/dev-branch` skill** — create a feature branch from a clean tree before delegating to the implementer. Eight-gate validation: prerequisites, clean tree, fetch, base resolution from `protected_branches[0]` (skipping glob entries like `release/*`) with silent fallback to `origin/HEAD` / `main` / `master`, worktree collision (`git worktree list --porcelain`), branch-name collision (local + remote, offline-tolerant), checkout from `origin/<base>`, SHELL.md Progress Log append.
+- **`docs/DEV-LOG-WATCH.md`** — recipe for tailing rotating dev logs into a `/watch` monitor. Documents the two non-obvious gotchas (block-buffered pipes silencing output, midnight date rollover) with a copy-paste bash one-liner and per-stack path-pattern table. Linked from README Documentation.
+- **`docs/SKILLS.md`: backfilled `dev-adapt`, `dev-doctor`, `dev-branch` sections** — file previously documented only 3 of 5 skills; `dev-adapt` and `dev-doctor` were missing.
+
 ### Changed
 
+- **`dev-doctor` check #4 promoted to FAIL** — `claude-code-dev-hermit.protected_branches` missing or empty now hard-fails (was WARN). Required by `/dev-branch` base resolution and used by `/dev-cleanup`. Existing operators with no configured `protected_branches` should run `/claude-code-dev-hermit:dev-adapt`.
+- **`dev-doctor` check #14 added — env-leakage scan** — warns when auto-loaded env files (`.env`, `.env.local`, `.env.development*`) contain credential-like keys (`*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*CREDENTIAL*`, `*PRIVATE_KEY*`, `*API_KEY*`). Excludes framework-public prefixes (`NEXT_PUBLIC_`, `VITE_`, `REACT_APP_`, `EXPO_PUBLIC_`, `PUBLIC_`, `VUE_APP_`), config-intent suffixes (`_NAME`, `_PREFIX`, `_LENGTH`, `_ENABLED`, `_URL`, `_HOST`, `_PATH`), and placeholder values. Recommends moving credentials to a non-auto-loaded file (e.g., `.env.local.dev-only`). Runs in both manual and scheduled modes.
+- **`CLAUDE-APPEND.md`: dev-branch step inserted** — the Implement step now directs the main session to run `/dev-branch` first when on a protected branch. Reach caveat: existing projects pick up this change on next `/hermit-evolve` after the 0.1.10 release.
+- **README skills table + hatch Available-skills report** — list `/dev-branch` so it is discoverable post-install.
 - **docs: bump Claude Code prerequisite to v2.1.110+** — dep resolver and `claude plugin tag` both require v2.1.110+; operators on older versions can't install this plugin cleanly. Updated `docs/HOW-TO-USE.md` and `CONTRIBUTING.md`.
 - **plugin.json: tighten `dependencies` range to `^1.0.18`** — caret range (`^1.0.18` = `>=1.0.18 <2.0.0`) is the conventional semver signal for "tested against this major version, expect patch-compat"; was `>=1.0.18` (open-ended upwards). `required_core_version` and `requires` remain `>=` for runtime minimum-version checks.
 - **remove per-plugin release skill** — `.claude/skills/release/SKILL.md` deleted; the root `/release claude-code-dev-hermit` skill covers the full validation suite (tests, auditor, branch guard, stale refs). Per-plugin skill was a lower-fidelity duplicate with zero audience (standalone repo is a zombie redirect per CLAUDE.md).
@@ -12,16 +22,24 @@
 
 | File | Change |
 |------|--------|
-| `plugins/claude-code-dev-hermit/docs/HOW-TO-USE.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
-| `plugins/claude-code-dev-hermit/CONTRIBUTING.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
-| `plugins/claude-code-dev-hermit/.claude-plugin/plugin.json` | `dependencies[0].version`: `>=1.0.18` → `^1.0.18` |
-| `plugins/claude-code-dev-hermit/.claude/skills/release/SKILL.md` | Deleted |
+| `skills/dev-branch/SKILL.md` | Added: feature-branch creation gate skill |
+| `docs/DEV-LOG-WATCH.md` | Added: recipe for tailing rotating dev logs |
+| `docs/SKILLS.md` | Backfilled dev-adapt, dev-branch, dev-doctor sections; count updated to six |
+| `skills/dev-doctor/SKILL.md` | Check #4 WARN → FAIL; check #14 added (env-leakage scan) |
+| `skills/hatch/SKILL.md` | dev-branch added to Available-skills report; skills reordered |
+| `state-templates/CLAUDE-APPEND.md` | dev-branch step inserted into Implement; unconditional invocation |
+| `README.md` | dev-branch row added to skills table; DEV-LOG-WATCH link added |
+| `docs/HOW-TO-USE.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
+| `CONTRIBUTING.md` | Prerequisite: v2.1.80+ → v2.1.110+ |
+| `.claude-plugin/plugin.json` | `dependencies[0].version`: `>=1.0.18` → `^1.0.18` |
+| `.claude/skills/release/SKILL.md` | Deleted |
 
 ### Upgrade Instructions
 
-No operator action required.
+1. **`dev-doctor` check #4 is now FAIL on missing `protected_branches`.** If you have not run `/claude-code-dev-hermit:dev-adapt` since installing the plugin, do so now to populate `claude-code-dev-hermit.protected_branches` in `.claude-code-hermit/config.json`. Without this, `/dev-branch` cannot resolve a base and existing operators will see a new FAIL on their next `dev-doctor` run.
+2. **`/dev-branch` workflow step lands via CLAUDE-APPEND.md.** Existing projects pick up the new step on next `/hermit-evolve` run after this release.
 
-No `config.json` changes required.
+No `config.json` schema changes required.
 
 - **CLAUDE.md tightened for contributor audience** — dropped the "This Repo is a Plugin" install block (duplicated in README) and the "Built-in Claude Code Skills Used" section (its actionable delegation guidance folded into Constraints); rewrote Core Contracts as 6 dense load-bearing items (profile values, `/session-close` is operator-only, ambient-rules meta-rule, learning loop, proposal-gate pointer, authoritative session-state path).
 - **plugin.json: native `dependencies` field added** — `dependencies: [{ name: "claude-code-hermit", version: ">=1.0.18" }]` enables Claude Code's native dependency resolver to auto-install core; the hermit-internal `requires` field remains for runtime version gating.

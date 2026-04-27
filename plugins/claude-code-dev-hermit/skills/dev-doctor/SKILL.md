@@ -38,14 +38,14 @@ Skip smoke-test and hermit-config-validator invocations. Run only the dev-specif
 
 ## Dev-specific checks
 
-For each property below, read the relevant file(s) and emit `PASS`, `WARN`, or `FAIL` with a one-sentence explanation. Use judgment for judgment calls (e.g., "test command looks safe") rather than pattern matching. Read `.gitignore` once and reuse the result across checks 9, 12, and 13.
+For each property below, read the relevant file(s) and emit `PASS`, `WARN`, or `FAIL` with a one-sentence explanation. Use judgment for judgment calls (e.g., "test command looks safe") rather than pattern matching. Read `.gitignore` once and reuse the result across checks 9, 12, 13, and 14.
 
 | # | Property | How to check |
 |---|---|---|
 | 1 | Core hermit version ≥ required | Compare `_hermit_versions["claude-code-hermit"]` in config.json with `required_core_version` in `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` |
 | 2 | Dev workflow marker in CLAUDE.md | `grep "claude-code-dev-hermit: Development Workflow" CLAUDE.md` |
 | 3 | always_on + strict profile | If `always_on: true` in config, `env.AGENT_HOOK_PROFILE` must be `strict`; FAIL if not |
-| 4 | Protected branches configured | `claude-code-dev-hermit.protected_branches` in config must be non-empty array |
+| 4 | Protected branches configured | `claude-code-dev-hermit.protected_branches` in config must be non-empty array — FAIL if missing or empty (required by `/dev-branch` base resolution and used by `/dev-cleanup`) |
 | 5 | Test command reachable | `claude-code-dev-hermit.commands.test` must be non-null AND the binary must resolve. Strip leading `KEY=value` env assignments, split on `&&`/`;` and take the first segment, take the first token. If the token is `npx`/`pnpm dlx`/`bunx`, also check the second token. Run `command -v <token>` (PATH only, no alias lookup). FAIL if not found and not an on-disk file; PASS otherwise. |
 | 6 | Typecheck or lint configured | At least one of `claude-code-dev-hermit.commands.typecheck` / `claude-code-dev-hermit.commands.lint` non-null; WARN only if both absent |
 | 7 | Worktree support | Run `git worktree list` — must exit 0 |
@@ -55,6 +55,7 @@ For each property below, read the relevant file(s) and emit `PASS`, `WARN`, or `
 | 11 | commit_format shape | If `commit_format` is set but `commit_format_pattern` is absent (or vice versa): WARN — re-run `/dev-adapt` to re-detect. Both null is fine; mismatch is not. |
 | 12 | `.claude/worktrees/` gitignored | Check `.gitignore` (and any parent `.gitignore`) for `.claude/worktrees/` or `.claude/`. WARN if absent — untracked worktree dirs will appear in `git status` of the main repo. Suggestion: append `.claude/worktrees/` to `.gitignore`. |
 | 13 | `.worktreeinclude` covers hermit config | If `.claude-code-hermit/config.json` is gitignored (check `.gitignore`), verify `.worktreeinclude` contains `.claude-code-hermit/config.json`. WARN if absent — the implementer agent may silently use default protected_branches and commit_format inside its worktree. Point at `/claude-code-dev-hermit:hatch` to generate the file. |
+| 14 | Auto-loaded env files free of credentials | Read `.env`, `.env.local`, `.env.development`, `.env.development.local` in parallel if they exist (reuse the cached `.gitignore` to note if they are gitignored — check regardless). For each `KEY=value` line, WARN if the key matches case-insensitive `(PASSWORD|SECRET|TOKEN|CREDENTIAL|PRIVATE_KEY|API_KEY)` AND none of these exclusions apply: key starts with `NEXT_PUBLIC_` / `VITE_` / `REACT_APP_` / `EXPO_PUBLIC_` / `PUBLIC_` / `VUE_APP_`; key ends with `_NAME` / `_PREFIX` / `_SUFFIX` / `_LENGTH` / `_ENABLED` / `_URL` / `_HOST` / `_PATH`; value is empty, `true`, `false`, numeric, or matches `change[-_]?me` / `placeholder` / `example` / `your[-_]?key` (case-insensitive). One WARN per match — name the file and key (never the value). Recommend moving to a non-auto-loaded file (e.g. `.env.local.dev-only`). |
 
 ## Output format
 
@@ -68,7 +69,7 @@ dev-doctor report
 PASS  core v1.0.18 ≥ required v1.0.18
 PASS  dev workflow marker present in CLAUDE.md
 FAIL  always_on=true but AGENT_HOOK_PROFILE is not strict — guard will never fire
-PASS  protected branches configured: main, staging
+FAIL  protected_branches missing or empty — required by /dev-branch and /dev-cleanup
 FAIL  test command binary not found: 'notarealbinary' not in PATH
 WARN  no typecheck or lint command configured
 PASS  git worktree supported
@@ -78,9 +79,10 @@ PASS  test command safety — looks safe
 WARN  commit_format set but commit_format_pattern absent — re-run /dev-adapt
 WARN  .gitignore missing .claude/worktrees/ entry — add it to suppress untracked worktree dirs
 WARN  .worktreeinclude missing .claude-code-hermit/config.json — run /hatch to generate
+WARN  .env.local key TEST_USER_PASSWORD looks credential-like — auto-loaded env files end up in process.env, crash reports, ps eww; move to .env.local.dev-only
 
-Safe for implementer: no   (2 FAIL)
-Next: set AGENT_HOOK_PROFILE=strict; fix test command via /dev-adapt
+Safe for implementer: no   (3 FAIL)
+Next: set AGENT_HOOK_PROFILE=strict; configure protected_branches via /dev-adapt; fix test command via /dev-adapt
 ```
 
 The final line `Safe for implementer: yes|no` is machine-readable — future skills (e.g., `/dev-ready`) can parse it.

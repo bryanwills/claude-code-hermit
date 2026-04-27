@@ -1,6 +1,6 @@
 # Skills Reference
 
-Three skills, each invoked with `/claude-code-dev-hermit:`.
+Six skills, each invoked with `/claude-code-dev-hermit:`.
 
 ---
 
@@ -10,7 +10,7 @@ One-time project setup. Run after `/claude-code-hermit:hatch`.
 
 **What it does:**
 
-1. Checks prerequisites (core v1.0.16+, Task List ID configured)
+1. Checks prerequisites (core v1.0.18+, Task List ID configured)
 2. Appends the dev workflow block to CLAUDE.md (or replaces it if reinitializing)
 3. Runs a setup wizard:
    - Auto-detects branch naming, protected branches, CI config, test commands
@@ -21,6 +21,52 @@ One-time project setup. Run after `/claude-code-hermit:hatch`.
 6. Stamps the plugin version in config.json
 
 **Idempotent.** Running it again detects the existing setup and offers to reinitialize — useful after plugin updates.
+
+---
+
+## dev-adapt
+
+Project profiling. Run after hatch or whenever the project's test or CI setup changes.
+
+**What it does:**
+
+1. Reads package manifests, CI configs, README, OPERATOR.md, and existing config in parallel
+2. Detects test, typecheck, and lint commands with a confidence rating (high / medium / low)
+3. Detects protected branches from CI config and git history
+4. Detects commit format (conventional / gitmoji / freeform) from the last 50 commits
+5. Confirms medium- and low-confidence values via `AskUserQuestion`; auto-confirms high-confidence
+6. Writes confirmed values to `.claude-code-hermit/config.json` under `claude-code-dev-hermit.*`
+7. Writes a compiled `dev-profile-<date>.md` artifact for future sessions
+
+**Config keys written:** `commands.test`, `commands.typecheck`, `commands.lint`, `protected_branches`, `commit_format`, `commit_format_pattern`.
+
+---
+
+## dev-branch
+
+Feature-branch creation gate. Run before delegating to the implementer or starting direct edits on a fresh task.
+
+**What it does:**
+
+Validates the repo state and creates a named branch through eight gates:
+
+1. **Prerequisites** — `.claude-code-hermit/sessions/` must exist
+2. **Gate 0** — already on a non-protected branch → short-circuit
+3. **Gate 1** — clean working tree
+4. **Gate 2** — fetch from origin (soft-fail if offline)
+5. **Gate 3** — resolve base from `protected_branches[0]` (skip glob entries), then `origin/HEAD`, then `main`/`master`
+6. **Gate 4** — no worktree collision (`git worktree list --porcelain`)
+7. **Gate 5** — no branch-name collision (local + remote; remote skipped if offline)
+8. **Gate 6** — `git checkout -b <name> origin/<base>`
+9. **Gate 7** — append creation to SHELL.md Progress Log
+
+Does not push.
+
+**Argument shapes:**
+- Full branch name with prefix (`feature/PROJ-123-add-auth`) — used as-is
+- Bare description (`PROJ-123 add auth`) — operator picks prefix; description is slugified
+
+**Note:** the `implementer` agent creates its own branch inside its worktree independently. `/dev-branch` is for the main session.
 
 ---
 
@@ -60,6 +106,39 @@ Branch cleanup utility. Use when local branches have accumulated across sessions
 - Cross-references all session reports and NEXT-TASK.md — never deletes branches tied to pending work
 - Skips branches tied to `waiting` sessions (e.g., PR submitted, awaiting review)
 - Logs all deletions to SHELL.md
+
+---
+
+## dev-doctor
+
+Setup health check. Diagnoses whether the project is correctly configured for the implementer agent to operate safely.
+
+**What it does:**
+
+Runs 14 dev-specific checks and produces a `PASS / WARN / FAIL` report. Manual mode also composes core validators (`/smoke-test`, `hermit-config-validator`, `/hermit-doctor`).
+
+| # | Property checked |
+|---|---|
+| 1 | Core hermit version ≥ required |
+| 2 | Dev workflow marker in CLAUDE.md |
+| 3 | always_on requires strict hook profile |
+| 4 | Protected branches configured (**FAIL** if missing or empty) |
+| 5 | Test command binary reachable |
+| 6 | Typecheck or lint configured |
+| 7 | Worktree support (`git worktree list`) |
+| 8 | git-push-guard.js parses cleanly |
+| 9 | .gitignore covers state dir and secret files |
+| 10 | Test command safety (no destructive patterns) |
+| 11 | commit_format and commit_format_pattern consistent |
+| 12 | `.claude/worktrees/` gitignored |
+| 13 | `.worktreeinclude` covers hermit config |
+| 14 | Auto-loaded env files free of credential-like keys |
+
+Concludes with a machine-readable `Safe for implementer: yes|no` line.
+
+**Modes:**
+- **Manual** — full check including core validators; side effects allowed
+- **Scheduled** — dev-specific checks only, no side effects; runs weekly if registered via hatch
 
 ---
 

@@ -245,9 +245,10 @@ Companion plugins:
   [code-review + feature-dev + context7 / partial / skipped]
 
 Available skills:
+  /claude-code-dev-hermit:dev-adapt     — re-profile project (test commands, branches, stack)
+  /claude-code-dev-hermit:dev-branch    — feature-branch creation with gates
   /claude-code-dev-hermit:dev-quality   — post-implementation quality pass
   /claude-code-dev-hermit:dev-cleanup   — branch cleanup
-  /claude-code-dev-hermit:dev-adapt     — re-profile project (test commands, branches, stack)
   /claude-code-dev-hermit:dev-doctor    — check setup is implementer-safe
 
 Available agent:
