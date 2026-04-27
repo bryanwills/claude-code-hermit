@@ -14,6 +14,7 @@ Detect which plugin's scope this change belongs to, simplify the diff (unless do
 - Never `--amend`, `--no-verify`, force-push, or create tags here.
 - Never use `git add -A` or `git add .` — staging is path-scoped per step 0.
 - If a pre-commit hook fails, fix the root cause and create a new commit — don't bypass the hook.
+- **On `main` with plugin-scope changes**: after detecting `$SCOPE = plugin` in step 0, check `git branch --show-current`. If on `main` and the diff is substantive (not a doc-only or root-scope change), emit a one-line nudge before continuing: `"On main — if this is version work, consider \`git checkout -b <slug>/vX.Y.Z\` first (Branching in CLAUDE.md)."` Then proceed normally — this is advisory, not a blocker.
 
 ## Steps
 

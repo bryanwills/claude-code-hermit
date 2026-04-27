@@ -64,7 +64,15 @@ If the auditor reports any FAIL, fix before proceeding. WARNs are acceptable if 
 
 ### 2. Determine version bump
 
-Read `plugins/<slug>/.claude-plugin/plugin.json` for the current version and `plugins/<slug>/CHANGELOG.md` for recent entries.
+**Already-bumped fast-path (two-phase release flow):** Find the most recent tag for this plugin:
+
+```bash
+git tag --list "<slug>--v*" | sort -V | tail -1
+```
+
+Compare its version to `plugin.json`. If `plugin.json` is already ahead (e.g. tag is `dev-hermit--v0.2.0`, plugin.json says `0.3.0`), the version was bumped on a plugin branch that has since merged to main. Skip steps 2–7 entirely — the CHANGELOG, version files, and commit are already done. Jump directly to step 8.
+
+**Normal path:** Read `plugins/<slug>/.claude-plugin/plugin.json` for the current version and `plugins/<slug>/CHANGELOG.md` for recent entries.
 
 Review the uncommitted or recently committed changes (`git diff` and/or `git log` since the last `<slug>--v<version>` tag — fall back to `<slug>-v<version>` for pre-migration releases, then `v<version>` for the legacy unprefixed scheme).
 
@@ -183,11 +191,11 @@ Push to origin.
 Run `git branch --show-current` and compare to `main` (or the repo's default branch from `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`).
 
 - **On `main`/default branch** → tag immediately (step 9).
-- **On a release branch** (e.g. `release/X.Y.Z`) → **stop**. Do not tag yet. Tagging the branch tip creates a commit SHA that `main` never carries after merge (PR squash/rebase changes the SHA), leaving the tag stranded on an orphan commit.
-  Report the branch name and two options to the user:
-  1. **Tag now** — accept the stranded-tag risk; release goes live immediately. Proceed to step 9.
-  2. **Hold tag** — open a PR (offer `/create-pr` if available), wait for merge into `main`, then re-run `/release <slug>` from `main` (it will detect the version is already bumped and skip ahead to tagging) OR run step 9 manually after checkout.
-  Wait for explicit user choice before proceeding.
+- **On any other branch** (e.g. `dev-hermit/v0.3.0`) → **stop**. Do not tag yet. Tagging the branch tip creates a commit SHA that `main` never carries after a regular merge (and is outright wrong after squash/rebase), leaving the tag stranded on an orphan commit.
+
+  **Recommended path** (default): open a PR via `/create-pr`, merge into `main` as a **merge commit** (not squash — squash strands the tag), then re-run `/release <slug>` from `main`. Step 2's already-bumped detection will skip straight to tagging.
+
+  If the user explicitly wants to tag now despite the risk, offer that as a secondary option. Wait for their explicit choice before proceeding.
 
 ### 9. Tag and publish
 

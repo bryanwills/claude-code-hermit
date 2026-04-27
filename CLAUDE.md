@@ -26,10 +26,11 @@ Always launch Claude Code from this repo's root, not from inside a plugin dir. A
 
 ## Branching
 
-- **Default: commit to `main`.** Tags land cleanly, no stranded-tag risk. Use this for single-plugin patches, doc edits, dep bumps, and any clear-cut change.
-- **Feature branch + PR when**: cross-plugin refactor, risky/speculative work, or you want CI green / a review pass (`/ultrareview`, `/code-review`) before merging. After merge, run `/release <slug>` from `main` — the skill detects the already-bumped version and skips to tagging.
-- **Avoid `release/X.Y.Z` branches.** Squash-merge changes the SHA, stranding the tag on an orphan commit. `/release` step 8 handles this case, but the clean path is to bump on `main` directly. Reserve release branches for coordinating multi-PR ships.
-- **Tags ship immediately to operators** — no staging. A PR is your safety gate when in doubt.
+- **Default for version work: use a plugin-scoped branch** named `<short-slug>/vX.Y.Z` (e.g. `dev-hermit/v0.3.0`, `hermit/v1.0.22`, `ha-hermit/v0.0.7`). Accumulate commits there until the version is complete, then PR + regular merge (no squash) to `main`, then `/release <slug>`. This groups related commits, gives CI and `/ultrareview` a natural review point, and avoids shipping to operators mid-iteration.
+- **Direct to `main`** for atomic, self-contained changes where a PR adds no value: hotfixes, single-line doc edits, dep bumps, and changes where the diff is its own review. Use judgment — if you'd want to see it in a PR before it reaches operators, branch.
+- **Branch naming**: `<short-slug>/vX.Y.Z` where short-slug drops the `claude-code-` prefix (`dev-hermit`, `hermit`, `ha-hermit`). The `v` prefix is required — matches tag convention and disambiguates from feature names.
+- **Never squash-merge** a plugin branch. Squash changes the SHA and strands the tag on an orphan commit. Regular merge commit, then `/release` tags HEAD of `main`.
+- **Tags ship immediately to operators** — no staging. The branch is your safety gate.
 
 ## Layout gotchas
 

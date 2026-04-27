@@ -37,22 +37,35 @@ Run the guardrails against these results before continuing.
 
 ### 3. Draft title and body
 
+**Detect plugin release branch:** Check if the current branch matches `<short-slug>/vX.Y.Z` (e.g. `dev-hermit/v0.3.0`, `hermit/v1.0.22`, `ha-hermit/v0.0.7`). If so, set `$PLUGIN_BRANCH=true` and infer the full plugin slug (`dev-hermit` → `claude-code-dev-hermit`, etc.).
+
 **Title (≤ 70 chars):**
 
-Use the Conventional Commits prefix that matches the dominant type across the commit range (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`). If there is only one commit, use its subject line verbatim (it's already conventional).
+- **Plugin release branch**: use `release(<slug>): v<X.Y.Z>` derived from the branch name.
+- **Otherwise**: use the Conventional Commits prefix that matches the dominant type across the commit range (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`, `test:`). If there is only one commit, use its subject line verbatim.
 
 **Body:**
 
-Check for `.github/PULL_REQUEST_TEMPLATE.md`. If present, fill it in using the commit range + diff as context.
+- **Plugin release branch**: read `plugins/<slug>/CHANGELOG.md` and extract the `## [Unreleased]` section (everything between the `[Unreleased]` header and the next `## [` header). Use that as the Summary block — it was written for exactly this purpose. Append the squash-merge warning below.
+- **Otherwise**: check for `.github/PULL_REQUEST_TEMPLATE.md`. If present, fill it in using the commit range + diff as context. If no template:
 
-If no template, use this structure:
+  ```
+  ## Summary
+  - <1-3 bullets: what changed and why>
+
+  ## Test plan
+  - [ ] <how to verify the change works>
+  ```
+
+**Squash-merge warning (plugin release branches only):**
+
+Append to the body after the Summary block:
 
 ```
-## Summary
-- <1-3 bullets: what changed and why>
-
-## Test plan
-- [ ] <how to verify the change works>
+---
+> ⚠️ **Merge as merge commit — not squash or rebase.** Squash changes the
+> SHA and strands the release tag on an orphan commit. After merging, run
+> `/release <slug>` from `main` to tag.
 ```
 
 **Issue links:**
