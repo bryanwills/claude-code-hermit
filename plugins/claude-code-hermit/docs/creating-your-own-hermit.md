@@ -149,12 +149,10 @@ If your hermit needs to run domain-specific setup on every always-on launch (e.g
    3. If stale, refresh HA context
    ```
 
-2. **Declare it in your plugin manifest** — add a `hermit` block to `.claude-plugin/plugin.json`:
+2. **Declare it in `.claude-plugin/hermit-meta.json`** — hermit-internal fields live in this sidecar, not `plugin.json`, so the native validator passes cleanly:
 
    ```json
    {
-     "name": "claude-code-homeassistant-hermit",
-     "version": "0.3.0",
      "hermit": {
        "boot_skill": "/claude-code-homeassistant-hermit:ha-boot"
      }
