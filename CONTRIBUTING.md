@@ -25,6 +25,18 @@ claude --plugin-dir /path/to/claude-code-hermit
 
 Then run `/claude-code-hermit:hatch` to create the state directory. Edits to skills, hooks, and scripts take effect immediately — no restart needed.
 
+### Testing a branch via marketplace install
+
+`--plugin-dir` bypasses the marketplace resolver entirely. If you need to verify that a plugin surfaces correctly through the normal install path (e.g. when onboarding a new plugin that doesn't exist on `main` yet), point a project-scoped marketplace at your local checkout instead:
+
+```bash
+# In the target project — your monorepo checkout must be on the branch under test
+claude plugin marketplace add /path/to/claude-code-hermit --scope project
+claude plugin install claude-code-fitness-hermit@claude-code-hermit --scope project
+```
+
+The `@claude-code-hermit` suffix disambiguates when both a user-scoped and a project-scoped marketplace share the same name. Remove the project marketplace when done (`claude plugin marketplace remove claude-code-hermit --scope project`).
+
 ## Testing
 
 ```bash
