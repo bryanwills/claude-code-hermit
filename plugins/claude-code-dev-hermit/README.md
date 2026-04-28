@@ -14,7 +14,7 @@
   <img src="https://raw.githubusercontent.com/gtapps/claude-code-hermit/main/plugins/claude-code-hermit/assets/demo.gif" alt="claude-code-hermit demo — Obsidian dashboard, Discord control, autonomous briefings, remote access" width="720" />
 </p>
 
-Your hermit already knows how to manage sessions, learn from its work, and keep things organized. This plugin adds the ability to actually *build* things — an `implementer` agent that writes code in isolated git worktrees, a quality pipeline that runs tests and `/simplify` (whose parallel review agents cover reuse/quality/efficiency), a session-scoped dev server it can boot and watchdog, `/dev-pr` to push and open the resulting PR, and git-safety rules that keep main clean. **In always-on mode, the whole loop — branch, server, tests, PR — runs on the hermit's own worktree, so your local checkout and dev port never have to stop.** Same philosophy as core: leverage what Claude Code offers, don't reinvent.
+Your hermit already knows how to manage sessions, learn from its work, and keep things organized. This plugin adds the ability to actually *build* things — an `implementer` agent that writes code on caller-prepared feature branches (worktree setup owned by `/dev-branch`), a quality pipeline that runs tests and `/simplify` (whose parallel review agents cover reuse/quality/efficiency), a session-scoped dev server it can boot and watchdog, `/dev-pr` to push and open the resulting PR, and git-safety rules that keep main clean. **In always-on mode, the whole loop — branch, server, tests, PR — runs on the hermit's own worktree, so your local checkout and dev port never have to stop.** Same philosophy as core: leverage what Claude Code offers, don't reinvent.
 
 Three steps to a dev-hermit you can hand a feature to:
 
@@ -36,7 +36,7 @@ Three steps to a dev-hermit you can hand a feature to:
 
 ## How It Works
 
-**1. Hand it a task.** It plans, then delegates to the `implementer` in an isolated git worktree. Your working tree stays clean. Main never sees it.
+**1. Hand it a task.** It plans, then runs `/dev-branch` to create a feature branch — and in interactive mode a `.claude/worktrees/<slug>/` worktree — before delegating to the `implementer`. Your working tree stays clean. Main never sees it.
 
 **2. It writes code on a feature branch.** Tests run before and after. You get back a structured summary — files changed, test results, concerns, branch name.
 
@@ -114,7 +114,7 @@ Protected branches are configurable in `.claude-code-hermit/config.json`:
 | `standard` (default) | None |
 | `strict` | `git-push-guard` active |
 
-The `implementer` agent has its own prompt-level rules that always apply regardless of profile — no push, no `--no-verify`, no commits to protected branches.
+The `implementer` agent enforces a two-gate pre-flight before touching any file: it refuses if called without a `Worktree:` token from `/dev-branch` (Step 0a), and refuses again if the worktree is on a protected branch (Step 0b). Only then does it proceed — no push, no `--no-verify` thereafter.
 
 ---
 
@@ -124,14 +124,14 @@ The `implementer` agent has its own prompt-level rules that always apply regardl
 |-------|-------------|
 | `hatch` | One-time project setup — appends dev workflow to CLAUDE.md, configures git safety, installs companion plugins |
 | `dev-adapt` | Profile the project's test commands, protected branches, dev-server setup, stack, and PR templates (GitHub + GitLab); persists findings to config |
-| `dev-branch` | Create a feature branch with gates — clean tree, base from protected_branches, no collisions |
+| `dev-branch` | Create a feature branch with gates — clean tree, base from protected_branches, no collisions. In active-dev mode also creates `.claude/worktrees/<slug>/` and emits `Worktree:`/`Branch:` tokens the caller passes to the implementer |
 | `dev-up` | Boot a session-scoped dev server via the Monitor tool — port checks, optional auth probe, optional HTTP health-poll. In always-on mode, `cd`s into the agent's worktree (resolving `dev_port_agent`) and registers health/error watchdogs |
 | `dev-down` | Stop the dev server and shut down the watchdog Monitor entries — runs `commands.dev_stop` if configured (compose/supervisord), else Monitor SIGTERM/SIGKILL |
 | `dev-log-watch` | Generate a Monitor entry that tails rotating or fixed dev-server logs for error patterns |
 | `dev-status` | Three-line read of branch state, dev-server monitor health, watchdog alerts, and worktree refs — read-only, no setup required |
 | `dev-quality` | Post-implementation quality pass — tests, simplify, tests |
 | `dev-pr` | Push the feature branch and open a PR — title/body assembled from `/dev-quality`, commits, work-binding context, screenshots, and an optional project PR template; gated on protected-branch, clean tree, fresh quality run, and unack'd watchdog alerts (override with `--force`) |
-| `dev-cleanup` | Lists stale/merged branches and offers to clean them up safely |
+| `dev-cleanup` | Lists stale/merged branches and offers to clean them up safely; removes associated managed worktrees before branch deletion |
 | `dev-doctor` | Diagnose dev-hermit setup issues; safe for weekly scheduled checks |
 
 ---

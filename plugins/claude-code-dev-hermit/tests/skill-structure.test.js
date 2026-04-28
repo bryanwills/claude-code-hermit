@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { parseFrontmatter } = require('./test-utils');
 
 const SKILL_DIR = path.join(__dirname, '..', 'skills');
 
@@ -24,6 +25,8 @@ const SKILLS = [
   { name: 'dev-log-watch', gates: 4 },  // Gate 0..3
   { name: 'dev-status', gates: 0 },     // read-only status, no gates
   { name: 'dev-pr', gates: 5 },         // Gate 0..4
+  { name: 'dev-branch', gates: 8 },     // Gate 0..7
+  { name: 'dev-cleanup', gates: 0 },    // numbered steps, no Gate N headings
 ];
 
 let passed = 0;
@@ -37,17 +40,6 @@ function ok(name, cond, detail) {
     console.error(`  ✗ ${name}${detail ? ' — ' + detail : ''}`);
     failed += 1;
   }
-}
-
-function parseFrontmatter(text) {
-  const m = text.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!m) return null;
-  const fields = {};
-  for (const line of m[1].split('\n')) {
-    const kv = line.match(/^(\w+):\s*(.*)$/);
-    if (kv) fields[kv[1]] = kv[2].trim();
-  }
-  return { raw: m[1], fields, body: text.slice(m[0].length) };
 }
 
 for (const { name, gates } of SKILLS) {

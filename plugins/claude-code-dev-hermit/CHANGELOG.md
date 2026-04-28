@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`scripts/lib/protected-branches.js`** — shared protected-branch helpers (load, normalize, glob-match, isProtected) extracted from `git-push-guard.js`. All skills and agents now shell out to `check-protected-branch.js` instead of restating glob logic inline.
+- **`scripts/check-protected-branch.js`** — CLI wrapper; exit 0 = not protected, exit 1 = protected (stdout names the matched pattern). Used by implementer Step 0b, `/dev-branch` Gate 0, `/dev-cleanup`, and `/dev-pr` Gate 0.
+- **`tests/agents-structure.test.js`** — structural lint for `agents/*.md`: frontmatter required fields, `isolation: worktree` absent, Step 0a/0b refusal language distinct and referencing the right tokens.
+- **`tests/test-utils.js`** — shared `parseFrontmatter` helper used by both structural test files.
+
+### Changed
+
+- **implementer: caller contract** — removed `isolation: worktree` (caller now owns worktree setup via `/dev-branch`). Added Step 0a (require `Worktree:` token in prompt) and Step 0b (verify branch is not protected via `check-protected-branch.js`) before any edits. Implementer refuses with actionable messages on missing token or protected branch.
+- **`/dev-branch`: worktree + token emission** — in active-dev mode (no `$HERMIT_AGENT_WORKTREE`), Gate 6 now runs `git worktree add .claude/worktrees/<slug>` and emits `Worktree:`/`Branch:` tokens. Gate 0 short-circuits when already on a feature branch and emits the same tokens. Gate 4b adds a slug-path guard before Gate 5 to prevent silent conflicts.
+- **`/dev-cleanup`: worktree removal** — before deleting a confirmed branch, checks `git worktree list` for a managed worktree under `.claude/worktrees/`; removes it (non-force) before the branch delete. Skips `agent/` basename and worktrees outside `.claude/worktrees/`.
+- **`/dev-pr` Gate 0** — replaced inline glob-match logic with `check-protected-branch.js` shell-out.
+- **`state-templates/CLAUDE-APPEND.md`** — step 2 (Implement) updated: `/dev-branch` is now mandatory before invoking the implementer; `Worktree:` token must be copied verbatim into the implementer prompt. Step 3 (after implementer) simplified: worktree cleanup is `/dev-cleanup`'s job.
+- **`scripts/git-push-guard.js`** — imports `loadProtectedBranches`/`isProtected` from `lib/protected-branches.js`; destructures `{ branches }` from the new return shape.
+
 ## [0.2.2] - 2026-04-28
 
 ### Added

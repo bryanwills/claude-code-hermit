@@ -12,6 +12,10 @@
 //   const { createWatchdog } = require('./watchdog-health');
 //   const wd = createWatchdog({ configPath, stateDir, binding, _probe, _sleep });
 //   await wd.tick(); // run one probe cycle
+//
+// binding is branch-only because this watchdog is not filesystem-bound (HTTP
+// polling only). Revisit if adding fs.watch/chokidar — the binding key would
+// need a worktree-path component to avoid cross-binding across worktrees.
 
 const fs = require('node:fs');
 const { probeOnce } = require('./lib/health-poll');

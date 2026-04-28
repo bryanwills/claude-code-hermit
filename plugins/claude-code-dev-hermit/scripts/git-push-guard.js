@@ -6,56 +6,11 @@
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 
 const MAX_STDIN = 1024 * 1024; // 1MB
 
-// --- Protected branch helpers ---
-
-function loadProtectedBranches() {
-  try {
-    const configPath = path.join(process.cwd(), '.claude-code-hermit', 'config.json');
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const cfg = JSON.parse(raw);
-    const branches = cfg?.['claude-code-dev-hermit']?.protected_branches;
-    if (Array.isArray(branches) && branches.length > 0) {
-      return branches;
-    }
-  } catch (_) {
-    // Config missing or unreadable — fall back to defaults
-  }
-  return ['main', 'master'];
-}
-
-function normalizeBranch(name) {
-  // Strip refs/heads/, refs/remotes/, origin/ prefixes
-  return name
-    .replace(/^refs\/remotes\/[^/]+\//, '')
-    .replace(/^refs\/heads\//, '')
-    .replace(/^[^/]+\//, (m) => {
-      // Only strip if it looks like a remote prefix (e.g. origin/)
-      // Keep prefixes that are part of branch names like feature/
-      // Heuristic: if the prefix is a known remote indicator we saw in git
-      // We can't know remotes here, so only strip common ones
-      return ['origin/', 'upstream/', 'fork/'].includes(m) ? '' : m;
-    });
-}
-
-function globMatch(pattern, str) {
-  // Simple glob: * matches anything within a segment, ** matches across segments
-  const reStr = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&') // escape regex chars
-    .replace(/\*\*/g, '§§')               // placeholder for **
-    .replace(/\*/g, '[^/]*')              // * = anything except /
-    .replace(/§§/g, '.*');               // ** = anything
-  return new RegExp('^' + reStr + '$').test(str);
-}
-
-function isProtected(branchName, protectedList) {
-  const normalized = normalizeBranch(branchName);
-  return protectedList.some((pattern) => globMatch(pattern, normalized));
-}
+const { loadProtectedBranches, isProtected } = require('./lib/protected-branches');
 
 // --- Command tokenizer ---
 
@@ -251,7 +206,7 @@ async function main() {
     // Quick pre-check: does the raw command even contain 'push'?
     if (!/\bpush\b/.test(command)) process.exit(0);
 
-    const protectedBranches = loadProtectedBranches();
+    const { branches: protectedBranches } = loadProtectedBranches();
     const subcmds = splitOnOperators(command);
 
     for (const subcmd of subcmds) {

@@ -4,11 +4,11 @@ Git safety, quality workflow, and dev conventions for claude-code-hermit.
 
 ## Plugin Structure
 
-- `agents/` — implementer agent (worktree-isolated code writing)
+- `agents/` — implementer agent (runs on a caller-prepared branch; **requires `Worktree:` token in prompt**, provided by `/dev-branch`)
 - `skills/` — hatch, dev-adapt, dev-branch, dev-up, dev-down, dev-log-watch, dev-status, dev-quality, dev-cleanup, dev-doctor, dev-pr
 - `hooks/hooks.json` — git-push-guard hook (strict profile only)
-- `scripts/` — process entrypoints (git-push-guard, watchdog-health, watchdog-errors); `scripts/lib/` — shared pure helpers (resolve-command, port-check, health-poll, log-watch-builder, dev-server-command, shell-utils, alerts-store, pr-body-builder) with co-located `.test.js` runners
-- `tests/` — `run-all.sh` central runner + `skill-structure.test.js` structural lint
+- `scripts/` — process entrypoints (git-push-guard, watchdog-health, watchdog-errors, check-protected-branch); `scripts/lib/` — shared pure helpers (resolve-command, port-check, health-poll, log-watch-builder, dev-server-command, shell-utils, alerts-store, pr-body-builder, **protected-branches**) with co-located `.test.js` runners
+- `tests/` — `run-all.sh` central runner + `skill-structure.test.js` + `agents-structure.test.js` structural lint
 - `state-templates/` — CLAUDE-APPEND.md (dev workflow rules appended to CLAUDE.md)
 - `docs/` — DEV-LOG-WATCH.md, GIT-SAFETY.md, WORKFLOW.md, HOW-TO-USE.md, RECOMMENDED-PLUGINS.md
 - `.claude-plugin/plugin.json` — plugin manifest
@@ -36,3 +36,4 @@ The `hatch` skill recommends enabling strict profile during setup.
 4. **Learning loop**: invoke `reflect` at every task boundary.
 5. **Proposal gate**: three-condition rule and tier mapping live in `state-templates/CLAUDE-APPEND.md` (Dev Proposal Categories §).
 6. **Session state**: `.claude-code-hermit/state/runtime.json` is authoritative. SHELL.md `Status:` is cosmetic only — never read it for programmatic state checks.
+7. **Implementer caller contract**: run `/dev-branch` before invoking the implementer; pass its `Worktree:` line verbatim in the implementer's prompt. The implementer refuses on missing token (Step 0a) and protected branches (Step 0b). `/dev-branch` is the single place that prepares both.

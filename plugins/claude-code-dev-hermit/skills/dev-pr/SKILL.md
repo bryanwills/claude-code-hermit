@@ -22,15 +22,16 @@ Run all five checks in order. FAIL on the first failure, name it, give the exact
 
 **1. Protected-branch check** (NEVER skipped by `--force`):
 
-Get current branch:
 ```bash
 # interactive:
-git rev-parse --abbrev-ref HEAD
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-protected-branch.js" \
+  --branch "$(git rev-parse --abbrev-ref HEAD)"
 # always-on ($HERMIT_AGENT_WORKTREE set):
-git -C "$HERMIT_AGENT_WORKTREE" rev-parse --abbrev-ref HEAD
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-protected-branch.js" \
+  --branch "$(git -C "$HERMIT_AGENT_WORKTREE" rev-parse --abbrev-ref HEAD)"
 ```
 
-Apply the same glob-match logic as `/dev-branch` Gate 0 against `protected_branches`. On match:
+Exit code 1 → FAIL:
 ```
 FAIL: cannot open PR from protected branch <branch>
   recovery: create a feature branch with /dev-branch <description>

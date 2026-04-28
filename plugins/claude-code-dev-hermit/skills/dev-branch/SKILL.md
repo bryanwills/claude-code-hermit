@@ -1,11 +1,11 @@
 ---
 name: dev-branch
-description: Create a feature branch from a clean tree before delegating to the implementer or starting direct edits. Validates working state, picks the right base from protected_branches, and refuses on collisions.
+description: Create a feature branch (and worktree in active-dev mode) before delegating to the implementer. Validates working state, picks the right base from protected_branches, refuses on collisions, and emits Worktree:/Branch: tokens for the caller.
 ---
 
 # /dev-branch
 
-Create a feature branch with the same gating discipline the rest of the plugin enforces. Run before delegating to the implementer or starting direct edits on a fresh task.
+Create a feature branch — and in active-dev mode a git worktree — with the same gating discipline the rest of the plugin enforces. Run before delegating to the implementer. In active-dev, the emitted `Worktree:` path must be included verbatim in the implementer's prompt.
 
 ## Prerequisites
 
@@ -46,17 +46,32 @@ Repo-level operations (Gate 2 fetch, Gate 3 base resolution, Gate 5 collision ch
 
 ### Gate 0 — already on a feature branch
 
-Read `claude-code-dev-hermit.protected_branches` from `.claude-code-hermit/config.json` and run `git rev-parse --abbrev-ref HEAD` (or `git -C $HERMIT_AGENT_WORKTREE rev-parse --abbrev-ref HEAD` in always-on mode) in parallel. Cache the config for Gate 3.
+Get the current branch (`git rev-parse --abbrev-ref HEAD`, or `git -C $HERMIT_AGENT_WORKTREE rev-parse --abbrev-ref HEAD` in always-on mode) and read the config for Gate 3 (`claude-code-dev-hermit.protected_branches` from `.claude-code-hermit/config.json`).
 
 **Detached HEAD** (output is the literal string `HEAD`) is **not** treated as "already on a feature branch." Proceed to the gates — do not short-circuit. This handles the always-on boot state where the agent worktree starts detached until the first `/dev-branch` creates a real branch.
 
-Otherwise: if the current branch is NOT in the resolved protected-branches set, short-circuit. Glob matching: treat `*` as zero-or-more chars within a branch segment — `release/*` matches `release/v1` but not `release`; `*` alone matches anything.
+Otherwise, check whether the current branch is protected:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-protected-branch.js" \
+  --branch "$(git rev-parse --abbrev-ref HEAD)"
+# in always-on mode:
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-protected-branch.js" \
+  --branch "$(git -C "$HERMIT_AGENT_WORKTREE" rev-parse --abbrev-ref HEAD)"
+```
+
+Exit code 0 (not protected) → already on a feature branch → short-circuit. Emit tokens so the caller can invoke the implementer without re-running `/dev-branch`:
+
+- **Always-on mode:** `Worktree:` is `$HERMIT_AGENT_WORKTREE` (already known). `Branch:` is the current branch.
+- **Active-dev mode:** run `git worktree list --porcelain` and find the entry for the current branch. If a managed worktree exists under `.claude/worktrees/`, emit its path. If none is found (operator checked out the branch manually), emit a note: "No managed worktree found for `<branch>` — run `/dev-branch` from a protected branch to create one before invoking the implementer."
 
 ```
 already on feature/PROJ-123-add-auth — nothing to do
+Worktree: /abs/path/to/worktree
+Branch:  feature/PROJ-123-add-auth
 ```
 
-Do NOT append to SHELL.md (no work happened).
+Do NOT append to SHELL.md (no work happened). Exit code 1 (protected) → proceed to Gate 1 to create a feature branch.
 
 ### Gate 1 — clean working tree
 
@@ -95,6 +110,14 @@ worktree exists at <path> — finish or remove it before recreating the branch
 
 Do not call `--force` from this skill. Surface the path and let the operator decide.
 
+**Active-dev slug-path guard** (interactive mode only, `$HERMIT_AGENT_WORKTREE` unset):
+
+Derive the worktree slug from the branch name — strip the `feature/` / `fix/` / `chore/` / `hotfix/` prefix, then apply the same slugification rules as the branch name (lowercase, kebab). Proposed path: `.claude/worktrees/<slug>/`.
+
+1. Run `git worktree list --porcelain`. If an entry at `.claude/worktrees/<slug>/` is already registered → **fail loud**: "worktree at `.claude/worktrees/<slug>/` already exists — reuse or remove it."
+2. If the path is NOT in `git worktree list` but the **directory exists on disk** → **refuse**: "stale directory at `.claude/worktrees/<slug>/` (not a registered worktree) — manually remove it before proceeding." Do not silently bump the slug suffix.
+3. Both checks pass → proceed to Gate 5.
+
 ### Gate 5 — branch-name collision
 
 Check for existing branches:
@@ -109,13 +132,35 @@ branch <name> already exists (local / remote) — choose a different name
 
 ### Gate 6 — create
 
+**Always-on mode (`$HERMIT_AGENT_WORKTREE` set):**
+
 ```bash
-git checkout -b <name> origin/<base>
-# in always-on mode:
-git -C $HERMIT_AGENT_WORKTREE checkout -b <name> origin/<base>
+git -C "$HERMIT_AGENT_WORKTREE" checkout -b <name> origin/<base>
 ```
 
-Use the remote-tracking ref so the new branch is not stale relative to origin. In always-on mode the branch is created in the agent worktree; the main checkout's HEAD is not touched.
+The branch is created in the agent worktree. No new worktree is created — the implementer will run inside the existing `$HERMIT_AGENT_WORKTREE`. Emit:
+
+```
+Worktree: <abs-path-of-HERMIT_AGENT_WORKTREE>
+Branch: <name>
+```
+
+**Active-dev mode (`$HERMIT_AGENT_WORKTREE` unset):**
+
+```bash
+git worktree add .claude/worktrees/<slug> -b <name> origin/<base>
+```
+
+Use the remote-tracking ref so the new branch is not stale relative to origin. Emit:
+
+```
+Worktree: <abs-path-of-.claude/worktrees/<slug>>
+Branch: <name>
+
+To invoke the implementer, include the Worktree: line above verbatim in the
+implementer's prompt. The agent will cd there itself (bash CWD does not
+propagate through Task subagents).
+```
 
 ### Gate 7 — log
 
@@ -128,7 +173,14 @@ dev-branch
   base:    main (from claude-code-dev-hermit.protected_branches[0])
   name:    feature/PROJ-123-add-auth
   status:  created
+
+Worktree: /path/to/repo/.claude/worktrees/proj-123-add-auth   (active-dev)
+  — or —
+Worktree: /path/to/hermit-worktree                             (always-on)
+Branch:  feature/PROJ-123-add-auth
 ```
+
+Both modes emit `Worktree:` and `Branch:` on their own lines so callers can parse without mode awareness. In active-dev mode the additional prompt instructs the caller to pass the token to the implementer verbatim.
 
 When Gate 0 short-circuits, emit only:
 
@@ -136,10 +188,12 @@ When Gate 0 short-circuits, emit only:
 already on feature/PROJ-123-add-auth — nothing to do
 ```
 
+(No `Worktree:` token on short-circuit — the caller should already have it from the prior `/dev-branch` run.)
+
 ## Rules
 
 - v1 accepts any branch name. If your team enforces a naming pattern, reject the proposed name interactively — there is no automated validation.
 - Never operates on remote refs beyond `git fetch` and `git ls-remote`. No push, no remote branch creation, no remote deletion.
 - SHELL.md append happens only on successful creation. Aborts and short-circuits stay quiet.
 - Non-interactive callers: fail loud rather than blocking on AskUserQuestion. Gate 3 unresolved → exit with config-fix instruction.
-- This skill is for the **main session**. The `claude-code-dev-hermit:implementer` agent creates its own branch inside its worktree independently — that is a separate code path and does not interact with `/dev-branch`. Operators may still invoke the implementer directly without running `/dev-branch` first.
+- Running `/dev-branch` before invoking the implementer is **mandatory**. The implementer refuses on prompts missing the `Worktree:` token (Step 0a) and on protected branches (Step 0b). `/dev-branch` is the single place that prepares both.

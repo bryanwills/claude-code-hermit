@@ -4,7 +4,7 @@ description: Lists and offers to clean up stale or merged git branches. Use when
 ---
 # Dev Cleanup
 
-**Scope:** merged local branches in the main repo. Orphaned subagent worktrees under `.claude/worktrees/` are Claude Code's responsibility — they're auto-swept at session startup once older than `cleanupPeriodDays`, provided they're clean (no uncommitted changes, no untracked files, no unpushed commits). Do not add worktree sweeping here.
+**Scope:** merged local branches and their associated managed worktrees under `.claude/worktrees/`. When a branch is deleted, its attached worktree (if any, created by `/dev-branch` in active-dev mode) is removed first. The always-on `agent/` worktree is never touched.
 
 List local branches and identify cleanup candidates.
 
@@ -15,7 +15,11 @@ List local branches and identify cleanup candidates.
 
 ## Plan
 
-1. Read `claude-code-dev-hermit.protected_branches` from `.claude-code-hermit/config.json` (default: `["main", "master"]` if absent). Run `git branch --merged <first-protected-branch>` to find fully merged branches. In always-on mode (`$HERMIT_AGENT_WORKTREE` set), run `git -C $HERMIT_AGENT_WORKTREE branch --merged <base>` so branch state reflects the agent's worktree.
+1. Resolve the base branch for merge checking. Run:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/check-protected-branch.js" --branch "<first-non-glob-from-config>"
+   ```
+   In practice: read `claude-code-dev-hermit.protected_branches` from `.claude-code-hermit/config.json` (default: `["main", "master"]` if absent); use the first non-glob entry as the base. Run `git branch --merged <first-protected-branch>` to find fully merged branches. In always-on mode (`$HERMIT_AGENT_WORKTREE` set), run `git -C $HERMIT_AGENT_WORKTREE branch --merged <base>` so branch state reflects the agent's worktree.
 2. Run `git branch -v` (or `git -C $HERMIT_AGENT_WORKTREE branch -v` in always-on mode) to find branches with no recent commits.
 3. Cross-reference with `.claude-code-hermit/sessions/SHELL.md`
    **and** all `S-*-REPORT.md` files in the sessions directory to
@@ -40,13 +44,17 @@ List local branches and identify cleanup candidates.
    | experiment/perf | unmerged           | 14 days ago | review before deleting |
 
 5. Ask operator which branches to delete
-6. Delete only confirmed branches with `git branch -d` (safe delete)
+6. Before deleting each confirmed branch:
+   - Run `git worktree list --porcelain` to find any worktree pinned to that branch.
+   - If a worktree entry is found under `.claude/worktrees/` AND its basename is **not** `agent` (literal-segment check — e.g. `.claude/worktrees/feature-agent-handoff/` has basename `feature-agent-handoff`, which is not `agent`, so it IS subject to removal): run `git worktree remove <path>` first. If the remove fails (dirty worktree), surface the error and skip the branch — do not force.
+   - Worktrees outside `.claude/worktrees/` or with basename `agent` are operator-owned; report them but do not touch them.
+   - Then delete the branch with `git branch -d` (safe delete).
 7. For unmerged branches the operator confirms: use `git branch -D`
-   only with explicit confirmation
+   only with explicit confirmation (apply the same worktree-removal step first)
 
 ## Rules
 
-- Never delete the current branch or any branch in `claude-code-dev-hermit.protected_branches` (defaults to main/master)
+- Never delete the current branch or any branch that `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-protected-branch.js" --branch <name>` reports as protected (defaults to main/master)
 - Never force-delete without explicit operator confirmation per branch
 - Never delete remote branches — local cleanup only
 - Cross-reference branches against ALL session reports (`S-*-REPORT.md`),

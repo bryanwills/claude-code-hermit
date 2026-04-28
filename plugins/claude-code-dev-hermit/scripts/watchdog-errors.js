@@ -12,6 +12,10 @@
 //   const { createErrorWatchdog } = require('./watchdog-errors');
 //   const wd = createErrorWatchdog({ configPath, stateDir, binding, logPath, _lineStream });
 //   // _lineStream is an EventEmitter that emits 'line' events (for testing without tail)
+//
+// binding is branch-only because this watchdog tails a single log file (not a
+// filesystem walker). Revisit if adding fs.watch/chokidar — the binding key
+// would need a worktree-path component to avoid cross-binding across worktrees.
 
 const fs = require('node:fs');
 const { execSync, spawn } = require('node:child_process');
