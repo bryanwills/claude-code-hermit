@@ -14,8 +14,8 @@
 //   await wd.tick(); // run one probe cycle
 
 const fs = require('node:fs');
-const { probeOnce } = require('./health-poll');
-const { isDuped, emitAlert } = require('./alerts-store');
+const { probeOnce } = require('./lib/health-poll');
+const { isDuped, emitAlert } = require('./lib/alerts-store');
 
 function readConfig(configPath) {
   try {

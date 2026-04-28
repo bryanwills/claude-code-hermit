@@ -29,24 +29,26 @@ Then run `/claude-code-dev-hermit:hatch` to activate. Edits to skills, hooks, an
 ### Prerequisites
 
 - [Claude Code](https://code.claude.com) v2.1.110+
-- [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) v1.0.21+ (core must be installed in the target project)
+- [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) v1.0.22+ (core must be installed in the target project)
 - Node.js 24+
 
 ## Testing
 
 ```bash
-node scripts/git-push-guard.test.js
+bash tests/run-all.sh
 ```
 
-The test suite covers 18 cases for the git-push-guard hook — blocked operations, allowed operations, edge cases, and all three profiles. Add tests for any new hook logic.
+The test suite covers all hooks and helpers; add tests for any new hook or lib logic.
 
 ## Project Structure
 
 ```
 agents/           — subagent definitions (implementer)
-skills/           — hatch, dev-quality, dev-cleanup
+skills/           — see skills/ directory for the full list
 hooks/            — hooks.json (hook registry)
-scripts/          — hook implementations + tests
+scripts/          — process entrypoints (git-push-guard, watchdog-*)
+scripts/lib/      — shared pure helpers (alerts-store, health-poll, …)
+tests/            — run-all.sh runner + cross-cutting structural lints
 state-templates/  — CLAUDE-APPEND.md (appended to target project's CLAUDE.md)
 docs/             — user-facing documentation
 .claude-plugin/   — plugin manifest + marketplace metadata
@@ -56,7 +58,7 @@ docs/             — user-facing documentation
 
 1. Create a feature branch
 2. Make changes
-3. Run `node scripts/git-push-guard.test.js` locally
+3. Run `bash tests/run-all.sh` locally
 4. Keep commits focused — one concern per PR
 5. Update docs if your change affects user-facing behavior
 

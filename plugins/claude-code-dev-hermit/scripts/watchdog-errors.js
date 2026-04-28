@@ -15,8 +15,8 @@
 
 const fs = require('node:fs');
 const { execSync, spawn } = require('node:child_process');
-const { isDuped, emitAlert } = require('./alerts-store');
-const { DEFAULT_ERROR_PATTERN } = require('./dev-server-command');
+const { isDuped, emitAlert } = require('./lib/alerts-store');
+const { DEFAULT_ERROR_PATTERN } = require('./lib/dev-server-command');
 
 function readConfig(configPath) {
   try {

@@ -55,6 +55,7 @@ No `config.json` changes required.
 ### Internal
 
 - **Structure cleanup** — promoted watchdog scripts to `scripts/` (entrypoints), added `tests/run-all.sh` central runner, moved `skill-structure.test.js` to `tests/`, removed empty `.claude/` artifact and `.vscode/` personal-pref file. Added `scripts/lib/ must be pure` rule to CONTRIBUTING.md.
+- **Doc corrections** — bumped prereq refs from `v1.0.21+` → `v1.0.22+` in README and CONTRIBUTING; removed `docs/SKILLS.md` (redundant with per-skill `SKILL.md` files); refreshed skill list in CLAUDE.md (added `dev-pr`); updated CONTRIBUTING project structure and test runner command.
 
 ## [0.2.1] - 2026-04-27
 

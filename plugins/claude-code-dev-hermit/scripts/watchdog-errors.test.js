@@ -1,13 +1,13 @@
 'use strict';
 
-// Tests for watchdog-errors.js — run with: node scripts/lib/watchdog-errors.test.js
+// Tests for watchdog-errors.js — run with: node scripts/watchdog-errors.test.js
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { createErrorWatchdog, DEFAULT_ERROR_PATTERN } = require('./watchdog-errors');
-const { readAlerts } = require('./alerts-store');
+const { readAlerts } = require('./lib/alerts-store');
 
 let passed = 0;
 let failed = 0;

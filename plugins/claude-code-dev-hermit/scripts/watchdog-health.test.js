@@ -1,12 +1,12 @@
 'use strict';
 
-// Tests for watchdog-health.js — run with: node scripts/lib/watchdog-health.test.js
+// Tests for watchdog-health.js — run with: node scripts/watchdog-health.test.js
 
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createWatchdog } = require('./watchdog-health');
-const { readAlerts } = require('./alerts-store');
+const { readAlerts } = require('./lib/alerts-store');
 
 let passed = 0;
 let failed = 0;
