@@ -30,8 +30,8 @@
     {
       "name": "claude-code-dev-hermit",
       "source": "./plugins/claude-code-dev-hermit",
-      "description": "Git safety, quality workflow, and dev conventions for claude-code-hermit",
-      "version": "0.2.3",
+      "description": "Language-agnostic safety layer + dev conventions for any agent your hermit uses to write code",
+      "version": "0.3.0",
       "category": "development",
       "author": {
         "name": "gtapps"

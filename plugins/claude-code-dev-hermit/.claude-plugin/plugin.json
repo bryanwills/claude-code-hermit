@@ -1,13 +1,13 @@
 {
   "name": "claude-code-dev-hermit",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "dependencies": [
     {
       "name": "claude-code-hermit",
       "version": "^1.0.22"
     }
   ],
-  "description": "Git safety, quality workflow, and dev conventions for claude-code-hermit",
+  "description": "Language-agnostic safety layer + dev conventions for any agent your hermit uses to write code",
   "author": {
     "name": "gtapps"
   },

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-04-28
 
 **v0.3.0 — language-agnostic safety layer.** Mass cleanup: dropped ~6,000 lines (~70% of the plugin) to reframe dev-hermit as a thin safety layer instead of a stack-aware orchestrator. The plugin now ships 2 skills (`hatch`, `dev-pr`), 1 hook (`git-push-guard`), and a CLAUDE-APPEND template that injects safety rules into the project's CLAUDE.md. No built-in implementer agent — operators use the native `Agent` tool, `feature-dev`'s research/architect agents, or custom subagents, all governed by the injected rules. Three audits (value / complexity / native-delegation) and a series of design-iteration conversations led to this redesign; full rationale in the v0.3.0 plan (`/home/d0m/.claude/plans/cryptic-weaving-dolphin.md`).
 
@@ -21,6 +21,27 @@
 - **Tests**: `tests/agents-structure.test.js` (no agents to lint); `pr-body-builder.test.js`, `port-check.test.js`, `health-poll.test.js`, `log-watch-builder.test.js`, `dev-server-command.test.js`, `alerts-store.test.js`, `resolve-command.test.js`, `check-protected-branch.test.js`, `watchdog-health.test.js`, `watchdog-errors.test.js` (their subjects were deleted). 55 tests survive: 9 structural lints + 46 git-push-guard cases.
 - **Docs**: `docs/DEV-LOG-WATCH.md` (the rotating-log monitoring skill it documented is gone).
 - **CLAUDE.md plugin block updates** — operators upgrading via `hermit-evolve` will see the §Dev Agent table, §Local Dev Environment, §Watchdog block, and §Always-on Worktree Topology sections silently replaced with the new safety rules. Existing config keys for the dropped features become inert (harmless but unused) — see Migration below.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `agents/` (entire dir) | Removed — implementer agent gone |
+| `skills/dev-branch/`, `skills/dev-quality/`, `skills/dev-cleanup/`, `skills/dev-doctor/`, `skills/dev-adapt/` | Removed — workflow ceremony skills |
+| `skills/dev-up/`, `skills/dev-down/`, `skills/dev-log-watch/`, `skills/dev-status/` | Removed — dev-server orchestration skills |
+| `skills/hatch/SKILL.md` | Rewritten (271 → ~155 lines): subsumes dev-adapt prompts, idempotent, strict-by-default |
+| `skills/dev-pr/SKILL.md` | Rewritten (241 → ~140 lines): inline body assembly, new tests-ran gate, no --force flag |
+| `scripts/git-push-guard.js` | Simplified (286 → ~85 lines): regex chains, lease carve-out, walk-up cwd resolution |
+| `scripts/record-test-result.js` (+ test) | New PostToolUse hook: records test exit + duration + sha to state/last-test.json |
+| `scripts/watchdog-health.js`, `scripts/watchdog-errors.js`, `scripts/check-protected-branch.js` (+ tests) | Removed |
+| `scripts/lib/` (entire dir: alerts-store, dev-server-command, health-poll, log-watch-builder, port-check, pr-body-builder, protected-branches, resolve-command, shell-utils + tests) | Removed (~1,300 lines) |
+| `state-templates/CLAUDE-APPEND.md` | Rewritten as the rules-of-the-road for any agent doing dev work |
+| `hooks/hooks.json` | Registers new PostToolUse record-test-result hook |
+| `tests/agents-structure.test.js`, 9 lib helper test files | Removed (subjects deleted) |
+| `tests/skill-structure.test.js`, `tests/run-all.sh` | Updated — slimmed to surviving skills, dropped agents-test invocation |
+| `CLAUDE.md`, `README.md`, `CONTRIBUTING.md` | Rewritten for v0.3.0 identity |
+| `docs/HOW-TO-USE.md`, `docs/WORKFLOW.md`, `docs/GIT-SAFETY.md`, `docs/RECOMMENDED-PLUGINS.md` | Rewritten or substantively trimmed |
+| `docs/DEV-LOG-WATCH.md` | Removed |
 
 ### Migration (operators upgrading from v0.2.x)
 
