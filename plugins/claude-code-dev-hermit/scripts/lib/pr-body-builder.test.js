@@ -308,12 +308,14 @@ console.log('\nbuildPRContent — requires qualityReport:');
 console.log('\nCLI smoke test:');
 {
   const { execSync } = require('node:child_process');
+  const path = require('node:path');
   const input = JSON.stringify({
     commits: [{ sha: 'abc', subject: 'fix: the bug', body: '' }],
     qualityReport: makeQuality(),
     branch: 'fix/the-bug',
   });
-  const output = execSync(`node scripts/lib/pr-body-builder.js '${input.replace(/'/g, "'\\''")}'`, { encoding: 'utf8' });
+  const pluginRoot = path.join(__dirname, '..', '..');
+  const output = execSync(`node scripts/lib/pr-body-builder.js '${input.replace(/'/g, "'\\''")}'`, { encoding: 'utf8', cwd: pluginRoot });
   const parsed = JSON.parse(output.trim());
   ok('CLI returns title', typeof parsed.title === 'string');
   ok('CLI returns body', typeof parsed.body === 'string');

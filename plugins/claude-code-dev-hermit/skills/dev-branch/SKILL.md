@@ -1,6 +1,6 @@
 ---
 name: dev-branch
-description: Create a feature branch (and worktree in active-dev mode) before delegating to the implementer. Validates working state, picks the right base from protected_branches, refuses on collisions, and emits Worktree:/Branch: tokens for the caller.
+description: "Create a feature branch (and worktree in active-dev mode) before delegating to the implementer. Validates working state, picks the right base from protected_branches, refuses on collisions, and emits Worktree:/Branch: tokens for the caller."
 ---
 
 # /dev-branch

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-04-28
 
 ### Added
 
@@ -11,12 +11,51 @@
 
 ### Changed
 
-- **implementer: caller contract** — removed `isolation: worktree` (caller now owns worktree setup via `/dev-branch`). Added Step 0a (require `Worktree:` token in prompt) and Step 0b (verify branch is not protected via `check-protected-branch.js`) before any edits. Implementer refuses with actionable messages on missing token or protected branch.
+- **implementer: caller contract** — removed `isolation: worktree` (caller now owns worktree setup via `/dev-branch`). Added Step 0a (require `Worktree:` token in prompt) and Step 0b (verify branch is not protected via `check-protected-branch.js`) before any edits. Implementer refuses with actionable messages on missing token or protected branch. **Breaking workflow change**: any caller that invoked the implementer directly must now run `/dev-branch` first and copy its `Worktree:` line into the implementer's prompt verbatim.
 - **`/dev-branch`: worktree + token emission** — in active-dev mode (no `$HERMIT_AGENT_WORKTREE`), Gate 6 now runs `git worktree add .claude/worktrees/<slug>` and emits `Worktree:`/`Branch:` tokens. Gate 0 short-circuits when already on a feature branch and emits the same tokens. Gate 4b adds a slug-path guard before Gate 5 to prevent silent conflicts.
 - **`/dev-cleanup`: worktree removal** — before deleting a confirmed branch, checks `git worktree list` for a managed worktree under `.claude/worktrees/`; removes it (non-force) before the branch delete. Skips `agent/` basename and worktrees outside `.claude/worktrees/`.
 - **`/dev-pr` Gate 0** — replaced inline glob-match logic with `check-protected-branch.js` shell-out.
 - **`state-templates/CLAUDE-APPEND.md`** — step 2 (Implement) updated: `/dev-branch` is now mandatory before invoking the implementer; `Worktree:` token must be copied verbatim into the implementer prompt. Step 3 (after implementer) simplified: worktree cleanup is `/dev-cleanup`'s job.
 - **`scripts/git-push-guard.js`** — imports `loadProtectedBranches`/`isProtected` from `lib/protected-branches.js`; destructures `{ branches }` from the new return shape.
+
+### Fixed
+
+- **`agents/implementer.md` and `skills/dev-branch/SKILL.md` frontmatter** — `description` values contained unquoted `Worktree:`/`Branch:` colons, causing the YAML parser to drop all frontmatter fields silently at runtime. Both descriptions are now quoted strings.
+- **`scripts/lib/pr-body-builder.test.js` CLI smoke test** — `execSync` lacked an explicit `cwd`, so the relative `node scripts/lib/pr-body-builder.js` path resolved against the caller's CWD. Now sets `cwd` to the plugin root so the test passes when `tests/run-all.sh` is invoked from the repo root.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `scripts/lib/protected-branches.js` + `.test.js` | New: shared protected-branch helpers |
+| `scripts/check-protected-branch.js` + `.test.js` | New: CLI wrapper for branch protection checks |
+| `tests/agents-structure.test.js` | New: structural lint for `agents/*.md` |
+| `tests/test-utils.js` | New: shared `parseFrontmatter` helper |
+| `tests/run-all.sh` | Wires `agents-structure.test.js` into the runner |
+| `tests/skill-structure.test.js` | Imports `parseFrontmatter` from `test-utils`; adds `dev-branch`, `dev-cleanup` to skill list |
+| `agents/implementer.md` | `isolation: worktree` removed; Step 0a/0b refusals added; description quoted |
+| `skills/dev-branch/SKILL.md` | Worktree creation + token emission in active-dev mode; Gate 4b slug-path guard; description quoted |
+| `skills/dev-cleanup/SKILL.md` | Removes managed worktree before branch deletion |
+| `skills/dev-pr/SKILL.md` | Gate 0 shells out to `check-protected-branch.js` |
+| `scripts/git-push-guard.js` | Uses `lib/protected-branches.js` exports |
+| `scripts/watchdog-health.js`, `scripts/watchdog-errors.js` | Inline doc-comment notes on binding scope |
+| `scripts/lib/pr-body-builder.test.js` | CLI smoke test sets `cwd` explicitly |
+| `state-templates/CLAUDE-APPEND.md` | `/dev-branch` mandatory before implementer; `Worktree:` token contract |
+| `CLAUDE.md` | Skill list refreshed; agent surface area + caller contract documented |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Copy** `scripts/lib/protected-branches.js` and `scripts/check-protected-branch.js` into the hermit's scripts directory.
+2. **Refresh** `agents/implementer.md` from the updated plugin (replaces the prior `isolation: worktree` agent).
+3. **Refresh** `skills/dev-branch/SKILL.md`, `skills/dev-cleanup/SKILL.md`, and `skills/dev-pr/SKILL.md` from the updated plugin.
+4. **Refresh** `scripts/git-push-guard.js` so it imports the new shared helpers.
+5. **Append** the updated implementer-caller-contract section from `state-templates/CLAUDE-APPEND.md` to the hermit's `CLAUDE.md`.
+
+No `config.json` changes required.
+
+**Note:** Callers that previously invoked the implementer directly must now run `/dev-branch` first and copy its `Worktree:` line verbatim into the implementer's prompt. The implementer refuses without that token.
 
 ## [0.2.2] - 2026-04-28
 

@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Writes code on a caller-prepared branch. Use for feature implementation, bug fixes, and refactoring. Requires a Worktree: token in the prompt (emitted by /dev-branch). Changes happen on a feature branch, never on main.
+description: "Writes code on a caller-prepared branch. Use for feature implementation, bug fixes, and refactoring. Requires a Worktree: token in the prompt (emitted by /dev-branch). Changes happen on a feature branch, never on main."
 model: sonnet
 effort: high
 maxTurns: 50
