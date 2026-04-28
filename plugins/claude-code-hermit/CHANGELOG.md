@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- **hermit-start: agent worktree setup** — deleted `setup_agent_worktree()` and the `HERMIT_AGENT_WORKTREE` env-file export from `scripts/hermit-start.py`. The function was added in v1.0.22 to give dev-hermit's always-on worktree topology a persistent `.claude/worktrees/agent/` checkout to operate in; dev-hermit v0.3.0 dropped that topology entirely (no more `$HERMIT_AGENT_WORKTREE` consumers anywhere in the fleet). The setup ran on every boot, made up to 3 git subprocess calls (15s timeout each → up to 45s worst-case), and produced a stale `.claude/worktrees/agent/` directory that nothing reads. Removing it speeds up boot and shrinks the per-session tmux env file by one variable.
+
+### Changed
+
+- **`docs/architecture.md`: agent layer description** — the line claiming dev-hermit "adds repo-mapper, implementer, reviewer" was always wrong (dev-hermit historically shipped only an `implementer`; v0.3.0 ships zero agents). Replaced with a generic statement pointing operators at each plugin's CLAUDE.md for its actual agent set.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Remove the stale agent worktree** if it exists. Run `git -C "$PROJECT_ROOT" worktree list --porcelain` to detect a registered worktree at `.claude/worktrees/agent/`. If present, run `git -C "$PROJECT_ROOT" worktree remove --force .claude/worktrees/agent`. If absent from `git worktree list` but the directory still exists on disk, `rm -r .claude/worktrees/agent` (no `-f` per repo rules) and `git worktree prune` to clear any stale ref. Best-effort: do not block the upgrade if the operation fails — print a one-line warning telling the operator to clean up manually.
+2. **Note the env-var removal.** Tell the operator: "v1.0.23 removes the `HERMIT_AGENT_WORKTREE` env var from the per-session tmux env file. Any custom skill or script you wrote that reads this var (none ship in the official hermit fleet) will see it as unset — adjust to either drop the dependency or read project root from `Path.cwd()` instead."
+
+The `.claude/worktrees/` line in `state-templates/GITIGNORE-APPEND.txt` and `GITIGNORE-APPEND-PROJECT.txt` is intentionally preserved — it covers Claude Code's native `isolation: worktree` agent feature (used by other plugins), not just the deleted hermit-managed subpath.
+
+No `config.json` changes required.
+
 ## [1.0.22] - 2026-04-28
 
 ### Added

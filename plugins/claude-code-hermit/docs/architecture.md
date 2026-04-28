@@ -85,7 +85,7 @@ SHELL.md tasks,  status,   S-NNN-REPORT.md,
 
 Tools: Read, Write, Edit, Bash, Glob, Grep. No web access. Uses `memory: project` for accumulated knowledge across sessions.
 
-Hermits extend this layer with specialized agents (e.g., `claude-code-dev-hermit` adds repo-mapper, implementer, reviewer).
+Hermits extend this layer with specialized agents when they ship them; the active set varies per hermit and is documented in each plugin's `CLAUDE.md`.
 
 ---
 

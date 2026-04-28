@@ -161,66 +161,6 @@ def is_container():
     )
 
 
-def setup_agent_worktree():
-    """Ensure the persistent agent worktree at .claude/worktrees/agent/ exists.
-
-    Three-way idempotent:
-      - absent on disk → create (--detach avoids "branch already checked out" error)
-      - dir exists but unlisted in git → prune stale refs, then re-add
-      - dir exists and listed → leave alone; do NOT re-detach HEAD (the worktree
-        may already be on a feature branch from the prior session — resetting
-        would destroy that context)
-
-    Fails open: prints a warning and returns the expected path even on git error
-    so skills can handle the situation gracefully via /dev-doctor.
-
-    Returns the absolute path string.
-    """
-    project_dir = Path.cwd().resolve()
-    worktree_abs = project_dir / '.claude' / 'worktrees' / 'agent'
-
-    try:
-        result = subprocess.run(
-            ['git', 'worktree', 'list', '--porcelain'],
-            capture_output=True, text=True, cwd=str(project_dir), timeout=15,
-        )
-        listed = result.returncode == 0 and str(worktree_abs) in result.stdout
-    except subprocess.TimeoutExpired:
-        print('[hermit] WARNING: git worktree list timed out — skipping worktree setup.')
-        return str(worktree_abs)
-
-    if worktree_abs.is_dir() and listed:
-        return str(worktree_abs)
-
-    if worktree_abs.is_dir() and not listed:
-        try:
-            subprocess.run(
-                ['git', 'worktree', 'prune'], cwd=str(project_dir),
-                capture_output=True, timeout=15,
-            )
-        except subprocess.TimeoutExpired:
-            pass  # prune is best-effort; proceed to add regardless
-
-    try:
-        # --force allows re-registering a directory that already exists on disk
-        # after a stale ref was pruned (prune removes the ref, not the directory).
-        result = subprocess.run(
-            ['git', 'worktree', 'add', '--detach', '--force', str(worktree_abs)],
-            capture_output=True, text=True, cwd=str(project_dir), timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        print('[hermit] WARNING: git worktree add timed out — skipping worktree setup.')
-        return str(worktree_abs)
-
-    if result.returncode != 0:
-        print(f'[hermit] WARNING: agent worktree setup failed — {result.stderr.strip()}')
-        print('[hermit]   Continuing without worktree isolation. Run /dev-doctor to diagnose.')
-    else:
-        print(f'[hermit] Agent worktree: .claude/worktrees/agent')
-
-    return str(worktree_abs)
-
-
 def write_runtime_json(data):
     """Atomic write to state/runtime.json."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -554,8 +494,6 @@ def main():
     # Auth vars must be in shell env before claude launches.
     # *_STATE_DIR vars must be OS env because MCP servers (channel plugins)
     # inherit shell env but don't read settings.local.json.
-    agent_worktree = setup_agent_worktree()
-
     forward_vars = ['CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'AGENT_HOOK_PROFILE']
     # *_STATE_DIR vars must reach MCP servers via OS env — see write_settings_env.
     for ch_name, ch_cfg in iter_channel_configs(config):
@@ -567,7 +505,6 @@ def main():
         # set it explicitly so Bash tool calls in skills work in cron-triggered sessions.
         plugin_root = str(Path(__file__).resolve().parent.parent)
         f.write(f'export CLAUDE_PLUGIN_ROOT={shlex.quote(plugin_root)}\n')
-        f.write(f'export HERMIT_AGENT_WORKTREE={shlex.quote(agent_worktree)}\n')
         for var in forward_vars:
             val = os.environ.get(var)
             if val is not None:
