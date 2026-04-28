@@ -1,16 +1,40 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.22] - 2026-04-28
 
 ### Added
 
-- **`hermit-start.py`: persistent agent worktree setup** — `setup_agent_worktree()` ensures `.claude/worktrees/agent/` exists before the tmux env file is written. Three-way idempotent: creates on first boot, re-registers via `--force` if the git ref was stale-pruned (prune removes the ref but not the directory), and leaves an existing registered worktree untouched so a feature branch from the prior session is preserved. Sets `HERMIT_AGENT_WORKTREE` in the tmux env so dev-hermit skills (`/dev-up`, `/dev-branch`, `/dev-quality`, etc.) operate in the agent worktree rather than the operator's main checkout. All three git calls (`worktree list`, `prune`, `add`) have a 15 s timeout; each fails open with a warning to let `/dev-doctor` diagnose.
-- **`.gitignore` templates**: `.claude/worktrees/` added to both `GITIGNORE-APPEND.txt` and `GITIGNORE-APPEND-PROJECT.txt` so agent worktree directories are excluded from project git history.
+- **hermit-start: persistent agent worktree setup** — `setup_agent_worktree()` creates `.claude/worktrees/agent/` before the tmux env file is written and sets `HERMIT_AGENT_WORKTREE` so dev-hermit skills operate in the agent worktree rather than the operator's main checkout. Three-way idempotent: creates on first boot, re-registers after a stale-pruned ref, leaves an existing registered worktree untouched (preserving any feature branch from the prior session). All git calls have a 15 s timeout and fail open with a warning.
+- **gitignore templates: `.claude/worktrees/`** — added to `GITIGNORE-APPEND.txt` and `GITIGNORE-APPEND-PROJECT.txt` so agent worktree directories are excluded from project git history.
 
 ### Changed
 
-- **`auto` permission mode added to `/hatch` and `/hermit-settings permissions`.** `hermit-start.py` now passes `--permission-mode auto` to Claude Code instead of treating it as an unknown mode. Max plan requires Opus 4.7; Team/Enterprise/API plans support Sonnet 4.6 or Opus 4.6/4.7. Replaces the outdated "Teams/Enterprise only" note. Not available on Pro, Haiku, or non-Anthropic providers (Bedrock/Vertex/Foundry).
-- **Channel-setup discoverability: three deployment modes mapped explicitly in hatch and channel-setup.** Hatch Phase 5 channel-save note now names all three modes (Docker/tmux/interactive) with their activation paths. Hatch Step 10 next-steps restructured into "Pick a mode / After picking / Anytime" groups so `/channel-setup` is visible for tmux and interactive users instead of buried at item 8. `channel-setup` step 1 gains a Docker-mode guard: reads `state/runtime.json` and redirects to `/docker-setup` if `runtime_mode == "docker"`, with a fallback check for `docker/Dockerfile.hermit` for scaffolded-but-unbooted projects. `hermit-settings channels add` note updated to mention both setup paths.
+- **hermit-start: `auto` permission mode** — `hermit-start.py` now passes `--permission-mode auto` to Claude Code instead of treating it as unknown. Max plan → Opus 4.7 only; Team/Enterprise/API → Sonnet 4.6 or Opus 4.6/4.7. Not available on Pro, Haiku, or non-Anthropic providers.
+- **hatch + hermit-settings: `auto` surfaced in permission mode options** — replaces the outdated "Teams/Enterprise only" note with accurate plan/model requirements.
+- **channel-setup: Docker-mode guard** — step 1 reads `state/runtime.json` and redirects to `/docker-setup` if `runtime_mode == "docker"`, with a fallback check for `docker/Dockerfile.hermit` for scaffolded-but-unbooted projects.
+- **hatch: deployment-mode next-steps** — Step 10 next-steps restructured into "Pick a mode / After picking / Anytime" groups so `/channel-setup` is visible for tmux and interactive users; channel-save note now names all three modes (Docker/tmux/interactive) with their activation paths.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `plugins/claude-code-hermit/scripts/hermit-start.py` | Agent worktree setup; `auto` permission mode support |
+| `plugins/claude-code-hermit/state-templates/GITIGNORE-APPEND.txt` | `.claude/worktrees/` added |
+| `plugins/claude-code-hermit/state-templates/GITIGNORE-APPEND-PROJECT.txt` | `.claude/worktrees/` added |
+| `plugins/claude-code-hermit/skills/channel-setup/SKILL.md` | Docker-mode guard at step 1 |
+| `plugins/claude-code-hermit/skills/hatch/SKILL.md` | Deployment-mode next-steps; `auto` permission mode option |
+| `plugins/claude-code-hermit/skills/hermit-settings/SKILL.md` | `auto` added to permission mode options |
+| `plugins/claude-code-hermit/docs/config-reference.md` | `permission_mode` entry updated for `auto` with plan requirements |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Refresh** `scripts/hermit-start.py` from the updated plugin.
+2. **Refresh** `skills/channel-setup/SKILL.md`, `skills/hatch/SKILL.md`, and `skills/hermit-settings/SKILL.md` from the updated plugin.
+3. **Append** `.claude/worktrees/` to the project `.gitignore` if dev-hermit agent worktrees are in use.
+
+No `config.json` changes required.
 
 ## [1.0.21] - 2026-04-27
 
