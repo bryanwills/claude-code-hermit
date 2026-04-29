@@ -1,0 +1,41 @@
+{
+  "enabledPlugins": {
+    "claude-code-dev-hermit@claude-code-hermit": true,
+    "claude-code-hermit@claude-code-hermit": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(node */scripts/cost-tracker.js*)",
+      "Bash(node */scripts/suggest-compact.js*)",
+      "Bash(node */scripts/run-with-profile.js*)",
+      "Bash(node */scripts/evaluate-session.js*)",
+      "Bash(node */scripts/append-metrics.js*)",
+      "Bash(node */scripts/generate-summary.js*)",
+      "Bash(node */scripts/update-reflection-state.js*)",
+      "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
+      "Edit(.claude-code-hermit/**)",
+      "Write(.claude-code-hermit/**)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(chmod 777*)",
+      "Bash(*sudo *)",
+      "Bash(*> /etc/*)",
+      "Bash(curl * | bash*)",
+      "Bash(wget * | bash*)",
+      "Bash(env)",
+      "Bash(printenv)",
+      "Bash(cat .env*)",
+      "Bash(cat */.env*)",
+      "Bash(cat ~/.ssh/*)",
+      "Bash(cat ~/.aws/*)",
+      "Bash(*API_KEY*)",
+      "Bash(*SECRET*)",
+      "Bash(*TOKEN*)",
+      "Bash(*> *.claude-code-hermit/OPERATOR.md*)"
+    ]
+  }
+}
