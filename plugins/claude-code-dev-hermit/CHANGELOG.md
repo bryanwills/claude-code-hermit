@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`/dev-quality` skill (`skills/dev-quality/SKILL.md`)** — re-introduces a `/dev-quality` skill (removed in v0.3.0 as "workflow ceremony") in leaner form as a mechanical pre-wrap quality gate: runs `/simplify` on the working-tree diff, re-runs `commands.test`, and reports results. On test regression, surfaces the failure and stops — no auto-rollback. If `/code-review:code-review` (`code-review@claude-plugins-official`) is in the agent's available slash-command list, the skill tells the agent to suggest it to the operator (never invokes it autonomously). No state file, no cross-skill contract.
+
+### Changed
+
+- **`state-templates/CLAUDE-APPEND.md`** — adds step 4 to §Implementation Flow pointing to `/dev-quality`; rewrites §Tests Before PR to reference `/dev-quality` as the `/simplify`+re-run owner (with a note to re-run `commands.test` after committing, before `/dev-pr`, until the `last-test.json` tree-equality fix ships). Operators must re-run `/claude-code-dev-hermit:hatch` to refresh their project's CLAUDE.md.
+
 ## [0.3.0] - 2026-04-28
 
 **v0.3.0 — language-agnostic safety layer.** Mass cleanup: dropped ~6,000 lines (~70% of the plugin) to reframe dev-hermit as a thin safety layer instead of a stack-aware orchestrator. The plugin now ships 2 skills (`hatch`, `dev-pr`), 1 hook (`git-push-guard`), and a CLAUDE-APPEND template that injects safety rules into the project's CLAUDE.md. No built-in implementer agent — operators use the native `Agent` tool, `feature-dev`'s research/architect agents, or custom subagents, all governed by the injected rules. Three audits (value / complexity / native-delegation) and a series of design-iteration conversations led to this redesign; full rationale in the v0.3.0 plan (`/home/d0m/.claude/plans/cryptic-weaving-dolphin.md`).
