@@ -182,6 +182,7 @@ questions: [
       { label: "claude-code-setup", description: "Analyzes codebase, recommends automations (skills, hooks, MCP servers, subagents)" },
       { label: "claude-md-management", description: "Audits and improves CLAUDE.md files — grades quality, proposes fixes" },
       { label: "skill-creator", description: "Builds and refines new skills from proposals" },
+      { label: "feature-dev", description: "Designs, explores, and reviews code for accepted-PROP implementation work" },
       { label: "None", description: "Skip all — add later via hermit-settings" }
     ],
     multiSelect: true
@@ -203,6 +204,7 @@ For each accepted plugin, also add the corresponding `scheduled_checks` entries 
   - `{"id":"md-audit","plugin":"claude-md-management","skill":"/claude-md-management:claude-md-improver","enabled":true,"trigger":"interval","interval_days":7}`
   - `{"id":"md-revise","plugin":"claude-md-management","skill":"/claude-md-management:revise-claude-md","enabled":true,"trigger":"session"}`
 - `skill-creator` → no entry (event-driven via proposal-act, not scheduled)
+- `feature-dev` → no entry (manual on-demand via /feature-dev:feature-dev, not scheduled)
 
 For each plugin the operator declines, skip silently. Note: "You can add it later with `/claude-code-hermit:hermit-settings`."
 
@@ -645,7 +647,7 @@ Identity:
   Sign-off:        Atlas out.
 
 Config:
-  Plugins:         claude-code-setup, claude-md-management, skill-creator
+  Plugins:         claude-code-setup, claude-md-management, skill-creator, feature-dev
   Channels:        none
   Budget prompts:  enabled
   Morning brief:   disabled

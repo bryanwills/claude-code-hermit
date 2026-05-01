@@ -44,6 +44,18 @@ Builds, tests, and refines new skills through structured iteration — from inte
 
 **Why it matters for Hermit:** When Hermit's reflect skill notices "this workflow keeps repeating" and creates a proposal, skill-creator gives it the tools to actually build and validate a new skill from that proposal. Closes the loop from observation to automation.
 
+### feature-dev
+
+**Source:** [github.com/anthropics/claude-code/tree/main/plugins/feature-dev](https://github.com/anthropics/claude-code/tree/main/plugins/feature-dev)
+**Marketplace:** `claude-plugins-official` (no marketplace add needed)
+**Install:** `claude plugin install feature-dev@claude-plugins-official`
+
+Orchestrates a 7-phase implementation workflow via `/feature-dev:feature-dev`: discovery → codebase exploration → clarifying questions → architecture design → implementation → quality review → summary. Backed by three read-only Sonnet agents — `code-architect` (implementation blueprints with file-level specifics), `code-explorer` (traces execution paths and dependencies), and `code-reviewer` (flags only 80+ confidence issues). The command gates on operator approval before Phase 5 (implementation) and presents multiple architecture options before coding.
+
+**Why it matters for Hermit:** Complements `skill-creator` for accepted-proposal implementation work — skill-creator builds new skills, feature-dev handles arbitrary code changes (hooks, scripts, refactors). After accepting a proposal, invoke `/feature-dev:feature-dev` when the work touches unfamiliar code paths in the host repo or calls for design-first scaffolding before writing code.
+
+**When not to use:** Per feature-dev's README: "Don't use for: single-line bug fixes, trivial changes, well-defined simple tasks, urgent hotfixes."
+
 ---
 
 ## Third-Party Plugins
@@ -103,6 +115,7 @@ When you accept a recommended plugin during `/hatch` or `/docker-setup`, Hermit 
 | `claude-md-management` | `md-audit` | `/claude-md-management:claude-md-improver` | `interval` | 7 days |
 | `claude-md-management` | `md-revise` | `/claude-md-management:revise-claude-md` | `session` | At task completion |
 | `skill-creator` | _(none)_ | Event-driven via `proposal-act` | — | On demand |
+| `feature-dev` | _(none)_ | Manual via `/feature-dev:feature-dev` | — | On demand |
 
 **Interval checks** run during idle reflection. If a check is due (past its `interval_days`), reflect invokes the skill, evaluates the output, and routes actionable findings through the proposal pipeline. One check per reflect cycle.
 

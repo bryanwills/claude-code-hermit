@@ -12,6 +12,8 @@
 
 - **`channel-setup` and `docker-setup`: default `ackReaction` to 👀 during pairing.** Channel plugins (`discord`, `telegram`) ship `ackReaction` empty by default, so freshly paired hermits had no inbound emoji feedback — operators only saw the 5–10s typing indicator before silence until the actual reply landed (often a minute+ for `session-start`, `proposal-create`, etc.). Both setup skills now run `/<channel>:access set ackReaction 👀` on first pair (with the same state-dir hint pattern used for pair/policy), skipping if the operator has already customized the value. `👀` is in Telegram's reaction whitelist and works on Discord. (`channel-setup/SKILL.md`, `docker-setup/SKILL.md`)
 
+- **Recommended plugins: added `feature-dev` (Anthropic-official)** — orchestrated 7-phase implementation workflow (`/feature-dev:feature-dev`) for designing, exploring, and reviewing code changes. Surfaces in `/hatch` Phase 4 for opt-in install; operators invoke it manually during sessions when implementing accepted proposals.
+
 ### Upgrade Instructions
 
 For each entry in `.claude-code-hermit/config.json` `channels` where `enabled !== false` and the channel name is `discord` or `telegram`:
@@ -26,6 +28,17 @@ For each entry in `.claude-code-hermit/config.json` `channels` where `enabled !=
 4. If `ackReaction` is already a non-empty string: skip — preserve operator customization.
 
 Use direct JSON edit, not the slash command. The setup skills route through `/<channel>:access set ackReaction` with a state-dir hint because they run during interactive pairing; for the migration, a direct edit is simpler for batch backfill across multiple channels and doesn't depend on channel plugins being loaded at upgrade time.
+
+**Offer `feature-dev` install for existing hermits.** Read `config.json`. If `docker.recommended_plugins` exists and contains `"feature-dev"`, skip silently — already adopted. If `docker.recommended_plugins` is absent (tmux/local hermit without docker setup), run `claude plugin list` — if `feature-dev` appears, skip silently.
+
+Otherwise, ask the operator with `AskUserQuestion` (header: "feature-dev"):
+
+- Question: "claude-code-hermit's recommended-plugin set now includes `feature-dev` (Anthropic-official) — orchestrated 7-phase implementation workflow (`/feature-dev:feature-dev`) for designing, exploring, and reviewing code changes. Install it?"
+- Options: **Yes — install** (default) / **No — skip**
+
+On **Yes**: run `claude plugin install feature-dev@claude-plugins-official --scope project` (idempotent if already installed). If `config.json` has a `docker.recommended_plugins` array, append `"feature-dev"` to it and write the file back, preserving existing formatting (2-space indent, trailing newline). If the key is absent (tmux/local hermits without docker setup), skip the config.json edit. Log: "Installed `feature-dev`@`claude-plugins-official`."
+
+On **No**: skip — operator can install later via `/claude-code-hermit:hermit-settings` or by re-running `/claude-code-hermit:hatch`.
 
 ## [1.0.24] - 2026-04-29
 
