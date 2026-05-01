@@ -34,7 +34,7 @@ This skill is **silent by default**. Only notify the operator (per the channel p
    b. Read all proposals with `status: accepted`. Sort by `accepted_date` ascending. Resume from the proposal after `last_resolution_check`, wrapping around. Take up to 5.
    c. If the accepted list from step b is empty, skip to step f.
    d. For each proposal: read its `title` and Evidence section to understand the original pattern.
-      Delegate the session fetch to the built-in `Explore` subagent. Prompt: `Glob .claude-code-hermit/sessions/S-*-REPORT.md. Sort descending by filename. Read the 3 most recent and return: filename, date from frontmatter, and the full body (needed for pattern presence/absence detection).`
+      Delegate the session fetch to the built-in `Explore` subagent. Prompt: `Glob .claude-code-hermit/sessions/S-*-REPORT.md. Sort descending by filename. Read the 3 most recent and return: filename, date from frontmatter, and the full body verbatim — do not truncate, summarize, or excerpt (full body is required for pattern presence/absence detection). If a body exceeds your read window, say so explicitly per file rather than silently trimming.` If Explore returns truncated bodies for any of the 3 files, fall back to reading those files inline with the Read tool before evaluating step e.
    e. If the pattern is **absent** from all 3 checked sessions — apply the cadence-aware resolution rule:
 
       **Compute original cadence:**
