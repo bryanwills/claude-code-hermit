@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.25] - 2026-05-01
 
 ### Changed
 
@@ -13,6 +13,24 @@
 - **`channel-setup` and `docker-setup`: default `ackReaction` to 👀 during pairing.** Channel plugins (`discord`, `telegram`) ship `ackReaction` empty by default, so freshly paired hermits had no inbound emoji feedback — operators only saw the 5–10s typing indicator before silence until the actual reply landed (often a minute+ for `session-start`, `proposal-create`, etc.). Both setup skills now run `/<channel>:access set ackReaction 👀` on first pair (with the same state-dir hint pattern used for pair/policy), skipping if the operator has already customized the value. `👀` is in Telegram's reaction whitelist and works on Discord. (`channel-setup/SKILL.md`, `docker-setup/SKILL.md`)
 
 - **Recommended plugins: added `feature-dev` (Anthropic-official)** — orchestrated 7-phase implementation workflow (`/feature-dev:feature-dev`) for designing, exploring, and reviewing code changes. Surfaces in `/hatch` Phase 4 for opt-in install; operators invoke it manually during sessions when implementing accepted proposals.
+
+### Fixed
+
+- **`proposal-triage` agent: YAML frontmatter parse error** — the `description` field contained a bare colon-space sequence (`<code>: <reason>`) which YAML interprets as a key-value separator, causing all frontmatter fields (model, effort, maxTurns, tools, disallowedTools) to be silently dropped at load time. Quoted the description string to fix the parse error.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `agents/proposal-triage.md` | Extended evidence scope, richer verdict output, YAML fix |
+| `skills/reflect/SKILL.md` | Explore delegation; triage verdict counters |
+| `skills/cortex-sync/SKILL.md` | Explore delegation; manifest flag fix |
+| `skills/reflect-scheduled-checks/SKILL.md` | Triage verdict counters |
+| `skills/proposal-create/SKILL.md` | Triage verdict counters |
+| `skills/channel-setup/SKILL.md` | Default ackReaction to 👀 on first pair |
+| `skills/docker-setup/SKILL.md` | Default ackReaction to 👀; feature-dev recommended plugin |
+| `skills/hatch/SKILL.md` | feature-dev opt-in in Phase 4 |
+| `docs/recommended-plugins.md` | Added feature-dev entry |
 
 ### Upgrade Instructions
 
