@@ -1,15 +1,24 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const historyPath = join(root, ".github/badges/clones-history.json");
-const badgePath   = join(root, ".github/badges/clones.json");
+const badgesDir = process.env.BADGES_DIR
+  ?? join(dirname(fileURLToPath(import.meta.url)), "../../.github/badges");
+const historyPath = join(badgesDir, "clones-history.json");
+const badgePath   = join(badgesDir, "clones.json");
 
 const token = process.env.GH_TOKEN;
 const repo  = process.env.REPO;
 if (!token || !repo) {
   console.error("GH_TOKEN and REPO env vars are required");
+  process.exit(1);
+}
+
+if (!existsSync(historyPath)) {
+  console.error(`Badge history not found: ${historyPath}`);
+  console.error(`Set BADGES_DIR to a local checkout of the badges branch, e.g.:`);
+  console.error(`  git worktree add /tmp/badges badges`);
+  console.error(`  BADGES_DIR=/tmp/badges/.github/badges node .github/scripts/update-clones.mjs`);
   process.exit(1);
 }
 
@@ -54,7 +63,7 @@ writeFileSync(
   JSON.stringify(
     {
       schemaVersion: 1,
-      label: "clones",
+      label: "Downloads",
       message: totalCount >= 1000 ? `${Math.floor(totalCount / 1000)}k+` : String(totalCount),
       color: "blue",
     },
