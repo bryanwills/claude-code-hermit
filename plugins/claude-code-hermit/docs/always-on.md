@@ -37,7 +37,7 @@ The wizard scans your project for dependencies, asks about auth, and generates f
 | ----------------------------- | ----------------------------------------------------- |
 | `Dockerfile.hermit`           | Ubuntu 24.04, Node 24, Bun, Claude Code, project packages, host UID matching |
 | `docker-entrypoint.hermit.sh` | Onboarding bypass, MCP approval, permission patch, channel symlinks, graceful SIGTERM handling, PID 1 keepalive |
-| `docker-compose.hermit.yml`   | Named volume, bind mounts, env vars, healthcheck, restart policy |
+| `docker-compose.hermit.yml`   | Named volume, bind mounts, env vars, healthcheck, restart policy, kernel-enforced hardening (`no-new-privileges`, `cap_drop: ALL`, `pids_limit`) |
 | `.env`                        | Auth token (appended if file already exists)           |
 
 The wizard also checks `.claude/settings.json` permissions to detect tools your project needs in the container.
