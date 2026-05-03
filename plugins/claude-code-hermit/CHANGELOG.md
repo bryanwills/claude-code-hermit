@@ -1,15 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.26] - 2026-05-03
 
 ### Fixed
 
-- **`hermit-routines load` now honors `config.timezone`** when registering CronCreates. Previously `config.timezone` was ignored by the routines pipeline, so a hermit running on a UTC server with `timezone: "Europe/Lisbon"` would fire daily routines at the wrong wall-clock hour during BST/WEST. The new `scripts/cron-tz-shift.js` helper converts each routine's schedule from `config.timezone` to the machine's local timezone using a minute-granularity offset, so half-hour and 45-minute IANA zones (Asia/Kolkata, Australia/Adelaide, Asia/Kathmandu) work correctly. DOW is shifted automatically when an hour shift crosses a day boundary. Schedules that cannot be represented as a single cron after shifting (mixed day-wrap on restricted-DOW, step patterns that lose their periodicity) pass through unchanged with a warning. The daily `heartbeat-restart` reload self-corrects DST drift within 24h.
-
-### Upgrade Instructions
-
-- Add `Bash(node */scripts/cron-tz-shift.js*)` to the project's `.claude/settings.json` Bash allowlist alongside the other `node */scripts/...` entries. This prevents permission prompts during routine load. `hermit-evolve` handles this automatically.
-- Run `/claude-code-hermit:hermit-routines load` after upgrading to re-register routines with the new timezone shift applied.
+- **hermit-routines: routine schedules now shift from `config.timezone` to machine timezone** before CronCreate registration. Previously the routines pipeline ignored `config.timezone`, so a UTC server with `timezone: "Europe/Lisbon"` would fire daily routines at the wrong wall-clock hour during BST. A new `scripts/cron-tz-shift.js` helper handles the conversion with minute-granularity offsets (30/45-minute IANA zones work), automatic DOW adjustment on day-wrap, and fail-open pass-through for patterns that can't collapse into a single cron. DST self-corrects within 24h via the daily `heartbeat-restart` reload.
 
 ### Added
 
@@ -23,23 +18,44 @@
 
 - **Per-fleet-plugin contract**: plugins can declare network requirements in a `## Docker network requirements` section in `skills/hatch/SKILL.md` or `DOCKER.md` (mirrors the existing `## Docker apt dependencies` pattern). The `/docker-security` wizard reads these and offers per-entry confirmation. Special token `ASK_OPERATOR_FOR_<NAME>_IP` triggers an operator IP prompt for plugin-specific LAN endpoints. Backward-compatible: plugins without the section contribute nothing.
 
+### Files affected
+
+| File | Change |
+|------|--------|
+| `scripts/cron-tz-shift.js` | New: shifts 5-field cron between IANA timezones |
+| `scripts/lib/time.js` | Extended `currentHHMM` to accept optional `ref` date |
+| `skills/hermit-routines/SKILL.md` | `load` now invokes `cron-tz-shift.js` per routine |
+| `skills/hatch/SKILL.md` | Added `cron-tz-shift.js` to Bash allowlist |
+| `skills/hermit-evolve/SKILL.md` | Added `cron-tz-shift.js` to required node entries list |
+| `skills/smoke-test/SKILL.md` | Added step 4b: helper availability check |
+| `skills/docker-security/SKILL.md` | New: opt-in hardening wizard (LAN, ro-fs, resource bounds, audit log) |
+| `scripts/doctor-check.js` | Eighth check: `docker-security` posture vs overlay drift |
+| `state-templates/bin/hermit-docker` | Pins `SERVICE=hermit`, chains security overlay when present |
+| `docs/config-reference.md` | Updated `routines.schedule` TZ description |
+| `tests/cron-tz-shift.test.sh` | New: 20 deterministic cron-shift tests |
+| `tests/run-hooks.sh` | Updated doctor-check test: 7 → 8 checks |
+
 ### Upgrade Instructions
 
 Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
-1. **Skip if no Docker scaffolding.** If `docker-compose.hermit.yml` does not exist at the project root, this entry is a no-op.
+1. **Add `cron-tz-shift.js` to the Bash allowlist.** Add `Bash(node */scripts/cron-tz-shift.js*)` to `.claude/settings.json` `permissions.allow` alongside the other `node */scripts/...` entries.
 
-2. **Ask the operator for consent.** Use `AskUserQuestion` (header: `"Container hardening"`):
-   - **Yes — apply hardening** (Recommended): proceed to step 3.
+2. **Re-register routines.** Run `/claude-code-hermit:hermit-routines load` to apply the timezone shift to existing CronCreate registrations.
+
+3. **Skip if no Docker scaffolding.** If `docker-compose.hermit.yml` does not exist at the project root, this entry is a no-op.
+
+4. **Ask the operator for consent.** Use `AskUserQuestion` (header: `"Container hardening"`):
+   - **Yes — apply hardening** (Recommended): proceed to step 5.
    - **Skip**: do nothing for this entry; continue with the rest of evolve.
 
    Hardening is opt-in because operators may have customized their compose for special workloads (privileged ports, larger PID needs).
 
-3. **Idempotency check.** Read the rendered `docker-compose.hermit.yml`. If it contains the literal string `no-new-privileges`, skip — already migrated. Tell the operator: "Container hardening already in place, skipping." (If it contains `cap_drop` or `pids_limit` but not `no-new-privileges`, a partial previous attempt may have stalled — show the operator the current file and ask them to patch it manually or re-run `/docker-setup` with backup.)
+5. **Idempotency check.** Read the rendered `docker-compose.hermit.yml`. If it contains the literal string `no-new-privileges`, skip — already migrated. Tell the operator: "Container hardening already in place, skipping." (If it contains `cap_drop` or `pids_limit` but not `no-new-privileges`, a partial previous attempt may have stalled — show the operator the current file and ask them to patch it manually or re-run `/docker-setup` with backup.)
 
-4. **Locate the insertion point.** Find the `hermit:` service block. Within it, locate the `restart:` line at 4-space indent. If either is missing or the structure is ambiguous (e.g. service renamed, restart removed, indentation drift), do NOT attempt the patch — fall through to step 6.
+6. **Locate the insertion point.** Find the `hermit:` service block. Within it, locate the `restart:` line at 4-space indent. If either is missing or the structure is ambiguous (e.g. service renamed, restart removed, indentation drift), do NOT attempt the patch — fall through to step 8.
 
-5. **Patch.** Insert the following three stanzas immediately before the `restart:` line, indented to match adjacent service keys (4 spaces in the standard template). Show the diff to the operator and ask for final confirmation before writing:
+7. **Patch.** Insert the following three stanzas immediately before the `restart:` line, indented to match adjacent service keys (4 spaces in the standard template). Show the diff to the operator and ask for final confirmation before writing:
 
    ```yaml
    cap_drop:
@@ -51,15 +67,15 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
    *(Shown unindented for clarity — in the file each line gets 4 leading spaces, same level as `restart:` and `stop_grace_period:`.)*
 
-   On confirm: write the file. Then jump to step 7.
+   On confirm: write the file. Then jump to step 9.
 
-6. **Fallback for unrecognized structure.** Tell the operator:
+8. **Fallback for unrecognized structure.** Tell the operator:
 
    > "Your `docker-compose.hermit.yml` has been customized — I can't patch it safely. Re-run `/claude-code-hermit:docker-setup` and choose **'Yes — back up'** when prompted to regenerate it cleanly with the new hardening defaults. Your customizations will be preserved in `docker-backup/` so you can re-apply them on top."
 
    No further action.
 
-7. **Container recreation reminder (CRITICAL).** Tell the operator:
+9. **Container recreation reminder (CRITICAL).** Tell the operator:
 
    > "**`hermit-docker restart` is NOT enough** — Docker only applies `cap_drop`, `security_opt`, and `pids_limit` at container creation, not on restart. To activate the new settings, run:
    >
@@ -72,7 +88,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
 No `config.json` changes required.
 
-8. **Inform the operator about the new advanced wizard (no automatic action).** After steps 1–7 complete (or are skipped), tell them:
+10. **Inform the operator about the new advanced wizard (no automatic action).** After steps 1–9 complete (or are skipped), tell them:
 
    > "v1.0.26 also ships an opt-in advanced wizard, `/claude-code-hermit:docker-security`, for stronger isolation than the baseline. The headline gain is blocking your container from reaching your local network — meaningful if you run hermit on a home or office machine alongside HA, NAS, printer, etc. Run `/claude-code-hermit:docker-security` when you're ready; nothing changes until you do. See [`docs/docker-security.md`](docs/docker-security.md) for the full toggle reference and documented limitations."
 
