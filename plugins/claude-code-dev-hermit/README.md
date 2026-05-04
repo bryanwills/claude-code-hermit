@@ -115,14 +115,12 @@ See [docs/GIT-SAFETY.md](docs/GIT-SAFETY.md) for the full safety model and the t
 
 ## What's Included
 
-| Surface | Role |
-|-------|-------------|
-| `hatch` skill | One-time setup wizard. Idempotent / re-runnable. Captures test/lint/format/protected/PR-template/hook-profile. Installs `git-push-guard` at strict by default. |
-| `dev-pr` skill | Push the current feature branch and open a PR with body assembled from commits + last test result + screenshots + optional project template. Runs tests automatically on cache miss — fresh HEAD pass hits instantly; anything else triggers the test runner. |
-| `dev-quality` skill | Pre-wrap quality gate. Runs `/simplify` on the diff, re-runs `commands.test` via `record-test-result.js`, and reports pass/fail. Suggests `/code-review` to the operator if available — never invokes it. |
-| `dev-test` skill | Run the configured test suite and record the result to `last-test.json`. Useful for mid-task verification and warming the `/dev-pr` cache. |
-| `git-push-guard` hook | Strict-profile-only `PreToolUse` Bash hook. Blocks the dangerous git operations listed above. |
-| `state-templates/CLAUDE-APPEND.md` | Injected into your project's `CLAUDE.md` by `/hatch`. The rules-of-the-road every agent reads when working on this project. |
+- **`hatch` skill** — One-time setup wizard. Idempotent and re-runnable. Captures test/lint/format/protected/PR-template/hook-profile. Installs `git-push-guard` at strict by default.
+- **`dev-pr` skill** — Push the current feature branch and open a PR with body assembled from commits + last test result + screenshots + optional project template. Runs tests automatically on cache miss — fresh HEAD pass hits instantly; anything else triggers the test runner.
+- **`dev-quality` skill** — Pre-wrap quality gate. Runs `/simplify` on the diff, re-runs `commands.test`, and reports pass/fail. Suggests `/code-review` if available — never invokes it.
+- **`dev-test` skill** — Run the configured test suite and record the result to `last-test.json`. Useful for mid-task verification and warming the `/dev-pr` cache.
+- **`git-push-guard` hook** — Strict-profile-only `PreToolUse` Bash hook. Blocks the dangerous git operations listed above.
+- **`state-templates/CLAUDE-APPEND.md`** — Injected into your project's `CLAUDE.md` by `/hatch`. The rules-of-the-road every agent reads when working on this project.
 
 ---
 
@@ -140,12 +138,10 @@ The CLAUDE-APPEND.md `§Implementation Flow` points to `/dev-quality` as the pre
 
 ## Documentation
 
-| Document | Read this when... |
-|----------|-------------------|
-| [How to Use](docs/HOW-TO-USE.md) | You want a walkthrough of day-to-day workflow |
-| [Task Workflow](docs/WORKFLOW.md) | You need the end-to-end mechanics of a ticket from branch → PR |
-| [Git Safety](docs/GIT-SAFETY.md) | You're tuning protected branches, hook profile, or want the full safety model |
-| [Recommended Plugins](docs/RECOMMENDED-PLUGINS.md) | You want context on companion plugins offered by `/hatch` |
+- [Git Safety](docs/GIT-SAFETY.md)
+- [How to Use](docs/HOW-TO-USE.md)
+- [Recommended Plugins](docs/RECOMMENDED-PLUGINS.md)
+- [Task Workflow](docs/WORKFLOW.md)
 
 ---
 
