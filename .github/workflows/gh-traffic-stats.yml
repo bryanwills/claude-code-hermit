@@ -28,7 +28,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TRAFFIC_TOKEN }}
           REPO: ${{ github.repository }}
           BADGES_DIR: ${{ github.workspace }}/badges-data/.github/badges
-          METRICS: clones,views
+          METRICS: clones
+          CLONES_LABEL: "downloads"
         run: node .github/update-gh-traffic.mjs
       - name: Commit if changed
         working-directory: badges-data
