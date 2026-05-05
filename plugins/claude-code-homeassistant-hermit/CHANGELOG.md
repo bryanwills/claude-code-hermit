@@ -2,7 +2,7 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.0.9] - 2026-05-05
 
 ### Added
 
@@ -16,6 +16,7 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 - **`validate-apply` JSON output** — includes three new fields: `config_id`, `creation_attempted`, `creation_ok`. The `creation_ok` field distinguishes a pushed-and-verified config from a reload-only operation (e.g. YAML mode fallback).
 - **`ApplyResult` dataclass** — extended with `config_id`, `domain`, `creation_attempted`, `creation_ok`.
+- **deps: bump core requirement to `>=1.0.30` / `^1.0.30`** — was `>=1.0.29`; `required_core_version` and `requires.claude-code-hermit` in `hermit-meta.json` and `dependencies[0].version` in `plugin.json` all updated together.
 
 ### Fixed
 
@@ -23,6 +24,31 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 - **`ha-delete-config` skill**: removed erroneous advice to use `validate-apply` for post-delete reload (it would also push the supplied YAML as a new config). Step 5 now correctly points to HA Developer Tools → Services.
 - **`ha-build-automation` skill**: `id:` field is now required as the first field in generated YAML — without it, `validate-apply` derives a fragile ID from the alias that breaks on rename.
 - **CLI tests**: `_make_config` helper consolidated into a shared `make_mock_config` fixture in `conftest.py`; `test_cli_probe.py` and `test_cli_delete.py` both use it. Renamed `test_delete_automation_missing_id_exits_nonzero` → `test_delete_automation_not_found_exits_nonzero` (the old name conflated a missing CLI argument with a missing HA resource).
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `src/ha_agent_lab/apply.py` | REST push (`POST /api/config/{domain}/config/{id}`) added before reload; `ApplyResult` extended with `config_id`, `domain`, `creation_attempted`, `creation_ok` |
+| `src/ha_agent_lab/cli.py` | `list-automations`, `list-scripts`, `delete-automation`, `delete-script` subcommands added |
+| `src/ha_agent_lab/ha_api.py` | `_extract_ha_error_message` helper added; all error responses now surface HA's `{"message":"..."}` field |
+| `skills/ha-apply-change/SKILL.md` | Apply workflow updated to reflect REST push flow and new `creation_ok` output field |
+| `skills/ha-build-automation/SKILL.md` | `id:` field marked required as first field in generated YAML |
+| `skills/ha-delete-config/SKILL.md` | New skill: delete workflow with list → confirm → delete → optional reload |
+| `state-templates/CLAUDE-APPEND.md` | `ha-delete-config` row added to skills table |
+| `CLAUDE.md` | `list-automations`, `list-scripts`, `delete-automation`, `delete-script` CLI commands documented |
+| `.claude-plugin/hermit-meta.json` | `required_core_version` and `requires.claude-code-hermit` bumped `>=1.0.29` → `>=1.0.30` |
+| `.claude-plugin/plugin.json` | `dependencies[0].version` bumped `^1.0.29` → `^1.0.30`; manifest `version` bumped `0.0.8` → `0.0.9` |
+| `CHANGELOG.md` | New `[0.0.9]` entry |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Refresh skill files** — replace `skills/ha-apply-change/SKILL.md`, `skills/ha-build-automation/SKILL.md`, and `skills/ha-delete-config/SKILL.md` from this release.
+2. **Add `ha-delete-config` to the injected skills table** — in the operator project's `CLAUDE.md`, find the `### Skills` table under `## Home Assistant Workflow` and append: `| /claude-code-homeassistant-hermit:ha-delete-config | Discover and delete an automation/script config from HA |`
+
+No `config.json` changes required.
 
 ## [0.0.8] - 2026-05-04
 
