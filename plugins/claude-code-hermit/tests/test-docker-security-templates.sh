@@ -88,7 +88,7 @@ run_test "SKILL.md: DNS-block check classifies timeout explicitly (not just grep
 # -------------------------------------------------------
 # SKILL.md: --no-cache netguard rebuild
 # -------------------------------------------------------
-run_test "SKILL.md: step 7c forces --no-cache netguard build (prevents stale image on upgrade)" bash -c \
+run_test "SKILL.md: step 6c forces --no-cache netguard build (prevents stale image on upgrade)" bash -c \
   "grep -q 'build --no-cache hermit-netguard' '$SKILL'"
 
 # -------------------------------------------------------

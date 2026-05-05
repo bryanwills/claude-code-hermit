@@ -93,7 +93,7 @@ Options:
 - `"Skip LAN containment (keep ports on hermit)"` — clear the LAN containment selection (treat as if operator answered No above). Set `lan_containment_skipped_due_to_ports=true`. Continue to step 4.
 - `"Cancel"` — print "Re-run /docker-security after deciding how to handle your port publishing. See docs/docker-security.md for guidance." Exit. Write nothing.
 
-**If operator chose "Skip LAN containment"**: proceed to step 4 without any LAN containment config. Step 10 final-report notes: "LAN containment skipped — docker-compose.hermit.yml has a `ports:` block on hermit that is incompatible with `network_mode: service:hermit-netguard`."
+**If operator chose "Skip LAN containment"**: proceed to step 4 without any LAN containment config. Step 9 final-report notes: "LAN containment skipped — docker-compose.hermit.yml has a `ports:` block on hermit that is incompatible with `network_mode: service:hermit-netguard`."
 
 #### 3a. Fleet-aware domain seeding
 
@@ -284,13 +284,13 @@ If LAN containment is not enabled, omit `subnet`, `gateway`, `netguard_ip` from 
 
 If at least one toggle is enabled, render the overlay. Otherwise (all-off): handled in the all-off branch above.
 
-#### 7a. dnsmasq UID is hardcoded
+#### 6a. dnsmasq UID is hardcoded
 
 Render `100` directly into `nftables.conf` as the dnsmasq UID — no probe step. Rationale and recovery path if Alpine ever changes it: see [docs/docker-security.md#design-rationale](https://github.com/gtapps/claude-code-hermit/blob/main/plugins/claude-code-hermit/docs/docker-security.md#design-rationale).
 
 After the netguard files are rendered (step 6c), the wizard runs an explicit `--no-cache` build of `hermit-netguard` to prevent stale Docker cache artifacts from surviving a hermit upgrade. Do not rely on `hermit-docker up` to trigger a rebuild.
 
-#### 7b. Write the overlay
+#### 6b. Write the overlay
 
 Render `docker-compose.security.yml` from `state-templates/docker/security/docker-compose.security.yml.template` by substituting the placeholder blocks. The template has placeholders:
 
@@ -379,7 +379,7 @@ The shared sysctls block (used in either `{{NETGUARD_SYSCTLS}}` or `{{HERMIT_SYS
         - net.ipv4.conf.default.accept_redirects=0
 ```
 
-#### 7c. Write Dockerfile + entrypoint + nftables + dnsmasq files (only if Prompt 1 enabled)
+#### 6c. Write Dockerfile + entrypoint + nftables + dnsmasq files (only if Prompt 1 enabled)
 
 Copy from `state-templates/docker/security/` into `.claude-code-hermit/docker/`:
 
@@ -400,7 +400,7 @@ timeout 180s docker compose -f docker-compose.hermit.yml -f docker-compose.secur
 
 If the build exits non-zero, run `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml logs hermit-netguard --tail=30`, surface the output, and stop. Do not proceed to step 6d.
 
-#### 7d. Show diff + confirm
+#### 6d. Show diff + confirm
 
 Print a one-screen summary of files written (paths + line counts). Ask `AskUserQuestion` (header: `"Apply"`) — `"Yes — restart container now"` / `"No — I'll restart manually later"`.
 

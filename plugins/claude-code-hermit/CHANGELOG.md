@@ -20,6 +20,8 @@
 
 - **`/docker-setup` Step 8 `ackReaction` race.** The `set ackReaction` tmux command was sent immediately before the Step 8b shutdown, leaving no time for the in-container LLM turn to write the value to `access.json`. Replaced the tmux send-keys round-trip with a direct host-side edit of `.claude.local/channels/<plugin>/access.json` — the bind-mount makes it visible in the container immediately, with no race.
 
+- **PR-review polish on the three fixes above.** `hermit-docker restart` now explicitly rejects service args (the old `restart <service>` semantics aren't preserved by the new `down && up -d` chain — silent partial restart was a footgun). `hermit-start` bootstrap now only fires in always-on/tmux mode — interactive runs (`--no-tmux` or no tmux installed) are operator-driven and no longer auto-fire heartbeat/routines/session-start. `/docker-setup` Step 8 ackReaction instruction tightened to specify read-modify-write via `Read` + `Edit` (preserve all other keys, do not overwrite the file). `/docker-security` SKILL step renumbering completed: subheadings `7a/b/c/d` → `6a/b/c/d` and one stale "Step 10" reference fixed.
+
 ### Upgrade Instructions
 
 Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:

@@ -460,7 +460,9 @@ def main():
     if auto_session:
         steps.append(boot_skill)
 
-    if steps and not setup_mode:
+    # Bootstrap fires only in always-on mode; interactive runs are operator-driven.
+    is_always_on = not no_tmux_flag and tools['tmux']
+    if steps and not setup_mode and is_always_on:
         if len(steps) == 1:
             bootstrap = steps[0]
         else:

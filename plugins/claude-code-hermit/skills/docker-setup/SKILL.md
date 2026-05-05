@@ -459,8 +459,8 @@ If the token is present, ask if already paired. If not:
    docker compose exec -T hermit bash -c 'src="${CLAUDE_CONFIG_DIR:-/home/claude/.claude}/channels/<plugin>/access.json"; dst="<project_path>/.claude.local/channels/<plugin>/"; [ -f "$src" ] && mkdir -p "$dst" && mv "$src" "$dst" && echo moved'
    ```
 6. **Default delivery settings** (skip if `"Already paired"` was chosen or pairing was skipped this run):
-   1. Read `<project_path>/.claude.local/channels/<plugin>/access.json` from the host. If `ackReaction` is already non-empty, skip — preserve operator customization.
-   2. Otherwise set `ackReaction` to `"👀"` and write it back to `<project_path>/.claude.local/channels/<plugin>/access.json`. The bind-mount makes this visible inside the container immediately — no tmux round-trip, no LLM turn, no race with the Step 8b shutdown.
+   1. Use the `Read` tool on `<project_path>/.claude.local/channels/<plugin>/access.json` (host file). If `ackReaction` is already non-empty, skip — preserve operator customization.
+   2. Otherwise use the `Edit` tool to set the `ackReaction` value to `"👀"` while preserving every other key in the file unchanged (read-modify-write a single field — do NOT overwrite the file with a fresh object). The bind-mount makes the change visible inside the container immediately — no tmux round-trip, no LLM turn, no race with the Step 8b shutdown.
    3. Idempotent: re-running docker-setup leaves customized values alone (sub-step 1 short-circuits when `ackReaction` is non-empty).
 7. Confirm: "Paired and locked down. If the bot doesn't respond to your first message, give it up to 2 minutes — the hermit may still be booting or running initial checks (plugin installs, workspace trust, auto-memory seeding)."
 
