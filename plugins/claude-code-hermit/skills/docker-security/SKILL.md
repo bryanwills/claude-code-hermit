@@ -1,6 +1,6 @@
 ---
 name: docker-security
-description: Opt-in advanced wizard for Docker security hardening beyond v1.0.26 baseline. Adds LAN containment with DNS policy (firewall + DNS sidecar), read-only root filesystem with smoke test, resource bounds with kernel hygiene sysctls, and a boot-time plugin install audit log. Each toggle is opt-in with honest cost/benefit framing, applied as a docker-compose overlay (does not modify the base compose file), verified against the live container, and fully reversible. Run after /docker-setup; requires bridge networking.
+description: Opt-in advanced wizard for Docker security hardening beyond v1.0.26 baseline. Adds LAN containment with DNS policy (firewall + DNS sidecar), resource bounds with kernel hygiene sysctls, and a boot-time plugin install audit log. Each toggle is opt-in with honest cost/benefit framing, applied as a docker-compose overlay (does not modify the base compose file), verified against the live container, and fully reversible. Run after /docker-setup; requires bridge networking.
 ---
 
 # Docker Security
@@ -36,7 +36,7 @@ If the output is `container`, **stop immediately** — do not proceed to step 1.
 1. Read `.claude-code-hermit/config.json`. If missing: "Run `/claude-code-hermit:hatch` first." Stop.
 2. Verify `docker-compose.hermit.yml` exists at the project root. If missing: "Run `/claude-code-hermit:docker-setup` first." Stop.
 3. **Docker daemon check**: run `timeout 10s docker info >/dev/null 2>&1`. If it fails or times out: tell the operator "Docker daemon is not reachable or timed out. Start Docker before re-running `/docker-security`." Stop.
-4. Read `docker.network_mode` from config (default: `"bridge"`). If `"host"`, set `HOST_NETWORK_MODE=true` and surface to operator: "Detected `network_mode: host` in your config. The LAN containment toggle (Prompt 1) will be skipped — it would replace host mode and break your HA / host-bound service access. Resource bounds (Prompt 3) will not apply network sysctls in host mode either; Docker rejects them and the container would fail to start."
+4. Read `docker.network_mode` from config (default: `"bridge"`). If `"host"`, set `HOST_NETWORK_MODE=true` and surface to operator: "Detected `network_mode: host` in your config. The LAN containment toggle (Prompt 1) will be skipped — it would replace host mode and break your HA / host-bound service access. Resource bounds (Prompt 2) will not apply network sysctls in host mode either; Docker rejects them and the container would fail to start."
 5. **Detect hermit ports**: run `timeout 10s docker compose -f docker-compose.hermit.yml config --format json 2>/dev/null` and parse `.services.hermit.ports`. Store as in-memory `detected_hermit_ports` (array of long-form Compose port objects: `{target, published, host_ip, protocol, mode}`). If the command fails or returns no JSON, fall back to `grep -n '^\s*ports:' docker-compose.hermit.yml` and set `detected_hermit_ports_unparsed=true` if found. Either way, a non-empty result means ports are present.
 6. Check whether the container is currently running: `docker compose -f docker-compose.hermit.yml ps --status running --format '{{.Service}}' 2>/dev/null | grep -x hermit`. If absent: tell the operator "Container is not running. The wizard will still write the overlay; you'll see the live verification only after starting the container with `hermit-docker up`."
 7. Read current `docker.security.*` from config.json. Print a "current posture" summary. Example:
@@ -44,7 +44,6 @@ If the output is `container`, **stop immediately** — do not proceed to step 1.
    ```
    Current security posture:
      LAN containment: off
-     Read-only root: off
      Resource bounds: off
      Audit log: off
 
@@ -90,11 +89,11 @@ only netguard (the netns owner) can publish ports.
 ```
 
 Options:
-- `"Move ports to netguard (recommended)"` — render the same `ports:` block on `hermit-netguard` in the overlay. Persist to `docker.security.network.publish_ports`. After overlay is written (step 7), show a diff and prompt the operator to delete the `ports:` block from `docker-compose.hermit.yml` themselves — the wizard does not modify the base file.
+- `"Move ports to netguard (recommended)"` — render the same `ports:` block on `hermit-netguard` in the overlay. Persist to `docker.security.network.publish_ports`. After overlay is written (step 6), show a diff and prompt the operator to delete the `ports:` block from `docker-compose.hermit.yml` themselves — the wizard does not modify the base file.
 - `"Skip LAN containment (keep ports on hermit)"` — clear the LAN containment selection (treat as if operator answered No above). Set `lan_containment_skipped_due_to_ports=true`. Continue to step 4.
 - `"Cancel"` — print "Re-run /docker-security after deciding how to handle your port publishing. See docs/docker-security.md for guidance." Exit. Write nothing.
 
-**If operator chose "Skip LAN containment"**: proceed to step 4 without any LAN containment config. Step 10 final-report notes: "LAN containment skipped — docker-compose.hermit.yml has a `ports:` block on hermit that is incompatible with `network_mode: service:hermit-netguard`."
+**If operator chose "Skip LAN containment"**: proceed to step 4 without any LAN containment config. Step 9 final-report notes: "LAN containment skipped — docker-compose.hermit.yml has a `ports:` block on hermit that is incompatible with `network_mode: service:hermit-netguard`."
 
 #### 3a. Fleet-aware domain seeding
 
@@ -132,7 +131,7 @@ On `"Pick each"`: loop through each entry with a 2-option `AskUserQuestion` (`"I
 
 For every confirmed `ASK_OPERATOR_FOR_HA_IP` (or similar): immediately follow up with `AskUserQuestion` (header: `"<plugin> IP"`) — Other field accepting an IPv4 address or CIDR. Validate. Re-prompt on invalid. Replace the token with the typed value.
 
-Confirmed entries are added to in-memory `fleet_lan_allowlist` and `fleet_domains` for step 7.
+Confirmed entries are added to in-memory `fleet_lan_allowlist` and `fleet_domains` for step 6.
 
 If the fleet list is empty: skip silently.
 
@@ -165,22 +164,7 @@ docker.security.network = {
 }
 ```
 
-### 4. Prompt 2 — Read-only root filesystem
-
-`AskUserQuestion` (header: `"Read-only root"`):
-
-```
-question: "Mount the container root filesystem read-only? Catches drop-binary attacks. The wizard runs a smoke test (real npm install, plugin add/remove, canary writes) before the toggle is considered persisted; if the smoke test fails, you'll be asked to re-run answering No."
-options:
-  - label: "Yes — with smoke test (recommended)"
-    description: "Required writable paths covered: /tmp, /run, /home/claude/{.npm,.cache,.config} (tmpfs); /home/claude/.npm-global (named volume for Claude Code self-update survival); existing project bind + named claude-config volume preserved."
-  - label: "No"
-    description: "Skip this toggle."
-```
-
-Persist `docker.security.read_only.enabled` accordingly.
-
-### 5. Prompt 3 — Resource bounds + kernel hygiene
+### 4. Prompt 2 — Resource bounds + kernel hygiene
 
 `AskUserQuestion` (header: `"Resource bounds"`):
 
@@ -213,7 +197,7 @@ docker.security.resources = {
 }
 ```
 
-### 6. Prompt 4 — Plugin install audit log
+### 5. Prompt 3 — Plugin install audit log
 
 `AskUserQuestion` (header: `"Audit log"`):
 
@@ -228,7 +212,7 @@ options:
 
 Persist `docker.security.audit.plugin_installs` accordingly.
 
-### 7. Render overlay
+### 6. Render overlay
 
 **Before rendering — preserve `publish_ports` across reruns:**
 Read `docker.security.network.publish_ports` from the existing config.json (if present). Keep this as `persisted_publish_ports`. In the current wizard run:
@@ -254,7 +238,7 @@ Then `AskUserQuestion` (header: `"Confirm all-off"`):
 - `"Yes — proceed (I'll restore base ports if needed)"`
 - `"No — cancel"`
 
-On Yes: continue to overlay deletion, clear `docker.security.*`, tell the operator "All toggles off — overlay removed and config cleared." Skip to step 10.
+On Yes: continue to overlay deletion, clear `docker.security.*`, tell the operator "All toggles off — overlay removed and config cleared." Skip to step 9.
 On No: exit wizard, write nothing.
 
 If `persisted_publish_ports` is empty: proceed directly to deletion without the prompt.
@@ -300,13 +284,13 @@ If LAN containment is not enabled, omit `subnet`, `gateway`, `netguard_ip` from 
 
 If at least one toggle is enabled, render the overlay. Otherwise (all-off): handled in the all-off branch above.
 
-#### 7a. dnsmasq UID is hardcoded
+#### 6a. dnsmasq UID is hardcoded
 
 Render `100` directly into `nftables.conf` as the dnsmasq UID — no probe step. Rationale and recovery path if Alpine ever changes it: see [docs/docker-security.md#design-rationale](https://github.com/gtapps/claude-code-hermit/blob/main/plugins/claude-code-hermit/docs/docker-security.md#design-rationale).
 
-After the netguard files are rendered (step 7c), the wizard runs an explicit `--no-cache` build of `hermit-netguard` to prevent stale Docker cache artifacts from surviving a hermit upgrade. Do not rely on `hermit-docker up` to trigger a rebuild.
+After the netguard files are rendered (step 6c), the wizard runs an explicit `--no-cache` build of `hermit-netguard` to prevent stale Docker cache artifacts from surviving a hermit upgrade. Do not rely on `hermit-docker up` to trigger a rebuild.
 
-#### 7b. Write the overlay
+#### 6b. Write the overlay
 
 Render `docker-compose.security.yml` from `state-templates/docker/security/docker-compose.security.yml.template` by substituting the placeholder blocks. The template has placeholders:
 
@@ -351,7 +335,7 @@ Render `docker-compose.security.yml` from `state-templates/docker/security/docke
         retries: 3
         start_period: 5s
   ```
-  Where `<dns_log_only>` = `"1"` if `dns_mode == "log-only"` else `"0"`. `{{NETGUARD_SYSCTLS}}` is the sysctls block from below if Prompt 3 enabled AND Prompt 1 enabled (sysctls live on netguard, the netns owner).
+  Where `<dns_log_only>` = `"1"` if `dns_mode == "log-only"` else `"0"`. `{{NETGUARD_SYSCTLS}}` is the sysctls block from below if Prompt 2 enabled AND Prompt 1 enabled (sysctls live on netguard, the netns owner).
 
   **`{{NETGUARD_PORTS_BLOCK}}`** — empty unless `persisted_publish_ports` is non-empty AND Prompt 1 is enabled. When non-empty, render as long-form YAML using the parsed port objects (`target`, `published`, `host_ip`, `protocol`, `mode`). Omit `host_ip` if `"0.0.0.0"` (Compose default). Omit `mode` if `"ingress"` (Compose default for non-swarm). Example for two ports:
   ```yaml
@@ -371,36 +355,18 @@ Render `docker-compose.security.yml` from `state-templates/docker/security/docke
         hermit-netguard:
           condition: service_healthy
   ```
-- `{{HERMIT_READ_ONLY_BLOCK}}` — empty unless Prompt 2 enabled. When enabled:
-  ```yaml
-      read_only: true
-      tmpfs:
-        - /tmp:size=512m,mode=1777
-        - /run:size=64m
-        - /home/claude/.npm:size=512m,uid={{HOST_UID}},mode=0700
-        - /home/claude/.cache:size=256m,uid={{HOST_UID}},mode=0700
-        - /home/claude/.config:size=64m,uid={{HOST_UID}},mode=0700
-      volumes:
-        - claude-npm-global:/home/claude/.npm-global
-  ```
-  `{{HOST_UID}}` is read from `.env` (variable `UID`, defaults to `1000`).
-- `{{HERMIT_RESOURCE_BOUNDS}}` — empty unless Prompt 3 enabled. When enabled:
+- `{{HERMIT_RESOURCE_BOUNDS}}` — empty unless Prompt 2 enabled. When enabled:
   ```yaml
       mem_limit: 4g
       memswap_limit: 4g
       cpus: 2.0
   ```
   (Custom values substituted if operator provided them.)
-- `{{HERMIT_SYSCTLS_ON_HERMIT}}` — sysctls block from below ONLY if Prompt 3 enabled, `sysctls_enabled` is true, AND Prompt 1 is OFF. (When Prompt 1 is on, sysctls go on netguard via `{{NETGUARD_SYSCTLS}}`.)
-- `{{HERMIT_AUDIT_ENV}}` — empty unless Prompt 4 enabled. When enabled:
+- `{{HERMIT_SYSCTLS_ON_HERMIT}}` — sysctls block from below ONLY if Prompt 2 enabled, `sysctls_enabled` is true, AND Prompt 1 is OFF. (When Prompt 1 is on, sysctls go on netguard via `{{NETGUARD_SYSCTLS}}`.)
+- `{{HERMIT_AUDIT_ENV}}` — empty unless Prompt 3 enabled. When enabled:
   ```yaml
       environment:
         - HERMIT_PLUGIN_INSTALL_AUDIT=1
-  ```
-- `{{TOPLEVEL_VOLUMES_BLOCK}}` — empty unless Prompt 2 enabled. When enabled:
-  ```yaml
-  volumes:
-    claude-npm-global:
   ```
 
 The shared sysctls block (used in either `{{NETGUARD_SYSCTLS}}` or `{{HERMIT_SYSCTLS_ON_HERMIT}}`):
@@ -413,7 +379,7 @@ The shared sysctls block (used in either `{{NETGUARD_SYSCTLS}}` or `{{HERMIT_SYS
         - net.ipv4.conf.default.accept_redirects=0
 ```
 
-#### 7c. Write Dockerfile + entrypoint + nftables + dnsmasq files (only if Prompt 1 enabled)
+#### 6c. Write Dockerfile + entrypoint + nftables + dnsmasq files (only if Prompt 1 enabled)
 
 Copy from `state-templates/docker/security/` into `.claude-code-hermit/docker/`:
 
@@ -421,7 +387,7 @@ Copy from `state-templates/docker/security/` into `.claude-code-hermit/docker/`:
 - `netguard-entrypoint.sh.template` → `netguard-entrypoint.sh` (chmod +x)
 - `nftables.conf.template` → `nftables.conf`, substituting:
   - `{{LAN_ALLOWLIST_RULES}}` → for each entry in `lan_allowlist`, render `        ip daddr <entry> accept` (8-space indent matching the chain body). Empty string if no entries.
-  - `{{DNSMASQ_UID}}` → the literal string `100` (Alpine dnsmasq's static UID — see step 7a).
+  - `{{DNSMASQ_UID}}` → the literal string `100` (Alpine dnsmasq's static UID — see step 6a).
 - `dnsmasq.allowlist.template` → `dnsmasq.allowlist`, substituting:
   - `{{FLEET_DOMAINS}}` → for each fleet domain, render `server=/<domain>/1.1.1.1` with a comment line above grouping by source plugin. Empty string if no entries.
   - `{{ADDITIONAL_DOMAINS}}` → for each operator-added domain, render `server=/<domain>/1.1.1.1`. Empty string if no entries.
@@ -432,15 +398,15 @@ After all files are copied, force a fresh netguard image build:
 timeout 180s docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml build --no-cache hermit-netguard
 ```
 
-If the build exits non-zero, run `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml logs hermit-netguard --tail=30`, surface the output, and stop. Do not proceed to step 7d.
+If the build exits non-zero, run `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml logs hermit-netguard --tail=30`, surface the output, and stop. Do not proceed to step 6d.
 
-#### 7d. Show diff + confirm
+#### 6d. Show diff + confirm
 
 Print a one-screen summary of files written (paths + line counts). Ask `AskUserQuestion` (header: `"Apply"`) — `"Yes — restart container now"` / `"No — I'll restart manually later"`.
 
-On `"No — I'll restart manually later"`: skip to step 10 with the note "Overlay written. Run `hermit-docker down` then `hermit-docker up` when ready to apply. Re-run `/docker-security` at any time to verify."
+On `"No — I'll restart manually later"`: skip to step 9 with the note "Overlay written. Run `hermit-docker down` then `hermit-docker up` when ready to apply. Re-run `/docker-security` at any time to verify."
 
-### 8. Restart + smoke test
+### 7. Restart + smoke test
 
 **Hard gate — re-check base ports before starting:**
 Before running `hermit-docker up`, re-run the step 5 port detection: `timeout 10s docker compose -f docker-compose.hermit.yml config --format json 2>/dev/null | python3 -c "import json,sys; p=json.load(sys.stdin)['services'].get('hermit',{}).get('ports',[]); print(len(p))"`. If the result is non-zero (or the command output from the grep fallback is non-empty) AND `docker.security.network.enabled === true` (LAN containment is on): stop here and print:
@@ -459,9 +425,7 @@ If operator chose to restart now AND container was running before this skill (an
 1. Run `.claude-code-hermit/bin/hermit-docker down`.
 2. Run `.claude-code-hermit/bin/hermit-docker up` (the wrapper now picks up the overlay automatically). The first up will trigger `docker compose build hermit-netguard` if Prompt 1 was enabled — wait for completion (can be 30-60s on first build).
 3. Poll `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml ps --status running --format '{{.Service}}'` every 2s for up to 30s; expect `hermit` (and `hermit-netguard` if Prompt 1 enabled). If either is missing after 30s: run `docker compose ... logs --tail=30` for the missing service, surface output, stop.
-4. **Read-only smoke test (only if Prompt 2 enabled)**: run the read-only verification block from step 9 inside hermit. If any check fails, surface the failing path with the kernel error message, then tell the operator: "Read-only root broke `<failed write path>`. The toggle is still active — re-run `/docker-security` and answer No to read-only to disable it. Other hardenings stay in place." Continue to step 9 anyway so the operator sees the full posture.
-
-### 9. Verify
+### 8. Verify
 
 Run the verification block via `docker exec hermit sh -c '...'`. The hermit base image has `python3`, `jq`, `curl`, and glibc (`getent`) — no `nc` or `nslookup`. Use Python and getent.
 
@@ -517,24 +481,12 @@ except Exception as e:
   || echo "  DNS-redirect: NOT ENFORCED (or in log-only mode — expected)"
 
 echo
-echo "=== Read-only root ==="
-touch /etc/canary 2>&1 | grep -q "Read-only file system" \
-  && echo "  RO-root:      OK (writes to /etc fail with EROFS)" \
-  || echo "  RO-root:      NOT ACTIVE (or test path is writable)"
-touch /home/claude/.cache/.hermit-canary 2>/dev/null && rm /home/claude/.cache/.hermit-canary 2>/dev/null \
-  && echo "  RO-write:     OK (claude-owned path writable)" \
-  || echo "  RO-write:     FAIL (named volume / tmpfs uid wrong)"
-touch /home/claude/.npm-global/.canary 2>/dev/null && rm /home/claude/.npm-global/.canary 2>/dev/null \
-  && echo "  Self-update:  OK (.npm-global writable for Claude Code self-update)" \
-  || echo "  Self-update:  FAIL (Claude Code self-update will silently break)"
-
-echo
 echo "=== Resource bounds + sysctls ==="
 echo "  memory.max:   $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo 'unset')"
 [ -r /proc/sys/net/ipv4/conf/all/accept_redirects ] \
   && [ "$(cat /proc/sys/net/ipv4/conf/all/accept_redirects)" = "0" ] \
   && echo "  sysctls:      OK (ICMP redirects disabled)" \
-  || echo "  sysctls:      not active (host mode, or Prompt 3 off)"
+  || echo "  sysctls:      not active (host mode, or Prompt 2 off)"
 
 echo
 echo "=== Audit log ==="
@@ -546,14 +498,13 @@ VERIFY_EOF
 
 Surface the output to the operator. Suggest: "Run `/claude-code-hermit:hermit-doctor` to also verify the docker-security check shows green."
 
-### 10. Final report
+### 9. Final report
 
 Print a brief summary:
 
 ```
 docker-security applied — current posture:
   LAN containment:   on  (DNS log-only)  | LAN carve-outs: 192.168.1.50
-  Read-only root:    on
   Resource bounds:   on  (mem 4g, cpus 2.0)
   Audit log:         on
 
@@ -563,12 +514,6 @@ Reverse: re-run /docker-security and answer No to every prompt, OR
 Tune DNS allowlist: edit .claude-code-hermit/docker/dnsmasq.allowlist,
          then `hermit-docker down && hermit-docker up`
          (restart hermit-netguard alone leaves hermit with stale resolver state).
-
-If hermit asks you to log in (session expired or first boot after
-hardening), open a shell in the container and authenticate:
-         .claude-code-hermit/bin/hermit-docker bash
-  then:  claude
-  then:  /login
 ```
 
 ## Notes

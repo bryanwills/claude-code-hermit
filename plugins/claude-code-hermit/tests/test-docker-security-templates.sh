@@ -86,18 +86,9 @@ run_test "SKILL.md: DNS-block check classifies timeout explicitly (not just grep
   "grep -q 'query timed out' '$SKILL'"
 
 # -------------------------------------------------------
-# SKILL.md: RO-write canary path is writable under read_only
-# -------------------------------------------------------
-run_test "SKILL.md: RO-write canary uses .cache/.hermit-canary (writable tmpfs path)" bash -c \
-  "grep -q '.cache/.hermit-canary' '$SKILL'"
-
-run_test "SKILL.md: RO-write canary does NOT write to /home/claude/.hermit-canary (read-only root)" bash -c \
-  "! grep -qF 'touch /home/claude/.hermit-canary' '$SKILL'"
-
-# -------------------------------------------------------
 # SKILL.md: --no-cache netguard rebuild
 # -------------------------------------------------------
-run_test "SKILL.md: step 7c forces --no-cache netguard build (prevents stale image on upgrade)" bash -c \
+run_test "SKILL.md: step 6c forces --no-cache netguard build (prevents stale image on upgrade)" bash -c \
   "grep -q 'build --no-cache hermit-netguard' '$SKILL'"
 
 # -------------------------------------------------------

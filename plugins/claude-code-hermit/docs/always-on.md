@@ -77,7 +77,6 @@ It applies a `docker-compose.security.yml` overlay that the `hermit-docker` wrap
 | Toggle | What it adds | Honest limitation |
 | --- | --- | --- |
 | LAN containment + DNS policy | nftables firewall + dnsmasq sidecar sharing hermit's netns; blocks RFC1918, cloud metadata; port-53 redirect for actual DNS-policy enforcement | Direct-IP egress to a hardcoded public IP is **not** blocked (no DNS lookup to intercept) |
-| Read-only root filesystem | tmpfs + named volume for paths that need to be writable; smoke test (real `npm install`, plugin add/remove, canary writes) before persisting | None worth flagging — operators with custom workloads can answer No |
 | Resource bounds + sysctls | `mem_limit`, `cpus`, ICMP-redirect / source-route hardening | Network sysctls auto-skip when `network_mode: host` |
 | Plugin install audit log | One JSONL line per boot-time `claude plugin install` to `state/plugin-installs.jsonl` | Post-boot installs run via tmux are not captured |
 

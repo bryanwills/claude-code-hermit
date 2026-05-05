@@ -20,9 +20,8 @@
 | Toggle | What it does | Real teeth? |
 |--------|--------------|-------------|
 | **LAN containment + DNS policy** (Prompt 1) | Spins up a `hermit-netguard` Alpine sidecar with nftables + dnsmasq. Hermit shares the sidecar's network namespace via `network_mode: "service:hermit-netguard"`. nftables drops RFC1918 + link-local egress AND redirects all egress :53 to local dnsmasq for actual DNS-policy enforcement. | **Yes — categorical.** Today: a compromised hermit on your home network can scan your router, NAS, HA, printer, etc. After: it cannot. |
-| **Read-only root filesystem** (Prompt 2) | Mounts `/` read-only, with tmpfs for `/tmp`, `/run`, `/home/claude/.npm`, `/home/claude/.cache`, `/home/claude/.config`, plus a named volume for `/home/claude/.npm-global` so Claude Code self-update survives. The wizard runs a real-write smoke test before considering the toggle persisted. | **Yes** — catches drop-binary attacks (e.g. injected payload writes a setuid binary to `/usr/local/bin`). |
-| **Resource bounds + kernel hygiene** (Prompt 3) | `mem_limit` / `cpus` caps + a network sysctl bundle (`accept_redirects=0`, `accept_source_route=0`, …). Sysctls placed on the netns owner: hermit-netguard if Prompt 1 is on, hermit otherwise. Sysctls **omitted entirely** in `network_mode: host` — Docker rejects them. | Resource caps are hygiene, not a security primitive. Sysctls block exotic ICMP-redirect / source-routing tricks. |
-| **Boot-time plugin install audit log** (Prompt 4) | The entrypoint appends a JSONL line to `.claude-code-hermit/state/plugin-installs.jsonl` for every `claude plugin install` it performs (hermit core, channels, recommended plugins). | Cheap paper trail, not a security primitive on its own. **Honest scope:** post-boot installs run by the operator via tmux are NOT captured. **Empty-log expectation:** the log only grows when an install actually fires — on subsequent boots when the marketplace + plugin set is unchanged, the entrypoint short-circuits the install path and writes nothing. An empty log on a boot where nothing changed is normal, not a failure. |
+| **Resource bounds + kernel hygiene** (Prompt 2) | `mem_limit` / `cpus` caps + a network sysctl bundle (`accept_redirects=0`, `accept_source_route=0`, …). Sysctls placed on the netns owner: hermit-netguard if Prompt 1 is on, hermit otherwise. Sysctls **omitted entirely** in `network_mode: host` — Docker rejects them. | Resource caps are hygiene, not a security primitive. Sysctls block exotic ICMP-redirect / source-routing tricks. |
+| **Boot-time plugin install audit log** (Prompt 3) | The entrypoint appends a JSONL line to `.claude-code-hermit/state/plugin-installs.jsonl` for every `claude plugin install` it performs (hermit core, channels, recommended plugins). | Cheap paper trail, not a security primitive on its own. **Honest scope:** post-boot installs run by the operator via tmux are NOT captured. **Empty-log expectation:** the log only grows when an install actually fires — on subsequent boots when the marketplace + plugin set is unchanged, the entrypoint short-circuits the install path and writes nothing. An empty log on a boot where nothing changed is normal, not a failure. |
 
 ## Documented limitations
 
@@ -42,11 +41,11 @@ The wizard makes the container *meaningfully harder to abuse*. It does not make 
 ## How to run it
 
 1. Run `/claude-code-hermit:docker-security` in Claude Code.
-2. Answer each of the 4 prompts. The wizard will:
-   - Detect host-network mode and gate Prompt 1 / Prompt 3 sysctls accordingly.
+2. Answer each of the 3 prompts. The wizard will:
+   - Detect host-network mode and gate Prompt 1 / Prompt 2 sysctls accordingly.
    - Scan installed fleet plugins (`claude-code-homeassistant-hermit`, `claude-code-fitness-hermit`, etc.) for declared `## Docker network requirements`. Surface their domain/LAN suggestions for per-entry confirmation.
    - Render `docker-compose.security.yml` and (if Prompt 1) the `.claude-code-hermit/docker/{Dockerfile.hermit-netguard,netguard-entrypoint.sh,nftables.conf,dnsmasq.allowlist}` files.
-   - Bring the container down and back up so the new settings take effect (Docker only applies `read_only`, `cap_drop`, `network_mode`, etc. at container creation, not on `restart`).
+   - Bring the container down and back up so the new settings take effect (Docker only applies `cap_drop`, `network_mode`, etc. at container creation, not on `restart`).
    - Run a verification pass and print a per-toggle pass/fail table.
 3. Re-run the wizard at any time to change toggles. Answer No to a prompt to disable that toggle.
 
@@ -69,10 +68,6 @@ echo "=== DNS policy (enforce mode) ==="
 getent hosts api.anthropic.com >/dev/null && echo "allow OK"
 python3 -c "import socket; socket.gethostbyname('example.com')" 2>&1 \
   | grep -q 'Name or service not known' && echo "block OK"
-
-echo "=== Read-only root (when on) ==="
-touch /etc/canary 2>&1 | grep -q "Read-only" && echo "OK"
-touch /home/claude/.npm-global/.canary && rm /home/claude/.npm-global/.canary && echo "self-update OK"
 
 echo "=== Resource bounds + sysctls (when on, applicable) ==="
 cat /sys/fs/cgroup/memory.max
@@ -124,8 +119,6 @@ A few decisions that operators occasionally ask about:
 **Why the dnsmasq UID exemption.** dnsmasq's own upstream queries to `1.1.1.1:53` would otherwise hit the port-53 redirect rule and loop back to itself, breaking all DNS resolution. The `meta skuid != <DNSMASQ_UID>` rule in `nftables.conf` exempts dnsmasq's outbound DNS so it can actually resolve.
 
 **Why the dnsmasq UID is hardcoded.** Alpine's `dnsmasq` package consistently ships `dnsmasq` as uid 100 (its `apk` post-install runs `adduser -u 100 -D -H -s /sbin/nologin dnsmasq`). The wizard renders `100` directly into `nftables.conf` — no probe step. If a future Alpine release ever changes this, the netguard sidecar's fail-safe entrypoint holds the netns open instead of crash-looping (`tail -f /dev/null` after rule-load failure), and the operator can `docker exec hermit-netguard getent passwd dnsmasq` to grep the live UID and update the rendered `nftables.conf` by hand.
-
-**Why a named volume for `.npm-global` under read-only root.** Claude Code self-updates by writing to `/home/claude/.npm-global/bin/claude`. Under `read_only: true`, that path is read-only unless backed by a volume or tmpfs. tmpfs would lose the new version on every restart. The named volume snapshots the image's `.npm-global` on first run, then persists across restarts. To force a downgrade or refresh, use `hermit-docker update` (rebuilds the image and recreates the volume).
 
 ## For plugin authors — declaring network requirements
 

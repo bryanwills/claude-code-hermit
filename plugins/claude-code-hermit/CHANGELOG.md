@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.0.30] - 2026-05-05
+
+### Removed
+
+- **`/docker-security` Prompt 2 (read-only root filesystem).** The toggle was breaking Claude Code auth: hermits with `read_only: true` 401'd with `Invalid authentication credentials` once the OAuth access token expired (~8h after `/login`), because the credential refresh write path failed silently under the current tmpfs / named-volume layout. The other three toggles (LAN containment, resource bounds, audit log) are unaffected and remain in the wizard.
+
+### Fixed
+
+- **`hermit-start`: pass bootstrap as `claude` argv instead of `tmux send-keys`.**
+  Eliminates a race where, on slow always-on boots (cold plugin cache, container
+  first-run), the send-keys-injected bootstrap landed before Claude Code's TUI was
+  ready and was silently swallowed — heartbeat, routines, and session-start all
+  failed to register. `claude` accepts a positional prompt that runs as the first
+  turn of an interactive REPL (per `claude --help`), so the bootstrap is now passed
+  as argv. Same long-lived process, no inter-process timing window.
+
+- **`hermit-docker restart` fails under the security overlay.** `docker compose restart` restarts services in parallel and ignores `depends_on`, so the hermit container tried to rejoin the netguard netns while netguard was briefly exited — producing "cannot join network namespace of a non running container". Fixed by replacing `compose restart` with `down && up -d`, which honors dependency order on start. Behavior is identical to `hermit-docker down && hermit-docker up`, which already worked.
+
+- **`/docker-setup` Step 8 `ackReaction` race.** The `set ackReaction` tmux command was sent immediately before the Step 8b shutdown, leaving no time for the in-container LLM turn to write the value to `access.json`. Replaced the tmux send-keys round-trip with a direct host-side edit of `.claude.local/channels/<plugin>/access.json` — the bind-mount makes it visible in the container immediately, with no race.
+
+- **PR-review polish on the three fixes above.** `hermit-docker restart` now explicitly rejects service args (the old `restart <service>` semantics aren't preserved by the new `down && up -d` chain — silent partial restart was a footgun). `hermit-start` bootstrap now only fires in always-on/tmux mode — interactive runs (`--no-tmux` or no tmux installed) are operator-driven and no longer auto-fire heartbeat/routines/session-start. `/docker-setup` Step 8 ackReaction instruction tightened to specify read-modify-write via `Read` + `Edit` (preserve all other keys, do not overwrite the file). `/docker-security` SKILL step renumbering completed: subheadings `7a/b/c/d` → `6a/b/c/d` and one stale "Step 10" reference fixed.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Delete `docker.security.read_only` from `.claude-code-hermit/config.json`** — the key is now inert and surfaces as a stale `/hermit-doctor` warning.
+
+**Note:** If that key had `enabled: true`, the container is still running with `read_only: true`. Re-run `/claude-code-hermit:docker-security`, answer through the remaining prompts, then `hermit-docker down && hermit-docker up`. Existing `claude-config` volume and credentials are preserved.
+
+No other `config.json` changes required.
+
 ## [1.0.29] - 2026-05-04
 
 ### Added

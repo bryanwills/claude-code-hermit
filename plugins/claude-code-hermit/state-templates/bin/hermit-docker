@@ -160,8 +160,12 @@ case "$CMD" in
 
   restart)
     _require_running
+    if [ $# -gt 0 ]; then
+      echo "[hermit] ERROR: 'restart' no longer accepts service args. Use 'hermit-docker restart' to restart everything." >&2
+      exit 2
+    fi
     echo "[hermit] Restarting container..."
-    cd "$PROJECT_DIR" && "${DC[@]}" restart "$@"
+    cd "$PROJECT_DIR" && "${DC[@]}" down && "${DC[@]}" up -d
     echo "[hermit] Container restarted."
     _oauth_hint
     ;;
