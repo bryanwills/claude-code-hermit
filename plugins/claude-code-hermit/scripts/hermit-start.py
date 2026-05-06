@@ -514,6 +514,7 @@ def main():
                 'shutdown_requested_at': None,
                 'shutdown_completed_at': None,
                 'last_error': None,
+                'last_shell_snapshot_at': None,
             })
         else:
             # Preserve lifecycle fields for session-start recovery
@@ -586,6 +587,7 @@ def main():
             'shutdown_requested_at': None,
             'shutdown_completed_at': None,
             'last_error': None,
+            'last_shell_snapshot_at': None,
         })
     else:
         # Preserve lifecycle fields for session-start recovery

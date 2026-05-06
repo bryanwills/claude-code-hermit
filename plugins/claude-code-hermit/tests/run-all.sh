@@ -13,4 +13,5 @@ bash "$SCRIPT_DIR/recurrence-gate-matrix.sh"  || rc=$?
 bash "$SCRIPT_DIR/cron-tz-shift.test.sh"      || rc=$?
 bash "$SCRIPT_DIR/test-docker-security-templates.sh" || rc=$?
 bash "$SCRIPT_DIR/test-template-skill-sync.sh"       || rc=$?
+bash "$SCRIPT_DIR/test-archive-shell.sh"             || rc=$?
 exit $rc

@@ -541,6 +541,7 @@ The plugin's hooks and boot scripts require specific Bash permissions to run wit
       "Bash(node */scripts/suggest-compact.js*)",
       "Bash(node */scripts/heartbeat-precheck.js*)",
       "Bash(node */scripts/reflect-precheck.js*)",
+      "Bash(node */scripts/archive-shell.js*)",
       "Bash(node */scripts/run-with-profile.js*)",
       "Bash(node */scripts/evaluate-session.js*)",
       "Bash(node */scripts/append-metrics.js*)",

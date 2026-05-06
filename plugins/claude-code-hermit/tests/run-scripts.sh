@@ -382,6 +382,49 @@ out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-herm
 run_test "reflect-precheck (RUN: compute activity detected)" bash -c "echo '$out' | grep -q 'compute'"
 cleanup
 
+# 26. ARCHIVE-only path: SHELL.md > 400 lines, last_shell_snapshot_at null,
+#     no other phases due → precheck runs archive-shell.js synchronously and
+#     emits EMPTY (no LLM reflect path).
+workdir="$(setup_workdir)"
+echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"
+echo '{"session_state":"idle","last_shell_snapshot_at":null}' \
+  > "$workdir/.claude-code-hermit/state/runtime.json"
+mkdir -p "$workdir/.claude-code-hermit/proposals"
+today="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "{\"counters\":{\"total_runs\":5,\"empty_runs\":2,\"last_run_at\":\"$today\",\"since\":\"$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")\"}}" \
+  > "$workdir/.claude-code-hermit/state/reflection-state.json"
+mkdir -p "$workdir/.claude"
+# Inflate SHELL.md past the 400-line threshold by appending Progress Log entries.
+{
+  cat "$FIXTURES/shell-session.md"
+  for i in $(seq 1 450); do echo "- [10:$(printf '%02d' $((i % 60)))] Bulk entry $i — done"; done
+} > "$workdir/.claude-code-hermit/sessions/SHELL.md"
+out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT")"
+run_test "reflect-precheck (ARCHIVE-only: emits EMPTY)" bash -c "[ '$out' = 'EMPTY' ]"
+run_test "reflect-precheck (ARCHIVE-only: snapshot file created)" bash -c \
+  "[ \$(ls '$workdir/.claude-code-hermit/sessions/snapshots/' 2>/dev/null | wc -l) -ge 1 ]"
+run_test "reflect-precheck (ARCHIVE-only: last_shell_snapshot_at populated)" bash -c \
+  "python3 -c \"import json; d=json.load(open('$workdir/.claude-code-hermit/state/runtime.json')); assert d.get('last_shell_snapshot_at') is not None\""
+run_test "reflect-precheck (ARCHIVE-only: SHELL.md compacted, sections preserved)" \
+  grep -q '^## Task' "$workdir/.claude-code-hermit/sessions/SHELL.md"
+cleanup
+
+# 27. ARCHIVE skipped when SHELL.md is small (no archive_due fires)
+workdir="$(setup_workdir)"
+echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"
+echo '{"session_state":"idle","last_shell_snapshot_at":null}' \
+  > "$workdir/.claude-code-hermit/state/runtime.json"
+mkdir -p "$workdir/.claude-code-hermit/proposals"
+today="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "{\"counters\":{\"total_runs\":5,\"empty_runs\":2,\"last_run_at\":\"$today\",\"since\":\"$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")\"}}" \
+  > "$workdir/.claude-code-hermit/state/reflection-state.json"
+mkdir -p "$workdir/.claude"
+# Small SHELL.md (default fixture is well under 400 lines).
+node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT" >/dev/null
+run_test "reflect-precheck (small SHELL.md: no snapshot taken)" bash -c \
+  "[ ! -d '$workdir/.claude-code-hermit/sessions/snapshots' ] || [ \$(ls '$workdir/.claude-code-hermit/sessions/snapshots/' 2>/dev/null | wc -l) -eq 0 ]"
+cleanup
+
 # -------------------------------------------------------
 # Summary
 # -------------------------------------------------------

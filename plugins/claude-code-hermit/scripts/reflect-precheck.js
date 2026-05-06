@@ -120,6 +120,23 @@ function hasComputeActivity(stateDir, lastRunAt, sessionState) {
   }
 }
 
+// Returns true when SHELL.md is large enough AND ≥24h has elapsed since the
+// last snapshot. Null last_shell_snapshot_at fires on size alone.
+function isShellSnapshotDue(stateDir, runtime) {
+  const SHELL_LINE_THRESHOLD = 400;
+  try {
+    const shellPath = path.join(stateDir, 'sessions', 'SHELL.md');
+    const content = fs.readFileSync(shellPath, 'utf-8');
+    const lines = content.split('\n').length;
+    if (lines < SHELL_LINE_THRESHOLD) return false;
+    const last = runtime.last_shell_snapshot_at;
+    if (!last) return true;
+    return daysSince(last) >= 1;
+  } catch {
+    return false;
+  }
+}
+
 function appendToProgressLog(shellPath, line) {
   try {
     let content = fs.readFileSync(shellPath, 'utf-8');
@@ -172,6 +189,33 @@ if (phase === 'juvenile' && daysSince(reflectionState.last_digest_at) > 7) {
 
 if (phase === 'newborn') phases.newborn = true;
 
+// Run archive synchronously when due so the LLM (if other phases fire) sees a
+// bounded SHELL.md. When archive is the only work due, fall through to EMPTY
+// and skip the reflect skill's LLM path entirely.
+const archiveDue = isShellSnapshotDue(stateDir, runtime);
+let archiveTaken = false;
+
+if (archiveDue) {
+  if (!pluginRoot) {
+    console.error('[reflect-precheck] archive_due skipped: pluginRoot missing');
+  } else {
+    try {
+      const stdout = execFileSync(process.execPath, [
+        path.join(pluginRoot, 'scripts', 'archive-shell.js'),
+        '--source=routine',
+        `--state-dir=${stateDir}`,
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      try {
+        const result = JSON.parse(stdout.toString().trim());
+        archiveTaken = result && result.archived === true;
+      } catch { /* malformed output → treat as not-archived */ }
+    } catch { /* fail-open */ }
+  }
+}
+
+const onlyArchive = archiveDue && Object.keys(phases).length === 0;
+if (archiveDue && !onlyArchive) phases.archive_due = true;
+
 if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify(phases));
 
 // EMPTY path: update reflection-state.json and append Progress Log line.
@@ -187,7 +231,8 @@ if (pluginRoot) {
 }
 
 const hhmm = currentHHMM(timezone);
-const logLine = `- [${hhmm}] reflect (${phase}) — 0 candidates; verdicts: accept=0 downgrade=0 suppress=0; outcomes: none`;
+const snapshotSuffix = archiveTaken ? ' (snapshot taken)' : '';
+const logLine = `- [${hhmm}] reflect (${phase}) — 0 candidates; verdicts: accept=0 downgrade=0 suppress=0; outcomes: none${snapshotSuffix}`;
 appendToProgressLog(path.join(stateDir, 'sessions', 'SHELL.md'), logLine);
 
 emit('EMPTY');

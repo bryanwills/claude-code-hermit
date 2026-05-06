@@ -4,15 +4,28 @@
 
 ### Fixed
 
-- **Remove quick-task gate from session-triggered scheduled checks** — the "no tasks created, under 5 minutes" skip caused `revise-claude-md` to miss short declarative operator corrections (e.g. "from now on never X"), which are exactly the sessions with the highest-signal CLAUDE.md updates.
+- **Remove quick-task gate from session-triggered scheduled checks** — the "no tasks created, under 5 minutes" skip caused `revise-claude-md` (when installed) to miss short declarative operator corrections (e.g. "from now on never X"), which are exactly the sessions with the highest-signal CLAUDE.md updates.
 
 ### Changed
 
 - **`reflect` operator-value self-check now covers micro-proposals.** The dismiss-ratio tally in step 5 now counts `micro-resolved` events (approved / rejected / expired) alongside `responded` events. The self-check distinguishes `rejected` (noise signal — pare back output) from `expired` (timing signal — adjust question scheduling). Previously the check was blind to Tier 1/2 micro-approval traffic, which is reflect's highest-volume output.
+- **`runtime.json` schema gains `last_shell_snapshot_at`** (ISO or null). Owned by `archive-shell.js`. Used for the 24h dedup gate on routine SHELL.md snapshots.
 
 ### Added
 
 - **Guild/group channel setup in `docker-setup` and `channel-setup`.** After DM pairing completes, both skills now offer an optional step to register one or more Discord server channels or Telegram group chats via `/<plugin>:access group add`. Each channel gets its own `requireMention` choice (default: true — require @mention, safer for noisy shared channels). Supports multiple channels per run via a loop; verification reads `access.json` once after all channels are added rather than on every iteration.
+- **Reflect lessons-to-memory pass.** Reflect's existing Memory update outcome now explicitly covers durable lessons (operator-stated rules, preferences that recurred, decision rationales) alongside sub-threshold patterns. Uses Claude's trained auto-memory flow ("remember it"). No new infrastructure — extension of existing reflect outcomes.
+- **Mechanical SHELL snapshot.** When SHELL.md exceeds 400 lines AND ≥24h has elapsed since the last snapshot, `reflect-precheck.js` invokes `scripts/archive-shell.js` to snapshot SHELL.md to `sessions/snapshots/SHELL-YYYYMMDD-HHMM.md` and compact the archived portion of `## Progress Log` to a one-line pointer. Bounds always-on SHELL.md growth without operator action. Pure JS, no LLM path — when snapshot is the only work due, the reflect skill never runs. Lifecycle reports (`S-NNN-REPORT.md`, owned by session-mgr) and routine snapshots live in different namespaces and share no machinery.
+- **`scripts/archive-shell.js`** — new helper that snapshots SHELL.md, inserts a marker, compacts the pre-marker Progress Log, and updates `runtime.json.last_shell_snapshot_at`. Atomic write via `wx`/O_EXCL on the snapshot path; concurrent invocations produce one snapshot. Stdout returns one JSON object; exits 0 always.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill executes:
+
+1. **Add `last_shell_snapshot_at` to `runtime.json`.** Read `.claude-code-hermit/state/runtime.json`. If the file exists and does not contain the key `last_shell_snapshot_at`, add `"last_shell_snapshot_at": null` and write back atomically (temp file + rename). Idempotent.
+2. **Add `archive-shell.js` permission to project settings.** Read `.claude/settings.json` (or `.claude/settings.local.json`, whichever holds the plugin allowlist). If `permissions.allow` does not contain `Bash(node */scripts/archive-shell.js*)`, append it. Idempotent.
+
+No routine changes. No `config.json` changes. `/session-close` behavior unchanged.
 
 ## [1.0.30] - 2026-05-05
 

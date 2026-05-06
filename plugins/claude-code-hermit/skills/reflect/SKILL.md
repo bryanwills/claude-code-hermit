@@ -162,7 +162,7 @@ Only act on ACCEPT and DOWNGRADE verdicts.
 After reflecting and validating with `claude-code-hermit:reflection-judge`, choose exactly one outcome per observation:
 
 1. **No action** — pattern not strong enough, already handled, or already addressed by the Resolution Check above.
-2. **Memory update** — fact worth recording → update project memory directly
+2. **Memory update** — for sub-threshold patterns AND for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked. For any such observation, issue the standard "remember it" reflection — Claude's trained auto-memory flow handles the write. Use auto-memory's discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE — no file paths, debugging recipes, or facts derivable from grep). Save nothing if nothing rises above noise.
 3. **Proposal candidate** — repeated pattern + clear consequence + operator-actionable
    → classify tier (see Proposal Tier Classification below):
    - Tier 1/2: gate with `claude-code-hermit:proposal-triage` first (see below), then queue micro-approval in `state/micro-proposals.json`
