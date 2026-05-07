@@ -10,6 +10,7 @@
 
 ### Changed
 
+- **Minimum core version bumped to `>=1.0.32`** — aligns `required_core_version`, `requires`, and `dependencies` with the upcoming core release.
 - **`/dev-quality` Gate 0 clean-tree FAIL** — adds a `hint:` line pointing operators at `--cwd <path>` for nested-repo workflows. Hint suppressed when `--cwd` was already passed.
 
 ### Files affected
