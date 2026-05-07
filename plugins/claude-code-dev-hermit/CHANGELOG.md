@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.3.5] - 2026-05-07
+
+### Removed
+
+- **`scripts/git-commit-quality-gate.js`** PreToolUse hook removed (and its registration in `hooks/hooks.json`). The strict-profile branch unconditionally blocked every `git commit` with no state check; the standard-profile nudge duplicated guidance already present in `CLAUDE-APPEND.md`. PR-time enforcement via `/dev-pr` Gate 0's `state/last-test.json` SHA check is unchanged. Resolves [#39](https://github.com/gtapps/claude-code-hermit/issues/39).
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `scripts/git-commit-quality-gate.js` | Deleted |
+| `scripts/git-commit-quality-gate.test.js` | Deleted |
+| `hooks/hooks.json` | `git-commit-quality-gate.js` PreToolUse entry removed |
+| `CLAUDE.md` | Hook bullet and Hook Profiles paragraph updated |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Refresh hook registration** — the removed hook is deregistered automatically on plugin update.
+
+No `config.json` changes required.
+
 ## [0.3.4] - 2026-05-07
 
 ### Added
