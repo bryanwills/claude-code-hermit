@@ -382,23 +382,35 @@ out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-herm
 run_test "reflect-precheck (RUN: compute activity detected)" bash -c "echo '$out' | grep -q 'compute'"
 cleanup
 
+# Local helper for tests #26-#29 — sets up a workdir with config/runtime/state/
+# proposals/.claude scaffolding for reflect-precheck. Args: <session_state> <inflate?>
+# Sets $workdir as a side effect (so the existing `cleanup` trap finds it).
+setup_archive_precheck_workdir() {
+  local session_state="$1"
+  local inflate="${2:-no}"
+  workdir="$(setup_workdir)"
+  echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"
+  echo "{\"session_state\":\"$session_state\",\"last_shell_snapshot_at\":null}" \
+    > "$workdir/.claude-code-hermit/state/runtime.json"
+  mkdir -p "$workdir/.claude-code-hermit/proposals"
+  local today since
+  today="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  since="$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")"
+  echo "{\"counters\":{\"total_runs\":5,\"empty_runs\":2,\"last_run_at\":\"$today\",\"since\":\"$since\"}}" \
+    > "$workdir/.claude-code-hermit/state/reflection-state.json"
+  mkdir -p "$workdir/.claude"
+  if [ "$inflate" = "yes" ]; then
+    {
+      cat "$FIXTURES/shell-session.md"
+      for i in $(seq 1 450); do echo "- [10:$(printf '%02d' $((i % 60)))] Bulk entry $i — done"; done
+    } > "$workdir/.claude-code-hermit/sessions/SHELL.md"
+  fi
+}
+
 # 26. ARCHIVE-only path: SHELL.md > 400 lines, last_shell_snapshot_at null,
 #     no other phases due → precheck runs archive-shell.js synchronously and
 #     emits EMPTY (no LLM reflect path).
-workdir="$(setup_workdir)"
-echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"
-echo '{"session_state":"idle","last_shell_snapshot_at":null}' \
-  > "$workdir/.claude-code-hermit/state/runtime.json"
-mkdir -p "$workdir/.claude-code-hermit/proposals"
-today="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "{\"counters\":{\"total_runs\":5,\"empty_runs\":2,\"last_run_at\":\"$today\",\"since\":\"$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")\"}}" \
-  > "$workdir/.claude-code-hermit/state/reflection-state.json"
-mkdir -p "$workdir/.claude"
-# Inflate SHELL.md past the 400-line threshold by appending Progress Log entries.
-{
-  cat "$FIXTURES/shell-session.md"
-  for i in $(seq 1 450); do echo "- [10:$(printf '%02d' $((i % 60)))] Bulk entry $i — done"; done
-} > "$workdir/.claude-code-hermit/sessions/SHELL.md"
+setup_archive_precheck_workdir idle yes
 out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT")"
 run_test "reflect-precheck (ARCHIVE-only: emits EMPTY)" bash -c "[ '$out' = 'EMPTY' ]"
 run_test "reflect-precheck (ARCHIVE-only: snapshot file created)" bash -c \
@@ -410,19 +422,37 @@ run_test "reflect-precheck (ARCHIVE-only: SHELL.md compacted, sections preserved
 cleanup
 
 # 27. ARCHIVE skipped when SHELL.md is small (no archive_due fires)
-workdir="$(setup_workdir)"
-echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"
-echo '{"session_state":"idle","last_shell_snapshot_at":null}' \
-  > "$workdir/.claude-code-hermit/state/runtime.json"
-mkdir -p "$workdir/.claude-code-hermit/proposals"
-today="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "{\"counters\":{\"total_runs\":5,\"empty_runs\":2,\"last_run_at\":\"$today\",\"since\":\"$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")\"}}" \
-  > "$workdir/.claude-code-hermit/state/reflection-state.json"
-mkdir -p "$workdir/.claude"
-# Small SHELL.md (default fixture is well under 400 lines).
+setup_archive_precheck_workdir idle no
 node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT" >/dev/null
 run_test "reflect-precheck (small SHELL.md: no snapshot taken)" bash -c \
   "[ ! -d '$workdir/.claude-code-hermit/sessions/snapshots' ] || [ \$(ls '$workdir/.claude-code-hermit/sessions/snapshots/' 2>/dev/null | wc -l) -eq 0 ]"
+cleanup
+
+# 28. ARCHIVE + other phases due → RUN with archive_due in phases JSON
+#     (in_progress session forces compute=true; large SHELL forces archive_due)
+setup_archive_precheck_workdir in_progress yes
+out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT")"
+run_test "reflect-precheck (ARCHIVE+other: emits RUN)" bash -c "echo '$out' | grep -q '^RUN|'"
+run_test "reflect-precheck (ARCHIVE+other: phases include compute)" bash -c \
+  "echo '$out' | grep -q '\"compute\":true'"
+run_test "reflect-precheck (ARCHIVE+other: phases include archive_due)" bash -c \
+  "echo '$out' | grep -q '\"archive_due\":true'"
+run_test "reflect-precheck (ARCHIVE+other: snapshot still taken)" bash -c \
+  "[ \$(ls '$workdir/.claude-code-hermit/sessions/snapshots/' 2>/dev/null | wc -l) -eq 1 ]"
+cleanup
+
+# 29. ARCHIVE due but subprocess fails (snapshot already exists, EEXIST/concurrent)
+#     + other phases → archive_due omitted from phases JSON (gated on archiveTaken)
+setup_archive_precheck_workdir in_progress yes
+mkdir -p "$workdir/.claude-code-hermit/sessions/snapshots"
+# Pre-create the file linkSync would target (HERMIT_NOW pinned) → EEXIST.
+touch "$workdir/.claude-code-hermit/sessions/snapshots/SHELL-20260506-2200.md"
+out="$(cd "$workdir" && HERMIT_NOW='2026-05-06T22:00:00Z' node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT")"
+run_test "reflect-precheck (ARCHIVE failed: emits RUN)" bash -c "echo '$out' | grep -q '^RUN|'"
+run_test "reflect-precheck (ARCHIVE failed: compute still in phases)" bash -c \
+  "echo '$out' | grep -q '\"compute\":true'"
+run_test "reflect-precheck (ARCHIVE failed: archive_due omitted)" bash -c \
+  "! echo '$out' | grep -q 'archive_due'"
 cleanup
 
 # -------------------------------------------------------

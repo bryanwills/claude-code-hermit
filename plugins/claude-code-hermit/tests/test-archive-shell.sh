@@ -132,6 +132,59 @@ run_test "fail-open: exit 0 with no state dir" bash -c "[ $ec -eq 0 ]"
 cleanup
 
 # -------------------------------------------------------
+# 8. Missing runtime.json → snapshot still happens (fail-open on runtime write)
+# -------------------------------------------------------
+workdir="$(setup_workdir)"
+rm "$workdir/.claude-code-hermit/state/runtime.json" 2>/dev/null || true
+out="$(cd "$workdir" && HERMIT_NOW='2026-05-06T22:00:00Z' node "$ARCHIVE" --source=routine)"
+run_test "no-runtime: archived true" bash -c "echo '$out' | grep -qF '\"archived\":true'"
+run_test "no-runtime: snapshot file written" bash -c \
+  "[ \$(ls '$workdir/.claude-code-hermit/sessions/snapshots/' | wc -l) -eq 1 ]"
+run_test "no-runtime: SHELL.md still compacted" \
+  grep -q '\[archived\] previous entries' "$workdir/.claude-code-hermit/sessions/SHELL.md"
+cleanup
+
+# -------------------------------------------------------
+# 9. SHELL.md without ## Progress Log → snapshot taken, warning surfaced,
+#    compacted:false in JSON, SHELL.md left untouched
+# -------------------------------------------------------
+workdir="$(setup_workdir)"
+echo '{"session_state":"in_progress","last_shell_snapshot_at":null}' > "$workdir/.claude-code-hermit/state/runtime.json"
+# Replace SHELL.md with content that lacks the Progress Log heading.
+cat > "$workdir/.claude-code-hermit/sessions/SHELL.md" <<'EOF'
+# Active Session
+
+## Task
+Drift test — Progress Log heading deliberately absent.
+
+## Findings
+Some content here.
+EOF
+shell_before="$(cat "$workdir/.claude-code-hermit/sessions/SHELL.md")"
+out="$(cd "$workdir" && HERMIT_NOW='2026-05-06T22:00:00Z' node "$ARCHIVE" --source=routine 2>/tmp/archive-stderr.$$)"
+stderr="$(cat /tmp/archive-stderr.$$)"
+rm -f /tmp/archive-stderr.$$
+run_test "no-progress-log: archived true" bash -c "echo '$out' | grep -qF '\"archived\":true'"
+run_test "no-progress-log: compacted:false in JSON" bash -c "echo '$out' | grep -qF '\"compacted\":false'"
+run_test "no-progress-log: warning on stderr" bash -c "echo '$stderr' | grep -q 'no .* Progress Log'"
+run_test "no-progress-log: SHELL.md unchanged" bash -c \
+  "[ \"\$(cat '$workdir/.claude-code-hermit/sessions/SHELL.md')\" = \"$shell_before\" ]"
+run_test "no-progress-log: snapshot file written" bash -c \
+  "[ \$(ls '$workdir/.claude-code-hermit/sessions/snapshots/' | wc -l) -eq 1 ]"
+cleanup
+
+# -------------------------------------------------------
+# 10. No partial snapshots left behind (no .tmp.<pid> file after run)
+# -------------------------------------------------------
+workdir="$(setup_workdir)"
+echo '{"session_state":"in_progress","last_shell_snapshot_at":null}' > "$workdir/.claude-code-hermit/state/runtime.json"
+cd "$workdir" && HERMIT_NOW='2026-05-06T22:00:00Z' node "$ARCHIVE" --source=routine >/dev/null
+cd "$ORIG_DIR"
+run_test "no-tmp: no .tmp.<pid> snapshot leftover" bash -c \
+  "[ \$(find '$workdir/.claude-code-hermit/sessions/snapshots/' -name '*.tmp.*' | wc -l) -eq 0 ]"
+cleanup
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 print_results

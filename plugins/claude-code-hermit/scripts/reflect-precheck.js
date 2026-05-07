@@ -189,9 +189,8 @@ if (phase === 'juvenile' && daysSince(reflectionState.last_digest_at) > 7) {
 
 if (phase === 'newborn') phases.newborn = true;
 
-// Run archive synchronously when due so the LLM (if other phases fire) sees a
-// bounded SHELL.md. When archive is the only work due, fall through to EMPTY
-// and skip the reflect skill's LLM path entirely.
+// Run archive synchronously so the LLM (when other phases fire) sees a
+// bounded SHELL.md.
 const archiveDue = isShellSnapshotDue(stateDir, runtime);
 let archiveTaken = false;
 
@@ -213,8 +212,10 @@ if (archiveDue) {
   }
 }
 
+// Gate on archiveTaken: a failed subprocess shouldn't cost LLM tokens
+// reasoning about a snapshot that never landed.
 const onlyArchive = archiveDue && Object.keys(phases).length === 0;
-if (archiveDue && !onlyArchive) phases.archive_due = true;
+if (archiveTaken && !onlyArchive) phases.archive_due = true;
 
 if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify(phases));
 

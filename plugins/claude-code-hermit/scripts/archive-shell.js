@@ -1,10 +1,8 @@
 'use strict';
 
-// archive-shell.js — snapshot live SHELL.md and compact ## Progress Log.
-// Lives in a separate namespace from S-NNN-REPORT.md (session-mgr's territory).
-// Concurrent invocations: 'wx' (O_EXCL) on the snapshot path serializes to one
-// winner; the other returns { archived: false, reason: 'concurrent' }.
-// Exit 0 always (hook fail-open contract).
+// link() is atomic and fails with EEXIST if the target exists, so it doubles
+// as the per-minute concurrency lock. A crash before link leaves only the tmp
+// behind, never a partial final snapshot.
 
 const fs = require('fs');
 const path = require('path');
@@ -65,10 +63,10 @@ function main() {
   try {
     shell = fs.readFileSync(shellPath, 'utf-8');
   } catch {
-    emit({ archived: false, reason: 'shell-empty' });
+    return emit({ archived: false, reason: 'shell-empty' });
   }
   if (!shell || !shell.trim()) {
-    emit({ archived: false, reason: 'shell-empty' });
+    return emit({ archived: false, reason: 'shell-empty' });
   }
 
   fs.mkdirSync(snapshotsDir, { recursive: true });
@@ -84,26 +82,29 @@ function main() {
     shell.replace(/\s*$/, '\n') +
     `<!-- snapshot @ ${nowIso} -->\n`;
 
-  let fd;
+  const snapshotTmp = snapshotPath + '.tmp.' + process.pid;
   try {
-    fd = fs.openSync(snapshotPath, 'wx');
+    fs.writeFileSync(snapshotTmp, snapshotContent, 'utf-8');
   } catch (e) {
-    if (e.code === 'EEXIST') emit({ archived: false, reason: 'concurrent' });
-    emit({ archived: false, reason: 'open-error: ' + e.message });
+    return emit({ archived: false, reason: 'write-error: ' + e.message });
   }
   try {
-    fs.writeSync(fd, snapshotContent);
-  } finally {
-    fs.closeSync(fd);
+    fs.linkSync(snapshotTmp, snapshotPath);
+  } catch (e) {
+    try { fs.unlinkSync(snapshotTmp); } catch { /* ignore */ }
+    if (e.code === 'EEXIST') {
+      return emit({ archived: false, reason: 'concurrent' });
+    }
+    return emit({ archived: false, reason: 'link-error: ' + e.message });
   }
+  try { fs.unlinkSync(snapshotTmp); } catch { /* tmp already gone */ }
 
-  // Replace pre-marker body of ## Progress Log with a one-line pointer; leave
-  // other sections (## Task, ## Findings, etc.) intact.
   const progressLogRe = /^## Progress Log[ \t]*$/m;
   const startMatch = progressLogRe.exec(shell);
 
   let updatedShell = shell;
   let keptLineCount = archivedLineCount;
+  let compacted = false;
 
   if (startMatch) {
     const bodyStart = startMatch.index + startMatch[0].length;
@@ -123,15 +124,22 @@ function main() {
 
     updatedShell = before + newBody + tail;
     keptLineCount = updatedShell.split('\n').length;
+    compacted = true;
 
     const shellTmp = shellPath + '.tmp.' + process.pid;
     fs.writeFileSync(shellTmp, updatedShell, 'utf-8');
     fs.renameSync(shellTmp, shellPath);
+  } else {
+    // 24h gate would otherwise mask this until tomorrow.
+    console.error(
+      `[archive-shell] WARNING: SHELL.md has no '## Progress Log' heading — ` +
+      `snapshot taken but SHELL.md not compacted. ` +
+      `Restore the heading to enable compaction.`
+    );
   }
 
-  // Single-writer for last_shell_snapshot_at: archive only fires inside an
-  // active reflect-precheck, and hermit-start runs before any precheck hook —
-  // so read-modify-write here doesn't race other writers in practice.
+  // Single-writer: archive fires only inside reflect-precheck, after
+  // hermit-start has settled — so RMW here doesn't race other writers.
   try {
     const runtimeRaw = fs.readFileSync(runtimePath, 'utf-8');
     const runtime = JSON.parse(runtimeRaw);
@@ -144,12 +152,13 @@ function main() {
   }
 
   console.error(`[archive-shell] ${source} archived ${archivedLineCount} lines → snapshots/${snapshotName}`);
-  emit({
+  return emit({
     archived: true,
     snapshot_path: snapshotPath,
     session_id: `SHELL-${stamp}`,
     shell_lines_archived: archivedLineCount,
     shell_lines_kept: keptLineCount,
+    compacted,
   });
 }
 
