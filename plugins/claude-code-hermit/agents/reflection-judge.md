@@ -42,7 +42,7 @@ Check `Evidence Source:` first — it overrides the session-based flow.
 
 **If `Evidence Source: scheduled-check/*` or `Evidence Source: operator-request`:**
 - Skip §§ 0.5 and 1 entirely (recurrence is not required for this source type).
-- Go directly to § 2 Tier check.
+- Run § 1.5 (Memory cross-check), then go to § 2 Tier check.
 - Emit the verdict with the appropriate source tag: `(scheduled-check)` or `(operator-request)`.
 
 **Otherwise** (`archived-session` or `current-session`, or field absent): continue to § 0.5.
@@ -66,6 +66,10 @@ For each cited session ID:
 A session "confirms" the pattern if:
 - The same problem, friction, or observation is described (not just tangentially mentioned)
 - The description is independent — not just a copy of the candidate summary
+
+### 1.5 Memory cross-check
+
+Read `MEMORY.md` (index of `- [title](file) — description` entries). Read each topic file whose title or description keyword-matches the candidate. Match against the file's `name`, `description`, body, `Why:`, and `How to apply:` fields. If memory already records the operator decision, preference, or pattern this candidate would surface, suppress with code `covered-by-memory`, quote the matching memory line in the reason, and include the source filename (e.g. `[memory: feedback_simplify_no_bypass.md]`) so the operator can locate and revise it if stale.
 
 ### 2. Tier check
 
@@ -96,6 +100,7 @@ SUPPRESS (<source>): <title> — <code>: <reason>          # other sources
 **Canonical suppress codes** (use exactly these strings — no others):
 - `no-evidence` — cited sessions don't contain the pattern
 - `no-sessions` — `Sessions: none` with no bypass source
+- `covered-by-memory` — auto-memory already records this decision/preference/pattern
 
 ## Output Format
 

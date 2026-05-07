@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.0.32] - 2026-05-07
+
+### Added
+
+- **Memory-first for suggestions.** Suggestion-generating skills (`brief`, `reflect`, `weekly-review`, `proposal-create`, `session-start`) and the `proposal-triage` / `reflection-judge` subagents now consult auto-memory before declaring a finding novel. Convention lives in `state-templates/CLAUDE-APPEND.md` and propagates to existing installs via the standard `/hermit-evolve` Step 6 anchored-block sync. Both subagents gain an explicit Memory cross-reference / cross-check step and a new canonical suppress code, `covered-by-memory`. Acting-on-decided-intent skills (`session-close`, `proposal-act`, `hermit-routines`, `hatch`) are exempt by design.
+
+### Changed
+
+- **`agents/proposal-triage.md`** — adds Step 1.5 (Memory cross-reference) between Deduplication and Session cross-reference; SUPPRESS code list extended with `covered-by-memory`; new `memory_ref: <filename>` metadata field emitted alongside that verdict.
+- **`agents/reflection-judge.md`** — adds `### 1.5 Memory cross-check` between Evidence verification and Tier check; canonical suppress codes extended with `covered-by-memory`; reason includes `[memory: <filename>]` breadcrumb so operators can locate the source. The §0 Evidence-Source dispatch routes `scheduled-check/*` and `operator-request` through §1.5 before §2 Tier check, so the memory cross-check applies to every source — not only `archived-session` / `current-session`.
+- **`agents/proposal-triage.md` Step 5 preamble** — clarifies that the Three-Condition Rule runs only when no duplicate *and* no memory match was found, matching the new Step 1.5 short-circuit.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `agents/proposal-triage.md` | Adds Step 1.5 memory cross-reference, `covered-by-memory` code, `memory_ref` metadata |
+| `agents/reflection-judge.md` | Adds §1.5 memory cross-check, `covered-by-memory` code, `[memory:]` breadcrumb |
+| `state-templates/CLAUDE-APPEND.md` | Adds Memory-first paragraph in Knowledge Discipline section |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill executes:
+
+1. **Refresh the CLAUDE-APPEND anchored block.** Step 6 reads `state-templates/CLAUDE-APPEND.md` and replaces the marker→EOF block in the project's `CLAUDE.md`. The new Memory-first paragraph propagates idempotently.
+
+No `config.json` changes required.
+
 ## [1.0.31] - 2026-05-07
 
 ### Fixed
