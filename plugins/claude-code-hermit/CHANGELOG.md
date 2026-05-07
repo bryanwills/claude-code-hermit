@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.33] - 2026-05-07
+
+### Changed
+
+- **Right-sized thinking budgets across `reflect`, `reflection-judge`, and `proposal-create`.** `agents/reflection-judge.md` drops the `ultrathink` keyword — the frontmatter `effort: medium` is now the sole, coherent control surface for that agent. `skills/reflect/SKILL.md` downgrades `ultrathink` to `think hard` (~10K vs ~32K token budget), appropriate for cross-session synthesis. `skills/proposal-create/SKILL.md` drops the keyword entirely from the body-writing step (structured drafting, no escalation needed) and downgrades to `think hard` for the capability-plan branch (designing new agents/skills). Reduces routine-path cost without compromising gating or synthesis quality.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `agents/reflection-judge.md` | Replaces `ultrathink` line with plain "reason carefully" instruction |
+| `skills/reflect/SKILL.md` | Downgrades `ultrathink` to `think hard` |
+| `skills/proposal-create/SKILL.md` | Drops `ultrathink` from body-writing step; downgrades to `think hard` for capability-plan branch |
+
+### Upgrade Instructions
+
+No upgrade actions required. Skill and agent text changes propagate via plugin update — no `config.json`, `runtime.json`, `state-templates/`, or operator-editable file changes.
+
 ## [1.0.32] - 2026-05-07
 
 ### Added

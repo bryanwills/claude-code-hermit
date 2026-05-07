@@ -1,7 +1,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.32-green.svg" alt="Version 1.0.32" /></a>
+  <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.33-green.svg" alt="Version 1.0.33" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="plugins/claude-code-hermit/docs/obsidian-setup.md"><img src="https://img.shields.io/badge/obsidian-active-7c3aed.svg" alt="Obsidian Integration" /></a>
@@ -18,11 +18,11 @@ Turn Claude Code into an Always-on Personal AI assistant that lives in your proj
 Three steps to a running 24/7 hermit:
 
 ```
-# Boot claude code and install
-/plugin marketplace add gtapps/claude-code-hermit
-/plugin install claude-code-hermit@claude-code-hermit --scope project
+# Install
+claude plugin marketplace add gtapps/claude-code-hermit
+claude plugin install claude-code-hermit@claude-code-hermit --scope project
 
-# Setup Wizard
+# Boot Claude Code and run the setup wizard
 /claude-code-hermit:hatch
 
 # Go always-on
