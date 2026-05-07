@@ -37,7 +37,7 @@ Analyze artifacts to find:
 
 ## Memory Cross-Reference
 
-Read `MEMORY.md` (index of `- [title](file) — description` entries) in Claude Code auto-memory. Read each topic file whose title or description keyword-matches a candidate. Match against the file's `name`, `description`, body, `Why:`, and `How to apply:` fields. For any candidate pattern, anomaly, opportunity, or reliability issue: if memory already records the operator's decision, preference, or pattern this candidate would surface, do not emit it under the regular arrays. Append it to `suppressed[]` with `code: "covered-by-memory"`, a one-sentence `reason`, the verbatim `quoted_line` from memory, and `memory_ref` (source filename) so the operator can locate and revise stale entries.
+Read `MEMORY.md` (index of `- [title](file) — description` entries). Read each topic file whose title or description keyword-matches a candidate. Match against the file's `name`, `description`, body, `Why:`, and `How to apply:` fields. For any candidate pattern, anomaly, opportunity, or reliability issue: if memory already records the operator's decision, preference, or pattern this candidate would surface, do not emit it under the regular arrays. Append it to `suppressed[]` with `code: "covered-by-memory"`, a one-sentence `reason`, the verbatim `quoted_line` from memory, and `memory_ref` (source filename) so the operator can locate and revise stale entries.
 
 ## Output Format
 
