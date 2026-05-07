@@ -61,7 +61,7 @@ Glob `.claude-code-hermit/compiled/*.md`. Read YAML frontmatter (`title`, `type`
 
 ## Step 5 — Three-Condition Rule
 
-Only if no duplicate found, check applicable conditions:
+Only if no duplicate found and no memory match, check applicable conditions:
 
 1. **Repeated pattern** — is the evidence concrete and observed more than once, across sessions?
    - **Skip for `scheduled-check/*`, `operator-request`, and `current-session`** sources:

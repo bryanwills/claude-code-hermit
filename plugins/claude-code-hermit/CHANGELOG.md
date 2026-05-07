@@ -9,7 +9,8 @@
 ### Changed
 
 - **`agents/proposal-triage.md`** — adds Step 1.5 (Memory cross-reference) between Deduplication and Session cross-reference; SUPPRESS code list extended with `covered-by-memory`; new `memory_ref: <filename>` metadata field emitted alongside that verdict.
-- **`agents/reflection-judge.md`** — adds `### 1.5 Memory cross-check` between Evidence verification and Tier check; canonical suppress codes extended with `covered-by-memory`; reason includes `[memory: <filename>]` breadcrumb so operators can locate the source.
+- **`agents/reflection-judge.md`** — adds `### 1.5 Memory cross-check` between Evidence verification and Tier check; canonical suppress codes extended with `covered-by-memory`; reason includes `[memory: <filename>]` breadcrumb so operators can locate the source. The §0 Evidence-Source dispatch routes `scheduled-check/*` and `operator-request` through §1.5 before §2 Tier check, so the memory cross-check applies to every source — not only `archived-session` / `current-session`.
+- **`agents/proposal-triage.md` Step 5 preamble** — clarifies that the Three-Condition Rule runs only when no duplicate *and* no memory match was found, matching the new Step 1.5 short-circuit.
 
 ### Files affected
 

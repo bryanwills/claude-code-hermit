@@ -42,7 +42,7 @@ Check `Evidence Source:` first — it overrides the session-based flow.
 
 **If `Evidence Source: scheduled-check/*` or `Evidence Source: operator-request`:**
 - Skip §§ 0.5 and 1 entirely (recurrence is not required for this source type).
-- Go directly to § 2 Tier check.
+- Run § 1.5 (Memory cross-check), then go to § 2 Tier check.
 - Emit the verdict with the appropriate source tag: `(scheduled-check)` or `(operator-request)`.
 
 **Otherwise** (`archived-session` or `current-session`, or field absent): continue to § 0.5.
