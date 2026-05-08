@@ -9,13 +9,13 @@
 
 # claude-code-hermit
 
-Turn Claude Code into an Always-on Personal AI assistant that lives in your project.
+Claude Code plugin that turns it into a 24/7 personal AI assistant. **Self-learning**, **Local**, **Cost-aware**, **One Claude subscription, multiple hermits**.
 
 <p align="center">
   <img src="plugins/claude-code-hermit/assets/demo.gif" alt="claude-code-hermit demo — Obsidian dashboard, Discord control, autonomous briefings, remote access" width="720" />
 </p>
 
-Three steps to a running 24/7 hermit:
+Hermit wires all the native Claude Code capabilities (`/loop`, `CronCreate`, channels, Monitor, auto-memory, native Tasks) to turn CC into a self-learning personal assistant.
 
 ```
 # Install
@@ -29,23 +29,59 @@ claude plugin install claude-code-hermit@claude-code-hermit --scope project
 /claude-code-hermit:docker-setup
 ```
 
-Hermit is the glue between Claude Code's native capabilities and a 24/7 agent that improves itself. One subscription to run multiple hermits.
+**One Claude subscription, multiple hermits** — each with its own memory, budget, and routines.
 
 ---
 
-## How It Works
+## What you get
 
-**1. Set it up anywhere.** Existing codebase, empty folder, new idea — Hermit scans what's there and generates a personal rulebook (`OPERATOR.md`) with your priorities, budget, and constraints.
+**Drops into any folder.** Existing codebase, empty directory, new idea — `/hatch` scans what's there, asks 4–5 questions, and writes a personal rulebook (`OPERATOR.md`) capturing your priorities, constraints, and approval gates.
 
-**2. Give it a task and walk away.** Tell it what you need from your terminal, phone, or anywhere. It plans, works, and pings when blocked or done. Crashes, reboots, SSH drops — state is on disk, sessions resume where they stopped.
+**Drive it from anywhere.** DM your hermit on Discord or Telegram, or remote-control. Powered by Claude Code's native Channels plugin and remote control — no web app, no separate UI.
 
-**3. It learns from experience.** Hermit spots patterns in its own memory — recurring blockers, repeated workarounds, odd spending — and proposes fixes. You decide what sticks. Under the hood, raw session notes distill into compiled artifacts that reload next session — the [raw-vs-compiled pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) Karpathy described for his wiki-LLM.
+**Self-learning, operator-gated.** Reflects on its own session journals and **token usage**, applies a three-condition rule (repeated pattern + meaningful consequence + actionable change), and proposes new skills, agents, routines, or rules. You approve, defer, or dismiss.
 
-**4. Routines and daily rhythm.** Morning briefs, evening summaries, background monitors, **custom routines**. Between tasks it picks up accepted proposals and runs maintenance. Silence means everything's fine.
+**Cost-aware by default.** Per-call tokens logged to `.claude/cost-log.jsonl`; per-session running total in `.status.json`; per-day rollup in `cost-summary.md`. Morning briefs include yesterday's spend.
 
-**5. See inside it.** Hermit Cortex (Obsidian-powered) turns your agent's memory — sessions, proposals, cost trends, learnings — into an Obsidian vault you can browse.
+**Two guided wizards.** `/hatch` (initialize), `/docker-setup` (always-on container). Each runs a Quick path (sensible defaults) or Advanced (full wizard).
 
-**6. Safe to leave running.**  Docker isolation, deny-pattern hooks that block destructive commands, optional kernel-level hardening via `/docker-security`. See [Security](plugins/claude-code-hermit/docs/security.md) for more.
+**Always-on** Docker isolation, `cap_drop: ALL`, `no-new-privileges`, `pids_limit` baseline. The opt-in `/docker-security` wizard adds LAN containment with DNS allowlist sidecar, resource bounds, and a plugin-install audit log.
+
+---
+
+## Built on Claude Code's native stack
+
+- **`/loop`** (scheduled tasks) — heartbeat ticks at your chosen cadence, local routines
+- **`CronCreate`** — built-in **local routines** (morning brief, evening summary, scheduled checks, heartbeat restart) plus **your own custom routines**
+- **Channels** — talk to your hermit via Discord or Telegram
+- **Remote Control** — drive live sessions from claude.ai/code or your phone; survives sleep and network drops
+- **Monitor tool** — background watches stream events as conversation notifications; zero tokens when quiet
+- **Auto-memory** (`MEMORY.md`) — load-bearing memory; hermit layers `raw/` and `compiled/` for durable domain artifacts
+- **Native Tasks** — `TaskCreate` for plan tracking; hooks read task files for `tasks-snapshot.md`
+- **Deny patterns** — configured in `.claude/settings.json` for fail-closed safety
+
+Hermit adds the integration layer — `/hatch` to spawn one, the proposal pipeline to evolve one, `OPERATOR.md` as policy.
+
+---
+
+## The Learning Loop
+
+Hermit reflects at natural pauses: end of session, idle ticks, scheduled-check cadence. Most reflections never hit the LLM: a precheck script gates whether any of five phases (compute, resolution check, cost spike, digest, newborn) are actually due. When something is, hermit drafts a candidate.
+
+Two subagents gate quality before anything reaches your inbox:
+- **`reflection-judge`** verifies that cited cross-session evidence actually exists in the report files.
+- **`proposal-triage`** deduplicates against existing proposals, cross-checks `MEMORY.md`, and applies the three-condition rule.
+
+Survivors land as a proposal you can act on:
+
+```
+/claude-code-hermit:proposal-list                  # see what hermit found
+/claude-code-hermit:proposal-act accept PROP-003   # approve
+```
+
+What gets proposed: improvements, routines, new capabilities (skills, agents, heartbeat checks), constraints (OPERATOR.md guidance you confirm), and bugs.
+
+Voyager-style auto-curriculum, you're editor-in-chief. Under the hood, raw session journals distill into compiled artifacts that reload next session — the [raw-vs-compiled pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) Karpathy described for his wiki-LLM.
 
 ---
 
@@ -61,17 +97,15 @@ claude plugin marketplace add gtapps/claude-code-hermit
 claude plugin install claude-code-hermit@claude-code-hermit --scope project
 ```
 
-> See the [Pre-built Hermits](#pre-built-hermits) below for existing plug-and-play domain hermits.
-
 ### 2. Initialize
 
 ```
 claude /claude-code-hermit:hatch
 ```
 
-The wizard sets up your agent's identity, scans your folder, and generates `OPERATOR.md` — the rulebook Hermit reads at every session start.
+The wizard sets up your agent's identity, scans your folder, generates `OPERATOR.md`, and offers Quick (5 questions) or Advanced (full wizard).
 
-> **Just want to try it?** After `hatch`, run `.claude-code-hermit/bin/hermit-start --no-tmux` in your terminal. You get sessions, routines, heartbeat, and the learning loop — minus the 24/7 autonomy. Ctrl+C exits cleanly. Want Discord or Telegram before going always-on? Run `/claude-code-hermit:channel-setup`. When you're ready for the full 24/7 setup, continue to step 3.
+> **Just trying it?** After `hatch`, run `.claude-code-hermit/bin/hermit-start --no-tmux` for sessions, routines, heartbeat, and the learning loop without 24/7 autonomy. Run `/claude-code-hermit:channel-setup` first if you want Discord or Telegram.
 
 ### 3. Go Always-on
 
@@ -79,11 +113,9 @@ The wizard sets up your agent's identity, scans your folder, and generates `OPER
 /claude-code-hermit:docker-setup
 ```
 
-The wizard generates the Docker files, builds the image, starts the container, and walks you through auth and channel pairing. When it's done, your hermit is running with safe permission bypass, crash recovery, and restart on reboot.
+Generates the Docker scaffolding, builds the image, starts the container, and walks through auth and channel pairing. The container ships with the hardening baseline (`cap_drop: ALL`, `no-new-privileges`, `pids_limit`). Want stronger isolation? Run [`/docker-security`](plugins/claude-code-hermit/docs/docker-security.md) for opt-in LAN containment + DNS allowlist + resource bounds.
 
-See [Always-On Setup](plugins/claude-code-hermit/docs/always-on.md) for the full guide — including how to attach, detach, and manage the running container.
-
-> **Want always-on without Docker?** See [Always-On Operations](plugins/claude-code-hermit/docs/always-on-ops.md) for bare tmux — lighter, no container isolation.
+See [Always-On Setup](plugins/claude-code-hermit/docs/always-on.md) for the full guide. Want always-on without Docker? See [Always-On Operations](plugins/claude-code-hermit/docs/always-on-ops.md) for bare tmux.
 
 ### Upgrading
 
@@ -92,42 +124,29 @@ claude plugin update claude-code-hermit@claude-code-hermit --scope project
 /claude-code-hermit:hermit-evolve
 ```
 
-See [Upgrading](plugins/claude-code-hermit/docs/upgrading.md) for details.
-
 ---
 
-## The Learning Loop
+## Cost & local-first
 
-What makes Hermit more than a one-shot agent.
+- **Per-call** token usage logged to `.claude/cost-log.jsonl` (model, input/output/cache split, USD estimate).
+- **Per-session** running total in `.status.json`; carried into archived session reports as frontmatter `cost_usd`.
+- **Per-day** rollup in `cost-summary.md`, regenerated on every cost-tracker tick.
+- **Morning brief** (when scheduled as a routine) reads `cost-summary.md` and includes yesterday's spend.
+- **`idle_budget`** is a soft cap. `hermit-doctor` warns at 80%, fails the cost check at 100% — no surprise stop-mid-task; you decide when to wind down.
 
-Hermit reflects at natural pauses — end of task, idle ticks, end of day. Drawing on Claude Code's native memory plus its own session journals, it spots recurring patterns (a blocker, a workaround, odd spending) and writes a proposal: a structured recommendation backed by evidence.
-
-```
-/claude-code-hermit:proposal-list                  # see what Hermit found
-/claude-code-hermit:proposal-act accept PROP-003   # make it the next thing to work on
-```
-
-Accept one and Hermit picks it up during idle time. If the fix works, the proposal auto-resolves. Reject, defer, dismiss — you're always in control.
-
-You can also ask Hermit directly how it could improve. It reflects on recent sessions and suggests concrete changes. You decide what sticks.
-
----
-
-## Creating Your Own Hermit
-
-Every hermit is yours from the moment you run `/claude-code-hermit:hatch`. See [Creating Your Own Hermit](plugins/claude-code-hermit/docs/creating-your-own-hermit.md) for OPERATOR.md tuning, custom agents, and building reusable hermit plugins.
-
-Hermits ride on Claude Code's native intelligence and add a `raw/` → `compiled/` layer — raw notes distilled into durable artifacts the agent reloads next session. See [Plugin Hermit Storage](plugins/claude-code-hermit/docs/plugin-hermit-storage.md).
-
-For ready-made specialists, install another hermit plugin from the same marketplace — see [Pre-built Hermits](#pre-built-hermits) below.
+No daily caps, no per-runtime-hour billing.
 
 ---
 
 ## Pre-built Hermits
 
+Domain plugins you stack on top of any hermit you've hatched.
+
 - [**`dev-hermit`**](plugins/claude-code-dev-hermit/README.md) — *For software builders.* Safety layer for code-writing agents: push guard, branch discipline, gated PRs.
 - [**`homeassistant-hermit`**](plugins/claude-code-homeassistant-hermit/README.md) — *For Home Assistant users.* HA skills, safety hook, automation builder, Python CLI.
 - [**`fitness-hermit`**](plugins/claude-code-fitness-hermit/README.md) — *Fitness focused.* Strava MCP wiring, activity deep-dives, weekly-load routines.
+
+Many operators run several hermits in parallel — one per domain. Each one is a `/hatch` away. They share nothing but the protocol; their memory, budgets, and routines are independent. See [Creating Your Own Hermit](plugins/claude-code-hermit/docs/creating-your-own-hermit.md).
 
 ---
 
@@ -136,9 +155,9 @@ For ready-made specialists, install another hermit plugin from the same marketpl
 - [Always-On Operations](plugins/claude-code-hermit/docs/always-on-ops.md)
 - [Always-On Setup](plugins/claude-code-hermit/docs/always-on.md)
 - [Architecture](plugins/claude-code-hermit/docs/architecture.md)
-- [Artifact Naming](plugins/claude-code-hermit/docs/artifact-naming.md)
 - [Config Reference](plugins/claude-code-hermit/docs/config-reference.md)
 - [Creating Your Own Hermit](plugins/claude-code-hermit/docs/creating-your-own-hermit.md)
+- [Docker Security](plugins/claude-code-hermit/docs/docker-security.md)
 - [FAQ](plugins/claude-code-hermit/docs/faq.md)
 - [Getting Started](plugins/claude-code-hermit/docs/how-to-use.md)
 - [Hermit Cortex (Powered by Obsidian)](plugins/claude-code-hermit/docs/obsidian-setup.md)
