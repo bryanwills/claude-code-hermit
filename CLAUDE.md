@@ -29,6 +29,7 @@ Always launch Claude Code from this repo's root, not from inside a plugin dir. A
 - **Default for version work: use a plugin-scoped branch** named `<short-slug>/vX.Y.Z` (e.g. `dev-hermit/v0.3.0`, `hermit/v1.0.22`, `ha-hermit/v0.0.7`). Accumulate commits there until the version is complete, then PR + regular merge (no squash) to `main`, then `/release <slug>`. This groups related commits, gives CI and `/ultrareview` a natural review point, and avoids shipping to operators mid-iteration.
 - **Direct to `main`** for atomic, self-contained changes where a PR adds no value: hotfixes, single-line doc edits, dep bumps, and changes where the diff is its own review. Use judgment — if you'd want to see it in a PR before it reaches operators, branch.
 - **Branch naming**: `<short-slug>/vX.Y.Z` where short-slug drops the `claude-code-` prefix (`dev-hermit`, `hermit`, `ha-hermit`). The `v` prefix is required — matches tag convention and disambiguates from feature names.
+- **Issue/scope branches: Conventional-Commits prefix, not plugin-scoped.** For bugfixes, features, hotfixes, or chores from a GH issue (or any sub-version-scoped change), name the branch `fix/<N>-<slug>`, `feat/<N>-<slug>`, or `chore/<N>-<slug>` — `<N>` is the GH issue number (omit if no issue), `<slug>` is a short kebab-case descriptor. Examples: `fix/44-self-update-race`, `feat/57-cortex-tagging`, `chore/upgrade-node-24`. Branch off the relevant version-prep branch (or `main` for direct-to-main work), PR back into it with a regular merge. Reserve the plugin-scoped `<short-slug>/vX.Y.Z` form for the version-prep branch itself, never for sub-work.
 - **Never squash-merge** a plugin branch. Squash changes the SHA and strands the tag on an orphan commit. Regular merge commit, then `/release` tags HEAD of `main`.
 - **Tags ship immediately to operators** — no staging. The branch is your safety gate.
 
@@ -42,6 +43,7 @@ Always launch Claude Code from this repo's root, not from inside a plugin dir. A
 - **`rm -rf` is blocked** by the `enforce-deny-patterns` hook. Use `rm -r` (no `-f`) for scratch cleanup.
 - **Subtree imports are unsquashed**: `git log --first-parent` for the monorepo-only view; full upstream commits live under each subtree merge.
 - **CI is not path-filtered yet**: every plugin's tests run on every PR. Don't assume a HA-test failure on a core-only PR is your fault.
+- **Plugin tests change CWD.** `bash plugins/<slug>/tests/run-all.sh` ends with CWD inside `plugins/<slug>/`; subsequent shell calls (especially `git add`) need absolute paths or an explicit `cd` back to repo root.
 
 ## Rules
 
