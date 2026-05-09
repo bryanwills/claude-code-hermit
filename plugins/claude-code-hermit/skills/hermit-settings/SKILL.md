@@ -302,16 +302,17 @@ Update `permission_mode` in config.json.
   Recommended Plugins (config.json docker.recommended_plugins)
 
     [enabled]  claude-code-setup (claude-plugins-official) — auto-installed on boot
-    [enabled]  claude-code-homeassistant-hermit (gtapps/claude-code-homeassistant-hermit) — auto-installed on boot
+    [enabled]  claude-code-homeassistant-hermit (claude-code-homeassistant-hermit) — auto-installed on boot
 
   (or "No recommended plugins configured" if empty)
   ```
+  Display each entry as `[enabled/disabled]  <plugin> (<marketplace>)` — show the `org/repo` (the `marketplace` field) in parens.
 - Ask: "Enable, disable, add, or remove recommended plugins? (e.g., 'enable claude-code-setup', 'add claude-code-setup', 'add superpowers obra/superpowers-marketplace', 'remove superpowers', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - `enable <PLUGIN>`: set `enabled: true` on matching entry
   - `disable <PLUGIN>`: set `enabled: false` on matching entry
   - `remove <PLUGIN>`: remove the entry entirely
-  - `add <PLUGIN> [<MARKETPLACE>]`: add new entry with `marketplace` (`"claude-plugins-official"` if omitted), `scope: "project"`, `enabled: true`. Deduplicate by plugin name.
+  - `add <PLUGIN> [<MARKETPLACE>]`: add new entry with `scope: "project"`, `enabled: true`. `<MARKETPLACE>` is an `org/repo` (e.g. `obra/superpowers-marketplace`) or omitted (defaults to `anthropics/claude-plugins-official`). If `<MARKETPLACE>` is provided but not registered locally, prompt: "Marketplace `<MARKETPLACE>` is not registered locally. Add it with `claude plugin marketplace add <MARKETPLACE>` first, then re-try." Abort the add. **Dedupe rule:** refuse the add if an existing entry has the same `(plugin, marketplace)` pair (scope is NOT part of the key) — operator should `enable` or `remove` first.
   - If input is just a plugin name without a verb: treat as `enable` if it exists, `add` if it doesn't
 - After changes, note: "Restart container to install new plugins: `.claude-code-hermit/bin/hermit-docker restart`"
 

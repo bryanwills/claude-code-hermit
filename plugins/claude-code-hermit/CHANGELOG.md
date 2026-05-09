@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.0.34] - 2026-05-08
+
+### Fixed
+
+- **Plugin detection scoped to project/local only across five skills.** `/hatch` Step 1.5, `/docker-setup` Step 7b.1, `/docker-security` Step 3a, `/hermit-evolve` Step 7, and `/channel-setup` Step 3 all enumerated installed plugins without pinning `projectPath` to the current project root. `claude plugin list --json` returns entries for all projects in the operator's config, so a bare `scope == "local"` predicate leaked plugins from sibling repos. All five sites now apply the canonical filter: `enabled == true AND (scope == "project" OR scope == "local") AND projectPath == cwd`. User-scope plugins are explicitly dropped. `/hatch` and `/hermit-evolve` also replace the `${CLAUDE_PLUGIN_ROOT}/../*` disk glob with the JSON list so the install root is read from `installPath` rather than inferred by path proximity. `/hatch`'s `detected_hermits` stash now carries `installPath` so downstream Steps 3, 5a, 6, and Quick Turn 1 read `CLAUDE-APPEND.md`, `plugin.json`, and `OPERATOR-QUESTIONS.md` from the resolved install path instead of re-globbing.
+
+- **`docker.recommended_plugins.marketplace` is always `org/repo`; entrypoint resolves the canonical name at boot.** The entrypoint was deriving the install target and on-disk cache key from `marketplace.split('/')[-1]`, which breaks when the marketplace `name` field differs from the repo basename (e.g. `openai/codex-plugin-cc` → name `openai-codex`). Official entries also stored the literal `"claude-plugins-official"` instead of an `org/repo`, mixing identifier types in the same field. The fix normalizes `marketplace` to always be `org/repo` (official is now `anthropics/claude-plugins-official`) and resolves the canonical marketplace name at boot via a single `claude plugin marketplace list --json` lookup — no schema bifurcation, no duplicated source of truth. The `is_safelisted` predicate folds back to a single arg (`marketplace`) since the literal-name shortcut is gone. Pre-v1.0.34 entries whose `marketplace` is not an `org/repo` get one warning at boot and are skipped; re-running `/docker-setup` rebuilds the entries cleanly from the host plugin list. The already-installed check in the entrypoint switches from bare substring to `❯ {target}` prefix match, preventing false positives where a short plugin name is a substring of a longer entry. Affects `/docker-setup` Step 7b, `/hermit-settings` docker section, docs, and entrypoint.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/hatch/SKILL.md` | Step 1.5 uses `claude plugin list --json` + filter; stash carries `installPath`; downstream steps read from `installPath` |
+| `skills/docker-setup/SKILL.md` | Step 7b.1 filter tightened; dedupe rule added; Step 7b.3/5/10 updated to write `marketplace` as `org/repo` only |
+| `skills/docker-security/SKILL.md` | Step 3a filter tightened; `path` field → `installPath` |
+| `skills/hermit-evolve/SKILL.md` | Step 7 replaces disk glob with `claude plugin list --json` + filter; reads from `installPath` |
+| `skills/channel-setup/SKILL.md` | Step 3 replaces unstructured grep with JSON + filter; adds `marketplace_name` gate; adds explicit `plugin enable` |
+| `skills/hermit-settings/SKILL.md` | Display renders `org/repo`; `add` action writes `marketplace` as `org/repo` with dedupe-by-(plugin, marketplace) |
+| `state-templates/docker/docker-entrypoint.hermit.sh.template` | Install loop resolves marketplace name from `claude plugin marketplace list --json` once at start; single warn-and-skip path for pre-v1.0.34 legacy entries; `❯` prefix match for already-installed guard |
+| `docs/config-reference.md` | `recommended_plugins` schema documents `marketplace` as `org/repo` (canonical name resolved at boot); example entry updated |
+| `docs/recommended-plugins.md` | Config format table documents `marketplace` as `org/repo` |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Refresh skill spec** — the updated skill text loads on the next invocation of each affected skill. No state files or templates change.
+
+If you use Docker:
+
+2. **Rebuild your container** — run `.claude-code-hermit/bin/hermit-docker update`. The new entrypoint resolves marketplace names at boot from the CLI's source of truth (`claude plugin marketplace list --json`) instead of guessing from the repo basename.
+
+3. **Re-run `/claude-code-hermit:docker-setup` once** — only required if your existing `docker.recommended_plugins` has any entry where `marketplace` is not an `org/repo` (the most common case is pre-v1.0.34 official entries that store the literal `"claude-plugins-official"`). The new entrypoint warns once at boot and skips such entries; re-running `/docker-setup` rebuilds the entries cleanly from the current host plugin list. Skip this step if every `marketplace` value in your config already contains a `/`.
+
 ## [1.0.33] - 2026-05-07
 
 ### Changed

@@ -203,16 +203,20 @@ Mirror host-installed plugins into the container so the container starts with th
 
 > **SECURITY-CRITICAL STEP.** Every plugin written here is auto-installed on container boot with `bypassPermissions` (full unrestricted execution). Do not shortcut the safelist, validation, or deselection rules below. If you find yourself about to skip one, stop and re-read this section.
 
-1. Run `claude plugin list --json` to enumerate plugins. Each entry has `id` (in the form `plugin@slug`), `scope`, `enabled`, and `projectPath`. **Keep only entries where:**
-   - `scope == "project"` **and** `projectPath` equals the current project root (the same `id` can appear multiple times for different projects — do not mirror another project's plugins), **OR**
-   - `scope == "local"`.
+1. Run `claude plugin list --json` to enumerate plugins. Each entry includes `id` (form `<plugin>@<marketplace_name>`), `scope`, `enabled`, `projectPath`, and `installPath`. Apply the **project-or-local + enabled filter**:
+   - Keep `enabled == true` AND (`scope == "project"` OR `scope == "local"`) AND `projectPath` equals the current project root.
+   - Drop user-scope, managed-scope, disabled, and cross-project entries entirely.
 
-   Drop `user`-scope entries entirely — those are the host user's personal choices across every project and do not belong in a project-specific container. If the operator wants a user-scope plugin in the container, they can install it at `project` scope on the host first and re-run this skill.
+   `claude plugin list --json` lists across the operator's full config — local-scope plugins from sibling repos carry their own `projectPath` and must be excluded.
+
+   **Dedupe rule.** After filtering, dedupe surviving entries by `(plugin, marketplace_name)`. If both a `project` and a `local` scope entry survive for the same `(plugin, marketplace_name)`, keep the `local` entry only — local is the override scope in Claude Code's overlay model. Different marketplaces remain distinct entries.
+
+   If the operator wants a user-scope plugin in the container, they install it at `project` scope on the host first and re-run this skill.
 2. Filter out additionally:
    - `claude-code-hermit@claude-code-hermit` — the entrypoint already handles it unconditionally.
    - Any channel plugins already picked up via `config.channels` (they flow through the entrypoint's channel branch).
-3. Run `claude plugin marketplace list --json` and build a slug → `repo` map from each entry's `name` (slug) and `repo` (`org/repo`) fields. Split each plugin `id` as `plugin@slug` and look up the slug in the map to get the full `org/repo`. The `marketplace` field written to `docker.recommended_plugins` must be `org/repo` — the entrypoint calls `claude plugin marketplace add <marketplace>` on first boot and a bare slug will fail.
-   - If a marketplace entry has `source != "github"` or no `repo` field (e.g. a locally-added marketplace), ask: "What's the GitHub source for the `<slug>` marketplace? (e.g. `org/repo`)" before presenting the plugin list.
+3. Run `claude plugin marketplace list --json` and build a `marketplace_name → repo` map from each entry's `name` and `repo` fields. Split each plugin `id` as `<plugin>@<marketplace_name>` and look up `marketplace_name` in the map to get the `org/repo`. Only the `org/repo` is recorded on each `docker.recommended_plugins` entry — the entrypoint resolves the canonical marketplace name at boot via the same `marketplace list --json` lookup, so storing it twice would just duplicate the source of truth.
+   - If a marketplace entry has `source != "github"` or no `repo` field (e.g. a locally-added marketplace), ask: "What's the GitHub source for the `<marketplace_name>` marketplace? (e.g. `org/repo`)" before presenting the plugin list.
 
 4. **Validation gate — apply to every `org/repo` before it reaches the plugin list or `config.json`:**
    - Regex: `^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$`
@@ -224,16 +228,17 @@ Mirror host-installed plugins into the container so the container starts with th
 
    ```
    def is_safelisted(marketplace):
+       # marketplace is always org/repo after the step 7b.3 lookup — no literal-name shortcut.
        return (
-           marketplace == "claude-plugins-official"
+           marketplace == "anthropics/claude-plugins-official"
            or marketplace.startswith("gtapps/")
        )
    ```
 
-   The `marketplace` value passed to `is_safelisted` is the resolved `org/repo` from step 3 (or the literal string `claude-plugins-official` for official plugins) — **never** the slug from the `plugin@slug` id. If you're about to pass `claude-code-homeassistant-hermit` to `is_safelisted`, you skipped the lookup — go back to step 3.
+   The `marketplace` value passed to `is_safelisted` is always the `org/repo` resolved in step 7b.3 — never the marketplace name and never the slug from the `<plugin>@<name>` id. If you're about to pass `claude-code-homeassistant-hermit` (a slug) to `is_safelisted`, you skipped the lookup — go back to step 3.
 
    Split into two groups:
-   - **SAFE** — `is_safelisted(marketplace)` is `True`. Examples: marketplace `claude-plugins-official`, marketplace `gtapps/claude-code-homeassistant-hermit`.
+   - **SAFE** — `is_safelisted(marketplace)` is `True`. Examples: `anthropics/claude-plugins-official`, `gtapps/claude-code-homeassistant-hermit`.
    - **THIRD-PARTY** — everything else. Examples: `obra/superpowers-marketplace`, any non-`gtapps` `org/repo`, any locally-added marketplace without a GitHub source.
 
    The SAFE group can be accepted as a batch. The THIRD-PARTY group **must be confirmed one-by-one**. Do not bulk-accept third-party plugins for the operator's convenience — the host list is the **candidate** set, not the trusted set.
@@ -244,7 +249,7 @@ Mirror host-installed plugins into the container so the container starts with th
    Host-installed plugins detected (project + local scope only):
 
    Safelisted (trusted sources):
-     - claude-code-setup @ claude-plugins-official (project)
+     - claude-code-setup @ anthropics/claude-plugins-official (project)
      - claude-code-homeassistant-hermit @ gtapps/claude-code-homeassistant-hermit (project)
 
    Third-party (require individual opt-in):
@@ -272,18 +277,18 @@ Mirror host-installed plugins into the container so the container starts with th
 9. After both groups are processed: any plugin not explicitly confirmed must **not** be written to `docker.recommended_plugins`. Write only confirmed entries with `enabled: true`.
 
 10. **Write-time assertion — run this before handing entries to step 7c.** For each confirmed entry:
-    - If `marketplace == "claude-plugins-official"` → accept.
-    - Else assert `marketplace` matches `^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$` (has a slash; is `org/repo`).
-    - If any entry fails: **stop, do not write config.** Re-derive the failed entry's marketplace from the `claude plugin marketplace list --json` output (look up the slug → `repo`). If the lookup cannot produce a valid `org/repo`, prompt the operator for it (same prompt as step 3). Re-run the assertion. Only proceed to step 7c once every entry passes.
-    - This catches the common failure mode where the slug from `plugin@slug` in `claude plugin list` gets written as the marketplace field verbatim (e.g. `claude-code-homeassistant-hermit` instead of `gtapps/claude-code-homeassistant-hermit`). For `claude-plugins-official` entries both forms are identical, so the bug only surfaces on non-official plugins — don't let the official entries trick you into thinking the set is valid.
+    - Assert `marketplace` matches `^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$` (has a slash; is `org/repo`). Uniform across official and third-party entries — official stores `anthropics/claude-plugins-official`, no more literal-name shortcut.
+    - If any entry fails: **stop, do not write config.** Re-derive the failing entry's `org/repo` from the `claude plugin marketplace list --json` output (look up the marketplace name from the plugin's `id` to get the `repo`). If the lookup cannot produce a valid `org/repo`, prompt the operator (same prompt as step 3). Re-run the assertion. Only proceed to step 7c once every entry passes.
 
 11. If the filtered list is **empty** (no extras installed on the host), skip silently — no prompt, no entries written.
 
 Record the confirmed selection as `docker.recommended_plugins`. Each entry has:
 ```json
-{"marketplace": "<marketplace-or-org/repo>", "plugin": "<plugin-name>", "scope": "<scope>", "enabled": true}
+{"plugin": "<plugin-name>", "marketplace": "<org/repo>", "scope": "<scope>", "enabled": true}
 ```
-The entrypoint adds the marketplace (if needed) and installs every enabled entry on first boot. See [Recommended Plugins](../../docs/recommended-plugins.md) for the full policy.
+The entrypoint resolves the canonical marketplace name at boot via `claude plugin marketplace list --json` (no need to store it on the entry), adds the marketplace if missing, and installs every enabled entry on first boot. See [Recommended Plugins](../../docs/recommended-plugins.md) for the full policy.
+
+**Legacy config note.** Re-running this skill against a pre-v1.0.34 config rebuilds `docker.recommended_plugins` from scratch from the current host plugin list — legacy entries (e.g. `marketplace == "claude-plugins-official"` literal) are replaced cleanly. The entrypoint warns and skips any legacy entry whose `marketplace` is not an `org/repo` until the operator re-runs this skill once.
 
 **On container-side `claude plugin marketplace add` / `plugin install` failure (either in entrypoint logs or when re-running the command manually after boot):** if the error mentions SSH auth, HTTPS credentials, `gh` not found, or `.gitconfig` read-only, **stop immediately — do not attempt workarounds inside the container.** The container has no SSH client, no `gh` CLI, and `.gitconfig` is bind-mounted read-only by design. Iterating on `GIT_CONFIG_NOSYSTEM`, `git config --global url...insteadOf`, or similar is guaranteed to fail and wastes the operator's time. Surface the error to the operator verbatim and move on — no retry unless the operator changes something host-side (makes the repo public, mirrors it, etc.) and asks to retry.
 
