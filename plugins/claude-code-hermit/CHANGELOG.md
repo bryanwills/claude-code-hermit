@@ -1,15 +1,43 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.36] - 2026-05-10
 
 ### Added
 
+- **`hermit-start`: support third-party channel plugins via `channels.<name>.marketplace` (#47).** `CHANNEL_PLUGINS` previously hardcoded a closed dict of three official channels (`discord`, `telegram`, `imessage`). Configuring any other channel name appended a bare token to `--channels`, which `claude` rejected as untagged and killed the launched process — taking the tmux session with it before any useful error reached the operator. `build_claude_command` now falls back to `channels.<name>.marketplace` from `config.json` and emits `plugin:<channel>@<marketplace>`. The hardcoded path is unchanged, so existing discord/telegram/imessage configs behave identically.
+- **`cache-edit-guard.js`: warn (or block) Edit/Write to marketplace cache copies (#48).** Project-local marketplaces declare `"source": "<relative-path>"` in `marketplace.json` and the runtime loads plugin code from that source. The directory under `.claude/plugins/cache/<marketplace>/<plugin>/<version>/` is a stale snapshot — silent edits there produce no-ops at runtime and look like the change worked until something restarts. New PreToolUse hook detects Edit/Write on a cache path, resolves the canonical source via the project's `marketplace.json`, and prints a stderr warning naming the source path. Default behaviour is warn-only (`exit 0`); setting `HERMIT_CACHE_GUARD=block` upgrades the warning into a hard block (`exit 2`). Stdlib-only, fail-open on stdin or `marketplace.json` parse errors.
 - **`hermit-start`: marketplace pre-flight for `--channels` (PROP-005).** Boot now runs `claude plugin marketplace list --json` once per `build_claude_command` call and validates every `plugin:<name>@<marketplace>` token. Unregistered marketplaces produce a loud `[hermit] WARNING` naming the missing marketplace and remediation (`claude plugin marketplace add <repo>`), and the channel is dropped from `--channels` rather than silently passed to claude — which would ignore the unknown marketplace and boot with no channels active, leaving the operator wondering why DMs go nowhere. The pre-flight also catches the common operator-confusion mode where `channels.<name>.marketplace` is set to a *repo* (e.g. `someone/matrix-plugin`) instead of a marketplace *name*: when the configured value matches a registered repo, the warning names the correct marketplace name to use in `config.json`. Fail-soft — if `claude` is missing or returns unexpected output, pre-flight is skipped and behavior is byte-identical to before.
 - **`hermit-start`: refuse channel names starting with `-` as bare args.** Defense-in-depth against future `claude` versions that might loosen flag-vs-arg validation. Today claude rejects untagged channel args downstream, so this guard isn't fixing a live bug — it just keeps the contract local to `hermit-start` rather than relying on downstream validation.
 
 ### Fixed
 
-- **Sanitize control characters in hermit hook stderr (PROP-006, terminal log-injection hardening).** `cache-edit-guard.js` and `channel-hook.js` interpolated values from `tool_input` (file paths, chat IDs) directly into `process.stderr.write`. An adversarial path of the form `foo\n\x1b[32m[hermit] OK proceed\x1b[0m` could render a forged green all-clear line below the real warning, hiding the warning's signal value from the operator or from a model reading transcript output. Added `scripts/lib/sanitize.js` with a `safe(s)` helper that replaces C0 controls + DEL + C1 controls (`U+0000..U+001F`, `U+007F`, `U+0080..U+009F`) with `?`, and routed every `tool_input`-derived stderr interpolation through it: `safe(filePath)` and `safe(canonical)` in `cache-edit-guard.js`; `safe(chatId)` in `channel-hook.js`. No behaviour change for benign paths — sanitization is a no-op on normal ASCII. Persisted values (config.json `dm_channel_id`) keep the raw bytes; sanitization applies only at the operator-visible stderr boundary. Added `TestStderrSanitization` contract class with four cases covering newline (C0), ANSI ESC (C0), C1 single-byte CSI, and channel-hook chat_id sanitization, verified via a negative-control protocol where each `safe()` wrap independently fails its corresponding test when removed. Hooks deliberately *not* hardened: `enforce-deny-patterns.js` and `dev-hermit/git-push-guard.js` interpolate operator-controlled config strings, not `tool_input`/`tool_response` values, so they fall outside this proposal's threat model.
+- **Sanitize control characters in hermit hook stderr (PROP-006, terminal log-injection hardening).** `cache-edit-guard.js` and `channel-hook.js` interpolated values from `tool_input` (file paths, chat IDs) directly into `process.stderr.write`. An adversarial path of the form `foo\n\x1b[32m[hermit] OK proceed\x1b[0m` could render a forged green all-clear line below the real warning, hiding the warning's signal value from the operator or from a model reading transcript output. Added `scripts/lib/sanitize.js` with a `safe(s)` helper that replaces C0 controls + DEL + C1 controls (`U+0000..U+001F`, `U+007F`, `U+0080..U+009F`) with `?`, and routed every `tool_input`-derived stderr interpolation through it: `safe(filePath)` and `safe(canonical)` in `cache-edit-guard.js`; `safe(chatId)` in `channel-hook.js`. No behaviour change for benign paths — sanitization is a no-op on normal ASCII. Persisted values (`config.json` `dm_channel_id`) keep the raw bytes; sanitization applies only at the operator-visible stderr boundary. Added `TestStderrSanitization` contract class with four cases covering newline (C0), ANSI ESC (C0), C1 single-byte CSI, and channel-hook chat_id sanitization, verified via a negative-control protocol where each `safe()` wrap independently fails its corresponding test when removed. Hooks deliberately *not* hardened: `enforce-deny-patterns.js` and `dev-hermit/git-push-guard.js` interpolate operator-controlled config strings, not `tool_input`/`tool_response` values, so they fall outside this proposal's threat model.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `scripts/hermit-start.py` | Marketplace pre-flight (PROP-005); third-party channel marketplace fallback (#47); reject bare args starting with `-` |
+| `scripts/cache-edit-guard.js` | New PreToolUse hook (#48); routed `safe()` over `tool_input`-derived stderr (PROP-006) |
+| `scripts/channel-hook.js` | Routed `safe()` over `chat_id` stderr interpolation (PROP-006) |
+| `scripts/lib/sanitize.js` | New helper — replaces C0/DEL/C1 control chars with `?` for stderr-bound strings (PROP-006) |
+| `hooks/hooks.json` | Registers `cache-edit-guard.js` for Edit\|Write (#48) |
+| `skills/channel-setup/SKILL.md` | Install/enable/manual commands now resolve marketplace from config rather than hardcoding `claude-plugins-official` (#47) |
+| `docs/config-reference.md` | Documents the new `channels.<name>.marketplace` field (#47) |
+| `tests/run-contracts.py` | New `TestCacheEditGuard` (7 cases), `TestStderrSanitization` (4 cases), and 3 third-party-channel cases |
+| `CLAUDE.md` | Dev note: `hermit-docker update` rebuilds with on-disk entrypoint, not the template |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **No state-file changes required.** All four items in this release ship inside the plugin (`scripts/`, `hooks/`, `skills/`, `docs/`) — they take effect on the next boot without modifying anything under `.claude-code-hermit/`.
+
+2. **No `config.json` changes required.** The new `channels.<name>.marketplace` field is purely additive and only consulted when an operator configures a non-built-in channel; existing discord/telegram/imessage configs need no edits.
+
+3. **Optional: enable cache-edit hard block.** Operators who want Edit/Write attempts on `.claude/plugins/cache/...` to fail rather than warn can export `HERMIT_CACHE_GUARD=block` in their shell environment. Default behaviour (warn-only) is the safer choice for most operators.
+
+**Note:** The PROP-005 marketplace pre-flight and PROP-006 stderr sanitization are silent on benign input — operators should see no behavioural difference unless they have a misconfigured channel marketplace or an adversarial tool_input value.
 
 ## [1.0.35] - 2026-05-09
 
