@@ -26,12 +26,11 @@ Always launch Claude Code from this repo's root, not from inside a plugin dir. A
 
 ## Branching
 
-- **Default for version work: use a plugin-scoped branch** named `<short-slug>/vX.Y.Z` (e.g. `dev-hermit/v0.3.0`, `hermit/v1.0.22`, `ha-hermit/v0.0.7`). Accumulate commits there until the version is complete, then PR + regular merge (no squash) to `main`, then `/release <slug>`. This groups related commits, gives CI and `/ultrareview` a natural review point, and avoids shipping to operators mid-iteration.
-- **Direct to `main`** for atomic, self-contained changes where a PR adds no value: hotfixes, single-line doc edits, dep bumps, and changes where the diff is its own review. Use judgment — if you'd want to see it in a PR before it reaches operators, branch.
-- **Branch naming**: `<short-slug>/vX.Y.Z` where short-slug drops the `claude-code-` prefix (`dev-hermit`, `hermit`, `ha-hermit`). The `v` prefix is required — matches tag convention and disambiguates from feature names.
-- **Issue/scope branches: Conventional-Commits prefix, not plugin-scoped.** For bugfixes, features, hotfixes, or chores from a GH issue (or any sub-version-scoped change), name the branch `fix/<N>-<slug>`, `feat/<N>-<slug>`, or `chore/<N>-<slug>` — `<N>` is the GH issue number (omit if no issue), `<slug>` is a short kebab-case descriptor. Examples: `fix/44-self-update-race`, `feat/57-cortex-tagging`, `chore/upgrade-node-24`. Branch off the relevant version-prep branch (or `main` for direct-to-main work), PR back into it with a regular merge. Reserve the plugin-scoped `<short-slug>/vX.Y.Z` form for the version-prep branch itself, never for sub-work.
-- **Never squash-merge** a plugin branch. Squash changes the SHA and strands the tag on an orphan commit. Regular merge commit, then `/release` tags HEAD of `main`.
-- **Tags ship immediately to operators** — no staging. The branch is your safety gate.
+- **Default: PR `fix/<N>-<slug>` / `feat/<N>-<slug>` / `chore/<slug>` branches to `main`.** Same flow for contributors and maintainer. `<N>` is the GH issue number (omit if no issue), `<slug>` is a short kebab-case descriptor. Examples: `fix/44-self-update-race`, `feat/57-cortex-tagging`, `chore/upgrade-node-24`. Regular merge to `main`.
+- **Why main is safe as staging.** Claude Code's `/plugin update` only fires when `version` in `plugin.json` changes ([docs](https://code.claude.com/docs/en/plugins-reference#version-management)). Commits on `main` between releases are invisible to operators on the standard install path — `/release <slug>` is the actual ship event because it bumps `version` and promotes `[Unreleased]` → `[X.Y.Z]`. Caveats: brand-new installers and `--plugin-dir` testers get whatever is on `main` HEAD, so don't leave `main` knowingly broken for long.
+- **Exception — plugin-scoped batching branch** `<short-slug>/vX.Y.Z` (e.g. `hermit/v1.0.36`, `ha-hermit/v0.0.8`, `dev-hermit/v0.3.0`). Use only for explicit multi-commit features where `main` HEAD shouldn't sit half-built (long rewrites, fleet-wide refactors that need CI as a whole). Accumulate commits there, PR + regular merge (no squash) to `main`, then `/release <slug>`. Short-slug drops the `claude-code-` prefix; the `v` prefix is required and matches tag convention.
+- **Never squash-merge** a plugin-scoped batching branch. Squash changes the SHA and strands the tag on an orphan commit. Regular merge commit, then `/release` tags HEAD of `main`.
+- **Tags ship to operators on next `/plugin update`.** The `version` bump inside `/release` is the gate — pre-release commits on `main` don't reach `/plugin update` users until that bump happens.
 
 ## Layout gotchas
 
@@ -97,7 +96,7 @@ Rules:
 
 ## Quick Reference
 
-`/session-start` `/session` `/session-close` `/pulse` `/brief` `/heartbeat` `/watch` `/reflect` `/reflect-scheduled-checks` `/hermit-routines` `/hermit-settings` `/proposal-list` `/proposal-act` `/proposal-create` `/hermit-evolve` `/channel-setup` `/channel-responder` `/docker-setup` `/hermit-takeover` `/hermit-hand-back` `/hatch` `/smoke-test` `/obsidian-setup` `/cortex-refresh` `/cortex-sync` `/weekly-review` `/migrate` `/knowledge` `/hermit-doctor`
+`/session-start` `/session` `/session-close` `/pulse` `/brief` `/heartbeat` `/watch` `/reflect` `/reflect-scheduled-checks` `/hermit-routines` `/hermit-settings` `/proposal-list` `/proposal-act` `/proposal-create` `/hermit-evolve` `/channel-setup` `/channel-responder` `/docker-setup` `/docker-security` `/hermit-takeover` `/hermit-hand-back` `/hatch` `/smoke-test` `/obsidian-setup` `/cortex-refresh` `/cortex-sync` `/weekly-review` `/migrate` `/knowledge` `/hermit-doctor`
 (All prefixed with `/claude-code-hermit:`)
 
 ## Operator Notification
@@ -117,6 +116,8 @@ When you need to notify the operator proactively:
 ## Knowledge Discipline
 
 Auto-memory handles all learning. `compiled/` is for durable domain outputs and records the operator may want surfaced across sessions and in Cortex. Don't duplicate lessons into `compiled/`.
+
+**Memory-first for suggestions.** Before any skill or subagent declares a finding novel — `brief`, `reflect`, `weekly-review`, `proposal-create`, `session-start`, and the `proposal-triage` / `reflection-judge` subagents — consult auto-memory first and suppress the suggestion if memory already covers the same operator decision, preference, or pattern. This applies only to suggestion-generating paths; skills acting on a decided intent (`session-close`, `proposal-act`, `hermit-routines`, `hatch`) are exempt — they execute, not suggest. When memory covers the candidate, suppress with the canonical code `covered-by-memory` and quote the matching memory line.
 
 - Domain inputs go to `raw/<type>-<slug>-<date>.md` with frontmatter (`title`, `type`, `created`, `tags` required).
 - Domain outputs go to `compiled/<type>-<slug>-<date>.md` with frontmatter. Max 150 lines, self-contained. Add `session: S-NNN` when inside a session. Cite source in frontmatter (`source: raw/<type>-<slug>-<date>.md`).

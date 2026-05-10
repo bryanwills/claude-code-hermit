@@ -11,6 +11,10 @@
       "Bash(node */scripts/append-metrics.js*)",
       "Bash(node */scripts/generate-summary.js*)",
       "Bash(node */scripts/update-reflection-state.js*)",
+      "Bash(node */scripts/heartbeat-precheck.js*)",
+      "Bash(node */scripts/reflect-precheck.js*)",
+      "Bash(node */scripts/cron-tz-shift.js*)",
+      "Bash(node */scripts/archive-shell.js*)",
       "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
       "Edit(.claude-code-hermit/**)",
       "Write(.claude-code-hermit/**)"
@@ -35,6 +39,7 @@
     ]
   },
   "enabledPlugins": {
-    "claude-code-hermit@claude-code-hermit": true
+    "claude-code-hermit@claude-code-hermit": true,
+    "feature-dev@claude-plugins-official": true
   }
 }

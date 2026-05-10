@@ -53,12 +53,21 @@ See [Testing](docs/testing.md) for hook test details, fixtures, manual testing, 
 
 ## PR Workflow
 
-1. Create a feature branch
+### Branching
+
+- **Default: PR feature branches to `main`.** Use Conventional-Commits prefixes — `fix/<N>-<slug>`, `feat/<N>-<slug>`, or `chore/<slug>` (`<N>` is the GH issue number, omit if no issue; `<slug>` is a short kebab-case descriptor). Examples: `fix/44-self-update-race`, `feat/57-cortex-tagging`, `chore/upgrade-node-24`. Regular merge to `main`.
+- **`main` is safe as staging.** Claude Code's `/plugin update` only fires when `version` in `plugin.json` changes ([docs](https://code.claude.com/docs/en/plugins-reference#version-management)) — and `version` only bumps when a maintainer runs `/release <slug>`. Commits merged to `main` between releases are not pushed to operators on the standard install path. Each plugin's `CHANGELOG.md` accumulates entries under `## [Unreleased]` until release time.
+- **Exception — plugin-scoped batching branch.** For explicit multi-commit features where `main` HEAD shouldn't sit half-built, branch as `<short-slug>/vX.Y.Z` (e.g. `hermit/v1.0.36`). Most contributions don't need this — when in doubt, target `main`.
+
+### Steps
+
+1. Create a feature branch off `main` (`fix/<N>-<slug>`, `feat/<N>-<slug>`, or `chore/<slug>`)
 2. Run `/release-status` for a read-only pipeline snapshot (flags stale `required_core_version`, shows what's awaiting tag)
 3. Make changes
 4. Run `( cd plugins/claude-code-hermit && bash tests/run-all.sh )` locally (and the HA pytest suite if HA code changed)
-5. Push — CI runs the same tests
-6. Keep commits focused — one concern per PR
+5. Add a bullet to the affected plugin's `CHANGELOG.md` under `## [Unreleased]` — the maintainer promotes it to a real version at release time. (If you're using Claude Code with the repo's local skills, `/commit` does this automatically.)
+6. Push — CI runs the same tests
+7. Keep commits focused — one concern per PR
 
 ## Adding a New Hermit
 
