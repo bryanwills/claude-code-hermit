@@ -8,6 +8,7 @@ Usage: python3 tests/run-contracts.py [-v]
 """
 
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -15,7 +16,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 FIXTURES = REPO / 'tests' / 'fixtures'
@@ -227,14 +230,22 @@ class TestBuildClaudeCommandChannels(_TempDirTest):
         (d / '.env').write_text('TOKEN=stub\n')
         return str(d)
 
-    def test_builtin_channel_resolves_via_hardcoded_dict(self):
+    def _capture(self, fn):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = fn()
+        return result, buf.getvalue()
+
+    @patch.object(hermit_start, '_fetch_registered_marketplaces', return_value=None)
+    def test_builtin_channel_resolves_via_hardcoded_dict(self, _mock):
         state_dir = self._state_dir_with_env('discord')
         config = {'channels': {'discord': {'enabled': True, 'state_dir': state_dir}}}
         cmd = hermit_start.build_claude_command(config, self._tools())
         self.assertIn('--channels', cmd)
         self.assertIn('plugin:discord@claude-plugins-official', cmd)
 
-    def test_third_party_channel_uses_config_marketplace(self):
+    @patch.object(hermit_start, '_fetch_registered_marketplaces', return_value=None)
+    def test_third_party_channel_uses_config_marketplace(self, _mock):
         state_dir = self._state_dir_with_env('matrix')
         config = {
             'channels': {
@@ -255,7 +266,8 @@ class TestBuildClaudeCommandChannels(_TempDirTest):
                 f'unexpected built-in resolution for third-party channel: {tok}',
             )
 
-    def test_unknown_channel_without_marketplace_falls_through(self):
+    @patch.object(hermit_start, '_fetch_registered_marketplaces', return_value=None)
+    def test_unknown_channel_without_marketplace_falls_through(self, _mock):
         # No CHANNEL_PLUGINS entry, no channels.<name>.marketplace → bare name appended.
         # This preserves prior behaviour (claude will reject it) but is now accompanied
         # by a clearer warning pointing at the marketplace fix.
@@ -265,6 +277,63 @@ class TestBuildClaudeCommandChannels(_TempDirTest):
         self.assertIn('--channels', cmd)
         self.assertIn('signal', cmd)
         self.assertNotIn('plugin:signal@claude-plugins-official', cmd)
+
+    @patch.object(hermit_start, '_fetch_registered_marketplaces')
+    def test_registered_marketplace_passes_through(self, mock_fetch):
+        mock_fetch.return_value = [
+            {'name': 'claude-plugins-official', 'repo': 'anthropics/claude-plugins-official'},
+        ]
+        state_dir = self._state_dir_with_env('discord')
+        config = {'channels': {'discord': {'enabled': True, 'state_dir': state_dir}}}
+        cmd = hermit_start.build_claude_command(config, self._tools())
+        self.assertIn('--channels', cmd)
+        self.assertIn('plugin:discord@claude-plugins-official', cmd)
+
+    @patch.object(hermit_start, '_fetch_registered_marketplaces')
+    def test_unregistered_marketplace_warns_and_drops(self, mock_fetch):
+        mock_fetch.return_value = [
+            {'name': 'claude-plugins-official', 'repo': 'anthropics/claude-plugins-official'},
+        ]
+        state_dir = self._state_dir_with_env('matrix')
+        config = {'channels': {'matrix': {
+            'enabled': True, 'state_dir': state_dir,
+            'marketplace': 'someone-fork',
+        }}}
+        cmd, out = self._capture(
+            lambda: hermit_start.build_claude_command(config, self._tools()))
+        self.assertNotIn('plugin:matrix@someone-fork', cmd)
+        self.assertNotIn('--channels', cmd)
+        self.assertIn('matrix', out)
+        self.assertIn('someone-fork', out)
+        self.assertIn('not registered', out)
+        self.assertIn('claude plugin marketplace add', out)
+
+    @patch.object(hermit_start, '_fetch_registered_marketplaces')
+    def test_unregistered_marketplace_repo_match_redirects(self, mock_fetch):
+        mock_fetch.return_value = [
+            {'name': 'matrix-plugin-official', 'repo': 'someone/matrix-plugin'},
+        ]
+        state_dir = self._state_dir_with_env('matrix')
+        config = {'channels': {'matrix': {
+            'enabled': True, 'state_dir': state_dir,
+            'marketplace': 'someone/matrix-plugin',
+        }}}
+        cmd, out = self._capture(
+            lambda: hermit_start.build_claude_command(config, self._tools()))
+        self.assertNotIn('plugin:matrix@someone/matrix-plugin', cmd)
+        self.assertIn('matrix-plugin-official', out)
+        self.assertIn('repo', out.lower())
+
+    @patch.object(hermit_start, '_fetch_registered_marketplaces', return_value=None)
+    def test_channel_starting_with_dash_is_dropped(self, _mock):
+        state_dir = self._state_dir_with_env('--evil')
+        config = {'channels': {'--evil': {'enabled': True, 'state_dir': state_dir}}}
+        cmd, out = self._capture(
+            lambda: hermit_start.build_claude_command(config, self._tools()))
+        self.assertNotIn('--evil', cmd)
+        self.assertNotIn('--channels', cmd)
+        self.assertIn('--evil', out)
+        self.assertIn('-', out)
 
 
 class TestWriteSettingsEnv(_TempDirTest):

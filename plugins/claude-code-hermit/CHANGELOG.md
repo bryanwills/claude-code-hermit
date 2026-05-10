@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`hermit-start`: marketplace pre-flight for `--channels` (PROP-005).** Boot now runs `claude plugin marketplace list --json` once per `build_claude_command` call and validates every `plugin:<name>@<marketplace>` token. Unregistered marketplaces produce a loud `[hermit] WARNING` naming the missing marketplace and remediation (`claude plugin marketplace add <repo>`), and the channel is dropped from `--channels` rather than silently passed to claude — which would ignore the unknown marketplace and boot with no channels active, leaving the operator wondering why DMs go nowhere. The pre-flight also catches the common operator-confusion mode where `channels.<name>.marketplace` is set to a *repo* (e.g. `someone/matrix-plugin`) instead of a marketplace *name*: when the configured value matches a registered repo, the warning names the correct marketplace name to use in `config.json`. Fail-soft — if `claude` is missing or returns unexpected output, pre-flight is skipped and behavior is byte-identical to before.
+- **`hermit-start`: refuse channel names starting with `-` as bare args.** Defense-in-depth against future `claude` versions that might loosen flag-vs-arg validation. Today claude rejects untagged channel args downstream, so this guard isn't fixing a live bug — it just keeps the contract local to `hermit-start` rather than relying on downstream validation.
+
 ## [1.0.35] - 2026-05-09
 
 ### Fixed

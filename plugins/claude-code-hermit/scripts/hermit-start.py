@@ -243,6 +243,35 @@ CHANNEL_PLUGINS = {
 }
 
 
+def _fetch_registered_marketplaces():
+    """Return registered marketplaces as [{'name': str, 'repo': str|None}, ...].
+
+    Returns None when the call fails or the output is unrecognized — caller
+    must treat None as "skip pre-flight" (fail-soft). A returned list (even
+    empty) means the check ran and is authoritative.
+    """
+    try:
+        result = subprocess.run(
+            ['claude', 'plugin', 'marketplace', 'list', '--json'],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+        if not isinstance(data, list):
+            return None
+        entries = []
+        for item in data:
+            if isinstance(item, dict) and isinstance(item.get('name'), str):
+                entries.append({
+                    'name': item['name'],
+                    'repo': item.get('repo') if isinstance(item.get('repo'), str) else None,
+                })
+        return entries
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
 def iter_channel_configs(config):
     """Yield (name, cfg) for channels whose config is a valid dict."""
     channels = config.get('channels', {})
@@ -293,8 +322,11 @@ def build_claude_command(config, tools):
             active_channels.append(channel)
 
         if active_channels:
-            cmd.append('--channels')
             channel_cfgs = {name: cfg for name, cfg in iter_channel_configs(config)}
+            registered = _fetch_registered_marketplaces()  # None = skip pre-flight
+            registered_names = {e['name'] for e in registered} if registered else set()
+
+            channel_args = []
             for channel in active_channels:
                 plugin_id = CHANNEL_PLUGINS.get(channel)
                 if not plugin_id:
@@ -303,13 +335,47 @@ def build_claude_command(config, tools):
                     marketplace = channel_cfgs.get(channel, {}).get('marketplace')
                     if marketplace:
                         plugin_id = f'plugin:{channel}@{marketplace}'
+
                 if plugin_id:
-                    cmd.append(plugin_id)
+                    if registered is not None:
+                        _, sep, marketplace_name = plugin_id.partition('@')
+                        if sep and marketplace_name:
+                            if marketplace_name not in registered_names:
+                                repo_match = next(
+                                    (e for e in registered if e.get('repo') == marketplace_name),
+                                    None,
+                                )
+                                if repo_match:
+                                    print(f'[hermit] WARNING: channel "{channel}" — '
+                                          f'"{marketplace_name}" is a repo path, not a '
+                                          f'marketplace name.')
+                                    print(f'[hermit]   That repo IS registered as '
+                                          f'"{repo_match["name"]}".')
+                                    print(f'[hermit]   Fix: set channels.{channel}.marketplace'
+                                          f' = "{repo_match["name"]}" in config.json')
+                                else:
+                                    print(f'[hermit] WARNING: channel "{channel}" — '
+                                          f'marketplace "{marketplace_name}" is not '
+                                          f'registered with claude.')
+                                    print(f'[hermit]   Fix: claude plugin marketplace add '
+                                          f'<repo>')
+                                print(f'[hermit]   Dropping "{channel}" from --channels to '
+                                      f'avoid silent boot with no channels active.')
+                                continue
+                    channel_args.append(plugin_id)
                 else:
+                    if channel.startswith('-'):
+                        print(f'[hermit] WARNING: channel "{channel}" starts with "-" — '
+                              f'refusing to pass as a bare arg (looks like a CLI flag).')
+                        continue
                     print(f'[hermit] WARNING: unrecognized channel "{channel}" — '
                           f'expected discord, telegram, or imessage '
                           f'(or set channels.{channel}.marketplace in config.json)')
-                    cmd.append(channel)
+                    channel_args.append(channel)
+
+            if channel_args:
+                cmd.append('--channels')
+                cmd.extend(channel_args)
 
     # Add remote control for web/mobile access (with session name)
     if config.get('remote', False):
