@@ -65,6 +65,7 @@ Routines replace the old `heartbeat.morning_routine` / `heartbeat.evening_routin
 | `proposal-list`   | All proposals with status, source, and age. Auto-detected proposals listed first. Stale proposals (10+ sessions) get flagged.                                                            | "what have you noticed", "any improvements", "any proposals" |
 | `proposal-act`    | Accept, defer, or dismiss. Accepting creates a NEXT-TASK.md for the next idle pickup.                                                                                                    | "accept PROP-", "dismiss PROP-", "defer PROP-"               |
 | `reflect`         | Reflects on accumulated experience to surface recurring patterns. Uses memory as primary input — no report prerequisite. Runs at task boundaries, heartbeat idle checks, and end of day. | --                                                           |
+| `capability-brainstorm` | On-demand hermit-voice brainstorm: synthesizes memory, available capabilities, recent compiled artifacts, and codebase shape into at most 2 capability ideas, each gated by proposal-triage. | "brainstorm capabilities", "what could you be doing for me?", "any capability ideas?" |
 
 ## Configuration
 

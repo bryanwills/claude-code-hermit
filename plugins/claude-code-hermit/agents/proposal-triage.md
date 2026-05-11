@@ -22,7 +22,7 @@ You are a proposal gate. You receive a candidate proposal (title + evidence summ
 The caller passes a candidate proposal as:
 ```
 Title: <title>
-Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request
+Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request | capability-brainstorm
 Evidence: <one-paragraph evidence summary>
 ```
 
@@ -64,10 +64,11 @@ Glob `.claude-code-hermit/compiled/*.md`. Read YAML frontmatter (`title`, `type`
 Only if no duplicate found and no memory match, check applicable conditions:
 
 1. **Repeated pattern** — is the evidence concrete and observed more than once, across sessions?
-   - **Skip for `scheduled-check/*`, `operator-request`, and `current-session`** sources:
+   - **Skip for `scheduled-check/*`, `operator-request`, `current-session`, and `capability-brainstorm`** sources:
      - `scheduled-check/*`: the check's own interval analysis establishes the pattern; cross-session recurrence is not required.
      - `operator-request`: human-initiated; recurrence is not required.
      - `current-session`: recurrence was validated upstream by `reflection-judge`; do not re-check here.
+     - `capability-brainstorm`: the brainstorm pass establishes the candidate; cross-session recurrence is not required.
    - **Required for `archived-session`** (or absent field): a single incident does not qualify.
 2. **Meaningful consequence** — does something actually go wrong without fixing this? (Mild inconvenience does not qualify.) Always required.
 3. **Operator-actionable change** — is there something the operator can concretely approve and implement? (Vague improvements do not qualify.) Always required.
