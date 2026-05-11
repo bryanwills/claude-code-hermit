@@ -2,7 +2,7 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.1.1] - 2026-05-11
 
 ### Added
 
@@ -20,6 +20,7 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 - **Migrated project-root `MEMORY.md` / `memory/` references to the right storage location for each value** — house profile, learned patterns, known issues, and cross-session suppression signals (in `ha-pattern-analyst` / `ha-safety-reviewer`) now live in Claude Code's platform auto memory (`~/.claude/projects/<key>/memory/`), which loads automatically at session start. The three agents (`ha-automation-builder`, `ha-pattern-analyst`, `ha-safety-reviewer`) already declared `memory: project` frontmatter — their body instructions now match. No more manual `MEMORY.md` reads/writes for Claude-derived knowledge.
 - **Locale now lives in `.claude-code-hermit/OPERATOR.md` under a `## HA hermit` section, not auto memory** — locale is operator-set config, not Claude-derived knowledge: it should survive project moves, be CLI-readable, and be visible to the operator. `boot status` reports the language again (`BootStatus.language` / `BootStatus.needs_language` restored); the setup checklist's `Language` entry points at `.claude-code-hermit/OPERATOR.md`. `boot store --language <locale>` writes to OPERATOR.md, creating the `## HA hermit` section on first use. Future HA operator preferences (room defaults, alert channels, etc.) belong under the same section.
+- **deps: bump core requirement to `>=1.0.37` / `^1.0.37`** — was `>=1.0.32`; aligns with core v1.0.37 release.
 
 ### Design notes
 
@@ -45,6 +46,8 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 | `tests/test_safety_hook.py` | New hook tests asserting `permissionDecision: "ask"` JSON output under ask mode |
 | `tests/test_config.py` | Updated 3 tests to use `Severity` enum return type |
 | `tests/conftest.py` | New `make_ha_config` factory fixture |
+| `.claude-plugin/hermit-meta.json` | `required_core_version` and `requires.claude-code-hermit` bumped `>=1.0.32` → `>=1.0.37` |
+| `.claude-plugin/plugin.json` | `dependencies[0].version` bumped `^1.0.32` → `^1.0.37` |
 
 ### Upgrade Instructions
 
