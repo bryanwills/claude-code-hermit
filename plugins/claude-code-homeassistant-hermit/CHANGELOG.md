@@ -12,7 +12,11 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 ### Changed
 
-- **Migrated all project-root `MEMORY.md` / `memory/` references to platform auto memory** — skills, agents, `CLAUDE.md`, and `state-templates/CLAUDE-APPEND.md` no longer tell the LLM to manually read or write a project-root `MEMORY.md` file. Language, house profile, learned patterns, and known issues are now stored in and read from Claude Code's platform auto memory (`~/.claude/projects/<key>/memory/`), which loads automatically at session start. The three agents (`ha-automation-builder`, `ha-pattern-analyst`, `ha-safety-reviewer`) already declared `memory: project` frontmatter — their body instructions now match. `boot.py`'s `_setup_checklist` reports the language location as `auto-memory`; the `memory_path()` helper is removed.
+- **Migrated all project-root `MEMORY.md` / `memory/` references to platform auto memory** — skills, agents, `CLAUDE.md`, and `state-templates/CLAUDE-APPEND.md` no longer tell the LLM to manually read or write a project-root `MEMORY.md` file. Language, house profile, learned patterns, and known issues are now stored in and read from Claude Code's platform auto memory (`~/.claude/projects/<key>/memory/`), which loads automatically at session start. The three agents (`ha-automation-builder`, `ha-pattern-analyst`, `ha-safety-reviewer`) already declared `memory: project` frontmatter — their body instructions now match.
+
+### Removed
+
+- **`boot store --language` flag and supporting helpers** — language is now exclusively managed via platform auto memory (set by `hatch` or directly by Claude in conversation). The `--language` flag wrote to project-root `MEMORY.md`, which the skills no longer read after the auto-memory migration; keeping it would have created orphan state. Dropped `read_language`, `write_language`, `LANGUAGE_PATTERN`, and the `Language` entry from `boot status`'s setup checklist and hints. `BootStatus.language` and `BootStatus.needs_language` are removed from the JSON output — operators relying on `boot status` to surface the language should query auto memory directly.
 
 ## [0.1.0] - 2026-05-07
 

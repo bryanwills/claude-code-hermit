@@ -24,7 +24,6 @@ def build_parser() -> argparse.ArgumentParser:
     boot_status_parser = boot_subparsers.add_parser("status")
     boot_status_parser.add_argument("--probe", action="store_true")
     boot_store_parser = boot_subparsers.add_parser("store")
-    boot_store_parser.add_argument("--language")
     boot_store_parser.add_argument("--url")
     boot_store_parser.add_argument("--local-url")
     boot_store_parser.add_argument("--remote-url")
@@ -94,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "boot" and args.boot_command == "store":
-        changes = save_boot_preferences(root, args.language, args.url, args.local_url, args.remote_url, args.token)
+        changes = save_boot_preferences(root, url=args.url, local_url=args.local_url, remote_url=args.remote_url, token=args.token)
         print(json.dumps({"updated": changes}, indent=2))
         return 0
 

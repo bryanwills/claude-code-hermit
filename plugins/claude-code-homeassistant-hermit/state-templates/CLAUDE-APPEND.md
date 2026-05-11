@@ -59,8 +59,9 @@ ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha simulate <artifact>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact> [--reload automation|script]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha policy-check <entity_id_or_yaml>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha audit-automations
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha audit-scripts
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status [--probe]
-${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot store --language <locale> --url <url> [--token <token>]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot store --url <url> [--token <token>]
 ```
 
 ### Environment
