@@ -88,7 +88,7 @@ function checkCostSpike(costLogPath, lastRunAt) {
 function hasAcceptedProposals(stateDir) {
   try {
     const proposalsDir = path.join(stateDir, 'proposals');
-    const files = fs.readdirSync(proposalsDir).filter(f => /^PROP-\d+\.md$/.test(f));
+    const files = fs.readdirSync(proposalsDir).filter(f => /^PROP-\d+(?:-.+)?\.md$/.test(f));
     return files.some(f => {
       try {
         const head = fs.readFileSync(path.join(proposalsDir, f), 'utf-8').slice(0, 1000);

@@ -76,7 +76,7 @@ This file is the **single source of truth** for lifecycle decisions. All scripts
      - `duration`: compute from `**Started:**` timestamp to now (e.g., `2h 15m`, `45m`)
      - `cost_usd`: read `cost_usd` from `.claude-code-hermit/sessions/.status.json`. Fall back to parsing `## Cost` section from SHELL.md (strip `$`, take the number before `(`). Use `0.00` if neither is available.
      - `tags`: from `**Tags:**` field, split on comma, trim whitespace, output as YAML array. E.g., `refactor, frontend` → `[refactor, frontend]`. Use `[]` if empty.
-     - `proposals_created`: scan `## Proposals Created` section for PROP-NNN patterns, output as YAML array. Use `[]` if none.
+     - `proposals_created`: scan `## Proposals Created` section for proposal IDs matching the regex `/PROP-[a-z0-9][a-z0-9-]*/gi` (captures legacy `PROP-006`, short `PROP-006-103612`, and full `PROP-006-capability-brainstorm-103612` / collision `PROP-006-capability-brainstorm-103612a` forms). Output the matched IDs verbatim as a YAML array. Use `[]` if none.
      - `task`: extract the first non-comment, non-empty line from `## Task` in SHELL.md. Trim to 120 characters max. Use `""` if blank.
      - `status`: must be one of `completed`, `partial`, `blocked`. Extract from the `**Status:**` field in SHELL.md. If the value is anything else, normalize to `partial` and add a line to `## Blockers` in the report: `Status normalized: original value \`<value>\` coerced to \`partial\`.`
      - `escalation`: read `escalation` from `.claude-code-hermit/config.json`. If the field is missing or empty, default to `"balanced"`. Allowed values: `conservative`, `balanced`, `autonomous`.
@@ -95,7 +95,7 @@ This file is the **single source of truth** for lifecycle decisions. All scripts
      duration: 1h 20m
      cost_usd: 0.4231
      tags: [bugfix, auth]
-     proposals_created: [PROP-002]
+     proposals_created: [PROP-002-capability-brainstorm-103612]
      task: "Fix authentication token refresh bug in middleware"
      ---
      # Session Report: S-003

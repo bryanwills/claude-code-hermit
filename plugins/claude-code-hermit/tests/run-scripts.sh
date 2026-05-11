@@ -366,6 +366,22 @@ out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-herm
 run_test "reflect-precheck (RUN: resolution_check due)" bash -c "echo '$out' | grep -q 'resolution_check'"
 cleanup
 
+# 24b. RUN — resolution_check due via new-format proposal filename (PROP-NNN-slug-HHMMSS.md)
+workdir="$(setup_workdir)"
+echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"
+echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
+mkdir -p "$workdir/.claude-code-hermit/proposals"
+printf -- '---\nid: PROP-002-test-new-format-103612\nstatus: accepted\naccepted_date: 2026-04-01\ntitle: Test new format\n---\nBody\n' \
+  > "$workdir/.claude-code-hermit/proposals/PROP-002-test-new-format-103612.md"
+today="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+old_date="2026-04-01T00:00:00Z"
+echo "{\"counters\":{\"total_runs\":5,\"empty_runs\":2,\"last_run_at\":\"$today\",\"since\":\"$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))")\"},\"last_resolution_check\":\"$old_date\"}" \
+  > "$workdir/.claude-code-hermit/state/reflection-state.json"
+mkdir -p "$workdir/.claude"
+out="$(node "$REPO_ROOT/scripts/reflect-precheck.js" "$workdir/.claude-code-hermit" "$REPO_ROOT")"
+run_test "reflect-precheck (RUN: resolution_check due — new-format proposal filename)" bash -c "echo '$out' | grep -q 'resolution_check'"
+cleanup
+
 # 25. RUN — compute activity (session report newer than last_run_at)
 workdir="$(setup_workdir)"
 echo '{"timezone":"UTC"}' > "$workdir/.claude-code-hermit/config.json"

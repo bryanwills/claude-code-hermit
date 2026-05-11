@@ -169,7 +169,7 @@ let totalFiles = 0;
 totalFiles += scanDir(sessionsDir, /^S-\d+-REPORT\.md$/, validateSession);
 
 // Proposals
-totalFiles += scanDir(proposalsDir, /^PROP-\d+\.md$/, validateProposal);
+totalFiles += scanDir(proposalsDir, /^PROP-\d+(?:-.+)?\.md$/, validateProposal);
 
 // Reviews
 if (fs.existsSync(reviewsDir)) {

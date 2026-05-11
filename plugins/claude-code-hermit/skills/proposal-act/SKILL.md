@@ -17,6 +17,29 @@ Take action on a proposal: accept, defer, dismiss, or resolve.
 
 If no action or ID is provided, ask the operator which proposal and action.
 
+## Resolving a Proposal ID
+
+Before reading any proposal file, resolve the operator's input to a filename using this algorithm:
+
+1. Trim whitespace and uppercase the input.
+2. Match against `/^PROP-(\d+)(?:-(.+))?$/`. If no match: error "Not a PROP id."
+3. Zero-pad the integer to 3 digits (e.g. `PROP-6` → `PROP-006`).
+4. Build the glob pattern:
+   - If no suffix (e.g. `PROP-006`): `PROP-006*.md` — matches legacy `PROP-006.md` and all new-format files with that integer.
+   - If suffix present (e.g. `PROP-006-103612`): `PROP-006-*103612*.md` — the slug sits between the integer and the timestamp, so bracket the suffix with wildcards.
+5. Glob `.claude-code-hermit/proposals/<pattern>`.
+6. Count the matches:
+   - **0 matches**: error "No proposal matches [input]. Use /proposal-list to see available proposals."
+   - **1 match**: proceed with that file.
+   - **2+ matches**: show a disambiguation prompt:
+     ```
+     Multiple proposals match PROP-NNN:
+       PROP-NNN-capability-brainstorm-103612 — [title of first match]
+       PROP-NNN-session-cost-tracking-104207 — [title of second match]
+     Reply with the full ID to continue.
+     ```
+     Re-resolve with the operator's reply.
+
 ## Timestamp Convention
 
 All timestamps in frontmatter and Operator Decision text use ISO 8601 with timezone offset (e.g., `2026-04-06T14:30:00+01:00`). Use the timezone from `config.json` if set, otherwise UTC.
@@ -25,7 +48,7 @@ All timestamps in frontmatter and Operator Decision text use ISO 8601 with timez
 
 When the operator accepts a proposal:
 
-1. Read the proposal file from `.claude-code-hermit/proposals/PROP-NNN.md`
+1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. Update the YAML frontmatter: set `status` to `accepted`, add `accepted_date` as timestamp. Do NOT set `resolved_date` — resolution happens when reflect confirms the pattern is gone. If the file uses old bullet-point metadata (`- **Status:**`), update that instead.
 2b. **First-response tracking:** Check if the proposal's `responded` field is already `true`. If `false`: set `responded: true` in frontmatter, then append a `responded` event:
    ```
@@ -82,7 +105,7 @@ When the operator accepts a proposal:
 
 ## Defer Flow
 
-1. Read the proposal file
+1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. Update the YAML frontmatter: set `status` to `deferred`, add `deferred_date` as timestamp. Do NOT set `resolved_date` — deferral is not a terminal state. If the file uses old bullet-point metadata (`- **Status:**`), update that instead.
 2b. **First-response tracking:** Same as accept flow — check `responded` field, set to `true` if `false`, append `responded` event with `"action":"defer"`, call `generate-summary.js`. Skip if already `true`.
 3. Ask: "Any note on why it's deferred or when to revisit?" (optional — operator can skip)
@@ -96,7 +119,7 @@ Deferred proposals still appear in `/proposal-list` but are sorted below open pr
 
 ## Dismiss Flow
 
-1. Read the proposal file
+1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. Update the YAML frontmatter: set `status` to `dismissed`, add `dismissed_date` and `resolved_date` as timestamps. If the file uses old bullet-point metadata (`- **Status:**`), update that instead.
 2b. **First-response tracking:** Same as accept flow — check `responded` field, set to `true` if `false`, append `responded` event with `"action":"dismiss"`, call `generate-summary.js`. Skip if already `true`.
 3. Ask: "Reason for dismissal?" (optional — operator can skip)
@@ -112,7 +135,7 @@ Dismissed proposals are hidden from the default `/proposal-list` view. Use "show
 
 Used when reflect has surfaced a sparse-cadence proposal as a resolution candidate (pattern absent from recent sessions but cadence too infrequent to auto-resolve). Also available directly: `/claude-code-hermit:proposal-act resolve PROP-NNN`.
 
-1. Read the proposal file
+1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. Update the YAML frontmatter: set `status` to `resolved`, `resolved_date` to current timestamp. Do NOT set `dismissed_date`. If the file uses old bullet-point metadata (`- **Status:**`), update that instead.
 3. Append a `resolved` event to proposal-metrics.jsonl:
    ```

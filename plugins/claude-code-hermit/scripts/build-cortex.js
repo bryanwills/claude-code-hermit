@@ -29,7 +29,7 @@ const sessions = sessionFiles
 
 // --- Load proposals ---
 const proposalsDir = path.join(hermitDir, 'proposals');
-const proposalFiles = globDir(proposalsDir, /^PROP-\d+\.md$/);
+const proposalFiles = globDir(proposalsDir, /^PROP-\d+(?:-.+)?\.md$/);
 const proposals = proposalFiles
   .map(f => ({ file: f, fm: readFrontmatter(f) }))
   .filter(p => p.fm && p.fm.id)

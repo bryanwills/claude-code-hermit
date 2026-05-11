@@ -21,7 +21,7 @@ async function run() {
   if (!fs.existsSync(OBSIDIAN_DIR)) return;
 
   const sessionFiles = globDir(path.join(HERMIT_DIR, 'sessions'), /^S-\d+-REPORT\.md$/);
-  const proposalFiles = globDir(path.join(HERMIT_DIR, 'proposals'), /^PROP-\d+\.md$/);
+  const proposalFiles = globDir(path.join(HERMIT_DIR, 'proposals'), /^PROP-\d+(?:-.+)?\.md$/);
 
   const inputMtimes = [
     ...sessionFiles.map(fileMtime),

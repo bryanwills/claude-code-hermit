@@ -34,12 +34,12 @@ Determine the current session number from the highest S-NNN-REPORT.md in `sessio
 ### 4. Display as table
 
 ```
-| ID       | Status   | Source        | Category    | Age          | Summary                          |
-|----------|----------|---------------|-------------|--------------|----------------------------------|
-| PROP-020 | proposed | auto-detected | improvement | 1 session    | [tag-correlation] Frontend blocked |
-| PROP-019 | proposed | auto-detected | routine     | 3 sessions   | [blocker] Test env recurring     |
-| PROP-015 | proposed | manual        | improvement | 12 sessions  | ⚠ Refactor auth module           |
-| PROP-012 | accepted | manual        | capability  | 20 sessions  | Add retry logic                  |
+| ID                                       | Status   | Source        | Category    | Age          | Summary                          |
+|------------------------------------------|----------|---------------|-------------|--------------|----------------------------------|
+| PROP-020-tag-correlation-103612          | proposed | auto-detected | improvement | 1 session    | [tag-correlation] Frontend blocked |
+| PROP-019-test-env-recurring-091455       | proposed | auto-detected | routine     | 3 sessions   | [blocker] Test env recurring     |
+| PROP-015-refactor-auth-module-142233     | proposed | manual        | improvement | 12 sessions  | ⚠ Refactor auth module           |
+| PROP-012                                 | accepted | manual        | capability  | 20 sessions  | Add retry logic (legacy ID)      |
 ```
 
 Ordering:

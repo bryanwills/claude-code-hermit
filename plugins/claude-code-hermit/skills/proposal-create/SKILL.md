@@ -46,15 +46,24 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js \
 
 ## How to Create
 
-1. Determine the next proposal ID:
+1. Determine the next proposal ID and creation timestamp:
    - List all `.claude-code-hermit/proposals/PROP-*.md` files
-   - Extract the highest NNN number, increment by 1
-   - If none exist, use `PROP-001`
-   - Format: `PROP-NNN` with zero-padded 3-digit number
+   - Extract the integer from each filename (regex `PROP-(\d+)`), take the max, add 1; zero-pad to 3 digits. If none exist, start at `001`.
+   - Capture current time as `HHMMSS` (6 digits, zero-padded) in the `timezone` from `config.json`, or UTC if unset.
+   - Canonical ID: `PROP-NNN-<slug>-HHMMSS` (e.g. `PROP-009-capability-brainstorm-103612`). This is what goes in frontmatter `id:` and in all cross-references. The ID equals the filename stem — there is no separate short form in the file.
 
-2. Create `.claude-code-hermit/proposals/PROP-NNN.md` using `.claude-code-hermit/templates/PROPOSAL.md.template`:
+2. Build the filename and create the proposal file:
+   - Generate a slug from the title:
+     a. Drop non-ASCII characters, lowercase.
+     b. Replace every run of non-`[a-z0-9]` characters with a single space.
+     c. Split into tokens; drop stopwords: `a an the and or of for to in on with by from as is are`.
+     d. If filter leaves zero tokens, fall back to the pre-filter token list.
+     e. Take the first 5 tokens; join with `-`; truncate to 40 chars at a word boundary (drop trailing tokens until ≤40 chars; if a single token exceeds 40, hard-cut it).
+   - Target filename: `PROP-NNN-<slug>-HHMMSS.md` (e.g. `PROP-009-capability-brainstorm-103612.md`).
+   - If the target filename already exists (same-second collision), append `a` to both the filename (`...-HHMMSSa.md`) and the `id` field (`PROP-NNN-slug-HHMMSSa`).
+   - Create `.claude-code-hermit/proposals/PROP-NNN-<slug>-HHMMSS.md` using `.claude-code-hermit/templates/PROPOSAL.md.template`:
    - Write YAML frontmatter with:
-     - `id`: the assigned PROP-NNN
+     - `id`: the canonical ID `PROP-NNN-<slug>-HHMMSS` (or `PROP-NNN-<slug>-HHMMSSa` if the collision guard fired) — equals the filename stem without `.md`
      - `status`: `proposed`
      - `source`: `manual` (default), `auto-detected` (when invoked by `reflect`), or `operator-request` (when triggered by a direct operator request). This field records **proposal origin only** — gate bypass is controlled by the caller-supplied `Evidence Source:` above, not by `source:`.
      - `session`: the current session ID (S-NNN)
@@ -77,7 +86,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js \
 
 4. Append a `created` event to proposal metrics (include `source` and `category` from the frontmatter):
    ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"created","proposal_id":"PROP-NNN","source":"manual","category":"improvement"}'
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"created","proposal_id":"PROP-NNN-slug-HHMMSS","source":"manual","category":"improvement"}'
    ```
 5. Update state summary:
    ```

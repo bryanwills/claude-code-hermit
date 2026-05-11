@@ -885,5 +885,50 @@ class TestMonitorsValidation(unittest.TestCase):
         self.assertTrue(cmd_err, f'expected missing command error, got {out}')
 
 
+class TestProposalIdScheme(unittest.TestCase):
+    """Contract tests for PROP-008 collision-safe proposal IDs.
+
+    Guards against silent regressions: scripts narrowing the filename regex back
+    to the legacy-only form, or session-mgr losing the full-ID capture pattern.
+    """
+
+    WIDENED_REGEX = r'/^PROP-\d+(?:-.+)?\.md$/'
+    SESSION_MGR_REGEX = r'/PROP-[a-z0-9][a-z0-9-]*/gi'
+
+    SCRIPTS_WITH_PROPOSAL_GLOB = [
+        'reflect-precheck.js',
+        'build-cortex.js',
+        'cortex-refresh-stage.js',
+        'weekly-review.js',
+        'validate-frontmatter.js',
+        'doctor-check.js',
+    ]
+
+    def test_scripts_use_widened_proposal_regex(self):
+        """All six proposal-scanning scripts must contain the widened filename regex."""
+        for script in self.SCRIPTS_WITH_PROPOSAL_GLOB:
+            path = SCRIPTS / script
+            self.assertTrue(path.exists(), f'{script} not found')
+            content = path.read_text()
+            self.assertIn(
+                self.WIDENED_REGEX,
+                content,
+                f'{script} is missing the widened proposal regex — '
+                f'new-format PROP-NNN-slug-HHMMSS.md files would be silently dropped',
+            )
+
+    def test_session_mgr_captures_full_proposal_id(self):
+        """session-mgr must use a regex that captures the full PROP-NNN-slug-HHMMSS form."""
+        path = REPO / 'agents' / 'session-mgr.md'
+        self.assertTrue(path.exists(), 'agents/session-mgr.md not found')
+        content = path.read_text()
+        self.assertIn(
+            self.SESSION_MGR_REGEX,
+            content,
+            'session-mgr.md is missing the full-ID capture regex — '
+            'new-format IDs would be truncated to PROP-NNN in session reports',
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

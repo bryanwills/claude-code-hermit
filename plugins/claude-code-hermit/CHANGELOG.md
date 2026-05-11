@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Collision-safe proposal IDs for multi-user hermits (PROP-008).** Proposal IDs now use the composite form `PROP-NNN-<slug>-HHMMSS` where the ID equals the filename stem (e.g. ID `PROP-009-capability-brainstorm-103612`, file `PROP-009-capability-brainstorm-103612.md`). The slug (up to 5 content words, kebab-cased) is part of the identity — it appears in Discord notifications, session-report cross-references, and channel messages so the operator can identify a proposal at a glance without opening it. The `HHMMSS` timestamp gives collision-safety. If a same-second collision fires, an `a` suffix is appended after the timestamp (`PROP-009-capability-brainstorm-103612a`). The change is git-merge-safe by construction: two operators concurrently creating proposals produce different filenames and both land cleanly.
+- **`/proposal-act` uses prefix-glob resolution** instead of exact-match file reads. `accept PROP-009` globs `PROP-009*.md`, matching legacy `PROP-009.md` and any new-format file with that integer. The operator can also type `accept PROP-009-103612` (timestamp-only) and the wildcard brackets the slug. If multiple files match (e.g. after a concurrent-creation merge), a disambiguation prompt lists each match's title. Existing short-form muscle memory (`accept PROP-NNN`) is unchanged.
+- **Legacy `PROP-NNN.md` files continue to work** — no migration, no rename. All resolution, listing, and cortex scripts accept both the old and new filename forms.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/proposal-create/SKILL.md` | New ID generation (ID = filename stem `PROP-NNN-slug-HHMMSS`), slug algorithm, collision `a` fallback |
+| `skills/proposal-act/SKILL.md` | Prefix-glob resolution algorithm with disambiguation prompt |
+| `skills/proposal-list/SKILL.md` | Example table updated to show new-format IDs alongside legacy |
+| `state-templates/PROPOSAL.md.template` | `id:` placeholder updated to `PROP-NNN-slug-HHMMSS` |
+| `agents/session-mgr.md` | `proposals_created` scan regex updated to capture full `PROP-NNN-slug-HHMMSS[a]` form |
+| `scripts/reflect-precheck.js` | Widened proposal filename regex to accept new-format files |
+| `scripts/build-cortex.js` | Widened proposal filename regex |
+| `scripts/cortex-refresh-stage.js` | Widened proposal filename regex |
+| `scripts/weekly-review.js` | Widened proposal filename regex |
+| `scripts/validate-frontmatter.js` | Widened proposal filename regex |
+| `scripts/doctor-check.js` | Widened proposal filename regex |
+
 ## [1.0.36] - 2026-05-10
 
 ### Added

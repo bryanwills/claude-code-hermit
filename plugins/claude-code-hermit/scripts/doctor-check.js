@@ -154,7 +154,7 @@ function checkProposals() {
     if (!fs.existsSync(proposalsDir)) {
       return { id: 'proposals', status: 'ok', detail: 'proposals/ empty (fresh install)' };
     }
-    const files = globDir(proposalsDir, /^PROP-\d+\.md$/);
+    const files = globDir(proposalsDir, /^PROP-\d+(?:-.+)?\.md$/);
     const now = Date.now();
     const STALE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
     let open = 0;
