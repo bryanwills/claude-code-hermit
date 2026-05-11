@@ -1,6 +1,9 @@
 # Local Claude Code overrides — operator-specific workflow notes
 CLAUDE.local.md
 
+# Claude worktrees
+.claude/worktrees/
+
 # Cost tracking logs
 .claude/cost-log.jsonl
 
