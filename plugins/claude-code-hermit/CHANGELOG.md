@@ -4,7 +4,7 @@
 
 ### Added
 
-- **`capability-brainstorm` skill (PROP-007).** On-demand hermit-voice brainstorm that synthesizes memory, available capabilities (MCPs, channels, fleet plugins), recent compiled artifacts, and codebase shape into at most 2 capability ideas. Each idea routes through the standard `proposal-triage` gate via a single `/proposal-create` call (`Evidence Source: hermit-synthesis`) before becoming a PROP — no double-triage. Emit-zero is a valid outcome. Zero-emit runs log a one-line note to SHELL.md Findings and skip the compiled artifact; non-empty runs write `compiled/capability-brainstorm-YYYY-MM-DD-HHMM.md`. `channel-responder` classifies "what could you be doing for me?" phrasings as brainstorm triggers. Kill criteria documented in the skill: after ≥8 invocations, if triage-survival < 25% or PROP-acceptance < 30%, cut rather than tune.
+- **`capability-brainstorm` skill (PROP-007).** On-demand hermit-voice brainstorm that synthesizes memory, available capabilities (MCPs, channels, fleet plugins), recent compiled artifacts, and codebase shape into at most 2 capability ideas. Each idea routes through the standard `proposal-triage` gate via a single `/proposal-create` call (`Evidence Source: capability-brainstorm`) before becoming a PROP — no double-triage. Emit-zero is a valid outcome. Zero-emit runs log a one-line note to SHELL.md Findings and skip the compiled artifact; non-empty runs write `compiled/capability-brainstorm-YYYY-MM-DD-HHMM.md`. `channel-responder` classifies "what could you be doing for me?" phrasings as brainstorm triggers. Kill criteria documented in the skill: after ≥8 invocations, if triage-survival < 25% or PROP-acceptance < 30%, cut rather than tune.
 
 ## [1.0.36] - 2026-05-10
 

@@ -42,7 +42,7 @@ For each generated idea, invoke `/proposal-create` once with:
 
 ```
 Title: <short idea title>
-Evidence Source: hermit-synthesis
+Evidence Source: capability-brainstorm
 Evidence: <one-paragraph summary: friction + grounding items>
 ```
 
