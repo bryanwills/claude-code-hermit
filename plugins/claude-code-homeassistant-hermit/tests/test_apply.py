@@ -32,6 +32,15 @@ actions:
       entity_id: lock.front_door
 """.strip()
 
+SENSITIVE_ALARM_YAML = """
+id: disarm_home
+alias: Disarm
+actions:
+  - service: alarm_control_panel.alarm_disarm
+    target:
+      entity_id: alarm_control_panel.home
+""".strip()
+
 SCRIPT_YAML = """
 id: my_script
 alias: Safe script
@@ -314,3 +323,23 @@ def test_extract_ha_error_message_falls_back_on_non_json():
 def test_extract_ha_error_message_falls_back_on_no_payload():
     exc = HomeAssistantError("connection refused")
     assert extract_ha_error_message(exc) == str(exc)
+
+
+# --- ask-mode regression tests ---
+
+def test_apply_proceeds_under_ask_mode_with_sensitive_entity(make_ha_root):
+    root = make_ha_root(inventory={
+        "entity_index": {
+            "alarm_control_panel.home": {"entity_id": "alarm_control_panel.home", "state": "armed_away"},
+        }
+    })
+    (root / ".claude-code-hermit" / "config.json").write_text('{"ha_safety_mode": "ask"}')
+    artifact = write_artifact(root, SENSITIVE_ALARM_YAML)
+    client = MagicMock()
+    client.post.return_value = {"result": "valid"}
+    client.get.return_value = {"alias": "Disarm"}
+
+    result = validate_and_apply(root, client, artifact, reload_domain="automation")
+
+    assert result.ok
+    client.post.assert_any_call("/api/services/automation/reload", {})

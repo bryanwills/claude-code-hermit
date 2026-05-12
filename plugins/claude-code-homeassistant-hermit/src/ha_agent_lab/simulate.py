@@ -19,19 +19,20 @@ class SimulationResult:
     referenced_services: list[str]
     missing_entities: list[str]
     blocked_reasons: list[str]
+    policy_blocked: bool  # True only when severity == BLOCK (not ASK)
 
     @property
     def is_valid(self) -> bool:
-        return not self.missing_entities and not self.blocked_reasons
+        return not self.missing_entities and not self.policy_blocked
 
 
-def evaluate_yaml_policy(yaml_path: Path) -> tuple[list[str], list[str], PolicyDecision]:
+def evaluate_yaml_policy(yaml_path: Path, root: Path | None = None) -> tuple[list[str], list[str], PolicyDecision]:
     """Load a YAML file, extract references, and evaluate against safety policy."""
     data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
     raw_entities, raw_services = collect_references(data)
     entities = sorted(set(raw_entities))
     services = sorted(set(raw_services))
-    decision = evaluate_references(entities, services)
+    decision = evaluate_references(entities, services, root=root)
     return entities, services, decision
 
 
@@ -43,13 +44,14 @@ def simulate_artifact(root: Path, artifact_path: Path, inventory_path: Path | No
     entities = sorted(set(raw_entities))
     services = sorted(set(raw_services))
     missing_entities = [entity_id for entity_id in entities if entity_id not in entity_index]
-    decision = evaluate_references(entities, services)
+    decision = evaluate_references(entities, services, root=root)
     result = SimulationResult(
         artifact_path=artifact_path,
         referenced_entities=entities,
         referenced_services=services,
         missing_entities=missing_entities,
         blocked_reasons=decision.reasons,
+        policy_blocked=decision.blocked,
     )
     write_simulation_report(root, result)
     return result
@@ -89,7 +91,7 @@ def write_simulation_report(root: Path, result: SimulationResult) -> Path:
     if result.missing_entities:
         body_lines.extend(["", "## Missing Entities", *[f"- {item}" for item in result.missing_entities]])
     if result.blocked_reasons:
-        body_lines.extend(["", "## Blocked Reasons", *[f"- {item}" for item in result.blocked_reasons]])
+        body_lines.extend(["", "## Policy Reasons", *[f"- {item}" for item in result.blocked_reasons]])
     slug = f"audit-ha-simulation-{slugify(result.artifact_path.stem)}"
     return write_markdown_artifact(
         root,

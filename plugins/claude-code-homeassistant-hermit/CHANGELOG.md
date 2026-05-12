@@ -4,6 +4,11 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 ## [Unreleased]
 
+### Fixed
+
+- **`SimulationResult.is_valid` no longer treats ASK-severity policy reasons as hard blocks** — regression missed when the `ask` tier was added in v0.1.1. **Operator action: if you added `alarm_control_panel.*` to `HA_SAFE_ENTITIES` as a workaround, remove it after updating.** Root causes: (1) `simulate_artifact` was calling `evaluate_references` without `root`, so `ha_safety_mode` was always read from `Path.cwd()` instead of the project config; (2) `is_valid` gated on `bool(blocked_reasons)`, but that list includes ASK-severity entries — only BLOCK entries should prevent apply. Fix adds `policy_blocked: bool` (sourced from `PolicyDecision.blocked`, True only for BLOCK) and threads `root` through to `evaluate_references`. Under `ha_safety_mode: ask` the YAML apply pipeline now proceeds after operator confirmation, matching the MCP hook and `ha-apply-change` skill.
+- **`ha policy-check <yaml>` now honors the project's `ha_safety_mode`** — `evaluate_yaml_policy` was calling `evaluate_references` without `root`, so the CLI's policy-check command silently fell back to `Path.cwd()` for policy config. Invoking from a subdirectory degraded to fail-closed `strict`. Fix threads `root` (from `load_config().root`) through the CLI handler and into `evaluate_yaml_policy`. Same class of latent bug as the apply-path fix above; no operator-visible regression reported, fixed for consistency.
+
 ### Changed
 
 - **Hooks: converted `mcp-safety-gate` and `curl-host-gate` to exec form.** Aligns with core's exec-form sweep. Fixes path-with-spaces fragility on installs whose plugin dir contains a space.

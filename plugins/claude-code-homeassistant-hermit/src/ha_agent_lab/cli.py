@@ -81,12 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # policy-check doesn't need HA config
-    if args.command == "ha" and args.ha_command == "policy-check":
-        return _handle_policy_check(args.target)
-
     config = load_config()
     root = config.root
+
+    if args.command == "ha" and args.ha_command == "policy-check":
+        return _handle_policy_check(args.target, root)
 
     if args.command == "boot" and args.boot_command == "status":
         status = boot_status(config, probe=args.probe)
@@ -291,12 +290,12 @@ def _print_safety_audit_summary(summary: dict[str, Any], domain: str = "automati
         print(f"Skipped (404 on config fetch): {len(fetch_failures)}")
 
 
-def _handle_policy_check(target: str) -> int:
+def _handle_policy_check(target: str, root: Path) -> int:
     target_path = Path(target)
     if target_path.exists() and target_path.suffix in (".yaml", ".yml"):
         from .simulate import evaluate_yaml_policy
 
-        entities, services, decision = evaluate_yaml_policy(target_path)
+        entities, services, decision = evaluate_yaml_policy(target_path, root=root)
         print(
             json.dumps(
                 {
