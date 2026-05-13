@@ -4,6 +4,7 @@
 
 ### Changed
 
+- **README and marketplace reframe: git-safety leads, workflow skills demoted to optional.** `git-push-guard` + CLAUDE-APPEND template are now the headline product. The three workflow skills (`/dev-pr`, `/dev-quality`, `/dev-test`) are consolidated into an "Optional workflow scaffolding" block in the README and grouped under "Optional workflow skills" in What's Included. Marketplace description updated to match. `/hatch`'s no-match default flipped from `standard` first to `safety` first — new installs on greenfield projects with no existing commit/PR/release skills detected now land in safety mode by default.
 - **Hooks: converted `git-push-guard` and `record-test-result` to exec form.** Aligns with core's exec-form sweep. Fixes path-with-spaces fragility on installs whose plugin dir contains a space.
 
 ### Upgrade Instructions

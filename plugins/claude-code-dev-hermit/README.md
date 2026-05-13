@@ -7,13 +7,13 @@
 
 # claude-code-dev-hermit
 
-Safety layer for code-writing agents. **Git-safe**, **Agent-agnostic**, **Tests-before-PR**, **Built on `claude-code-hermit`**.
+Strict git-safety hook for any Claude Code agent — blocks force-push, `--no-verify`, and direct push to protected branches. Optional dev workflow skills for greenfield projects.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/gtapps/claude-code-hermit/main/plugins/claude-code-hermit/assets/demo.gif" alt="claude-code-hermit demo (the core hermit — dev-hermit extends it with the safety layer described below)" width="720" />
 </p>
 
-One safety layer for every code-writing agent your hermit spawns — regardless of framework. Ships a `git-push-guard` hook (strict-by-default), `/dev-pr` to close the loop, `/dev-quality` as a pre-wrap quality gate, and a CLAUDE-APPEND template that injects the same rules into your project's `CLAUDE.md`. No built-in implementer — operators bring their own agents (native `Agent` tool, `feature-dev`, custom subagents) and dev-hermit makes sure none of them push to main.
+Installs a `git-push-guard` hook (strict-by-default) and injects git-safety rules into your project's `CLAUDE.md` via a CLAUDE-APPEND template — so every code-writing agent, regardless of framework, can't push to main or bypass hooks. No built-in implementer — bring your own agents. Optional workflow skills (`/dev-pr`, `/dev-quality`, `/dev-test`) are available for greenfield projects that don't already have their own commit/PR/release conventions.
 
 ```
 # Install
@@ -37,13 +37,9 @@ claude plugin install claude-code-dev-hermit@claude-code-hermit --scope project
 
 **Works with any agent.** The CLAUDE-APPEND.md template, injected into your project's `CLAUDE.md`, gives every code-writing agent the same rules: clean tree before starting, branch from `protected_branches[0]`, name as `<prefix>/<slug>`, run the configured test command before declaring done, re-run after `/simplify`, revert on regression. Native `Agent` tool, `feature-dev:code-architect`, your own subagent — they all read the same rules.
 
-**`/dev-pr` to close the loop.** Pushes the current feature branch and opens a PR with a body assembled inline from your commits, last test result, screenshots, and an optional project PR template. Refuses on protected branches, dirty trees, or zero commits ahead. Calls `gh pr create` (GitHub), `glab mr create` (GitLab), or a custom command configured at `/hatch`.
+**Optional workflow scaffolding.** For greenfield projects without their own commit/PR/release conventions: `/dev-pr` pushes the branch and opens a PR assembled from commits + last test result + screenshots (`gh pr create` for GitHub, `glab mr create` for GitLab, or a custom command). `/dev-quality` runs `/simplify` on the diff and re-runs `commands.test` before you commit. `/dev-test` runs the configured suite and records the result so `/dev-pr` only opens PRs after tests pass at the current commit. If your project already has its own `/commit`, `/create-pr`, or `/release` skills, skip these — `/hatch` detects them and defaults to safety mode.
 
-**Pre-wrap quality gate.** `/dev-quality` runs `/simplify` on the diff, re-runs `commands.test`, and reports pass/fail. Suggests `/code-review` if available — never invokes it.
-
-**Mid-task verification.** `/dev-test` runs the configured suite and records the result so `/dev-pr` only opens PRs after tests have actually passed on the current commit.
-
-That's it. Three skills + one hook + one template. Whatever you don't need from a typical dev-server lifecycle (the watchdog, the worktree dance, an implementer agent) — gone. Operators bring their own `tmux`, `npm run dev`, `tail -f`, and however they like to spawn agents.
+That's it. One hook + one template, with optional workflow skills on top. Whatever you don't need — gone.
 
 ---
 
@@ -115,12 +111,15 @@ See [docs/GIT-SAFETY.md](docs/GIT-SAFETY.md) for the full safety model and the t
 
 ## What's Included
 
+- **`git-push-guard` hook** — Strict-profile-only `PreToolUse` Bash hook. Blocks the dangerous git operations listed above.
+- **`state-templates/CLAUDE-APPEND.md`** — Injected into your project's `CLAUDE.md` by `/hatch`. The rules-of-the-road every agent reads when working on this project.
 - **`hatch` skill** — One-time setup wizard. Idempotent and re-runnable. Captures test/lint/format/protected/PR-template/hook-profile. Installs `git-push-guard` at strict by default.
+
+**Optional workflow skills** (for greenfield projects — skip if you already have your own `/commit`, `/create-pr`, or `/release` skills):
+
 - **`dev-pr` skill** — Push the current feature branch and open a PR with body assembled from commits + last test result + screenshots + optional project template. Runs tests automatically on cache miss — fresh HEAD pass hits instantly; anything else triggers the test runner.
 - **`dev-quality` skill** — Pre-wrap quality gate. Runs `/simplify` on the diff, re-runs `commands.test`, and reports pass/fail. Suggests `/code-review` if available — never invokes it.
 - **`dev-test` skill** — Run the configured test suite and record the result to `last-test.json`. Useful for mid-task verification and warming the `/dev-pr` cache.
-- **`git-push-guard` hook** — Strict-profile-only `PreToolUse` Bash hook. Blocks the dangerous git operations listed above.
-- **`state-templates/CLAUDE-APPEND.md`** — Injected into your project's `CLAUDE.md` by `/hatch`. The rules-of-the-road every agent reads when working on this project.
 
 ---
 

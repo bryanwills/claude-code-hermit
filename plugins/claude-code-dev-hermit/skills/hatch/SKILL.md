@@ -61,7 +61,7 @@ questions: [
 When building the options array at runtime:
 - If `hatch_mode` is already set in `config.json`, prepend `Keep current (<value>)` as the first (recommended) option.
 - If the capability scan matched one or more skill dirs, surface `safety (recommended)` with the detected names; present `standard` as the alternative.
-- If no scan match, present `standard` first (no existing project skills detected) and `safety` as the alternative.
+- If no scan match, present `safety` first and `standard` as the alternative.
 
 ### 3. Update CLAUDE.md dev block
 
