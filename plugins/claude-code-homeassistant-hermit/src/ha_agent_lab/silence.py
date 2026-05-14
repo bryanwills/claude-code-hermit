@@ -6,24 +6,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .time_utils import days_since, parse_iso
+
 _EVENT_SENSOR_DEVICE_CLASSES = frozenset({"motion", "door", "window", "opening", "occupancy"})
+# `climate` is retained here for visibility into HVAC entities that haven't received
+# a state change in weeks (broken schedule, dead controller). Expect a higher false-positive
+# rate than the other domains — climate state is often legitimately stable. The bucket is
+# informational only (Markdown artifact); the canonical HVAC signal is `state_durations`
+# from `snapshot-ha-history-*-latest.json`.
 _INACTIVE_CANDIDATE_DOMAINS = frozenset({"light", "switch", "cover", "climate"})
-
-
-def _parse_iso(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts)
-    except (ValueError, TypeError):
-        return None
-
-
-def _days_since(now: datetime, then: datetime | None) -> int | None:
-    if then is None:
-        return None
-    delta = now - then.astimezone(UTC)
-    return int(delta.total_seconds() // 86400)
 
 
 def _load_degraded_entity_domains(root: Path) -> set[str]:
@@ -47,17 +38,26 @@ def _classify_automation(
 ) -> dict[str, Any] | None:
     """Return a dead-automation payload for enabled automations past the threshold, else None.
 
-    Disabled automations (state == 'off') are dropped silently.
+    Disabled automations (state == 'off') are dropped silently. Newly-enabled automations
+    that have never fired are also dropped: a never_fired:True classification only counts
+    once `last_changed` (creation or enable time) is at least dead_threshold_days old.
+    Without that gate, a freshly-created automation would be flagged immediately.
     """
     if entity.get("state") != "on":
         return None
     attrs = entity.get("attributes") or {}
     last_triggered_raw = attrs.get("last_triggered")
-    last_triggered = _parse_iso(last_triggered_raw)
-    days = _days_since(now, last_triggered)
+    last_triggered = parse_iso(last_triggered_raw)
+    days = days_since(now, last_triggered)
     never_fired = last_triggered is None
-    if not never_fired and (days is None or days < dead_threshold_days):
+
+    if never_fired:
+        last_changed_days = days_since(now, parse_iso(entity.get("last_changed")))
+        if last_changed_days is None or last_changed_days < dead_threshold_days:
+            return None
+    elif days is None or days < dead_threshold_days:
         return None
+
     return {
         "entity_id": entity["entity_id"],
         "last_triggered": last_triggered_raw,
@@ -72,8 +72,8 @@ def _classify_event_sensor(entity: dict[str, Any], now: datetime, stuck_days: in
     device_class = attrs.get("device_class")
     if device_class not in _EVENT_SENSOR_DEVICE_CLASSES:
         return None
-    last_changed = _parse_iso(entity.get("last_changed"))
-    days = _days_since(now, last_changed)
+    last_changed = parse_iso(entity.get("last_changed"))
+    days = days_since(now, last_changed)
     if days is None or days < stuck_days:
         return None
     return {
@@ -127,8 +127,8 @@ def compute_silence_summary(
             continue
 
         if domain in _INACTIVE_CANDIDATE_DOMAINS:
-            last_changed = _parse_iso(entity.get("last_changed"))
-            days = _days_since(now, last_changed)
+            last_changed = parse_iso(entity.get("last_changed"))
+            days = days_since(now, last_changed)
             if days is not None and days >= stuck_days:
                 inactive_by_domain[domain].append({
                     "entity_id": entity_id,
@@ -141,8 +141,8 @@ def compute_silence_summary(
         domain = entity_id.split(".", 1)[0]
         entity = entity_index.get(entity_id, {})
         since = entity.get("last_changed")
-        last_changed = _parse_iso(since)
-        days = _days_since(now, last_changed)
+        last_changed = parse_iso(since)
+        days = days_since(now, last_changed)
         if days is None or days < stuck_days:
             continue
         if domain in degraded_domains:
@@ -151,7 +151,12 @@ def compute_silence_summary(
         long_unavailable.append({"entity_id": entity_id, "domain": domain, "since": since, "days": days})
 
     def _sort(items: list[dict]) -> list[dict]:
-        return sorted(items, key=lambda x: (-(x.get("days_silent") or x.get("days") or 0), x.get("entity_id", "")))
+        def key(x: dict) -> tuple:
+            d = x.get("days_silent")
+            if d is None:
+                d = x.get("days")
+            return (-(d if d is not None else 0), x.get("entity_id", ""))
+        return sorted(items, key=key)
 
     return {
         "computed_at": now.isoformat(),

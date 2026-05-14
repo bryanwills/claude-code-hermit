@@ -7,6 +7,7 @@ from typing import Any
 
 from .artifacts import write_json_artifact
 from .ha_api import HomeAssistantClient
+from .time_utils import parse_iso
 
 _DEFAULT_DOMAINS = frozenset({"light", "switch", "cover", "climate", "automation"})
 _HISTORY_BINARY_SENSOR_CLASSES = frozenset({"motion", "door", "window", "opening", "occupancy"})
@@ -45,15 +46,6 @@ def select_history_entities(
     return sorted(result)
 
 
-def _parse_iso(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts)
-    except (ValueError, TypeError):
-        return None
-
-
 def aggregate_history(
     history: dict[str, list[dict[str, Any]]],
     requested: list[str],
@@ -79,12 +71,11 @@ def aggregate_history(
                 "returned": False,
                 "hour_histogram": [0] * 24,
                 "last_event_iso": None,
-                "stuck_for_days": None,
                 "state_durations": {},
             }
             continue
 
-        timestamps = [_parse_iso(ev.get("last_changed")) for ev in events]
+        timestamps = [parse_iso(ev.get("last_changed")) for ev in events]
 
         histogram = [0] * 24
         last_event: datetime | None = None
@@ -113,7 +104,6 @@ def aggregate_history(
             "returned": True,
             "hour_histogram": histogram,
             "last_event_iso": last_event.isoformat() if last_event else None,
-            "stuck_for_days": None,
             "state_durations": {s: int(secs) for s, secs in state_durations.items()},
         }
 

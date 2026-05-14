@@ -74,6 +74,14 @@ def test_select_history_entities_override_bypasses_scope() -> None:
     assert "light.kitchen" not in result
 
 
+def test_select_history_entities_empty_entity_index_returns_empty_list() -> None:
+    # Fresh-install edge case: snapshot exists but the entity_index is empty.
+    # Returning [] here lets the caller surface the empty-fetch error from
+    # HomeAssistantClient.get_history instead of crashing on a missing key.
+    assert select_history_entities(_normalized({})) == []
+    assert select_history_entities({}) == []
+
+
 # ---------------------------------------------------------------------------
 # aggregate_history
 # ---------------------------------------------------------------------------

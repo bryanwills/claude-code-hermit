@@ -12,6 +12,7 @@ from .artifacts import current_session_id, standard_metadata, utc_timestamp, wri
 from .boot import boot_status, save_boot_preferences
 from .config import load_config, normalized_context_path
 from .ha_api import HomeAssistantClient, HomeAssistantError
+from .history import fetch_history_snapshot
 from .integration_health import compute_degraded_domains, format_integration_health_stdout, write_degraded_domains_artifact
 from .policy import check_entity, normalize_entity_index
 from .silence import compute_silence_summary
@@ -74,7 +75,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch_history_parser = ha_subparsers.add_parser(
         "fetch-history",
-        help="Fetch and aggregate HA history into a snapshot artifact.",
+        help=(
+            "Fetch and aggregate HA history into a snapshot artifact. "
+            "Requires a normalized snapshot; runs `refresh-context` first if none exists."
+        ),
     )
     fetch_history_parser.add_argument("--window-days", type=int, default=7)
     fetch_history_parser.add_argument("--entities", nargs="+", metavar="ENTITY")
@@ -266,8 +270,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _handle_fetch_history(root: Path, config: Any, window_days: int, entity_override: list[str] | None) -> int:
-    from .history import fetch_history_snapshot
-
     try:
         client = HomeAssistantClient(config)
     except HomeAssistantError as exc:
