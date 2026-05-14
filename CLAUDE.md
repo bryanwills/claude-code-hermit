@@ -38,6 +38,8 @@ Always launch Claude Code from this repo's root, not from inside a plugin dir. A
 
 ## Environment quirks
 
+- **Secrets:** env vars → `.env` (gitignored); secret files (`.pem` etc.) → `.claude.local/` (gitignored). Never `.claude/` — it's checked in.
+- **Docker paths mirror the host** (`${PWD}:${PWD}` mount) — absolute paths are identical inside the container despite the container user being `claude`.
 - **`rm -rf` is blocked** by the `enforce-deny-patterns` hook. Use `rm -r` (no `-f`) for scratch cleanup.
 - **Subtree imports are unsquashed**: `git log --first-parent` for the monorepo-only view; full upstream commits live under each subtree merge.
 - **CI is not path-filtered yet**: every plugin's tests run on every PR. Don't assume a HA-test failure on a core-only PR is your fault.
