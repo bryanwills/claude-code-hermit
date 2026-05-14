@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [0.0.3] - 2026-05-14
 
 ### Changed
 
@@ -15,6 +15,21 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **English-only at the GitHub boundary** — title/body are translated to English before filing if not already English. Technical identifiers, code, frontmatter, and proper nouns are preserved verbatim. The local proposal file is untouched; the `gh_issue:` back-write into the proposal frontmatter still runs after filing.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/hermit-scribe/SKILL.md` | CC title construction, config-derived scope vocab, EN normalization, single-message preview, edit loop |
+| `README.md` | Updated docs to reflect CC title format, scope inference, EN normalization, and preview changes |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Update the skill** — pulls the revised `SKILL.md` with the new title format and preview flow.
+
+No `config.json` changes required.
 
 ---
 
