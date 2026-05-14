@@ -30,7 +30,7 @@ Analyze artifacts to find:
 
 ## Data Sources
 
-- `.claude-code-hermit/raw/snapshot-ha-normalized-latest.json` — current entity/service index
+- `.claude-code-hermit/raw/snapshot-ha-normalized-latest.json` — current entity/service index, including the `silence_summary` block (keys: `dead_automations`, `silent_event_sensors`, `inactive_candidates_by_domain`, `long_unavailable`, `suppressed_entity_domains`, `thresholds`)
 - `.claude-code-hermit/raw/snapshot-ha-pattern-analysis-latest.json` — previous analysis
 - `.claude-code-hermit/raw/snapshot-ha-pattern-analysis-*.json` — historical analysis files
 - `.claude-code-hermit/raw/audit-ha-context-refresh-latest.md` — last context refresh stats
@@ -52,6 +52,6 @@ Return structured findings as JSON:
 }
 ```
 
-Omit `suppressed` when empty.
+Omit `suppressed` when empty. `dead_automations` and `silent_event_sensors` from `silence_summary` are handled by the calling skill directly — do not duplicate them in this output.
 
 Never modify files. Never actuate devices.
