@@ -107,9 +107,9 @@ When the operator accepts a proposal:
      3. Verify the fix resolves the pattern
      ```
      If `NEXT-TASK.md` already exists: do **not** write. Status still flips to `accepted` (operator intent is recorded). Notify: "PROP-NNN accepted. NEXT-TASK is already pending another proposal. Run `/session-start` to consume it first, then re-run `/proposal-act accept PROP-NNN` and pick 'Start implementing now' or manual."
-     Otherwise write the file. After writing, conditionally append numbered bullets to the Suggested Plan in this order (quality-gate is always last when present, so `/simplify` reviews any skill-creator output):
-       - If the proposal contains `## Skill Improvement` AND `/skill-creator` is available, append: `4. Use /skill-creator to build and validate the skill.`
-       - If `quality_gate.enabled` is not explicitly `false` in `.claude-code-hermit/config.json` (absent, `true`, or malformed all count as enabled), append the quality-gate bullet with the next available number (`4.` if no skill-creator bullet was appended, `5.` if one was): `Run /simplify on the touched files for a quality review, then commit.`
+     Otherwise write the file. Then append any of the following bullets to the end of the Suggested Plan, in order, numbered sequentially from `4.` (quality-gate bullet is last so `/simplify` reviews any skill-creator output):
+       - **(if the proposal contains `## Skill Improvement` AND `/skill-creator` is available)** `Use /skill-creator to build and validate the skill.`
+       - **(if quality_gate is enabled per step e.5)** `Run /simplify on the touched files for a quality review, then commit.`
      Confirm: "Task prepared. The next `/session-start` will offer this as the default task."
 
    - **"I'll handle it manually"** → Just mark accepted. Respond: "Marked as accepted. No further action taken."
