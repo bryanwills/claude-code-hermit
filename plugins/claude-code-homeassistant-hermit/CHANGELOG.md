@@ -2,6 +2,12 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **`ha integration-health` CLI command and `integration_health.py` module** — promotes `ha-integration-health` from a pure-skill arithmetic pass to a Python-backed command. The CLI replicates the skill's existing stdout contract (`ha-integration-health findings — <date>` / `Degraded domains: N` / per-domain lines) so `reflect-scheduled-checks` sees no change. New side effect: every run writes `.claude-code-hermit/state/integration-health-degraded-domains.json`, a machine-readable list of degraded entity-domain prefixes consumed by the upcoming `silence.py` module to suppress overlapping `long_unavailable` findings in `ha-analyze-patterns`. Thresholds (`min_total=3`, `min_ratio=0.5`) are defined once in `compute_degraded_domains()` and no longer duplicated across skills. `ha-integration-health/SKILL.md` is updated to a single Bash delegate.
+
 ## [0.1.2] - 2026-05-12
 
 ### Fixed

@@ -3,48 +3,39 @@ name: ha-integration-health
 description: Detect dropped HA integrations by computing per-domain unavailable-entity ratios from the latest context snapshot. Flags domains where most entities are unavailable, suggesting the integration lost its connection. Runs daily as a scheduled check via reflect-scheduled-checks.
 allowed-tools:
   - Bash
-  - Read
 ---
 
 # HA Integration Health
 
 ## Purpose
 
-When an HA integration loses its connection (lost WiFi, API change, expired token), its entities go `unavailable`. Nobody notices until they try to use one. This skill reads the latest normalized snapshot, groups entities by domain, and flags domains with a high unavailable ratio.
+When an HA integration loses its connection (lost WiFi, API change, expired token), its entities go `unavailable`. This skill reads the latest normalized snapshot, groups entities by domain, and flags domains with a high unavailable ratio.
 
 ## Steps
 
-1. Check freshness: read the modification time of `.claude-code-hermit/raw/snapshot-ha-normalized-latest.json`. If older than 24 hours or missing, emit:
-   ```
-   ha-integration-health findings — <date>
-   No actionable findings. (skipped: snapshot stale or missing)
-   ```
-   and stop. The `daily-ha-context` routine keeps the snapshot fresh.
+Run the integration-health check via the Python CLI:
 
-2. Load the snapshot JSON. The `entity_index` field maps `entity_id → state object`. The `unavailable_entities` field lists entity IDs whose state is `unavailable` or `unknown`.
+```bash
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha integration-health
+```
 
-3. Group by domain (the prefix before the first `.`). For each domain compute:
-   - `total` = count of entity IDs in `entity_index` with that domain prefix
-   - `unavailable` = count of those same IDs present in `unavailable_entities`
-   - `ratio` = unavailable / total
-
-4. Flag each domain where **all** are true:
-   - `total >= 3` (avoids single-device false positives)
-   - `ratio >= 0.5` (half or more unavailable)
-
-5. Emit the findings block:
-   ```
-   ha-integration-health findings — <date>
-   Degraded domains: N
-   - <domain>: <unavailable>/<total> entities unavailable (<percent>%)
-   ```
-
-   If nothing is flagged: `No actionable findings. (D domains scanned)`.
+The CLI:
+- Checks that `snapshot-ha-normalized-latest.json` exists and is fresh (< 24h). If stale or missing, emits the skip message and exits cleanly.
+- Groups entities by domain prefix, computes unavailable ratios, and flags domains where `total >= 3` AND `ratio >= 0.5`.
+- Writes `.claude-code-hermit/state/integration-health-degraded-domains.json` — a machine-readable state artifact consumed by `ha-analyze-patterns` (via `silence.py`) to suppress overlapping `long_unavailable` findings.
+- Prints the findings block to stdout in the documented format below.
 
 ## Output contract
 
-reflect-scheduled-checks routes the findings block through the proposal pipeline. Keep output to the exact shape above — no prose, no extra sections.
+reflect-scheduled-checks routes the findings block through the proposal pipeline. The stdout shape is fixed:
 
-## No Python helper
+```
+ha-integration-health findings — <date>
+Degraded domains: N
+- <domain>: <unavailable>/<total> entities unavailable (<percent>%)
+```
 
-This skill is intentionally pure-skill — it reads an existing artifact and does arithmetic. No CLI command backs it. If the logic grows more complex (e.g., day-over-day drift detection), consider promoting it to a Python helper.
+If nothing is flagged: `No actionable findings. (D domains scanned)`.
+If snapshot is stale or missing: `No actionable findings. (skipped: snapshot stale or missing)`.
+
+Keep stdout to this shape — no prose, no extra sections.

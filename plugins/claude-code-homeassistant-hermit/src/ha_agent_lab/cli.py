@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,7 @@ from .artifacts import current_session_id, standard_metadata, utc_timestamp, wri
 from .boot import boot_status, save_boot_preferences
 from .config import load_config, normalized_context_path
 from .ha_api import HomeAssistantClient, HomeAssistantError
+from .integration_health import compute_degraded_domains, format_integration_health_stdout, write_degraded_domains_artifact
 from .policy import check_entity, normalize_entity_index
 
 
@@ -65,6 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     probe_parser.add_argument("path", help="HA REST path, e.g. /api/config/automation/config/1234")
 
+    ha_subparsers.add_parser(
+        "integration-health",
+        help="Detect degraded HA integrations and write state/integration-health-degraded-domains.json.",
+    )
+
     ha_subparsers.add_parser("list-automations", help="List all automation entity IDs and config IDs.")
     ha_subparsers.add_parser("list-scripts", help="List all script entity IDs and config IDs.")
 
@@ -96,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
         changes = save_boot_preferences(root, language=args.language, url=args.url, local_url=args.local_url, remote_url=args.remote_url, token=args.token)
         print(json.dumps({"updated": changes}, indent=2))
         return 0
+
+    if args.command == "ha" and args.ha_command == "integration-health":
+        return _handle_integration_health(root)
 
     if args.command == "ha" and args.ha_command == "refresh-context":
         try:
@@ -243,6 +252,30 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.error("Unsupported command.")
     return 1
+
+
+def _handle_integration_health(root: Path) -> int:
+    today = date.today().isoformat()
+    header = f"ha-integration-health findings — {today}"
+    snapshot_path = normalized_context_path(root)
+
+    try:
+        mtime = datetime.fromtimestamp(snapshot_path.stat().st_mtime, tz=UTC)
+        if datetime.now(UTC) - mtime > timedelta(hours=24):
+            print(f"{header}\nNo actionable findings. (skipped: snapshot stale or missing)")
+            return 0
+        normalized = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        print(f"{header}\nNo actionable findings. (skipped: snapshot stale or missing)")
+        return 0
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"{header}\nNo actionable findings. (skipped: snapshot unreadable — {exc})")
+        return 0
+
+    payload = compute_degraded_domains(normalized)
+    write_degraded_domains_artifact(root, payload)
+    print(format_integration_health_stdout(payload, today))
+    return 0
 
 
 def _list_domain(client: HomeAssistantClient, domain: str) -> list[dict[str, Any]]:
