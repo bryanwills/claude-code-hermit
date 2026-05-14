@@ -14,6 +14,7 @@ from .config import load_config, normalized_context_path
 from .ha_api import HomeAssistantClient, HomeAssistantError
 from .integration_health import compute_degraded_domains, format_integration_health_stdout, write_degraded_domains_artifact
 from .policy import check_entity, normalize_entity_index
+from .silence import compute_silence_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -365,6 +366,7 @@ def refresh_context(root: Path, client: HomeAssistantClient) -> dict[str, Any]:
     write_json_artifact(root, ".claude-code-hermit/raw", "snapshot-ha-context", snapshot, latest_name="snapshot-ha-context-latest.json")
 
     normalized = normalize_context(states, services, components)
+    normalized["silence_summary"] = compute_silence_summary(normalized, root)
     write_json_artifact(root, ".claude-code-hermit/raw", "snapshot-ha-normalized", normalized, latest_name="snapshot-ha-normalized-latest.json")
     write_markdown_artifact(
         root,
@@ -439,6 +441,7 @@ def refresh_context_incremental(
         **baseline,
         "entity_index": merged_index,
         "unavailable_entities": unavailable_entities,
+        "silence_summary": compute_silence_summary({"entity_index": merged_index, "unavailable_entities": unavailable_entities}, root),
     }
 
     write_json_artifact(
