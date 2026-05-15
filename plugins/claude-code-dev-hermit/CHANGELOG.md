@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Surface `/dev-pr` as the sanctioned push path in §Git Safety.** Both CLAUDE-APPEND templates and `docs/GIT-SAFETY.md` now end the "Never `git push`" rule with a pointer to `/claude-code-dev-hermit:dev-pr` as the operator-sanctioned alternative, and soften "The operator pushes" to "Stop and ask the operator." Resolves the discoverability gap where downstream LLMs offered manual-push workarounds instead of invoking the skill. `skills/dev-pr/SKILL.md` description updated with the inverse note. `tests/hatch-mode.test.js` drops the "no /dev-pr in safety template" assertion (no longer correct) and adds named positive assertions for both templates. Closes PROP-027.
+
 ## [0.3.6] - 2026-05-13
 
 ### Changed
