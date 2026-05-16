@@ -78,4 +78,4 @@ def test_get_automation_config_yaml_mode_403(capsys, make_mock_config) -> None:
     assert result == 1
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False
-    assert "403" in out["message"] or "YAML mode" in out["message"] or "Forbidden" in out["message"]
+    assert "YAML mode" in out["message"]

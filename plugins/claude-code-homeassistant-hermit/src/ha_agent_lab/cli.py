@@ -92,10 +92,10 @@ def build_parser() -> argparse.ArgumentParser:
     delete_script_parser = ha_subparsers.add_parser("delete-script", help="Delete a script config by ID.")
     delete_script_parser.add_argument("id", help="Script config ID (not entity_id).")
 
-    get_automation_config_parser = ha_subparsers.add_parser("get-automation-config", help="Read an automation's config YAML from HA.")
+    get_automation_config_parser = ha_subparsers.add_parser("get-automation-config", help="Read an automation's stored config from HA.")
     get_automation_config_parser.add_argument("id", help="Automation config ID.")
 
-    get_script_config_parser = ha_subparsers.add_parser("get-script-config", help="Read a script's config YAML from HA.")
+    get_script_config_parser = ha_subparsers.add_parser("get-script-config", help="Read a script's stored config from HA.")
     get_script_config_parser.add_argument("id", help="Script config ID.")
 
     return parser
