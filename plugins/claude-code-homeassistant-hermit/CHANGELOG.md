@@ -2,7 +2,7 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.1.4] - 2026-05-16
 
 ### Added
 
@@ -13,6 +13,7 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 - **`ha-morning-brief` subsumes `brief --morning` for HA operators** — closes the duplicate-notification UX issue (#78) where operators with both plugins received two morning channel messages 30 min apart. `ha-morning-brief` now includes the micro-proposals lifecycle (read `state/micro-proposals.json`, follow-up at count 1, expire at count ≥ 2 with a `micro-resolved` event appended to `proposal-metrics.jsonl` in the same schema core's `append-metrics.js` writes — `ts`, `type`, `micro_id`, `action`, `question` — so `reflect` and `generate-summary.js` pick it up). Output format translated to English with an `Awaiting decision:` section (non-droppable, rendered above the 25-line cap). Routine id reference fixed (`morning` → `morning-brief`).
 - **`hatch` morning-brief routine now offers unified mode** — fresh installs are prompted to choose unified (08:30, enabled, fires in waiting state, disables core `morning` routine) or legacy (09:00, disabled). Re-hatch detects operators on the old schedule and offers an in-place upgrade. Custom configs are silently skipped.
 - **Skill output format translated to English** — all section headers and example strings in `ha-morning-brief` changed from Portuguese to English to match the rest of the plugin. The runtime language adapts to the operator's configured locale as before.
+- **deps: bump core requirement to `>=1.0.40` / `^1.0.40`** — was `>=1.0.38`; aligns with core v1.0.40 release.
 
 ### Fixed
 
@@ -20,9 +21,11 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 ### Upgrade Instructions
 
-- In `.claude-code-hermit/config.json`, locate `routines[id=morning-brief]`. If `enabled: true` and `schedule: "0 9 * * *"`: rewrite to `schedule: "30 8 * * *"` and `run_during_waiting: true`.
-- In the same array, locate `routines[id=morning]` (core). If both it and the updated `morning-brief` are enabled: set `morning.enabled = false`.
-- Report the changes to the operator; do not prompt — these are deterministic.
+1. In `.claude-code-hermit/config.json`, locate `routines[id=morning-brief]`. If `enabled: true` and `schedule: "0 9 * * *"`: rewrite to `schedule: "30 8 * * *"` and `run_during_waiting: true`.
+2. In the same array, locate `routines[id=morning]` (core). If both it and the updated `morning-brief` are enabled: set `morning.enabled = false`.
+3. Report the changes to the operator; do not prompt — these are deterministic.
+
+No `config.json` schema changes beyond the routine values above.
 
 ## [0.1.3] - 2026-05-14
 
