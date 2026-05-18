@@ -112,9 +112,8 @@ When a new skill, routine, or plugin hermit introduces a new artifact type:
   knowledge graph for the model; state files are the coordination layer for the
   plumbing. Different readers, different GC rules — don't conflate them.
 - **New top-level directories under `.claude-code-hermit/`.** Base-hermit infra only
-  recognizes the four buckets above plus `sessions/`, `templates/`, `bin/`, `docker/`,
-  `obsidian/`. A new top-level directory will be invisible to every existing reader
-  and scanner.
+  recognizes the four buckets above plus `sessions/`, `templates/`, `bin/`, `docker/`.
+  A new top-level directory will be invisible to every existing reader and scanner.
 - **Schema-typed JSON state files without a validator.** If a hook depends on a
   specific shape in `state/foo.json`, the shape needs a test in `run-contracts.py`.
   Silent schema drift is a recurring bug class; the contract tests are cheap insurance.

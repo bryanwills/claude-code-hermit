@@ -863,7 +863,6 @@ Next steps:
     - /reload-plugins                       load newly installed plugins in this session
     - /claude-code-hermit:channel-setup     if a channel was configured AND you chose B or C
                                               (A handles channels inside docker-setup)
-    - /claude-code-hermit:obsidian-setup    optional Obsidian dashboard
 
   Anytime:
     - /claude-code-hermit:hermit-settings   change settings

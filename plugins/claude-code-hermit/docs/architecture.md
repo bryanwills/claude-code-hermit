@@ -69,7 +69,7 @@ SHELL.md tasks,  status,   S-NNN-REPORT.md,
 
 **Start:** Checks for existing SHELL.md. Resumes if `in_progress` or `waiting`, creates fresh if not. Loads OPERATOR.md. Calls `TaskList` to see plan steps. Runs morning routine if it hasn't fired today.
 
-**Work:** Plan items tracked as native Claude Code Tasks (`pending` -> `in_progress` -> `completed`). Timestamped progress log in SHELL.md. Blockers recorded with cold-start context. `tasks-snapshot.md` auto-updated by cost-tracker hook for Obsidian.
+**Work:** Plan items tracked as native Claude Code Tasks (`pending` -> `in_progress` -> `completed`). Timestamped progress log in SHELL.md. Blockers recorded with cold-start context. `tasks-snapshot.md` auto-updated by cost-tracker hook.
 
 **Close:** Defaults to idle transition at every task boundary — your hermit says "What's next?" and waits. Reflection fires. Full shutdown only via `/session-close`. See [Always-On Lifecycle](always-on-ops.md#2-always-on-lifecycle).
 
@@ -154,7 +154,6 @@ your-project/
 │   │   └── .lifecycle.lock           # Always-on lifecycle lock (hermit-start-owned)
 │   ├── bin/hermit-start, hermit-stop
 │   ├── config.json
-│   ├── cortex-manifest.json          # Obsidian Cortex index (optional, created by obsidian-setup)
 │   ├── OPERATOR.md
 │   └── HEARTBEAT.md
 └── CLAUDE.md (session discipline appended)
@@ -175,7 +174,7 @@ One writer per state file. No shared mutation bus.
 | `state/session-diff.json`      | session-diff.js only                                | session-close (display)                                       |
 | `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.js                                           |
 | `state/micro-proposals.json`   | reflect (queue) + channel-responder/brief (resolve) | brief, generate-summary.js                                    |
-| `state/state-summary.md`       | generate-summary.js only                            | Obsidian, humans                                              |
+| `state/state-summary.md`       | generate-summary.js only                            | humans                                                        |
 | `state/monitors.runtime.json`  | watch skill only                                    | session-start (clear on start), session-close (stop all)      |
 | `state/.heartbeat`             | heartbeat-touch.js only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.py only                                | hermit-stop.py (cleanup)                                      |
@@ -200,7 +199,7 @@ One writer per state file. No shared mutation bus.
 |  Owner: Agent. Lifetime: managed.            |
 |  Durable domain outputs — briefings,         |
 |  decisions, postmortems, assessments.        |
-|  Visible in Cortex. Injected on startup.     |
+|  Injected on startup.                        |
 +----------------------------------------------+
 |  sessions/SHELL.md                           |
 |  Owner: Agent. Lifetime: one session.        |
@@ -212,7 +211,7 @@ One writer per state file. No shared mutation bus.
 +----------------------------------------------+
 ```
 
-OPERATOR.md is human-curated — your hermit reads it but never modifies it. Auto-memory is Claude Code's built-in [persistent memory](https://code.claude.com/docs/en/sub-agents) and the primary input to learning. `compiled/` is for durable domain outputs the operator wants surfaced across sessions and in Cortex — distinct from auto-memory, which handles operational lessons. SHELL.md is the live working document. Reports are the journal and cold-start safety net — not the input to learning.
+OPERATOR.md is human-curated — your hermit reads it but never modifies it. Auto-memory is Claude Code's built-in [persistent memory](https://code.claude.com/docs/en/sub-agents) and the primary input to learning. `compiled/` is for durable domain outputs the operator wants surfaced across sessions — distinct from auto-memory, which handles operational lessons. SHELL.md is the live working document. Reports are the journal and cold-start safety net — not the input to learning.
 
 ### Knowledge directories
 
@@ -231,11 +230,11 @@ OPERATOR.md is human-curated — your hermit reads it but never modifies it. Aut
 | Concern | Owner |
 |---------|-------|
 | Operational learning (lessons, patterns, preferences) | Auto-memory |
-| Durable domain outputs the operator wants in Cortex | `compiled/` |
+| Durable domain outputs the operator wants surfaced across sessions | `compiled/` |
 | Domain operational inputs | `raw/` |
 | Session state | `state/` |
 
-`compiled/` artifacts use the [Section E frontmatter contract](frontmatter-contract.md#e-cortex-connected-custom-artifact) extended with a `type` field. Startup injection reads `compiled/` frontmatter and injects the newest artifact of each type within the configured char budget (`knowledge.compiled_budget_chars`, default 1000). Artifacts tagged `foundational` are always injected first.
+`compiled/` artifacts use the [frontmatter conventions](frontmatter-contract.md) with a required `type` field. Startup injection reads `compiled/` frontmatter and injects the newest artifact of each type within the configured char budget (`knowledge.compiled_budget_chars`, default 1000). Artifacts tagged `foundational` are always injected first.
 
 ---
 

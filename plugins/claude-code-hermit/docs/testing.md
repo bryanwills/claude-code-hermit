@@ -97,12 +97,3 @@ These are stricter than `run-hooks.sh` — they test the plugin's behavioral con
 
 `tests/cron-test-corpus.json` is a shared fixture used by contract tests that validate cron expression parsing. It contains time/schedule pairs with expected fire/skip decisions. Add entries when fixing schedule edge cases.
 
----
-
-## Frontmatter Validator (validate-frontmatter.js)
-
-```bash
-node scripts/validate-frontmatter.js
-```
-
-Validates that all `.md` files in `skills/` and `agents/` have valid YAML frontmatter with required fields (`name`, `description`). Exits non-zero if any file fails. Run before releasing skills changes.

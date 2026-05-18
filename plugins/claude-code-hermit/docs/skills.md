@@ -93,14 +93,14 @@ Routines replace the old `heartbeat.morning_routine` / `heartbeat.evening_routin
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `migrate` | Audits a hermit-backed repo for safe migration to another machine. Classifies ignored files, assesses hermit state, and produces a `migration-manifest.txt` and verification checklist. Git-first, read-only by default. | --            |
 
-## Cortex (Obsidian)
+## Channel-Friendly Summaries
 
-| Skill            | What it does                                                                                                                                                                                                                                          | Auto-triggers   |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| `obsidian-setup` | One-time Cortex setup. Creates the `obsidian/` vault surface with Brain, Cortex, Evolution, System Health, Connections, and Cortex Portal pages. Configures `cortex-manifest.json` for artifact indexing and adds the nightly cortex-refresh routine. | --              |
-| `cortex-refresh` | Regenerates `obsidian/Connections.md` and `obsidian/Cortex Portal.md` from current session, proposal, and artifact data. Runs nightly at 23:30 via routine. Safe to invoke manually.                                                                  | Nightly routine |
-| `cortex-sync`    | Enriches existing content with frontmatter and tags. Scans sessions, proposals, and artifact paths for missing fields, clusters similar files for batch confirmation, then rebuilds Connections.md if the Cortex is set up.                           | --              |
-| `weekly-review`  | Generates a weekly review report at `.claude-code-hermit/compiled/review-weekly-YYYY-Www.md` (type: `review`) summarising sessions, proposals, costs, open loops, and **knowledge health** (stale artifacts, working set growth, raw expiry candidates). **Archives expired raw artifacts** to `raw/.archive/` after the report. | --              |
+| Skill           | What it does                                                                                                                                                                                    | Auto-triggers       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `hermit-brain`     | Show fragile zones, stale accepted proposals, and recent learnings from session history, proposals, and reflect output. Activated by natural language: "what's stuck", "fragile zones", etc.    | --                  |
+| `hermit-evolution` | Show cost trend, autonomy delta, and proposal-resolution times across recent weekly reviews. Activated by: "how am I trending", "cost trend", "hermit evolution", etc.                          | --                  |
+| `hermit-health`    | Show alert state, proposal queue depth, routine engagement, and channel availability. Activated by: "health check", "how's the hermit", "is anything broken", etc.                              | --                  |
+| `weekly-review` | Generates a weekly review report at `.claude-code-hermit/compiled/review-weekly-YYYY-Www.md` and sends a channel-friendly summary with an evolution block. Archives expired raw artifacts.      | Sunday 23:00 routine |
 
 ## Communication
 
@@ -115,4 +115,4 @@ Routines replace the old `heartbeat.morning_routine` / `heartbeat.evening_routin
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `smoke-test`    | Post-hatch validation — checks config structure, OPERATOR.md, routine schema, plugin references, and optionally sends a channel test message. Run after hatch to verify setup. | --            |
 | `hermit-doctor` | Eight-check installation health report — config validity, hook registration, state file integrity, cost budget, proposal health, sibling dependency ranges, file permissions, docker-security posture. Use when diagnosing an install, before a release, or after suspicious behavior. | --            |
-| `test-run`      | Runs the full hermit test suite (`run-contracts.py`, `run-hooks.sh`, `validate-frontmatter.js`) and reports pass/fail. Use before releasing changes.       | --            |
+| `test-run`      | Runs the full hermit test suite (`run-contracts.py`, `run-hooks.sh`) and reports pass/fail. Use before releasing changes.                                   | --            |

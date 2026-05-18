@@ -174,7 +174,7 @@ function writeStatusJson(shellContent, cumulative, budget, sessionId) {
   const tasks = readTasks();
   const progress = taskProgress(tasks);
 
-  // Write tasks-snapshot.md for Obsidian visibility
+  // Write tasks-snapshot.md
   writeTaskSnapshot(tasks, progress);
 
   const blockersText = blockersMatch ? blockersMatch[1].trim().replace(/<!--.*?-->/g, '').trim() : '';
@@ -224,7 +224,7 @@ function writeTaskSnapshot(tasks, progress) {
     }
   }
 
-  // Skip write if content unchanged (avoids unnecessary Obsidian file-change events)
+  // Skip write if content unchanged
   try {
     const existing = fs.readFileSync(TASK_SNAPSHOT, 'utf-8');
     // Compare everything after the frontmatter (updated timestamp always differs)

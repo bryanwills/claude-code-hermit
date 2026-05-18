@@ -16,7 +16,7 @@ After install, run `/claude-code-hermit:hatch` in the target project to create t
 ## Plugin Structure
 
 - `agents/` — subagent definitions (session-mgr, hermit-config-validator, proposal-triage, reflection-judge, quality-gate-judge; hermit plugins add more subagents)
-- `skills/` — skill definitions (namespaced as `/claude-code-hermit:*`): session, session-start, session-close, pulse, brief, watch, heartbeat, hermit-routines, hermit-settings, proposal-create, proposal-list, proposal-act, reflect, reflect-scheduled-checks, capability-brainstorm, channel-responder, channel-setup, hatch, hermit-evolve, docker-setup, docker-security, smoke-test, test-run, obsidian-setup, cortex-refresh, cortex-sync, weekly-review, migrate, knowledge, hermit-doctor
+- `skills/` — skill definitions (namespaced as `/claude-code-hermit:*`): session, session-start, session-close, pulse, brief, watch, heartbeat, hermit-routines, hermit-settings, proposal-create, proposal-list, proposal-act, reflect, reflect-scheduled-checks, capability-brainstorm, channel-responder, channel-setup, hatch, hermit-evolve, docker-setup, docker-security, smoke-test, test-run, hermit-brain, hermit-evolution, hermit-health, weekly-review, migrate, knowledge, hermit-doctor
 - `hooks/hooks.json` — hook registrations
 - `scripts/` — hook implementation scripts + boot scripts (hermit-start.py, hermit-stop.py)
 - `state-templates/` — templates copied into target projects by the `hatch` skill
@@ -43,7 +43,7 @@ When installed in a target project, state lives in `.claude-code-hermit/`:
 - `config.json` — project config (identity, channels, budget prefs, routines, idle agency, scheduled checks)
 - `OPERATOR.md` — human-curated context (draft changes, confirm before writing; hard-blocked in always-on mode)
 
-`hatch` also seeds `bin/` (lifecycle scripts), `docker/` (container scaffolding), `obsidian/` (Cortex vault templates), `HEARTBEAT.md`, `IDLE-TASKS.md`, and `SESSION-REPORT.md` — see `state-templates/` for the full set.
+`hatch` also seeds `bin/` (lifecycle scripts), `docker/` (container scaffolding), `HEARTBEAT.md`, `IDLE-TASKS.md`, and `SESSION-REPORT.md` — see `state-templates/` for the full set.
 
 ## Migrations
 

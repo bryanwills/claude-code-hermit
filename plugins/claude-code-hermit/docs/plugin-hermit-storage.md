@@ -53,7 +53,7 @@ source: raw/snapshot-home-2026-04-17.md
 
 Tag compiled artifacts `foundational` to pin them to every session start regardless of age.
 
-Artifacts without frontmatter appear as "Unlinked" in the Cortex. See `docs/frontmatter-contract.md` for the full contract.
+Artifacts should carry frontmatter for grep-ability and startup injection. See `docs/frontmatter-contract.md` for the field conventions.
 
 ## Handling large artifact volumes
 
@@ -61,7 +61,7 @@ If a hermit produces many artifacts of the same type (per-room audits, per-accou
 
 - **Write a rollup digest** to `compiled/` and the per-entity raw data to `raw/`. One `compiled/audit-home-2026-04-17.md` covering all rooms beats 10 per-room files bloating session context.
 - Let retention do the work: raw snapshots expire per `knowledge.raw_retention_days` and land in `raw/.archive/`. The compiled digest survives.
-- If the rollup is too coarse, use tags (e.g. `tags: [kitchen, audit]`) to let Cortex filter — not subdirectories.
+- If the rollup is too coarse, use tags (e.g. `tags: [kitchen, audit]`) to group related artifacts — not subdirectories.
 
 ## Compliant vs non-compliant paths
 

@@ -130,19 +130,6 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 
 ---
 
-## See What's Inside — Hermit Cortex
-
-Hermit Cortex is an Obsidian-powered view of your hermit's brain — sessions, proposals, cost trends, learning, and cross-file connections, all linkable and searchable.
-
-```bash
-/claude-code-hermit:obsidian-setup    # one-time setup
-/claude-code-hermit:cortex-refresh    # rebuild the index
-```
-
-See [Hermit Cortex](obsidian-setup.md) for the full guide.
-
----
-
 ## Common Workflows
 
 **Disconnected?** — Restart Claude Code. Hermit detects the active session and shows where you left off. Type "continue."
@@ -177,7 +164,6 @@ See [Hermit Cortex](obsidian-setup.md) for the full guide.
 │   └── .archive/              <- expired raw artifacts
 ├── compiled/                  <- durable domain outputs (briefings, decisions, review-weekly-YYYY-Www.md)
 ├── knowledge-schema.md        <- what this hermit produces and when
-├── cortex-manifest.json       <- Obsidian Cortex index (optional)
 ├── OPERATOR.md                <- your rulebook
 ├── HEARTBEAT.md               <- background checklist
 └── config.json                <- settings
@@ -258,7 +244,7 @@ Most common actions auto-trigger from natural language — just say what you mea
 | **Config**     | `hermit-settings`, `hatch`, `hermit-evolve`                        |
 | **Docker**     | `docker-setup`                                                     |
 | **Channels**   | `channel-responder`                                                |
-| **Cortex**     | `obsidian-setup`, `cortex-refresh`, `cortex-sync`, `weekly-review` |
+| **Summaries**  | `hermit-brain`, `hermit-evolution`, `hermit-health`, `weekly-review` |
 | **Testing**    | `smoke-test`, `test-run`                                           |
 
 Full reference: [Skills Reference](skills.md).

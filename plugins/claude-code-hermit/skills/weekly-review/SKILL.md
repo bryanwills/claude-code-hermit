@@ -1,6 +1,6 @@
 ---
 name: weekly-review
-description: Generate the weekly review report for the current ISO week. Writes to .claude-code-hermit/compiled/review-weekly-YYYY-Www.md and updates obsidian/Latest Review.md if the cortex is set up. Runs every Sunday at 23:00 via routine.
+description: Generate the weekly review report for the current ISO week. Writes to .claude-code-hermit/compiled/review-weekly-YYYY-Www.md and sends a channel-friendly summary with an evolution block. Runs every Sunday at 23:00 via routine.
 ---
 # Weekly Review
 
@@ -10,14 +10,31 @@ Generates the weekly review for the current ISO week.
 
 1. Run:
    ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/weekly-review.js .claude-code-hermit obsidian
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/weekly-review.js .claude-code-hermit
    ```
 
-2. Report the result. On success, output the review filename and whether `Latest Review.md` was updated. If a **Knowledge Health** section appears in the review output, summarize the issues to the operator.
+2. Report the result. On success, output the review filename. If a **Knowledge Health** section appears in the review output, summarize the issues to the operator.
 
-3. If `obsidian/` does not exist, the script skips the `Latest Review.md` update and logs a note. No action required — the review file is still written to `.claude-code-hermit/compiled/review-weekly-<week>.md`.
+3. Build the weekly evolution block from the freshly-written review file:
+   - Read `.claude-code-hermit/compiled/review-weekly-<current-week>.md` frontmatter (just written in step 1).
+   - Also read the prior week's `compiled/review-weekly-*.md` frontmatter (sort by `week` descending, take the second file).
+   - Compute deltas directly from frontmatter values (no synthesis or inference) and format:
+     ```
+     ## This week's evolution
+     - Cost: $X.XX (vs $Y.YY prior week, Δ+/-N%)
+     - Autonomy: N% self-directed (vs M% prior, Δ+/-N pp)
+     - Proposals: +A created, B resolved (C pending review, D in flight)
+     - Oldest open accepted: PROP-NNN (Nd since accepted) [or "none"]
+     ```
+   - If no prior week file exists: omit the "vs" comparisons and show this week's numbers only.
+   - If the current-week file is missing (script failed): skip the evolution block entirely.
 
-4. Archive expired raw artifacts:
+4. Channel-send the combined weekly summary:
+   - Compose the message: one-line review headline (session count, cost, self-directed rate from frontmatter) followed by the evolution block from step 3.
+   - Pick the destination channel using this fixed priority order: `discord`, `telegram`. For each in turn, if `config.json.channels.<id>.dm_channel_id` is set, send via that channel's reply tool (`mcp__plugin_<id>_<id>__reply` with `{ chat_id: dm_channel_id, text: <message> }`) and stop. Operator override via a `channels.primary` field is on the roadmap (tracked separately).
+   - If no listed channel has `dm_channel_id` configured: append a single Findings line to `.claude-code-hermit/sessions/SHELL.md`: `"weekly-review: no dm_channel_id configured, channel-send skipped"`. Only log this once per session to avoid noise. Do **not** emit a `channel-send-unavailable` alert issue.
+
+5. Archive expired raw artifacts:
    ```
    node ${CLAUDE_PLUGIN_ROOT}/scripts/archive-raw.js .claude-code-hermit
    ```
@@ -25,7 +42,6 @@ Generates the weekly review for the current ISO week.
 
 ## Notes
 
-- The routine ships `enabled: false` in the config template. Enable it after running `/claude-code-hermit:obsidian-setup`.
 - Safe to run manually at any time — re-runs overwrite the current week's review.
-- The weekly review does not modify any other Obsidian pages. `obsidian/Latest Review.md` is the only file updated.
+- The routine is enabled by default for new installs. Existing operators who haven't opted in can enable it via `/claude-code-hermit:hermit-settings`.
 - `archive-raw.js` only moves files — it never deletes. Archived files land in `raw/.archive/` and can be restored manually.

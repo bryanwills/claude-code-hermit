@@ -4,7 +4,6 @@
   <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.0.40-green.svg" alt="Version 1.0.40" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
-  <a href="plugins/claude-code-hermit/docs/obsidian-setup.md"><img src="https://img.shields.io/badge/obsidian-active-7c3aed.svg" alt="Obsidian Integration" /></a>
 </p>
 
 # claude-code-hermit
@@ -12,7 +11,7 @@
 Claude Code plugin that turns it into a 24/7 personal AI assistant. **Self-learning**, **Local**, **Cost-aware**, **One Claude subscription, multiple hermits**.
 
 <p align="center">
-  <img src="plugins/claude-code-hermit/assets/demo.gif" alt="claude-code-hermit demo — Obsidian dashboard, Discord control, autonomous briefings, remote access" width="720" />
+  <img src="plugins/claude-code-hermit/assets/demo.gif" alt="claude-code-hermit demo — Discord control, autonomous briefings, remote access" width="720" />
 </p>
 
 Hermit wires all the native Claude Code capabilities (`/loop`, `CronCreate`, channels, Monitor, auto-memory, native Tasks) to turn CC into a self-learning personal assistant.
@@ -160,7 +159,6 @@ Many operators run several hermits in parallel — one per domain. Each one is a
 - [Docker Security](plugins/claude-code-hermit/docs/docker-security.md)
 - [FAQ](plugins/claude-code-hermit/docs/faq.md)
 - [Getting Started](plugins/claude-code-hermit/docs/how-to-use.md)
-- [Hermit Cortex (Powered by Obsidian)](plugins/claude-code-hermit/docs/obsidian-setup.md)
 - [Plugin Hermit Storage](plugins/claude-code-hermit/docs/plugin-hermit-storage.md)
 - [Recommended Plugins](plugins/claude-code-hermit/docs/recommended-plugins.md)
 - [Security](plugins/claude-code-hermit/docs/security.md)

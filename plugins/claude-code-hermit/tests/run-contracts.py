@@ -911,10 +911,7 @@ class TestProposalIdScheme(unittest.TestCase):
 
     SCRIPTS_WITH_PROPOSAL_GLOB = [
         'reflect-precheck.js',
-        'build-cortex.js',
-        'cortex-refresh-stage.js',
         'weekly-review.js',
-        'validate-frontmatter.js',
         'doctor-check.js',
     ]
 
@@ -942,6 +939,44 @@ class TestProposalIdScheme(unittest.TestCase):
             'session-mgr.md is missing the full-ID capture regex — '
             'new-format IDs would be truncated to PROP-NNN in session reports',
         )
+
+
+class TestAnalyticsSkillsContract(unittest.TestCase):
+    """Structural contract for the three on-demand analytics skills (PROP-038).
+
+    Guards against copy-paste drift between the directory name, the frontmatter
+    `name` field, and the channel-reply step that downstream operators depend on.
+    """
+
+    ANALYTICS_SKILLS = ['hermit-brain', 'hermit-evolution', 'hermit-health']
+
+    def _read_skill(self, slug):
+        path = REPO / 'skills' / slug / 'SKILL.md'
+        self.assertTrue(path.exists(), f'skills/{slug}/SKILL.md missing')
+        return path.read_text()
+
+    def test_frontmatter_name_matches_directory(self):
+        for slug in self.ANALYTICS_SKILLS:
+            content = self._read_skill(slug)
+            parts = content.split('---\n', 2)
+            self.assertEqual(len(parts), 3, f'{slug}: SKILL.md missing closing --- of frontmatter')
+            self.assertEqual(parts[0], '', f'{slug}: content before opening --- delimiter')
+            head = parts[1]
+            self.assertIn(f'name: {slug}', head, f'{slug}: frontmatter name field must match directory')
+            self.assertIn('description:', head, f'{slug}: frontmatter description field missing')
+
+    def test_channel_reply_step_present(self):
+        """Each analytics skill must keep its Step 0 channel-reply branch (PROP-037 contract)."""
+        for slug in self.ANALYTICS_SKILLS:
+            content = self._read_skill(slug)
+            self.assertIn('Channel reply', content, f'{slug}: Step 0 channel-reply section removed')
+            self.assertIn('<channel source=', content, f'{slug}: channel envelope sentinel removed')
+
+    def test_output_char_budget_declared(self):
+        """Each analytics skill declares the ≤1500-char channel budget."""
+        for slug in self.ANALYTICS_SKILLS:
+            content = self._read_skill(slug)
+            self.assertIn('1500 chars', content, f'{slug}: 1500-char output budget no longer declared')
 
 
 if __name__ == '__main__':

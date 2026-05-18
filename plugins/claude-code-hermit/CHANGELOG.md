@@ -4,6 +4,7 @@
 
 ### Added
 
+- **New skills: `/hermit-brain`, `/hermit-evolution`, `/hermit-health`.** Three on-demand channel-friendly analytics skills that replace the retired Obsidian Cortex surface. `/brain` synthesises fragile zones, stale accepted proposals, and recent learnings from session history and reflect output. `/evolution` shows cost trend, autonomy delta, and proposal-resolution times across recent weekly reviews. `/health` shows alert state, proposal queue depth, routine engagement, and channel availability. All three emit ≤1500-char channel-optimised markdown. When invoked via a channel-arrived message they reply via the channel (per PROP-037 §0); terminal invocations emit to conversation.
 - **Automatic session close (PROP-040).** Heartbeat archives sessions whose SHELL.md has been idle for more than 12h, silently and without configuration. Auto-closed session reports carry `closed_via: auto` frontmatter; reflect skips them when scanning archive evidence (preventing mtime-triggered false compute-phase runs); weekly-review includes them in cost/session totals but excludes them from the autonomy rate denominator with an inline "(N auto-archived excluded)" note. The trigger fires via a new `AUTO_CLOSE` verdict from `heartbeat-precheck.js` (SHELL.md mtime check, testable with `HERMIT_NOW` env var); the `--auto` flag on `/session-close` bypasses the operator-summary prompt, skips reflect, and preserves the heartbeat loop.
 - **Reactive channel-reply reminder (PROP-037).** Inbound `<channel source="..." chat_id="..." ...>` messages now get a per-prompt hook-injected reminder naming the exact reply tool and `chat_id`, plus a documented contract in the channel-responder skill. Two reinforcement surfaces: (1) `skills/channel-responder/SKILL.md` §0 promotes the reply-via-channel rule to step 0 of the canonical handler — using the generic tool-name pattern `mcp__plugin_<source>_<source>__reply` so it stays accurate for all channel plugins; (2) new `scripts/channel-reply-reminder.js` UserPromptSubmit hook parses the channel envelope at the start of the prompt (order-independent attribute extraction, `>` inside quoted values handled correctly, `safeForLLM` sanitization, length caps) and emits an `additionalContext` reminder. Hook is a no-op when no channel envelope is present, so non-channel installs pay zero cost. Addresses the downstream silent-stranding bug observed when MCP-level guidance alone proved insufficient. No operator `CLAUDE.md` changes.
 
@@ -13,7 +14,33 @@
 
 ### Changed
 
+- **Cortex generation moves from cron-driven file regeneration to on-demand skill dispatch.** `/hermit-brain`, `/hermit-evolution`, `/hermit-health` read hermit state directly and emit fresh analyses per invocation. No pre-built file artifact.
+- **`weekly-review` now appends a "This week's evolution" block** (cost, autonomy, proposal counts with week-over-week Δ) and sends the combined summary via the configured channel. The block is computed from `compiled/review-weekly-*.md` frontmatter — no extra LLM call at routine time, though the LLM still formats the prose.
+- **`weekly-review` routine default changed to `enabled: true`** for new installs. Existing operators retain their current setting; to receive the new channel-friendly weekly evolution summary, enable the `weekly-review` routine via `/claude-code-hermit:hermit-settings`.
+- **Frontmatter contract softened from strict (enforced by `validate-frontmatter.js`) to convention.** Include `title`, `created`, `tags`, `source`, `session` (if applicable) on artifacts you create. See `docs/frontmatter-contract.md`.
 - **`/reflect`: Tier 1 + `Evidence Source: current-session` is now accepted at any hermit phase (PROP-036 Stage 1).** Previously only `newborn` (age < 3d) allowed it; juvenile and adult required 2+ archived sessions for every tier, leaving reflect silent on long-running daemons whose operators rarely close sessions and never accumulate `S-NNN-REPORT.md` archives. Tier 1 + `archived-session` still requires 2+ archived sessions, and Tier 2 / Tier 3 are unchanged. The Evidence Integrity Rule (reflect must not inject pattern text into Findings/Blockers pre-judge) is unchanged and remains the guardrail against self-certification. Stage 2 (candidate_history ledger for the empty-Findings subcase) is deferred pending empirical signal.
+
+### Fixed
+
+- **`hermit-evolve` migration check uses the correct `obsidian/` path (PR #102 review).** The retired Cortex was always written to the project root (`<project-root>/obsidian/`), not inside `.claude-code-hermit/`. The earlier `hermit-evolve` step 5a checked the wrong path, so the upgrade-time Findings note ("obsidian/ no longer maintained by hermit; safe to delete") would never have fired for existing operators. Also: `weekly-review` channel selection now uses an explicit fixed priority (`discord`, `telegram`) instead of relying on JSON object key order; `/brain` trigger list no longer collides with `/knowledge`'s "knowledge health" phrase; `weekly-review` SKILL.md step numbering normalised; new contract tests in `tests/run-contracts.py` (`TestAnalyticsSkillsContract`) guard against copy-paste drift in the three new analytics skills.
+
+### Removed
+
+- **Skills:** `/claude-code-hermit:obsidian-setup`, `:cortex-refresh`, `:cortex-sync`
+- **Scripts:** `build-cortex.js`, `cortex-refresh-stage.js`, `validate-frontmatter.js`
+- **Templates:** `state-templates/obsidian/` (six Cortex page templates)
+- **Templates:** `state-templates/cortex-manifest.json.template`
+- **Docs:** `docs/obsidian-setup.md`
+- **Stop-hook stage:** cortex-refresh stage removed from `scripts/stop-pipeline.js`
+- **Weekly-review:** `Latest Review.md` pointer write removed from `scripts/weekly-review.js`
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve` after `/plugin update`. It will:
+
+1. **Detect existing project-root `obsidian/` directory** — leave it untouched (operators may have customised it). Logs a SHELL.md Findings note: `"obsidian/ no longer maintained by hermit; safe to delete or keep as personal vault."` The `.claude-code-hermit/cortex-manifest.json` file is also left in place for the same reason.
+2. **`weekly-review` default.** The template now ships `enabled: true` for new installs. Your current setting is not auto-flipped. To opt in to the new channel-friendly weekly evolution summary, run `/claude-code-hermit:hermit-settings` and enable the `weekly-review` routine.
+3. **`/obsidian-setup`, `/cortex-refresh`, `/cortex-sync`** disappear on next `/plugin update`; no migration required for existing operators.
 
 ## [1.0.40] - 2026-05-16
 
