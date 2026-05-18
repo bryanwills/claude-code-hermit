@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Reactive channel-reply reminder (PROP-037).** Inbound `<channel source="..." chat_id="..." ...>` messages now get a per-prompt hook-injected reminder naming the exact reply tool and `chat_id`, plus a documented contract in the channel-responder skill. Two reinforcement surfaces: (1) `skills/channel-responder/SKILL.md` §0 promotes the reply-via-channel rule to step 0 of the canonical handler — using the generic tool-name pattern `mcp__plugin_<source>_<source>__reply` so it stays accurate for all channel plugins; (2) new `scripts/channel-reply-reminder.js` UserPromptSubmit hook parses the channel envelope at the start of the prompt (order-independent attribute extraction, `>` inside quoted values handled correctly, `safeForLLM` sanitization, length caps) and emits an `additionalContext` reminder. Hook is a no-op when no channel envelope is present, so non-channel installs pay zero cost. Addresses the downstream silent-stranding bug observed when MCP-level guidance alone proved insufficient. No operator `CLAUDE.md` changes.
+
 ## [1.0.40] - 2026-05-16
 
 ### Added
