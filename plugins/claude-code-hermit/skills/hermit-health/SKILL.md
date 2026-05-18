@@ -1,8 +1,8 @@
 ---
-name: health
-description: "Show alert state, proposal queue depth, routine engagement, and channel availability. Activates on messages like 'health check', 'how's the hermit', 'is anything broken', 'health', 'system health', 'anything wrong', 'hermit status', 'are routines running'."
+name: hermit-health
+description: "Show alert state, proposal queue depth, routine engagement, and channel availability. Activates on messages like 'health check', 'how's the hermit', 'is anything broken', 'hermit health', 'system health', 'anything wrong', 'hermit status', 'are routines running'."
 ---
-# Health
+# Hermit Health
 
 Synthesize a compact infrastructure snapshot: active alerts, proposal queue, routine engagement, and whether channels are ready for outbound sends.
 

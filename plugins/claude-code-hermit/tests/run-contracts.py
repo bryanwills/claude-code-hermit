@@ -948,7 +948,7 @@ class TestAnalyticsSkillsContract(unittest.TestCase):
     `name` field, and the channel-reply step that downstream operators depend on.
     """
 
-    ANALYTICS_SKILLS = ['brain', 'evolution', 'health']
+    ANALYTICS_SKILLS = ['hermit-brain', 'hermit-evolution', 'hermit-health']
 
     def _read_skill(self, slug):
         path = REPO / 'skills' / slug / 'SKILL.md'

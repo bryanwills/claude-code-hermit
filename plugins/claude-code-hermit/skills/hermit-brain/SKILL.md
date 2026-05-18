@@ -1,8 +1,8 @@
 ---
-name: brain
-description: "Show fragile zones, stale accepted proposals, and recent learnings drawn from session history, proposals, and reflect output. Activates on messages like 'what's stuck', 'any fragile zones', 'show me what's blocked', 'recent learnings', 'brain', 'what have you learned lately', 'where are the weak spots'."
+name: hermit-brain
+description: "Show fragile zones, stale accepted proposals, and recent learnings drawn from session history, proposals, and reflect output. Activates on messages like 'what's stuck', 'any fragile zones', 'show me what's blocked', 'recent learnings', 'hermit brain', 'what have you learned lately', 'where are the weak spots'."
 ---
-# Brain
+# Hermit Brain
 
 Synthesize a compact analytical snapshot of the hermit's current knowledge state: where things are fragile, which accepted proposals have stalled, and what has been recently learned.
 

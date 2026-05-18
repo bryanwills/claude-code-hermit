@@ -1,8 +1,8 @@
 ---
-name: evolution
-description: "Show cost trend, autonomy delta, and proposal-resolution times across recent weeks. Activates on messages like 'how am I trending', 'cost trend', 'autonomy', 'evolution', 'show me my trajectory', 'am I improving', 'proposal velocity', 'weekly trends'."
+name: hermit-evolution
+description: "Show cost trend, autonomy delta, and proposal-resolution times across recent weeks. Activates on messages like 'how am I trending', 'cost trend', 'autonomy', 'hermit evolution', 'show me my trajectory', 'am I improving', 'proposal velocity', 'weekly trends'."
 ---
-# Evolution
+# Hermit Evolution
 
 Synthesize a compact analytical snapshot of the hermit's trajectory over recent weeks: cost trend, autonomy rate, and how fast proposals move through the pipeline.
 
@@ -24,7 +24,7 @@ Read the following (gracefully skip any file that doesn't exist):
 
 **Autonomy:** From review files, extract `self_directed_rate` (fraction of sessions with no operator turns). Show latest value and Δ vs prior week. Higher = more self-directed. If fewer than 2 reviews exist, show "not enough data".
 
-**Proposal resolution:** From `proposal-metrics.jsonl`, compute median days between `created_at` and `resolved_at` for proposals resolved in the last 30 days. If no data: "no resolution data yet". (For specific stale proposal names, use `/brain`.)
+**Proposal resolution:** From `proposal-metrics.jsonl`, compute median days between `created_at` and `resolved_at` for proposals resolved in the last 30 days. If no data: "no resolution data yet". (For specific stale proposal names, use `/hermit-brain`.)
 
 ## Output
 

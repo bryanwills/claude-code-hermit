@@ -97,9 +97,9 @@ Routines replace the old `heartbeat.morning_routine` / `heartbeat.evening_routin
 
 | Skill           | What it does                                                                                                                                                                                    | Auto-triggers       |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| `brain`         | Show fragile zones, stale accepted proposals, and recent learnings from session history, proposals, and reflect output. Activated by natural language: "what's stuck", "fragile zones", etc.    | --                  |
-| `evolution`     | Show cost trend, autonomy delta, and proposal-resolution times across recent weekly reviews. Activated by: "how am I trending", "cost trend", "evolution", etc.                                 | --                  |
-| `health`        | Show alert state, proposal queue depth, routine engagement, and channel availability. Activated by: "health check", "how's the hermit", "is anything broken", etc.                              | --                  |
+| `hermit-brain`     | Show fragile zones, stale accepted proposals, and recent learnings from session history, proposals, and reflect output. Activated by natural language: "what's stuck", "fragile zones", etc.    | --                  |
+| `hermit-evolution` | Show cost trend, autonomy delta, and proposal-resolution times across recent weekly reviews. Activated by: "how am I trending", "cost trend", "hermit evolution", etc.                          | --                  |
+| `hermit-health`    | Show alert state, proposal queue depth, routine engagement, and channel availability. Activated by: "health check", "how's the hermit", "is anything broken", etc.                              | --                  |
 | `weekly-review` | Generates a weekly review report at `.claude-code-hermit/compiled/review-weekly-YYYY-Www.md` and sends a channel-friendly summary with an evolution block. Archives expired raw artifacts.      | Sunday 23:00 routine |
 
 ## Communication

@@ -244,7 +244,7 @@ Most common actions auto-trigger from natural language — just say what you mea
 | **Config**     | `hermit-settings`, `hatch`, `hermit-evolve`                        |
 | **Docker**     | `docker-setup`                                                     |
 | **Channels**   | `channel-responder`                                                |
-| **Summaries**  | `brain`, `evolution`, `health`, `weekly-review`                    |
+| **Summaries**  | `hermit-brain`, `hermit-evolution`, `hermit-health`, `weekly-review` |
 | **Testing**    | `smoke-test`, `test-run`                                           |
 
 Full reference: [Skills Reference](skills.md).
