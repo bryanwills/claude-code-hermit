@@ -17,3 +17,13 @@ Detailed — provide full context and explanation when reporting findings or cha
 ## CI
 
 GitHub Actions (test-ha.yml, test-hooks.yml). Tests run from inside each plugin directory — not from repo root. CI covers all plugins on every PR regardless of which plugin changed; a failure in an unrelated plugin test is expected and not your fault.
+
+## Development Conventions
+
+- Test command: `bash plugins/claude-code-hermit/tests/run-all.sh`
+- Lint: none configured
+- Format: none configured
+- PR command: `gh pr create`
+- Protected branches: `main`
+- Hook profile: strict (git-push-guard active)
+- Mode: standard (full workflow injected into CLAUDE.md)
