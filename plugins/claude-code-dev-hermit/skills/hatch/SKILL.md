@@ -68,24 +68,48 @@ When building the options array at runtime:
 Read the plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
 
 **Resolve target file:** Read `.claude-code-hermit/state/hatch-options.json`. Use the `"target"` field:
-- `"local"` → write to `CLAUDE.local.md`
-- `"committed"` or absent → write to `CLAUDE.md`
-- If the file doesn't exist (operator ran dev-hermit hatch before core hatch): ask with `AskUserQuestion` (header: "Visibility") — options: **`.local` files** (gitignored) / **Committed files** (shared). Record choice and write `.claude-code-hermit/state/hatch-options.json` with `{"target": "<choice>", "stamped_by": "claude-code-dev-hermit:hatch", "stamped_at": "<iso>"}`.
+- `"local"` → `target_file = CLAUDE.local.md`
+- `"committed"` or absent → `target_file = CLAUDE.md`
+- If the file doesn't exist (operator ran dev-hermit hatch before core hatch): detect `core_install_scope` from `claude plugin list --json` using the same precedence rules core hatch's Step 1.5 item 2 uses (filter to entries where plugin name is `claude-code-hermit` and `enabled == true`; apply precedence `local` > `project` (both require `projectPath == project root`) > `user` (any `projectPath`) > `null`; map `project` → `committed`, `local`/`user`/`null` → `local` as the scope-derived default). Ask with `AskUserQuestion` (header: "Visibility") — present the scope-derived default at position 0 with `(recommended)` in the label: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Record the choice and write `.claude-code-hermit/state/hatch-options.json` with the full schema:
 
-Based on the mode chosen in step 2:
-- `safety` → read `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND-SAFETY.md`
-- `standard` → read `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md`
+  ```json
+  {
+    "target": "<choice>",
+    "core_install_scope": "<project|local|user|null>",
+    "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
+    "stamped_by": "claude-code-dev-hermit:hatch",
+    "version": "<current dev-hermit plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
+  }
+  ```
 
-Look for the marker comment `<!-- claude-code-dev-hermit: Development Workflow -->` in the target file.
+  This matches the canonical schema core hatch Step 9b writes, so when core hatch later runs its 1.1.1 preservation logic keeps `stamped_at`/`stamped_by` intact and adds `last_updated_at`/`last_updated_by`.
 
-- Marker absent: append the selected template to the target file.
-- Marker present, stamped version differs from the plugin version: silently replace the existing block with the selected template.
-- Marker present, versions match AND mode is unchanged from config: skip — block is current.
-- Marker present, versions match but mode changed: replace — operator switched modes.
+Compute `other_file = (target == "local") ? "CLAUDE.md" : "CLAUDE.local.md"`.
 
-The template is the source of truth. No operator prompt is needed for the replace step.
+**Select mode template and read it once:**
+- `safety` → `template = ${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND-SAFETY.md`
+- `standard` → `template = ${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md`
 
-The template is the source of truth. No operator prompt is needed for this step.
+The marker is `<!-- claude-code-dev-hermit: Development Workflow -->`. Detect presence in both files: `in_target = marker present in target_file`; `in_other = marker present in other_file`. Then branch on the (in_target, in_other) tuple:
+
+**Case A — (false, false), marker absent in both:** append `template` to `target_file`. No prompt.
+
+**Case B — (true, false), marker only in target_file (steady state):**
+- Stamped version in target block matches plugin version AND mode is unchanged from config: skip — block is current.
+- Otherwise: silently replace the existing block in `target_file` with `template`. No prompt (template is the source of truth).
+
+**Case C — (false, true), marker only in other_file (the migration case):**
+- Compare the block content in `other_file` against `template`. Surface mode mismatch and hand-edits separately:
+  - If the prior block's mode (detect by section list — e.g. `## Implementation Flow` absent → safety) differs from the currently selected mode, label the diff as "mode switch: <prior> → <current>" — not as hand-edits.
+  - Any remaining diff inside the marker is hand-edits.
+- Ask with `AskUserQuestion` (header: "Migrate dev block") — options, matching core hermit-evolve voice: **Move** (recommended; removes block from `<other_file>`, writes `template` to `<target_file>`, drops any hand-edits unless operator carries them) / **Keep in `<other_file>`** (leaves the block where it is; does NOT write to `target_file`) / **Skip** (no changes this run; does NOT write to `target_file`).
+- If hand-edits exist, ask a follow-up: carry them across or drop them. If carry: merge into `template` before writing to `target_file`.
+- On Move: remove the marked block from `other_file`, then write the (possibly-merged) template to `target_file`.
+- On Keep or Skip: do NOT fall through to Case A — that would append a fresh block to `target_file` and recreate the duplicate-block bug. Just exit Step 3.
+
+**Case D — (true, true), marker in both files (diagnostic state, e.g. partial migration):**
+- Report the state to the operator. Ask with `AskUserQuestion` (header: "Resolve duplicate") — options: **Remove from `<other_file>`** (recommended; strips the stray block, then proceeds as Case B on `target_file`) / **Manual** (exits Step 3 with no changes; operator cleans up themselves) / **Skip** (exits Step 3 with no changes).
+- On Remove: strip the marker block from `other_file`, then run Case B's logic on `target_file`.
 
 ### 4. Ask about remaining settings
 
