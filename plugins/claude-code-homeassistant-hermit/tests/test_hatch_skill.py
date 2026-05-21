@@ -23,7 +23,9 @@ def skill_text() -> str:
 def changelog_unreleased() -> str:
     text = CHANGELOG.read_text(encoding="utf-8")
     m = re.search(r"## \[Unreleased\]([\s\S]*?)(?=\n## \[)", text)
-    assert m, "[Unreleased] section not found in CHANGELOG.md"
+    if not m:
+        m = re.search(r"## \[\d+\.\d+\.\d+\][^\n]*\n([\s\S]*?)(?=\n## \[)", text)
+    assert m, "No changelog section found in CHANGELOG.md"
     return m.group(1)
 
 
