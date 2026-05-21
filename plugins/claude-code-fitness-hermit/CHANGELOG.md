@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.0.4] - 2026-05-21
+
+### Changed
+
+- **deps: core hermit floor raised to >=1.1.1** — aligns with the >=1.1.1 requirement now enforced across all fleet plugins; operators on older core builds will be prompted to update.
+- **docs: README updated to reflect RPE skills** — `capture-activity-rpe` and `set-rpe` now listed in the skills overview and features section.
+- **docs: min Claude Code prerequisite raised to v2.1.140+** — reflects the actual minimum tested version.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `.claude-plugin/hermit-meta.json` | `required_core_version` and `requires` bumped to `>=1.1.1` |
+| `.claude-plugin/plugin.json` | `dependencies.claude-code-hermit` bumped to `^1.1.1` |
+| `README.md` | RPE skills added to features and skills overview; CC prerequisite raised to v2.1.140+ |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Verify core version** — confirm the installed `claude-code-hermit` core is >=1.1.1. If not, run `claude plugin update claude-code-hermit` first.
+
+No `config.json` changes required.
+
+---
+
 ## [0.0.3] - 2026-05-14
 
 ### Added
