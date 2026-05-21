@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`/hatch` Step 3 is now target-aware (GH #111).** Reads `.claude-code-hermit/state/hatch-options.json` written by core hatch and writes the CLAUDE-APPEND block to `CLAUDE.local.md` (when `target = "local"`) or `CLAUDE.md` (when `target = "committed"`). If core hatch hasn't run yet, prompts the operator for a Visibility choice and stamps the file. Both `CLAUDE-APPEND.md` (standard mode) and `CLAUDE-APPEND-SAFETY.md` (safety mode) targets follow the same routing.
+
 ## [0.3.7] - 2026-05-16
 
 ### Changed
