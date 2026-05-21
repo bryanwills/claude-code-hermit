@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Duplicate Fitness block after core 1.1.1 target migration.** When an operator upgraded core hermit to 1.1.1 and chose `target = "local"`, core's `hermit-evolve` migrated its own block from `CLAUDE.md` to `CLAUDE.local.md` but the fitness-hermit block was left behind. The subsequent sibling-sync in `hermit-evolve` Step 7 found no marker in `CLAUDE.local.md` and appended a fresh Fitness block there, while the pre-existing block in `CLAUDE.md` was never removed — resulting in duplicate `<!-- claude-code-fitness-hermit: Fitness Workflow -->` blocks in both files. The Upgrade Instructions below run a one-shot migration via `hermit-evolve` Step 7 to remove the stray block.
+
+### Changed
+
+- **`/hatch` Step 6 is now target-aware (GH #111 follow-up).** Reads `.claude-code-hermit/state/hatch-options.json` written by core hatch and writes the CLAUDE-APPEND block to `CLAUDE.local.md` (when `target = "local"`) or `CLAUDE.md` (when `target = "committed"`). If core hatch hasn't run yet, the skill detects `core_install_scope` from `claude plugin list --json` and presents the scope-derived default at position 0 of the Visibility prompt, then stamps `hatch-options.json` with the canonical 5-field schema (`target`, `core_install_scope`, `stamped_at`, `stamped_by`, `version`). Stray-block migration is handled one-shot by the Upgrade Instructions below — hatch itself stays focused on target-aware setup.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill executes the following steps automatically (via Step 7's sibling upgrade flow, which runs every plugin's `### Upgrade Instructions` before its CLAUDE-APPEND sync). The migration is unconditional — `hermit-evolve` Step 7 always re-syncs the canonical block to `hatch_target` after this, so the only operator-prompted decision is hand-edit preservation.
+
+1. **Resolve `hatch_target`.** Use the same fallback chain `hermit-evolve` Step 2a uses, substituting the Fitness marker: read `.claude-code-hermit/state/hatch-options.json` and use the `"target"` field; else check `CLAUDE.local.md` for `<!-- claude-code-fitness-hermit: Fitness Workflow -->` → `hatch_target = "local"`; else check `CLAUDE.md` for the same marker → `hatch_target = "committed"`; else stop — the Fitness block is in neither file, nothing to migrate.
+
+2. **Identify the non-target file.** `non_target = (hatch_target == "local") ? "CLAUDE.md" : "CLAUDE.local.md"`.
+
+3. **If the marker is present in `non_target`:** detect hand-edits inside the marker by comparing the block content against the canonical template at this plugin version (`<installPath>/state-templates/CLAUDE-APPEND.md`, where `<installPath>` is the sibling plugin's install path that `hermit-evolve` Step 7 already iterates over).
+   - If hand-edits exist, ask the operator: **Carry forward** (merge hand-edits into the canonical template, write the merged block to `hatch_target` file, then strip the block from `non_target`) / **Drop** (strip the block from `non_target`; let Step 7's sync re-append the clean canonical template to `hatch_target`).
+   - If no hand-edits: silently strip the block from `non_target`. Step 7's sync handles `hatch_target`.
+
+4. **If the marker is only in `hatch_target`:** no-op. Steady state — Step 7's normal sync handles routine version-bump replacement.
+
+No `config.json` changes required.
+
 ## [0.0.4] - 2026-05-21
 
 ### Changed

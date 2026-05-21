@@ -135,16 +135,34 @@ Read the source file (using Read tool), then check if the destination exists (`.
 
 ---
 
-## Step 6 — CLAUDE.md inject
+## Step 6 — CLAUDE.md / CLAUDE.local.md inject
 
-Read the project's `CLAUDE.md`. Search for the opening marker:
+**Resolve target file:** Read `.claude-code-hermit/state/hatch-options.json`. Use the `"target"` field:
+- `"local"` → `target_file = CLAUDE.local.md`
+- `"committed"` or absent → `target_file = CLAUDE.md`
+- If the file doesn't exist (no `hatch-options.json` yet — operator's core hermit predates 1.1.1): detect `core_install_scope` from `claude plugin list --json` using the same precedence rules as core hatch Step 1.5 item 2 (filter entries where plugin name is `claude-code-hermit` and `enabled == true`; precedence `local` > `project` (both require `projectPath == project root`) > `user` (any `projectPath`) > `null`; map `project` → `committed`, `local`/`user`/`null` → `local`). Ask with `AskUserQuestion` (header: "Visibility") — scope-derived default at position 0 with `(recommended)`: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Write the canonical 5-field schema to `.claude-code-hermit/state/hatch-options.json`:
+
+  ```json
+  {
+    "target": "<choice>",
+    "core_install_scope": "<project|local|user|null>",
+    "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
+    "stamped_by": "claude-code-fitness-hermit:hatch",
+    "version": "<current fitness-hermit plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
+  }
+  ```
+
+Read `target_file`. Search for the opening marker:
 
 ```
 <!-- claude-code-fitness-hermit: Fitness Workflow -->
 ```
 
-- **Marker absent** → append the full contents of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` to the project `CLAUDE.md` using Edit.
+- **`target_file` does not exist** (greenfield `CLAUDE.local.md` is common) → treat as marker-absent and proceed to the append branch; Edit will create the file.
+- **Marker absent** → append the full contents of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` to `target_file` using Edit.
 - **Marker present** → skip (up-to-date; `hermit-evolve` handles block replacement on upgrade).
+
+Stray-block migration (block stranded in the non-target file after a target flip) is handled one-shot by the Upgrade Instructions in this version's CHANGELOG entry, executed by `hermit-evolve` Step 7. Hatch itself stays focused on target-aware setup.
 
 ---
 
