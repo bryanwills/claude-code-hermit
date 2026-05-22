@@ -164,6 +164,107 @@ def is_container():
     )
 
 
+def _is_sandbox_enabled():
+    """Return True if the effective sandbox.enabled state is true.
+
+    Respects Claude Code's merge order: settings.local.json overrides settings.json.
+    The last file that explicitly declares sandbox.enabled wins. Non-bool values
+    (e.g., the string "false") are treated as undeclared, not coerced via bool().
+    """
+    result = None
+    for path in (Path('.claude/settings.json'), Path('.claude/settings.local.json')):
+        try:
+            with open(path) as f:
+                s = json.load(f)
+            if not isinstance(s, dict):
+                continue
+            sandbox = s.get('sandbox') or {}
+            if not isinstance(sandbox, dict):
+                continue
+            if 'enabled' in sandbox and isinstance(sandbox['enabled'], bool):
+                result = sandbox['enabled']
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            pass
+    return result is True
+
+
+def _sandbox_probe_cached():
+    """Run sandbox-probe.py; cache result keyed on a system fingerprint."""
+    import hashlib
+    import platform
+
+    probe_cache = STATE_DIR / 'sandbox-probe.json'
+    plugin_root = Path(__file__).resolve().parent.parent
+    probe_script = plugin_root / 'scripts' / 'sandbox-probe.py'
+    if not probe_script.exists():
+        return None
+
+    bwrap_path = shutil.which('bwrap') or ''
+    socat_path = shutil.which('socat') or ''
+    try:
+        bwrap_mtime = str(os.path.getmtime(bwrap_path)) if bwrap_path else ''
+        socat_mtime = str(os.path.getmtime(socat_path)) if socat_path else ''
+    except OSError:
+        bwrap_mtime = socat_mtime = ''
+    fp_raw = f'{platform.release()}|{bwrap_path}|{bwrap_mtime}|{socat_path}|{socat_mtime}'
+    fingerprint = hashlib.sha1(fp_raw.encode()).hexdigest()[:16]
+
+    try:
+        with open(probe_cache) as f:
+            cached = json.load(f)
+        if cached.get('fingerprint') == fingerprint:
+            cached_result = cached.get('result')
+            if isinstance(cached_result, dict):
+                return cached_result
+            # Corrupted cache (non-dict result) — fall through to re-probe.
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+
+    try:
+        out = subprocess.run(
+            [sys.executable, str(probe_script)],
+            capture_output=True, text=True, timeout=10,
+        )
+        if out.returncode != 0:
+            return None
+        result = json.loads(out.stdout)
+        if not isinstance(result, dict):
+            return None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError, ValueError):
+        return None
+
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        with open(probe_cache, 'w') as f:
+            json.dump({'fingerprint': fingerprint, 'result': result}, f)
+    except OSError:
+        pass
+
+    return result
+
+
+def check_sandbox_capability():
+    """Warn to stdout if sandbox is enabled but deps are unavailable.
+
+    Skipped inside containers: hermit-start auto-writes enableWeakerNestedSandbox
+    for that case, which sidesteps the user-namespace restriction that the probe
+    tests for. The unshare check would always fail in unprivileged containers
+    regardless, producing a spurious warning.
+    """
+    if not _is_sandbox_enabled():
+        return
+    if is_container():
+        return
+    probe = _sandbox_probe_cached()
+    if not probe or probe.get('status') == 'pass':
+        return
+    msg = probe.get('message', 'Sandbox may not start.')
+    print(f'[hermit] Warning: sandbox enabled but: {msg}')
+    hint = probe.get('install_hint')
+    if hint:
+        print(f'[hermit] Fix: {hint}')
+
+
 def write_runtime_json(data):
     """Atomic write to state/runtime.json."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -493,6 +594,24 @@ def write_settings_env(config):
     if stale_keys:
         print(f'[hermit] Cleaned stale token vars from settings.local.json: {", ".join(stale_keys)}')
 
+    # Sandbox: manage only sandbox.enableWeakerNestedSandbox.
+    # All other sandbox.* keys are hatch/operator territory — never touched here.
+    # Use `or {}` so a literal null or non-dict value (corrupted file, jq edit)
+    # doesn't crash with TypeError downstream.
+    sandbox = settings.get('sandbox') or {}
+    if not isinstance(sandbox, dict):
+        sandbox = {}
+    if is_container():
+        sandbox['enableWeakerNestedSandbox'] = True
+        settings['sandbox'] = sandbox
+    else:
+        if 'enableWeakerNestedSandbox' in sandbox:
+            del sandbox['enableWeakerNestedSandbox']
+        if sandbox:
+            settings['sandbox'] = sandbox
+        else:
+            settings.pop('sandbox', None)
+
     with open(settings_path, 'w') as f:
         json.dump(settings, f, indent=2)
         f.write('\n')
@@ -508,6 +627,7 @@ def main():
     lock_fd = acquire_lifecycle_lock()
     check_for_upgrade(config)
     tools = check_prerequisites()
+    check_sandbox_capability()
     cmd = build_claude_command(config, tools)
     session_name = get_session_name(config)
 
