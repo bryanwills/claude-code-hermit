@@ -181,10 +181,10 @@ Update `boot_skill` in config.json. Set to `null` if operator says "none", "defa
 Note: "Boot skill changes take effect on next `hermit-start` run."
 
 **If argument is "permissions":**
-Ask: "Permission mode for Claude Code? (default / acceptEdits / auto / plan / dontAsk / bypassPermissions) [current value]"
-- `default` — prompts for permission on first use of each tool
-- `acceptEdits` — auto-approves file edits, prompts for shell commands
+Ask: "Permission mode for Claude Code? (auto / acceptEdits / default / plan / dontAsk / bypassPermissions) [current value]"
 - `auto` — autonomous mode; a classifier reviews each action before it runs. Max plan → Opus 4.7 only. Team/Enterprise/API → Sonnet 4.6 or Opus 4.6/4.7. Not available on Pro, Haiku, or non-Anthropic providers. **(default)**
+- `acceptEdits` — auto-approves file edits, prompts for shell commands
+- `default` — prompts for permission on first use of each tool
 - `plan` — read-only exploration, no file modifications or shell commands
 - `dontAsk` — denies all tools not in `permissions.allow`; requires a curated allowlist in `settings.json`
 - `bypassPermissions` — no checks; isolated containers/VMs only
