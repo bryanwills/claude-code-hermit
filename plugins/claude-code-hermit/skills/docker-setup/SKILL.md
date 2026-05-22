@@ -178,6 +178,8 @@ Only the top-level project memory is seeded — not agent-scoped memories at `<p
 
    If the target settings file already has `permissions.deny`, merge (never remove existing entries). Tell the operator: "Added safety deny rules for always-on operation — protects against destructive commands and credential exposure. Container-specific rules (docker, ssh, kubectl) are enforced by the hook at runtime. Written to {.claude/settings.local.json | .claude/settings.json}."
 
+5. **Sandbox note:** The hermit Docker base image ships `bubblewrap` and `socat` (added in v1.1.2), so the Claude Code sandbox can run inside the container. `hermit-start.py` automatically writes `sandbox.enableWeakerNestedSandbox: true` to `.claude/settings.local.json` on every Docker boot — this is required for bwrap to start inside an unprivileged container. The sandbox profile itself (enabled/disabled, filesystem denies) is set at `/hatch` time and lives in the operator's settings file; docker-setup does not modify it.
+
 ### 7. Channel setup
 
 Skip if no enabled channels in `config.json`. Read `.claude-code-hermit/config.json` from the project root (same root verified in Step 1 — do not rely on cwd). A channel counts as present when `config.channels[<name>].enabled !== false` (missing `enabled` is treated as enabled). Empty `channels: {}` skips.

@@ -684,6 +684,31 @@ Merge selected rules into existing `permissions.deny` in the target settings fil
 
 Do NOT include `Bash(docker *)`, `Bash(kubectl *)`, `Bash(ssh *)` in hatch — these are valid in devops contexts on the host. Docker-setup includes them because the container should not spawn child containers or SSH out.
 
+### 9a. Sandbox profile (silent auto-apply, no question)
+
+Configure the Claude Code bash sandbox for this hermit when the system supports it. The sandbox isolates bash tool calls at the OS level (`bwrap` on Linux/WSL2, `sandbox-exec` on macOS), adding defense in depth on top of the `permissions.deny` rules from Step 9. This step asks the operator no questions — silent secure default when deps are present, silent skip when they're not.
+
+**Step:**
+
+1. **Resolve target settings file** using `hatch_target` (`local` → `.claude/settings.local.json`; `committed` → `.claude/settings.json`).
+
+2. **Skip if operator already has sandbox config.** Check if the target settings file already has any of these *operator-intent* keys under `sandbox`: `enabled`, `filesystem`, `network`, `failIfUnavailable`, `autoAllowBashIfSandboxed`, `allowUnsandboxedCommands`. If any are present, skip silently — tell the operator once: "Existing sandbox config preserved." Continue to Step 9b.
+
+   **Important:** `sandbox.enableWeakerNestedSandbox` does NOT count as operator config — it's hermit-managed (auto-written by `hermit-start` inside Docker). Ignore it when deciding whether to skip.
+
+3. **Probe capability**:
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/sandbox-probe.py
+   ```
+   Parse the JSON `status` field.
+
+4. **Branch on probe status:**
+   - `"pass"`: build the standard profile and write it. Read `${CLAUDE_PLUGIN_ROOT}/state-templates/sandbox-profiles.json` (select `standard` entry); read `${CLAUDE_PLUGIN_ROOT}/state-templates/deny-patterns.json` (extract `sandbox.filesystem.denyRead`); merge `profile.filesystem = { "denyRead": <that array> }`; merge into the target settings file under the `sandbox` key. One-line note to the operator: "Sandbox enabled (standard profile, written to {file})."
+   - `"warn"`: surface the probe `message` verbatim to the operator first (e.g., "user-namespaces appear disabled — sandbox may not start"), then write the standard profile (same merge as `pass`). One-line note: "Sandbox configured (standard profile, may degrade silently per warning above; written to {file})." The operator now has a configured-but-potentially-degraded sandbox; the warning tells them what to do if they want it actually enforced.
+   - `"fail"`: do NOT write any sandbox block. Print a single line with the install hint from the probe result: "Sandbox unavailable: {message} — run `{install_hint}` to enable later, then re-run `/claude-code-hermit:hermit-evolve`." Continue.
+
+No `AskUserQuestion`. Operators who want the sandbox off can set `sandbox.enabled: false` in their settings file at any time — documented in `docs/faq.md`.
+
 ### 9b. Persist hatch options
 
 After Steps 6–9 complete, write `.claude-code-hermit/state/hatch-options.json`.
