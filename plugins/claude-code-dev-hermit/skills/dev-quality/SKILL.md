@@ -84,11 +84,11 @@ Do **not** invoke `/code-review:code-review` autonomously — operator decision 
 
 **Tests fail:**
 
-Read `state/last-test.json` and include `likely_cause` in the failure message if present. FAIL with `"tests regressed after /code-review (exit <N>[, likely OOM|timeout|user-interrupt]) — investigate before committing"` and the last 20 lines of stderr. Leave the working tree as-is (post-apply state) — the agent or operator decides whether to fix forward or revert the applied findings manually (`git checkout -- <files>`).
+Read `state/last-test.json` and include `likely_cause` in the failure message if present. FAIL with `"tests regressed after applied findings (exit <N>[, likely OOM|timeout|user-interrupt]) — investigate before committing"` and the last 20 lines of stderr. Leave the working tree as-is (post-apply state) — the agent or operator decides whether to fix forward or revert the applied findings manually (`git checkout -- <files>`).
 
 ## Output
 
-`code-review:` is `N/M findings applied (K surfaced)`, dropping the `(K surfaced)` when `K == 0`; `0 findings` when `M == 0`. The optional `unapplied:` block lists surface-only findings as `<file>:<line> — <summary>` (truncate to ~80 chars); omit when `K == 0`.
+`code-review:` is `N/M findings applied (K surfaced)`, dropping the `(K surfaced)` when `K == 0`; `0 findings` when `M == 0`; or `surfaced (apply skipped — output not parseable as JSON array)` on parser failure (see Gate 1 fallback). The optional `unapplied:` block lists surface-only findings as `<file>:<line> — <summary>` (truncate to ~80 chars); omit when `K == 0`.
 
 ```
 dev-quality
