@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- **`/proposal-act` applies `/code-review` findings.** Step e.5 `quality` and `balanced(RUN)` tiers now parse `/code-review`'s JSON output, Edit-apply findings whose fix is unambiguous from the summary, and surface the rest. Both tiers report `applied N/M findings (K surfaced)` instead of a hallucinated `M cleanups`. The no-post-apply-test-gate risk is documented inline; `/claude-code-dev-hermit:dev-quality` is the follow-up for verification.
 ### Added
 
 - **Claude Code bash sandbox integration (silent secure default).** `/hatch` now configures the Claude Code sandbox (OS-level bash isolation via `bwrap` on Linux/WSL2 and `sandbox-exec` on macOS) automatically when the system supports it — no wizard question, no operator-facing knob. When the capability probe passes, the standard profile is written to the operator's target settings file (filesystem denies for `~/.aws`, `~/.ssh`, `~/.gnupg`; network unrestricted so `gh`/`npm`/`pip` work on first run). When the probe fails (missing `bubblewrap`/`socat` on Linux), hatch prints a one-line install hint and proceeds without enabling the sandbox. Existing operator-set `sandbox.*` keys are preserved unconditionally. Operators can disable at any time by setting `sandbox.enabled: false` in their settings file.
@@ -22,6 +19,7 @@
 ### Fixed
 
 - **Sandbox probe message corrected for Ubuntu 24.04+.** The warn branch in `scripts/sandbox-probe.py` for failed user-namespace detection (`unshare --user --pid true`) previously suggested `sysctl -w kernel.userns_restrict=0` on Ubuntu 24.04+ — that sysctl does not exist. Per upstream Claude Code sandbox docs, the actual remediation is to install an AppArmor profile granting `bwrap` the `userns` capability. The message now points operators at the AppArmor profile path for Ubuntu 24.04+ while preserving the correct `kernel.unprivileged_userns_clone=1` sysctl for older kernels. The actionable command is also populated in the probe result's `install_hint` field (previously `None`) so callers like `/hatch` step 9a, `/hermit-doctor`, and `hermit-start` surface it consistently.
+- **`/proposal-act` applies `/code-review` findings.** Step e.5 `quality` and `balanced(RUN)` tiers now parse `/code-review`'s JSON output, Edit-apply findings whose fix is unambiguous from the summary, and surface the rest. Both tiers report `applied N/M findings (K surfaced)` instead of a hallucinated `M cleanups`. The no-post-apply-test-gate risk is documented inline; `/claude-code-dev-hermit:dev-quality` is the follow-up for verification.
 
 ### Upgrade Instructions
 
