@@ -127,7 +127,7 @@ See [docs/GIT-SAFETY.md](docs/GIT-SAFETY.md) for the full safety model and the t
 
 These are Claude Code built-ins — no installation needed:
 
-- `/code-review` — code cleanup after implementation
+- `/code-review` — read-only correctness review. `/dev-quality` wraps it and applies findings whose fix is derivable from the summary.
 - `/batch` — same change across many files in parallel
 - `/debug` — diagnostics when something's stuck
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **`/dev-quality` applies `/code-review` findings.** `/code-review` became read-only in Claude Code 2.1.146+ (replacing `/simplify`). Gate 1 now parses its JSON output, Edit-applies findings whose fix is unambiguous from the summary, surfaces the rest, and reports truthful `N/M` counts. NOTICE, recovery hint, and docs (`WORKFLOW.md`, `HOW-TO-USE.md`, `README.md`) updated to route through `/dev-quality` for the apply step.
+
 ## [0.3.9] - 2026-05-21
 
 ### Fixed
