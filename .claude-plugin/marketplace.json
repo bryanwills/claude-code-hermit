@@ -11,7 +11,7 @@
       "name": "claude-code-hermit",
       "source": "./plugins/claude-code-hermit",
       "description": "Core hermit - memory-driven learning, daily rhythm, idle agency, and operational hygiene for Claude Code",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "category": "productivity",
       "author": {
         "name": "gtapps"
@@ -31,7 +31,7 @@
       "name": "claude-code-dev-hermit",
       "source": "./plugins/claude-code-dev-hermit",
       "description": "Strict git-push-guard hook + optional dev conventions for any Claude Code agent — blocks force-push, --no-verify, and direct push to protected branches",
-      "version": "0.3.9",
+      "version": "0.3.10",
       "category": "development",
       "author": {
         "name": "gtapps"
