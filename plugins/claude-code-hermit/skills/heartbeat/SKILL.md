@@ -20,7 +20,7 @@ Background health checker that periodically evaluates a checklist and surfaces a
 
 ### run
 
-Execute one heartbeat tick.
+This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by the heartbeat Monitor. It's also runnable manually for ad-hoc ticks. The Monitor uses `precheck --peek` for polling; this handler re-runs precheck without `--peek` so the mutating tick (`total_ticks` increment, alert-state write) happens exactly once per noteworthy tick.
 
 1. Run the precheck:
    ```
@@ -28,7 +28,7 @@ Execute one heartbeat tick.
    ```
 2. Read the verdict (first line of output):
    - Starts with `SKIP|` → emit `HEARTBEAT_SKIP (<reason>)`. No channel notification. No SHELL.md write. Stop.
-   - `OK` → emit `HEARTBEAT_OK`. If `heartbeat.show_ok` is `true` in config, notify the operator. Stop.
+   - `OK` → emit `HEARTBEAT_OK`. Stop.
    - `AUTO_CLOSE` → SHELL.md mtime exceeded 12h. Run the auto-close sequence, then stop:
      1. Append to SHELL.md `## Monitoring`: `[HH:MM] Heartbeat: auto-closed after 12h quiet.` (Step 2 replaces SHELL.md with a fresh template, so a later append would miss the archived report.)
      2. Invoke `/claude-code-hermit:session-close --auto` (skips summary-gathering, reflect, heartbeat-stop; passes `Closed Via: auto` to session-mgr).
@@ -42,38 +42,46 @@ Execute one heartbeat tick.
    - If elapsed > `heartbeat.stale_threshold` (default `"2h"`): generate alert with key `stale-session`.
 6. **Waiting timeout check.** If `session_state` is `waiting` and `heartbeat.waiting_timeout` is set:
    - If elapsed > `waiting_timeout` with no channel activity: update `runtime.json` `session_state` to `idle`, update SHELL.md Status to `idle`, notify the operator.
-7. **Resume check.** If the previous tick was a SKIP and this tick is not: append to SHELL.md `## Monitoring`: `[HH:MM] Heartbeat: resumed (was inactive)`.
-8. Evaluate each checklist item against available information. Generate alerts with semantic keys (taxonomy in reference.md).
-9. Determine if anything needs operator attention.
-10. Apply alert deduplication and write `state/alert-state.json` (procedure in reference.md).
-    **Do NOT write `total_ticks` — it was already incremented by the precheck.**
-11. If `total_ticks % 20 === 0` (read from updated `state/alert-state.json`): run self-evaluation (procedure in reference.md).
+7. Evaluate each checklist item against available information. Generate alerts with semantic keys (taxonomy in reference.md).
+8. Determine if anything needs operator attention.
+9. Apply alert deduplication and write `state/alert-state.json` (procedure in reference.md).
+   **Do NOT write `total_ticks` — it was already incremented by the precheck.**
+10. If `total_ticks % 20 === 0` (read from updated `state/alert-state.json`): run self-evaluation (procedure in reference.md).
 
 ### start
 
-Start a recurring heartbeat tick using `CronCreate`.
+Start the heartbeat as a persistent CC Monitor subprocess.
 
-1. Read `heartbeat.every` from config (default: `"2h"`).
-2. Convert the interval to a 5-field cron expression using an off-minute (never `:00`, never `:30`) so a fleet of hermits doesn't cluster on the same wall-clock moment:
-   - `30m` → `7,37 * * * *`
-   - `Nh` (N≥1) → `7 */N * * *` (e.g. `1h` → `7 * * * *`, `2h` → `7 */2 * * *`)
-   - `Nd` → `7 4 */N * *`
-   - Any other `Nm` value: use `*/N * * * *` and proceed — `CronCreate` accepts non-clean steps without error.
-3. Call `CronList` and delete any existing task whose prompt is `/claude-code-hermit:heartbeat run` (via `CronDelete`). Idempotent: safe to re-run from `heartbeat-restart` to reset the 7-day expiry.
-4. Call `CronCreate` with `cron` set to the expression from step 2, `prompt` set to `/claude-code-hermit:heartbeat run`, and `recurring: true`.
-5. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: started (every <interval>, cron <expr>, task <id>)`.
+1. Read `heartbeat.every` from config (default: `"2h"`). Parse to seconds (`"30m"` → 1800, `"2h"` → 7200, etc).
+2. Resolve the script path: `${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-monitor.sh` (resolve at skill execution time — not available inside the subprocess).
+3. Sweep any pre-existing CronCreate entry for the old recurring-cron approach: `CronList` → if an entry's `prompt` matches `/claude-code-hermit:heartbeat run`, `CronDelete` it. Idempotent.
+4. If a Monitor with description `heartbeat-monitor` exists (TaskList), TaskStop it. Also remove any prior entry from `state/heartbeat-monitor.runtime.json`.
+5. Register a new Monitor:
+   - `description`: `heartbeat-monitor` (reserved slot — operators must not reuse this description for ad-hoc `/watch` entries)
+   - `command`: `bash <abs_script_path> <interval_seconds> $PWD/.claude-code-hermit`
+   - `timeout_ms`: 86400000  (24h; re-armed daily by `heartbeat-restart`)
+   - `persistent`: true
+6. Write the new entry (description, task_id, command, interval, started_at) to `state/heartbeat-monitor.runtime.json`. Do NOT use `state/monitors.runtime.json` — that file is owned exclusively by /watch and is cleared on every session start.
+7. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: monitor started (interval: <every>)`.
 
-We use `CronCreate` directly rather than `/loop` because Claude Code 2.1.150 added an operator-facing "Cloud schedule vs This session only" prompt inside `/loop` that blocks the always-on bootstrap. `CronCreate` is the same local in-session scheduler `/loop` wraps — same runtime semantics, no prompt.
+Safe to call from a routine — idempotent (legacy cron swept + existing Monitor stopped + state file rewritten).
 
 ### stop
 
-1. Call `CronList`. Delete every task whose prompt is `/claude-code-hermit:heartbeat run` via `CronDelete`.
-2. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: stopped`.
+1. Read `state/heartbeat-monitor.runtime.json`. If a `task_id` is present, TaskStop it. Fallback: TaskList → find by description `heartbeat-monitor` and TaskStop.
+2. Clear `state/heartbeat-monitor.runtime.json` (write `{}`).
+3. Sweep legacy CronCreate: `CronList` → `CronDelete` any entry whose `prompt` matches `/claude-code-hermit:heartbeat run`. Belt-and-suspenders.
+4. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: stopped`.
 
 ### status
 
-Report current heartbeat state:
-- Call `CronList` and find the task whose prompt is `/claude-code-hermit:heartbeat run`. Report: running (yes/no), cron expression, task ID, configured interval, active hours window, last tick time and result, show_ok setting.
+Report current heartbeat state by reading:
+- `state/heartbeat-monitor.runtime.json` — running yes/no, registered interval, task_id, started_at
+- `CronList` filtered for `/claude-code-hermit:heartbeat run` — should be empty post-migration; if present, surface as "legacy CronCreate still active — run /heartbeat start to clean up"
+- `state/alert-state.json` for `total_ticks` and last-tick metadata
+- `config.json` for active hours window
+
+Report: monitor running (yes/no), configured interval, active hours window, total ticks since last clear, legacy-cron warning if applicable.
 
 ### edit
 

@@ -37,7 +37,6 @@ Before appending any alert to SHELL.md Monitoring:
 ## If nothing actionable
 
 - Do NOT append to SHELL.md.
-- Read config `heartbeat.show_ok`: if `true`, notify the operator "Heartbeat OK"; if `false` (default), no channel message.
 - Respond "HEARTBEAT_OK".
 
 ## If something found

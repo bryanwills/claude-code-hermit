@@ -45,7 +45,6 @@
   "heartbeat": {
     "enabled": true,
     "every": "2h",
-    "show_ok": false,
     "active_hours": {
       "start": "08:00",
       "end": "23:00"

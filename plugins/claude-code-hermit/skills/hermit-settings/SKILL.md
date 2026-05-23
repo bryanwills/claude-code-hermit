@@ -63,7 +63,7 @@ Operational:
   Morning brief:   disabled       → run: /claude-code-hermit:hermit-settings brief
   Idle behavior:   discover       → discover | wait
   Idle budget:     $0.50          → any dollar amount (e.g. $0.25, $1.00)
-  Heartbeat:       disabled       → yes | no  (interval, show_ok, active hours, stale threshold)
+  Heartbeat:       disabled       → yes | no  (interval, active hours, stale threshold)
   Routines:        2 configured   → run: /claude-code-hermit:hermit-settings routines
   Quality gate:    budget         → budget | balanced | quality
   Permission mode: auto           → default | acceptEdits | auto | plan | dontAsk | bypassPermissions
@@ -200,7 +200,6 @@ Update `permission_mode` in config.json.
   ```
   Heartbeat sub-fields (press Enter to keep current value):
     interval  — how often to check (e.g. 5m, 15m, 30m)         [current]
-    show_ok   — post a message on healthy checks (yes / no)     [current]
     active    — active hours window (e.g. 08:00-23:00)          [current]
     stale     — alert if no session progress for (e.g. 2h, 30m) [current]
   ```

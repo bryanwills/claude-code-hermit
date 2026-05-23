@@ -35,7 +35,7 @@ Skills are Hermit's built-in workflows — invoke them with `/claude-code-hermit
 | Checklist    | HEARTBEAT.md (you edit it)                                                    | Inline command or config `monitors`|
 | Quiet mode   | Suppresses OK by default                                                      | Silent until stdout fires          |
 | Active hours | Yes (default 08:00-23:00)                                                     | No                                 |
-| Token cost   | LLM evaluation per tick                                                       | Zero when quiet                    |
+| Token cost   | Zero tokens when quiet                                                        | Zero when quiet                    |
 
 **Checklist weight:** Keep the heartbeat checklist under 10 items. Items that need checking on a schedule (daily, weekly) rather than every tick belong in routines. The self-evaluation will flag overgrown checklists.
 

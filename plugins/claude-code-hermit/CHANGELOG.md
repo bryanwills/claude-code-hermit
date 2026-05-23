@@ -4,6 +4,12 @@
 
 ### Changed
 
+- **heartbeat: CronCreate → CC Monitor** — OK/SKIP ticks no longer wake the LLM. Trade-off: EVALUATE notifications now interrupt mid-task (Monitor semantics) instead of deferring until idle (CronCreate semantics). Bounded by precheck suppression.
+
+### Removed
+
+- **heartbeat.show_ok: deprecated** — OK ticks are silent by design; use `/heartbeat status` for liveness.
+
 - **env defaults: `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` bumped 50 → 65** — auto-compact was firing well before the quality-degradation zone (~73%); 65 reduces premature context loss while staying conservative.
 - **env defaults: `COMPACT_THRESHOLD` bumped 50 → 75** — the tool-call-based nudge was firing mid-session for any non-trivial work; 75 quiets the fallback path while `context_usage > 60%` continues to drive real nudges in `suggest-compact.js`.
 - **docs: `COMPACT_THRESHOLD` description corrected to tool-call-count fallback** — config-reference previously called it a "context % threshold," which contradicted `suggest-compact.js`. Now matches the code: tool-call counter consulted only when `context_usage` is unavailable.
@@ -26,6 +32,11 @@
 ### Fixed
 
 - **heartbeat: schedule via `CronCreate` instead of `/loop`** — Claude Code 2.1.150's new "Cloud schedule" prompt inside `/loop` was blocking always-on bootstrap.
+
+### Upgrade Instructions
+
+1. Run `/claude-code-hermit:heartbeat start` — sweeps the prior CronCreate entry and registers the new Monitor in one shot. Otherwise the legacy cron keeps firing alongside the new Monitor until its 7-day expiry.
+2. If upgrade is delayed, the daily `heartbeat-restart` routine will eventually re-register, but the legacy cron continues until its expiry — manual `start` is preferred.
 
 ## [1.1.3] - 2026-05-23
 

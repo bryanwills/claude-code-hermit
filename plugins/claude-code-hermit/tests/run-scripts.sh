@@ -344,6 +344,97 @@ run_test "heartbeat-precheck (self_eval{} not mutated by precheck)" bash -c \
 cleanup
 
 # -------------------------------------------------------
+# heartbeat-precheck.js --peek (read-only mode)
+# -------------------------------------------------------
+
+# 20a. --peek returns verdict without mutating total_ticks
+workdir="$(setup_workdir)"
+echo '{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"23:59"}}}' \
+  > "$workdir/.claude-code-hermit/config.json"
+echo '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":5}' \
+  > "$workdir/.claude-code-hermit/state/alert-state.json"
+echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
+echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
+peek_out="$(node "$REPO_ROOT/scripts/heartbeat-precheck.js" --peek "$workdir/.claude-code-hermit")"
+run_test "heartbeat-precheck --peek (returns verdict)" bash -c "[ -n '$peek_out' ]"
+run_test "heartbeat-precheck --peek (total_ticks not mutated)" bash -c \
+  "python3 -c \"import json; d=json.load(open('$workdir/.claude-code-hermit/state/alert-state.json')); assert d['total_ticks']==5\""
+cleanup
+
+# 20a-2. --peek fires self-eval EVALUATE one tick early (at total_ticks=19)
+workdir="$(setup_workdir)"
+echo '{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"23:59"}}}' \
+  > "$workdir/.claude-code-hermit/config.json"
+echo '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":19}' \
+  > "$workdir/.claude-code-hermit/state/alert-state.json"
+echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
+echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
+printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
+  > "$workdir/.claude-code-hermit/HEARTBEAT.md"
+run_test "heartbeat-precheck --peek (self-eval EVALUATE at tick 19)" bash -c \
+  "[ \"$(node "$REPO_ROOT/scripts/heartbeat-precheck.js" --peek "$workdir/.claude-code-hermit")\" = 'EVALUATE' ]"
+run_test "heartbeat-precheck --peek (self-eval: total_ticks still 19)" bash -c \
+  "python3 -c \"import json; d=json.load(open('$workdir/.claude-code-hermit/state/alert-state.json')); assert d['total_ticks']==19\""
+cleanup
+
+# -------------------------------------------------------
+# heartbeat-monitor.sh — real-script tests (HEARTBEAT_MONITOR_ONCE=1)
+# -------------------------------------------------------
+
+MONITOR_SH="$REPO_ROOT/scripts/heartbeat-monitor.sh"
+
+# 20b. EVALUATE → HEARTBEAT_EVALUATE
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stdout.write("EVALUATE\\n");\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (EVALUATE → HEARTBEAT_EVALUATE)" bash -c "[ '$out' = 'HEARTBEAT_EVALUATE' ]"
+rm -f "$stub"
+
+# 20c. EVALUATE with suffix (prefix match) → HEARTBEAT_EVALUATE
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stdout.write("EVALUATE|micro-pending\\n");\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (EVALUATE|micro-pending → HEARTBEAT_EVALUATE)" bash -c "[ '$out' = 'HEARTBEAT_EVALUATE' ]"
+rm -f "$stub"
+
+# 20d. AUTO_CLOSE → HEARTBEAT_EVALUATE
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stdout.write("AUTO_CLOSE\\n");\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (AUTO_CLOSE → HEARTBEAT_EVALUATE)" bash -c "[ '$out' = 'HEARTBEAT_EVALUATE' ]"
+rm -f "$stub"
+
+# 20e. OK → silent (no output)
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stdout.write("OK\\n");\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (OK → silent)" bash -c "[ -z '$out' ]"
+rm -f "$stub"
+
+# 20f. SKIP|outside-hours → silent
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stdout.write("SKIP|outside-hours\\n");\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (SKIP|outside-hours → silent)" bash -c "[ -z '$out' ]"
+rm -f "$stub"
+
+# 20g. precheck nonzero exit → HEARTBEAT_ERROR: precheck failed
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stderr.write("crash\\n"); process.exit(1);\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (nonzero exit → HEARTBEAT_ERROR: precheck failed)" bash -c \
+  "echo '$out' | grep -q 'HEARTBEAT_ERROR: precheck failed'"
+rm -f "$stub"
+
+# 20h. unknown verdict → HEARTBEAT_ERROR: unknown verdict
+stub="$(mktemp /tmp/hb-stub-XXXXX.js)"
+printf 'process.stdout.write("WHATEVER\\n");\n' > "$stub"
+out="$(HEARTBEAT_MONITOR_ONCE=1 HEARTBEAT_PRECHECK="$stub" bash "$MONITOR_SH" 60 /tmp 2>/dev/null)"
+run_test "heartbeat-monitor (unknown verdict → HEARTBEAT_ERROR: unknown verdict)" bash -c \
+  "echo '$out' | grep -q 'HEARTBEAT_ERROR: unknown verdict'"
+rm -f "$stub"
+
+# -------------------------------------------------------
 # reflect-precheck.js
 # -------------------------------------------------------
 

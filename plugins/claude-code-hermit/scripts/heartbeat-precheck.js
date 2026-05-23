@@ -1,9 +1,10 @@
 'use strict';
 
 // heartbeat-precheck.js — fast-path verdict before the LLM evaluates HEARTBEAT.md.
-// Usage: node heartbeat-precheck.js <hermit-state-dir>
+// Usage: node heartbeat-precheck.js [--peek] <hermit-state-dir>
 // Output (stdout, one line): SKIP|<reason>  |  OK  |  AUTO_CLOSE  |  EVALUATE
-// Exit 0 always. Writes updated alert-state.json (increments total_ticks only).
+// Exit 0 always. Without --peek: writes updated alert-state.json (increments total_ticks).
+// With --peek: read-only — computes the same verdict without any state mutation.
 //
 // Owner contract (write-field split with SKILL.md):
 //   This script owns: alert-state.json total_ticks
@@ -18,7 +19,8 @@ function emit(verdict) {
   process.exit(0);
 }
 
-const stateDir = process.argv[2];
+const peek = process.argv[2] === '--peek';
+const stateDir = peek ? process.argv[3] : process.argv[2];
 if (!stateDir) emit('EVALUATE');
 
 const readJSON = (p) => {
@@ -70,10 +72,13 @@ const alertState = readJSON(alertStatePath) ?? { alerts: {}, last_digest_date: n
 if (typeof alertState.total_ticks !== 'number' || !Number.isFinite(alertState.total_ticks)) {
   alertState.total_ticks = 0;
 }
-alertState.total_ticks += 1;
-writeJSON(alertStatePath, alertState);
+if (!peek) {
+  alertState.total_ticks += 1;
+  writeJSON(alertStatePath, alertState);
+}
 
-if (alertState.total_ticks % 20 === 0) emit('EVALUATE');
+// peek fires one tick early; the subsequent mutating call lands on the multiple-of-20
+if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20 === 0) emit('EVALUATE');
 
 const microProposals = readJSON(path.join(stateDir, 'state', 'micro-proposals.json')) ?? { pending: [] };
 const hasPendingMicro = Array.isArray(microProposals.pending) &&

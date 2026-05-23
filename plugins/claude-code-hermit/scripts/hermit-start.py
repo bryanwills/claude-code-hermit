@@ -73,7 +73,6 @@ DEFAULT_CONFIG = {
     'heartbeat': {
         'enabled': True,
         'every': '2h',
-        'show_ok': False,
         'active_hours': {
             'start': '08:00',
             'end': '23:00',
