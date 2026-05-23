@@ -51,15 +51,15 @@ Then write the code. The CLAUDE.md `§Git Safety` rules apply throughout: no pus
 
 Per `§Implementation Flow`: run the configured test command (`claude-code-dev-hermit.commands.test`) before claiming the task is done. If tests fail, fix or report — never declare done with broken tests.
 
-### 4. Code-review, then test again
+### 4. Cleanup pass, then test again
 
 Per `§Tests Before PR`:
 
-1. Run `/claude-code-dev-hermit:dev-quality` on changed files. It wraps the built-in `/code-review`, applies findings whose fix is derivable from the summary, then re-runs the test command.
+1. Run `/claude-code-dev-hermit:dev-quality` on the working tree. It wraps `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits) and re-runs the test command.
 2. If tests pass, proceed.
-3. If tests fail, `git checkout -- <changed-files>` to revert the findings dev-quality applied and stop. Surface the regression.
+3. If tests fail, `git checkout -- <changed-files>` to revert the applied edits and stop. Surface the regression.
 
-For PR review, security-sensitive changes, or large refactors, invoke `/code-review:code-review` (from the optional `code-review` plugin) after the dev-quality pass.
+For PR review, security-sensitive changes, or large refactors, invoke `/code-review:code-review` (from the optional `code-review` plugin) after the dev-quality pass — that's the deeper bug-finding option.
 
 ### 5. Open the PR
 
@@ -92,7 +92,7 @@ Or set up a recurring routine via `/claude-code-hermit:hermit-routines` if you w
 
 - **Same change across many files** — use `/batch` (built-in)
 - **Independent tasks** — use multiple `Agent` tool calls in a single message, or implement sequentially
-- **After parallel work** — run `/code-review` in the main session (subagents can't invoke skills)
+- **After parallel work** — run `/claude-code-hermit:simplify` in the main session (subagents can't invoke skills)
 
 ---
 

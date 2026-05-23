@@ -37,7 +37,7 @@ Examples: `PROJ-123 add auth flow` → `feature/proj-123-add-auth-flow`. `Fix lo
 
 ## Technical Constraints
 
-Subagents cannot invoke skills (`/code-review`, `/batch`, etc.) — those must run in the main session only.
+Subagents cannot invoke skills (`/claude-code-hermit:simplify`, `/batch`, etc.) — those must run in the main session only.
 
 Session state (`in_progress`/`waiting`/`idle`/`dead_process`) lives in `.claude-code-hermit/state/runtime.json` (`.session_state`). SHELL.md `Status:` is cosmetic — never parse it for programmatic checks.
 
@@ -76,7 +76,7 @@ Tier mapping:
 ## Dev Quick Reference
 
 - One-time setup / re-config: `/claude-code-dev-hermit:hatch`
-- Read-only correctness review: `/code-review` (built-in; `/dev-quality` wraps it and applies findings with a derivable fix)
+- Cleanup pass: `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits)
 - Parallel changes across many files: `/batch` (built-in)
 - Diagnostics: `/debug` (built-in)
 - High-stakes review: `/code-review:code-review` (from `code-review@claude-plugins-official`, recommended companion)

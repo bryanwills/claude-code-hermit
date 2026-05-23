@@ -9,7 +9,7 @@ The plugin's contribution to the workflow is two-part:
    - **`safety`** (`state-templates/CLAUDE-APPEND-SAFETY.md`): git safety and branch discipline only. No §Implementation Flow or §Tests Before PR. For projects that already have their own `/commit`, `/create-pr`, or `/release` skills — dev-hermit's safety layer without the prescriptive workflow.
 2. **`/dev-pr`** is the operator-invoked terminal step that pushes the branch and opens the PR.
 
-Everything between (planning, branch creation, code, tests, code-review) is the agent following the injected rules. There's no "dev-hermit pipeline" — the rules ARE the pipeline.
+Everything between (planning, branch creation, code, tests, cleanup) is the agent following the injected rules. There's no "dev-hermit pipeline" — the rules ARE the pipeline.
 
 ---
 
@@ -46,15 +46,15 @@ At strict hook profile (`AGENT_HOOK_PROFILE=strict`), `git-push-guard` enforces 
 
 Per `§Implementation Flow`: agent runs `claude-code-dev-hermit.commands.test` before declaring the task done. If tests fail, fix or surface. Never declare done with broken tests.
 
-### Step 5 — Code-review and re-test
+### Step 5 — Cleanup pass and re-test
 
 Per `§Tests Before PR`:
 
-1. Run `/claude-code-dev-hermit:dev-quality` on changed files. It invokes the built-in `/code-review`, applies findings whose fix is derivable from the summary, then re-runs `commands.test`.
+1. Run `/claude-code-dev-hermit:dev-quality` on the working tree. It invokes `/claude-code-hermit:simplify` (three parallel reviewers, applies its own edits), then re-runs `commands.test`.
 2. If tests pass → proceed.
-3. If tests fail → `git checkout -- <changed-files>` to revert the findings dev-quality applied, surface the regression, stop.
+3. If tests fail → `git checkout -- <changed-files>` to revert the applied edits, surface the regression, stop.
 
-For high-stakes changes, optionally invoke `/code-review:code-review` (from the optional `code-review` companion plugin) after the dev-quality pass.
+For high-stakes changes, optionally invoke `/code-review:code-review` (from the optional `code-review` companion plugin) after the dev-quality pass — that's the deeper bug-finding option.
 
 ### Step 6 — PR
 

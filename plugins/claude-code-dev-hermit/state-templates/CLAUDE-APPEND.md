@@ -45,20 +45,20 @@ After making code changes:
 1. Run the configured test command (`claude-code-dev-hermit.commands.test`, set via `/claude-code-dev-hermit:hatch`). If unset, ask the operator for the command and offer to save it via `hatch`.
 2. If tests fail, fix the failures or surface them in the response — **do not declare the task done with broken tests**.
 3. If the task is non-trivial and `/feature-dev:feature-dev` is installed, run it first when the code path is unfamiliar (framework lifecycle hooks, ORM internals, build-tool plugins, auth middleware). The trigger is **unfamiliarity, not urgency**. Skip for: doc/prompt/config edits, single-line fixes, code paths you've already read end-to-end.
-4. Before declaring the task done: run `/claude-code-dev-hermit:dev-quality`. It runs `/code-review` on the diff and re-runs `commands.test` if configured. If tests regress, investigate before committing. If `/code-review:code-review` is installed (`code-review@claude-plugins-official`), the skill will tell you to suggest it to the operator — do not invoke that skill autonomously. **Nested git repo?** If your work is happening inside a nested git repo (true submodule, Composer path package, npm/pnpm path workspace, vendored dep edited in place), pass `--cwd <relative/path>` so `/dev-quality` scopes git ops, `/code-review`, and the test re-run to that repo. State still lives under the parent's `.claude-code-hermit/`, but the captured SHA is the child's HEAD.
+4. Before declaring the task done: run `/claude-code-dev-hermit:dev-quality`. It runs `/claude-code-hermit:simplify` on the working tree (cleanup pass) and re-runs `commands.test` if configured. If tests regress, investigate before committing. If `/code-review:code-review` is installed (`code-review@claude-plugins-official`), the skill will tell you to suggest it to the operator for a deeper correctness review — do not invoke that skill autonomously. **Nested git repo?** If your work is happening inside a nested git repo (true submodule, Composer path package, npm/pnpm path workspace, vendored dep edited in place), pass `--cwd <relative/path>` so `/dev-quality` scopes git ops, `/claude-code-hermit:simplify`, and the test re-run to that repo. State still lives under the parent's `.claude-code-hermit/`, but the captured SHA is the child's HEAD.
 
 ## Tests Before PR
 
 If the project defines its own pre-PR validation (e.g. a custom test runner, CI gate, or PR-creation skill that handles testing internally), follow that. The steps below are the fallback.
 
-1. Run `/claude-code-dev-hermit:dev-quality` — handles `/code-review` + test re-run (see §Implementation Flow step 4). For nested-repo workflows, pass `--cwd <path>`.
+1. Run `/claude-code-dev-hermit:dev-quality` — handles `/claude-code-hermit:simplify` + test re-run (see §Implementation Flow step 4). For nested-repo workflows, pass `--cwd <path>`.
 2. Commit.
 3. If you committed after `/dev-quality` ran and `commands.test` is configured, re-run it once — `/dev-pr` Gate 0 checks `last-test.json` against the current HEAD sha.
 4. Run `/claude-code-dev-hermit:dev-pr`. Gate 0 reads `last-test.json` and refuses if missing, on a stale sha, or with a non-pass status. Pass `--cwd <path>` if you used it for `/dev-quality` — the PR opens against the child repo's remote.
 
 ## Technical Constraints
 
-Subagents cannot invoke skills (`/code-review`, `/batch`, etc.) — those must run in the main session only.
+Subagents cannot invoke skills (`/claude-code-hermit:simplify`, `/batch`, etc.) — those must run in the main session only.
 
 Session state (`in_progress`/`waiting`/`idle`/`dead_process`) lives in `.claude-code-hermit/state/runtime.json` (`.session_state`). SHELL.md `Status:` is cosmetic — never parse it for programmatic checks.
 
@@ -100,7 +100,7 @@ Tier mapping:
 - Mid-task test run + cache warm: `/claude-code-dev-hermit:dev-test` (supports `--cwd <path>`)
 - Pre-wrap quality gate: `/claude-code-dev-hermit:dev-quality` (supports `--cwd <path>`)
 - Open the PR: `/claude-code-dev-hermit:dev-pr` (supports `--cwd <path>`)
-- Read-only correctness review: `/code-review` (built-in; `/dev-quality` wraps it and applies findings with a derivable fix)
+- Cleanup pass: `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits; `/dev-quality` wraps it)
 - Parallel changes across many files: `/batch` (built-in)
 - Diagnostics: `/debug` (built-in)
 - High-stakes review: `/code-review:code-review` (from `code-review@claude-plugins-official`, recommended companion)

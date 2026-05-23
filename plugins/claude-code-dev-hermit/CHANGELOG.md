@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
-- **`/dev-quality` applies `/code-review` findings.** `/code-review` became read-only in Claude Code 2.1.146+ (replacing `/simplify`). Gate 1 now parses its JSON output, Edit-applies findings whose fix is unambiguous from the summary, surfaces the rest, and reports truthful `N/M` counts. NOTICE, recovery hint, and docs (`WORKFLOW.md`, `HOW-TO-USE.md`, `README.md`) updated to route through `/dev-quality` for the apply step.
-- **State-templates realigned to read-only `/code-review`.** `state-templates/CLAUDE-APPEND.md` and `CLAUDE-APPEND-SAFETY.md` Dev Quick Reference no longer describe `/code-review` as "Cleanup" — they describe it as a read-only correctness review wrapped by `/dev-quality`. Operators who `/hatch` a project after this release get the corrected description.
-- **`/dev-quality` Gate 3 failure attribution and Output spec polish.** Test-failure message now says "tests regressed after applied findings" (the applied findings are what changed the tree, not `/code-review` itself, which is read-only). Output spec now documents the parser-failure form (`surfaced (apply skipped — output not parseable as JSON array)`) defined in Gate 1's fallback.
+- **`/dev-quality` Gate 1 swaps to `/claude-code-hermit:simplify`.** Requires core v1.1.2+ (see `hermit-meta.json` bump). Drops the JSON parser and apply/surface classifier — the skill applies its own edits (parallel review, sequential apply with conflict resolution per its Principles) and reports a totals line. Reframes from correctness (bug-finding via JSON output) to cleanup (refactor proposals). Gate 0 precondition extended to accept untracked-only working trees (previously `git -C "$TARGET" diff --quiet && git -C "$TARGET" diff --cached --quiet` ignored untracked files, so a task that only added new files would fail "nothing to clean up"; now uses `git -C "$TARGET" status --porcelain` — empty output → fail, any output passes, matching `/simplify`'s Phase 1 capture of untracked files). Output spec swaps `code-review: N/M findings applied (K surfaced)` for `simplify: applied N · deduped M · principle-rejected K · stale-anchor skips L · parse failures P`; drops the `unapplied:` block (the skill reports its own "Noticed but not applied" section inline). NOTICE and recovery hint rewritten ("nothing to clean up", "revert the applied edits"). State-templates (`CLAUDE-APPEND.md`, `CLAUDE-APPEND-SAFETY.md`) and docs (`README.md`, `CONTRIBUTING.md`, `WORKFLOW.md`, `HOW-TO-USE.md`) realigned to the new wrapped skill. The marketplace `code-review:code-review` plugin remains the deeper bug-finding option `/dev-quality` suggests when installed.
+
+### Upgrade Instructions
+
+1. **Refresh the CLAUDE-APPEND block.** Re-run `/claude-code-dev-hermit:hatch` in each target project (or `/claude-code-hermit:hermit-evolve` which sibling-syncs all hermit plugin blocks). The injected `§Implementation Flow`, `§Tests Before PR`, `§Technical Constraints`, and `§Dev Quick Reference` sections previously named `/code-review` as the wrapped skill; the canonical template now names `/claude-code-hermit:simplify`.
+
+2. **Bump core hermit alongside this release.** Existing dev-hermit installs do not auto-update their core dependency on `/plugin update`. Operators on dev-hermit 0.3.10+ must also run `/plugin update claude-code-hermit` to land core 1.1.2+ which ships `/claude-code-hermit:simplify`. Without the core bump, `/dev-quality` Gate 1 will fail at the simplify invocation.
 
 ## [0.3.9] - 2026-05-21
 
