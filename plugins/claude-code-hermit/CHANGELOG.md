@@ -6,6 +6,7 @@
 
 - **env defaults: `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` bumped 50 → 65** — auto-compact was firing well before the quality-degradation zone (~73%); 65 reduces premature context loss while staying conservative.
 - **env defaults: `COMPACT_THRESHOLD` bumped 50 → 75** — the tool-call-based nudge was firing mid-session for any non-trivial work; 75 quiets the fallback path while `context_usage > 60%` continues to drive real nudges in `suggest-compact.js`.
+- **docs: `COMPACT_THRESHOLD` description corrected to tool-call-count fallback** — config-reference previously called it a "context % threshold," which contradicted `suggest-compact.js`. Now matches the code: tool-call counter consulted only when `context_usage` is unavailable.
 
 ### Upgrade Instructions
 
