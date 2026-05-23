@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **hatch: push_notifications now defaults to true** — `/hatch` derives the flag from the channel choice (no channel → true, channel configured → false) and the explicit opt-in question is removed from both Quick and Advanced wizards. Existing installs without the field now also resolve to `true` at boot in `hermit-start.py` for a consistent global default. Toggle via `/hermit-settings push-notifications`.
+
 ## [1.1.3] - 2026-05-23
 
 ### Fixed
