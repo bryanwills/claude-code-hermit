@@ -6,12 +6,12 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 ### Fixed
 
-- **Duplicate HA block after core 1.1.1 target migration.** When an operator upgraded core hermit to 1.1.1 and chose `target = "local"`, core's `hermit-evolve` migrated its own block from `CLAUDE.md` to `CLAUDE.local.md` but the ha-hermit block was left behind. The subsequent sibling-sync in `hermit-evolve` Step 7 found no marker in `CLAUDE.local.md` and appended a fresh ha block there, while the pre-existing block in `CLAUDE.md` was never removed — resulting in duplicate `<!-- claude-code-homeassistant-hermit: Home Assistant Workflow -->` blocks in both files. The Upgrade Instructions below run a one-shot migration via `hermit-evolve` Step 7 to remove the stray block.
+- **hatch/hermit-evolve: duplicate HA block after core 1.1.1 target migration** — block stranded in old file; Upgrade Instructions run a one-shot migration via `hermit-evolve` Step 7 to remove it.
 
 ### Changed
 
-- **`/hatch` Step 7 is now target-aware (GH #111 follow-up).** Reads `.claude-code-hermit/state/hatch-options.json` written by core hatch and writes the CLAUDE-APPEND block to `CLAUDE.local.md` (when `target = "local"`) or `CLAUDE.md` (when `target = "committed"`). If core hatch hasn't run yet, the skill detects `core_install_scope` from `claude plugin list --json` and presents the scope-derived default at position 0 of the Visibility prompt, then stamps `hatch-options.json` with the canonical 5-field schema (`target`, `core_install_scope`, `stamped_at`, `stamped_by`, `version`). Step 7's three-branch decision is preserved: marker absent → append; marker present with stamped version matching → skip (no churn on re-run); marker present with stale stamped version → replace. Stray-block migration is handled one-shot by the Upgrade Instructions below — hatch itself stays focused on target-aware setup and steady-state refresh.
-- **Polish aligned with `claude-code-dev-hermit` PR #116.** Upgrade Instructions Step 3 is fully unattended — dropped the hand-edit detection / Carry-forward branch since `/hatch`'s single-source-of-truth contract already makes the marked block template-authoritative. Marker-replacement prose in Step 7 names both opening and closing markers explicitly. Step 7's stamped-version source is now pinned to `_hermit_versions["claude-code-homeassistant-hermit"]` in `.claude-code-hermit/config.json` (matching the `hermit-evolve` convention), and the "marker present with no stamped version" upgrade case is folded into the stale branch so pre-stamping installs migrate cleanly. Test coverage added via `tests/test_hatch_skill.py` — structural-lint assertions for target routing, the 5-field hatch-options.json schema, scope mapping, skip-on-match, the stamped-version source, absent-stamp handling, marker boundaries, migration delegation, and unattended-migration prose.
+- **hatch: Step 7 is now target-aware** — writes CLAUDE-APPEND block to `CLAUDE.local.md` or `CLAUDE.md` based on `hatch-options.json`; stamps canonical 5-field schema; three-branch marker logic (absent/match/stale).
+- **hatch: Upgrade Instructions Step 3 is fully unattended** — dropped hand-edit detection; stamped-version source pinned to `config.json`; absent-stamp case folded into stale branch. Tests added via `tests/test_hatch_skill.py`.
 
 ### Upgrade Instructions
 
@@ -35,7 +35,7 @@ No `config.json` changes required.
 
 ### Fixed
 
-- **`ha fetch-history` no longer fails with Cloudflare HTTP 520 on default-scope fetches** (gh #107). `HomeAssistantClient.get_history()` now splits the requested entity IDs into chunks of 50 and merges the per-chunk responses, keeping the `filter_entity_id` query string short enough to pass through the Nabu Casa Cloudflare proxy. Restores the `Overnight:` section in `ha-morning-brief` and unblocks `ha-analyze-patterns` for deployments with large entity inventories. No CLI or skill changes; explicit `--entities` calls keep their original single-request shape when they fit under the chunk size. Duplicate entity IDs are now collapsed (first occurrence wins) before chunking so the chunk merge can't silently drop one chunk's rows.
+- **ha fetch-history: fix Cloudflare HTTP 520 on large entity sets** (gh #107) — chunks entity IDs at 50 to keep `filter_entity_id` short enough for Nabu Casa proxy; dedupes IDs before chunking.
 
 ### Files affected
 
@@ -58,18 +58,18 @@ No `config.json` changes required.
 
 ### Added
 
-- **`ha get-automation-config <id>` and `ha get-script-config <id>` CLI commands** — read a single automation or script config directly from HA's REST API (`GET /api/config/{domain}/config/{id}`) and print it as JSON. Useful for inspecting what HA holds before deciding whether to patch or delete. Returns exit code 1 with a structured JSON error on failure (including 400 "not found" and 403 YAML-mode responses). New `ReadResult` dataclass and `read_config()` function in `apply.py` back the command; the unsupported-domain error string is now shared via `_unsupported_domain_msg()`. New `tests/test_cli_get_config.py` covers the happy path, not-found, and YAML-mode 403 cases.
+- **ha get-automation-config / get-script-config: new CLI commands** — fetch a single automation or script config from HA REST and print as JSON; exits 1 with structured error on 400/403.
 
 ### Changed
 
-- **`ha-morning-brief` subsumes `brief --morning` for HA operators** — closes the duplicate-notification UX issue (#78) where operators with both plugins received two morning channel messages 30 min apart. `ha-morning-brief` now includes the micro-proposals lifecycle (read `state/micro-proposals.json`, follow-up at count 1, expire at count ≥ 2 with a `micro-resolved` event appended to `proposal-metrics.jsonl` in the same schema core's `append-metrics.js` writes — `ts`, `type`, `micro_id`, `action`, `question` — so `reflect` and `generate-summary.js` pick it up). Output format translated to English with an `Awaiting decision:` section (non-droppable, rendered above the 25-line cap). Routine id reference fixed (`morning` → `morning-brief`).
-- **`hatch` morning-brief routine now offers unified mode** — fresh installs are prompted to choose unified (08:30, enabled, fires in waiting state, disables core `morning` routine) or legacy (09:00, disabled). Re-hatch detects operators on the old schedule and offers an in-place upgrade. Custom configs are silently skipped.
-- **Skill output format translated to English** — all section headers and example strings in `ha-morning-brief` changed from Portuguese to English to match the rest of the plugin. The runtime language adapts to the operator's configured locale as before.
+- **ha-morning-brief: subsumes core `brief --morning`** — eliminates duplicate-notification UX issue (#78); adds micro-proposals lifecycle and `Awaiting decision:` section; routine id fixed (`morning` → `morning-brief`).
+- **hatch: morning-brief routine offers unified mode** — fresh installs choose unified (08:30, disables core `morning`) or legacy (09:00, disabled); re-hatch detects old schedule and offers upgrade.
+- **ha-morning-brief: skill output translated to English** — section headers and examples changed from Portuguese; runtime language still adapts to operator locale.
 - **deps: bump core requirement to `>=1.0.40` / `^1.0.40`** — was `>=1.0.38`; aligns with core v1.0.40 release.
 
 ### Fixed
 
-- **Backfilled `state-templates/CLAUDE-APPEND.md` with previously shipped CLI commands** (`list-automations`, `list-scripts`, `delete-automation`, `delete-script`, `integration-health`, `fetch-history`, `probe`) plus the two new `get-*-config` commands. Earlier releases added these CLI subcommands but never updated the template injected into target projects by `hatch`. Operators running `hermit-evolve` or fresh `hatch` will see CLAUDE.md grow by these listings on next sync.
+- **state-templates/CLAUDE-APPEND.md: backfill previously shipped CLI commands** — `list-automations`, `list-scripts`, `delete-*`, `integration-health`, `fetch-history`, `probe`, and the two new `get-*-config` commands were missing from the hatch-injected template.
 
 ### Upgrade Instructions
 
@@ -83,19 +83,19 @@ No `config.json` schema changes beyond the routine values above.
 
 ### Added
 
-- **`ha integration-health` CLI command and `integration_health.py` module** — promotes `ha-integration-health` from a pure-skill arithmetic pass to a Python-backed command. The CLI replicates the skill's existing stdout contract (`ha-integration-health findings — <date>` / `Degraded domains: N` / per-domain lines) so `reflect-scheduled-checks` sees no change. New side effect: every run writes `.claude-code-hermit/state/integration-health-degraded-domains.json`, a machine-readable list of degraded entity-domain prefixes consumed by the upcoming `silence.py` module to suppress overlapping `long_unavailable` findings in `ha-analyze-patterns`. Thresholds (`min_total=3`, `min_ratio=0.5`) are defined once in `compute_degraded_domains()` and no longer duplicated across skills. `ha-integration-health/SKILL.md` is updated to a single Bash delegate.
-- **`silence_summary` block in `snapshot-ha-normalized-latest.json`** — `compute_silence_summary()` in the new `silence.py` module mines the snapshot's existing `last_triggered`, `last_changed`, and `device_class` fields to produce four finding categories: `dead_automations` (enabled automations not fired in 30+ days), `silent_event_sensors` (motion/door/window binary sensors silent for 7+ days), `inactive_candidates_by_domain` (lights/switches/covers/climates unchanged for 7+ days — informational only), and `long_unavailable` (individual entities unavailable 7+ days that aren't already covered by a degraded domain from `ha-integration-health`). `suppressed_entity_domains` lists which entity-domain prefixes were skipped because integration-health already covers them. Both `refresh-context` and `refresh-context --incremental` attach this block before writing the artifact — including on no-diff incremental runs, since thresholds advance daily.
-- **`ha-analyze-patterns` surfaces silence findings** — step 4 maps each `silence_summary` category to the documented stdout buckets (`Reliability issues:` for dead automations, silent sensors, long-unavailable; `inactive_candidates_by_domain` is Markdown-only). `What to Look For` retains explicit coverage for manual-action pattern detection under Time/Correlation patterns. `ha-pattern-analyst` agent Data Sources updated to describe `silence_summary`; its output schema clarified to exclude fields the skill reads directly from the snapshot. `docs/knowledge-schema.md` documents the new block.
-- **`HomeAssistantClient.get_history()`** — new method on the REST client that fetches state-change history from HA's `/api/history/period` endpoint. Accepts explicit `start_time` and `end_time` datetimes; rejects empty `entity_ids` to prevent an unbounded all-entity fetch; sends bare query flags (`&minimal_response`, `&significant_changes_only`) matching HA REST API docs rather than `=true` suffixes; maps the response by `inner_list[0]["entity_id"]` (resilient to HA reordering); entities with no events in the window are absent from the result dict so callers detect zero-count entities explicitly.
-- **`history.py` aggregator and `ha fetch-history` CLI** — new `history.py` module produces per-entity aggregates from `get_history()` responses: `event_count`, `returned`, `hour_histogram` (24-bucket UTC-hour distribution), `last_event_iso`, and `state_durations` (seconds spent in each state, clipped to `[window_start, window_end]`). Entities in the requested scope that HA omits from its response get synthesized zero-count rows so downstream consumers see a complete picture. `detect_time_patterns()` flags entities where a single UTC hour accounts for > 50% of events (minimum 5 total). `fetch_history_snapshot()` orchestrates fetch → aggregate → detect and writes `.claude-code-hermit/raw/snapshot-ha-history-{N}d-<date>.json` plus a fixed-name `latest` alias; the `ha fetch-history [--window-days N] [--entities …]` CLI subcommand drives it. Default scope: `light.*`, `switch.*`, `cover.*`, `climate.*`, `automation.*`, and motion/door/window/opening/occupancy `binary_sensor.*`.
-- **Skill and agent wiring for history** — `ha-analyze-patterns` now fetches 7d history as step 3, cross-references `time_patterns` into `Automation opportunities:`, and promotes zero-count inactive candidates to `Reliability issues:` when corroborated by a 30d `last_changed` threshold; fetch failures log to SHELL.md Monitoring and never surface to scheduled-check stdout. `ha-morning-brief` fetches 1d history and renders a `Durante a noite:` section (top-active overnight entity, stuck sensors, HVAC duration from `state_durations`) between `Estado actual:` and `Energia:`; the section is silently omitted if the fetch fails. `ha-pattern-analyst` agent Data Sources updated to include `snapshot-ha-history-7d-latest.json`; `time_patterns` added to output schema. `docs/knowledge-schema.md` documents the two new artifact rows.
+- **ha integration-health: new CLI command and `integration_health.py` module** — promotes skill from arithmetic pass to Python-backed command; writes `state/integration-health-degraded-domains.json` for `silence.py` cross-reference; thresholds centralized in `compute_degraded_domains()`.
+- **silence_summary block in normalized snapshot** — new `silence.py` module adds four finding categories (`dead_automations`, `silent_event_sensors`, `inactive_candidates_by_domain`, `long_unavailable`) to every `refresh-context` run; suppresses domains already flagged by integration-health.
+- **ha-analyze-patterns: surfaces silence findings** — step 4 maps `silence_summary` categories to stdout buckets; `ha-pattern-analyst` Data Sources and output schema updated; `docs/knowledge-schema.md` updated.
+- **HomeAssistantClient.get_history(): new REST client method** — fetches `/api/history/period`; rejects empty entity_ids; maps by `entity_id` for reorder resilience; absent entities omitted from result dict.
+- **ha fetch-history: new CLI command and `history.py` aggregator** — produces per-entity `event_count`, `hour_histogram`, `state_durations`; synthesizes zero-count rows for absent entities; writes `raw/snapshot-ha-history-{N}d-<date>.json` and `latest` alias.
+- **ha-analyze-patterns / ha-morning-brief: history wiring** — analyze-patterns fetches 7d history as step 3; morning-brief fetches 1d and renders an overnight section; fetch failures log silently.
 
 ### Changed
 
-- **`time_utils.parse_iso` / `days_since`** — extracted the duplicate `_parse_iso` helpers from `silence.py` and `history.py` into a shared `time_utils` module. No behavior change; reduces drift risk if ISO parsing semantics need to evolve (e.g., handling additional offset suffixes).
-- **`silence._classify_automation` gates `never_fired` on `last_changed`** — a brand-new enabled automation that has not fired yet was previously flagged immediately as "never fired (enabled but never triggered)". The classifier now only emits `never_fired: True` once `last_changed` (creation or last-enable time) is at least `dead_automation_days` (30d) old, eliminating the false positive on freshly-added automations. Long-broken-never-fired automations still surface as before.
-- **`silence._sort` key uses explicit None-aware fallback** — replaced the falsy-chain `(x.get("days_silent") or x.get("days") or 0)` with explicit `is None` checks. No observable behavior change today (thresholds prevent `0` values), but future relaxations of those thresholds will no longer silently fall through to the wrong key.
-- **`fetch-history --help` documents the refresh fallback** — the `ha fetch-history` subcommand triggers a full `refresh-context` when no normalized snapshot exists. This is now explicit in `--help` instead of an undocumented side effect. `_handle_fetch_history` also drops its lazy `from .history import` in favor of a top-level import in `cli.py`.
+- **time_utils: extract shared `parse_iso` / `days_since` helpers** — deduplicates the private helpers from `silence.py` and `history.py` into a shared module.
+- **silence._classify_automation: gate `never_fired` on `last_changed` age** — avoids false positive on freshly-added automations; only fires once `last_changed` is ≥30d old.
+- **silence._sort: explicit None-aware sort key** — replaces falsy-chain fallback with `is None` checks to prevent silent wrong-key fallthrough.
+- **ha fetch-history: document refresh fallback in `--help`** — triggers `refresh-context` when no normalized snapshot exists; drops lazy import in favor of top-level `cli.py` import.
 
 ### Removed
 
@@ -130,8 +130,8 @@ No `config.json` changes required.
 
 ### Fixed
 
-- **`SimulationResult.is_valid` no longer treats ASK-severity policy reasons as hard blocks** — regression missed when the `ask` tier was added in v0.1.1. **Operator action: if you added `alarm_control_panel.*` to `HA_SAFE_ENTITIES` as a workaround, remove it after updating.** Root causes: (1) `simulate_artifact` was calling `evaluate_references` without `root`, so `ha_safety_mode` was always read from `Path.cwd()` instead of the project config; (2) `is_valid` gated on `bool(blocked_reasons)`, but that list includes ASK-severity entries — only BLOCK entries should prevent apply. Fix adds `policy_blocked: bool` (sourced from `PolicyDecision.blocked`, True only for BLOCK) and threads `root` through to `evaluate_references`. Under `ha_safety_mode: ask` the YAML apply pipeline now proceeds after operator confirmation, matching the MCP hook and `ha-apply-change` skill.
-- **`ha policy-check <yaml>` now honors the project's `ha_safety_mode`** — `evaluate_yaml_policy` was calling `evaluate_references` without `root`, so the CLI's policy-check command silently fell back to `Path.cwd()` for policy config. Invoking from a subdirectory degraded to fail-closed `strict`. Fix threads `root` (from `load_config().root`) through the CLI handler and into `evaluate_yaml_policy`. Same class of latent bug as the apply-path fix above; no operator-visible regression reported, fixed for consistency.
+- **SimulationResult.is_valid: ASK-severity reasons no longer block apply** — regression from v0.1.1 `ask` tier; adds `policy_blocked` field (True only for BLOCK); threads `root` into `evaluate_references`. **Remove `alarm_control_panel.*` from `HA_SAFE_ENTITIES` if added as workaround.**
+- **ha policy-check: honor project `ha_safety_mode`** — `evaluate_yaml_policy` was missing `root`, silently falling back to `Path.cwd()` and defaulting to `strict` from subdirectories.
 
 ### Changed
 
@@ -159,20 +159,17 @@ No `config.json` changes required.
 
 ### Added
 
-- **`ha audit-scripts` CLI command and `audit_scripts` function** — mirrors `audit-automations` for `script.*` entities. Uses `GET /api/config/script/config/{id}`, runs the same safety policy check, and writes artifacts to `.claude-code-hermit/raw/audit-ha-script-safety-*`. `ha-safety-audit` skill updated to run both commands and concatenate findings.
-- **Acknowledgement scaffold** — `_load_acknowledged` reads `automation_ids` and `script_ids` from `.claude-code-hermit/compiled/acknowledged-violations.md` frontmatter. Violations whose ids are listed there are routed to a new `acknowledged` bucket in the audit summary instead of `violations`, so repeat proposals are suppressed for operator-approved exceptions. `hatch` copies the template on first setup.
-- **`state-templates/compiled/acknowledged-violations.md`** — template for the per-project suppression list, copied by `hatch`.
-- **`ha_safety_mode` two-tier dial** — configurable behaviour for sensitive-domain actuation (`lock`, `alarm_control_panel`, security-related `cover`/`button`/`switch`). Two values:
-  - `strict` (default, existing behaviour) — always block; work goes through a proposal.
-  - `ask` — operator is prompted before any sensitive actuation. `ha-apply-change` uses `AskUserQuestion` before pushing; direct MCP calls emit `permissionDecision: "ask"` so Claude Code's permission system prompts the operator natively (matches the convention already used by `hooks/curl-host-gate.py`). Both paths are harness-enforced, not convention-driven.
-  Set during `hatch` (new §7.5 question) or by editing `ha_safety_mode` in `.claude-code-hermit/config.json` directly. An unknown value (e.g. `permissive`) falls back to `strict`.
-- **`Severity` enum in `policy.py`** (`block` / `ask` / `allow`) — replaces the internal `bool` return from `classify_entity()`. `is_sensitive_entity()` kept as a backward-compatible shim (True for BLOCK or ASK, False for ALLOW). `evaluate_references()` `PolicyDecision` gains a `severity` field alongside the existing `blocked` bool.
-- **`severity` field in `ha policy-check` JSON output** — callers can now distinguish `block`, `ask`, and `allow` without re-implementing the policy logic.
+- **ha audit-scripts: new CLI command** — mirrors `audit-automations` for `script.*`; writes artifacts to `raw/audit-ha-script-safety-*`; `ha-safety-audit` skill updated to concatenate both.
+- **audit: acknowledgement scaffold** — `_load_acknowledged` reads ids from `compiled/acknowledged-violations.md` frontmatter; matched violations route to `acknowledged` bucket instead of `violations`; `hatch` copies the template.
+- **state-templates/compiled/acknowledged-violations.md** — new per-project suppression list template copied by `hatch`.
+- **ha_safety_mode: two-tier dial for sensitive-domain actuation** — `strict` (default): always block via proposal; `ask`: prompt operator before actuation (both YAML apply and MCP); unknown values fall back to `strict`. Set via hatch §7.5 or `config.json`.
+- **policy.py: Severity enum** (`block`/`ask`/`allow`) — replaces `bool` return from `classify_entity()`; `is_sensitive_entity()` kept as backward-compatible shim; `PolicyDecision` gains `severity` field.
+- **ha policy-check: add `severity` field to JSON output** — callers can distinguish `block`, `ask`, and `allow` without re-implementing policy logic.
 
 ### Changed
 
-- **Migrated project-root `MEMORY.md` / `memory/` references to the right storage location for each value** — house profile, learned patterns, known issues, and cross-session suppression signals (in `ha-pattern-analyst` / `ha-safety-reviewer`) now live in Claude Code's platform auto memory (`~/.claude/projects/<key>/memory/`), which loads automatically at session start. The three agents (`ha-automation-builder`, `ha-pattern-analyst`, `ha-safety-reviewer`) already declared `memory: project` frontmatter — their body instructions now match. No more manual `MEMORY.md` reads/writes for Claude-derived knowledge.
-- **Locale now lives in `.claude-code-hermit/OPERATOR.md` under a `## HA hermit` section, not auto memory** — locale is operator-set config, not Claude-derived knowledge: it should survive project moves, be CLI-readable, and be visible to the operator. `boot status` reports the language again (`BootStatus.language` / `BootStatus.needs_language` restored); the setup checklist's `Language` entry points at `.claude-code-hermit/OPERATOR.md`. `boot store --language <locale>` writes to OPERATOR.md, creating the `## HA hermit` section on first use. Future HA operator preferences (room defaults, alert channels, etc.) belong under the same section.
+- **agents: migrate MEMORY.md references to platform auto memory** — house profile, patterns, and suppression signals now live in `~/.claude/projects/<key>/memory/`; agent body instructions updated to match existing `memory: project` frontmatter.
+- **locale: move from auto memory to OPERATOR.md** — locale is operator config, not Claude-derived knowledge; `boot status` reports language again; `boot store --language` writes to `OPERATOR.md` `## HA hermit` section.
 - **deps: bump core requirement to `>=1.0.37` / `^1.0.37`** — was `>=1.0.32`; aligns with core v1.0.37 release.
 
 ### Design notes
@@ -213,9 +210,9 @@ Run `/claude-code-hermit:hermit-evolve`. After updating the plugin:
 
 ### Changed
 
-- **`agents/ha-safety-reviewer.md`: added `## Memory Cross-Check` section** — reviewer now consults auto-memory (`MEMORY.md` index + matching topic files) before issuing a verdict. If memory records an operator decision that would change the verdict, the reviewer returns `approve` with a single `info` Finding coded `covered-by-memory` plus a `[memory: <filename>]` breadcrumb. Sensitive-domain blocks (`lock`, `alarm_control_panel`, security-related `cover`/`button`/`switch`) are carved out — memory cannot override them regardless of any operator note.
-- **`agents/ha-pattern-analyst.md`: added `## Memory Cross-Reference` section** — analyst now consults auto-memory before emitting candidates; covered candidates move to a new top-level `suppressed[]` array with fields `{code, reason, quoted_line, memory_ref}`. Omitted when empty. Mirrors the canonical `covered-by-memory` code introduced in `claude-code-hermit` v1.0.32.
-- **deps: bump core requirement to `>=1.0.32` / `^1.0.32`** — `required_core_version` and `requires.claude-code-hermit` in `hermit-meta.json`, and `dependencies[0].version` in `plugin.json`, all updated. The `covered-by-memory` code was introduced in core hermit v1.0.32 (`proposal-triage`, `reflection-judge`); this release adopts it for the HA suggestion agents and the floor declares the dependency.
+- **ha-safety-reviewer: add Memory Cross-Check** — consults auto-memory before verdict; returns `covered-by-memory` approval if memory records an operator decision; sensitive-domain blocks immune to memory override.
+- **ha-pattern-analyst: add Memory Cross-Reference** — covered candidates move to `suppressed[]` array with `{code, reason, quoted_line, memory_ref}`; mirrors `covered-by-memory` code from core v1.0.32.
+- **deps: bump core requirement to `>=1.0.32` / `^1.0.32`** — `covered-by-memory` code introduced in core v1.0.32.
 
 ### Files affected
 
@@ -238,26 +235,26 @@ No `config.json` changes required.
 
 ### Added
 
-- **`ha validate-apply` now pushes config to HA via REST** — `POST /api/config/{domain}/config/{id}` is called before the domain reload, fixing the silent failure where `reload_attempted: true` was returned but the automation never appeared in HA (PROP-005). The automation `id:` field is used as the REST config ID; if absent, it is derived from the alias or filename with a drift warning in the output.
-- **`ha delete-automation <id>` and `ha delete-script <id>`** — remove an automation or script config from HA via `DELETE /api/config/{domain}/config/{id}`. Output includes `ok`, `message`, and a report path.
-- **`ha list-automations` and `ha list-scripts`** — lightweight enumeration of live HA automations/scripts (entity_id, config id, friendly_name, state, deletable). Sorted by entity_id. The `deletable: false` flag identifies YAML-packaged automations that lack a numeric `id` and cannot be removed via REST. Intended as a quick lookup before delete, without the full policy audit of `audit-automations`.
-- **`ha-delete-config` skill** — operator-facing workflow for discovering a target automation/script, confirming deletion, and optionally triggering a reload.
-- **Structured HA error messages surfaced verbatim** — all HA error responses carry `{"message":"..."}`. This field is now extracted and included in apply/remove reports, replacing the opaque "Home Assistant request failed (status=400)".
+- **ha validate-apply: push config to HA via REST before reload** — fixes silent failure (PROP-005) where reload succeeded but automation was never pushed; derives `id` from alias/filename if absent.
+- **ha delete-automation / delete-script: new CLI commands** — remove automation or script via `DELETE /api/config/{domain}/config/{id}`; output includes `ok`, `message`, report path.
+- **ha list-automations / list-scripts: new CLI commands** — enumerate live automations/scripts with `deletable` flag; sorted by entity_id; quick lookup before delete.
+- **ha-delete-config: new skill** — operator workflow for discovering, confirming, and deleting an automation/script config.
+- **ha_api: surface HA error messages verbatim** — extracts `{"message":"..."}` from all HA error responses into apply/remove reports.
 
 ### Changed
 
-- **`validate-apply` JSON output** — includes three new fields: `config_id`, `creation_attempted`, `creation_ok`. The `creation_ok` field distinguishes a pushed-and-verified config from a reload-only operation (e.g. YAML mode fallback).
-- **`ApplyResult` dataclass** — extended with `config_id`, `domain`, `creation_attempted`, `creation_ok`.
-- **deps: bump core requirement to `>=1.0.30` / `^1.0.30`** — was `>=1.0.29`; `required_core_version` and `requires.claude-code-hermit` in `hermit-meta.json` and `dependencies[0].version` in `plugin.json` all updated together.
+- **validate-apply: new output fields** — `config_id`, `creation_attempted`, `creation_ok` distinguish a pushed-and-verified config from a reload-only YAML-mode fallback.
+- **ApplyResult: extended with `config_id`, `domain`, `creation_attempted`, `creation_ok`.**
+- **deps: bump core requirement to `>=1.0.30` / `^1.0.30`** — was `>=1.0.29`.
 
 ### Fixed
 
-- **Apply flow no longer silently succeeds when HA never received the config** — previous behavior called `automation.reload` with no config push, returning success despite the automation being absent. Now reports `creation_ok: false` with a clear message in the YAML-mode fallback case.
-- **`ha-delete-config` skill**: removed erroneous advice to use `validate-apply` for post-delete reload (it would also push the supplied YAML as a new config). Step 5 now correctly points to HA Developer Tools → Services.
-- **`ha-build-automation` skill**: `id:` field is now required as the first field in generated YAML — without it, `validate-apply` derives a fragile ID from the alias that breaks on rename.
-- **CLI tests**: `_make_config` helper consolidated into a shared `make_mock_config` fixture in `conftest.py`; `test_cli_probe.py` and `test_cli_delete.py` both use it. Renamed `test_delete_automation_missing_id_exits_nonzero` → `test_delete_automation_not_found_exits_nonzero` (the old name conflated a missing CLI argument with a missing HA resource).
-- **`validate-apply` no longer pushes config when reload domain is disallowed** — the `can_reload_domain` authorization check now runs before the REST POST, not after. Previously the config could be pushed and then the result returned as `reload-blocked`, leaving HA state inconsistent with operator expectations. No-op in practice today (`_CONFIG_DOMAINS` and the reload allowlist are identical sets), but eliminates the latent footgun if those sets ever drift.
-- **`list-automations` / `list-scripts` output shape** — renamed `alias` → `friendly_name` (matches HA's actual `attributes.friendly_name` — HA never exposes the YAML `alias:` field via `/api/states`), added `deletable: bool` flag (`false` for YAML-packaged automations that lack a numeric `id` and cannot be removed via REST), and results are now sorted by `entity_id` for deterministic operator UX. Field rename is contained within this unreleased v0.0.9 — no operator scripting is impacted.
+- **validate-apply: no longer silently succeeds when config was never pushed** — reports `creation_ok: false` in YAML-mode fallback instead of returning success after reload-only.
+- **ha-delete-config: remove erroneous `validate-apply` post-delete advice** — step 5 now points to HA Developer Tools → Services.
+- **ha-build-automation: require `id:` as first field in generated YAML** — without it, `validate-apply` derives a fragile alias-based ID that breaks on rename.
+- **CLI tests: consolidate `_make_config` into shared `make_mock_config` fixture** — used by `test_cli_probe.py` and `test_cli_delete.py`; test renamed to `test_delete_automation_not_found_exits_nonzero`.
+- **validate-apply: run `can_reload_domain` check before REST POST** — prevents pushing config that would then return `reload-blocked`.
+- **list-automations / list-scripts: rename `alias` → `friendly_name`** — matches HA's `attributes.friendly_name`; results sorted by `entity_id`.
 
 ### Files affected
 
@@ -288,16 +285,16 @@ No `config.json` changes required.
 
 ### Added
 
-- **`READ_FROM_ENV:HOMEASSISTANT_URL` in docker network requirements** — added to the DNS allowlist section so `/claude-code-hermit:docker-security` step 3a can resolve the operator's configured HA hostname (e.g. `ha.mydomain.com`) dynamically, covering custom remote domains not under `nabu.casa`. Requires the core `>=1.0.29` bump below — the `READ_FROM_ENV:` sentinel is parsed by core 1.0.29's `/docker-security` allowlist resolver.
+- **hatch: add `READ_FROM_ENV:HOMEASSISTANT_URL` to docker network requirements** — allows `/docker-security` step 3a to resolve custom HA hostnames dynamically; requires core `>=1.0.29`.
 
 ### Changed
 
-- **deps: bump core requirement to `>=1.0.29` / `^1.0.29`** — was `>=1.0.26`; `required_core_version` and `requires.claude-code-hermit` in `hermit-meta.json` and `dependencies[0].version` in `plugin.json` all updated together. Required by the new `READ_FROM_ENV:HOMEASSISTANT_URL` allowlist entry above (resolver lives in core 1.0.29's `/docker-security`).
+- **deps: bump core requirement to `>=1.0.29` / `^1.0.29`** — was `>=1.0.26`; required by `READ_FROM_ENV:HOMEASSISTANT_URL` allowlist entry (resolver in core 1.0.29's `/docker-security`).
 
 ### Fixed
 
-- **`hatch`: read token via Read tool, not Python subprocess** — replaced the `python -c "from dotenv import dotenv_values…"` one-liner with an instruction to use the Read tool on `.env` directly. The Python approach was blocked by the deny-pattern hook (any Bash argument containing the literal string `TOKEN` is rejected, including via `python -c`). The Read tool approach is hook-safe and avoids echoing the token to conversation output.
-- **`hatch`: removed non-existent `.env.example` copy step** — the `.env` missing-credential message instructed users to run `cp .env.example .env`, but no such example file ships with this plugin. Replaced with a direct "create `.env` with these values" instruction.
+- **hatch: read token via Read tool instead of Python subprocess** — `python -c "from dotenv…"` was blocked by the `TOKEN` deny-pattern hook; Read tool is hook-safe.
+- **hatch: remove non-existent `.env.example` copy step** — no such file ships with the plugin; replaced with direct "create `.env`" instruction.
 
 ### Files affected
 
@@ -322,17 +319,17 @@ No `config.json` changes required.
 
 ### Added
 
-- **Docker network requirements section in `skills/hatch/SKILL.md`** — declares `nabu.casa` (DNS allowlist) and `ASK_OPERATOR_FOR_HA_IP` (LAN allowlist suggestion) for `/claude-code-hermit:docker-security` step 3a fleet scan. Operators running the docker-security wizard with this plugin installed are prompted per-entry; nothing is auto-applied. This is the consumer that requires the core `>=1.0.26` bump below.
+- **hatch: add Docker network requirements section** — declares `nabu.casa` and `ASK_OPERATOR_FOR_HA_IP` for `/docker-security` step 3a fleet scan; operators are prompted per-entry.
 
 ### Changed
 
-- **deps: bump core requirement to `>=1.0.26` / `^1.0.26`** — was `>=1.0.21`; `required_core_version` and `requires.claude-code-hermit` in `hermit-meta.json` and `dependencies[0].version` in `plugin.json` all updated together. README prereq line updated to match. Required by the new `## Docker network requirements` section in `skills/hatch/SKILL.md` (parsed by core 1.0.26's `/docker-security` step 3a).
+- **deps: bump core requirement to `>=1.0.26` / `^1.0.26`** — was `>=1.0.21`; required by `## Docker network requirements` section (parsed by core 1.0.26's `/docker-security`).
 
 ### Removed
 
-- **`ha-automation-errors` scheduled check retired end-to-end.** The check depended on `/api/error_log`, which is no longer reliably available on current Home Assistant installs (returns 404 for many operators; even on installs where it returned 200 the existing code couldn't parse the plain-text body — the JSON-only client raised `Malformed JSON`, crashing the check). Migrating to `/api/logbook` was evaluated and rejected: logbook surfaces state changes, not automation execution errors, so a clean run there would give operators false confidence that nothing is broken. Removing the check end-to-end (audit function, CLI subcommand, skill, hatch registration, docs) until a replacement signal is designed.
-- **`ha automation-errors` CLI subcommand** (`./bin/ha-agent-lab ha automation-errors [--min-hits N]`).
-- **`ha-automation-error-review` skill** (`/claude-code-homeassistant-hermit:ha-automation-error-review`).
+- **ha-automation-errors: scheduled check retired end-to-end** — `/api/error_log` unreliable on current HA installs (404 or unparseable plain-text); `/api/logbook` rejected as replacement (state changes, not errors). Removed audit function, CLI subcommand, skill, hatch registration, and docs.
+- **ha automation-errors CLI subcommand** (`./bin/ha-agent-lab ha automation-errors [--min-hits N]`).
+- **ha-automation-error-review skill** (`/claude-code-homeassistant-hermit:ha-automation-error-review`).
 
 ### Files affected
 
@@ -383,11 +380,11 @@ No template, CLAUDE-APPEND, or settings changes required for this release.
 
 ### Changed
 
-- **manifest: migrate hermit-internal fields to `hermit-meta.json` sidecar** — `required_core_version`, `requires`, and `hermit.boot_skill` moved out of `plugin.json` so `claude plugin validate` and `claude plugin tag --push` pass the native validator cleanly.
-- **deps: bump core requirement to `>=1.0.21` / `^1.0.21`** — was `>=1.0.17`; `required_core_version` and `requires.claude-code-hermit` in `hermit-meta.json` and `dependencies[0].version` in `plugin.json` all updated together.
-- **plugin.json: native `dependencies` field added** — enables Claude Code's native dependency resolver to auto-install core; hermit-internal `requires` field remains for runtime version gating.
-- **docs: Claude Code prerequisite raised to v2.1.110+** — dep resolver and `claude plugin tag` both require v2.1.110+.
-- **docs: CLAUDE.md tightened for contributor audience** — install block removed (duplicated in README); development constraints promoted to a top-level section; safety rationale added to sensitive-domains rule.
+- **manifest: migrate hermit-internal fields to `hermit-meta.json`** — `required_core_version`, `requires`, and `hermit.boot_skill` removed from `plugin.json` so native validator passes.
+- **deps: bump core requirement to `>=1.0.21` / `^1.0.21`** — was `>=1.0.17`.
+- **plugin.json: add native `dependencies` field** — enables Claude Code's dependency resolver to auto-install core.
+- **docs: raise Claude Code prerequisite to v2.1.110+** — required by dep resolver and `claude plugin tag`.
+- **docs: tighten CLAUDE.md for contributor audience** — remove duplicate install block; promote dev constraints to top-level section.
 
 ### Files affected
 
@@ -410,11 +407,11 @@ No `config.json` changes required.
 
 ### Added
 
-- **GitHub Actions workflow `Test HA Hermit`.** New `.github/workflows/test-ha.yml` runs the existing pytest suite (`plugins/claude-code-homeassistant-hermit/tests/test_*.py`) on every PR or push that touches HA-hermit. Installs `pyproject.toml`'s `[dev]` extras (pytest≥8) on Python 3.12 and runs `pytest tests/ -v`. Filtered to `plugins/claude-code-homeassistant-hermit/**` so unrelated plugin edits don't trigger HA CI. Closes the gap from the monorepo migration where HA's tests had no CI runner of their own.
+- **CI: add GitHub Actions workflow `Test HA Hermit`** — runs pytest on every PR touching HA-hermit; path-filtered to `plugins/claude-code-homeassistant-hermit/**`.
 
 ### Changed
 
-- **Monorepo housekeeping.** Plugin source moved into `plugins/claude-code-homeassistant-hermit/` of the `gtapps/claude-code-hermit` monorepo. `required_core_version` standardized as a top-level semver-range field (`>=1.0.17`); `requires.claude-code-hermit` restored to mirror it. Inner `.claude-plugin/marketplace.json` removed (the repo-root marketplace catalog is now authoritative). `plugin.json` `homepage` and `repository` URLs point at the monorepo path. README and Documentation links point at the monorepo.
+- **manifest: monorepo housekeeping** — plugin moved into `plugins/claude-code-homeassistant-hermit/`; inner marketplace.json removed; `required_core_version` set to `>=1.0.17`; URLs updated to monorepo paths.
 
 ### Upgrade Instructions
 
@@ -428,23 +425,23 @@ No `config.json` changes required.
 
 ### Fixed
 
-- **`audit_automations` 404 on bulk endpoint** — replaced the non-existent `GET /api/config/automation/config` call with a two-step fetch: enumerate automation entities via `/api/states`, then fetch each config individually via `/api/config/automation/config/{id}` in parallel (up to 20 concurrent requests). Automations lacking a numeric `id` (YAML-packaged) are counted in `unmanaged`; per-ID 404s are counted in `fetch_failures`; other errors still propagate loudly. Fixes `ha audit-automations` and the `ha-safety-audit` scheduled check.
+- **audit_automations: fix 404 on non-existent bulk endpoint** — replaced with two-step fetch (`/api/states` enumerate + per-id parallel GET); YAML-packaged automations counted in `unmanaged`.
 
 ### Added
 
-- **`ha probe <path>` CLI subcommand** — `bin/ha-agent-lab ha probe /api/config/automation/config/1234` GETs a raw HA REST path and pretty-prints the JSON response. Provides a safe alternative to `curl` when the `Bash(*TOKEN*)` deny-pattern hook is active, and a quick way to verify whether a REST endpoint exists before writing code against it.
-- **HA API references in `CLAUDE.md`** — links to the authoritative REST and WebSocket API docs, a verification rule ("probe a live instance or WebFetch upstream before assuming an endpoint exists"), and a known-gotchas section seeded with the automation-listing lesson from this bug.
+- **ha probe: new CLI subcommand** — GETs a raw HA REST path and pretty-prints JSON; safe alternative to `curl` when the `TOKEN` deny-pattern hook is active.
+- **CLAUDE.md: add HA API references** — links to REST/WebSocket docs; verification rule and known-gotchas section.
 
 ### Changed
 
-- **Align with claude-code-hermit 1.0.17: artifact-naming convention** — `src/ha_agent_lab/artifacts.py` now produces `<slug>-<YYYY-MM-DD>.<ext>` filenames (was `<UTC-timestamp>__<slug>.<ext>`), matching the format declared in `docs/knowledge-schema.md`. Added `standard_metadata()` helper (enforces `title/type/created/session/tags` ordering) and `current_session_id()` helper (reads `.claude-code-hermit/state/runtime.json`). Simulation and apply reports now carry full frontmatter. All audit reports gain a `session:` field.
-- **`ha-analyze-patterns`: write to `raw/` not `compiled/`** — pattern analyses are weekly rolling snapshots, not durable cross-session work-products. Skill output path corrected to `raw/patterns-<date>.md` with `type: analysis` and a `patterns-latest.md` sibling, aligning code with `docs/knowledge-schema.md`. Raw JSON data goes to `raw/snapshot-ha-pattern-analysis-<date>.json`.
-- **`ha-morning-brief`: write brief to `compiled/` and cite in SHELL.md** — morning briefs are durable and injected at session start. Skill now writes `compiled/brief-morning-<YYYY-MM-DD>.md` (with `type: brief`, `session:` frontmatter) and appends a `[[compiled/brief-morning-<date>]]` wikilink to SHELL.md `### Artifacts produced this session` for core session-close to archive in `## Artifacts`.
-- **`ha-refresh-context`: document house-profile compiled/ write path** — skill Output section now describes when to write `compiled/context-house-profile-<date>.md` (first run or when profile changes) and how to cite it in SHELL.md.
-- **`source: "plugin-check"` → `source: "scheduled-check"` in audit frontmatter** — aligns with the v1.0.15 terminology rename that was applied to config/state keys but had been missed in artifact frontmatter.
-- **`docs/knowledge-schema.md` updated** — frontmatter field requirements documented (with `session:` field), all filename patterns corrected to match code output, and a cross-reference to the core `artifact-naming.md` added.
-- **`CLAUDE.md` bucket list expanded** — four canonical buckets documented (`raw/`, `compiled/`, `state/`, `proposals/`) with purpose descriptions.
-- **Minimum core hermit requirement bumped to ≥ 1.0.17** — ensures the `## Artifacts` session-report section, `hermit-attach`, and `prompt-context` UserPromptSubmit hook are available on the operator's deployment.
+- **artifacts: align naming to core 1.0.17 convention** — produces `<slug>-<YYYY-MM-DD>.<ext>` filenames; adds `standard_metadata()` and `current_session_id()` helpers; all reports now carry full frontmatter with `session:` field.
+- **ha-analyze-patterns: write to `raw/` not `compiled/`** — pattern analyses are weekly snapshots, not durable work-products; output path corrected to `raw/patterns-<date>.md`.
+- **ha-morning-brief: write to `compiled/` and cite in SHELL.md** — briefs are durable; writes `compiled/brief-morning-<date>.md` and appends wikilink to SHELL.md for session-close archival.
+- **ha-refresh-context: document house-profile compiled/ write path** — Output section now describes when to write `compiled/context-house-profile-<date>.md`.
+- **audit frontmatter: rename `source: "plugin-check"` → `"scheduled-check"`** — aligns with v1.0.15 terminology rename missed in artifact frontmatter.
+- **docs/knowledge-schema.md: update frontmatter requirements and filename patterns.**
+- **CLAUDE.md: expand bucket list** — document four canonical buckets (`raw/`, `compiled/`, `state/`, `proposals/`) with purpose descriptions.
+- **deps: bump core requirement to `>=1.0.17`** — requires `## Artifacts` section, `hermit-attach`, and `prompt-context` hook.
 
 ### Upgrade Instructions
 
@@ -476,8 +473,8 @@ No `config.json` changes required. Core hermit v1.0.17 is handled independently 
 
 ### Changed
 
-- **Align with claude-code-hermit 1.0.16: scheduled-checks decoupled from reflect** — all references to "plugin_check via reflect" updated to "scheduled check via reflect-scheduled-checks" across skill descriptions, hatch instructions, and docs. The `scheduled-checks` routine (registered by core hermit 1.0.16's hatch/evolve) is now the correct driver of our four HA checks; reflect no longer runs them. Updated files: `skills/ha-safety-audit`, `ha-integration-health`, `ha-automation-error-review`, `ha-analyze-patterns`, `hatch`, `docs/knowledge-schema.md`, `CLAUDE.md`.
-- **Minimum core hermit requirement bumped to ≥ 1.0.16** — ensures the core `scheduled-checks` routine is registered on fresh installs; on 1.0.15 that routine is absent and scheduled checks would silently never fire.
+- **align with core 1.0.16: scheduled-checks decoupled from reflect** — all `"plugin_check via reflect"` references updated to `"scheduled check via reflect-scheduled-checks"` across skills, hatch, and docs.
+- **deps: bump core requirement to `>=1.0.16`** — ensures `scheduled-checks` routine is registered; on 1.0.15 it is absent and checks silently never fire.
 
 ---
 
@@ -485,8 +482,8 @@ No `config.json` changes required. Core hermit v1.0.17 is handled independently 
 
 ### Fixed
 
-- **`plugin_checks` → `scheduled_checks` (hermit 1.0.15 rename)** — `hatch` now writes scheduled checks under the `scheduled_checks` config key. Prior installs registered checks under the old `plugin_checks` key, which reflect silently ignored after the core hermit upgrade. Operator-facing copy ("Plugin Checks") updated to "Scheduled Checks" throughout.
-- **Missing `config.boot_skill` write in hatch (hermit 1.0.14)** — `hatch` now explicitly writes `boot_skill: "/claude-code-homeassistant-hermit:ha-boot"` to `config.json` during setup. The field was declared in `plugin.json` and handled by `hermit-evolve` for upgrades, but was never written on fresh installs — so always-on mode booted with the generic session skill instead of `ha-boot`.
+- **hatch: rename config key `plugin_checks` → `scheduled_checks`** — prior installs used the old key, which reflect silently ignored after core 1.0.15 upgrade.
+- **hatch: write `config.boot_skill` on fresh installs** — field was handled by `hermit-evolve` for upgrades but never written on first setup, causing always-on mode to boot with generic session skill.
 
 ### Changed
 
