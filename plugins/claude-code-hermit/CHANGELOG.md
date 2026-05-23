@@ -17,7 +17,7 @@
 ### Changed
 
 - **`/proposal-act` step (e.5): swapped `/code-review` for `/simplify`** — gates shift from correctness (JSON bug-finding) to cleanup (refactor proposals the skill applies itself). Failures log a warning and fall back to skip; `code-review:code-review` remains available for deeper bug checks.
-- **`permission_mode` default changed to `auto` (CC 2.1.150+)** — classifier-reviewed autonomy; safer than `bypassPermissions`. Applies to Docker and non-Docker hermits. `bypassPermissions` remains as an explicit opt-in for fully unattended containers. Requires CC 2.1.150+; not available on Pro, Haiku, or non-Anthropic providers. `min_claude_code_version` bumped to `>=2.1.150` in `hermit-meta.json`.
+- **`permission_mode: auto` available as an opt-in (CC 2.1.150+)** — classifier-reviewed autonomy; selectable via `/hermit-settings permissions` or chosen at `/hatch` time. NOT the default for Docker or tmux always-on deployments: CC shows an interactive "Enable auto mode?" acknowledgement on first launch, which blocks headless boot until acknowledged. Quick Docker / tmux always-on hatches keep `bypassPermissions`; interactive hatches default to `acceptEdits`. Existing installs are NOT auto-migrated to `auto` — operators opt in explicitly when they can attend the first-run acknowledgement. Requires CC 2.1.150+; not available on Pro, Haiku, or non-Anthropic providers. `min_claude_code_version` bumped to `>=2.1.150` in `hermit-meta.json`.
 
 ### Fixed
 
@@ -25,19 +25,7 @@
 
 ### Upgrade Instructions
 
-1. **Migrate `permission_mode` to `auto` (optional).** If `config.json` has `permission_mode` set to `acceptEdits` or `bypassPermissions`, ask the operator:
-
-   > Your hermit's `permission_mode` is currently `"<current_value>"`. The new default is `"auto"`: classifier-reviewed autonomy. Eligibility depends on plan and model (Max plan → Opus 4.7 only; Team/Enterprise/API → Sonnet 4.6 or Opus 4.6/4.7; not available on Pro, Haiku, or non-Anthropic providers). Switch to `"auto"`? (y/N)
-
-   - If `y`: write `permission_mode: "auto"` directly to `.claude-code-hermit/config.json` now. Do not rely on the silent-defaults pass later in evolve, which only adds missing keys and will not overwrite the existing value.
-   - If `n`: leave `permission_mode` unchanged.
-   - If `permission_mode` is already `"auto"`, `"default"`, `"plan"`, or `"dontAsk"`: skip this prompt.
-
-   **Note for `bypassPermissions` operators:** `auto` pauses for confirmation on risky actions, so it will not work for fully unattended hermits that cannot tolerate any pause. Only switch if your workload can handle occasional confirmation prompts, or if a human is present when the hermit runs.
-
-   **Note for Pro, Haiku, or non-Anthropic-provider operators:** `auto` mode is not available on your plan/model/provider. CC will report it as unavailable at launch and the hermit will not enter `auto`. Answer `n` here and keep your current mode, or pick another mode via `/hermit-settings permissions` after upgrade.
-
-2. **Apply the standard sandbox profile when supported** (or confirm existing config).
+1. **Apply the standard sandbox profile when supported** (or confirm existing config).
 
    Read the target settings file — resolve via `hatch_target` (`local` → `.claude/settings.local.json`; `committed` → `.claude/settings.json`; fallback chain: `.claude-code-hermit/state/hatch-options.json` → marker scan → scope detection).
 
@@ -50,15 +38,15 @@
 
    **Apply the standard profile** means: read `${CLAUDE_PLUGIN_ROOT}/state-templates/sandbox-profiles.json` (select the `standard` entry — includes `enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed`, `allowUnsandboxedCommands`); read `${CLAUDE_PLUGIN_ROOT}/state-templates/deny-patterns.json` and extract `sandbox.filesystem.denyRead`; merge `profile.filesystem = { "denyRead": <that array> }`; merge into the target settings file under the `sandbox` key.
 
-3. **Rebuild the Docker image** (Docker operators only).
+2. **Rebuild the Docker image** (Docker operators only).
 
    The base image now includes `bubblewrap` and `socat`. Without a rebuild the sandbox silently degrades inside the container. Run `hermit-docker update` or `docker compose build` to pick up the new packages. Note: the entrypoint itself did not change, so no template refresh is needed.
 
-4. **Note on custom-CA tooling** (informational, no action required unless affected).
+3. **Note on custom-CA tooling** (informational, no action required unless affected).
 
    Tools that use a MITM proxy with a custom certificate authority (e.g. `gcloud` with a corporate proxy, `terraform` with a company CA) may require `"enableWeakerNetworkIsolation": true` in the `sandbox` block. See [Claude Code sandbox docs](https://code.claude.com/docs/en/settings#sandbox-settings) and the FAQ entry in `docs/faq.md`.
 
-5. **Refresh the CLAUDE-APPEND block to point `quality-gate-judge` at `/claude-code-hermit:simplify`.** The injected `## Subagents` table in operator `CLAUDE.md` (or `CLAUDE.local.md`) contains a `quality-gate-judge` row that previously read `decides whether /code-review should run`. After this release, `hermit-evolve` Step 7's sibling-sync re-syncs the canonical block to the resolved `hatch_target` — operators with the marker present see the wording flip to `/claude-code-hermit:simplify` automatically. No operator-prompt required; the marked block is template-authoritative.
+4. **Refresh the CLAUDE-APPEND block to point `quality-gate-judge` at `/claude-code-hermit:simplify`.** The injected `## Subagents` table in operator `CLAUDE.md` (or `CLAUDE.local.md`) contains a `quality-gate-judge` row that previously read `decides whether /code-review should run`. After this release, `hermit-evolve` Step 7's sibling-sync re-syncs the canonical block to the resolved `hatch_target` — operators with the marker present see the wording flip to `/claude-code-hermit:simplify` automatically. No operator-prompt required; the marked block is template-authoritative.
 
 ## [1.1.1] - 2026-05-21
 
