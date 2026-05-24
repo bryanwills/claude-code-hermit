@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **daily-auto-close routine** — fires `0 0 * * *` (local) and closes the current session via `/session-close --auto` once the operator has been idle ≥10 min. If the operator is currently active at midnight, the routine writes `state/pending-close.json`; the next heartbeat tick drains the flag as soon as the lull arrives, regardless of active-hours or other gates. Fixes the silent-no-archives failure mode on long-running daemons (sessions that never close → reflect / weekly-review / hermit-brain / hermit-evolution all degrade).
+- **skills/daily-auto-close/SKILL.md** — new routine driver skill (queue / drain-direct / stale-flag-cleanup branches).
+- **scripts/heartbeat-precheck.js** — new pending-close drain block at the top of the script, runs before active-hours / 20-tick / micro-proposal gates.
+
+### Changed
+
+- **Removed `closed_via: auto` skip** from `reflect-precheck.js`, `skills/reflect/SKILL.md` (Resolution Check + routine-effect scan), and `weekly-review.js` (`isAutoArchived` filter, autonomy-denominator exclusion, "auto-archived excluded" note). All archives now count as evidence regardless of close trigger. The skip was correct for genuinely-empty 12h-inactivity closes but is wrong for the new daily-midnight closes on chatty daemons (which carry real operator content); the `operator_turns == 0` semantic still excludes empty archives from the `self-directed` numerator.
+- **Auto-close wording** — `skills/heartbeat/SKILL.md`, `skills/session-close/SKILL.md`, `docs/always-on.md`, `docs/always-on-ops.md`, `skills/channel-responder/SKILL.md` updated to reflect both AUTO_CLOSE triggers (12h-inactivity OR midnight + 10-min lull). Generic "auto-closed" wording replaces "auto-closed after 12h quiet".
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Add `daily-auto-close` routine to `.claude-code-hermit/config.json`.** Read `config.routines`. If any entry has `id: "daily-auto-close"`, skip — already present. Otherwise append: `{"id": "daily-auto-close", "schedule": "0 0 * * *", "skill": "claude-code-hermit:daily-auto-close", "run_during_waiting": true, "enabled": true}`. Preserve operator ordering; insert at end of array.
+2. **Re-arm routines.** Invoke `/claude-code-hermit:hermit-routines load` so the new entry registers via CronCreate this session — no restart needed.
+3. **Report.** "Added `daily-auto-close` routine — long-running daemon sessions now archive at midnight when idle ≥10 min, restoring reflect / weekly-review / brain evidence on chatty hermits. As part of this change, the `closed_via: auto` filter in reflect-precheck, reflect's session scans, and weekly-review's autonomy calculation was removed: all archives now count as evidence, regardless of close trigger."
+
 ## [1.1.4] - 2026-05-23
 
 ### Changed

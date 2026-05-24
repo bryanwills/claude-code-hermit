@@ -75,7 +75,7 @@ After authorization passes, run:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.js --force
 ```
 
-This writes `state/last-operator-action.json` with the current timestamp, resetting the 12h AUTO_CLOSE quiet window. The `UserPromptSubmit` hook deliberately skips `<channel` prompts (it can't see the allowlist); this step is the authorized write site.
+This writes `state/last-operator-action.json` with the current timestamp, resetting the AUTO_CLOSE quiet window (used by both the 12h-inactivity trigger and the daily-midnight lull drain). The `UserPromptSubmit` hook deliberately skips `<channel` prompts (it can't see the allowlist); this step is the authorized write site.
 
 ## 1e. Persist Chat ID
 

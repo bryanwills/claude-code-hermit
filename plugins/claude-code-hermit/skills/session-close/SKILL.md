@@ -8,7 +8,7 @@ description: Closes the current work session with a structured handoff. Archives
 
 `/session-close` is always a **Full Shutdown**. The operator explicitly invoked it — that's the confirmation. No close mode decision, no prompting.
 
-When invoked with `--auto` by heartbeat (after 12h SHELL.md inactivity), the operator did not invoke it. The auto-close path bypasses summary-gathering, skips reflect (step 5), skips the heartbeat-stop step (step below), and stamps `closed_via: auto` in the archive frontmatter via the session-mgr payload.
+When invoked with `--auto` by heartbeat (either after 12h SHELL.md inactivity, or via the `daily-auto-close` pending-flag drain after a 10-min lull), the operator did not invoke it. The auto-close path bypasses summary-gathering, skips reflect (step 5), skips the heartbeat-stop step (step below), stamps `closed_via: auto` in the archive frontmatter via the session-mgr payload, and clears `state/pending-close.json` after the archive succeeds.
 
 Idle transitions happen automatically at task boundaries (handled by the `session` skill). By the time the operator runs `/session-close`, they want out.
 
@@ -37,7 +37,9 @@ Closed Via: auto
 Next Start Point: Fresh start.
 ```
 
-Write `Auto-closed after 12h quiet.` as the first line of `## Overview` in the session report.
+Write `Auto-closed by heartbeat.` as the first line of `## Overview` in the session report.
+
+After the session-mgr archive returns success, delete `.claude-code-hermit/state/pending-close.json` if it exists (`rm -f` — ignore if absent). If the archive failed, leave the flag in place so the next heartbeat tick retries the drain.
 
 ---
 
@@ -63,6 +65,7 @@ Write `Auto-closed after 12h quiet.` as the first line of `## Overview` in the s
    Next Start Point: <one line>
    ```
    Also include the task table (if native Tasks were created).
+8. After the session-mgr archive returns success, delete `.claude-code-hermit/state/pending-close.json` if it exists (`rm -f` — ignore if absent). Any pending midnight-drain flag is invalidated by a successful close, regardless of trigger; without this step a flag queued before an operator-invoked close would survive and the next session's first heartbeat tick could fire `AUTO_CLOSE` against it.
 
 ---
 

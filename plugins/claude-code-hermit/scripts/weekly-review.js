@@ -50,10 +50,6 @@ function isSelfDirected(s) {
   return s.fm.escalation === 'autonomous';
 }
 
-function isAutoArchived(s) {
-  return s.fm.closed_via === 'auto';
-}
-
 // --- Determine current week ---
 const now = new Date();
 const { year: currentYear, week: currentWeek } = getISOWeek(now);
@@ -133,13 +129,18 @@ if (allHaveTokens) {
 }
 const avgTokens = sessionsCount > 0 ? Math.round(totalTokens / sessionsCount) : 0;
 
-// Self-directed rate excludes auto-archived sessions from the denominator —
-// closed_via: auto + status: completed would otherwise inflate the apparent completion/autonomy rate.
-const autoArchivedSessions = weekSessions.filter(isAutoArchived);
-const operatorSessions = weekSessions.filter(s => !isAutoArchived(s));
-const selfDirectedCount = operatorSessions.filter(isSelfDirected).length;
-const assistedSessions = operatorSessions.filter(s => !isSelfDirected(s));
-const autonomousRate = operatorSessions.length > 0 ? selfDirectedCount / operatorSessions.length : 0;
+// Exclude truly empty auto-archives (12h-inactivity closes with operator_turns: 0)
+// from the autonomy calc — they have no content to attribute either way and would
+// otherwise inflate the self-directed numerator via the operator_turns === 0 branch
+// of isSelfDirected. Daily-lull closes on chatty daemons carry operator_turns > 0
+// and DO count (correctly, as operator-assisted).
+const contentfulSessions = weekSessions.filter(s => {
+  const ops = parseInt(s.fm.operator_turns, 10) || 0;
+  return !(s.fm.closed_via === 'auto' && ops === 0);
+});
+const selfDirectedCount = contentfulSessions.filter(isSelfDirected).length;
+const assistedSessions = contentfulSessions.filter(s => !isSelfDirected(s));
+const autonomousRate = contentfulSessions.length > 0 ? selfDirectedCount / contentfulSessions.length : 0;
 
 // --- Operator dependence ---
 const assistedTags = {};
@@ -227,8 +228,7 @@ let body = `## Week of ${dateRange}\n\n`;
 if (sessionsCount > 0) {
   body += `### Sessions\n`;
   body += `${sessionsCount} session${sessionsCount !== 1 ? 's' : ''}, $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}) total ($${avgCost.toFixed(2)} avg).\n`;
-  const autoArchivedNote = autoArchivedSessions.length > 0 ? `, ${autoArchivedSessions.length} auto-archived excluded` : '';
-  body += `${selfDirectedCount} self-directed (operator_turns = 0), ${assistedSessions.length} operator-assisted${autoArchivedNote}.\n\n`;
+  body += `${selfDirectedCount} self-directed (operator_turns = 0), ${assistedSessions.length} operator-assisted.\n\n`;
 } else {
   body += `### Sessions\nNo sessions this week.\n\n`;
 }

@@ -29,10 +29,10 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
 2. Read the verdict (first line of output):
    - Starts with `SKIP|` → emit `HEARTBEAT_SKIP (<reason>)`. No channel notification. No SHELL.md write. Stop.
    - `OK` → emit `HEARTBEAT_OK`. Stop.
-   - `AUTO_CLOSE` → SHELL.md mtime exceeded 12h. Run the auto-close sequence, then stop:
-     1. Append to SHELL.md `## Monitoring`: `[HH:MM] Heartbeat: auto-closed after 12h quiet.` (Step 2 replaces SHELL.md with a fresh template, so a later append would miss the archived report.)
-     2. Invoke `/claude-code-hermit:session-close --auto` (skips summary-gathering, reflect, heartbeat-stop; passes `Closed Via: auto` to session-mgr).
-     3. Notify the operator per CLAUDE-APPEND.md § Operator Notification: "Auto-closed S-NNN after 12h quiet."
+   - `AUTO_CLOSE` → operator inactivity exceeded the threshold (12h of no operator action, or 10-min lull after a `daily-auto-close` queued at midnight). Run the auto-close sequence, then stop:
+     1. Append to SHELL.md `## Monitoring`: `[HH:MM] Heartbeat: auto-closed.` (Step 2 replaces SHELL.md with a fresh template, so a later append would miss the archived report.)
+     2. Invoke `/claude-code-hermit:session-close --auto` (skips summary-gathering, reflect, heartbeat-stop; passes `Closed Via: auto` to session-mgr; clears `state/pending-close.json` after archive succeeds).
+     3. Notify the operator per CLAUDE-APPEND.md § Operator Notification: "Auto-closed S-NNN."
      4. Emit `HEARTBEAT_AUTO_CLOSED`. Stop. Do NOT run the EVALUATE flow — the session is being archived; generating stale-session alerts for a closing session would create phantom dedup entries.
    - `EVALUATE` → continue to step 3.
 3. Read `${CLAUDE_PLUGIN_ROOT}/skills/heartbeat/reference.md` for the semantic key taxonomy, alert deduplication procedure, self-evaluation steps, and output format.

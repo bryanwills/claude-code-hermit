@@ -55,6 +55,27 @@ const checklistItems = heartbeatContent
 
 if (checklistItems.length === 0) emit('SKIP|HEARTBEAT.md has no checklist items');
 
+// Pending-close drain: if the daily-auto-close routine queued a close because the
+// operator was active at midnight, drain it as soon as a 10-min lull appears.
+// Runs BEFORE active-hours / 20-tick / micro-proposal gates — the close is the
+// signal, not a notification.
+if (readJSON(path.join(stateDir, 'state', 'pending-close.json')) !== null) {
+  const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
+  if (runtime.session_state === 'in_progress') {
+    const lastAction = readJSON(path.join(stateDir, 'state', 'last-operator-action.json'));
+    const tStr = lastAction && typeof lastAction.at === 'string' ? lastAction.at : null;
+    const t = tStr ? new Date(tStr).getTime() : NaN;
+    let now = Date.now();
+    if (process.env.HERMIT_NOW) {
+      const d = new Date(process.env.HERMIT_NOW).getTime();
+      if (!isNaN(d)) now = d;
+    }
+    // Absent or malformed last-operator-action.json → treat as idle indefinitely
+    // (per daily-auto-close SKILL.md step 5 fail-open rule).
+    if (isNaN(t) || (now - t) / (1000 * 60) > 10) emit('AUTO_CLOSE');
+  }
+}
+
 const config = readJSON(path.join(stateDir, 'config.json')) ?? {};
 const hbConfig = config.heartbeat ?? {};
 const timezone = config.timezone ?? 'UTC';
