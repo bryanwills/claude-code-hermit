@@ -44,6 +44,46 @@ function normalizeItemKey(itemText) {
   return text ? `checklist:${text}` : null;
 }
 
+// Resolve "now" once: real wall-clock, overridable by HERMIT_NOW for deterministic
+// tests. Shared by the pending-close drain and the in_progress 12h check below.
+let now = Date.now();
+if (process.env.HERMIT_NOW) {
+  const d = new Date(process.env.HERMIT_NOW).getTime();
+  if (!isNaN(d)) now = d;
+}
+
+// Pending-close drain: if the daily-auto-close routine queued a close because the
+// operator was active at midnight, drain it as soon as a 10-min lull appears.
+// Runs BEFORE every other gate (HEARTBEAT.md presence, active-hours, 20-tick,
+// micro-proposal) — the close is the signal, not a notification, and must not
+// depend on operator-editable HEARTBEAT.md being present.
+{
+  const pendingClose = readJSON(path.join(stateDir, 'state', 'pending-close.json'));
+  if (pendingClose !== null) {
+    const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
+    if (runtime.session_state === 'in_progress') {
+      const lastAction = readJSON(path.join(stateDir, 'state', 'last-operator-action.json'));
+      const tStr = lastAction && typeof lastAction.at === 'string' ? lastAction.at : null;
+      const t = tStr ? new Date(tStr).getTime() : NaN;
+      if (!isNaN(t)) {
+        // Valid last-operator-action → standard 10-min lull check.
+        if ((now - t) / (1000 * 60) > 10) emit('AUTO_CLOSE');
+      } else {
+        // Absent/malformed last-operator-action → fail-open per daily-auto-close
+        // SKILL.md step 5, BUT only when the flag itself is recent. A stale flag
+        // left over from a crashed prior session must not auto-close a fresh
+        // session whose last-op clock has not yet been seeded. The routine fires
+        // every 24h and overwrites or cleans up the flag, so a queued_at older
+        // than 24h means the routine has stopped firing and the flag cannot be
+        // trusted.
+        const qStr = typeof pendingClose.queued_at === 'string' ? pendingClose.queued_at : null;
+        const q = qStr ? new Date(qStr).getTime() : NaN;
+        if (!isNaN(q) && (now - q) / (1000 * 60 * 60) <= 24) emit('AUTO_CLOSE');
+      }
+    }
+  }
+}
+
 let heartbeatContent;
 try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }
 catch { emit('SKIP|HEARTBEAT.md missing'); }
@@ -89,12 +129,6 @@ const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
 const sessionState = runtime.session_state ?? 'idle';
 
 if (sessionState === 'in_progress') {
-  let now = Date.now();
-  if (process.env.HERMIT_NOW) {
-    const d = new Date(process.env.HERMIT_NOW).getTime();
-    if (!isNaN(d)) now = d;
-  }
-
   // Prefer last-operator-action.json: records genuine operator prompts only, unaffected
   // by routine writes (reflect, scheduled-checks, heartbeat alerts) that bump SHELL.md mtime.
   // Falls back to SHELL.md mtime for pre-upgrade installs that don't have the file yet.

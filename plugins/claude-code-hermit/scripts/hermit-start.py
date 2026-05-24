@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
         {'id': 'reflect', 'schedule': '0 9 * * *', 'skill': 'claude-code-hermit:reflect', 'enabled': True},
         {'id': 'scheduled-checks', 'schedule': '5 9 * * *', 'skill': 'claude-code-hermit:reflect-scheduled-checks', 'run_during_waiting': True, 'enabled': True},
         {'id': 'weekly-review', 'schedule': '0 23 * * 0', 'skill': 'claude-code-hermit:weekly-review', 'enabled': True},
+        {'id': 'daily-auto-close', 'schedule': '0 0 * * *', 'skill': 'claude-code-hermit:daily-auto-close', 'run_during_waiting': True, 'enabled': True},
     ],
     'monitors': [],
     'env': {

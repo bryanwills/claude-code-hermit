@@ -75,6 +75,26 @@ function readFileWithFrontmatter(filePath) {
 }
 
 /**
+ * Returns true when a session-report frontmatter represents an empty auto-archive:
+ * `closed_via: auto` AND `operator_turns: 0`. These reports come from the
+ * 12h-inactivity AUTO_CLOSE path on quiet sessions and carry no operator content;
+ * the daily-lull AUTO_CLOSE path carries operator_turns > 0 and is NOT empty.
+ *
+ * Used by reflect-precheck (excluded from compute-phase mtime trigger) and
+ * weekly-review (excluded from the autonomy-rate denominator). Null frontmatter
+ * returns false (an unreadable report is never excluded from evidence); a missing
+ * or non-numeric operator_turns is read as 0, matching the inline behavior both
+ * call sites had before extraction. Post-KAIROS the predicate becomes moot —
+ * reflect and weekly-review will read KAIROS daily logs instead of S-NNN-REPORT.md
+ * archives.
+ */
+function isEmptyAutoArchive(fm) {
+  if (!fm) return false;
+  const ops = parseInt(fm.operator_turns, 10) || 0;
+  return fm.closed_via === 'auto' && ops === 0;
+}
+
+/**
  * Given an array of artifacts with { fm } (each having fm.type and fm.created),
  * return a Map<type, artifact> keeping only the newest artifact per type.
  * Artifacts without fm or fm.created are skipped.
@@ -141,4 +161,4 @@ function resolveArtifactPath(baseDir, pathEntry) {
   return globDir(dir, re);
 }
 
-module.exports = { parseFrontmatter, readFrontmatter, readFileWithFrontmatter, newestByType, globDir, globDirRecursive, resolveArtifactPath };
+module.exports = { parseFrontmatter, readFrontmatter, readFileWithFrontmatter, isEmptyAutoArchive, newestByType, globDir, globDirRecursive, resolveArtifactPath };

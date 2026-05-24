@@ -187,15 +187,19 @@ This means even a raw `docker compose down` (without `hermit-docker down`) will 
 
 ## Auto-Close
 
-Heartbeat archives the session when SHELL.md has been idle for more than 12 hours:
+Heartbeat archives the current session via two triggers:
 
-1. `heartbeat-precheck.js` checks SHELL.md mtime on each tick
-2. If idle >12h, returns the `AUTO_CLOSE` verdict
-3. Heartbeat appends `[HH:MM] Heartbeat: auto-closed after 12h quiet.` to SHELL.md Monitoring (so the trace lands in the archived report, not the next session)
-4. Invokes `/session-close --auto` — bypasses the operator-summary prompt and skips reflect; the heartbeat tick continues
-5. The report is archived with frontmatter `closed_via: auto`
+- **12h inactivity** — `heartbeat-precheck.js` checks `last-operator-action.json` on each tick. If the operator has not acted for >12h, it returns the `AUTO_CLOSE` verdict.
+- **Daily midnight with lull** — the `daily-auto-close` routine fires at `0 0 * * *` (local). If the operator is currently active (last action ≤10 min), the routine writes `state/pending-close.json`. The next heartbeat tick where the operator has been idle >10 min drains the flag and emits `AUTO_CLOSE`. If the operator was already idle when the routine fired, it closes directly without queueing.
 
-`weekly-review` includes auto-archived sessions in cost/session totals but excludes them from the autonomy-rate denominator (with an inline "(N auto-archived excluded)" note). Reflect skips them when scanning archive evidence, preventing mtime-triggered false compute-phase runs. No configuration is needed — the trigger is fixed at 12h.
+On either trigger:
+
+1. Heartbeat appends `[HH:MM] Heartbeat: auto-closed.` to SHELL.md Monitoring (so the trace lands in the archived report, not the next session).
+2. Invokes `/session-close --auto` — bypasses the operator-summary prompt and skips reflect; the heartbeat tick continues.
+3. The report is archived with frontmatter `closed_via: auto`.
+4. `state/pending-close.json` (if present) is removed after archive success.
+
+All auto-archived sessions count as evidence in `reflect`, `weekly-review`, `hermit-brain`, and `hermit-evolution` — the prior `closed_via: auto` skip filter was removed so daily-midnight archives (with real operator content) reach those surfaces. The 12h-inactivity trigger and the 10-min lull threshold are not configurable in v1.
 
 ## Crash Recovery
 
