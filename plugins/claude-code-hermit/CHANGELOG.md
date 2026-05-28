@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **heartbeat: start subcommand reads state file before writing** — fixes "File has not been read yet" failure on always-on restart when `state/heartbeat-monitor.runtime.json` exists from a prior session.
+
 ## [1.1.5] - 2026-05-25
 
 ### Added
