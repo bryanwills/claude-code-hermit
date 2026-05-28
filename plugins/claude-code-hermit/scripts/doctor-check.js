@@ -438,6 +438,75 @@ function checkPermissions() {
   }
 }
 
+const MS_PER_DAY = 86400000;
+
+function daysSince(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  return (Date.now() - t) / MS_PER_DAY;
+}
+
+function checkArchival() {
+  try {
+    const runtimePath = path.join(stateDir, 'runtime.json');
+    if (!fs.existsSync(runtimePath)) {
+      return { id: 'archive', status: 'ok', detail: 'no runtime state' };
+    }
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    const state = rt.session_state;
+    const sid = rt.session_id;
+    const age = daysSince(rt.updated_at);
+    const ageStr = age == null ? 'unknown' : `${age.toFixed(1)}d`;
+
+    if ((state === 'in_progress' || state === 'waiting') && age > 2) {
+      return {
+        id: 'archive',
+        status: 'warn',
+        detail: `stale active session: state=${state}, last update ${ageStr} ago (daily-auto-close may have stopped archiving)`,
+      };
+    }
+    if (state === 'idle' && sid && age > 2) {
+      return {
+        id: 'archive',
+        status: 'warn',
+        detail: `orphaned session: id=${sid}, idle but never archived (${ageStr} ago)`,
+      };
+    }
+    return { id: 'archive', status: 'ok', detail: `session_state=${state || 'unset'}, last update ${ageStr} ago` };
+  } catch (e) {
+    return { id: 'archive', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
+function checkReflectLoop() {
+  try {
+    const reflectPath = path.join(stateDir, 'reflection-state.json');
+    if (!fs.existsSync(reflectPath)) {
+      return { id: 'reflect', status: 'ok', detail: 'reflection-state.json absent (no reflect runs yet)' };
+    }
+    const rs = JSON.parse(fs.readFileSync(reflectPath, 'utf8'));
+    const c = rs.counters || {};
+    const total = Number(c.total_runs) || 0;
+    const empty = Number(c.empty_runs) || 0;
+    const props = Number(c.proposals_created) || 0;
+    if (total < 10) {
+      return { id: 'reflect', status: 'ok', detail: `${total} reflect run(s) (insufficient sample for empty-rate analysis)` };
+    }
+    const ratio = empty / total;
+    const pct = Math.round(ratio * 100);
+    if (ratio > 0.80 && props === 0) {
+      return {
+        id: 'reflect',
+        status: 'warn',
+        detail: `reflect loop unproductive: ${empty}/${total} empty (${pct}%), 0 proposals created`,
+      };
+    }
+    return { id: 'reflect', status: 'ok', detail: `${empty}/${total} empty (${pct}%), ${props} proposal(s) created` };
+  } catch (e) {
+    return { id: 'reflect', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
 // ----------------- Orchestration -----------------
 
 function runAllChecks() {
@@ -450,6 +519,8 @@ function runAllChecks() {
     checkDependencies(),
     checkPermissions(),
     checkDockerSecurity(),
+    checkArchival(),
+    checkReflectLoop(),
   ];
 }
 
@@ -481,7 +552,7 @@ if (require.main === module) {
   module.exports = {
     checkConfig, checkHooks, checkStateFiles,
     checkCost, checkProposals, checkDependencies, checkPermissions,
-    checkDockerSecurity,
+    checkDockerSecurity, checkArchival, checkReflectLoop,
     satisfiesRange, cidrOverlap,
     runAllChecks, writeReport,
   };

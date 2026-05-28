@@ -491,7 +491,7 @@ run_test "channel-reply-reminder (adversarial system-reminder in chat_id)" bash 
 cleanup
 
 # -------------------------------------------------------
-# 44. doctor-check — minimal install returns 7 checks, exits 0
+# 44. doctor-check — minimal install returns 10 checks, exits 0
 # -------------------------------------------------------
 workdir="$(setup_workdir)"
 cd "$workdir"
@@ -499,8 +499,8 @@ mkdir -p "$workdir/.claude-code-hermit/proposals"
 cat > "$workdir/.claude-code-hermit/config.json" <<'EOF'
 {"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"active_hours":{"start":"08:00","end":"23:00"}},"routines":[],"idle_budget":"$0.50"}
 EOF
-run_test "doctor-check (minimal install, 8 checks)" bash -c \
-  "node '$REPO_ROOT/scripts/doctor-check.js' '$workdir/.claude-code-hermit' >/dev/null && python3 -c \"import json; r=json.load(open('$workdir/.claude-code-hermit/state/doctor-report.json')); ids=[c['id'] for c in r['checks']]; assert ids==['config','hooks','state','cost','proposals','dependencies','permissions','docker-security'], ids\""
+run_test "doctor-check (minimal install, 10 checks)" bash -c \
+  "node '$REPO_ROOT/scripts/doctor-check.js' '$workdir/.claude-code-hermit' >/dev/null && python3 -c \"import json; r=json.load(open('$workdir/.claude-code-hermit/state/doctor-report.json')); ids=[c['id'] for c in r['checks']]; assert ids==['config','hooks','state','cost','proposals','dependencies','permissions','docker-security','archive','reflect'], ids\""
 cleanup
 
 # -------------------------------------------------------
@@ -765,6 +765,39 @@ chmod +x "$fake_bin/docker"
 run_test "docker-security check (own hermit-net excluded → ok)" bash -c \
   "PATH='$fake_bin:$PATH' node '$REPO_ROOT/scripts/doctor-check.js' '$workdir/.claude-code-hermit' >/dev/null && python3 -c \"import json; r=json.load(open('$workdir/.claude-code-hermit/state/doctor-report.json')); d=[c for c in r['checks'] if c['id']=='docker-security'][0]; assert d['status']=='ok', d\""
 rm -rf "$fake_bin"
+cleanup
+
+# -------------------------------------------------------
+# 59. checkArchival — stale in_progress runtime.json → warn
+# -------------------------------------------------------
+workdir="$(setup_workdir)"
+cd "$workdir"
+mkdir -p "$workdir/.claude-code-hermit/proposals"
+cat > "$workdir/.claude-code-hermit/config.json" <<'EOF'
+{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}
+EOF
+stale_ts=$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+cat > "$workdir/.claude-code-hermit/state/runtime.json" <<EOF
+{"version":1,"session_state":"in_progress","session_id":"S-042","updated_at":"$stale_ts"}
+EOF
+run_test "checkArchival (stale in_progress → warn)" bash -c \
+  "node '$REPO_ROOT/scripts/doctor-check.js' '$workdir/.claude-code-hermit' >/dev/null && python3 -c \"import json; r=json.load(open('$workdir/.claude-code-hermit/state/doctor-report.json')); a=[c for c in r['checks'] if c['id']=='archive'][0]; assert a['status']=='warn' and 'stale active session' in a['detail'], a\""
+cleanup
+
+# -------------------------------------------------------
+# 60. checkReflectLoop — high empty-rate over ≥10 runs → warn
+# -------------------------------------------------------
+workdir="$(setup_workdir)"
+cd "$workdir"
+mkdir -p "$workdir/.claude-code-hermit/proposals"
+cat > "$workdir/.claude-code-hermit/config.json" <<'EOF'
+{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}
+EOF
+cat > "$workdir/.claude-code-hermit/state/reflection-state.json" <<'EOF'
+{"counters":{"total_runs":20,"empty_runs":18,"proposals_created":0}}
+EOF
+run_test "checkReflectLoop (unproductive ≥10 runs → warn)" bash -c \
+  "node '$REPO_ROOT/scripts/doctor-check.js' '$workdir/.claude-code-hermit' >/dev/null && python3 -c \"import json; r=json.load(open('$workdir/.claude-code-hermit/state/doctor-report.json')); rc=[c for c in r['checks'] if c['id']=='reflect'][0]; assert rc['status']=='warn' and 'unproductive' in rc['detail'], rc\""
 cleanup
 
 # -------------------------------------------------------
