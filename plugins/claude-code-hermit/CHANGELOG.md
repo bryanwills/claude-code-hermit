@@ -1,24 +1,52 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.6] - 2026-05-28
 
 ### Added
 
-- **hermit-doctor: archive + reflect checks** — two new diagnostic checks for archival stall (runtime.json stuck `in_progress`/`waiting` >2d, or `idle` with non-null `session_id` >2d) and reflect-loop empty-rate (>80% empty over ≥10 runs with 0 proposals created). Closes #148 with the targeted approach the operator's comment outlined.
+- **hermit-doctor: archive + reflect checks** — two new diagnostic checks for archival stall (runtime.json stuck `in_progress`/`waiting` >2d, or `idle` with non-null `session_id` >2d) and reflect-loop empty-rate (>80% empty over ≥10 runs with 0 proposals created). Closes #148.
 - **routines: `reflect_after: true` optional flag** — appends `/claude-code-hermit:reflect --quick` to the routine's CronCreate prompt, closing the same-day feedback gap for late-day routines whose Tier-1 `current-session` observations would otherwise wait until the next morning's scheduled reflect. The append is skipped when the routine's own skill is `reflect`. Closes #142.
 - **reflect: `--quick` mode** — bypasses the cadence precheck, binds `$PHASE = adult`, skips cost_spike / proposal scan / Resolution Check / Component Health, and scans only live SHELL.md `## Findings` / `## Blockers` for Tier-1 `current-session` candidates. Does not call `update-reflection-state.js` so the next scheduled reflect fires normally.
+- **reflection-judge: per-code suppress counters** — `reflection-state.json → counters.judge_suppress_by_code` now accumulates suppression counts by canonical code (`no-evidence`, `no-sessions`, `covered-by-memory`). The reflect skill passes the per-code map in its State Update payload; `update-reflection-state.js` merges it cumulatively. `/hermit-health` surfaces the non-zero mix (e.g. `suppress mix — no-evidence:12, covered-by-memory:3`) on the reflect routine bullet.
 
-- **reflection-judge: per-code suppress counters** — `reflection-state.json → counters.judge_suppress_by_code` now accumulates suppression counts by canonical code (`no-evidence`, `no-sessions`, `covered-by-memory`). The reflect skill passes the per-code map in its State Update payload; `update-reflection-state.js` merges it cumulatively. `/hermit-health` surfaces the non-zero mix (e.g. `suppress mix — no-evidence:12, covered-by-memory:3`) on the reflect routine bullet, making the Component Health "gate may be too strict" signal verifiable.
 ### Fixed
 
-- **proposal-triage: status-aware dedup (#159)** — open proposals (`proposed`/`deferred`/`dismissed`) still hard-block as `DUPLICATE`; `accepted`/`resolved` surface via `closest_prop` metadata and let evaluation continue, instead of silently killing follow-up proposals on shared infrastructure. Adds explicit "same problem" definition: shared integrations/APIs/data stores are not grounds for suppression on their own.
+- **proposal-triage: status-aware dedup (#159)** — open proposals (`proposed`/`deferred`/`dismissed`) still hard-block as `DUPLICATE`; `accepted`/`resolved` surface via `closest_prop` metadata and let evaluation continue, instead of silently killing follow-up proposals on shared infrastructure.
 - **heartbeat: start subcommand reads state file before writing** — fixes "File has not been read yet" failure on always-on restart when `state/heartbeat-monitor.runtime.json` exists from a prior session.
-- **heartbeat start: deterministic dedup via persisted task_id** — step 4 now reads `state/heartbeat-monitor.runtime.json` and TaskStops the recorded `task_id` before falling back to a TaskList description scan. Prevents duplicate monitors when the daily `heartbeat-restart` routine fires while a prior monitor is still alive. Also satisfies the CC Write read-before-write contract for step 6 (fixes "File has not been read yet" on always-on restart).
+- **heartbeat start: deterministic dedup via persisted task_id** — step 4 now reads `state/heartbeat-monitor.runtime.json` and TaskStops the recorded `task_id` before falling back to a TaskList description scan. Prevents duplicate monitors when the daily `heartbeat-restart` routine fires while a prior monitor is still alive.
 
 ### Changed
 
-- **hermit-evolve step 10** — after printing the upgrade summary, the skill now fires the standard Operator Notification (channel DM or push fallback) with a condensed one-line message. Always-on operators no longer miss upgrades that completed while they weren't watching the terminal. Closes #141.
-- **skills/simplify: sync to upstream reference** — Preserve-behavior principles now treat a diff's deleted (`-`) lines as the behavior baseline, so reverting an added `== True` back to a plain truthiness check is no longer mis-flagged as a behavior change; Phase 3a repairs malformed findings (unescaped quotes in `old_string`/`new_string`) from intent instead of dropping them.
+- **hermit-evolve step 10** — after printing the upgrade summary, fires the standard Operator Notification (channel DM or push fallback) with a condensed one-line message. Always-on operators no longer miss upgrades that completed while they weren't watching the terminal. Closes #141.
+- **skills/simplify: sync to upstream reference** — deleted (`-`) lines are the behavior baseline; reverting an added `== True` back to plain truthiness is no longer mis-flagged as a behavior change. Phase 3a repairs malformed findings from intent instead of dropping them.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `scripts/doctor-check.js` | Archive-stall and reflect-loop-empty-rate diagnostic checks |
+| `skills/hermit-doctor/SKILL.md` | Invokes the two new doctor checks |
+| `skills/hermit-routines/SKILL.md` | `reflect_after` flag support in CronCreate prompt assembly |
+| `skills/reflect/SKILL.md` | `--quick` mode; passes `judge_suppress_by_code` in State Update |
+| `agents/proposal-triage.md` | Status-aware dedup; `accepted`/`resolved` no longer hard-block |
+| `agents/hermit-config-validator.md` | Minor sync with triage status semantics |
+| `scripts/update-reflection-state.js` | Merges `judge_suppress_by_code` map cumulatively |
+| `scripts/heartbeat-precheck.js` | State-file read-before-write; persisted task_id dedup |
+| `skills/heartbeat/SKILL.md` | Updated start subcommand to persist task_id |
+| `skills/hermit-evolve/SKILL.md` | Step 10 operator notification |
+| `skills/hermit-health/SKILL.md` | Surfaces suppress-mix from `judge_suppress_by_code` |
+| `skills/simplify/SKILL.md` | Upstream behavior-baseline and Phase 3a repair sync |
+| `skills/daily-auto-close/SKILL.md` | Minor wording; no behavior change |
+| `tests/` | New and updated tests for all of the above |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Refresh skills and agents.** The updated files are delivered automatically on the next `/plugin update`.
+2. **Optionally enable `reflect_after` on routines.** To get same-session reflect after a routine, add `"reflect_after": true` to any routine entry in `config.json` (except the reflect routine itself). Re-run `/claude-code-hermit:hermit-routines load` after saving.
+
+No `config.json` changes required.
 
 ## [1.1.5] - 2026-05-25
 
