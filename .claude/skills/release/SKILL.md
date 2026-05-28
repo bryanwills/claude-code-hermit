@@ -170,6 +170,12 @@ Update the version string in:
 
 Write the result to `plugins/claude-code-hermit/README.md`.
 
+**Sync simplify skill from root (claude-code-hermit only):** `plugins/claude-code-hermit/skills/simplify/SKILL.md` is an exact copy of `.claude/skills/simplify/SKILL.md`. Copy it verbatim:
+
+```bash
+cp .claude/skills/simplify/SKILL.md plugins/claude-code-hermit/skills/simplify/SKILL.md
+```
+
 After editing, verify the manifest and marketplace are in sync — the plugin manifest wins silently if they differ:
 ```bash
 jq -r '.version' plugins/<slug>/.claude-plugin/plugin.json

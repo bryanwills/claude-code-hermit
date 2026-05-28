@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(gh issue:*)",
-      "Bash(node */skills/hermit-scribe/file-issue.js*)"
+      "Bash(node */skills/hermit-scribe/file-issue.js*)",
+      "Bash(node */scripts/cron-tz-shift.js *)",
+      "Bash(node */scripts/resolve-outbound-channel.js *)"
     ],
     "deny": []
   },
