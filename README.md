@@ -8,7 +8,7 @@
 
 # claude-code-hermit
 
-Claude Code plugin that turns it into a 24/7 personal AI assistant. **Self-learning**, **Local**, **Cost-aware**, **One Claude subscription, multiple hermits**.
+Claude Code plugin that turns it into a 24/7 personal AI assistant. **Self-learning**, **Local**, **Cost-aware**, **Observable**, **One Claude subscription, multiple hermits**.
 
 <p align="center">
   <img src="plugins/claude-code-hermit/assets/demo.gif" alt="claude-code-hermit demo — Discord control, autonomous briefings, remote access" width="720" />
@@ -83,9 +83,19 @@ Survivors land as a proposal you can act on:
 
 What gets proposed: improvements, routines, new capabilities (skills, agents, heartbeat checks), constraints (OPERATOR.md guidance you confirm), and bugs.
 
-On demand: `/hermit-brain` (fragile zones and learnings), `/hermit-evolution` (cost and autonomy trends), `/hermit-health` (alert state and channel availability) — each emits a compact, channel-ready snapshot.
-
 Voyager-style auto-curriculum, you're editor-in-chief. Under the hood, raw session journals distill into compiled artifacts that reload next session — the [raw-vs-compiled pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) Karpathy described for his wiki-LLM.
+
+---
+
+## Observable
+
+Three on-demand skills give you a live read on how your hermit is doing:
+
+- **`/hermit-brain`** — open loops, fragile zones, and key learnings surfaced from recent sessions
+- **`/hermit-evolution`** — cost trends and how your hermit's behavior is shifting over time
+- **`/hermit-health`** — alert state, channel availability, and heartbeat status
+
+Each emits a compact snapshot that's also channel-ready — ask from Discord or Telegram and the result comes back in DM.
 
 ---
 
