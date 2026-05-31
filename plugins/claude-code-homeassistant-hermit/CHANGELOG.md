@@ -2,6 +2,17 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **ha-presence-report: new on-demand skill** — presence history, tracker-health, arrival/departure transitions, and activity patterns for `person.*` / `device_tracker.*` entities. Gives operators a direct diagnostic path when presence-dependent automations misbehave.
+
+### Changed
+
+- **fetch-history `--entities`: glob expansion** — tokens containing `*` are now expanded against `entity_index` via `fnmatch`; exact IDs still pass through. Fixes the documented `--entities <glob> …` contract, which previously passed patterns verbatim to HA's REST API and returned empty data.
+- **fetch-history `--include-transitions`** — new flag; when set, each entity aggregate in the snapshot includes a `transitions` list of ordered `{ts, state}` dicts with consecutive duplicates collapsed. Default off; existing callers are unaffected.
+
 ## [0.1.6] - 2026-05-21
 
 ### Fixed
