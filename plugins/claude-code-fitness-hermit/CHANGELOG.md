@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [0.0.6] - 2026-05-31
 
 ### Added
 
@@ -17,6 +17,24 @@ All notable changes to this project will be documented in this file.
 - **capture-activity-rpe: refresh deep-dive after RPE capture** — re-runs `activity-deep-dive` for `Run` activities so the artifact includes RPE, which is unavailable at sync time.
 - **activity-deep-dive: interval vs steady-state session detection** — classifies each workout from HR alternation and lap clustering, then branches the metrics: interval sessions report work-interval HR progression and between-bout recovery, steady sessions report pace/HR efficiency and cardiac drift. Both still get zone breakdown and recovery estimate. `session_kind` is recorded in the compiled artifact frontmatter.
 - **activity-deep-dive: labeled coaching observations to SHELL.md Findings** — signal-bearing observations (cardiac drift, zone anomalies, RPE/recovery conflicts, efficiency regressions) are appended under `## Findings` as `Coaching observation [<label>] (activity <id>)`, feeding reflect's `current-session` evidence path. Dedup-guarded against repeated runs.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/activity-deep-dive/SKILL.md` | Interval/steady-state detection, cadence analysis, labeled SHELL.md observations |
+| `skills/capture-activity-rpe/SKILL.md` | Re-runs deep-dive after RPE capture for Run activities |
+| `skills/weekly-coaching-patterns/SKILL.md` | New scheduled check for cardiac-drift trend detection |
+| `state-templates/compiled/routine-strava-sync.md` | Auto-triggers activity-deep-dive for new runs |
+| `state-templates/CLAUDE-APPEND.md` | Adds weekly-coaching-patterns to skills table |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Sync the CLAUDE-APPEND block** — Step 7 re-appends the updated canonical block to the hatch target, adding `weekly-coaching-patterns` to the quick-reference skills table.
+
+No `config.json` changes required.
 
 ---
 

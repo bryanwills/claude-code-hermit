@@ -19,6 +19,7 @@ After install, run `/claude-code-fitness-hermit:hatch` in the target project. Th
 - `skills/activity-deep-dive/` — per-activity coaching analysis (`/claude-code-fitness-hermit:activity-deep-dive`)
 - `skills/capture-activity-rpe/` — auto-triggered RPE capture from channel replies (`/claude-code-fitness-hermit:capture-activity-rpe`)
 - `skills/set-rpe/` — manual RPE entry for any activity (`/claude-code-fitness-hermit:set-rpe`)
+- `skills/weekly-coaching-patterns/` — scheduled cardiac-drift trend check (`/claude-code-fitness-hermit:weekly-coaching-patterns`)
 - `agents/strava-data-cruncher.md` — Haiku bulk-aggregation subagent (`@claude-code-fitness-hermit:strava-data-cruncher`)
 - `state-templates/compiled/routine-*.md` — four routine prompt files dropped into the consumer's `.claude-code-hermit/compiled/` by `hatch`
 - `state-templates/CLAUDE-APPEND.md` — Fitness Workflow block injected into the consumer's `CLAUDE.md` by `hatch`
