@@ -82,7 +82,7 @@ function lint(hermitDir, options = {}) {
         if (!result || !result.fm) return null;
         const lineCount = result.content.split('\n').length;
         const bodyChars = result.body.length;
-        compiledBodies.set(f, result.body);
+        if (!f.startsWith('review-weekly-')) compiledBodies.set(f, result.body);
         return { file: f, fm: result.fm, lineCount, bodyChars };
       } catch { return null; }
     }).filter(Boolean);
@@ -119,7 +119,9 @@ function lint(hermitDir, options = {}) {
   for (const raw of rawFiles) {
     const filename = raw.file;
 
-    // Check if any compiled/ body references this filename
+    // Check if any compiled/ body references this filename.
+    // review-weekly-*.md are excluded from compiledBodies at build time above so they
+    // don't mask the very files they report as expired.
     let referenced = false;
     for (const [, body] of compiledBodies) {
       if (body.includes(filename)) { referenced = true; break; }
@@ -276,7 +278,8 @@ function lint(hermitDir, options = {}) {
   // --- Counts ---
   let archivedCount = 0;
   try {
-    archivedCount = globDirRecursive(archiveDir).length;
+    archivedCount = globDirRecursive(archiveDir).length
+                  + globDirRecursive(path.join(compiledDir, '.archive')).length;
   } catch {}
 
   return {
@@ -332,4 +335,4 @@ if (require.main === module) {
   console.log(`\n(${counts.raw} raw, ${counts.compiled} compiled, ${counts.archived} archived)`);
 }
 
-module.exports = { lint };
+module.exports = { lint, parseSchema };
