@@ -20,7 +20,7 @@ Field names: lowercase with underscores. Flat only — no nested objects. Use `n
 
 **Session report** (`sessions/S-NNN-REPORT.md`): `id`, `status`, `date`, `duration`, `cost_usd`, `tags`, `proposals_created`, `task`, `escalation`, `operator_turns`. Optional: `closed_via` (`operator` | `auto`; absent in legacy reports — treat as `operator`).
 
-**Proposal** (`proposals/PROP-NNN-<slug>-HHMMSS.md`): `id`, `title`, `status`, `source`, `created`, `category`
+**Proposal** (`proposals/PROP-NNN-<slug>-HHMMSS.md`): `id`, `title`, `status`, `source`, `created`, `category`, `tags`
 
 **Weekly review** (`compiled/review-weekly-YYYY-Www.md`): `type: review`, `title`, `created`, `tags`, `generated: true`, `week`, `sessions_count`, `proposals_created`, `proposals_accepted`, `proposals_resolved`, `total_cost_usd`, `total_tokens`, `avg_session_cost_usd`, `avg_session_tokens`, `self_directed_rate`
 

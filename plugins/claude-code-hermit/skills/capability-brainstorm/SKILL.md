@@ -7,7 +7,12 @@ description: On-demand hermit-voice brainstorm — synthesizes memory, available
 
 ## Kill criteria (read before running)
 
-After ≥8 invocations, grep `state/proposal-metrics.jsonl` for proposals tagged `capability-brainstorm`. If triage-survival rate < 25% or PROP-acceptance rate < 30%, cut this skill rather than tune it — the signal-to-noise ratio isn't there.
+After ≥8 invocations, compute two rates over `state/proposal-metrics.jsonl`:
+
+- **Triage-survival rate** — `grep '"evidence_source":"capability-brainstorm"' proposal-metrics.jsonl` to find all `triage-verdict` events from this skill. Rate = `CREATE` count ÷ total. Kill if < 25%.
+- **PROP-acceptance rate** — `grep '"capability-brainstorm"' proposal-metrics.jsonl` to find `created` events tagged `capability-brainstorm`. Cross-reference their `proposal_id` against `responded` events with `"action":"accept"`. Rate = accepted ÷ created. Kill if < 30%.
+
+If either rate is below threshold, cut this skill rather than tune it — the signal-to-noise ratio isn't there.
 
 ## 1. Gather inputs
 

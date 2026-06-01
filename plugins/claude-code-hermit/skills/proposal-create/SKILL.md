@@ -37,8 +37,9 @@ After receiving the verdict, append one event to `state/proposal-metrics.jsonl`:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js \
   .claude-code-hermit/state/proposal-metrics.jsonl \
-  '{"ts":"<now ISO>","type":"triage-verdict","verdict":"<CREATE|SUPPRESS|DUPLICATE>","caller":"proposal-create"}'
+  '{"ts":"<now ISO>","type":"triage-verdict","verdict":"<CREATE|SUPPRESS|DUPLICATE>","caller":"proposal-create","evidence_source":"<evidence source>"}'
 ```
+`evidence_source` is the `Evidence Source:` value the caller passed (default `archived-session`).
 
 - `CREATE` — proceed with the steps below
 - `DUPLICATE:<PROP-ID> — <reason>`: stop, report to the caller: "Proposal already exists as <PROP-ID>"
@@ -76,6 +77,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js \
        - `capability` — new agent, skill, or heartbeat item
        - `constraint` — OPERATOR.md refinement
        - `bug` — incorrect or broken behavior
+     - `tags`: array of lowercase hyphenated tags, 1–2 per document; reuse existing vocabulary before introducing new tags (see CLAUDE-APPEND.md tag discipline). Callers may supply specific tags — e.g. `capability-brainstorm` passes `[capability-brainstorm, ideation]`. Default `[]` if none supplied.
      - `title`: short proposal title (same text used in the H1 heading after the dash)
      - `resolved_date`: `null` (set later by reflect when pattern is confirmed gone)
    - Fill in the title in the H1 heading
@@ -85,9 +87,9 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js \
 
 3. Add a reference to the proposal in `.claude-code-hermit/sessions/SHELL.md` under the Findings section
 
-4. Append a `created` event to proposal metrics (include `source` and `category` from the frontmatter):
+4. Append a `created` event to proposal metrics (include `source`, `category`, and `tags` from the frontmatter):
    ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"created","proposal_id":"PROP-NNN-slug-HHMMSS","source":"manual","category":"improvement"}'
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"created","proposal_id":"PROP-NNN-slug-HHMMSS","source":"<source>","category":"<category>","tags":["<tag>"]}'
    ```
 5. Update state summary:
    ```

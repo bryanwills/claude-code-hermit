@@ -1374,5 +1374,59 @@ class TestChannelResolverContract(unittest.TestCase):
         )
 
 
+class TestKillMetricsContract(unittest.TestCase):
+    """Contract: kill-metrics origin tokens must reach proposal-metrics.jsonl.
+
+    Guards against the silent breakage where capability-brainstorm (or any future
+    brainstorm skill) declares kill criteria that grep for an origin token that no
+    writer ever emits.  The three emitter shapes and the kill-criteria grep targets
+    must stay in sync — so each assertion checks both sides of the contract.
+    """
+
+    PROPOSAL_TEMPLATE = REPO / 'state-templates' / 'PROPOSAL.md.template'
+    PROPOSAL_CREATE = REPO / 'skills' / 'proposal-create' / 'SKILL.md'
+    CAPABILITY_BRAINSTORM = REPO / 'skills' / 'capability-brainstorm' / 'SKILL.md'
+
+    @classmethod
+    def setUpClass(cls):
+        cls._proposal_template = cls.PROPOSAL_TEMPLATE.read_text()
+        cls._proposal_create = cls.PROPOSAL_CREATE.read_text()
+        cls._capability_brainstorm = cls.CAPABILITY_BRAINSTORM.read_text()
+
+    def test_proposal_template_has_tags_field(self):
+        """PROPOSAL.md.template must declare a tags field so proposal-create can write it."""
+        self.assertIn('tags:', self._proposal_template,
+                      'PROPOSAL.md.template is missing the tags field — '
+                      'brainstorm origin can never be preserved in proposal frontmatter')
+
+    def test_proposal_create_triage_verdict_has_evidence_source(self):
+        """proposal-create triage-verdict event must include evidence_source."""
+        self.assertIn('"evidence_source"', self._proposal_create,
+                      'proposal-create triage-verdict event is missing evidence_source — '
+                      'triage-survival rate cannot be segmented by brainstorm origin')
+
+    def test_proposal_create_created_event_has_tags(self):
+        """proposal-create created event must include tags."""
+        self.assertIn('"tags"', self._proposal_create,
+                      'proposal-create created event is missing tags — '
+                      'PROP-acceptance rate cannot be segmented by brainstorm origin')
+
+    def test_capability_brainstorm_kill_criteria_references_evidence_source(self):
+        """capability-brainstorm kill criteria must reference evidence_source for triage-survival."""
+        self.assertIn('evidence_source', self._capability_brainstorm,
+                      'capability-brainstorm kill criteria no longer references evidence_source — '
+                      'triage-survival grep target has drifted from the emitter')
+
+    def test_capability_brainstorm_kill_criteria_references_tags(self):
+        """capability-brainstorm kill criteria must reference tags for acceptance rate."""
+        parts = self._capability_brainstorm.split('## Kill criteria')
+        self.assertGreater(len(parts), 1,
+                           'capability-brainstorm SKILL.md is missing the Kill criteria section')
+        kill_section = parts[1].split('## ')[0]
+        self.assertIn('capability-brainstorm', kill_section,
+                      'capability-brainstorm kill criteria no longer references the tag token — '
+                      'acceptance-rate grep target has drifted from what proposal-create emits')
+
+
 if __name__ == '__main__':
     unittest.main()
