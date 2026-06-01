@@ -59,14 +59,14 @@ Evidence Source: capability-brainstorm
 Evidence: <one paragraph: friction sentence + named grounding items>
 ```
 
-Set frontmatter: `source: auto-detected`, `category: improvement`.
+Set frontmatter: `source: auto-detected`, `category: improvement`, `tags: [domain-brainstorm, ideation]`.
 
 Parse the verdict:
 - `CREATE` — note PROP-NNN.
 - `SUPPRESS — <code>` — record suppression code; don't retry.
 - `DUPLICATE:<PROP-ID>` — record existing ID; don't create.
 
-After each verdict, append a metrics event (Node stdlib, no deps). Use `skill:'ha-domain-brainstorm'` to keep this plugin's rows separable from the dev brainstorm's rows in a shared `proposal-metrics.jsonl`:
+After each verdict, append a metrics event (Node stdlib, no deps). Tag `skill:'ha-domain-brainstorm'` to keep rows attributable to this plugin if other brainstorm skills ever share `proposal-metrics.jsonl`. Inlined here because `append-metrics.js` lives in the core plugin and is unreachable via `${CLAUDE_PLUGIN_ROOT}`; `JSON.stringify` guarantees a valid line:
 
 ```bash
 node -e "const fs=require('fs'); fs.appendFileSync('.claude-code-hermit/state/proposal-metrics.jsonl', JSON.stringify({ts:new Date().toISOString(),type:'brainstorm-emit',skill:'ha-domain-brainstorm',verdict:'<CREATE|SUPPRESS|DUPLICATE>',proposal_id:'<PROP-NNN or null>'})+'\n','utf-8');"

@@ -89,8 +89,8 @@ def test_metrics_emit_type(skill_body: str):
 
 
 def test_metrics_emit_skill_value(skill_body: str):
-    # Must use the HA-specific skill name, not the dev pilot's generic name,
-    # so brainstorm-emit rows stay separable in a shared proposal-metrics.jsonl.
+    # Must use the HA-specific skill name so brainstorm-emit rows stay attributable
+    # to this plugin if other brainstorm skills ever share proposal-metrics.jsonl.
     assert "ha-domain-brainstorm" in skill_body
 
 

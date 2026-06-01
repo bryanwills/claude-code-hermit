@@ -2,6 +2,12 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **domain-brainstorm: new operator-invoked skill** — reads entity inventory, automation/script listings, and operator intent to surface at most 2 capability-gap proposals (`[automation-gap]` / `[coverage-asymmetry]` / `[unbuilt-intent]`), each gated by `proposal-triage`. Health/reliability findings act as suppression filters only, never idea sources. Never runs autonomously.
+
 ## [0.1.7] - 2026-05-31
 
 ### Added
