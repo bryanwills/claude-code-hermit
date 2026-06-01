@@ -278,7 +278,8 @@ function lint(hermitDir, options = {}) {
   // --- Counts ---
   let archivedCount = 0;
   try {
-    archivedCount = globDirRecursive(archiveDir).length;
+    archivedCount = globDirRecursive(archiveDir).length
+                  + globDirRecursive(path.join(compiledDir, '.archive')).length;
   } catch {}
 
   return {
