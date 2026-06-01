@@ -2,9 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **startup-context: schema-drift warning at session start** — surfaces a "Schema Drift" block when any `compiled/` artifact has a `type` not declared in `knowledge-schema.md ## Work Products`, closing the up-to-7-day lag before the weekly Knowledge Health check fires. Silent when schema is absent/empty (weekly review handles that) or when all types are declared. Reuses the existing `parseSchema` logic from `knowledge-lint.js`. Closes #208.
+- **archive-compiled.js** — weekly-review now rotates compiled artifacts, keeping the newest 2 per type; `foundational`-tagged artifacts exempt. Companion to `archive-raw.js`. (#201)
 ### Changed
 
 - **hermit-evolve: deterministic pre-pass (`scripts/evolve-plan.js`)** — a read-only analyzer precomputes the version gap, bounded CHANGELOG slice, new config keys, changed templates/bin, and the CLAUDE-APPEND block diff in one JSON pass; the skill acts on it instead of reading and diffing whole files in-context. Cuts a typical evolve run to ~15–25K tokens and fixes the CHANGELOG 2000-line read truncation that could silently skip the oldest `### Upgrade Instructions`. Closes #211.
+
+### Fixed
+
+- **archive-raw: cover dated `.json` snapshots and pin `-latest.*` aliases** — retention now globs `(md|json)`, so domain-hermit JSON snapshots obey `raw_retention_days` instead of accumulating forever; `-latest.*` pointer files are pinned (never archived); `.json` artifacts with no frontmatter fall back to a `YYYY-MM-DD` filename date for age resolution. Closes #209.
 
 ### Upgrade Instructions
 

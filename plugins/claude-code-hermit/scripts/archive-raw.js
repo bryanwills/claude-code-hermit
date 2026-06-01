@@ -30,8 +30,12 @@ const cutoffMs = retentionDays * 24 * 60 * 60 * 1000;
 const now = Date.now();
 
 // --- Load compiled artifact bodies for reference check ---
+// review-weekly-*.md are auto-generated weekly review reports; they list expired raw filenames
+// in their Knowledge Health section, which would falsely "pin" those files and prevent
+// archiving. Exclude them — only genuine compiled work products count as protective references.
 const compiledBodies = new Map(); // basename -> body text
 for (const fullPath of globDir(compiledDir, /^[^.].*\.md$/)) {
+  if (path.basename(fullPath).startsWith('review-weekly-')) continue;
   try {
     compiledBodies.set(path.basename(fullPath), fs.readFileSync(fullPath, 'utf8'));
   } catch {}
@@ -49,8 +53,8 @@ fs.mkdirSync(archiveDir, { recursive: true });
 
 let archived = 0;
 let retained = 0;
-let skipped = 0;
 let pinned = 0;
+const skippedFiles = []; // { file, reason } — surfaced by name so operators can fix the root cause
 
 for (const filePath of rawFullPaths) {
   const filename = path.basename(filePath);
@@ -61,17 +65,28 @@ for (const filePath of rawFullPaths) {
     continue;
   }
 
-  // Resolve artifact age: prefer frontmatter `created`, fall back to YYYY-MM-DD in filename
+  // Resolve artifact age: prefer frontmatter `created`, fall back to a YYYY-MM-DD
+  // date in the filename (dated .json snapshots carry no frontmatter).
   const fm = readFrontmatter(filePath);
-  let created = fm && fm.created ? new Date(fm.created) : null;
-  if (!created || isNaN(created.getTime())) {
-    const m = filename.match(/(\d{4}-\d{2}-\d{2})/);
-    created = m ? new Date(m[1]) : null;
-  }
+  const m = filename.match(/(\d{4}-\d{2}-\d{2})/);
+  const filenameDate = m ? m[1] : null;
 
-  if (!created || isNaN(created.getTime())) {
-    skipped++;
-    continue;
+  let created;
+  if (fm && fm.created) {
+    created = new Date(fm.created);
+    if (isNaN(created.getTime())) {
+      created = filenameDate ? new Date(filenameDate) : null;
+    }
+    if (!created || isNaN(created.getTime())) {
+      skippedFiles.push({ file: filename, reason: `unparseable created: "${fm.created}"` });
+      continue;
+    }
+  } else {
+    created = filenameDate ? new Date(filenameDate) : null;
+    if (!created || isNaN(created.getTime())) {
+      skippedFiles.push({ file: filename, reason: 'missing created: frontmatter and no date in filename' });
+      continue;
+    }
   }
 
   // Not yet past retention
@@ -99,12 +114,15 @@ for (const filePath of rawFullPaths) {
   try {
     fs.renameSync(filePath, dest);
     archived++;
-  } catch {
-    skipped++;
+  } catch (err) {
+    skippedFiles.push({ file: filename, reason: `move failed: ${err.message}` });
   }
 }
 
-console.log(`archive-raw: ${archived} archived, ${retained} retained, ${skipped} skipped, ${pinned} pinned (-latest).`);
+console.log(`archive-raw: ${archived} archived, ${retained} retained, ${skippedFiles.length} skipped, ${pinned} pinned (-latest).`);
 if (archived > 0) {
   console.log(`Archived to ${archiveDir}`);
+}
+for (const { file, reason } of skippedFiles) {
+  console.log(`archive-raw: skipped ${file} — ${reason}`);
 }
