@@ -30,9 +30,9 @@ const cutoffMs = retentionDays * 24 * 60 * 60 * 1000;
 const now = Date.now();
 
 // --- Load compiled artifact bodies for reference check ---
-// review-weekly-*.md are auto-generated lint reports; they list expired raw filenames
+// review-weekly-*.md are auto-generated weekly review reports; they list expired raw filenames
 // in their Knowledge Health section, which would falsely "pin" those files and prevent
-// archiving. Exclude them — only genuine work products count as protective references.
+// archiving. Exclude them — only genuine compiled work products count as protective references.
 const compiledBodies = new Map(); // basename -> body text
 for (const fullPath of globDir(compiledDir, /^[^.].*\.md$/)) {
   if (path.basename(fullPath).startsWith('review-weekly-')) continue;
