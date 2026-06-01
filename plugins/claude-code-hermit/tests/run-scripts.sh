@@ -157,6 +157,32 @@ run_test "knowledge-lint (schema: declared type is clean)" bash -c \
 cleanup
 
 # -------------------------------------------------------
+# archive-raw.js
+# -------------------------------------------------------
+
+# review-weekly must not pin expired raw files, but a real compiled work product must
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/raw" "$workdir/.claude-code-hermit/compiled"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+# Expired raw named ONLY by a review file -> should archive
+printf -- '---\ntitle: expired\ncreated: 2025-01-01T00:00:00+00:00\n---\ndata' \
+  > "$workdir/.claude-code-hermit/raw/expired-snap.md"
+# Expired raw named by a genuine compiled work product -> should stay retained
+printf -- '---\ntitle: cited\ncreated: 2025-01-01T00:00:00+00:00\n---\ndata' \
+  > "$workdir/.claude-code-hermit/raw/cited-snap.md"
+printf -- '---\ntype: review\ncreated: 2025-01-15T00:00:00+00:00\n---\n### Knowledge Health\n- raw/expired-snap.md [14d] — Past retention.\n' \
+  > "$workdir/.claude-code-hermit/compiled/review-weekly-2025-W03.md"
+printf -- '---\ntype: briefing\ncreated: 2025-01-15T00:00:00+00:00\n---\nDerived from cited-snap.md.\n' \
+  > "$workdir/.claude-code-hermit/compiled/work.md"
+outfile="$(mktemp)"
+node "$REPO_ROOT/scripts/archive-raw.js" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
+run_test "archive-raw (review-weekly does not pin, real ref does)" grep -q '1 archived, 1 retained' "$outfile"
+run_test "archive-raw (review-named file archived)" test -f "$workdir/.claude-code-hermit/raw/.archive/expired-snap.md"
+run_test "archive-raw (work-product-cited file retained)" test -f "$workdir/.claude-code-hermit/raw/cited-snap.md"
+rm -f "$outfile"
+cleanup
+
+# -------------------------------------------------------
 # update-reflection-state.js
 # -------------------------------------------------------
 
