@@ -2,21 +2,29 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.1.8] - 2026-06-01
 
 ### Added
 
 - **domain-brainstorm: new operator-invoked skill** — reads entity inventory, automation/script listings, and operator intent to surface at most 2 capability-gap proposals (`[automation-gap]` / `[coverage-asymmetry]` / `[unbuilt-intent]`), each gated by `proposal-triage`. Health/reliability findings act as suppression filters only, never idea sources. Never runs autonomously.
+
 ### Fixed
 
 - **hatch: knowledge-schema.md now seeded with HA artifact types** — weekly-review Knowledge Health no longer flags HA `.md` artifacts as `undeclared-type`. Covers `brief`, `context`, `presence-report` (Work Products) and `audit`, `simulation`, `apply`, `remove`, `analysis` (Raw Captures).
+- **ha-refresh-context: foundational pinning spec** — `foundational: true` frontmatter was never detected by `startup-context.js` (which checks `tags`); updated spec to `tags: [..., foundational]` with `injection_stub` for large-profile injection.
+- **README: install scope** — `--scope project` corrected to `--scope local` in install and upgrade commands.
 
 ### Files affected
 
 | File | Change |
 |------|--------|
+| `skills/domain-brainstorm/SKILL.md` | New skill: capability-gap brainstorm, proposal-triage gated |
+| `state-templates/CLAUDE-APPEND.md` | Add domain-brainstorm to quick-reference table |
 | `skills/hatch/SKILL.md` | New Step 7.6: idempotent knowledge-schema extension; final-report line |
 | `tests/test_hatch_skill.py` | Structural tests for Step 7.6 |
+| `skills/ha-refresh-context/SKILL.md` | Fix House Profile frontmatter: `tags` array + `injection_stub` |
+| `docs/knowledge-schema.md` | Update foundational-pinning guidance to match core contract |
+| `README.md` | `--scope project` → `--scope local` in install/upgrade snippets |
 
 ### Upgrade Instructions
 
@@ -41,6 +49,12 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill executes the following
    ```
 
    Use Edit to append.
+
+2. **Sync the CLAUDE-APPEND block** — re-writes the HA section with the updated skills table including `domain-brainstorm`.
+
+No `config.json` changes required.
+
+**Note:** Existing house profiles written with `foundational: true` will not be auto-pinned until re-generated via `/claude-code-homeassistant-hermit:ha-refresh-context`.
 
 ---
 
