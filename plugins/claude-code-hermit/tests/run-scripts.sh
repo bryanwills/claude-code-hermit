@@ -156,6 +156,20 @@ run_test "knowledge-lint (schema: declared type is clean)" bash -c \
   "node '$REPO_ROOT/scripts/knowledge-lint.js' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
 cleanup
 
+# 6c. Bold-format schema — entries written as `- **type**:` are parsed (no schema-empty, no undeclared-type)
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/raw" "$workdir/.claude-code-hermit/compiled"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+printf -- '## Work Products\n- **briefing**: daily summary\n\n## Raw Captures\n- **source**: fetched articles\n' \
+  > "$workdir/.claude-code-hermit/knowledge-schema.md"
+printf -- '---\ntitle: fresh\ntype: source\ncreated: 2026-04-14T00:00:00+00:00\n---\ndata' \
+  > "$workdir/.claude-code-hermit/raw/fresh-snap.md"
+printf -- '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\nBased on fresh-snap.md data' \
+  > "$workdir/.claude-code-hermit/compiled/summary.md"
+run_test "knowledge-lint (bold schema entries parsed)" bash -c \
+  "node '$REPO_ROOT/scripts/knowledge-lint.js' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
+cleanup
+
 # -------------------------------------------------------
 # update-reflection-state.js
 # -------------------------------------------------------
