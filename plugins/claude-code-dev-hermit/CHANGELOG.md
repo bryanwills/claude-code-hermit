@@ -4,7 +4,7 @@
 
 ### Added
 
-- **domain-brainstorm skill** — on-demand codebase friction brainstorm. Reads git churn, last test signal (`state/last-test.json`), manifest↔lockfile drift, and README coverage to emit at most 2 `[prefix]`-tagged improvement PROPs per invocation. Operator-invoked only; per-skill kill criteria (cut if triage-survival < 25% after ≥8 runs).
+- **domain-brainstorm skill** — on-demand codebase friction brainstorm. Reads git churn, last test signal (`state/last-test.json`), manifest↔lockfile drift, and README coverage to emit at most 2 `[prefix]`-tagged improvement PROPs per invocation. Operator-invoked only; per-skill kill criteria (cut if triage-survival < 25% or PROP-acceptance < 30% after ≥8 runs).
 
 ## [0.3.11] - 2026-05-31
 

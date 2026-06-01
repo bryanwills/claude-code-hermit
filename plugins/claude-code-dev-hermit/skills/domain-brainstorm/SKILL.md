@@ -21,7 +21,7 @@ git log --format= --name-only -50 | sort | uniq -c | sort -rn | head -20
 Note the 5 most-churned files and any subsystem clusters.
 
 **Test signal**
-Read `.claude-code-hermit/state/last-test.json` (written by `/dev-test`). Extract result, exit code, and duration. If absent or last-modified >24h ago, note "no recent test run" — do not run the suite.
+Read `.claude-code-hermit/state/last-test.json` (written by `/dev-test`). Extract `status`, `exit_code`, and `duration_ms`. If absent or last-modified >24h ago, note "no recent test run" — do not run the suite.
 
 **Manifest drift**
 `ls` for `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`. For each found, check its lockfile (`package-lock.json`/`yarn.lock`/`pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`, `go.sum`) exists alongside it. Flag any mismatch.
@@ -59,10 +59,10 @@ Parse the verdict:
 - `SUPPRESS — <code>` — record suppression code; don't retry.
 - `DUPLICATE:<PROP-ID>` — record existing ID; don't create.
 
-After each verdict, append a metrics event (Node stdlib, no deps):
+After each verdict, append a metrics event via the shared helper:
 
 ```bash
-node -e "const fs=require('fs'); fs.appendFileSync('.claude-code-hermit/state/proposal-metrics.jsonl', JSON.stringify({ts:new Date().toISOString(),type:'brainstorm-emit',skill:'domain-brainstorm',verdict:'<CREATE|SUPPRESS|DUPLICATE>',proposal_id:'<PROP-NNN or null>'})+'\n','utf-8');"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js" .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"brainstorm-emit","skill":"domain-brainstorm","verdict":"<CREATE|SUPPRESS|DUPLICATE>","proposal_id":<\"PROP-NNN\" or null>}'
 ```
 
 This event is what the kill-criteria audit reads — `proposal-create`'s own `created` event does not carry per-skill provenance.
