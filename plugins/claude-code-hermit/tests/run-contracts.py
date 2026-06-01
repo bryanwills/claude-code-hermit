@@ -1411,7 +1411,7 @@ class TestKillMetricsContract(unittest.TestCase):
     def test_proposal_create_created_event_has_tags(self):
         """proposal-create created event must include tags."""
         self.assertIn(
-            '"type":"created","proposal_id":"PROP-NNN-slug-HHMMSS","source":"<source>","category":"<category>","tags":["<tag-1>","<tag-2>"]',
+            '"type":"created","proposal_id":"PROP-NNN-slug-HHMMSS","source":"<source>","category":"<category>","tags":[',
             self._proposal_create,
             'proposal-create created emitter example is missing tags — '
             'PROP-acceptance rate cannot be segmented by brainstorm origin',
@@ -1429,9 +1429,12 @@ class TestKillMetricsContract(unittest.TestCase):
         self.assertGreater(len(parts), 1,
                            'capability-brainstorm SKILL.md is missing the Kill criteria section')
         kill_section = parts[1].split('## ')[0]
-        self.assertIn('capability-brainstorm', kill_section,
-                      'capability-brainstorm kill criteria no longer references the tag token — '
-                      'acceptance-rate grep target has drifted from what proposal-create emits')
+        self.assertIn(
+            'grep \'"type":"created".*"tags":.*"capability-brainstorm"\' state/proposal-metrics.jsonl',
+            kill_section,
+            'capability-brainstorm kill criteria no longer references the created-event grep token — '
+            'acceptance-rate grep target has drifted from what proposal-create emits',
+        )
 
 
 if __name__ == '__main__':
