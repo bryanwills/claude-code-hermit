@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **hatch: always default `push_notifications: true` on fresh hatch** — removed the channel-choice derivation that wrote `false` whenever a channel was selected. The runtime guard in `CLAUDE-APPEND.md` already enforces channel-first delivery with push as fallback, so the hatch-time override was discarding the fallback unnecessarily. Both Quick and Advanced modes now leave `push_notifications` at the template default (`true`); re-init still preserves the existing value.
+
+### Upgrade Instructions
+
+1. Read `.claude-code-hermit/config.json`.
+2. If `push_notifications` is `false`, ask the operator: "Push notifications are currently disabled. With this update push acts as a fallback when your channel is unreachable — would you like to enable it? (y / n)".
+3. If yes: set `push_notifications: true` in config.json and write the file.
+4. If no: leave config.json unchanged.
+
 ## [1.1.8] - 2026-06-01
 
 ### Added
