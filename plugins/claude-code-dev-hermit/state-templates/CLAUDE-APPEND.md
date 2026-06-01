@@ -89,7 +89,7 @@ Use these prefixes in proposal titles for consistent sorting:
 - **[tooling]** — Missing linter rules, CI checks, dev scripts
 - **[architecture]** — Structural improvements
 
-All dev proposals must pass the three-condition gate: (1) repeated pattern across sessions, (2) meaningful consequence if unaddressed, (3) operator-actionable change.
+All dev proposals must pass the three-condition gate: (1) repeated pattern across sessions, (2) meaningful consequence if unaddressed, (3) operator-actionable change. Exception: ideas surfaced by `/claude-code-dev-hermit:domain-brainstorm` are single-pass — the brainstorm establishes the candidate, so condition (1) is waived (conditions 2 and 3 still apply).
 
 Tier mapping:
 - **Tier 2** (micro-approval): `[tech-debt]`, `[tooling]`, `[dependency]` updates

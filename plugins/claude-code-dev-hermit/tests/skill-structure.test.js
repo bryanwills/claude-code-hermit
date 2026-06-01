@@ -21,6 +21,7 @@ const SKILL_DIR = path.join(__dirname, '..', 'skills');
 // gates: 0 → skill has no Gate N — section structure (e.g., read-only status skills).
 const SKILLS = [
   { name: 'dev-pr', gates: 5 },         // Gate 0..4
+  { name: 'domain-brainstorm', gates: 5 }, // Gate 0..4
 ];
 
 const { ok, summary } = makeReporter();

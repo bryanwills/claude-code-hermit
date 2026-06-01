@@ -108,4 +108,5 @@ The setup wizard offers companion plugins from `claude-plugins-official`. See [R
 - **Talk to your hermit.** "What slowed you down?" / "Suggest improvements" — feedback feeds into the learning loop.
 - **After plugin updates**, run `/claude-code-hermit:hermit-evolve` — it detects companion hermits and syncs their CLAUDE-APPEND blocks automatically.
 - **Proposals have categories.** Dev-specific prefixes (`[missing-tests]`, `[tech-debt]`, `[dependency]`, `[tooling]`, `[architecture]`) keep things organized.
+- **"What should I be fixing?"** Run `/claude-code-dev-hermit:domain-brainstorm`. It reads git churn, your last test result, manifest drift, and README coverage to surface at most 2 grounded improvement ideas as PROPs — no manual triage needed.
 - **Channel activation**: run `/claude-code-hermit:channel-setup` for messaging between operator and hermit.
