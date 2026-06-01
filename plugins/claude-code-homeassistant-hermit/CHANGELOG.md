@@ -4,6 +4,9 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 ## [Unreleased]
 
+### Added
+
+- **domain-brainstorm: new operator-invoked skill** — reads entity inventory, automation/script listings, and operator intent to surface at most 2 capability-gap proposals (`[automation-gap]` / `[coverage-asymmetry]` / `[unbuilt-intent]`), each gated by `proposal-triage`. Health/reliability findings act as suppression filters only, never idea sources. Never runs autonomously.
 ### Fixed
 
 - **hatch: knowledge-schema.md now seeded with HA artifact types** — weekly-review Knowledge Health no longer flags HA `.md` artifacts as `undeclared-type`. Covers `brief`, `context`, `presence-report` (Work Products) and `audit`, `simulation`, `apply`, `remove`, `analysis` (Raw Captures).
