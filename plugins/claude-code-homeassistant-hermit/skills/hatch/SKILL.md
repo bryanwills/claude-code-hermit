@@ -167,8 +167,7 @@ Write the chosen value to `config.json` as `ha_safety_mode`. Default to `strict`
 
 Read `.claude-code-hermit/knowledge-schema.md`.
 
-Check if `- analysis:` is present in the file. This string only appears as the last Raw Captures bullet written — so its presence means both blocks were fully written on a prior run.
-
+Check if either `- analysis:` or `- **analysis**:` is present in the file. This string only appears as the last Raw Captures bullet written — so its presence means both blocks were fully written on a prior run.
 If **absent**, append the following block under `## Work Products` (create the section header if the base schema only has a template stub):
 
 ```
