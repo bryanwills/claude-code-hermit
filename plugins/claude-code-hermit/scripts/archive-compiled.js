@@ -73,7 +73,12 @@ for (const [, group] of byType) {
       retained++;
       continue;
     }
-    const dest = path.join(archiveDir, group[i].filename);
+    let dest = path.join(archiveDir, group[i].filename);
+    if (fs.existsSync(dest)) {
+      const ext = path.extname(dest);
+      const base = path.basename(dest, ext);
+      dest = path.join(archiveDir, `${base}-${Date.now()}${ext}`);
+    }
     try {
       fs.renameSync(group[i].filePath, dest);
       archived++;
