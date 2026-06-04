@@ -165,16 +165,31 @@ Write the body to a temp file (avoids shell-quoting issues with multi-line markd
 PR_BODY_TMP=$(mktemp)
 # (Write tool wrote the body to $PR_BODY_TMP)
 
+# Derive owner/repo from origin so SSH host aliases (e.g. git@github.com-work:org/repo.git)
+# don't break gh/glab auto-detection. Falls back to bare invocation if the URL can't be parsed.
+OWNER_REPO=$(git remote get-url origin 2>/dev/null \
+  | sed -E 's#^(git@[^:]+:|ssh://[^/]+/|https?://[^/]+/)##; s#\.git$##')
+
 case "$TOOL" in
   gh)
-    $PR_CREATE --title "$TITLE" --body-file "$PR_BODY_TMP" --base "$BASE"
+    if [ -n "$OWNER_REPO" ]; then
+      $PR_CREATE --repo "$OWNER_REPO" --head "$CURRENT_BRANCH" \
+        --title "$TITLE" --body-file "$PR_BODY_TMP" --base "$BASE"
+    else
+      $PR_CREATE --title "$TITLE" --body-file "$PR_BODY_TMP" --base "$BASE"
+    fi
     ;;
   glab)
     # glab mr create uses --description (string) and --target-branch, not --body-file/--base
-    $PR_CREATE --title "$TITLE" --description "$(cat "$PR_BODY_TMP")" --target-branch "$BASE"
+    if [ -n "$OWNER_REPO" ]; then
+      $PR_CREATE -R "$OWNER_REPO" --source-branch "$CURRENT_BRANCH" \
+        --title "$TITLE" --description "$(cat "$PR_BODY_TMP")" --target-branch "$BASE"
+    else
+      $PR_CREATE --title "$TITLE" --description "$(cat "$PR_BODY_TMP")" --target-branch "$BASE"
+    fi
     ;;
   *)
-    # Custom command: Gate 3 passes gh-style flags.
+    # Custom command: Gate 3 passes gh-style flags (no --repo; the wrapper owns repo resolution).
     # Wrap your CLI in a script that accepts --title --body-file --base if it uses different flags.
     $PR_CREATE --title "$TITLE" --body-file "$PR_BODY_TMP" --base "$BASE"
     ;;
