@@ -23,18 +23,26 @@ Pull the last 14 days of Strava activities and compute weekly training load summ
    - Bike: total distance (km), session count
    - Strength: session count
    - Total active days
+   Also compute **load-adjusted run distance** (`adjusted_km`): for each run activity, derive
+   `elev_gain_per_km = elevation_gain_m / distance_km` and apply a heuristic multiplier to account
+   for the higher mechanical load of gradient (descents especially):
+   `< 10 m/km → 1.0×` · `10–25 m/km → 1.2×` · `25–40 m/km → 1.35×` · `> 40 m/km → 1.5×`.
+   Sum the adjusted distances to get the week's `adjusted_km`.
 5. Read `state/strava-weekly-baselines.json` and `state/activity-notes.json` (or `{}` if absent) in the same turn. The baselines file is used in step 6; the activity notes will be used in step 8.
-6. Compare this week's run distance to the 4-week rolling average from the baseline file:
-   - >25% above average → 🔴 "Load spike: [X]km vs [avg]km average"
-   - >25% below average → 🟡 "Load dip: [X]km vs [avg]km average"
+6. Compare this week's `adjusted_km` to the 4-week rolling average of `adjusted_km` from the
+   baseline file. If any historical week lacks `adjusted_km` (written before this feature), use
+   that week's raw `km` as its adjusted value for the rolling average.
+   - >25% above average → 🔴 "Load spike: [Y]km (adj) vs [avg]km average"
+   - >25% below average → 🟡 "Load dip: [Y]km (adj) vs [avg]km average"
    - Within range → 🟢 "Consistent load"
-7. Update `state/strava-weekly-baselines.json`: append this week's totals. Keep only the last 8 weeks.
+7. Update `state/strava-weekly-baselines.json`: append this week's totals, including `adjusted_km`
+   alongside the existing raw `km`. Keep only the last 8 weeks.
 8. From the activity list fetched in step 2, collect the IDs of this week's activities. Filter the `activity-notes.json` read in step 5 to those IDs. If 2 or more RPE entries exist, compute the average (one decimal place) and prepare the line: `💬 Avg RPE: X.X/10 (N=<count>)`. Otherwise prepare no RPE line.
 
    Send a message via the configured channel. If no channel is configured, log the summary to SHELL.md Progress Log instead and skip the notification.
    ```
    📅 Weekly review — w/e [date]
-   🏃 Run: [X]km ([N] sessions, [E]m elev) [flag]
+   🏃 Run: [X]km ([N] sessions, [E]m elev) → load-adj [Y]km [flag]
    🚴 Bike: [X]km ([N] sessions)
    💪 Strength: [N] sessions
    💬 Avg RPE: X.X/10 (N=3)           ← omit this line if fewer than 2 rated

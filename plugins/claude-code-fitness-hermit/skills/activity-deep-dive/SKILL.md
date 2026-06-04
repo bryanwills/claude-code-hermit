@@ -35,7 +35,7 @@ Produces a standardised per-activity coaching note. Detects interval vs steady-s
 3b. Read `.claude-code-hermit/state/activity-notes.json`. If the file exists and contains an entry for the resolved activity ID, hold `rpe` and `notes` in context for steps 6 and 7.
 
 4. Issue the following three calls in a single turn so they execute concurrently:
-   - `mcp__strava__get-activity-details` — name, type, date, distance, duration, avg/max HR, avg pace, elevation
+   - `mcp__strava__get-activity-details` — name, type, sport_type, date, distance, duration, moving time, avg/max HR, avg pace, total elevation gain (m)
    - `mcp__strava__get-activity-laps` — lap splits
    - `mcp__strava__get-activity-streams` with keys `heartrate,velocity_smooth,altitude,cadence` (add `watts` if sport type is Ride — use `altitude,cadence` as the baseline keys and add `watts` only when sport type is known to be Ride)
 
@@ -54,6 +54,13 @@ Produces a standardised per-activity coaching note. Detects interval vs steady-s
      `N` work bouts (the high-HR lap group identified by the clustering signal) and their avg
      duration in minutes — for steps 5 and 6.
 
+4c. **Classify terrain** — compute `elev_gain_per_km = total_elevation_gain_m / distance_km`.
+   Set `terrain`:
+   - `trail` if `sport_type == TrailRun`, OR as a fallback if `elev_gain_per_km >= 20` for a
+     running activity (≥ 100 m gain per 5 km — significant gradient that decouples pace from effort).
+   - `road` otherwise.
+   Hold `terrain` and `elev_gain_per_km` for steps 5–7.
+
 5. Compute metrics:
 
    **Zone breakdown** — from HR stream vs athlete zone boundaries. Calculate % of stream datapoints in each zone (Z1–Z5). If HR stream absent: note "HR data unavailable".
@@ -66,14 +73,28 @@ Produces a standardised per-activity coaching note. Detects interval vs steady-s
    absent or empty, or the sport type is not a running type, skip the cadence line entirely (mirror
    the "HR data unavailable" guard — do not emit a placeholder).
 
-   **Pace/HR efficiency** *(steady sessions only)* — average pace (min/km) divided by average HR.
-   Lower = more efficient. Call `mcp__strava__get-recent-activities` with `perPage: 5` now (only
-   needed for this metric): filter for activities of the same sport type, exclude the current
-   activity ID, take up to the 4 most recent. Compute the same ratio for each. Report delta vs
-   prior mean.
+   **Pace/HR efficiency** *(steady sessions only, road terrain only)* — average pace (min/km)
+   divided by average HR. Lower = more efficient. Call `mcp__strava__get-recent-activities` with
+   `perPage: 5` now (only needed for this metric): filter for activities of the same sport type,
+   exclude the current activity ID, take up to the 4 most recent. Compute the same ratio for each.
+   Report delta vs prior mean. If `terrain == trail`, skip this metric entirely and emit no
+   placeholder — gradient decouples pace from aerobic effort on technical terrain.
 
-   **Cardiac drift** *(steady sessions only)* — compare average HR in first 20% of HR stream vs last
-   20%. Flag if difference > 10 bpm at similar pace (± 15 sec/km). Report: `drift: +N bpm`.
+   **Cardiac drift** *(steady sessions only)* — on road (`terrain == road`): compare average HR in
+   first 20% of HR stream vs last 20%. Flag if difference > 10 bpm at similar pace (± 15 sec/km).
+   Report: `drift: +N bpm`. On trail (`terrain == trail`): elevation changes confound the
+   first/last HR split, so instead report a qualitative `HR/altitude` note: describe whether HR
+   broadly tracked the climb/descent profile (expected) or showed a decoupled trend worth noting.
+
+   **VAM** *(trail terrain only)* — vertical ascent meters per hour: `total_elevation_gain_m /
+   moving_time_h`. Report `VAM: N m/h`. Contextual benchmarks (heuristic): < 500 m/h is hiking
+   pace, 500–800 is easy trail, 800–1200 is solid trail running, > 1200 is race/VO2 effort.
+
+   **GAP estimate** *(trail terrain only)* — session-level grade-adjusted pace: converts the run
+   to an equivalent flat effort using total elevation gain only (not per-point grade). Heuristic:
+   `equiv_flat_km = distance_km + 0.008 × total_elevation_gain_m` (100 m of ascent ≈ 0.8 km of
+   flat effort). `GAP = total_duration / equiv_flat_km`. Report
+   `GAP ~M:SS/km (est, vs actual P:SS/km)`. Label as heuristic in output.
 
    **Work-interval HR progression** *(interval sessions only)* — per-lap avg HR across work laps
    in sequence (e.g. `I1 157 → I4 168 bpm — progressive ✓`). Include the activity `max HR`
@@ -92,12 +113,18 @@ Produces a standardised per-activity coaching note. Detects interval vs steady-s
    - 4 = hard (> 50% Z3 or > 10% Z4, or > 90 min hard)
    - 5 = race-level (> 20% Z4+, or peak HR > 95% max)
    Include recommended recovery window: 1→24h, 2→36h, 3→48h, 4→72h, 5→5–7 days.
+   For trail activities, extend the recommended window based on `elev_gain_per_km` to account for
+   the muscular load of descents and technical footwork not captured by HR zones (heuristic):
+   - `elev_gain_per_km < 15` → no extension
+   - `elev_gain_per_km 15–30` → add 1 day to the window (e.g. 48h → 72h, 72h → 4 days)
+   - `elev_gain_per_km > 30` → add 1–2 days (e.g. 72h → 4–5 days, 5–7 days stays at 5–7 days)
+   Append `(+trail vert)` to the recovery line when an extension is applied.
 
    **Coaching note** — 2–3 sentences grounded in the numbers. Highlight what was executed well and one concrete thing to monitor or adjust next time. Reference specific metrics (e.g. "cardiac drift of +14 bpm suggests pacing started too hot").
 
 6. Format output (8–10 lines):
 
-   **Steady session:**
+   **Steady session (road):**
    ```
    Activity: <name> | <date> | <distance>km in <duration>
    Session type: Steady
@@ -110,7 +137,20 @@ Produces a standardised per-activity coaching note. Detects interval vs steady-s
    Coaching: <2–3 sentences>
    ```
 
-   **Interval session:**
+   **Steady session (trail):**
+   ```
+   Activity: <name> | <date> | <distance>km in <duration> | <elevation>m gain
+   Session type: Steady · Trail
+   Zones: Z1 N% / Z2 N% / Z3 N% / Z4 N% / Z5 N%
+   Cadence: N spm avg (CV: X%) [⚠ over-striding | ⚠ high variability]   ← omit line when cadence absent or non-running; show ⚠ only on a tripped flag
+   Trail: VAM N m/h | GAP ~M:SS/km (est, actual P:SS/km)
+   HR/altitude: <qualitative note on whether HR tracked the climb/descent profile>
+   Recovery: N/5 — recommended rest: Xh[(+trail vert)]
+   Subjective: RPE N/10 — <notes>          ← include only when RPE data exists from step 3b
+   Coaching: <2–3 sentences>
+   ```
+
+   **Interval session (road):**
    ```
    Activity: <name> | <date> | <distance>km in <duration>
    Session type: Interval (N×~Xmin)
@@ -119,6 +159,20 @@ Produces a standardised per-activity coaching note. Detects interval vs steady-s
    Intervals: I1 NNNbpm → IN NNNbpm — <progressive ✓ / regressive / flat>; peaked at NNNbpm on IN
    Between-bout recovery: HR to ~NNNbpm — <adequate / incomplete>
    Recovery: N/5 — recommended rest: Xh
+   Subjective: RPE N/10 — <notes>          ← include only when RPE data exists from step 3b
+   Coaching: <2–3 sentences>
+   ```
+
+   **Interval session (trail):**
+   ```
+   Activity: <name> | <date> | <distance>km in <duration> | <elevation>m gain
+   Session type: Interval (N×~Xmin) · Trail
+   Zones: Z1 N% / Z2 N% / Z3 N% / Z4 N% / Z5 N%
+   Cadence: N spm avg (CV: X%) [⚠ over-striding | ⚠ high variability]   ← omit line when cadence absent or non-running; show ⚠ only on a tripped flag
+   Trail: VAM N m/h | GAP ~M:SS/km (est, actual P:SS/km)
+   Intervals: I1 NNNbpm → IN NNNbpm — <progressive ✓ / regressive / flat>; peaked at NNNbpm on IN
+   Between-bout recovery: HR to ~NNNbpm — <adequate / incomplete>
+   Recovery: N/5 — recommended rest: Xh[(+trail vert)]
    Subjective: RPE N/10 — <notes>          ← include only when RPE data exists from step 3b
    Coaching: <2–3 sentences>
    ```
@@ -133,7 +187,8 @@ session: <current session ID from SHELL.md>
 source: manual
 tags: [activity-analysis]
 activity_id: <id>
-sport_type: <Run|Ride|WeightTraining|…>
+sport_type: <Run|TrailRun|Ride|WeightTraining|…>
+terrain: <road|trail>
 session_kind: <interval|steady>
 rpe: <int>                               # include only when RPE data exists from step 3b
 subjective_notes: "<string>"             # include only when notes exist from step 3b
@@ -154,7 +209,7 @@ Body: the full output above.
 
    Skip the append if a line with the same `[<label>] (activity <id>)` already exists in `## Findings`; re-running the deep-dive must not duplicate observations. If the anchor comment is absent (operator edited SHELL.md), append directly under the `## Findings` heading instead.
 
-   Labels are kebab-case and reused across sessions for consistency. Prefer an existing label over inventing a synonym. Seed vocabulary: `cooldown-hr-elevated`, `vo2max-stimulus-confirmed`, `cardiac-drift-high`, `interval-pacing-inconsistent`, `recovery-insufficient`, `efficiency-regression`, `cadence-low`, `cadence-variability-high`. Add a new kebab-case label only when none fit.
+   Labels are kebab-case and reused across sessions for consistency. Prefer an existing label over inventing a synonym. Seed vocabulary: `cooldown-hr-elevated`, `vo2max-stimulus-confirmed`, `cardiac-drift-high`, `interval-pacing-inconsistent`, `recovery-insufficient`, `efficiency-regression`, `cadence-low`, `cadence-variability-high`, `trail-recovery-extended`, `vam-notable`. Add a new kebab-case label only when none fit.
 
    These lines feed reflect's `current-session` evidence path; the label convention lets reflect recognize recurrence across sessions, and recurring observations graduate to proposals through the normal `reflection-judge` / `proposal-triage` gates.
 
