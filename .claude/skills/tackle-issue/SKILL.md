@@ -113,6 +113,10 @@ Read referenced files with `Read`. Grep with `Grep`. Skim sibling tests for the 
 
 Present everything in chat. **Do not call ExitPlanMode.**
 
+> Contract note: `/issue-proposals` parses this output by exact heading (`## Recommendation:`,
+> `## Verdict:`, `Proposed approach`, `Files to touch`, `Verification plan`, `Trade-offs`).
+> If you rename any of these, update `/issue-proposals` Steps 6–7 to match.
+
 ```
 ## Verdict: <Confirmed as-is | Refined approach | Corrected scope | Nothing to do>
 

@@ -15,7 +15,10 @@ Routine skill: autonomous issue→proposal pipeline. Fetches one open GitHub iss
 vets it through `/tackle-issue --investigate-only`, and creates a proposal only if the
 verdict is SHIP or SHIP WITH CAVEAT.
 
-Invoked daily by the `issue-proposals` routine (config.json). Can also be run manually: `/issue-proposals`.
+Intended to run daily as a hermit routine. The routine is **not** auto-registered by
+this skill. Add an entry to `.claude-code-hermit/config.json` (`routines[]` with
+`skill: issue-proposals`, a `schedule`, and `enabled: true`), then `/claude-code-hermit:hermit-routines load`.
+Until then the skill only runs when invoked manually: `/issue-proposals`.
 
 ## Steps
 
@@ -93,7 +96,11 @@ This runs tackle-issue's full Falsification workflow → Verdict → Recommendat
 approach (on positive verdicts). It stops before the Branch + task handoff (H0–H6).
 
 Read the output and classify the recommendation. Look for a line beginning with
-`## Recommendation:` in the output. The token after the colon determines the path:
+`## Recommendation:` in the output. **This parse depends on tackle-issue's exact output
+headings** (`## Recommendation:`, `## Verdict:`, `Proposed approach`, `Files to touch`,
+`Verification plan`, `Trade-offs`). If those headings change in tackle-issue, update this
+step and Step 7 to match; there is no test guarding the contract. The token after the
+colon determines the path:
 - `SHIP` or `SHIP WITH CAVEAT` → proceed to Step 7
 - `DEFER`, `SKIP`, or Verdict `Nothing to do` → proceed to Step 8 (log, no proposal)
 
@@ -146,7 +153,9 @@ Append one line to SHELL.md `## Progress Log`:
 ## Never
 
 - Pick more than one issue per invocation.
-- Create a branch, commit, push, label issues, or close issues.
+- Create a branch, commit, push, comment on issues, label issues, or close issues. This
+  skill is read-only against GitHub (`gh issue list` / `gh pr list` only); it writes a
+  proposal and a SHELL.md log, nothing back to the tracker.
 - Write to `.claude-code-hermit/` outside of SHELL.md Progress Log entries (the proposal is
   created by `/claude-code-hermit:proposal-create` which handles its own state).
 - Invoke tackle-issue without `--investigate-only` (would create a branch + Tasks).
