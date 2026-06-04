@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **session-close: memory-review fallback when reflect short-circuits** — captures single-session discoveries on operator closes where reflect's cadence precheck returns EMPTY. Skipped on `--auto` by construction. Closes #230.
+
 ### Fixed
 
 - **hatch: always default `push_notifications: true` on fresh hatch** — removed the channel-choice derivation that wrote `false` whenever a channel was selected. The runtime guard in `CLAUDE-APPEND.md` already enforces channel-first delivery with push as fallback, so the hatch-time override was discarding the fallback unnecessarily. Both Quick and Advanced modes now leave `push_notifications` at the template default (`true`); re-init still preserves the existing value.

@@ -53,6 +53,7 @@ If the archive in step 7 fails, leave `pending-close.json` in place so the next 
 3. Confirm the "Next Start Point" is clear enough for a fresh session to resume without questions
 4. If any high-leverage improvements were discovered during work, create proposals via the `claude-code-hermit:proposal-create` skill
 5. Invoke the `claude-code-hermit:reflect` skill to reflect on accumulated experience. Reflect no longer requires archived reports — it uses memory. This runs before archiving so any findings are included in the archived report. **Skip on `--auto`** — during auto-close, `session_state` is still `in_progress`, which forces reflect-precheck into compute phase before the `closed_via: auto` filter can run; there is no operator-curated session content to reflect on anyway.
+   If reflect returns `reflect: no candidates`, scan this session's `## Findings` and `## Progress Log` for non-obvious discoveries not already in memory and issue the standard "remember it" reflection for any that clear the auto-memory threshold. Apply WHAT_NOT_TO_SAVE as normal.
 6. If native Tasks exist: call `TaskList`, format as a markdown table. Then `TaskUpdate(status=deleted)` for completed tasks only — pending/in_progress tasks persist for next session.
 7. Archive the session via `claude-code-hermit:session-mgr` (full close — finalize SHELL.md and replace with fresh template in one operation). Pass the following compact structured payload in the prompt — keep it brief, no freeform prose:
    ```
