@@ -1,11 +1,29 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.13] - 2026-06-04
 
 ### Fixed
 
 - **dev-quality Gate 0: protected-branch hint** — on a clean tree on a protected branch, point to §Branch Discipline instead of the generic nested-repo hint (#267).
-- **dev-pr Gate 1: HTTPS fallback when SSH unavailable** — when `git push` fails with `cannot run ssh`, retry over HTTPS via the forge's git-credential helper and record the fallback, instead of a generic FAIL. Covers GitHub (`gh`, #234) and GitLab (`glab`, #246); other forges get a tailored message naming the manual recovery path. Makes `/dev-pr` work in Docker hermit containers without an `ssh` binary. The GitLab auto-fallback targets gitlab.com, so a self-hosted instance reached via a `gitlab.`-alias host should switch origin to that instance's HTTPS remote.
+- **dev-pr Gate 1: HTTPS fallback when SSH unavailable** — when `git push` fails with `cannot run ssh`, retry over HTTPS via the forge's git-credential helper instead of a generic FAIL. Covers GitHub (`gh`, #234) and GitLab (`glab`, #246); other forges get a tailored message naming the manual recovery path. Makes `/dev-pr` work in Docker hermit containers without an `ssh` binary.
+- **core requirement bumped to `>=1.1.9`** — aligns `required_core_version`, `requires`, and `dependencies` with the latest core release.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/dev-quality/SKILL.md` | Gate 0: protected-branch hint fix |
+| `skills/dev-pr/SKILL.md` | Gate 1: HTTPS fallback for missing ssh binary |
+| `.claude-plugin/hermit-meta.json` | `required_core_version` and `requires` bumped to `>=1.1.9` |
+| `.claude-plugin/plugin.json` | `dependencies` bumped to `^1.1.9` |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Update the plugin.** Run `claude plugin update claude-code-dev-hermit --scope local` (or the scope you used at install).
+
+No `config.json` changes required.
 
 ## [0.3.12] - 2026-06-01
 

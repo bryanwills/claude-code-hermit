@@ -1,7 +1,7 @@
 {
-  "required_core_version": ">=1.1.7",
+  "required_core_version": ">=1.1.9",
   "requires": {
-    "claude-code-hermit": ">=1.1.7"
+    "claude-code-hermit": ">=1.1.9"
   },
   "min_claude_code_version": ">=2.1.150"
 }
