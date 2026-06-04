@@ -54,7 +54,10 @@ gh pr list \
 ```
 
 Build a set of referenced issue numbers from:
-- PR bodies: regex `(?:[Cc]loses|[Ff]ixes|[Rr]esolves)?\s*#(\d+)`
+- PR bodies: regex `(?i)\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\b\s*:?\s+#(\d+)`.
+  A GitHub closing keyword is **required**, so bare `#N` mentions (e.g. "similar to #5",
+  PR cross-links) are ignored and incidental references don't drop an eligible issue
+  from candidacy.
 - Head-ref branch names: pattern `(?:feat|fix|chore)/(\d+)-`
 
 Remove matching issues from the candidate list.
