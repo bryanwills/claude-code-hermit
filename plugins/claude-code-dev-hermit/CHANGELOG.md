@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **dev-pr Gate 1: HTTPS fallback when SSH unavailable** — when `git push` fails with `cannot run ssh` on a GitHub remote, retry over HTTPS via `gh auth git-credential` and record the fallback, instead of a generic FAIL. Makes `/dev-pr` work in Docker hermit containers without an `ssh` binary (#234).
+
 ## [0.3.12] - 2026-06-01
 
 ### Added

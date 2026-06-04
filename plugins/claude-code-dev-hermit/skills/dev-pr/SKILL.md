@@ -130,8 +130,8 @@ BEHIND=$(git rev-list --count "HEAD..$REMOTE_SHA")
   container has no SSH binary but `gh` is the configured tool. Derive the HTTPS URL from
   `git remote get-url origin`: `git@github.com:OWNER/REPO(.git)?` →
   `https://github.com/OWNER/REPO.git`; for a `github.`-alias host (e.g.
-  `git@github-work:OWNER/REPO.git`), take the `OWNER/REPO` tail and prefix
-  `https://github.com/`. Retry:
+  `git@github.work:OWNER/REPO.git`, matching Gate 0's `github.` rule), take the
+  `OWNER/REPO` tail and prefix `https://github.com/`. Retry:
 
   ```bash
   git -c "credential.helper=!gh auth git-credential" \
