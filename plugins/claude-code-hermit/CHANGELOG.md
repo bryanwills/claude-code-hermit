@@ -4,6 +4,7 @@
 
 ### Added
 
+- **session-close: `shutdown_skill` config hook** — fires a configured skill on full close (operator and `--auto`), before archival, as the counterpart to `boot_skill`, for stopping always-on services. Closes #259.
 - **session-close: memory-review fallback when reflect short-circuits** — captures single-session discoveries on operator closes where reflect's cadence precheck returns EMPTY. Skipped on `--auto` by construction. Closes #230.
 
 ### Fixed
