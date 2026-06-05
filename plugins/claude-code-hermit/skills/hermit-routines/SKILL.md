@@ -41,7 +41,7 @@ Called automatically by `hermit-start.py` on always-on launches. Can also be cal
 
 Use `run_during_waiting` (rdw) from the config entry to select the template. Default `run_during_waiting` is `false` when the field is absent.
 
-**Model-override substitution.** Read the routine's optional `model` field. First, if `id === "heartbeat-restart"`, treat `model` as absent regardless of its value — its re-arm append must run in the session, so it is never dispatched to a subagent. Then: if `model` is absent/null, use the literal clause `invoke /<skill>` in the templates below (current behavior). If set to a non-null `<model>`, replace that clause with the **Agent-dispatch clause**:
+**Model-override substitution.** Read the routine's optional `model` field. First, if `id === "heartbeat-restart"`, treat `model` as absent regardless of its value — its re-arm append must run in the session, so it is never dispatched to a subagent. Then: if `model` is absent/null, use the literal `invoke /<skill>` clause in the templates below (current behavior). If set to a non-null `<model>`, replace that clause — `invoke /<skill>` in the rdw=false template, `Invoke /<skill>` (capitalized) in the rdw=true template — with the **Agent-dispatch clause**:
 
 ```
 dispatch the skill via the Agent tool: subagent_type "general-purpose", model "<model>", prompt "Invoke the skill /<skill> to completion in this project, following its instructions exactly, including any reads/writes to .claude-code-hermit/ state files. Return only a one-line status."
