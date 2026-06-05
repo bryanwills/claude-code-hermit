@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **brief: anchor proposal-count status read to frontmatter** — resolved proposals quoting `status: proposed` in their body no longer inflate the morning-brief pending count. Closes #287.
+
 ### Added
 
 - **hatch: git init on fresh dirs** — when hatching in an empty, non-git directory (e.g. a dedicated ops-hermit workspace), offers a local `git init` so the hermit's build artifacts are versioned from day one. Existing projects and re-inits are untouched. Closes #282.
