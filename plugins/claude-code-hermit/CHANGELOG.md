@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **hatch: git init on fresh dirs** — when hatching in an empty, non-git directory (e.g. a dedicated ops-hermit workspace), offers a local `git init` so the hermit's build artifacts are versioned from day one. Existing projects and re-inits are untouched. Closes #282.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/hatch/SKILL.md` | git-init eligibility probe (Step 1.5), new Step 7.5, Quick confirm Git: line, Step 10 report line |
+
 ## [1.1.9] - 2026-06-04
 
 ### Added

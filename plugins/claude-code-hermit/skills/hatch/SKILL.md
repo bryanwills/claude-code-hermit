@@ -37,9 +37,14 @@ Before the setup-mode gate or any file writes, gather context silently. Run all 
    - Stash the resulting list as `detected_hermits`. Each entry must carry: `plugin` (id left of `@`), `id` (full JSON field), `marketplace_name` (id right of `@`), `installPath` (JSON `installPath` field — Step 3 reads `state-templates/CLAUDE-APPEND.md` and `plugin.json` from this path directly).
    - Note: sibling detection is intentionally restrictive. A hermit installed at user scope does NOT auto-detect — operator can install it at project scope and re-run, or activate via `/hermit-settings`.
 
-3. **Print one summary line** so the operator sees what was detected:
+3. **Detect git-init eligibility** — run in parallel with items 1–2. Set `git_init_eligible = true` if and only if all three hold:
+   - `is_reinit == false`.
+   - `git rev-parse --is-inside-work-tree 2>/dev/null` is falsy (not already under version control).
+   - `ls -A` of the project root yields only names from this **explicit allowed set**: `.claude-code-hermit`, `.claude`, `.gitignore`, `.bash_profile`, `.bashrc`, `.zshrc`, `.zprofile`, `.profile`, `.gitconfig`, `.ripgreprc`. The dotfile entries (`.bash_profile` through `.ripgreprc`) come from the sandbox-dotfile block at the bottom of `state-templates/GITIGNORE-APPEND.txt` — keep those in sync if that block changes.
 
-   > Initializing hermit in `<project-name>`. Detected: language=<lang>, timezone=<tz>, scope=<project|local|user>, target=<committed|local>, hermit candidates=<N> (<comma-separated names or "none">).
+4. **Print one summary line** so the operator sees what was detected:
+
+   > Initializing hermit in `<project-name>`. Detected: language=<lang>, timezone=<tz>, scope=<project|local|user>, target=<committed|local>, hermit candidates=<N> (<comma-separated names or "none">), git=<fresh|existing|n/a>.
 
 ### 1.6. Setup mode gate
 
@@ -565,6 +570,17 @@ Read the template. Determine which lines are missing from the project's `.gitign
 - If `.gitignore` exists and no lines are missing: skip silently.
 - If `.gitignore` doesn't exist: show the operator the full template that will be written, and ask with `AskUserQuestion` (header: "Create .gitignore") — options: **Yes — create** (default) / **No — skip**. Create only if confirmed.
 
+### 7.5. Initialize git repo (fresh dirs only)
+
+**Skip this step entirely if `git_init_eligible` is false.** Skip silently with no operator interaction.
+
+If `git_init_eligible`:
+
+- **Advanced branch:** ask with `AskUserQuestion` (header: "Git init") — "Initialize a local git repo here? The hermit's build output will be tracked; its internal churn (sessions, proposals, state) stays gitignored." — options: **Yes** (default) / **No**. Run `git init` only on Yes.
+- **Quick branch:** announced in the Quick Turn 5 confirm bundle and run as part of the shared steps only after the operator confirms (see "Quick — silent defaults applied to shared steps" table — Step 7.5 row). Never auto-runs before confirmation.
+
+When run, `git init` creates the repo at the project root. The `.gitignore` written in Step 7 is immediately in effect.
+
 ### 8. Ensure plugin permissions in settings file
 
 The plugin's hooks and boot scripts require specific Bash permissions to run without prompting. The target settings file is determined by `hatch_target`:
@@ -859,6 +875,7 @@ Quick setup will apply:
   Push notifications: enabled
   Hermit ext:  {activated or none}
   Visibility:  {.local — plugin installed at <scope> scope | committed — plugin installed at project scope}
+  Git:         {initialize local repo (tracks build output; hermit internals gitignored) | not applicable}
   Files:       {CLAUDE.local.md | CLAUDE.md}, .gitignore, {.claude/settings.local.json | .claude/settings.json}
   OPERATOR.md: drafted from scan + your answers (written below)
 
@@ -899,6 +916,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Advanced Phase 6 equivalent | permission_mode, routines | permission_mode = `auto`; routines = morning 08:30 + evening 22:30 + (template) heartbeat 04:00 |
 | Step 6 | CLAUDE.md / CLAUDE.local.md append | apply silently to `hatch_target` file (default "keep" if marker already present) |
 | Step 7 | .gitignore append | apply silently (per-line idempotent) |
+| Step 7.5 | git init (fresh dirs only) | run `git init` if `git_init_eligible`; omit otherwise |
 | Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file |
 | Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
 
@@ -962,6 +980,7 @@ Updated:
   .gitignore — hermit entries added
   {.claude/settings.local.json | .claude/settings.json} — plugin permissions added
   .claude-code-hermit/state/hatch-options.json — target stamped
+  .git/ — initialized (tracks build output; hermit internals gitignored)   ← omit if git init was skipped or declined
 
   Flip target by re-running /hatch (Advanced) and choosing the other Visibility option.
 
