@@ -129,6 +129,8 @@ DST transitions self-correct within 24h via the daily `heartbeat-restart` reload
 
 Schedules that cannot be expressed as a single CronCreate after shifting are passed through unchanged with a warning: mixed day-wrap on restricted-DOW schedules, and hour step patterns (`*/7`) that lose their structure. Avoid these in routines when `config.timezone` differs from the machine TZ; split into separate fixed-time entries instead.
 
+**Staggering routines.** When several routines run around the same time, offset them by a minute or two (the defaults do this: `reflect` at `0 9`, `scheduled-checks` at `5 9`). Co-scheduled routines fire as separate idle turns; a small stagger keeps each fire inside the prompt-cache window so they reuse warm context.
+
 ---
 
 ## `knowledge`
