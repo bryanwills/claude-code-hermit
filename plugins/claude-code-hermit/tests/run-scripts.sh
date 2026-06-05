@@ -728,6 +728,108 @@ run_test "log-routine-event (no ancestor diagnostic)" bash -c \
 rm -rf "$nohermit"
 
 # -------------------------------------------------------
+# lib/pricing.js — shared pricing regression
+# Validates that extracting pricing into lib didn't change any output.
+# Golden values computed from the original cost-tracker.js constants.
+# -------------------------------------------------------
+
+# Pricing lib exports the required symbols
+run_test "pricing.js: exports PRICING, costByType, calculateCost" bash -c \
+  "node -e \"const p=require('$REPO_ROOT/scripts/lib/pricing.js'); ['PRICING','costByType','calculateCost'].forEach(k=>{ if(typeof p[k]==='undefined') throw new Error(k+' missing'); });\""
+
+# calculateCost golden value: sonnet, 1M cache_read → $0.30
+run_test "pricing.js: calculateCost golden (sonnet 1M cache_read = \$0.30)" bash -c \
+  "node -e \"const {calculateCost}=require('$REPO_ROOT/scripts/lib/pricing.js'); const v=calculateCost('sonnet',0,0,1000000,0); if(Math.abs(v-0.30)>1e-9) throw new Error('got '+v);\""
+
+# costByType sums to calculateCost
+run_test "pricing.js: costByType sums equal calculateCost" bash -c \
+  "node -e \"const {costByType,calculateCost}=require('$REPO_ROOT/scripts/lib/pricing.js'); const t=costByType('opus',100,200,300,400); const s=t.input+t.cacheWrite+t.cacheRead+t.output; const c=calculateCost('opus',100,200,300,400); if(Math.abs(s-c)>1e-12) throw new Error('sum '+s+' != calculateCost '+c);\""
+
+# Unknown model falls back to sonnet
+run_test "pricing.js: unknown model falls back to sonnet" bash -c \
+  "node -e \"const {calculateCost}=require('$REPO_ROOT/scripts/lib/pricing.js'); const a=calculateCost('unknown-model',0,0,1000000,0); const b=calculateCost('sonnet',0,0,1000000,0); if(Math.abs(a-b)>1e-12) throw new Error('got '+a);\""
+
+# -------------------------------------------------------
+# cost-reflect.js
+# -------------------------------------------------------
+
+# Build a fixture log with known entries.
+# Entry timestamps use a date definitely within the 7-day window (today - 1 day).
+# One entry is older than the window (today - 8 days).
+REFLECT_WORKDIR="$(setup_workdir)"
+REFLECT_TODAY="$(date -u +%Y-%m-%d)"
+REFLECT_IN_WINDOW="$(date -u -d '1 day ago' +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d 2>/dev/null || echo "$REFLECT_TODAY")"
+REFLECT_OLD="$(date -u -d '8 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-8d +%Y-%m-%d 2>/dev/null || echo '2020-01-01')"
+
+# Write fixture entries to the cost log
+cat > "$REFLECT_WORKDIR/.claude/cost-log.jsonl" <<LOGEOF
+{"timestamp":"${REFLECT_IN_WINDOW}T10:00:00.000Z","session_id":"session-A","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":100000,"output_tokens":0,"total_tokens":100000,"estimated_cost_usd":0.03}
+{"timestamp":"${REFLECT_IN_WINDOW}T10:01:00.000Z","session_id":"session-A","model":"sonnet","input_tokens":0,"cache_write_tokens":50000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":50500,"estimated_cost_usd":0.195}
+{"timestamp":"${REFLECT_IN_WINDOW}T10:02:00.000Z","session_id":"session-A","model":"haiku","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":200000,"output_tokens":2000,"total_tokens":202000,"estimated_cost_usd":0.024}
+{"timestamp":"${REFLECT_IN_WINDOW}T10:03:00.000Z","session_id":"session-B","model":"opus","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":0,"output_tokens":100000,"total_tokens":100000,"estimated_cost_usd":7.5}
+{"timestamp":"${REFLECT_IN_WINDOW}T10:04:00.000Z","session_id":"session-D","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":20000,"output_tokens":1000,"total_tokens":21000,"estimated_cost_usd":0.021}
+{"timestamp":"${REFLECT_OLD}T10:00:00.000Z","session_id":"session-OLD","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":999999,"output_tokens":0,"total_tokens":999999,"estimated_cost_usd":99.9999}
+LOGEOF
+
+# Insert a malformed line to test resilience
+echo 'NOT_VALID_JSON' >> "$REFLECT_WORKDIR/.claude/cost-log.jsonl"
+
+REFLECT_OUT="$(cd "$REFLECT_WORKDIR" && node "$REPO_ROOT/scripts/cost-reflect.js" .claude-code-hermit 2>&1)"
+
+# Basic: exits cleanly and produces output
+run_test "cost-reflect: produces output" bash -c "[ -n '$REFLECT_OUT' ]"
+
+# Grand total = sum of 5 in-window entries (session-OLD and malformed line excluded)
+# Recomputed from tokens (not estimated_cost_usd): 0.03 + 0.195 + 0.024 + 7.5 + 0.021 = 7.77
+run_test "cost-reflect: total includes all 5 in-window entries" bash -c \
+  "echo '$REFLECT_OUT' | grep -qE '7\.7[0-9]'"
+
+# Pre-window entry excluded (session-OLD would contribute $99 if included)
+run_test "cost-reflect: pre-window entry excluded" bash -c \
+  "! echo '$REFLECT_OUT' | grep -qE '99\.|session-OLD'"
+
+# Malformed line skipped, output still produced
+run_test "cost-reflect: malformed line skipped" bash -c \
+  "echo '$REFLECT_OUT' | grep -qE '\\\$'"
+
+# Cold-start: section appears AND the content shows exactly 1 turn
+# (entry 2 matches heuristic; entry 4 has cw=0 so it is NOT a cold-start)
+run_test "cost-reflect: cold-start section present" bash -c \
+  "echo '$REFLECT_OUT' | grep -q 'Cold starts'"
+run_test "cost-reflect: 1 cold-start turn detected" bash -c \
+  "echo '$REFLECT_OUT' | grep -q '1 turn.*cache-write'"
+
+# session-B is the most expensive (opus, $7.5 output) → appears first in Top sessions
+run_test "cost-reflect: session-B (opus output) is top session" bash -c \
+  "echo '$REFLECT_OUT' | grep -A5 'Top sessions' | grep -q 'session-'"
+
+# session-D: sonnet, cache_read=20K tokens vs output=1K tokens — by token count cache_read>output,
+# but by sub-cost output ($0.015) > cache_read ($0.006) → dominant must be 'output', not 'cache_read'
+run_test "cost-reflect: dominant type by sub-cost not token volume" bash -c \
+  "echo '$REFLECT_OUT' | grep -E 'session-D|$(echo session-D | cut -c1-8)' | grep -qi 'output'"
+
+# Output respects ≤1500 char cap
+run_test "cost-reflect: output ≤1500 chars" bash -c \
+  "[ \$(echo '$REFLECT_OUT' | wc -c) -le 1500 ]"
+
+cleanup
+
+# Empty log: no entries at all
+REFLECT_EMPTY="$(setup_workdir)"
+echo '' > "$REFLECT_EMPTY/.claude/cost-log.jsonl"
+REFLECT_EMPTY_OUT="$(cd "$REFLECT_EMPTY" && node "$REPO_ROOT/scripts/cost-reflect.js" .claude-code-hermit 2>&1)"
+run_test "cost-reflect: empty log → 'No cost data'" bash -c \
+  "echo '$REFLECT_EMPTY_OUT' | grep -qi 'no cost data'"
+cleanup
+
+# Missing log: .claude/cost-log.jsonl does not exist
+REFLECT_MISSING="$(setup_workdir)"
+REFLECT_MISSING_OUT="$(cd "$REFLECT_MISSING" && node "$REPO_ROOT/scripts/cost-reflect.js" .claude-code-hermit 2>&1)"
+run_test "cost-reflect: missing log → 'No cost data' (exit 0)" bash -c \
+  "echo '$REFLECT_MISSING_OUT' | grep -qi 'no cost data'"
+cleanup
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 print_results

@@ -10,13 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// Per-1M-token pricing (USD)
-const PRICING = {
-  haiku:  { input: 0.80, cacheWrite: 1.00,  cacheRead: 0.08, output: 4.0  },
-  sonnet: { input: 3.00, cacheWrite: 3.75,  cacheRead: 0.30, output: 15.0 },
-  opus:   { input: 15.0, cacheWrite: 18.75, cacheRead: 1.50, output: 75.0 },
-};
-
+const { calculateCost } = require('./lib/pricing');
 const { readTasks, taskProgress } = require('./lib/tasks');
 const { kStr, formatTokens } = require('./lib/format');
 
@@ -54,14 +48,6 @@ function detectModel(modelStr) {
   if (lower.includes('haiku')) return 'haiku';
   if (lower.includes('opus')) return 'opus';
   return 'sonnet';
-}
-
-function calculateCost(model, inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens) {
-  const pricing = PRICING[model] || PRICING.sonnet;
-  return (inputTokens      / 1_000_000) * pricing.input
-       + (cacheWriteTokens / 1_000_000) * pricing.cacheWrite
-       + (cacheReadTokens  / 1_000_000) * pricing.cacheRead
-       + (outputTokens     / 1_000_000) * pricing.output;
 }
 
 function readLastTurnUsage(transcriptPath) {
