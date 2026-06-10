@@ -4,6 +4,7 @@
 
 ### Added
 
+- **weekly-review: reflect vital-signs line** — review gains `reflect_runs/candidates/surfaced/accepted/cost_usd` frontmatter and a `### Reflect` section with a suppression digest (slug:code), computed week-scoped from session-report Progress Log lines and proposal-metrics.jsonl events; evolution block relays it. Makes a healthy-quiet reflect loop distinguishable from a dead one.
 - **session-close: close debrief in Lessons** — step 1 asks what was built ad-hoc this session (throwaway scripts, manual procedures, long waits a tool would remove) and what had to be re-derived that a compiled note should have covered; persists one quantified Lesson line per item (substantial re-derived knowledge goes to `compiled/`); arms procedure-capture recurrence upstream.
 
 ## [1.1.12] - 2026-06-10

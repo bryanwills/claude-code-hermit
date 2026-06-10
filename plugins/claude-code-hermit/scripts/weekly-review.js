@@ -194,6 +194,65 @@ const openLoops = allProposals
   .filter(o => o.sessionsSince >= 5)
   .sort((a, b) => (a.p.fm.created || '').localeCompare(b.p.fm.created || ''));
 
+// --- Reflect vital-signs ---
+// Week-scoped on purpose: reflection-state.json counters are cumulative since
+// hatch, so weekly numbers come from the week's session-report Progress Log
+// lines (runs, candidates, suppressions) and proposal-metrics.jsonl events
+// (surfaced, accepted). All reads fail open to zeros.
+const REFLECT_LINE_RE = /reflect \((?:newborn|juvenile|adult|quick[^)]*)\) — (\d+) candidates?; verdicts: accept=\d+ downgrade=\d+ suppress=\d+/;
+let reflectRuns = 0;
+let reflectCandidates = 0;
+const reflectSuppressed = new Set();
+for (const s of weekSessions) {
+  let text = '';
+  try { text = fs.readFileSync(s.file, 'utf-8'); } catch { continue; }
+  for (const line of text.split('\n')) {
+    const m = line.match(REFLECT_LINE_RE);
+    if (!m) continue;
+    reflectRuns++;
+    reflectCandidates += parseInt(m[1], 10);
+    const sup = line.match(/suppressed: \[([^\]]*)\]/);
+    if (!sup) continue;
+    for (const entry of sup[1].split(',')) {
+      const t = entry.trim();
+      if (t && !t.startsWith('+')) reflectSuppressed.add(t.replace(/:\s+/, ':'));
+    }
+  }
+}
+
+let reflectSurfaced = 0;
+let reflectAccepted = 0;
+try {
+  const lines = fs.readFileSync(path.join(hermitDir, 'state', 'proposal-metrics.jsonl'), 'utf-8').split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      const d = new Date(e.ts);
+      if (!(d >= weekStart && d < weekEnd)) continue;
+      if (e.type === 'micro-queued' || e.type === 'created') reflectSurfaced++;
+      if ((e.type === 'responded' && e.action === 'accept') ||
+          (e.type === 'micro-resolved' && e.action === 'approved')) reflectAccepted++;
+    } catch {}
+  }
+} catch {}
+
+// Approximation: only reflect runs attributed as routine cost-log sources are
+// counted; quick-mode reflect_after runs inside other sessions are not.
+let reflectCost = 0;
+try {
+  const lines = fs.readFileSync(path.resolve(process.cwd(), '.claude/cost-log.jsonl'), 'utf-8').split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      if (!(e.source || '').startsWith('routine:reflect')) continue;
+      const d = new Date(e.timestamp);
+      if (d >= weekStart && d < weekEnd) reflectCost += e.estimated_cost_usd || 0;
+    } catch {}
+  }
+} catch {}
+
 // --- Build report ---
 
 const frontmatter = [
@@ -213,6 +272,11 @@ const frontmatter = [
   `avg_session_cost_usd: ${avgCost.toFixed(2)}`,
   `avg_session_tokens: ${avgTokens}`,
   `self_directed_rate: ${autonomousRate.toFixed(2)}`,
+  `reflect_runs: ${reflectRuns}`,
+  `reflect_candidates: ${reflectCandidates}`,
+  `reflect_surfaced: ${reflectSurfaced}`,
+  `reflect_accepted: ${reflectAccepted}`,
+  `reflect_cost_usd: ${reflectCost.toFixed(2)}`,
   '---',
 ].join('\n');
 
@@ -275,6 +339,20 @@ if (openLoops.length > 0) {
     body += `- ${p.fm.id}: ${p.fm.title || 'untitled'} — proposed ${sessionsSince} sessions ago, no action taken.\n`;
   }
   body += '\n';
+}
+
+// Reflect vital-signs — makes healthy-quiet distinguishable from dead: a week
+// of runs with zero surfaced/accepted while cost accumulates is the loop
+// telling the operator to prune it.
+if (reflectRuns > 0 || reflectSuppressed.size > 0) {
+  body += `### Reflect\n`;
+  let line = `reflect: ${reflectRuns} run${reflectRuns !== 1 ? 's' : ''}, ${reflectCandidates} candidates, ${reflectSurfaced} surfaced, ${reflectAccepted} accepted, ~$${reflectCost.toFixed(2)}`;
+  if (reflectSuppressed.size > 0) {
+    const list = [...reflectSuppressed];
+    const more = list.length > 5 ? `, +${list.length - 5} more` : '';
+    line += `; suppressed: ${list.slice(0, 5).join(', ')}${more}`;
+  }
+  body += `${line}.\n\n`;
 }
 
 // --- Knowledge Health (via shared knowledge-lint.js) ---
