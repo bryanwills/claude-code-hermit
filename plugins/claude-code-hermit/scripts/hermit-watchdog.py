@@ -361,6 +361,11 @@ def main():
                     consecutive = watchdog_state.get('consecutive_stale', 0) + 1
 
                     if consecutive >= escalate_after and pane_frozen and monitor_dead:
+                        # Persist the bumped count so doctor's checkWatchdog reports it
+                        # accurately even though do_restart doesn't touch watchdog-state.
+                        watchdog_state['consecutive_stale'] = consecutive
+                        watchdog_state['last_pane_hash'] = current_pane_hash
+                        write_watchdog_state(watchdog_state)
                         do_restart(session_name, 'pane-frozen', runtime)
                     else:
                         do_nudge(session_name, watchdog_state, consecutive, current_pane_hash)

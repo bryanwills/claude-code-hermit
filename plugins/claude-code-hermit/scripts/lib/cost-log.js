@@ -3,15 +3,16 @@
 // Hermit-owned cost-log index: incremental byte-offset tracking + corrupt-line counting.
 // cc-compat.js owns the cost-log PATH only; this module owns the record shape and the index.
 //
-// Index schema (cost-index.json):
+// Index schema (state/cost-index.json):
 //   version               — schema version (bump on breaking changes)
 //   byte_offset           — position in cost-log.jsonl after last processed line
 //   total_cost_usd        — all-time cumulative cost
 //   total_tokens          — all-time cumulative tokens
-//   total_sessions        — count of unique hermit sessions ever seen
-//   sessions_seen         — deduplicated array of all session_id values (drives total_sessions)
+//   total_sessions        — running count of distinct sessions (incremented when session_id changes)
+//   last_session_id       — most recent session_id seen (drives total_sessions; bounded, O(1))
 //   by_source             — {[source]: {cost, tokens}} buckets
-//   by_date               — {[YYYY-MM-DD]: {cost, tokens, session_ids[]}} per-day aggregates
+//   by_date               — {[YYYY-MM-DD]: {cost, tokens, session_ids[]}} per-day aggregates,
+//                            pruned to the trailing BY_DATE_RETENTION_DAYS window
 //   skipped_corrupt_lines — count of JSONL lines that failed JSON.parse (Known Limitation #3)
 //   updated_at            — ISO timestamp of last index write
 //
@@ -21,10 +22,13 @@
 const fs = require('fs');
 const path = require('path');
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
+
+// writeCostSummary reads today + the trailing 7 days; keep one extra day of buffer.
+const BY_DATE_RETENTION_DAYS = 8;
 
 function costIndexPath(hermitRoot) {
-  return path.join(path.resolve(hermitRoot), 'cost-index.json');
+  return path.join(path.resolve(hermitRoot), 'state', 'cost-index.json');
 }
 
 function readCostIndex(indexPath) {
@@ -44,7 +48,7 @@ function _emptyIndex() {
     total_cost_usd: 0,
     total_tokens: 0,
     total_sessions: 0,
-    sessions_seen: [],
+    last_session_id: null,
     by_source: {},
     by_date: {},
     skipped_corrupt_lines: 0,
@@ -59,9 +63,19 @@ function _writeIndex(indexPath, index) {
   return index;
 }
 
+// Drop by_date buckets older than the retention window. Keeps the index bounded
+// regardless of how long the hermit runs; total_* counters are unaffected.
+function _pruneByDate(index) {
+  const cutoff = new Date(Date.now() - BY_DATE_RETENTION_DAYS * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  for (const date of Object.keys(index.by_date)) {
+    if (date < cutoff) delete index.by_date[date];
+  }
+}
+
 // Process one log line into the index in-place.
-// seenSet mirrors index.sessions_seen for O(1) dedup during a batch.
-function _processLine(index, line, seenSet) {
+function _processLine(index, line) {
   try {
     const entry = JSON.parse(line);
     const cost = entry.estimated_cost_usd || 0;
@@ -72,6 +86,14 @@ function _processLine(index, line, seenSet) {
 
     index.total_cost_usd += cost;
     index.total_tokens += tokens;
+
+    // Count a new session each time the session_id changes. Cost-log lines for one
+    // session are contiguous (one always-on hermit runs a single session at a time),
+    // so tracking only the last id keeps the counter bounded and O(1).
+    if (sid && sid !== index.last_session_id) {
+      index.total_sessions += 1;
+      index.last_session_id = sid;
+    }
 
     if (!index.by_source[source]) index.by_source[source] = { cost: 0, tokens: 0 };
     index.by_source[source].cost += cost;
@@ -85,11 +107,6 @@ function _processLine(index, line, seenSet) {
         index.by_date[date].session_ids.push(sid);
       }
     }
-
-    if (sid && !seenSet.has(sid)) {
-      seenSet.add(sid);
-      index.sessions_seen.push(sid);
-    }
   } catch {
     index.skipped_corrupt_lines++;
   }
@@ -98,7 +115,6 @@ function _processLine(index, line, seenSet) {
 // Full O(n) rebuild from scratch. Only called: first run, version mismatch, or log truncation.
 function rebuildCostIndex(logPath, indexPath) {
   const index = _emptyIndex();
-  const seenSet = new Set();
 
   let fileSize = 0;
   try {
@@ -111,7 +127,7 @@ function rebuildCostIndex(logPath, indexPath) {
     const content = fs.readFileSync(logPath, 'utf-8').trim();
     if (content) {
       for (const line of content.split('\n')) {
-        if (line.trim()) _processLine(index, line, seenSet);
+        if (line.trim()) _processLine(index, line);
       }
     }
   } catch {
@@ -119,7 +135,7 @@ function rebuildCostIndex(logPath, indexPath) {
   }
 
   index.byte_offset = fileSize;
-  index.total_sessions = index.sessions_seen.length;
+  _pruneByDate(index);
   index.updated_at = new Date().toISOString();
   return _writeIndex(indexPath, index);
 }
@@ -135,9 +151,7 @@ function updateCostIndex(logPath, indexPath) {
     // Log absent — ensure an empty index exists and return it
     const existing = readCostIndex(indexPath);
     if (existing) return existing;
-    const empty = _emptyIndex();
-    empty.updated_at = new Date().toISOString();
-    return _writeIndex(indexPath, empty);
+    return _writeIndex(indexPath, _emptyIndex());
   }
 
   const index = readCostIndex(indexPath);
@@ -156,21 +170,23 @@ function updateCostIndex(logPath, indexPath) {
   try {
     const buf = Buffer.alloc(newByteCount);
     const fd = fs.openSync(logPath, 'r');
-    fs.readSync(fd, buf, 0, newByteCount, index.byte_offset);
-    fs.closeSync(fd);
+    try {
+      fs.readSync(fd, buf, 0, newByteCount, index.byte_offset);
+    } finally {
+      fs.closeSync(fd);
+    }
     text = buf.toString('utf-8');
   } catch {
     // Non-fatal — skip this increment, try again next call
     return index;
   }
 
-  const seenSet = new Set(index.sessions_seen);
   for (const line of text.split('\n')) {
-    if (line.trim()) _processLine(index, line, seenSet);
+    if (line.trim()) _processLine(index, line);
   }
 
   index.byte_offset = fileSize;
-  index.total_sessions = index.sessions_seen.length;
+  _pruneByDate(index);
   index.updated_at = new Date().toISOString();
   return _writeIndex(indexPath, index);
 }

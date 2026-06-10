@@ -801,16 +801,20 @@ run_test "cc-compat.js: ccVersion absent → null (no throw)" bash -c \
 
 COST_LOG_LIB="$REPO_ROOT/scripts/lib/cost-log.js"
 COST_LOG_WORKDIR="$(setup_workdir)"
-COST_INDEX_PATH="$COST_LOG_WORKDIR/.claude-code-hermit/cost-index.json"
+COST_INDEX_PATH="$COST_LOG_WORKDIR/.claude-code-hermit/state/cost-index.json"
 COST_LOG_PATH="$COST_LOG_WORKDIR/.claude/cost-log.jsonl"
+
+# Recent dates so by_date buckets survive the retention-window prune.
+COST_D1="$(python3 -c 'import datetime; print(datetime.date.today().isoformat())')"
+COST_D2="$(python3 -c 'import datetime; print((datetime.date.today()-datetime.timedelta(days=1)).isoformat())')"
 
 # Exports present
 run_test "cost-log.js: exports required symbols" bash -c \
   "node -e \"const c=require('$COST_LOG_LIB'); ['costIndexPath','readCostIndex','updateCostIndex','rebuildCostIndex'].forEach(k=>{ if(typeof c[k]!=='function') throw new Error(k+' missing'); });\""
 
-# costIndexPath resolves correctly
-run_test "cost-log.js: costIndexPath resolves to cost-index.json" bash -c \
-  "node -e \"const {costIndexPath}=require('$COST_LOG_LIB'); const p=costIndexPath('/proj/.claude-code-hermit'); if(!p.endsWith('/.claude-code-hermit/cost-index.json')) throw new Error('got '+p);\""
+# costIndexPath resolves correctly (under state/)
+run_test "cost-log.js: costIndexPath resolves to state/cost-index.json" bash -c \
+  "node -e \"const {costIndexPath}=require('$COST_LOG_LIB'); const p=costIndexPath('/proj/.claude-code-hermit'); if(!p.endsWith('/.claude-code-hermit/state/cost-index.json')) throw new Error('got '+p);\""
 
 # readCostIndex returns null when absent
 run_test "cost-log.js: readCostIndex absent → null" bash -c \
@@ -818,9 +822,9 @@ run_test "cost-log.js: readCostIndex absent → null" bash -c \
 
 # Write known cost-log fixture, update index, check totals
 cat > "$COST_LOG_PATH" <<COSTEOF
-{"timestamp":"2026-01-01T10:00:00.000Z","session_id":"s1","source":"heartbeat","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":100000,"output_tokens":0,"total_tokens":100000,"estimated_cost_usd":0.03}
-{"timestamp":"2026-01-01T10:01:00.000Z","session_id":"s1","source":"other","model":"sonnet","input_tokens":0,"cache_write_tokens":50000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":50500,"estimated_cost_usd":0.195}
-{"timestamp":"2026-01-02T10:00:00.000Z","session_id":"s2","source":"other","model":"haiku","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":200000,"output_tokens":2000,"total_tokens":202000,"estimated_cost_usd":0.024}
+{"timestamp":"${COST_D2}T10:00:00.000Z","session_id":"s1","source":"heartbeat","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":100000,"output_tokens":0,"total_tokens":100000,"estimated_cost_usd":0.03}
+{"timestamp":"${COST_D2}T10:01:00.000Z","session_id":"s1","source":"other","model":"sonnet","input_tokens":0,"cache_write_tokens":50000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":50500,"estimated_cost_usd":0.195}
+{"timestamp":"${COST_D1}T10:00:00.000Z","session_id":"s2","source":"other","model":"haiku","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":200000,"output_tokens":2000,"total_tokens":202000,"estimated_cost_usd":0.024}
 COSTEOF
 
 run_test "cost-log.js: updateCostIndex computes correct totals" bash -c \
@@ -837,9 +841,26 @@ run_test "cost-log.js: by_date populated for both dates" bash -c \
   "node -e \"
 const {readCostIndex}=require('$COST_LOG_LIB');
 const idx=readCostIndex('$COST_INDEX_PATH');
-if(!idx.by_date['2026-01-01']) throw new Error('missing 2026-01-01');
-if(!idx.by_date['2026-01-02']) throw new Error('missing 2026-01-02');
-if(idx.by_date['2026-01-01'].session_ids.length!==1) throw new Error('session_ids day1');
+if(!idx.by_date['$COST_D2']) throw new Error('missing $COST_D2');
+if(!idx.by_date['$COST_D1']) throw new Error('missing $COST_D1');
+if(idx.by_date['$COST_D2'].session_ids.length!==1) throw new Error('session_ids day1');
+\""
+
+# Old by_date buckets are pruned to the retention window; totals are not affected
+COST_PRUNE_LOG="$COST_LOG_WORKDIR/.claude/cost-log-prune.jsonl"
+COST_PRUNE_INDEX="$COST_LOG_WORKDIR/.claude-code-hermit/state/cost-index-prune.json"
+cat > "$COST_PRUNE_LOG" <<PRUNEEOF
+{"timestamp":"2020-01-01T10:00:00.000Z","session_id":"old","source":"other","total_tokens":1000,"estimated_cost_usd":0.01}
+{"timestamp":"${COST_D1}T10:00:00.000Z","session_id":"new","source":"other","total_tokens":2000,"estimated_cost_usd":0.02}
+PRUNEEOF
+run_test "cost-log.js: old by_date buckets pruned, totals retained" bash -c \
+  "node -e \"
+const {updateCostIndex}=require('$COST_LOG_LIB');
+const idx=updateCostIndex('$COST_PRUNE_LOG','$COST_PRUNE_INDEX');
+if(idx.by_date['2020-01-01']) throw new Error('old date not pruned');
+if(!idx.by_date['$COST_D1']) throw new Error('recent date missing');
+if(Math.abs(idx.total_cost_usd-0.03)>1e-9) throw new Error('totals lost on prune: '+idx.total_cost_usd);
+if(idx.total_sessions!==2) throw new Error('sessions '+idx.total_sessions);
 \""
 
 run_test "cost-log.js: by_source buckets heartbeat vs other" bash -c \
@@ -871,7 +892,7 @@ if(before.total_cost_usd!==after.total_cost_usd) throw new Error('cost changed')
 
 # Corrupt line increments skipped_corrupt_lines
 CORRUPT_LOG_PATH="$COST_LOG_WORKDIR/.claude/cost-log-corrupt.jsonl"
-CORRUPT_INDEX_PATH="$COST_LOG_WORKDIR/.claude-code-hermit/cost-index-corrupt.json"
+CORRUPT_INDEX_PATH="$COST_LOG_WORKDIR/.claude-code-hermit/state/cost-index-corrupt.json"
 cat > "$CORRUPT_LOG_PATH" <<CORRUPTEOF
 {"timestamp":"2026-01-01T10:00:00.000Z","session_id":"x","model":"sonnet","total_tokens":1000,"estimated_cost_usd":0.01}
 NOT VALID JSON AT ALL
@@ -891,8 +912,8 @@ run_test "cost-log.js: truncated log triggers rebuild" bash -c \
   "node -e \"
 const fs=require('fs');
 const {updateCostIndex,readCostIndex}=require('$COST_LOG_LIB');
-// Manufacture a stale index with a large offset
-const stale={version:1,byte_offset:999999,total_cost_usd:99,total_tokens:99,total_sessions:0,sessions_seen:[],by_source:{},by_date:{},skipped_corrupt_lines:0,updated_at:'2020-01-01T00:00:00.000Z'};
+// Manufacture a stale index (current schema) with a large offset → truncation rebuild
+const stale={version:2,byte_offset:999999,total_cost_usd:99,total_tokens:99,total_sessions:0,last_session_id:null,by_source:{},by_date:{},skipped_corrupt_lines:0,updated_at:'2020-01-01T00:00:00.000Z'};
 fs.writeFileSync('$CORRUPT_INDEX_PATH',JSON.stringify(stale)+'\n');
 const idx=updateCostIndex('$CORRUPT_LOG_PATH','$CORRUPT_INDEX_PATH');
 if(idx.byte_offset===999999) throw new Error('offset not reset after rebuild');

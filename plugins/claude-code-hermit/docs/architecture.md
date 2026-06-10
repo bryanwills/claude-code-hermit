@@ -182,7 +182,7 @@ One writer per state file. No shared mutation bus.
 | `state/cc-stop-snapshot.json`  | stop-pipeline.js only                               | doctor-check.js (scheduler/background-task health check)      |
 | `state/.heartbeat`             | heartbeat-touch.js only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.py only                                | hermit-stop.py (cleanup)                                      |
-| `cost-index.json`              | cost-tracker.js only                                | cost-tracker.js (writeCostSummary, getCumulativeCost fallback), doctor-check.js |
+| `state/cost-index.json`        | cost-tracker.js only                                | cost-tracker.js (writeCostSummary, getCumulativeCost fallback), doctor-check.js |
 | `state/watchdog-state.json`    | hermit-watchdog.py only                             | doctor-check.js (consecutive_stale)                           |
 | `state/watchdog-events.jsonl`  | hermit-watchdog.py only (append)                    | doctor-check.js (event counts), session-start (restart reason)|
 
