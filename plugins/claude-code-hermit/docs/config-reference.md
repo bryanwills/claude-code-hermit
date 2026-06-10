@@ -99,7 +99,7 @@ Modify with `/hermit-settings heartbeat`.
 
 ## `watchdog`
 
-Out-of-session supervisor that detects dead or wedged sessions and restarts them. Default disabled — opt in by setting `enabled: true`, then run `bin/hermit-watchdog install` to register the OS timer.
+Out-of-session supervisor that detects dead or wedged sessions and restarts them. Default disabled — opt in by setting `enabled: true`, then run `bin/hermit-watchdog install` to register the OS timer. **Docker hermits:** `/docker-setup` sets `enabled: true` automatically at the end of setup; the entrypoint loop already runs the watchdog, so no `install` step is needed.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -118,6 +118,8 @@ Out-of-session supervisor that detects dead or wedged sessions and restarts them
 Every nudge, restart, and re-arm is appended to `state/watchdog-events.jsonl`. Restarts also set `runtime.json.watchdog_restart_reason`; `session-start` announces the restart to the operator channel.
 
 **Install:** `bin/hermit-watchdog install` — systemd user timer on Linux/WSL2, LaunchAgent on macOS, cron line printed as fallback.
+
+Modify with `/hermit-settings watchdog`.
 
 ---
 

@@ -205,9 +205,9 @@ Update `permission_mode` in config.json.
   Watchdog (config.json watchdog)
 
     enabled         false
-    stale_factor    2       (wedge detection: tolerated missed-cycle multiplier)
-    escalate_after  3       (consecutive stale cycles before operator alert)
-    operator_grace  15m     (silence window before escalation fires)
+    stale_factor    2
+    escalate_after  3
+    operator_grace  15m
   ```
 - Ask: "Enable watchdog? (yes / no) [current: <value>]"
 - If yes: show the configurable sub-fields before asking each one:
@@ -219,7 +219,7 @@ Update `permission_mode` in config.json.
   ```
   Then ask each field in sequence.
 - Update `watchdog` object in config.json.
-- Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall`. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
+  - Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall`. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
 
 **If argument is "routines":**
 - Show current routines from `config.routines` array:
