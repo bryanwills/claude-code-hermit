@@ -142,6 +142,19 @@ If SHELL.md status is `idle` — think broader:
   {"id":"weekly-deps","schedule":"0 9 * * 1","skill":"claude-code-hermit:session-start --task 'dependency audit'","enabled":false}
   ```
 
+- Is a channel-delivering routine being ignored? For any routine with ≥10 fires in the last 14 days, check engagement via the channel-reply log:
+  1. Read last 200 lines of `state/channel-replies.jsonl` (skip silently if the file is absent or empty — this check requires data). Parse per-line with `try { JSON.parse(line) } catch {}`; collect `{ ts }` for entries with `event == "reply"`. These are the hermit's outbound reply-tool calls, which only occur when the operator has messaged in.
+  2. **Engagement join (until-next-send window):** for each routine, sort its `fired` events by `ts`. For consecutive fires at `T` and `T_next`, a fire at `T` is *engaged* if at least one reply has `ts` in `(T + 5 min, T_next]`. For the last fire in the 14-day window, treat `T_next` as the window boundary. The 5-minute floor excludes the routine's own delivery (routines send via the reply tool; their delivery lands in this file too). Engagement ratio = engaged_fires / total_fires.
+  3. **Cost join:** read last 200 lines of `cost-log.jsonl`. Sum `cost` for entries where `source` starts with `"routine:<id>"` and `ts` is within the 14-day window. Divide by 14 → `$/day` (approximate; model-override subagent costs are not attributed — note this when relevant).
+  4. **Proposal gate:** if engagement ratio ≤ 20% — apply the Three-Condition Rule. Meaningful consequence: operator incurs `~$X/day` for output that generates no reply within the engagement window. If all three conditions hold:
+     - Prefer re-time over disable if there is an obvious better time (e.g. routine fires at 06:00 but operator is active at 09:00+). Tier 1.
+     - Prefer disable if no better time is apparent. Tier 1.
+     - Evidence section must cite: `"~$X/day, R replies in N sends over 14 days"`.
+     ```markdown
+     ## Config
+     {"id":"morning-brief","schedule":"0 9 * * *","skill":"claude-code-hermit:brief --morning","enabled":true}
+     ```
+
 ## Component Health
 
 Check whether any skill, agent, or hook is underperforming.
