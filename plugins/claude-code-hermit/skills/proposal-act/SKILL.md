@@ -70,6 +70,16 @@ When the operator accepts a proposal:
     - Notify the operator.
     - Skip step 4 — no further implementation needed.
 
+3c. **Success signal (optional).** Check whether the proposal body has a `## Success Signal` section with a non-empty predicate line (ignore comment lines starting with `<!--`).
+   - If a non-empty predicate line is found, validate it:
+     ```
+     node ${CLAUDE_PLUGIN_ROOT}/scripts/eval-success-signal.js --validate "<predicate line>"
+     ```
+   - Exit 0 → set `success_signal: <predicate line>` in the proposal's YAML frontmatter.
+   - Exit non-zero → log a one-line warning to SHELL.md Findings: `PROP-NNN success_signal ignored: <reason printed by the script>`. Leave `success_signal: null`.
+   - No `## Success Signal` section, or the section is empty / comment-only → leave `success_signal: null`.
+   - Never block accept regardless of outcome.
+
 4. Ask: **"How should this be implemented?"**
 
    - **"Start implementing now"** (default, typical answer): run the falsification gate, then handle session lifecycle, then execute in this turn.
@@ -184,7 +194,8 @@ Deferred proposals still appear in `/proposal-list` but are sorted below open pr
    ```
    Dismissed on 2026-04-06T14:30:00+01:00. Reason: [operator's reason]
    ```
-5. Respond: "PROP-NNN dismissed."
+4b. **Dismissal learning** — only when a reason was provided in step 3. Judge whether the reason states a durable preference, rule, or taste that applies to a *family* of future proposals (e.g. "don't propose process changes for things I do twice a year", "stop suggesting test-coverage proposals on docs-only changes") versus a one-off or proposal-specific response ("not now", "already did this manually", "the analysis is wrong", "duplicate of last week"). If generalizable, issue the standard "remember it" reflection framed as a `feedback`-type entry: state the preference as a rule, add a brief `Why:` and `How to apply:` so proposal-triage and reflection-judge can match it in their memory cross-check. Apply auto-memory discipline: respect `WHAT_NOT_TO_SAVE` (no file paths, no debugging recipes, no facts derivable from grep), keep it concise. The native auto-memory flow writes `feedback_<slug>.md` and updates the `MEMORY.md` index — do not write those files directly. If the reason is one-off or sub-threshold, skip — save nothing.
+5. Respond: "PROP-NNN dismissed." If step 4b saved a preference, add: "Remembered that as a standing preference (future similar proposals may be filtered)."
 
 Dismissed proposals are hidden from the default `/proposal-list` view. Use "show all" with `/proposal-list` to see them.
 
