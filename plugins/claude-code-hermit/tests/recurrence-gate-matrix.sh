@@ -83,12 +83,46 @@ if ! grep -q "DOWNGRADE" "$judge"; then
   rc=1
 fi
 
+for term in "closed_via" "auto-closed-evidence"; do
+  if ! grep -q "$term" "$judge"; then
+    echo "FAIL [agents/reflection-judge.md]: missing '$term' provenance token"
+    rc=1
+  fi
+done
+
 # ── 4. Verdict-tag coverage in judge output examples ────────────────────────
 echo "=== Recurrence gate: verdict-tag coverage ==="
 
 for tag in "current-session" "scheduled-check" "operator-request"; do
   if ! grep -q "($tag)" "$judge"; then
     echo "FAIL [agents/reflection-judge.md]: no example verdict line with source tag '($tag)'"
+    rc=1
+  fi
+done
+
+# ── 5. External-origin quarantine vocabulary ─────────────────────────────────
+echo "=== External-origin quarantine: vocabulary coverage ==="
+
+# reflect is the tagging site — must define external-content and own-work
+reflect="$REPO_DIR/skills/reflect/SKILL.md"
+if ! grep -q "external-content" "$reflect"; then
+  echo "FAIL [skills/reflect/SKILL.md]: missing 'external-content' quarantine vocabulary"
+  rc=1
+fi
+
+# All gate files must document Evidence Origin / external-content
+for file in "${GATE_FILES[@]}"; do
+  label="$(basename "$(dirname "$file")")/$(basename "$file")"
+  if ! grep -q "external-content" "$file"; then
+    echo "FAIL [$label]: missing 'external-content' quarantine vocabulary"
+    rc=1
+  fi
+  if ! grep -q "Evidence Origin" "$file"; then
+    echo "FAIL [$label]: missing 'Evidence Origin' field documentation"
+    rc=1
+  fi
+  if [[ "$file" == "$judge" ]] && ! grep -q "quarantine" "$file"; then
+    echo "FAIL [agents/reflection-judge.md]: missing 'quarantine' escalation reason in verdict examples"
     rc=1
   fi
 done
