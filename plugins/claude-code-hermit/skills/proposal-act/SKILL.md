@@ -62,6 +62,14 @@ When the operator accepts a proposal:
 
 3a. **Session tracking:** Read `state/runtime.json` for `session_id` and `session_state` (both are used below). If `session_id` is non-null, set `accepted_in_session` to that session ID in the proposal's YAML frontmatter. If no session is active (`session_id` is null), leave `accepted_in_session: null`.
 
+3b. **Routine proposals.** If the proposal metadata contains `Type: routine` and a `## Config` section with a JSON block:
+    - Parse the JSON block. Validate: must have `id`, `schedule`, `skill`, `enabled` fields.
+    - Check for duplicate `id` in existing `config.json` routines array — if found, update the existing entry instead of appending.
+    - If no duplicate found, append the routine entry to `config.json` routines array.
+    - Respond: "Routine '{id}' added to config. Run `/claude-code-hermit:hermit-routines load` to register it immediately."
+    - Notify the operator.
+    - Skip step 4 — no further implementation needed.
+
 3c. **Success signal (optional).** Check whether the proposal body has a `## Success Signal` section with a non-empty predicate line (ignore comment lines starting with `<!--`).
    - If a non-empty predicate line is found, validate it:
      ```
@@ -71,14 +79,6 @@ When the operator accepts a proposal:
    - Exit non-zero → log a one-line warning to SHELL.md Findings: `PROP-NNN success_signal ignored: <reason printed by the script>`. Leave `success_signal: null`.
    - No `## Success Signal` section, or the section is empty / comment-only → leave `success_signal: null`.
    - Never block accept regardless of outcome.
-
-3b. **Routine proposals.** If the proposal metadata contains `Type: routine` and a `## Config` section with a JSON block:
-    - Parse the JSON block. Validate: must have `id`, `schedule`, `skill`, `enabled` fields.
-    - Check for duplicate `id` in existing `config.json` routines array — if found, update the existing entry instead of appending.
-    - If no duplicate found, append the routine entry to `config.json` routines array.
-    - Respond: "Routine '{id}' added to config. Run `/claude-code-hermit:hermit-routines load` to register it immediately."
-    - Notify the operator.
-    - Skip step 4 — no further implementation needed.
 
 4. Ask: **"How should this be implemented?"**
 

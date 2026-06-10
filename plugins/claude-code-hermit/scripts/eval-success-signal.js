@@ -119,7 +119,14 @@ function runEvaluate(stateDir, acceptedDateStr, acceptedInSession, predicate) {
       const reportDate = new Date(fm.date);
       if (isNaN(reportDate.getTime())) continue;
       if (reportDate < acceptedDate) continue;
-      candidates.push({ id, date: reportDate, cost_usd: parseFloat(fm.cost_usd || 0) });
+      // cost_usd is populated only when the cost-tracker hook is active; the
+      // template default is 0.00. Treat <= 0 as unrecorded (not a real $0
+      // session) and skip it, so an install without cost tracking can't
+      // spuriously satisfy a cost-reduction predicate. The window simply takes
+      // longer to fill (INSUFFICIENT_DATA holds) until N recorded sessions exist.
+      const cost = parseFloat(fm.cost_usd || 0);
+      if (!(cost > 0)) continue;
+      candidates.push({ id, date: reportDate, cost_usd: cost });
     } catch {
       // readFrontmatter is fail-open, but downstream date/float parsing can still throw.
     }

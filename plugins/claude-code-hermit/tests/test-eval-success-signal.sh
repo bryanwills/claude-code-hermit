@@ -124,7 +124,7 @@ run_test "evaluate: observed value in MET output" \
   bash -c '
     workdir="$(mktemp -d)"
     trap "rm -rf \"$workdir\"" EXIT
-    sdir="$workdir/.claire-code-hermit"
+    sdir="$workdir/.claude-code-hermit"
     mkdir -p "$sdir/sessions"
     '"$(declare -f write_report)"'
     write_report "$sdir/sessions" S-001 "2026-05-01T10:00:00Z" 0.20
@@ -217,6 +217,41 @@ run_test "evaluate: missing sessions dir returns INSUFFICIENT_DATA (not crash)" 
     # No sessions/ directory.
     out=$(node "'"$EVAL"'" "$sdir" "2026-04-30T00:00:00Z" "null" "avg_session_cost_usd < 0.30 over 3 sessions")
     echo "$out" | grep -q "INSUFFICIENT_DATA"
+  '
+
+# ── Unrecorded cost (cost_usd <= 0) excluded ──────────────────────────────────
+
+run_test "evaluate: cost_usd=0 sessions excluded (no spurious MET)" \
+  bash -c '
+    workdir="$(mktemp -d)"
+    trap "rm -rf \"$workdir\"" EXIT
+    sdir="$workdir/.claude-code-hermit"
+    mkdir -p "$sdir/sessions"
+    '"$(declare -f write_report)"'
+    # cost_usd defaults to 0.00 when the cost-tracker hook is inactive. Three
+    # such sessions must NOT satisfy "< 0.30" — they are unrecorded, not $0.
+    write_report "$sdir/sessions" S-001 "2026-05-01T10:00:00Z" 0.00
+    write_report "$sdir/sessions" S-002 "2026-05-02T10:00:00Z" 0.00
+    write_report "$sdir/sessions" S-003 "2026-05-03T10:00:00Z" 0.00
+    out=$(node "'"$EVAL"'" "$sdir" "2026-04-30T00:00:00Z" "null" "avg_session_cost_usd < 0.30 over 3 sessions")
+    echo "$out" | grep -q "INSUFFICIENT_DATA"
+  '
+
+run_test "evaluate: unrecorded sessions skipped, recorded ones still count" \
+  bash -c '
+    workdir="$(mktemp -d)"
+    trap "rm -rf \"$workdir\"" EXIT
+    sdir="$workdir/.claude-code-hermit"
+    mkdir -p "$sdir/sessions"
+    '"$(declare -f write_report)"'
+    # Two unrecorded + three recorded → window of 3 fills from the recorded ones.
+    write_report "$sdir/sessions" S-001 "2026-05-01T10:00:00Z" 0.00
+    write_report "$sdir/sessions" S-002 "2026-05-02T10:00:00Z" 0.20
+    write_report "$sdir/sessions" S-003 "2026-05-03T10:00:00Z" 0.00
+    write_report "$sdir/sessions" S-004 "2026-05-04T10:00:00Z" 0.20
+    write_report "$sdir/sessions" S-005 "2026-05-05T10:00:00Z" 0.20
+    out=$(node "'"$EVAL"'" "$sdir" "2026-04-30T00:00:00Z" "null" "avg_session_cost_usd < 0.30 over 3 sessions")
+    echo "$out" | node -e "const d=JSON.parse(require(\"fs\").readFileSync(\"/dev/stdin\",\"utf8\")); process.exit(d.verdict===\"MET\"&&d.sessions_counted===3&&d.observed===0.2?0:1)"
   '
 
 print_results

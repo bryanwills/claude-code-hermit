@@ -37,7 +37,8 @@ success_signal: null
 <!-- Optional. Machine-checkable predicate that AUTO-RESOLVES this proposal when met.
      v1 grammar: avg_session_cost_usd <OP> <NUMBER> over <N> sessions   (OP: < <= > >=)
      Example: avg_session_cost_usd < 0.30 over 10 sessions
-     Window: first N sessions after accepted_date, excluding the implementation session.
+     Window: first N sessions after accepted_date, excluding the implementation
+     session and any session without a recorded cost (cost-tracker hook inactive).
      Leave empty → reflect's default prose pattern-absence resolution applies. -->
 
 ## Operator Decision
