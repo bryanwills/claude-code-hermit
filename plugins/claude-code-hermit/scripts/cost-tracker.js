@@ -25,12 +25,15 @@ const HEARTBEAT_FILE = path.resolve('.claude-code-hermit/state/.heartbeat');
 const COST_SUMMARY = path.resolve('.claude-code-hermit/cost-summary.md');
 const TASK_SNAPSHOT = path.resolve('.claude-code-hermit/tasks-snapshot.md');
 
+let _runtimeCache;
 function readRuntimeJson() {
+  if (_runtimeCache !== undefined) return _runtimeCache;
   try {
-    return JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8'));
+    _runtimeCache = JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8'));
   } catch {
-    return {};
+    _runtimeCache = {};
   }
+  return _runtimeCache;
 }
 
 function readRuntimeSessionId() {
@@ -434,7 +437,7 @@ async function run(data) {
     const cumulative = getCumulativeCost(roundedCost, totalTokens, hadHumanTurn, runtimeSessionId || sessionId);
     const costStr = `$${cumulative.cost.toFixed(4)}`;
 
-    // Read SHELL.md for status — do NOT write back (avoids race condition with Claude's edits)
+    // Read SHELL.md for task/blockers — do NOT write back (avoids race condition with Claude's edits)
     try {
       const shellContent = fs.readFileSync(SHELL_SESSION, 'utf-8');
       writeStatusJson(shellContent, cumulative, runtimeSessionId || sessionId);
