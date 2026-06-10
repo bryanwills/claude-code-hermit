@@ -138,13 +138,13 @@ Optional. Controls domain knowledge retention and startup injection.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `raw_retention_days` | integer | `14` | Days before raw artifacts are archived to `raw/.archive/` by the weekly review |
-| `compiled_budget_chars` | integer | `1000` | Character budget for compiled knowledge injection at session start (range: 500–4000) |
+| `compiled_budget_chars` | integer | `2500` | Character budget for compiled knowledge injection at session start (range: 500–6000) |
 | `working_set_warn` | integer | `20` | Warn in weekly review when unsuperseded compiled artifact count exceeds this |
 
 ```json
 "knowledge": {
   "raw_retention_days": 14,
-  "compiled_budget_chars": 1000,
+  "compiled_budget_chars": 2500,
   "working_set_warn": 20
 }
 ```

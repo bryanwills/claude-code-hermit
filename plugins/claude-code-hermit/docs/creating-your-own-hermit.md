@@ -238,7 +238,7 @@ All domain artifacts must live in exactly two directories — `raw/` and `compil
 Short version:
 
 - **`raw/<type>-<slug>-<date>.md`** — ephemeral inputs (API data, snapshots, logs). Archived after `knowledge.raw_retention_days`.
-- **`compiled/<type>-<slug>-<date>.md`** — durable outputs (briefings, decisions, audit results). Injected into session context at startup within `compiled_budget_chars`.
+- **`compiled/<type>-<slug>-<date>.md`** — durable outputs (briefings, decisions, audit results). Injected into session context at startup within `compiled_budget_chars` (default 2500 chars). Use `/recall` for deep retrieval of specific past content.
 
 **Never create new top-level folders inside `.claude-code-hermit/`** (no `audits/`, `reports/`, `reviews/`, `memory/`, `tmp/`). **Never add subdirectories inside `raw/` or `compiled/`** (e.g. `raw/audits/`). Use the `type` field in frontmatter — not the filesystem — to discriminate work products within each directory.
 

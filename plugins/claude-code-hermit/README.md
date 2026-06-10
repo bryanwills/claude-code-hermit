@@ -74,11 +74,12 @@ What it proposes: improvements, routines, new capabilities (skills, agents, hear
 
 ## Observable
 
-Three on-demand skills, pullable from the Claude app, your terminal, or a DM:
+Four on-demand skills, pullable from the Claude app, your terminal, or a DM:
 
 - **`/hermit-brain`** — open loops, fragile zones, and key learnings from recent sessions
 - **`/hermit-evolution`** — cost trends and how the hermit's behavior is shifting over time
 - **`/hermit-health`** — alert state, channel availability, and heartbeat status
+- **`/recall <query>`** — full-text search over session reports, compiled artifacts, and proposals ("what did I decide about X", "when did we last touch Y")
 
 ---
 

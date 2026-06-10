@@ -24,7 +24,7 @@ const HARD_CAP = 9000;
 const BUDGETS = {
   operator:      2000,
   session:       3000,
-  knowledge:     1000, // compiled/ artifacts — read from config, 1000 default
+  knowledge:     2500, // compiled/ artifacts — read from config, 2500 default
   schemaDrift:    400, // only emitted when compiled/ types are undeclared in knowledge-schema.md
   storageDrift:   500, // only emitted when misplaced files are found
   cost:           500,
@@ -192,7 +192,7 @@ function main() {
   }
 
   // -------------------------------------------------------
-  // 4. Compiled knowledge (priority 2.5, budget from config — default 1000)
+  // 4. Compiled knowledge (priority 2.5, budget from config — default 2500)
   // -------------------------------------------------------
   if (totalChars < HARD_CAP) {
     try {
@@ -203,6 +203,10 @@ function main() {
           knowledgeBudget = config.knowledge.compiled_budget_chars;
         }
       } catch {}
+
+      // Clamp to remaining headroom so a maxed compiled budget doesn't crowd lower-priority
+      // sections (cost, report, upgrade). Operator and session emit first and are already safe.
+      knowledgeBudget = Math.min(knowledgeBudget, HARD_CAP - totalChars);
 
       const compiledDir = path.resolve(AGENT_DIR, 'compiled');
       const compiledFiles = globDir(compiledDir, /^[^.].*\.md$/);

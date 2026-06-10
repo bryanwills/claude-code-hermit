@@ -44,8 +44,9 @@ compliant path table.
   line pointing to the raw artifact(s) the compiled was derived from.
 - **Session injection:** every compiled file is surfaced to the model at session start
   via `scripts/startup-context.js`. Shared budget — `knowledge.compiled_budget_chars`
-  (default 1000) applies across **all** compiled files, not per-file. `/hermit-doctor` and
-  `scripts/knowledge-lint.js` surface oversize.
+  (default 2500, range 500–6000) applies across **all** compiled files, not per-file.
+  `/hermit-doctor` and `scripts/knowledge-lint.js` surface oversize. For deep retrieval
+  of specific past content by keyword, use `/recall`.
 - **Foundational pinning:** tag a compiled artifact `foundational` to pin it to every
   session regardless of age.
 - **Example:** `compiled/audit-kitchen-2026-04-17.md`

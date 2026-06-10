@@ -93,7 +93,7 @@ For each entry in the plan's `new_config_keys`, check the interactive allowlist 
 - `env` (0.0.7): `{"AGENT_HOOK_PROFILE":"standard","COMPACT_THRESHOLD":"75","CLAUDE_AUTOCOMPACT_PCT_OVERRIDE":"65","MAX_THINKING_TOKENS":"10000"}`
 - `docker` (0.0.7): `{"packages":[],"recommended_plugins":[]}`
 - `compact` (0.0.7): `{"monitoring_threshold":30,"monitoring_keep":20,"summary_threshold":30,"summary_keep":15}`
-- `knowledge` (0.4.0): `{"raw_retention_days":14,"compiled_budget_chars":1000,"working_set_warn":20}`
+- `knowledge` (0.4.0): `{"raw_retention_days":14,"compiled_budget_chars":2500,"working_set_warn":20}`
 
 **Prompts** — use the exact same `AskUserQuestion` structures as hatch Phase 2 (see `skills/hatch/SKILL.md`):
 - `agent_name`: AskUserQuestion with options (Atlas / Hermit / Skip) + Other for custom input

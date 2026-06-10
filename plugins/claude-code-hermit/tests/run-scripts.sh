@@ -1079,6 +1079,99 @@ run_test "cost-reflect: 20-source fixture shows +N more sources line" bash -c \
 cleanup
 
 # -------------------------------------------------------
+# search.js / lib/search.js
+# -------------------------------------------------------
+
+# search: basic match — finds a compiled artifact by keyword, returns file:line snippet
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/sessions" "$workdir/.claude-code-hermit/compiled" "$workdir/.claude-code-hermit/proposals"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+printf -- '---\ntitle: Heartbeat design\ntype: review\ncreated: 2026-05-01T00:00:00+00:00\n---\nThe zero-token heartbeat is the best idea in the repo.' \
+  > "$workdir/.claude-code-hermit/compiled/review-heartbeat-2026-05-01.md"
+printf -- '---\ntitle: Weekly summary\ntype: briefing\ncreated: 2026-05-10T00:00:00+00:00\n---\nNo relevant content here about the search term.' \
+  > "$workdir/.claude-code-hermit/compiled/briefing-2026-05-10.md"
+outfile="$(mktemp)"
+node "$REPO_ROOT/scripts/search.js" "$workdir/.claude-code-hermit" "heartbeat" > "$outfile" 2>&1
+run_test "search (finds compiled artifact by keyword)" grep -q 'review-heartbeat-2026-05-01' "$outfile"
+run_test "search (irrelevant file excluded)" bash -c "! grep -q 'briefing-2026-05-10' \"$outfile\""
+run_test "search (returns file:line snippet)" grep -q ':' "$outfile"
+rm -f "$outfile"
+cleanup
+
+# search: session and proposal scope — finds hits across directories
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/sessions" "$workdir/.claude-code-hermit/compiled" "$workdir/.claude-code-hermit/proposals"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+printf -- '---\nid: S-001\ndate: 2026-05-01T00:00:00+00:00\ntask: Set up deployment pipeline\n---\n## Completed\n- Configured deployment pipeline for staging.' \
+  > "$workdir/.claude-code-hermit/sessions/S-001-REPORT.md"
+printf -- '---\nid: PROP-001\ntitle: Add deployment health check\nstatus: proposed\ndate: 2026-05-02T00:00:00+00:00\n---\nProposal: add a deployment health check.\n' \
+  > "$workdir/.claude-code-hermit/proposals/PROP-001-deploy-check-120000.md"
+outfile="$(mktemp)"
+node "$REPO_ROOT/scripts/search.js" "$workdir/.claude-code-hermit" "deployment" > "$outfile" 2>&1
+run_test "search (finds session report)" grep -q 'S-001-REPORT' "$outfile"
+run_test "search (finds proposal)" grep -q 'PROP-001' "$outfile"
+rm -f "$outfile"
+cleanup
+
+# search: title-hit outranks body-only hit
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/compiled"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+printf -- '---\ntitle: Memory architecture review\ntype: review\ncreated: 2026-05-10T00:00:00+00:00\n---\nSome other content.' \
+  > "$workdir/.claude-code-hermit/compiled/review-memory-2026-05-10.md"
+printf -- '---\ntitle: Unrelated briefing\ntype: briefing\ncreated: 2026-05-11T00:00:00+00:00\n---\nThis file mentions memory in the body once.' \
+  > "$workdir/.claude-code-hermit/compiled/briefing-2026-05-11.md"
+outfile="$(mktemp)"
+node "$REPO_ROOT/scripts/search.js" "$workdir/.claude-code-hermit" "memory" > "$outfile" 2>&1
+run_test "search (title hit ranks first)" bash -c \
+  "grep -n 'review-memory' \"$outfile\" | head -1 | grep -q '^[123]:'"
+rm -f "$outfile"
+cleanup
+
+# search: no results case
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/compiled"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+printf -- '---\ntitle: Some artifact\ntype: review\ncreated: 2026-05-01T00:00:00+00:00\n---\nSome content.' \
+  > "$workdir/.claude-code-hermit/compiled/review-some-2026-05-01.md"
+run_test "search (no results)" bash -c \
+  "node '$REPO_ROOT/scripts/search.js' '$workdir/.claude-code-hermit' 'zzznomatch' | grep -q 'No results found'"
+cleanup
+
+# search: snippet :line matches the real file line (frontmatter offset included)
+# 5-line frontmatter (---/title/type/created/---) then body; "zebra" lands on file line 8.
+workdir="$(setup_workdir)"
+mkdir -p "$workdir/.claude-code-hermit/compiled"
+echo '{}' > "$workdir/.claude-code-hermit/config.json"
+printf -- '---\ntitle: Offset check\ntype: review\ncreated: 2026-05-01T00:00:00+00:00\n---\nalpha\nbeta\nthe keyword zebra lives here\ngamma' \
+  > "$workdir/.claude-code-hermit/compiled/review-offset-2026-05-01.md"
+outfile="$(mktemp)"
+node "$REPO_ROOT/scripts/search.js" "$workdir/.claude-code-hermit" "zebra" > "$outfile" 2>&1
+run_test "search (:line matches real file line, frontmatter offset)" grep -q ':8  the keyword zebra lives here' "$outfile"
+rm -f "$outfile"
+cleanup
+
+# lib/search.js: TF+frontmatter boost verified inline
+run_test "lib/search: title hit outranks body-only hit (unit)" node -e "
+const path = require('path');
+const { search } = require('$REPO_ROOT/scripts/lib/search');
+const fs = require('fs');
+const os = require('os');
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-'));
+const dir = path.join(tmp, '.claude-code-hermit');
+const comp = path.join(dir, 'compiled');
+fs.mkdirSync(comp, { recursive: true });
+fs.writeFileSync(path.join(comp, 'review-a.md'),
+  '---\ntitle: deployment pipeline\ntype: review\ncreated: 2026-05-10T00:00:00+00:00\n---\nUnrelated body.');
+fs.writeFileSync(path.join(comp, 'briefing-b.md'),
+  '---\ntitle: weekly update\ntype: briefing\ncreated: 2026-05-11T00:00:00+00:00\n---\nMentions deployment in the body here.');
+const results = search(dir, 'deployment');
+if (results.length < 2) { process.stderr.write('Expected 2 results, got ' + results.length); process.exit(1); }
+if (results[0].relPath.indexOf('review-a') === -1) { process.stderr.write('Title hit did not rank first: ' + results[0].relPath); process.exit(1); }
+fs.rmSync(tmp, { recursive: true });
+"
+
+# -------------------------------------------------------
 # Summary
 # -------------------------------------------------------
 print_results

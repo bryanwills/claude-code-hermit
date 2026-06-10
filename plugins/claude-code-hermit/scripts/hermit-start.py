@@ -85,7 +85,7 @@ DEFAULT_CONFIG = {
     },
     'knowledge': {
         'raw_retention_days': 14,
-        'compiled_budget_chars': 1000,
+        'compiled_budget_chars': 2500,
         'working_set_warn': 20,
     },
 }

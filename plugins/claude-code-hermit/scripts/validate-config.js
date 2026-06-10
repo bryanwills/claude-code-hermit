@@ -209,8 +209,8 @@ function validate(config) {
         }
       }
       if (k.compiled_budget_chars !== undefined) {
-        if (!Number.isInteger(k.compiled_budget_chars) || k.compiled_budget_chars < 500 || k.compiled_budget_chars > 4000) {
-          errors.push('knowledge.compiled_budget_chars: must be an integer between 500 and 4000');
+        if (!Number.isInteger(k.compiled_budget_chars) || k.compiled_budget_chars < 500 || k.compiled_budget_chars > 6000) {
+          errors.push('knowledge.compiled_budget_chars: must be an integer between 500 and 6000');
         }
       }
       if (k.working_set_warn !== undefined) {
