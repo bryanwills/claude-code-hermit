@@ -151,9 +151,7 @@ function updateCostIndex(logPath, indexPath) {
     // Log absent — ensure an empty index exists and return it
     const existing = readCostIndex(indexPath);
     if (existing) return existing;
-    const empty = _emptyIndex();
-    empty.updated_at = new Date().toISOString();
-    return _writeIndex(indexPath, empty);
+    return _writeIndex(indexPath, _emptyIndex());
   }
 
   const index = readCostIndex(indexPath);
@@ -172,8 +170,11 @@ function updateCostIndex(logPath, indexPath) {
   try {
     const buf = Buffer.alloc(newByteCount);
     const fd = fs.openSync(logPath, 'r');
-    fs.readSync(fd, buf, 0, newByteCount, index.byte_offset);
-    fs.closeSync(fd);
+    try {
+      fs.readSync(fd, buf, 0, newByteCount, index.byte_offset);
+    } finally {
+      fs.closeSync(fd);
+    }
     text = buf.toString('utf-8');
   } catch {
     // Non-fatal — skip this increment, try again next call
