@@ -71,6 +71,10 @@ A session "confirms" the pattern if:
 
 Read `MEMORY.md` (index of `- [title](file) — description` entries). Read each topic file whose title or description keyword-matches the candidate. Match against the file's `name`, `description`, body, `Why:`, and `How to apply:` fields. If memory already records the operator decision, preference, or pattern this candidate would surface, suppress with code `covered-by-memory`, quote the matching memory line in the reason, and include the source filename (e.g. `[memory: feedback_simplify_no_bypass.md]`) so the operator can locate and revise it if stale.
 
+### 1.6 Provenance weighting
+
+When reading each cited report in § 1, also read its `closed_via:` frontmatter field. Treat a missing `closed_via` as `operator` (legacy reports predate the field). Citations from **operator-supervised** sessions (`closed_via: operator`) carry stronger evidential weight than citations from **auto-closed idle** sessions (`closed_via: auto`) — two auto-closed sightings do not equal two supervised sightings. For **Tier 2 or Tier 3** candidates whose confirming recurrence rests *entirely* on auto-closed sessions, lean toward `DOWNGRADE:<N>` with reason `auto-closed-evidence`: the pattern may be real but its significance is unconfirmed under supervision. Mixed or operator-supervised evidence carries full weight. Tier 1 is reversible and low-stakes — provenance does not downgrade it. Never suppress on provenance alone; there is no suppress code for it.
+
 ### 2. Tier check
 
 Given confirmed evidence (or bypassed evidence for scheduled-check/operator-request), is the tier classification correct?
@@ -110,6 +114,7 @@ ACCEPT (current-session): <title>
 ACCEPT (scheduled-check): <title>
 ACCEPT (operator-request): <title>
 DOWNGRADE:2: <title> — <reason>
+DOWNGRADE:1: <title> — <reason>
 SUPPRESS: <title> — no-evidence: <reason>
 SUPPRESS (current-session): <title> — no-evidence: <reason>
 ```

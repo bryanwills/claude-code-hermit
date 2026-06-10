@@ -83,6 +83,13 @@ if ! grep -q "DOWNGRADE" "$judge"; then
   rc=1
 fi
 
+for term in "closed_via" "auto-closed-evidence"; do
+  if ! grep -q "$term" "$judge"; then
+    echo "FAIL [agents/reflection-judge.md]: missing '$term' provenance token"
+    rc=1
+  fi
+done
+
 # ── 4. Verdict-tag coverage in judge output examples ────────────────────────
 echo "=== Recurrence gate: verdict-tag coverage ==="
 
