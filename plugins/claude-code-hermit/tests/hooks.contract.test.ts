@@ -756,6 +756,35 @@ describe('doctor-check', () => {
     ]);
   }));
 
+  test('doctor-check (hooks: exec-form args are verified — missing script → fail)', withDir(async (dir) => {
+    seedDoctor(dir,
+      '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}');
+    // Fake plugin root whose hooks.json references a script that doesn't exist,
+    // in exec form (command: "bun", args: [path]) — the shape every real hook uses.
+    const fakeRoot = path.join(dir, 'fake-plugin');
+    fs.mkdirSync(path.join(fakeRoot, 'hooks'), { recursive: true });
+    fs.mkdirSync(path.join(fakeRoot, '.claude-plugin'), { recursive: true });
+    write(path.join(fakeRoot, '.claude-plugin', 'plugin.json'), '{"name":"claude-code-hermit","version":"1.0.0"}');
+    write(path.join(fakeRoot, 'hooks', 'hooks.json'), JSON.stringify({
+      hooks: {
+        PreToolUse: [{
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: 'bun', args: ['${CLAUDE_PLUGIN_ROOT}/scripts/does-not-exist.ts'] }],
+        }],
+      },
+    }));
+    const c = checkById(await doctorReport(dir, { CLAUDE_PLUGIN_ROOT: fakeRoot }), 'hooks');
+    expect(c.status).toBe('fail');
+    expect(c.detail).toContain('does-not-exist.ts');
+  }));
+
+  test('doctor-check (hooks: real hooks.json passes — every exec-form arg resolves)', withDir(async (dir) => {
+    seedDoctor(dir,
+      '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}');
+    const c = checkById(await doctorReport(dir), 'hooks');
+    expect(c.status).toBe('ok');
+  }));
+
   test('doctor-check (cost visibility — ok with data, detail has today spend)', withDir(async (dir) => {
     seedDoctor(dir,
       '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}');

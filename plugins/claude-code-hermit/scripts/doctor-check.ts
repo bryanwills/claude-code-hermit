@@ -84,15 +84,21 @@ function checkHooks() {
     const hooks = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
     const missing: string[] = [];
     const groups = hooks.hooks || {};
+    const PLUGIN_SCRIPT_RE = /\$\{CLAUDE_PLUGIN_ROOT\}\/(\S+?\.(?:ts|js|sh|py))/;
+    const checkRef = (s: string) => {
+      const m = s.match(PLUGIN_SCRIPT_RE);
+      if (m && !fs.existsSync(path.join(pluginRoot, m[1]))) missing.push(m[1]);
+    };
     for (const entries of Object.values(groups) as Json[]) {
       if (!Array.isArray(entries)) continue;
       for (const entry of entries) {
         for (const h of entry.hooks || []) {
-          const cmd = h.command || '';
-          const m = cmd.match(/\$\{CLAUDE_PLUGIN_ROOT\}\/(\S+?\.(?:js|sh|py))/);
-          if (!m) continue;
-          const abs = path.join(pluginRoot, m[1]);
-          if (!fs.existsSync(abs)) missing.push(m[1]);
+          // String-form hooks carry the path in `command`; exec-form hooks
+          // (command: "bun", args: [path]) carry it in `args` — both count.
+          checkRef(h.command || '');
+          for (const arg of Array.isArray(h.args) ? h.args : []) {
+            if (typeof arg === 'string') checkRef(arg);
+          }
         }
       }
     }
