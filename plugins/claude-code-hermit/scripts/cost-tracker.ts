@@ -3,18 +3,18 @@
 // Changes: Added SHELL.md cost injection for session tracking,
 //          simplified pricing model, removed ECC-specific metric paths,
 //          added cumulative cost tracking,
-//          plan progress sourced from native Claude Code Tasks (via lib/tasks.js).
+//          plan progress sourced from native Claude Code Tasks (via lib/tasks.ts).
 
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const fs = require('fs');
-const path = require('path');
+import { calculateCost } from './lib/pricing';
+import { readTasks, taskProgress } from './lib/tasks';
+import { kStr, formatTokens } from './lib/format';
+import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, costLogPath } from './lib/cc-compat';
+import { costIndexPath, updateCostIndex, readCostIndex } from './lib/cost-log';
 
-const { calculateCost } = require('./lib/pricing');
-const { readTasks, taskProgress } = require('./lib/tasks');
-const { kStr, formatTokens } = require('./lib/format');
-const { sessionId: ccSessionId, transcriptPath: ccTranscriptPath, entryText, isToolResult, extractUsage, costLogPath } = require('./lib/cc-compat');
-const { costIndexPath, updateCostIndex, readCostIndex } = require('./lib/cost-log');
+type Json = any;
 
 const MAX_STDIN = 1024 * 1024; // 1MB safety limit
 const COST_LOG = costLogPath('.claude-code-hermit');
@@ -27,8 +27,8 @@ const HEARTBEAT_FILE = path.resolve('.claude-code-hermit/state/.heartbeat');
 const COST_SUMMARY = path.resolve('.claude-code-hermit/cost-summary.md');
 const TASK_SNAPSHOT = path.resolve('.claude-code-hermit/tasks-snapshot.md');
 
-let _runtimeCache;
-function readRuntimeJson() {
+let _runtimeCache: Json;
+function readRuntimeJson(): Json {
   if (_runtimeCache !== undefined) return _runtimeCache;
   try {
     _runtimeCache = JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8'));
@@ -38,11 +38,11 @@ function readRuntimeJson() {
   return _runtimeCache;
 }
 
-function readRuntimeSessionId() {
+function readRuntimeSessionId(): string {
   return readRuntimeJson().session_id || '';
 }
 
-function touchHeartbeat() {
+function touchHeartbeat(): void {
   try {
     const now = new Date();
     fs.utimesSync(HEARTBEAT_FILE, now, now);
@@ -51,7 +51,7 @@ function touchHeartbeat() {
   }
 }
 
-function detectModel(modelStr) {
+function detectModel(modelStr: string | undefined): string {
   if (!modelStr) return 'sonnet';
   const lower = modelStr.toLowerCase();
   if (lower.includes('haiku')) return 'haiku';
@@ -65,8 +65,8 @@ function detectModel(modelStr) {
 // assistant steps (which each carry their own usage) so a multi-step heartbeat/routine
 // turn still reaches its marker, while stopping before the prior turn's prompt so an
 // earlier routine's marker can't bleed into a later turn's source.
-function scanTriggerMarkers(lines, billedIndex) {
-  const parts = [];
+function scanTriggerMarkers(lines: string[], billedIndex: number): string {
+  const parts: string[] = [];
   for (let j = billedIndex - 1; j >= 0; j--) {
     try {
       const prev = JSON.parse(lines[j]);
@@ -88,7 +88,7 @@ function scanTriggerMarkers(lines, billedIndex) {
 // Limitation: scanning covers the whole turn (prompt + tool_results), so a turn that
 // merely surfaces a marker string in tool output (e.g. grepping these very sources)
 // can be misclassified. Accepted — the markers are stable and this is rare in practice.
-function classifySource(triggerText) {
+function classifySource(triggerText: string): string {
   if (!triggerText) return 'other';
   if (triggerText.includes('HEARTBEAT_EVALUATE') ||
       triggerText.includes('/claude-code-hermit:heartbeat run')) {
@@ -104,7 +104,7 @@ function classifySource(triggerText) {
   return 'other';
 }
 
-function readLastTurnUsage(transcriptPath) {
+function readLastTurnUsage(transcriptPath: string): Json {
   const TAIL_BYTES = 131072; // 128KB — read from end, avoid loading full transcript
   try {
     const stat = fs.statSync(transcriptPath);
@@ -144,11 +144,11 @@ function readLastTurnUsage(transcriptPath) {
   return null;
 }
 
-function parseLogEntries() {
+function parseLogEntries(): Json[] {
   try {
     const content = fs.readFileSync(COST_LOG, 'utf-8').trim();
     if (!content) return [];
-    return content.split('\n').reduce((acc, line) => {
+    return content.split('\n').reduce((acc: Json[], line) => {
       try { acc.push(JSON.parse(line)); } catch {}
       return acc;
     }, []);
@@ -157,7 +157,7 @@ function parseLogEntries() {
   }
 }
 
-function getCumulativeCost(newCost, newTokens, hadHumanTurn, currentSessionId, index) {
+function getCumulativeCost(newCost: number, newTokens: number, hadHumanTurn: boolean, currentSessionId: string, index: Json): { cost: number; tokens: number; operatorTurns: number } {
   // O(1) path: read running totals from .status.json
   try {
     const status = JSON.parse(fs.readFileSync(STATUS_JSON, 'utf-8'));
@@ -191,11 +191,11 @@ function getCumulativeCost(newCost, newTokens, hadHumanTurn, currentSessionId, i
 
 const MAX_SUMMARY_LEN = 120;
 
-function readRuntimeSessionState() {
+function readRuntimeSessionState(): string {
   return readRuntimeJson().session_state || 'unknown';
 }
 
-function writeStatusJson(shellContent, cumulative, sessionId) {
+function writeStatusJson(shellContent: string, cumulative: { cost: number; tokens: number; operatorTurns: number }, sessionId: string): void {
   const { cost: cumulativeCost, tokens: cumulativeTokens, operatorTurns: cumulativeOperatorTurns } = cumulative;
   const taskMatch = shellContent.match(/## Task\n([\s\S]*?)(?=\n## |$)/);
   const blockersMatch = shellContent.match(/## Blockers\n([\s\S]*?)(?=\n## |$)/);
@@ -232,7 +232,7 @@ function writeStatusJson(shellContent, cumulative, sessionId) {
   fs.renameSync(STATUS_JSON_TMP, STATUS_JSON);
 }
 
-function writeTaskSnapshot(tasks, progress) {
+function writeTaskSnapshot(tasks: Json[], progress: { done: number; total: number }): void {
   const { done, total } = progress;
 
   let content = `---\nupdated: ${new Date().toISOString()}\nprogress: ${done}/${total}\n---\n# Active Tasks\n\n`;
@@ -262,7 +262,7 @@ function writeTaskSnapshot(tasks, progress) {
   try { fs.writeFileSync(TASK_SNAPSHOT, content, 'utf-8'); } catch {}
 }
 
-function writeCostSummary(index) {
+function writeCostSummary(index: Json): void {
   if (!index) return;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -279,7 +279,7 @@ function writeCostSummary(index) {
   if (index.total_tokens === 0 && index.total_cost_usd === 0) return;
 
   const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-  const byDate = index.by_date || {};
+  const byDate: Record<string, Json> = index.by_date || {};
 
   const totalCost = index.total_cost_usd || 0;
   const totalTokens = index.total_tokens || 0;
@@ -354,7 +354,7 @@ ${trendTable}`;
   }
 }
 
-function updateShellSession(content, costStr, tokenStr) {
+function updateShellSession(content: string, costStr: string, tokenStr: string): string {
   const costSection = `## Cost\n${costStr} (${tokenStr})`;
 
   if (content.includes('## Cost')) {
@@ -369,10 +369,10 @@ function updateShellSession(content, costStr, tokenStr) {
   return content;
 }
 
-// Exported run() function for use by stop-pipeline.js.
+// Exported run() function for use by stop-pipeline.ts.
 // Returns the summary string, or null if there is nothing to report.
 // process.exit() calls become returns so the pipeline is not killed.
-async function run(data) {
+async function run(data: Json): Promise<string | null> {
   try {
     const sessionId = ccSessionId(data) || 'unknown';
     const transcriptPath = ccTranscriptPath(data);
@@ -436,19 +436,19 @@ async function run(data) {
 
     // Return brief summary (pipeline writes this to stderr)
     return `[cost-tracker] ${model}: ${kStr(totalTokens)}K tokens (${kStr(cacheReadTokens)}K cached), $${cost.toFixed(4)} (cumulative: ${costStr})`;
-  } catch (err) {
+  } catch (err: any) {
     // Non-fatal — never block on cost tracking failure
     console.error(`[cost-tracker] Error: ${err.message}`);
     return null;
   }
 }
 
-module.exports = { run, getCumulativeCost, classifySource, scanTriggerMarkers };
+export { run, getCumulativeCost, classifySource, scanTriggerMarkers };
 
-if (require.main === module) {
+if (import.meta.main) {
   (async () => {
     try {
-      const chunks = [];
+      const chunks: Buffer[] = [];
       let totalSize = 0;
 
       for await (const chunk of process.stdin) {
@@ -469,7 +469,7 @@ if (require.main === module) {
       const summary = await run(data);
       if (summary) console.log(summary);
       touchHeartbeat();
-    } catch (err) {
+    } catch (err: any) {
       console.error(`[cost-tracker] Error: ${err.message}`);
       process.exit(0);
     }

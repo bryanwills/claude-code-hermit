@@ -1,8 +1,8 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { safeForLLM } from './lib/sanitize';
 
-const fs = require('fs');
-const path = require('path');
-const { safeForLLM } = require('./lib/sanitize');
+type Json = any;
 
 /**
  * PostToolUse hook — validates config.json after any Edit/Write to it.
@@ -13,7 +13,7 @@ const { safeForLLM } = require('./lib/sanitize');
 const CONFIG_PATH = path.resolve('.claude-code-hermit/config.json');
 const MAX_STDIN = 64 * 1024;
 
-const REQUIRED_KEYS = {
+const REQUIRED_KEYS: Record<string, string[]> = {
   'agent_name': ['string', 'null'],
   'language': ['string', 'null'],
   'timezone': ['string', 'null'],
@@ -31,15 +31,15 @@ const VALID_ROUTINE_MODEL = ['opus', 'sonnet', 'haiku'];
 const TIME_RE = /^\d{2}:\d{2}$/;
 
 // --- Cron validation (5-field: minute hour dom month dow) ---
-function parseCronField(token, lo, hi) {
-  const values = new Set();
+function parseCronField(token: string, lo: number, hi: number): Set<number> {
+  const values = new Set<number>();
   for (const part of token.split(',')) {
     if (!part) throw new Error('empty segment in list');
     if (part.includes('/')) {
       const [base, stepStr] = part.split('/', 2);
       const step = Number(stepStr);
       if (!Number.isInteger(step) || step <= 0) throw new Error(`zero or invalid step: ${part}`);
-      let start, end;
+      let start: number, end: number;
       if (base === '*') { start = lo; end = hi; }
       else if (base.includes('-')) { [start, end] = base.split('-', 2).map(Number); }
       else { start = Number(base); end = hi; }
@@ -62,7 +62,7 @@ function parseCronField(token, lo, hi) {
   return values;
 }
 
-function validateCronSchedule(schedule) {
+function validateCronSchedule(schedule: string): string | null {
   if (schedule.startsWith('@')) return 'macros not supported';
   const fields = schedule.split(/\s+/);
   if (fields.length !== 5) return `expected 5 fields, got ${fields.length}`;
@@ -75,7 +75,7 @@ function validateCronSchedule(schedule) {
     parseCronField(fields[2], 1, 31);
     parseCronField(fields[3], 1, 12);
     parseCronField(fields[4], 0, 7);
-  } catch (e) {
+  } catch (e: any) {
     return e.message;
   }
   const domRestricted = fields[2] !== '*';
@@ -84,9 +84,9 @@ function validateCronSchedule(schedule) {
   return null;
 }
 
-function validate(config) {
-  const errors = [];
-  const warnings = [];
+function validate(config: Json): { errors: string[]; warnings: string[] } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
 
   for (const [key, types] of Object.entries(REQUIRED_KEYS)) {
     if (!(key in config)) {
@@ -112,7 +112,7 @@ function validate(config) {
 
   if (Array.isArray(config.routines)) {
     const ids = new Set();
-    config.routines.forEach((r, i) => {
+    config.routines.forEach((r: Json, i: number) => {
       if (!r.id) errors.push(`routines[${i}]: missing id`);
       if (!r.skill) errors.push(`routines[${i}]: missing skill`);
       if (r.time !== undefined) {
@@ -147,7 +147,7 @@ function validate(config) {
   }
 
   if (config.channels && typeof config.channels === 'object') {
-    for (const [name, ch] of Object.entries(config.channels)) {
+    for (const [name, ch] of Object.entries<Json>(config.channels)) {
       // channels.primary is a magic string key (preferred-channel pointer), not a
       // channel-config object. Skip object-shape validation here; the primary-specific
       // checks below handle it.
@@ -245,7 +245,7 @@ function validate(config) {
     errors.push('monitors: must be an array');
   } else if (Array.isArray(config.monitors)) {
     const ids = new Set();
-    config.monitors.forEach((m, i) => {
+    config.monitors.forEach((m: Json, i: number) => {
       if (!m.id || typeof m.id !== 'string') {
         errors.push(`monitors[${i}]: missing or invalid id`);
       } else {
@@ -287,10 +287,10 @@ function main() {
         process.exit(0);
       }
 
-      let config;
+      let config: Json;
       try {
         config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      } catch (e) {
+      } catch (e: any) {
         process.stderr.write(`[config-validate] FAIL: config.json is not valid JSON — ${safeForLLM(e.message)}\n`);
         process.exit(2);
       }
@@ -318,9 +318,9 @@ function main() {
   });
 }
 
-// Allow tests to require individual functions
-if (require.main === module) {
+// Allow tests to import individual functions
+export { parseCronField, validateCronSchedule, validate };
+
+if (import.meta.main) {
   main();
-} else {
-  module.exports = { parseCronField, validateCronSchedule, validate };
 }

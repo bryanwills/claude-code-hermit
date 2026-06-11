@@ -111,7 +111,7 @@ See [Skills Reference](skills.md) for the full list.
 | Session evaluator   | Stop         | standard+ | Validates SHELL.md quality, detects zombie/stale/bloat |
 | Stop pipeline       | Stop         | all       | Cost tracking, compact suggestion, session diff, evaluation, heartbeat |
 
-Hermits may add hooks at `strict` (e.g., git-push-guard). Use `run-with-profile.js` for profile-gated execution.
+Hermits may add hooks at `strict` (e.g., git-push-guard). Use `run-with-profile.ts` for profile-gated execution.
 
 ---
 
@@ -149,7 +149,7 @@ your-project/
 │   │   ├── session-diff.json         # Uncommitted file tracking (session-diff-owned)
 │   │   ├── proposal-metrics.jsonl    # Append-only event log (proposal-create + proposal-act)
 │   │   ├── micro-proposals.json      # Pending micro-approvals list (reflect + channel-responder)
-│   │   ├── state-summary.md          # Auto-generated health snapshot (generate-summary.js)
+│   │   ├── state-summary.md          # Auto-generated health snapshot (generate-summary.ts)
 │   │   ├── monitors.runtime.json     # Active watch registry, cleared on session start (watch-owned)
 │   │   ├── .heartbeat                # Activity marker (heartbeat-touch-owned)
 │   │   └── .lifecycle.lock           # Always-on lifecycle lock (hermit-start-owned)
@@ -174,9 +174,9 @@ One writer per state file. No shared mutation bus.
 | `state/channel-activity.json`  | channel-hook.js only                                | channel-responder, heartbeat                                  |
 | `state/channel-replies.jsonl`  | channel-hook.js (append only)                       | reflect (routine-ROI engagement join)                         |
 | `state/session-diff.json`      | session-diff.js only                                | session-close (display)                                       |
-| `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.js, proposal-metrics-report.js (read-only)   |
-| `state/micro-proposals.json`   | reflect (queue) + channel-responder/brief (resolve) | brief, generate-summary.js                                    |
-| `state/state-summary.md`       | generate-summary.js only                            | humans                                                        |
+| `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal-metrics-report.js (read-only)   |
+| `state/micro-proposals.json`   | reflect (queue) + channel-responder/brief (resolve) | brief, generate-summary.ts                                    |
+| `state/state-summary.md`       | generate-summary.ts only                            | humans                                                        |
 | `state/monitors.runtime.json`  | watch skill only                                    | session-start (clear on start), session-close (stop all)      |
 | `state/heartbeat-monitor.runtime.json` | heartbeat skill only                        | heartbeat-start (write), heartbeat-stop (clear), heartbeat-restart (rewrite) |
 | `state/cc-stop-snapshot.json`  | stop-pipeline.js only                               | doctor-check.js (scheduler/background-task health check)      |

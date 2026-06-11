@@ -6,7 +6,7 @@
 // Stderr: WARN: <reason>  (when passing through unchanged due to unsupported pattern)
 // Exit 0 always except: malformed cron that fails validateCronSchedule, or unparseable HERMIT_CRON_TZ_SHIFT_NOW
 
-const { parseCronField, validateCronSchedule } = require('./validate-config.js');
+const { parseCronField, validateCronSchedule } = require('./validate-config');
 const { currentHHMM } = require('./lib/time.js');
 
 function wallMinutes(tz, ref) {

@@ -533,7 +533,7 @@ function checkReflectLoop() {
 }
 
 function checkScheduler() {
-  // Reads state/cc-stop-snapshot.json written by stop-pipeline.js on each Stop.
+  // Reads state/cc-stop-snapshot.json written by stop-pipeline.ts on each Stop.
   // The snapshot is point-in-time at last Stop, not live — the captured_at
   // timestamp is always surfaced so staleness is visible rather than silently trusted.
   //

@@ -3,12 +3,12 @@
 // Changes: Threshold set to 60%, simplified to use tool-call counter with
 //          session-specific counter files, removed ECC-specific config.
 
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { sessionId as ccSessionId } from './lib/cc-compat';
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const { sessionId: ccSessionId } = require('./lib/cc-compat');
+type Json = any;
 
 const MAX_STDIN = 1024 * 1024; // 1MB safety limit
 const COMPACT_THRESHOLD = parseInt(process.env.COMPACT_THRESHOLD || '75', 10) || 75;
@@ -19,7 +19,7 @@ const CONTEXT_USAGE_THRESHOLD = 0.6; // 60%
 const COUNTER_DIR = path.join(os.tmpdir(), `claude-agent-compact-${process.getuid?.() ?? 'win'}`);
 let counterDirCreated = false;
 
-function getCounterPath(sessionId) {
+function getCounterPath(sessionId: string): string {
   if (!counterDirCreated) {
     fs.mkdirSync(COUNTER_DIR, { recursive: true, mode: 0o700 });
     counterDirCreated = true;
@@ -28,7 +28,7 @@ function getCounterPath(sessionId) {
   return path.join(COUNTER_DIR, `counter-${safe}.txt`);
 }
 
-function readCounter(counterPath) {
+function readCounter(counterPath: string): number {
   try {
     const val = parseInt(fs.readFileSync(counterPath, 'utf-8').trim(), 10);
     if (isNaN(val) || val < 0 || val > MAX_COUNTER) return 0;
@@ -38,7 +38,7 @@ function readCounter(counterPath) {
   }
 }
 
-function writeCounter(counterPath, value) {
+function writeCounter(counterPath: string, value: number): void {
   try {
     fs.writeFileSync(counterPath, String(Math.min(value, MAX_COUNTER)), 'utf-8');
   } catch {
@@ -46,10 +46,10 @@ function writeCounter(counterPath, value) {
   }
 }
 
-// Exported run() function for use by stop-pipeline.js.
+// Exported run() function for use by stop-pipeline.ts.
 // Returns the suggestion object {additionalContext: "..."} or null.
 // process.exit() calls become returns so the pipeline is not killed.
-async function run(data) {
+async function run(data: Json): Promise<{ additionalContext: string } | null> {
   try {
     const sessionId = ccSessionId(data) || 'default';
 
@@ -79,19 +79,19 @@ async function run(data) {
     }
 
     return null;
-  } catch (err) {
+  } catch (err: any) {
     // Non-fatal — never block on compact suggestion failure
     console.error(`[suggest-compact] Error: ${err.message}`);
     return null;
   }
 }
 
-module.exports = { run };
+export { run };
 
-if (require.main === module) {
+if (import.meta.main) {
   (async () => {
     try {
-      const chunks = [];
+      const chunks: Buffer[] = [];
       let totalSize = 0;
 
       for await (const chunk of process.stdin) {
@@ -110,7 +110,7 @@ if (require.main === module) {
       const data = JSON.parse(raw);
       const result = await run(data);
       if (result) console.log(JSON.stringify(result));
-    } catch (err) {
+    } catch (err: any) {
       console.error(`[suggest-compact] Error: ${err.message}`);
       process.exit(0);
     }

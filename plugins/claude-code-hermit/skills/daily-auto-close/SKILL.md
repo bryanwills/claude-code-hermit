@@ -6,7 +6,7 @@ description: Daily routine that closes the current session at midnight when the 
 
 Closes long-running daemon sessions on a daily cadence so cross-session learning surfaces (`reflect`, `weekly-review`, `hermit-brain`, `hermit-evolution`) have archives to work with.
 
-The skill is invoked by the `daily-auto-close` routine at `0 0 * * *` (local). The routine prompt is prefixed `[hermit-routine:daily-auto-close]` so `scripts/record-operator-action.js` does not bump `state/last-operator-action.json` (load-bearing: this skill reads that clock to decide whether to close now or queue).
+The skill is invoked by the `daily-auto-close` routine at `0 0 * * *` (local). The routine prompt is prefixed `[hermit-routine:daily-auto-close]` so `scripts/record-operator-action.ts` does not bump `state/last-operator-action.json` (load-bearing: this skill reads that clock to decide whether to close now or queue).
 
 ## Steps
 
@@ -32,5 +32,5 @@ The skill is invoked by the `daily-auto-close` routine at `0 0 * * *` (local). T
 ## Notes
 
 - The skill is intentionally silent. No operator notification on queue or drain — the existing `Auto-closed S-NNN` notification from `/session-close --auto` is the only operator-facing signal.
-- The 10-minute lull threshold is hardcoded. If operators report mid-conversation closes, raise it; the threshold is a single constant in this skill and in `scripts/heartbeat-precheck.js`.
+- The 10-minute lull threshold is hardcoded. If operators report mid-conversation closes, raise it; the threshold is a single constant in this skill and in `scripts/heartbeat-precheck.ts`.
 - When heartbeat is disabled and the operator stays active past midnight, this routine itself acts as the slow-path drain on the next day's tick: it re-evaluates and closes directly if branch (b)'s conditions are met.

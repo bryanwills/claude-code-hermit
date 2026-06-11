@@ -675,7 +675,7 @@ class TestHookOutputs(_TempDirTest):
             'cwd': self._tmpdir,
         })
 
-        stdout, stderr, code = self._run_hook('cost-tracker.js', hook_input)
+        stdout, stderr, code = self._run_hook('cost-tracker.ts', hook_input)
         self.assertEqual(code, 0)
 
         log_path = Path(self._tmpdir) / '.claude' / 'cost-log.jsonl'
@@ -690,7 +690,7 @@ class TestHookOutputs(_TempDirTest):
     def test_evaluate_session_standard(self):
         """Standard profile produces structured JSON with criteria."""
         stdout, stderr, code = self._run_hook(
-            'evaluate-session.js', '{}',
+            'evaluate-session.ts', '{}',
             env_extra={'AGENT_HOOK_PROFILE': 'standard'},
         )
         self.assertEqual(code, 0)
@@ -704,7 +704,7 @@ class TestHookOutputs(_TempDirTest):
     def test_evaluate_session_minimal(self):
         """Minimal profile produces no stdout (silence is the contract)."""
         stdout, stderr, code = self._run_hook(
-            'evaluate-session.js', '{}',
+            'evaluate-session.ts', '{}',
             env_extra={'AGENT_HOOK_PROFILE': 'minimal'},
         )
         self.assertEqual(code, 0)
@@ -716,14 +716,14 @@ class TestHookOutputs(_TempDirTest):
 # ============================================================
 
 class TestCacheEditGuard(_TempDirTest):
-    """cache-edit-guard.js — silent-breakage zone.
+    """cache-edit-guard.ts — silent-breakage zone.
 
     Project-local marketplaces load from `source` at runtime; cache copies are
     stale. Editing a cache file works *until* the bridge restarts and the source
     is read instead. The guard must catch this.
     """
 
-    SCRIPT = REPO / 'scripts' / 'cache-edit-guard.js'
+    SCRIPT = REPO / 'scripts' / 'cache-edit-guard.ts'
 
     def _run_guard(self, event, env_extra=None):
         env = os.environ.copy()
@@ -841,8 +841,8 @@ class TestStderrSanitization(_TempDirTest):
     easier to read.
     """
 
-    GUARD = REPO / 'scripts' / 'cache-edit-guard.js'
-    CHANNEL = REPO / 'scripts' / 'channel-hook.js'
+    GUARD = REPO / 'scripts' / 'cache-edit-guard.ts'
+    CHANNEL = REPO / 'scripts' / 'channel-hook.ts'
 
     def _run(self, script, event, env_extra=None):
         env = os.environ.copy()
@@ -945,7 +945,7 @@ class TestNegativePaths(_TempDirTest):
 # ============================================================
 
 class TestCronCorpus(unittest.TestCase):
-    """validate-config.js validateCronSchedule() must accept the shared
+    """validate-config.ts validateCronSchedule() must accept the shared
     corpus of valid expressions and reject the invalid ones. Cron schedules
     are now consumed directly by CronCreate (via /hermit-routines), not parsed
     by hermit code — only config-time validation remains."""
@@ -956,10 +956,10 @@ class TestCronCorpus(unittest.TestCase):
             cls.corpus = json.load(f)
 
     def test_node_valid(self):
-        """validate-config.js validateCronSchedule() accepts valid expressions."""
+        """validate-config.ts validateCronSchedule() accepts valid expressions."""
         exprs = json.dumps([c['schedule'] for c in self.corpus['valid_expressions']])
         js = f"""
-        const v = require('{SCRIPTS}/validate-config.js');
+        const v = require('{SCRIPTS}/validate-config.ts');
         const exprs = {exprs};
         const fails = [];
         for (const e of exprs) {{
@@ -978,10 +978,10 @@ class TestCronCorpus(unittest.TestCase):
                          f'Node rejected valid expressions:\n{result.stderr}')
 
     def test_node_invalid(self):
-        """validate-config.js validateCronSchedule() rejects invalid expressions."""
+        """validate-config.ts validateCronSchedule() rejects invalid expressions."""
         exprs = json.dumps([c['schedule'] for c in self.corpus['invalid_expressions']])
         js = f"""
-        const v = require('{SCRIPTS}/validate-config.js');
+        const v = require('{SCRIPTS}/validate-config.ts');
         const exprs = {exprs};
         const fails = [];
         for (const e of exprs) {{
@@ -1001,7 +1001,7 @@ class TestCronCorpus(unittest.TestCase):
 
 
 class TestMonitorsValidation(unittest.TestCase):
-    """validate-config.js monitors block — error and warning paths."""
+    """validate-config.ts monitors block — error and warning paths."""
 
     # Minimal valid config to merge monitors into
     BASE_CONFIG = {
@@ -1013,10 +1013,10 @@ class TestMonitorsValidation(unittest.TestCase):
     }
 
     def _run_validate(self, config_dict):
-        """Call validate-config.js validate() via node -e; return {errors, warnings}."""
+        """Call validate-config.ts validate() via node -e; return {errors, warnings}."""
         config_json = json.dumps({**self.BASE_CONFIG, **config_dict})
         js = f"""
-        const v = require('{SCRIPTS}/validate-config.js');
+        const v = require('{SCRIPTS}/validate-config.ts');
         const result = v.validate({config_json});
         process.stdout.write(JSON.stringify(result));
         """
@@ -1094,7 +1094,7 @@ class TestMonitorsValidation(unittest.TestCase):
 
 
 class TestPushNotificationsValidation(unittest.TestCase):
-    """validate-config.js push_notifications field — type check."""
+    """validate-config.ts push_notifications field — type check."""
 
     BASE_CONFIG = {
         "agent_name": None, "language": None, "timezone": None,
@@ -1105,10 +1105,10 @@ class TestPushNotificationsValidation(unittest.TestCase):
     }
 
     def _run_validate(self, config_dict):
-        """Call validate-config.js validate() via node -e; return {errors, warnings}."""
+        """Call validate-config.ts validate() via node -e; return {errors, warnings}."""
         config_json = json.dumps({**self.BASE_CONFIG, **config_dict})
         js = f"""
-        const v = require('{SCRIPTS}/validate-config.js');
+        const v = require('{SCRIPTS}/validate-config.ts');
         const result = v.validate({config_json});
         process.stdout.write(JSON.stringify(result));
         """
@@ -1220,11 +1220,11 @@ class TestChannelResolverContract(unittest.TestCase):
     """Contract tests for scripts/resolve-outbound-channel.js.
 
     Verifies resolution order, primary override, eligibility gates, and the
-    validate-config.js special-case for channels.primary.
+    validate-config.ts special-case for channels.primary.
     """
 
     RESOLVER = SCRIPTS / 'resolve-outbound-channel.js'
-    VALIDATOR = SCRIPTS / 'validate-config.js'
+    VALIDATOR = SCRIPTS / 'validate-config.ts'
 
     def _run_resolver(self, config_obj):
         """Call resolve() in-process via node -e; bypasses tempdir + fs read.
@@ -1242,7 +1242,7 @@ class TestChannelResolverContract(unittest.TestCase):
 
     def _run_validator(self, config_obj):
         js = f"""
-        const v = require('{SCRIPTS}/validate-config.js');
+        const v = require('{SCRIPTS}/validate-config.ts');
         const result = v.validate({json.dumps(config_obj)});
         process.stdout.write(JSON.stringify(result));
         """
@@ -1579,7 +1579,7 @@ class TestBootstrapSkills(unittest.TestCase):
 
 
 class TestRoutineModelValidation(unittest.TestCase):
-    """validate-config.js routine model field — validation rules."""
+    """validate-config.ts routine model field — validation rules."""
 
     BASE_CONFIG = {
         "agent_name": None, "language": None, "timezone": None,
@@ -1593,10 +1593,10 @@ class TestRoutineModelValidation(unittest.TestCase):
     HB_ROUTINE = {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:heartbeat start", "run_during_waiting": True, "enabled": True}
 
     def _run_validate(self, config_dict):
-        """Call validate-config.js validate() via node -e; return {errors, warnings}."""
+        """Call validate-config.ts validate() via node -e; return {errors, warnings}."""
         config_json = json.dumps({**self.BASE_CONFIG, **config_dict})
         js = f"""
-        const v = require('{SCRIPTS}/validate-config.js');
+        const v = require('{SCRIPTS}/validate-config.ts');
         const result = v.validate({config_json});
         process.stdout.write(JSON.stringify(result));
         """
@@ -1655,7 +1655,7 @@ class TestRoutineModelValidation(unittest.TestCase):
 
 
 class TestStopPayloadSnapshot(_TempDirTest):
-    """stop-pipeline.js writes state/cc-stop-snapshot.json from the Stop payload.
+    """stop-pipeline.ts writes state/cc-stop-snapshot.json from the Stop payload.
 
     Guards against: snapshot not written, wrong tri-state, absent fields, or
     missing captured_at. Also exercises checkScheduler() via doctor-check.js.
@@ -1667,7 +1667,7 @@ class TestStopPayloadSnapshot(_TempDirTest):
         if env_extra:
             env.update(env_extra)
         return subprocess.run(
-            ['bun', str(REPO / 'scripts' / 'stop-pipeline.js')],
+            ['bun', str(REPO / 'scripts' / 'stop-pipeline.ts')],
             input=json.dumps(payload_dict), capture_output=True, text=True,
             cwd=self._tmpdir, env=env, timeout=15,
         )

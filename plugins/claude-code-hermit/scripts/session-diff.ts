@@ -1,4 +1,4 @@
-// scripts/session-diff.js — Stop hook (standard+ profile)
+// scripts/session-diff.ts — Stop hook (standard+ profile)
 // Captures git diff stats and writes to state/session-diff.json (sidecar file).
 // session-mgr merges this into SHELL.md ## Changed during lifecycle transitions.
 //
@@ -11,19 +11,19 @@
 // mid-implementation while changes are still on a worktree branch, this
 // script will see an empty diff. session-mgr handles merge from this sidecar.
 
-"use strict";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
-const { execSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+type Json = any;
 
 const MAX_STDIN = 1024 * 1024; // 1MB safety limit
 const SIDECAR_PATH = path.resolve(".claude-code-hermit/state/session-diff.json");
 const SIDECAR_TMP = path.resolve(".claude-code-hermit/state/.session-diff.json.tmp");
 
-const STATUS_LABELS = { A: "added", M: "modified", D: "deleted" };
+const STATUS_LABELS: Record<string, string> = { A: "added", M: "modified", D: "deleted" };
 
-function captureDiff() {
+function captureDiff(): { file: string; status: string }[] | null {
   let diff = "";
   try {
     // Files changed in working tree + staged
@@ -48,8 +48,8 @@ function captureDiff() {
       diff = committed;
     } else if (committed && diff) {
       // Merge both, deduplicate by filename
-      const seen = new Set();
-      const lines = [];
+      const seen = new Set<string>();
+      const lines: string[] = [];
       for (const line of [...diff.split("\n"), ...committed.split("\n")]) {
         const file = line.split("\t").pop();
         if (file && !seen.has(file)) {
@@ -81,7 +81,7 @@ function captureDiff() {
   return changedFiles;
 }
 
-function writeSidecar(changedFiles) {
+function writeSidecar(changedFiles: { file: string; status: string }[]): void {
   const data = {
     changed_files: changedFiles,
     captured_at: new Date().toISOString(),
@@ -95,11 +95,11 @@ function writeSidecar(changedFiles) {
 const RUNTIME_JSON = path.resolve(".claude-code-hermit/state/runtime.json");
 const DEBOUNCE_MS = 60 * 1000; // 60 seconds
 
-// Exported run() function for use by stop-pipeline.js.
+// Exported run() function for use by stop-pipeline.ts.
 // Includes state-aware debounce: skips when in_progress and sidecar is fresh.
 // Forces refresh when session state is not in_progress (archive is imminent).
 // process.exit() calls become returns so the pipeline is not killed.
-async function run(_payload) {
+async function run(_payload: Json): Promise<void> {
   // Profile gating — run on "standard" and "strict" only
   const profile = (process.env.AGENT_HOOK_PROFILE || "standard").trim().toLowerCase();
   if (profile === "minimal") {
@@ -136,9 +136,9 @@ async function run(_payload) {
   }
 }
 
-module.exports = { run };
+export { run };
 
-if (require.main === module) {
+if (import.meta.main) {
   (async () => {
     // Consume stdin to avoid broken pipe (content not used for diff)
     let totalSize = 0;

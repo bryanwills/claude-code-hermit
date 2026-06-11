@@ -72,7 +72,7 @@ The allowlist is per-channel inside the `channels` object in config.json:
 After authorization passes, run:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.js --force
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts --force
 ```
 
 This writes `state/last-operator-action.json` with the current timestamp, resetting the AUTO_CLOSE quiet window (used by both the 12h-inactivity trigger and the daily-midnight lull drain). The `UserPromptSubmit` hook deliberately skips `<channel` prompts (it can't see the allowlist); this step is the authorized write site.

@@ -1,30 +1,30 @@
-#!/usr/bin/env node
-// knowledge-lint.js — lint raw/ and compiled/ knowledge directories
+#!/usr/bin/env bun
+// knowledge-lint.ts — lint raw/ and compiled/ knowledge directories
 // Zero npm dependencies. Node stdlib only.
 //
-// Usage as CLI:   node knowledge-lint.js <hermit-state-dir>
-// Usage as lib:   require('./knowledge-lint').lint(hermitDir) => { findings, counts }
+// Usage as CLI:   bun knowledge-lint.ts <hermit-state-dir>
+// Usage as lib:   import { lint } from './knowledge-lint' — lint(hermitDir) => { findings, counts }
 //
 // findings: array of { type, file, age, reason }
 //   type: 'unreferenced' | 'stale' | 'missing-type' | 'oversized' | 'working-set' | 'stale-compiled' | 'line-limit' | 'tag-variant' | 'undeclared-type' | 'unused-declaration'
 // counts: { raw, compiled, archived }
 // options: { verbose: false } — unused-declaration findings only included when verbose=true
 
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { readFrontmatter, readFileWithFrontmatter, newestByType, globDirRecursive } from './lib/frontmatter';
 
-const fs = require('fs');
-const path = require('path');
-const { readFrontmatter, readFileWithFrontmatter, newestByType, globDirRecursive } = require('./lib/frontmatter');
+type Json = any;
 
-function parseSchema(schemaPath) {
+function parseSchema(schemaPath: string): { workProducts: Set<string>; rawCaptures: Set<string> } | null | false {
   // Returns { workProducts: Set<string>, rawCaptures: Set<string> }, null if present but empty, false if missing.
   // Bullet grammar: lines matching `^-\s+([\w-]+):` or `^-\s+\*\*([\w-]+)\*\*:` under each section heading.
-  let text;
+  let text: string;
   try { text = fs.readFileSync(schemaPath, 'utf8'); } catch { return false; }
   text = text.replace(/<!--[\s\S]*?-->/g, '');
-  const workProducts = new Set();
-  const rawCaptures = new Set();
-  let section = null;
+  const workProducts = new Set<string>();
+  const rawCaptures = new Set<string>();
+  let section: string | null = null;
   for (const line of text.split('\n')) {
     if (/^##\s+Work Products\b/.test(line)) { section = 'work'; continue; }
     if (/^##\s+Raw Captures\b/.test(line)) { section = 'raw'; continue; }
@@ -39,7 +39,7 @@ function parseSchema(schemaPath) {
   return { workProducts, rawCaptures };
 }
 
-function lint(hermitDir, options = {}) {
+function lint(hermitDir: string, options: Json = {}): { findings: Json[]; counts: { raw: number; compiled: number; archived: number }; schemaPresent: boolean } {
   const verbose = !!options.verbose;
   const rawDir = path.join(hermitDir, 'raw');
   const archiveDir = path.join(rawDir, '.archive');
@@ -65,15 +65,15 @@ function lint(hermitDir, options = {}) {
   const LINE_LIMIT = 150;
   const TAG_VARIANTS = ['foundation', 'core', 'important', 'essential', 'permanent'];
 
-  const findings = [];
+  const findings: Json[] = [];
 
   // --- Schema (parsed once; false=missing, null=present-but-empty, object=usable) ---
   const schemaPath = path.join(hermitDir, 'knowledge-schema.md');
   const schema = parseSchema(schemaPath);
 
   // --- Load compiled artifacts (shared across checks) ---
-  let compiledArtifacts = [];
-  const compiledBodies = new Map(); // filename -> body text
+  let compiledArtifacts: Json[] = [];
+  const compiledBodies = new Map<string, string>(); // filename -> body text
   try {
     const files = fs.readdirSync(compiledDir).filter(f => f.endsWith('.md') && !f.startsWith('.'));
     compiledArtifacts = files.map(f => {
@@ -89,7 +89,7 @@ function lint(hermitDir, options = {}) {
   } catch {}
 
   // --- Raw checks (active files only, not archive) ---
-  let rawFiles = [];
+  let rawFiles: Json[] = [];
   try {
     rawFiles = fs.readdirSync(rawDir)
       .filter(f => f.endsWith('.md') && !f.startsWith('.'))
@@ -164,7 +164,7 @@ function lint(hermitDir, options = {}) {
 
   // Schema: unused raw declarations (verbose only)
   if (schema && verbose) {
-    const usedRawTypes = new Set(rawFiles.map(r => r.fm.type).filter(Boolean));
+    const usedRawTypes = new Set<string>(rawFiles.map(r => r.fm.type).filter(Boolean));
     for (const declared of schema.rawCaptures) {
       if (!usedRawTypes.has(declared)) {
         findings.push({
@@ -179,7 +179,7 @@ function lint(hermitDir, options = {}) {
 
   // --- Compiled checks ---
   if (compiledArtifacts.length > 0) {
-    const workingSet = Array.from(newestByType(compiledArtifacts).values());
+    const workingSet: Json[] = Array.from(newestByType(compiledArtifacts).values());
 
     // Working set size
     if (workingSet.length > workingSetWarn) {
@@ -239,7 +239,7 @@ function lint(hermitDir, options = {}) {
       }
 
       // Tag variant warnings
-      const offenders = (a.fm.tags || []).filter(t => TAG_VARIANTS.includes(t));
+      const offenders = (a.fm.tags || []).filter((t: string) => TAG_VARIANTS.includes(t));
       if (offenders.length > 0) {
         findings.push({
           type: 'tag-variant',
@@ -262,7 +262,7 @@ function lint(hermitDir, options = {}) {
 
     // Schema: unused work-product declarations (verbose only)
     if (schema && verbose) {
-      const usedCompiledTypes = new Set(compiledArtifacts.map(a => a.fm.type).filter(Boolean));
+      const usedCompiledTypes = new Set<string>(compiledArtifacts.map(a => a.fm.type).filter(Boolean));
       for (const declared of schema.workProducts) {
         if (!usedCompiledTypes.has(declared)) {
           findings.push({
@@ -294,8 +294,10 @@ function lint(hermitDir, options = {}) {
   };
 }
 
+export { lint, parseSchema };
+
 // --- CLI mode ---
-if (require.main === module) {
+if (import.meta.main) {
   const args = process.argv.slice(2);
   const verbose = args.includes('--verbose');
   const hermitDir = args.find(a => !a.startsWith('--')) || '.claude-code-hermit';
@@ -310,10 +312,10 @@ if (require.main === module) {
   }
 
   // Group by type
-  const groups = new Map();
+  const groups = new Map<string, Json[]>();
   for (const f of findings) {
     if (!groups.has(f.type)) groups.set(f.type, []);
-    groups.get(f.type).push(f);
+    groups.get(f.type)!.push(f);
   }
 
   for (const [type, items] of groups) {
@@ -335,5 +337,3 @@ if (require.main === module) {
 
   console.log(`\n(${counts.raw} raw, ${counts.compiled} compiled, ${counts.archived} archived)`);
 }
-
-module.exports = { lint, parseSchema };

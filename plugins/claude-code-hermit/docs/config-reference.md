@@ -175,7 +175,7 @@ Optional. Controls domain knowledge retention and startup injection.
 }
 ```
 
-Modify with `/hermit-settings`. Validated by `validate-config.js` when present.
+Modify with `/hermit-settings`. Validated by `validate-config.ts` when present.
 
 ---
 

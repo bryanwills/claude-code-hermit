@@ -52,7 +52,7 @@ Scheduled checks run during idle reflection via `reflect`. If configured checks 
 
 - Check `AGENT_HOOK_PROFILE` in `config.json` `env` (written to `.claude/settings.local.json` at boot). Core hooks need `standard` or `strict`. Hermit hooks (e.g., git-push-guard) need `strict`. View/change with `/hermit-settings env`.
 - Validate hooks.json: `cat hooks/hooks.json | python3 -m json.tool`
-- Test manually: `echo '{}' | node scripts/cost-tracker.js`
+- Test manually: `echo '{}' | bun scripts/cost-tracker.ts`
 - Hooks may not fire for subagent tool calls — see [Architecture](architecture.md).
 
 ## Session-Start Hangs

@@ -1,12 +1,12 @@
-'use strict';
-
 // Suppress EPIPE errors (e.g. when stdout pipe closes early in tests)
 process.stdout.on('error', () => {});
 
 // UserPromptSubmit hook — injects per-prompt context so the model never anchors to stale state.
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
+
+type Json = any;
 
 const AGENT_DIR = process.env.AGENT_DIR || '.claude-code-hermit';
 
@@ -16,7 +16,7 @@ process.stdin.on('data', () => {});
 process.stdin.on('error', () => {});
 
 function main() {
-  let config = {};
+  let config: Json = {};
   try {
     config = JSON.parse(fs.readFileSync(path.resolve(AGENT_DIR, 'config.json'), 'utf-8'));
   } catch {

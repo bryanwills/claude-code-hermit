@@ -43,9 +43,9 @@ compliant path table.
 - **Required frontmatter:** `title:`, `type:`, `created:`, `tags:`, and a `source:`
   line pointing to the raw artifact(s) the compiled was derived from.
 - **Session injection:** every compiled file is surfaced to the model at session start
-  via `scripts/startup-context.js`. Shared budget — `knowledge.compiled_budget_chars`
+  via `scripts/startup-context.ts`. Shared budget — `knowledge.compiled_budget_chars`
   (default 2500, range 500–6000) applies across **all** compiled files, not per-file.
-  `/hermit-doctor` and `scripts/knowledge-lint.js` surface oversize. For deep retrieval
+  `/hermit-doctor` and `scripts/knowledge-lint.ts` surface oversize. For deep retrieval
   of specific past content by keyword, use `/recall`.
 - **Foundational pinning:** tag a compiled artifact `foundational` to pin it to every
   session regardless of age.
@@ -67,7 +67,7 @@ skills use this bucket to coordinate across invocations.
 - **No subdirectories** by convention. If runtime data naturally clusters, use a
   filename prefix (`monitors.runtime.json`, not `monitors/runtime.json`).
 - **Schema enforcement:** if a new JSON state file needs a guaranteed shape, add a
-  check to `scripts/validate-config.js` or a contract test in `tests/run-contracts.py`.
+  check to `scripts/validate-config.ts` or a contract test in `tests/run-contracts.py`.
 
 ## proposals/ — improvement suggestions
 
@@ -92,7 +92,7 @@ When a new skill, routine, or plugin hermit introduces a new artifact type:
 4. **Declare the types in `knowledge-schema.md`** — every artifact type must appear
    there with `Produces:`, `When:`, and `Format:` lines. This is the behavioral
    contract operators read.
-5. **No code changes required** in `archive-raw.js` or `knowledge-lint.js` — both are
+5. **No code changes required** in `archive-raw.js` or `knowledge-lint.ts` — both are
    convention-driven and pick up new artifacts automatically as long as the frontmatter
    contract is respected.
 6. **If runtime coordination is needed** (a queue, a dedup table, a counter), add a

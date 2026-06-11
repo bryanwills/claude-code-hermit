@@ -1,7 +1,5 @@
-'use strict';
-
-// heartbeat-precheck.js — fast-path verdict before the LLM evaluates HEARTBEAT.md.
-// Usage: node heartbeat-precheck.js [--peek] <hermit-state-dir>
+// heartbeat-precheck.ts — fast-path verdict before the LLM evaluates HEARTBEAT.md.
+// Usage: bun heartbeat-precheck.ts [--peek] <hermit-state-dir>
 // Output (stdout, one line): SKIP|<reason>  |  OK  |  AUTO_CLOSE  |  EVALUATE
 // Exit 0 always. Without --peek: writes updated alert-state.json (increments total_ticks).
 // With --peek: read-only — computes the same verdict without any state mutation.
@@ -10,11 +8,13 @@
 //   This script owns: alert-state.json total_ticks
 //   SKILL.md owns:    alert-state.json alerts{}, self_eval{}, last_digest_date
 
-const fs = require('fs');
-const path = require('path');
-const { currentHHMM, todayYMD } = require('./lib/time');
+import fs from 'node:fs';
+import path from 'node:path';
+import { currentHHMM, todayYMD } from './lib/time';
 
-function emit(verdict) {
+type Json = any;
+
+function emit(verdict: string): never {
   process.stdout.write(verdict + '\n');
   process.exit(0);
 }
@@ -23,19 +23,19 @@ const peek = process.argv[2] === '--peek';
 const stateDir = peek ? process.argv[3] : process.argv[2];
 if (!stateDir) emit('EVALUATE');
 
-const readJSON = (p) => {
+const readJSON = (p: string): Json => {
   try { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
   catch { return null; }
 };
 
-const writeJSON = (p, obj) => {
+const writeJSON = (p: string, obj: Json): void => {
   try { fs.writeFileSync(p, JSON.stringify(obj, null, 2) + '\n', 'utf-8'); }
   catch { /* fail-open */ }
 };
 
 // Normalises a HEARTBEAT.md checklist item to its dedup key.
 // Key format mirrors SKILL.md: 'checklist:<first-8-chars-normalized>'.
-function normalizeItemKey(itemText) {
+function normalizeItemKey(itemText: string): string | null {
   const text = itemText
     .replace(/^[-*+]\s*(\[.\]\s*)?/, '')
     .toLowerCase()
@@ -45,11 +45,11 @@ function normalizeItemKey(itemText) {
 }
 
 // Same unit set the heartbeat skill uses for `every`.
-function parseDuration(str, defaultMs) {
+function parseDuration(str: Json, defaultMs: number): number {
   if (typeof str !== 'string') return defaultMs;
   const m = str.trim().match(/^(\d+)\s*([smh])$/i);
   if (!m) return defaultMs;
-  const mult = { s: 1000, m: 60000, h: 3600000 }[m[2].toLowerCase()];
+  const mult = ({ s: 1000, m: 60000, h: 3600000 } as Record<string, number>)[m[2].toLowerCase()];
   return parseInt(m[1], 10) * mult;
 }
 
@@ -93,7 +93,7 @@ if (process.env.HERMIT_NOW) {
   }
 }
 
-let heartbeatContent;
+let heartbeatContent: string;
 try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }
 catch { emit('SKIP|HEARTBEAT.md missing'); }
 
@@ -131,7 +131,7 @@ if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20
 
 const microProposals = readJSON(path.join(stateDir, 'state', 'micro-proposals.json')) ?? { pending: [] };
 const hasPendingMicro = Array.isArray(microProposals.pending) &&
-  microProposals.pending.some(p => p.status === 'pending' && p.tier === 1);
+  microProposals.pending.some((p: Json) => p.status === 'pending' && p.tier === 1);
 if (hasPendingMicro) emit('EVALUATE');
 
 const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
@@ -177,8 +177,8 @@ if (sessionState === 'in_progress') {
 // waiting-timeout check requires elapsed computation — delegate to LLM
 if (sessionState === 'waiting' && hbConfig.waiting_timeout) emit('EVALUATE');
 
-const alerts = alertState.alerts ?? {};
-const hasSuppressed = Object.values(alerts).some(e => e?.suppressed === true);
+const alerts: Json = alertState.alerts ?? {};
+const hasSuppressed = Object.values(alerts).some((e: Json) => e?.suppressed === true);
 const today = todayYMD(timezone);
 if (hasSuppressed && alertState.last_digest_date !== today) emit('EVALUATE');
 

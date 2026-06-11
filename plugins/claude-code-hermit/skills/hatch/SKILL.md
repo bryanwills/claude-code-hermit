@@ -131,7 +131,7 @@ Initialize state files (inline — shape-insensitive or append-only):
 - `.claude-code-hermit/state/observations.jsonl`: empty file — append-only sub-threshold observation ledger (`{ts, pattern, session_id, source}`; read by `reflect` for recurrence graduation, pruned by `scripts/prune-observations.js`)
 - `.claude-code-hermit/state/routine-metrics.jsonl`: empty file — append-only routine fire log (`fired` events written by `scripts/log-routine-event.sh` from CronCreate prompts)
 - `.claude-code-hermit/state/update-history.jsonl`: empty file — append-only log of `hermit-docker update` runs
-- `.claude-code-hermit/state/channel-replies.jsonl`: empty file — append-only channel reply log (routine-ROI join source; written by `channel-hook.js`)
+- `.claude-code-hermit/state/channel-replies.jsonl`: empty file — append-only channel reply log (routine-ROI join source; written by `channel-hook.ts`)
 - `.claude-code-hermit/state/pending-close.json`: do NOT initialize — created lazily by the `daily-auto-close` skill when the midnight routine fires while the operator is currently active. Deleted by `session-close --auto` after the archive succeeds.
 
 - Read the template files from `${CLAUDE_SKILL_DIR}/../../state-templates/`
@@ -592,15 +592,15 @@ Merge these into the target file:
       "Bash(git diff:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
-      "Bash(node */scripts/cost-tracker.js*)",
-      "Bash(node */scripts/suggest-compact.js*)",
-      "Bash(node */scripts/heartbeat-precheck.js*)",
+      "Bash(bun */scripts/cost-tracker.ts*)",
+      "Bash(bun */scripts/suggest-compact.ts*)",
+      "Bash(bun */scripts/heartbeat-precheck.ts*)",
       "Bash(node */scripts/reflect-precheck.js*)",
       "Bash(node */scripts/archive-shell.js*)",
-      "Bash(node */scripts/run-with-profile.js*)",
-      "Bash(node */scripts/evaluate-session.js*)",
+      "Bash(bun */scripts/run-with-profile.ts*)",
+      "Bash(bun */scripts/evaluate-session.ts*)",
       "Bash(node */scripts/append-metrics.js*)",
-      "Bash(node */scripts/generate-summary.js*)",
+      "Bash(bun */scripts/generate-summary.ts*)",
       "Bash(node */scripts/update-reflection-state.js*)",
       "Bash(node */scripts/cron-tz-shift.js*)",
       "Bash(node */scripts/evolve-plan.js*)",
@@ -614,7 +614,7 @@ Merge these into the target file:
 
 **Why each one:**
 
-- `git diff`, `git status`, `git log` — session-diff.js hook auto-populates `## Changed` in SHELL.md
+- `git diff`, `git status`, `git log` — session-diff.ts hook auto-populates `## Changed` in SHELL.md
 - `node */scripts/<name>.js` — Stop hooks (cost-tracker, suggest-compact, session-diff, evaluate-session) and precheck scripts (heartbeat-precheck, reflect-precheck), scoped to plugin scripts only
 - `bash -c 'AGENT_DIR=...` — SessionStart hook that loads session context on every startup
 - `Edit`, `Write` on `.claude-code-hermit/**` — heartbeat appends to SHELL.md, increments config.json tick counter, and skills update session state without prompting

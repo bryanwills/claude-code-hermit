@@ -1,5 +1,3 @@
-'use strict';
-
 // Suppress EPIPE errors (e.g. when stdout pipe closes early in tests)
 process.stdout.on('error', () => {});
 
@@ -8,12 +6,14 @@ process.stdout.on('error', () => {});
 // and chat_id. Operators on Discord/Telegram read the channel, not the
 // transcript; this reminder fires right before the model's next turn.
 
-const { safeForLLM } = require('./lib/sanitize.js');
+import { safeForLLM } from './lib/sanitize';
+
+type Json = any;
 
 // Known channel sources → exact MCP reply tool name.
 // Unknown sources fall back to a generic phrase so future channel plugins
 // still benefit from the reminder without a code change.
-const REPLY_TOOLS = {
+const REPLY_TOOLS: Record<string, string> = {
   discord: 'mcp__plugin_discord_discord__reply',
   telegram: 'mcp__plugin_telegram_telegram__reply',
   imessage: 'mcp__plugin_imessage_imessage__reply',
@@ -22,8 +22,8 @@ const REPLY_TOOLS = {
 const MAX_SOURCE_LEN = 32;
 const MAX_CHAT_ID_LEN = 128;
 
-function main(raw) {
-  let payload;
+function main(raw: string): void {
+  let payload: Json;
   try {
     payload = JSON.parse(raw);
   } catch {

@@ -3,15 +3,13 @@
 // Changes: Renamed env var from ECC_HOOK_PROFILE to AGENT_HOOK_PROFILE,
 //          stripped ECC-specific disabled-hooks logic, kept core profile-gating pattern.
 
-'use strict';
-
-const path = require('path');
-const { spawnSync } = require('child_process');
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 /**
  * Profile-gated hook execution wrapper.
  *
- * Usage: bun run-with-profile.js <requiredProfiles> <scriptPath>
+ * Usage: bun run-with-profile.ts <requiredProfiles> <scriptPath>
  *
  * requiredProfiles: comma-separated list of profiles that enable this hook
  *                   e.g. "standard,strict" means the hook runs on standard OR strict
@@ -27,11 +25,11 @@ const VALID_PROFILES = new Set(['minimal', 'standard', 'strict']);
 function main() {
   const args = process.argv.slice(2);
   if (args.length < 2) {
-    console.error('Usage: bun run-with-profile.js <requiredProfiles> <scriptPath>');
+    console.error('Usage: bun run-with-profile.ts <requiredProfiles> <scriptPath>');
     process.exit(1);
   }
 
-  const [requiredProfilesCsv, scriptPath] = args;
+  const [requiredProfilesCsv, scriptPath] = args as [string, string];
   const requiredProfiles = new Set(requiredProfilesCsv.split(',').map(p => p.trim()));
   const activeProfile = (process.env.AGENT_HOOK_PROFILE || 'standard').trim().toLowerCase();
 
@@ -49,7 +47,7 @@ function main() {
 
   // Profile matches — execute the target script
   // Prevent path traversal
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
   const resolved = path.resolve(pluginRoot, scriptPath);
   if (!resolved.startsWith(pluginRoot)) {
     console.error('Path traversal detected — blocking execution');

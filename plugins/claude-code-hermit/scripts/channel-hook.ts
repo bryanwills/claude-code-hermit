@@ -1,8 +1,8 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { safe } from './lib/sanitize';
 
-const fs = require('fs');
-const path = require('path');
-const { safe } = require('./lib/sanitize');
+type Json = any;
 
 /**
  * PostToolUse hook for channel reply tools (Discord, Telegram, etc.).
@@ -20,13 +20,13 @@ const ACTIVITY_PATH = path.resolve('.claude-code-hermit/state/channel-activity.j
 const REPLIES_PATH = path.resolve('.claude-code-hermit/state/channel-replies.jsonl');
 const MAX_STDIN = 64 * 1024;
 
-const SERVER_TO_CHANNEL = {
+const SERVER_TO_CHANNEL: Record<string, string> = {
   discord: 'discord',
   telegram: 'telegram',
   imessage: 'imessage',
 };
 
-function resolveChannel(toolName) {
+function resolveChannel(toolName: string): string | null {
   // The hooks.json matcher already filters to channel reply tools.
   // Just extract the channel name from anywhere in the tool name —
   // covers all formats: mcp__discord__reply, plugin_discord_discord_reply,
@@ -36,7 +36,7 @@ function resolveChannel(toolName) {
   return SERVER_TO_CHANNEL[match[1]] || null;
 }
 
-function readConfig() {
+function readConfig(): Json | null {
   try {
     return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   } catch {
@@ -44,11 +44,11 @@ function readConfig() {
   }
 }
 
-function writeConfig(config) {
+function writeConfig(config: Json): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
 }
 
-function persistDmChannelId(config, channelKey, chatId) {
+function persistDmChannelId(config: Json, channelKey: string, chatId: Json): boolean {
   if (!chatId) return false;
 
   const channel = config.channels[channelKey];
@@ -61,9 +61,9 @@ function persistDmChannelId(config, channelKey, chatId) {
   return true;
 }
 
-function updateLastReplyAt(channelKey, ts) {
+function updateLastReplyAt(channelKey: string, ts: string): void {
   try {
-    let activity = {};
+    let activity: Json = {};
     try {
       activity = JSON.parse(fs.readFileSync(ACTIVITY_PATH, 'utf8'));
     } catch {}
@@ -75,7 +75,7 @@ function updateLastReplyAt(channelKey, ts) {
   } catch {}
 }
 
-function appendReplyEvent(channelKey, ts) {
+function appendReplyEvent(channelKey: string, ts: string): void {
   try {
     const entry = JSON.stringify({ ts, channel: channelKey, event: 'reply' });
     fs.appendFileSync(REPLIES_PATH, entry + '\n', 'utf8');

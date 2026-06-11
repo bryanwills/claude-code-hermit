@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib.sh"
 echo "=== auto-close (PROP-040) ==="
 echo ""
 
-HEARTBEAT_PRECHECK="$REPO_ROOT/scripts/heartbeat-precheck.js"
+HEARTBEAT_PRECHECK="$REPO_ROOT/scripts/heartbeat-precheck.ts"
 REFLECT_PRECHECK="$REPO_ROOT/scripts/reflect-precheck.js"
 WEEKLY_REVIEW="$REPO_ROOT/scripts/weekly-review.js"
 
@@ -157,7 +157,7 @@ echo ""
 echo "=== last-operator-action.json signal ==="
 echo ""
 
-RECORD_HOOK="$REPO_ROOT/scripts/record-operator-action.js"
+RECORD_HOOK="$REPO_ROOT/scripts/record-operator-action.ts"
 
 # -------------------------------------------------------
 # a. precheck: last-operator-action.json 13h ago + fresh SHELL.md mtime → AUTO_CLOSE

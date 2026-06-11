@@ -1,5 +1,5 @@
 // Per-1M-token pricing (USD). Source of truth for all cost calculations.
-// Keep in sync with the displayed model names in cost-tracker.js detectModel().
+// Keep in sync with the displayed model names in cost-tracker.ts detectModel().
 // Note: when Anthropic updates prices, change ONLY this file.
 type ModelPricing = { input: number; cacheWrite: number; cacheRead: number; output: number };
 

@@ -3,21 +3,21 @@
 // Changes: Replaced ECC quality criteria with session-specific criteria
 //          (task status, SHELL.md current, blockers documented, next-start-point clear).
 //          Outputs structured quality score for session reports.
-//          Plan tracking criterion reads native Claude Code Tasks (via lib/tasks.js).
+//          Plan tracking criterion reads native Claude Code Tasks (via lib/tasks.ts).
 
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { readTasks } from './lib/tasks';
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { readTasks } = require('./lib/tasks');
+type Json = any;
 
 const SHELL_SESSION = path.resolve('.claude-code-hermit/sessions/SHELL.md');
 const HASH_FILE = path.resolve('.claude-code-hermit/sessions/.eval-hash');
 const RUNTIME_JSON = path.resolve('.claude-code-hermit/state/runtime.json');
 
-function evaluateSession(content, tasks) {
-  const results = {
+function evaluateSession(content: Json, tasks: Json[]): Json {
+  const results: Json = {
     criteria: [],
     overall: 'pass',
   };
@@ -33,7 +33,7 @@ function evaluateSession(content, tasks) {
   }
 
   // Criterion 1: Session state is valid (reads runtime.json — authoritative lifecycle source)
-  let sessionState = null;
+  let sessionState: string | null = null;
   try {
     const rt = JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8'));
     sessionState = rt.session_state || null;
@@ -55,7 +55,7 @@ function evaluateSession(content, tasks) {
   });
 
   // Helper: check if a markdown section exists and has non-comment content
-  function checkSection(sectionName) {
+  function checkSection(sectionName: string): { exists: boolean; hasContent: Json } {
     const section = content.match(new RegExp(`## ${sectionName}\n([\\s\\S]*?)(?=\n## |$)`));
     const text = section ? section[1].trim() : '';
     return { exists: !!section, hasContent: text && !text.startsWith('<!--') };
@@ -90,8 +90,8 @@ function evaluateSession(content, tasks) {
   });
 
   // Determine overall score
-  const failCount = results.criteria.filter(c => c.status === 'fail').length;
-  const warnCount = results.criteria.filter(c => c.status === 'warn').length;
+  const failCount = results.criteria.filter((c: Json) => c.status === 'fail').length;
+  const warnCount = results.criteria.filter((c: Json) => c.status === 'warn').length;
 
   if (failCount > 0) {
     results.overall = 'fail';
@@ -105,7 +105,7 @@ function evaluateSession(content, tasks) {
 }
 
 // Core evaluation logic extracted for use by both run() and standalone main().
-async function _evaluate() {
+async function _evaluate(): Promise<string | null> {
   // Profile gating — run on "standard" and "strict" only
   const profile = (process.env.AGENT_HOOK_PROFILE || 'standard').trim().toLowerCase();
   if (profile === 'minimal') {
@@ -113,7 +113,7 @@ async function _evaluate() {
   }
 
   // Read SHELL.md once — used for hash check and passed to evaluateSession
-  let content;
+  let content: string | null;
   try {
     content = fs.readFileSync(SHELL_SESSION, 'utf-8');
   } catch {
@@ -183,7 +183,7 @@ async function _evaluate() {
   }
 
   // Human-readable summary to stderr
-  const icon = { pass: 'PASS', warn: 'WARN', fail: 'FAIL', info: 'INFO' };
+  const icon: Record<string, string> = { pass: 'PASS', warn: 'WARN', fail: 'FAIL', info: 'INFO' };
   console.error(`\n[session-eval] Overall: ${icon[results.overall]}`);
   for (const c of results.criteria) {
     console.error(`  [${icon[c.status]}] ${c.name}: ${c.detail}`);
@@ -192,21 +192,21 @@ async function _evaluate() {
   return JSON.stringify(results, null, 2);
 }
 
-// Exported run() function for use by stop-pipeline.js.
+// Exported run() function for use by stop-pipeline.ts.
 // Returns the JSON results string, or null if skipped/cached.
 // process.exit() calls become returns so the pipeline is not killed.
-async function run(_payload) {
+async function run(_payload: Json): Promise<string | null> {
   try {
     return await _evaluate();
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[session-eval] Error: ${err.message}`);
     return null;
   }
 }
 
-module.exports = { run };
+export { run };
 
-if (require.main === module) {
+if (import.meta.main) {
   (async () => {
     try {
       // Profile gating — run on "standard" and "strict" only
@@ -224,7 +224,7 @@ if (require.main === module) {
 
       const result = await _evaluate();
       if (result) console.log(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error(`[session-eval] Error: ${err.message}`);
       process.exit(0);
     }

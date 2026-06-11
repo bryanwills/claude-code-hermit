@@ -1,24 +1,24 @@
-'use strict';
-
-// stop-pipeline.js — unified Stop hook
+// stop-pipeline.ts — unified Stop hook
 // Reads stdin once, runs all stop stages in sequence, touches heartbeat.
 // Only suggest-compact output goes to stdout (Claude Code parses it).
 // All other stage output goes to stderr.
 
-const { run: costTracker } = require('./cost-tracker');
-const { run: suggestCompact } = require('./suggest-compact');
-const { run: sessionDiff } = require('./session-diff');
-const { run: evaluateSession } = require('./evaluate-session');
-const { sessionCrons, backgroundTasks, ccVersion } = require('./lib/cc-compat');
-const fs = require('fs');
-const path = require('path');
+import { run as costTracker } from './cost-tracker';
+import { run as suggestCompact } from './suggest-compact';
+import { run as sessionDiff } from './session-diff';
+import { run as evaluateSession } from './evaluate-session';
+import { sessionCrons, backgroundTasks, ccVersion } from './lib/cc-compat';
+import fs from 'node:fs';
+import path from 'node:path';
+
+type Json = any;
 
 const HEARTBEAT_FILE = path.resolve('.claude-code-hermit/state/.heartbeat');
 const SNAPSHOT_FILE = path.resolve('.claude-code-hermit/state/cc-stop-snapshot.json');
 
-async function main() {
+async function main(): Promise<void> {
   // Read stdin once
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let totalSize = 0;
   for await (const chunk of process.stdin) {
     totalSize += chunk.length;
@@ -29,7 +29,7 @@ async function main() {
 
   // Defensive: fall back to {} on malformed/truncated input.
   // Stages that don't need the payload still run even on bad input.
-  let payload = {};
+  let payload: Json = {};
   if (raw) {
     try { payload = JSON.parse(raw); } catch {
       console.error('[stop-pipeline] malformed stdin, falling back to empty payload');
@@ -40,25 +40,25 @@ async function main() {
   const isStandardPlus = profile !== 'minimal';
 
   // Suggest-compact output gets special treatment — Claude Code parses it for additionalContext
-  let compactSuggestion = null;
+  let compactSuggestion: Json = null;
 
   // Stage 1: cost-tracker (always)
   try {
     const out = await costTracker(payload);
     if (out) console.error(out);
-  } catch (e) { console.error(`[stop-pipeline] cost-tracker: ${e.message}`); }
+  } catch (e: any) { console.error(`[stop-pipeline] cost-tracker: ${e.message}`); }
 
   // Stage 2: suggest-compact (standard+)
   if (isStandardPlus) {
     try {
       compactSuggestion = await suggestCompact(payload);
-    } catch (e) { console.error(`[stop-pipeline] suggest-compact: ${e.message}`); }
+    } catch (e: any) { console.error(`[stop-pipeline] suggest-compact: ${e.message}`); }
   }
 
   // Stage 3: session-diff (standard+, state-aware debounce)
   if (isStandardPlus) {
     try { await sessionDiff(payload); }
-    catch (e) { console.error(`[stop-pipeline] session-diff: ${e.message}`); }
+    catch (e: any) { console.error(`[stop-pipeline] session-diff: ${e.message}`); }
   }
 
   // Stage 4: evaluate-session (standard+)
@@ -66,7 +66,7 @@ async function main() {
     try {
       const out = await evaluateSession(payload);
       if (out) console.error(out);
-    } catch (e) { console.error(`[stop-pipeline] evaluate-session: ${e.message}`); }
+    } catch (e: any) { console.error(`[stop-pipeline] evaluate-session: ${e.message}`); }
   }
 
   // Guaranteed heartbeat touch — runs even if all stages fail

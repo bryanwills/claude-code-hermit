@@ -75,14 +75,14 @@ run_test "safeForLLM: case-insensitive (<System-Reminder>)" bash -c \
   "bun -e \"const {safeForLLM}=require('$SANITIZE_LIB'); const r=safeForLLM('<System-Reminder>x</System-Reminder>'); process.exit(r.includes('<System-Reminder>') || r.includes('</System-Reminder>') ? 1 : 0)\""
 
 # -------------------------------------------------------
-# knowledge-lint.js
+# knowledge-lint.ts
 # -------------------------------------------------------
 
 # 4. Empty state — no raw/, no compiled/
 workdir="$(setup_workdir)"
 echo '{}' > "$workdir/.claude-code-hermit/config.json"
 run_test "knowledge-lint (empty state)" bash -c \
-  "bun '$REPO_ROOT/scripts/knowledge-lint.js' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
+  "bun '$REPO_ROOT/scripts/knowledge-lint.ts' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
 cleanup
 
 # 5. Findings: stale, unreferenced, oversized, missing-type
@@ -97,7 +97,7 @@ printf -- '---\ntitle: big\ntype: briefing\ncreated: 2026-04-10T00:00:00+00:00\n
   "$(python3 -c "print('x' * 1500)")" \
   > "$workdir/.claude-code-hermit/compiled/big.md"
 outfile="$(mktemp)"
-bun "$REPO_ROOT/scripts/knowledge-lint.js" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
+bun "$REPO_ROOT/scripts/knowledge-lint.ts" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
 run_test "knowledge-lint (finds unreferenced or stale)" grep -qE 'unreferenced|stale' "$outfile"
 run_test "knowledge-lint (finds stale)" grep -q 'stale' "$outfile"
 run_test "knowledge-lint (finds oversized)" grep -q 'oversized' "$outfile"
@@ -116,7 +116,7 @@ printf -- '---\ntitle: big\ntype: briefing\ncreated: 2026-06-01T00:00:00+00:00\n
   "$(python3 -c "print('x' * 1500)")" \
   > "$workdir/.claude-code-hermit/compiled/briefing-big.md"
 outfile="$(mktemp)"
-bun "$REPO_ROOT/scripts/knowledge-lint.js" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
+bun "$REPO_ROOT/scripts/knowledge-lint.ts" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
 run_test "knowledge-lint (stub exempts oversized)" bash -c \
   "! grep -q 'context-stubbed' \"$outfile\""
 run_test "knowledge-lint (unstubbed oversized still flagged)" grep -q 'oversized' "$outfile"
@@ -134,7 +134,7 @@ printf -- '---\ntitle: fresh\ntype: source\ncreated: 2026-04-14T00:00:00+00:00\n
 printf -- '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\nBased on fresh-snap.md data' \
   > "$workdir/.claude-code-hermit/compiled/summary.md"
 run_test "knowledge-lint (clean state)" bash -c \
-  "bun '$REPO_ROOT/scripts/knowledge-lint.js' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
+  "bun '$REPO_ROOT/scripts/knowledge-lint.ts' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
 cleanup
 
 # 6a. Schema-empty finding — template-style schema (all bullets commented) emits schema-empty without --verbose
@@ -149,7 +149,7 @@ cp "$REPO_ROOT/state-templates/knowledge-schema.md.template" "$workdir/.claude-c
 # Remove the starter bullets we just added to simulate a pre-upgrade all-comments schema
 sed -i '/^- note:/d; /^- input:/d; /^- review:/d; /^- procedure-brief:/d' "$workdir/.claude-code-hermit/knowledge-schema.md"
 outfile="$(mktemp)"
-bun "$REPO_ROOT/scripts/knowledge-lint.js" "$workdir/.claude-code-hermit" > "$outfile" 2>&1 || true
+bun "$REPO_ROOT/scripts/knowledge-lint.ts" "$workdir/.claude-code-hermit" > "$outfile" 2>&1 || true
 run_test "knowledge-lint (schema-empty emitted without --verbose)" grep -q 'schema-empty' "$outfile"
 rm -f "$outfile"
 cleanup
@@ -164,14 +164,14 @@ printf -- '## Work Products\n- briefing: daily summary\n\n## Raw Captures\n- sou
 printf -- '---\ntitle: unknown\ntype: foo\ncreated: 2026-04-14T00:00:00+00:00\n---\ndata' \
   > "$workdir/.claude-code-hermit/compiled/unknown.md"
 outfile="$(mktemp)"
-bun "$REPO_ROOT/scripts/knowledge-lint.js" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
+bun "$REPO_ROOT/scripts/knowledge-lint.ts" "$workdir/.claude-code-hermit" > "$outfile" 2>&1
 run_test "knowledge-lint (schema: undeclared type warned)" grep -q 'undeclared-type' "$outfile"
 rm -f "$outfile"
 # Matching type: schema has 'briefing', file has type: briefing — no undeclared-type
 printf -- '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\ndata' \
   > "$workdir/.claude-code-hermit/compiled/unknown.md"
 run_test "knowledge-lint (schema: declared type is clean)" bash -c \
-  "bun '$REPO_ROOT/scripts/knowledge-lint.js' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
+  "bun '$REPO_ROOT/scripts/knowledge-lint.ts' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
 cleanup
 
 # 6c. Bold-format schema — entries written as `- **type**:` are parsed (no schema-empty, no undeclared-type)
@@ -185,7 +185,7 @@ printf -- '---\ntitle: fresh\ntype: source\ncreated: 2026-04-14T00:00:00+00:00\n
 printf -- '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\nBased on fresh-snap.md data' \
   > "$workdir/.claude-code-hermit/compiled/summary.md"
 run_test "knowledge-lint (bold schema entries parsed)" bash -c \
-  "bun '$REPO_ROOT/scripts/knowledge-lint.js' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
+  "bun '$REPO_ROOT/scripts/knowledge-lint.ts' '$workdir/.claude-code-hermit' | grep -q 'Knowledge base is clean'"
 cleanup
 
 # -------------------------------------------------------
@@ -210,7 +210,7 @@ printf -- '---\ntype: briefing\ncreated: 2000-01-15T00:00:00+00:00\n---\nDerived
 
 # Regression: review-weekly must not mask stale raw in knowledge-lint
 lint_outfile="$(mktemp)"
-bun "$REPO_ROOT/scripts/knowledge-lint.js" "$workdir/.claude-code-hermit" > "$lint_outfile" 2>&1
+bun "$REPO_ROOT/scripts/knowledge-lint.ts" "$workdir/.claude-code-hermit" > "$lint_outfile" 2>&1
 run_test "knowledge-lint (review-weekly does not mask stale)" grep -q '^stale ' "$lint_outfile"
 run_test "knowledge-lint (expired raw flagged stale)" grep -q 'raw/expired-snap.md' "$lint_outfile"
 rm -f "$lint_outfile"
@@ -311,7 +311,7 @@ run_test "update-reflection-state (judge_suppress_by_code: absent payload preser
 cleanup
 
 # -------------------------------------------------------
-# heartbeat-precheck.js
+# heartbeat-precheck.ts
 # -------------------------------------------------------
 
 # 12. SKIP — HEARTBEAT.md missing
@@ -322,7 +322,7 @@ echo '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":0}' \
   > "$workdir/.claude-code-hermit/state/alert-state.json"
 echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (SKIP: missing HEARTBEAT.md)" bash -c "echo '$out' | grep -qE '^SKIP\|'"
 cleanup
 
@@ -335,7 +335,7 @@ echo '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":0}' \
 echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat Checklist\n<!-- no items -->\n' > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (SKIP: empty HEARTBEAT.md)" bash -c "echo '$out' | grep -qE '^SKIP\|'"
 cleanup
 
@@ -348,7 +348,7 @@ echo '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":0}' \
 echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Check something\n' > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (SKIP: outside active hours)" bash -c "echo '$out' | grep -qE '^SKIP\|'"
 cleanup
 
@@ -362,7 +362,7 @@ echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.js
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (EVALUATE: item not in alerts)" bash -c "[ '$out' = 'EVALUATE' ]"
 cleanup
 
@@ -377,7 +377,7 @@ echo '{"pending":[{"id":"MP-001","tier":1,"status":"pending","question":"Do X?"}
   > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (EVALUATE: tier-1 micro-proposal pending)" bash -c "[ '$out' = 'EVALUATE' ]"
 cleanup
 
@@ -391,7 +391,7 @@ echo '{"session_state":"in_progress"}' > "$workdir/.claude-code-hermit/state/run
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (EVALUATE: session in_progress)" bash -c "[ '$out' = 'EVALUATE' ]"
 cleanup
 
@@ -405,7 +405,7 @@ echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.js
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (EVALUATE: self-eval due at tick 20)" bash -c "[ '$out' = 'EVALUATE' ]"
 cleanup
 
@@ -419,7 +419,7 @@ echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.js
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit")"
+out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck (OK: all items suppressed and stable)" bash -c "[ '$out' = 'OK' ]"
 cleanup
 
@@ -433,7 +433,7 @@ echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.js
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
-bun "$REPO_ROOT/scripts/heartbeat-precheck.js" "$workdir/.claude-code-hermit" >/dev/null
+bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" "$workdir/.claude-code-hermit" >/dev/null
 run_test "heartbeat-precheck (total_ticks incremented once)" bash -c \
   "python3 -c \"import json; d=json.load(open('$workdir/.claude-code-hermit/state/alert-state.json')); assert d['total_ticks']==4\""
 run_test "heartbeat-precheck (alerts{} not mutated by precheck)" bash -c \
@@ -443,7 +443,7 @@ run_test "heartbeat-precheck (self_eval{} not mutated by precheck)" bash -c \
 cleanup
 
 # -------------------------------------------------------
-# heartbeat-precheck.js --peek (read-only mode)
+# heartbeat-precheck.ts --peek (read-only mode)
 # -------------------------------------------------------
 
 # 20a. --peek returns verdict without mutating total_ticks
@@ -454,7 +454,7 @@ echo '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":5}' \
   > "$workdir/.claude-code-hermit/state/alert-state.json"
 echo '{"session_state":"idle"}' > "$workdir/.claude-code-hermit/state/runtime.json"
 echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json"
-peek_out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" --peek "$workdir/.claude-code-hermit")"
+peek_out="$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" --peek "$workdir/.claude-code-hermit")"
 run_test "heartbeat-precheck --peek (returns verdict)" bash -c "[ -n '$peek_out' ]"
 run_test "heartbeat-precheck --peek (total_ticks not mutated)" bash -c \
   "python3 -c \"import json; d=json.load(open('$workdir/.claude-code-hermit/state/alert-state.json')); assert d['total_ticks']==5\""
@@ -471,7 +471,7 @@ echo '{"pending":[]}' > "$workdir/.claude-code-hermit/state/micro-proposals.json
 printf '# Heartbeat\n- Review proposals/ for any needing attention\n' \
   > "$workdir/.claude-code-hermit/HEARTBEAT.md"
 run_test "heartbeat-precheck --peek (self-eval EVALUATE at tick 19)" bash -c \
-  "[ \"$(bun "$REPO_ROOT/scripts/heartbeat-precheck.js" --peek "$workdir/.claude-code-hermit")\" = 'EVALUATE' ]"
+  "[ \"$(bun "$REPO_ROOT/scripts/heartbeat-precheck.ts" --peek "$workdir/.claude-code-hermit")\" = 'EVALUATE' ]"
 run_test "heartbeat-precheck --peek (self-eval: total_ticks still 19)" bash -c \
   "python3 -c \"import json; d=json.load(open('$workdir/.claude-code-hermit/state/alert-state.json')); assert d['total_ticks']==19\""
 cleanup
@@ -935,7 +935,7 @@ cleanup "$COST_LOG_WORKDIR"
 # -------------------------------------------------------
 # lib/pricing.js — shared pricing regression
 # Validates that extracting pricing into lib didn't change any output.
-# Golden values computed from the original cost-tracker.js constants.
+# Golden values computed from the original cost-tracker.ts constants.
 # -------------------------------------------------------
 
 # Pricing lib exports the required symbols
@@ -1039,7 +1039,7 @@ cleanup
 # cost-tracker: classifySource / scanTriggerMarkers unit tests
 # -------------------------------------------------------
 
-TRACKER_LIB="$REPO_ROOT/scripts/cost-tracker.js"
+TRACKER_LIB="$REPO_ROOT/scripts/cost-tracker.ts"
 
 # Exports the new symbols
 run_test "cost-tracker: exports classifySource and scanTriggerMarkers" bash -c \

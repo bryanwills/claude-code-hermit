@@ -19,7 +19,7 @@ Read-only lint of the hermit's knowledge directories. Reports findings without m
 Run the shared lint script:
 
 ```bash
-node scripts/knowledge-lint.js .claude-code-hermit
+bun scripts/knowledge-lint.ts .claude-code-hermit
 ```
 
 The script path is relative to the plugin install directory. Use `Bash` to execute it.

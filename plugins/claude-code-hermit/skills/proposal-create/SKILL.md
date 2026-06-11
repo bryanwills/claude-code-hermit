@@ -95,7 +95,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.js \
    ```
 5. Update state summary:
    ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/generate-summary.js .claude-code-hermit/state/
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/generate-summary.ts .claude-code-hermit/state/
    ```
 
 ## Do NOT Create Proposals For

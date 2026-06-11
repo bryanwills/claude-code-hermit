@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/enforce-deny-patterns.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/enforce-deny-patterns.ts"],
             "timeout": 3
           }
         ],
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/cache-edit-guard.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/cache-edit-guard.ts"],
             "timeout": 3
           }
         ],
@@ -33,7 +33,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-hook.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-hook.ts"],
             "timeout": 5
           }
         ],
@@ -56,7 +56,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.ts"],
             "timeout": 5,
             "continueOnBlock": true
           }
@@ -69,7 +69,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/generate-summary.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/generate-summary.ts"],
             "timeout": 5
           }
         ],
@@ -83,7 +83,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/prompt-context.js"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/prompt-context.ts"]
           }
         ],
         "description": "Inject current local time before every prompt so the model never anchors to a stale 'now'"
@@ -94,7 +94,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-reply-reminder.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-reply-reminder.ts"],
             "timeout": 3
           }
         ],
@@ -106,7 +106,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts"],
             "timeout": 3
           }
         ],
@@ -120,7 +120,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/startup-context.js"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/startup-context.ts"]
           }
         ],
         "description": "Load session context on startup"
@@ -131,7 +131,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts"],
             "timeout": 3
           }
         ],
@@ -145,7 +145,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/stop-pipeline.js"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/stop-pipeline.ts"],
             "timeout": 15
           }
         ],

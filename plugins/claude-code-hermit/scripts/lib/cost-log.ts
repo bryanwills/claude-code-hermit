@@ -14,8 +14,8 @@
 //   skipped_corrupt_lines — count of JSONL lines that failed JSON.parse (Known Limitation #3)
 //   updated_at            — ISO timestamp of last index write
 //
-// Sole writer: cost-tracker.js (calls updateCostIndex after every log append).
-// Readers: cost-tracker.js (writeCostSummary, getCumulativeCost fallback), doctor-check.js.
+// Sole writer: cost-tracker.ts (calls updateCostIndex after every log append).
+// Readers: cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.js.
 
 import fs from 'node:fs';
 import path from 'node:path';

@@ -40,10 +40,10 @@ cat tests/fixtures/stop-hook-input.json | node scripts/suggest-compact.js
 # session-diff (Stop hook — standard/strict profile)
 cat tests/fixtures/stop-hook-input.json | \
   AGENT_HOOK_PROFILE=standard CLAUDE_PLUGIN_ROOT=. \
-  node scripts/run-with-profile.js standard,strict scripts/session-diff.js
+  bun scripts/run-with-profile.ts standard,strict scripts/session-diff.ts
 
 # evaluate-session (Stop hook — standard/strict profile)
-echo '{}' | AGENT_HOOK_PROFILE=standard node scripts/evaluate-session.js
+echo '{}' | AGENT_HOOK_PROFILE=standard bun scripts/evaluate-session.ts
 
 # check-upgrade (SessionStart hook)
 bash scripts/check-upgrade.sh .
@@ -69,7 +69,7 @@ All hooks follow this contract:
 | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | **Stdin**          | Stop hooks receive JSON. SessionStart hooks receive no stdin.                                                        |
 | **Exit code**      | Always 0 on error. Non-zero only for genuine assertion failures.                                                     |
-| **Profile gating** | Use `run-with-profile.js` or check `AGENT_HOOK_PROFILE` internally. Valid profiles: `minimal`, `standard`, `strict`. |
+| **Profile gating** | Use `run-with-profile.ts` or check `AGENT_HOOK_PROFILE` internally. Valid profiles: `minimal`, `standard`, `strict`. |
 | **File paths**     | Resolved relative to cwd (the target project root).                                                                  |
 
 ### No Test Framework

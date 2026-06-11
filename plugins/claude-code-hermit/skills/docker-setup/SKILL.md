@@ -174,7 +174,7 @@ Only the top-level project memory is seeded — not agent-scoped memories at `<p
 
    **Resolve `hatch_target`** using the same fallback chain as `hermit-evolve` SKILL.md §2a (`.claude-code-hermit/state/hatch-options.json` `"target"` field → marker scan of `CLAUDE.local.md` / `CLAUDE.md` → `claude plugin list --json` scope detection). Do not silently default to committed when the state file is absent — that can leak operator-personal hardening into the repo. Map: `hatch_target == "local"` → `.claude/settings.local.json`; `hatch_target == "committed"` → `.claude/settings.json`.
 
-   Do NOT include the `always_on` set — those patterns (docker, ssh, kubectl, git push --force, etc.) are enforced by the `enforce-deny-patterns.js` hook when `AGENT_HOOK_PROFILE=strict`, which the container runs with. Writing them to settings would block docker commands needed by later steps in this skill.
+   Do NOT include the `always_on` set — those patterns (docker, ssh, kubectl, git push --force, etc.) are enforced by the `enforce-deny-patterns.ts` hook when `AGENT_HOOK_PROFILE=strict`, which the container runs with. Writing them to settings would block docker commands needed by later steps in this skill.
 
    If the target settings file already has `permissions.deny`, merge (never remove existing entries). Tell the operator: "Added safety deny rules for always-on operation — protects against destructive commands and credential exposure. Container-specific rules (docker, ssh, kubectl) are enforced by the hook at runtime. Written to {.claude/settings.local.json | .claude/settings.json}."
 

@@ -360,7 +360,7 @@ if (reflectRuns > 0) {
   body += `${line}.\n\n`;
 }
 
-// --- Knowledge Health (via shared knowledge-lint.js) ---
+// --- Knowledge Health (via shared knowledge-lint.ts) ---
 let knowledgeSection = '';
 try {
   const { findings } = knowledgeLint(hermitDir);

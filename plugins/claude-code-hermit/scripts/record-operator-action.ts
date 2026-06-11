@@ -1,9 +1,7 @@
-'use strict';
-
 process.stdout.on('error', () => {});
 
 // UserPromptSubmit + SessionStart hook — records when an operator prompt is received.
-// Writes state/last-operator-action.json so heartbeat-precheck.js can gate AUTO_CLOSE
+// Writes state/last-operator-action.json so heartbeat-precheck.ts can gate AUTO_CLOSE
 // on genuine operator silence rather than SHELL.md mtime (which routine writes reset).
 //
 // Invocation modes:
@@ -21,8 +19,8 @@ process.stdout.on('error', () => {});
 //   <channel…           — unauthorized DMs arrive here before channel-responder's allowlist
 //                          check; recording them would let bot traffic suppress AUTO_CLOSE
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 const AGENT_DIR = process.env.AGENT_DIR || '.claude-code-hermit';
 const STATE_PATH = path.resolve(AGENT_DIR, 'state', 'last-operator-action.json');
@@ -35,7 +33,7 @@ function write() {
   } catch { /* fail-open */ }
 }
 
-function isRoutinePrompt(prompt) {
+function isRoutinePrompt(prompt: string): boolean {
   if (prompt.startsWith('[hermit-routine:')) return true;
   const t = prompt.trimStart();
   if (t.startsWith('<channel')) return true;
@@ -46,8 +44,8 @@ function isRoutinePrompt(prompt) {
   return false;
 }
 
-function main(raw) {
-  let prompt = null;
+function main(raw: string): void {
+  let prompt: string | null = null;
   try {
     const payload = JSON.parse(raw);
     if (payload && typeof payload.prompt === 'string') prompt = payload.prompt;

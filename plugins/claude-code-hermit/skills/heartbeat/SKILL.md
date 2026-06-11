@@ -24,7 +24,7 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
 
 1. Run the precheck:
    ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-precheck.js .claude-code-hermit
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-precheck.ts .claude-code-hermit
    ```
 2. Read the verdict (first line of output):
    - Starts with `SKIP|` → emit `HEARTBEAT_SKIP (<reason>)`. No channel notification. No SHELL.md write. Stop.

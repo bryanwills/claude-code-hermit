@@ -1,7 +1,7 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const fs = require('fs');
-const path = require('path');
+type Json = any;
 
 /**
  * PreToolUse hook — enforces deny-patterns.json and warns on state-template edits.
@@ -15,20 +15,20 @@ const path = require('path');
  */
 
 const DENY_FILE = path.join(
-  process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..'),
+  process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..'),
   'state-templates',
   'deny-patterns.json'
 );
 const MAX_STDIN = 64 * 1024;
 
-function globToRegex(glob) {
+function globToRegex(glob: string): RegExp {
   const escaped = glob
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`);
 }
 
-function matchesPattern(toolCall, pattern) {
+function matchesPattern(toolCall: { tool: string; content: string }, pattern: string): boolean {
   const m = pattern.match(/^(\w+)\((.+)\)$/);
   if (!m) return false;
 
@@ -38,7 +38,7 @@ function matchesPattern(toolCall, pattern) {
   return globToRegex(patternGlob).test(toolCall.content);
 }
 
-function buildToolCall(event) {
+function buildToolCall(event: Json): { tool: string; content: string } {
   const name = event.tool_name || '';
   const input = event.tool_input || {};
 
@@ -72,7 +72,7 @@ function main() {
       // --- Check 2: Deny patterns ---
       if (!toolCall.content) process.exit(0);
 
-      let patterns;
+      let patterns: Json;
       try {
         patterns = JSON.parse(fs.readFileSync(DENY_FILE, 'utf8'));
       } catch {

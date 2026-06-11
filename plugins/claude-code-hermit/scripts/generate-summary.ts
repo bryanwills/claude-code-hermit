@@ -1,16 +1,16 @@
 // Regenerates state-summary.md from state files. Zero npm dependencies, Node stdlib only.
-// CLI mode:  node generate-summary.js <state-dir-path>
+// CLI mode:  bun generate-summary.ts <state-dir-path>
 // Hook mode: PostToolUse on Edit|Write — fires automatically when a state/ file is edited
 
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const fs = require('fs');
-const path = require('path');
+type Json = any;
 
 const MAX_STDIN = 64 * 1024;
 const STATE_SUBDIR = '.claude-code-hermit/state';
 
-function run(stateDir) {
+function run(stateDir: string): void {
 
 const ALERT_STATE = path.join(stateDir, 'alert-state.json');
 const REFLECTION_STATE = path.join(stateDir, 'reflection-state.json');
@@ -33,7 +33,7 @@ try {
 }
 
 // Read alert state
-let alertState = { alerts: {}, last_digest_date: null, self_eval: {} };
+let alertState: Json = { alerts: {}, last_digest_date: null, self_eval: {} };
 try {
   alertState = JSON.parse(fs.readFileSync(ALERT_STATE, 'utf-8'));
 } catch {}
@@ -50,7 +50,7 @@ for (const key of Object.keys(alerts)) {
 }
 
 // Read reflection state
-let lastReflection = null;
+let lastReflection: string | null = null;
 try {
   const rs = JSON.parse(fs.readFileSync(REFLECTION_STATE, 'utf-8'));
   lastReflection = rs.last_reflection || null;
@@ -62,9 +62,9 @@ let proposalsResponded = 0;
 let proposalsResolved = 0;
 let microQueued = 0;
 let microApproved = 0;
-const proposalSource = {}; // proposal_id -> source (for cross-referencing accepts by source)
-const createdBySource = {}; // source -> count
-const acceptedBySource = {}; // source -> count
+const proposalSource: Record<string, string> = {}; // proposal_id -> source (for cross-referencing accepts by source)
+const createdBySource: Record<string, number> = {}; // source -> count
+const acceptedBySource: Record<string, number> = {}; // source -> count
 try {
   const lines = fs.readFileSync(METRICS_FILE, 'utf-8').trim().split('\n').filter(Boolean);
   for (const line of lines) {
@@ -88,12 +88,12 @@ try {
       if (event.type === 'micro-resolved' && event.action === 'approved') microApproved++;
     } catch {}
   }
-} catch (err) {
+} catch (err: any) {
   if (err.code !== 'ENOENT') process.stderr.write(`generate-summary: failed to read metrics: ${err.message}\n`);
 }
 
 // Acceptance rate per source
-function srcAcceptRate(src) {
+function srcAcceptRate(src: string): number | null {
   const created = createdBySource[src] || 0;
   const accepted = acceptedBySource[src] || 0;
   return created > 0 ? Math.round((accepted / created) * 100) : null;
@@ -102,15 +102,15 @@ const autoDetectAcceptRate = srcAcceptRate('auto-detected');
 const manualAcceptRate = srcAcceptRate('manual');
 
 // Rate formatting helpers
-const fmtRate = (rate) => rate !== null ? (rate / 100).toFixed(2) : 'null';
-const fmtRateStr = (rate) => rate !== null ? `${rate}%` : 'no data';
+const fmtRate = (rate: number | null) => rate !== null ? (rate / 100).toFixed(2) : 'null';
+const fmtRateStr = (rate: number | null) => rate !== null ? `${rate}%` : 'no data';
 
 // Read micro-proposals state
 let microPendingCount = 0;
-let microQuestion = null;
+let microQuestion: string | null = null;
 try {
   const mp = JSON.parse(fs.readFileSync(MICRO_FILE, 'utf-8'));
-  const pending = Array.isArray(mp.pending) ? mp.pending : [];
+  const pending: Json[] = Array.isArray(mp.pending) ? mp.pending : [];
   const activePending = pending.filter(e => e && e.status === 'pending');
   const count = activePending.length;
   microPendingCount = count;
@@ -173,14 +173,14 @@ Last: ${lastReflectionStr}
 try {
   const existing = fs.readFileSync(OUTPUT, 'utf-8');
   // Skip the first line (updated: ...) and compare the rest
-  const skipFirst = (s) => s.slice(s.indexOf('\n') + 1);
+  const skipFirst = (s: string) => s.slice(s.indexOf('\n') + 1);
   if (skipFirst(content) === skipFirst(existing)) return;
 } catch {}
 
 fs.writeFileSync(OUTPUT, content, 'utf-8');
 }
 
-// CLI mode: node generate-summary.js <state-dir-path>
+// CLI mode: bun generate-summary.ts <state-dir-path>
 if (process.argv[2]) {
   run(process.argv[2]);
   process.exit(0);

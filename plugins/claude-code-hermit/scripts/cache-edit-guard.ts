@@ -1,8 +1,8 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { safe } from './lib/sanitize';
 
-const fs = require('fs');
-const path = require('path');
-const { safe } = require('./lib/sanitize');
+type Json = any;
 
 /**
  * PreToolUse hook — warn (or block) when Edit/Write targets a marketplace cache copy.
@@ -23,7 +23,7 @@ const { safe } = require('./lib/sanitize');
 const MAX_STDIN = 64 * 1024;
 const CACHE_RE = /(?:^|\/)\.claude\/plugins\/cache\/([^/]+)\/([^/]+)\/([^/]+)\/(.*)$/;
 
-function readEvent(callback) {
+function readEvent(callback: (event: Json) => void): void {
   let raw = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', chunk => {
@@ -40,7 +40,7 @@ function readEvent(callback) {
   process.stdin.on('error', () => process.exit(0));
 }
 
-function findProjectMarketplace(start) {
+function findProjectMarketplace(start: string): string | null {
   let dir = path.resolve(start);
   while (true) {
     const candidate = path.join(dir, '.claude-plugin', 'marketplace.json');
@@ -51,15 +51,15 @@ function findProjectMarketplace(start) {
   }
 }
 
-function resolveSourceRoot(marketplaceFile, marketplaceName, pluginName) {
-  let manifest;
+function resolveSourceRoot(marketplaceFile: string, marketplaceName: string, pluginName: string): string | null {
+  let manifest: Json;
   try {
     manifest = JSON.parse(fs.readFileSync(marketplaceFile, 'utf8'));
   } catch (_e) {
     return null;
   }
   if (manifest.name !== marketplaceName) return null;
-  const plugins = Array.isArray(manifest.plugins) ? manifest.plugins : [];
+  const plugins: Json[] = Array.isArray(manifest.plugins) ? manifest.plugins : [];
   const entry = plugins.find(p => p && p.name === pluginName);
   if (!entry) return null;
   const src = entry.source;

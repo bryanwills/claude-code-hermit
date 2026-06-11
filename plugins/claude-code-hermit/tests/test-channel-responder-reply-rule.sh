@@ -17,13 +17,13 @@ echo ""
 
 SKILL="$REPO_ROOT/skills/channel-responder/SKILL.md"
 HOOKS="$REPO_ROOT/hooks/hooks.json"
-SCRIPT="$REPO_ROOT/scripts/channel-reply-reminder.js"
+SCRIPT="$REPO_ROOT/scripts/channel-reply-reminder.ts"
 
 run_test "skill file exists" test -f "$SKILL"
 run_test "skill has §0 heading" grep -qF "## 0." "$SKILL"
 run_test "skill §0 names reply via channel" grep -q "Reply via the channel" "$SKILL"
 run_test "skill §0 names generic reply tool pattern" grep -q "mcp__plugin_" "$SKILL"
-run_test "hooks.json has channel-reply-reminder entry" grep -qF "channel-reply-reminder.js" "$HOOKS"
-run_test "channel-reply-reminder.js exists and is non-empty" test -s "$SCRIPT"
+run_test "hooks.json has channel-reply-reminder entry" grep -qF "channel-reply-reminder.ts" "$HOOKS"
+run_test "channel-reply-reminder.ts exists and is non-empty" test -s "$SCRIPT"
 
 print_results

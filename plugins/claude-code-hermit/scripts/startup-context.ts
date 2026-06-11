@@ -1,21 +1,21 @@
-'use strict';
-
 // Suppress EPIPE errors (e.g. when stdout pipe closes early in tests)
 process.stdout.on('error', () => {});
 
-// startup-context.js — SessionStart hook
+// startup-context.ts — SessionStart hook
 // Replaces the inline bash blob with a capped, priority-ordered context injection.
 // Emits only startup-relevant SHELL.md sections with per-section budgets.
 // Hard cap: 9000 chars total (~2250 tokens).
 
-const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-const { readFrontmatter, readFileWithFrontmatter, newestByType, globDir } = require('./lib/frontmatter');
-const { parseSchema } = require('./knowledge-lint');
+import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
+import { readFrontmatter, readFileWithFrontmatter, newestByType, globDir } from './lib/frontmatter';
+import { parseSchema } from './knowledge-lint';
+
+type Json = any;
 
 const AGENT_DIR = process.env.AGENT_DIR || '.claude-code-hermit';
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
+const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 const HARD_CAP = 9000;
 
 // Section budgets (chars). Higher priority sections emit first.
@@ -36,7 +36,7 @@ const BUDGETS = {
 // headerFn(artifact) → string used as the section header per entry.
 // Pinned and recent budgets are intentionally isolated — unused pinned budget
 // does not roll over to recent, and vice versa.
-function emitArtifacts(artifacts, budget, headerFn, parts) {
+function emitArtifacts(artifacts: Json[], budget: number, headerFn: (a: Json) => string, parts: string[]): void {
   let used = 0;
   for (const a of artifacts) {
     const header = headerFn(a);
@@ -44,7 +44,7 @@ function emitArtifacts(artifacts, budget, headerFn, parts) {
     if (available <= 0) break;
     const stubRaw = typeof a.fm.injection_stub === 'string' ? a.fm.injection_stub : '';
     const stub = stubRaw.trim();
-    let entry;
+    let entry: string;
     if (stub) {
       if (stubRaw.length > available) continue; // too long for remaining budget — skip rather than garble
       entry = header + stubRaw;
@@ -60,7 +60,7 @@ function emitArtifacts(artifacts, budget, headerFn, parts) {
 
 // Extract a named ## Section from markdown content.
 // Returns the section body (without the header line), or null if not found.
-function extractSection(md, name) {
+function extractSection(md: string, name: string): string | null {
   const idx = md.indexOf(`## ${name}`);
   if (idx === -1) return null;
   const bodyStart = md.indexOf('\n', idx) + 1;
@@ -69,19 +69,19 @@ function extractSection(md, name) {
 }
 
 // Return last N non-empty lines from a string.
-function lastLines(text, n) {
+function lastLines(text: string, n: number): string {
   const lines = text.split('\n').filter(l => l.trim());
   return lines.slice(-n).join('\n');
 }
 
 // Scan hermitDir for artifacts written outside raw/ and compiled/ (flat).
 // Returns an array of human-readable hit strings, empty when clean.
-function findStorageDrift(hermitDir) {
+function findStorageDrift(hermitDir: string): string[] {
   const KNOWN_DIRS = new Set(['raw', 'compiled', 'sessions', 'proposals', 'state', 'templates',
     'memory', 'bin', 'docker']);
-  const hits = [];
+  const hits: string[] = [];
 
-  function countEntries(dir) {
+  function countEntries(dir: string): number {
     try { return fs.readdirSync(dir).filter(f => !f.startsWith('.')).length; } catch { return 0; }
   }
 
@@ -113,7 +113,7 @@ function findStorageDrift(hermitDir) {
 function main() {
   let totalChars = 0;
 
-  function emit(label, content) {
+  function emit(label: string, content: string): void {
     if (totalChars >= HARD_CAP) return;
     const header = `---${label}---\n`;
     // Subtract 1 for the trailing newline written after body
@@ -149,7 +149,7 @@ function main() {
   // 3. Active session (priority 2, budget 3000)
   // -------------------------------------------------------
   const shellPath = path.resolve(AGENT_DIR, 'sessions', 'SHELL.md');
-  let shellContent = null;
+  let shellContent: string | null = null;
   try {
     shellContent = fs.readFileSync(shellPath, 'utf-8');
   } catch {}
@@ -157,7 +157,7 @@ function main() {
   if (shellContent === null) {
     emit('Active Session', 'No active session');
   } else {
-    const parts = [];
+    const parts: string[] = [];
 
     const task = extractSection(shellContent, 'Task');
     if (task && task.trim() && !task.trim().startsWith('<!--')) {
@@ -213,7 +213,7 @@ function main() {
 
       if (compiledFiles.length > 0) {
         // Single read per file: frontmatter + body in one pass
-        const artifacts = compiledFiles
+        const artifacts: Json[] = compiledFiles
           .map(f => {
             const r = readFileWithFrontmatter(f);
             return r && r.fm && r.fm.created
@@ -223,7 +223,7 @@ function main() {
           .filter(Boolean);
 
         if (artifacts.length > 0) {
-          const candidates = Array.from(newestByType(artifacts).values());
+          const candidates: Json[] = Array.from(newestByType(artifacts).values());
 
           const pinned = candidates.filter(a => (a.fm.tags || []).includes('foundational'));
           const recent = candidates
@@ -233,7 +233,7 @@ function main() {
           const pinnedBudget = Math.floor(knowledgeBudget * 0.4);
           const recentBudget = knowledgeBudget - pinnedBudget;
 
-          const parts = [];
+          const parts: string[] = [];
           emitArtifacts(pinned, pinnedBudget,
             a => `[${a.fm.type || 'artifact'}] ${a.fm.title || a.basename}\n`,
             parts);
@@ -279,7 +279,7 @@ function main() {
       if (schema) {
         const compiledDir = path.resolve(AGENT_DIR, 'compiled');
         const compiledFiles = globDir(compiledDir, /^[^.].*\.md$/);
-        const undeclared = new Map(); // type -> first filename
+        const undeclared = new Map<string, string>(); // type -> first filename
         for (const f of compiledFiles) {
           const fm = readFrontmatter(f);
           if (!fm || !fm.type) continue;
@@ -360,6 +360,6 @@ function main() {
   }
 }
 
-if (require.main === module) {
+if (import.meta.main) {
   main();
 }
