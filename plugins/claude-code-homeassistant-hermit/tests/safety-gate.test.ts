@@ -119,3 +119,34 @@ test('internal I/O error during policy load fails CLOSED (exit 2), never 1', () 
   expect(result.stderr).toContain('internal error');
 });
 
+test('block path with stderr unwritable still exits 2, not 1 (fail() write cannot fail open)', () => {
+  // Close fd 2 before exec, then feed a block-triggering payload. fail()'s
+  // writeSync(2) throws EBADF; if that escaped, bun would exit 1 = fail-open.
+  // The guarded write must still exit 2.
+  const root = makeHaConfig('strict');
+  const payload = JSON.stringify({ tool_input: { entity_id: 'lock.front_door' } });
+  const r = Bun.spawnSync(['bash', '-c', `exec 2>&-; exec '${process.execPath}' '${HOOK}'`], {
+    stdin: Buffer.from(payload, 'utf8'),
+    cwd: root,
+  });
+  expect(r.exitCode).toBe(2);
+});
+
+test('safe concrete entity_id alongside an area_id selector is blocked (unresolvable fan-out)', () => {
+  const root = makeHaConfig('strict');
+  const result = run({ tool_input: { entity_id: 'light.kitchen', area_id: 'garage' } }, root);
+  expect(result.returncode).toBe(2);
+  expect(result.stderr).toContain('Cannot verify target safety');
+});
+
+test('uppercase sensitive domain is blocked (case-insensitive match)', () => {
+  const result = run({ tool_input: { entity_id: 'LOCK.front_door' } });
+  expect(result.returncode).toBe(2);
+});
+
+test('malformed entity_id with empty domain is blocked, not allowed', () => {
+  const result = run({ tool_input: { entity_id: '.lock' } });
+  expect(result.returncode).toBe(2);
+  expect(result.stderr).toContain('Cannot verify target safety');
+});
+

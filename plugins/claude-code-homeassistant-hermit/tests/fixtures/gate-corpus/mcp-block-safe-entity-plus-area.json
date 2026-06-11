@@ -1,0 +1,7 @@
+{
+  "gate": "mcp",
+  "stdin": "{\"tool_input\":{\"entity_id\":\"light.kitchen\",\"area_id\":\"garage\"}}",
+  "verdict": "block",
+  "divergence": "Code-review finding: a safe concrete entity_id alongside an area_id (which fans out server-side to unevaluated entities, e.g. lock.* in the garage) was ALLOWED by the Python (exit 0) because the fail-closed branch only fired on an empty id list. The TS port treats any unresolvable targeting selector as unverifiable and blocks (exit 2).",
+  "expect_py": { "exit": 0 }
+}

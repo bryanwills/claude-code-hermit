@@ -115,7 +115,10 @@ export function classifyEntity(entityId: string, root?: string | null): [Severit
   const resolved = resolve(root ?? process.cwd());
   const overrides = loadPolicyOverrides(resolved);
   if (overrides.safeEntities.has(entityId)) return [Severity.ALLOW, []];
-  const domain = entityId.split('.', 1)[0]!;
+  // Match the domain case-insensitively: HA entity_ids are lowercase, but a
+  // call carrying `LOCK.front_door` must not slip past the sensitive-domain
+  // check (the keyword branch already lowercases). Closes a real bypass.
+  const domain = entityId.split('.', 1)[0]!.toLowerCase();
   const modeSev = MODE_TO_SEVERITY[loadSafetyMode(resolved)]!;
   if (SENSITIVE_DOMAINS.has(domain) || overrides.extraDomains.has(domain)) {
     return [modeSev, [`Domain '${domain}' is always sensitive`]];

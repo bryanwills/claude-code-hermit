@@ -54,6 +54,40 @@ export function extractEntityIds(toolInput: Record<string, unknown>): string[] {
   return ids;
 }
 
+// Targeting selectors that fan a service call out to an entity set we cannot
+// enumerate here (HA resolves area/floor/label/device → entities server-side).
+// A call carrying any of these with a value that did NOT resolve to an
+// extracted, well-formed entity_id is unverifiable → fail closed, even when a
+// safe concrete entity_id is also present in the same call.
+const TARGETING_KEYS = ['area_id', 'floor_id', 'label_id', 'device_id'];
+
+export function hasUnresolvableTarget(
+  toolInput: Record<string, unknown>,
+  resolved: Set<string>,
+): boolean {
+  const scopes: Record<string, unknown>[] = [toolInput];
+  const target = toolInput['target'];
+  if (typeof target === 'object' && target !== null && !Array.isArray(target)) {
+    scopes.push(target as Record<string, unknown>);
+  }
+  for (const scope of scopes) {
+    for (const key of TARGETING_KEYS) {
+      const v = scope[key];
+      const values =
+        typeof v === 'string' ? (v ? [v] : []) : Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+      // A device_id whose value was extracted as a dotted entity ref is
+      // resolvable; every other present targeting value is not.
+      if (values.some((val) => !resolved.has(val))) return true;
+    }
+  }
+  return false;
+}
+
+/** An entity_id is well-formed only with a non-empty domain segment (rejects `.lock`). */
+export function isWellFormedEntityId(id: string): boolean {
+  return id.split('.', 1)[0] !== '';
+}
+
 /** Encode a string exactly like CPython json.dumps (ensure_ascii=True). */
 export function pyJsonString(s: string): string {
   const SHORT: Record<string, string> = {
@@ -83,7 +117,13 @@ export function pyJsonString(s: string): string {
 }
 
 function fail(message: string): never {
-  writeSync(2, `${message}\n`);
+  // The exit code IS the fail-closed contract. A stderr write can itself throw
+  // (closed fd / broken pipe = EPIPE/EBADF) — if that escaped, the process
+  // would exit 1, which Claude Code treats as NON-blocking (fail-open). Never
+  // let the diagnostic write decide the exit.
+  try {
+    writeSync(2, `${message}\n`);
+  } catch {}
   process.exit(2);
 }
 
@@ -112,8 +152,17 @@ function main(): void {
     }
 
     const entityIds = extractEntityIds(toolInput as Record<string, unknown>);
+    const resolved = entityIds.filter(isWellFormedEntityId);
 
-    if (entityIds.length === 0) {
+    // Fail closed when we cannot fully verify the call's target set:
+    //   - no well-formed entity_id at all, OR
+    //   - a malformed entity_id slipped through extraction (e.g. `.lock`), OR
+    //   - an area/floor/label/device selector that didn't resolve to one.
+    if (
+      resolved.length === 0 ||
+      resolved.length !== entityIds.length ||
+      hasUnresolvableTarget(toolInput as Record<string, unknown>, new Set(resolved))
+    ) {
       fail(
         'Cannot verify target safety: no resolvable entity IDs found ' +
           '(area_id / device_id targets are not evaluated). Use a proposal instead.',

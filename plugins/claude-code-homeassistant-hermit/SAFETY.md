@@ -10,7 +10,7 @@ Every MCP call matching `mcp__homeassistant__Hass*` is pre-screened by `hooks/mc
 
 - **Sensitive domains**: `lock`, `alarm_control_panel`
 - **Security-tagged devices**: `cover`, `button`, `switch` entities matching security-related keywords (door, gate, garage, etc.)
-- **Unresolvable targets**: calls that specify only an `area_id` or `device_id` with no concrete `entity_id`
+- **Unresolvable targets**: any call carrying an `area_id`/`floor_id`/`label_id`/`device_id` selector that does not resolve to a concrete, well-formed `entity_id` — blocked even when a safe concrete `entity_id` is also present (the selector fans out server-side to entities the gate cannot enumerate). Domain matching is case-insensitive (`LOCK.front_door` is treated as `lock`); malformed ids with an empty domain (e.g. `.lock`) are rejected as unresolvable.
 - **Anything explicitly listed** in the sensitive-domain or sensitive-keyword policy
 
 Blocked operations do not silently fail — they become proposals for human review.

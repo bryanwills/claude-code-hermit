@@ -1,0 +1,7 @@
+{
+  "gate": "mcp",
+  "stdin": "{\"tool_input\":{\"entity_id\":\".lock\"}}",
+  "verdict": "block",
+  "divergence": "Code-review finding: a malformed entity_id with an empty domain segment ('.lock') was extracted (it contains a dot) but classified ALLOW by the Python (empty domain matches no sensitive domain) → exit 0. The TS port rejects malformed ids as unresolvable and blocks (exit 2).",
+  "expect_py": { "exit": 0 }
+}
