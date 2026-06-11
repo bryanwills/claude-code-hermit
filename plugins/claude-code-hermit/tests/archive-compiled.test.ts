@@ -141,7 +141,64 @@ describe('skipped artifacts', () => {
 });
 
 // -------------------------------------------------------
-// 4. Fail-open: no state dir → exit 0
+// 4. Topic exemption: living pages are never rotated, even past KEEP_PER_TYPE
+// -------------------------------------------------------
+describe('topic exemption', () => {
+  let h: Hermit;
+  let out: string;
+  beforeAll(async () => {
+    h = makeHermit();
+    writeArtifact(h.compiled, 'topic-alpha.md', 'topic', '2024-01-01T00:00:00.000Z');
+    writeArtifact(h.compiled, 'topic-beta.md', 'topic', '2024-02-01T00:00:00.000Z');
+    writeArtifact(h.compiled, 'topic-gamma.md', 'topic', '2024-03-01T00:00:00.000Z');
+    writeArtifact(h.compiled, 'topic-delta.md', 'topic', '2024-04-01T00:00:00.000Z');
+    out = await runArchive(h);
+  });
+  afterAll(() => h.cleanup());
+
+  test('topic: nothing archived', () => {
+    expect(out).toContain('0 archived');
+  });
+
+  test('topic: all four pages still on disk', () => {
+    for (const f of ['topic-alpha.md', 'topic-beta.md', 'topic-gamma.md', 'topic-delta.md']) {
+      expect(fs.existsSync(path.join(h.compiled, f))).toBe(true);
+    }
+  });
+
+  test('topic: 4 retained in output', () => {
+    expect(out).toContain('4 retained');
+  });
+});
+
+// -------------------------------------------------------
+// 5. Mixed: dated notes rotate, topic pages do not
+// -------------------------------------------------------
+describe('mixed rotation with topics', () => {
+  let h: Hermit;
+  beforeAll(async () => {
+    h = makeHermit();
+    writeArtifact(h.compiled, 'note-a.md', 'note', '2025-01-05T00:00:00.000Z');
+    writeArtifact(h.compiled, 'note-b.md', 'note', '2025-01-12T00:00:00.000Z');
+    writeArtifact(h.compiled, 'note-c.md', 'note', '2025-01-19T00:00:00.000Z');
+    writeArtifact(h.compiled, 'topic-old.md', 'topic', '2023-01-01T00:00:00.000Z');
+    writeArtifact(h.compiled, 'topic-older.md', 'topic', '2022-01-01T00:00:00.000Z');
+    await runArchive(h);
+  });
+  afterAll(() => h.cleanup());
+
+  test('mixed: oldest note archived', () => {
+    expect(fs.existsSync(path.join(h.compiled, '.archive', 'note-a.md'))).toBe(true);
+  });
+
+  test('mixed: topic pages untouched despite oldest dates', () => {
+    expect(fs.existsSync(path.join(h.compiled, 'topic-old.md'))).toBe(true);
+    expect(fs.existsSync(path.join(h.compiled, 'topic-older.md'))).toBe(true);
+  });
+});
+
+// -------------------------------------------------------
+// 6. Fail-open: no state dir → exit 0
 // -------------------------------------------------------
 test('fail-open: exit 0 with no state dir', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-archive-compiled-'));

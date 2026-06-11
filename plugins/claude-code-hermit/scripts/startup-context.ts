@@ -9,7 +9,7 @@ process.stdout.on('error', () => {});
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { readFrontmatter, readFileWithFrontmatter, newestByType, globDir } from './lib/frontmatter';
+import { readFrontmatter, readFileWithFrontmatter, globDir } from './lib/frontmatter';
 import { parseSchema } from './knowledge-lint';
 
 type Json = any;
@@ -223,26 +223,57 @@ function main() {
           .filter(Boolean);
 
         if (artifacts.length > 0) {
-          const candidates: Json[] = Array.from(newestByType(artifacts).values());
+          const dateOf = (a: Json) =>
+            (typeof a.fm.updated === 'string' && a.fm.updated) || a.fm.created || '';
 
-          const pinned = candidates.filter(a => (a.fm.tags || []).includes('foundational'));
-          const recent = candidates
-            .filter(a => !(a.fm.tags || []).includes('foundational'))
-            .sort((a, b) => (b.fm.created || '').localeCompare(a.fm.created || ''));
+          // All foundational artifacts pin full bodies (no per-type collapse — multiple
+          // foundational topic pages must co-pin). Everything else gets a catalog line.
+          // procedure-briefs are transient audit records, declared not-session-injected
+          // in the schema — excluded from the catalog.
+          const pinned = artifacts
+            .filter(a => (a.fm.tags || []).includes('foundational'))
+            .sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
+          const rest = artifacts
+            .filter(a => !(a.fm.tags || []).includes('foundational')
+              && a.fm.type !== 'procedure-brief')
+            .sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
 
           const pinnedBudget = Math.floor(knowledgeBudget * 0.4);
-          const recentBudget = knowledgeBudget - pinnedBudget;
 
           const parts: string[] = [];
           emitArtifacts(pinned, pinnedBudget,
             a => `[${a.fm.type || 'artifact'}] ${a.fm.title || a.basename}\n`,
             parts);
-          emitArtifacts(recent, recentBudget,
-            a => {
-              const date = a.fm.created ? ` (${a.fm.created.slice(0, 10)})` : '';
-              return `[${a.fm.type || 'artifact'}] ${a.fm.title || a.basename}${date}\n`;
-            },
-            parts);
+
+          // Unused pinned budget rolls into the catalog — with few or no foundational
+          // pages, the 40% reservation would otherwise be dead weight.
+          const pinnedUsed = parts.reduce((s, p) => s + p.length, 0);
+          const catalogBudget = knowledgeBudget - Math.min(pinnedBudget, pinnedUsed);
+
+          // Catalog: pointers, not bodies — depth on demand via /recall or Read.
+          if (rest.length > 0) {
+            const intro = 'Catalog — Read compiled/<file>.md for full content:';
+            const catLines: string[] = [];
+            let used = intro.length + 1;
+            for (const a of rest) {
+              const date = dateOf(a).slice(0, 10);
+              const tags = (Array.isArray(a.fm.tags) ? a.fm.tags : [])
+                .map((t: string) => `#${t}`).join(' ');
+              const summary = typeof a.fm.summary === 'string' && a.fm.summary.trim()
+                ? a.fm.summary.trim()
+                : (typeof a.fm.title === 'string' ? a.fm.title : '');
+              let entry = `- ${a.basename} [${a.fm.type || 'artifact'}]`
+                + (date ? ` (${date})` : '') + (tags ? ` ${tags}` : '');
+              if (summary) entry += `\n  ${summary.slice(0, 100)}`;
+              if (used + entry.length + 1 > catalogBudget) break;
+              catLines.push(entry);
+              used += entry.length + 1;
+            }
+            if (catLines.length > 0) {
+              if (catLines.length < rest.length) catLines.push(`(+${rest.length - catLines.length} more)`);
+              parts.push([intro, ...catLines].join('\n'));
+            }
+          }
 
           if (parts.length > 0) {
             emit('Compiled Knowledge', parts.join('\n'));

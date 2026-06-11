@@ -39,14 +39,18 @@ compliant path table.
 
 - **Layout:** flat.
 - **Naming:** `<type>-<slug>-<YYYY-MM-DD>.md`. Same shape as `raw/` — the `type` field
-  in frontmatter is the discriminator.
+  in frontmatter is the discriminator. Exception: living topic pages are undated —
+  `topic-<slug>.md` — because they are updated in place (bump `updated:` in frontmatter)
+  rather than rewritten as dated copies.
 - **Required frontmatter:** `title:`, `type:`, `created:`, `tags:`, and a `source:`
-  line pointing to the raw artifact(s) the compiled was derived from.
-- **Session injection:** every compiled file is surfaced to the model at session start
-  via `scripts/startup-context.ts`. Shared budget — `knowledge.compiled_budget_chars`
-  (default 2500, range 500–6000) applies across **all** compiled files, not per-file.
-  `/hermit-doctor` and `scripts/knowledge-lint.ts` surface oversize. For deep retrieval
-  of specific past content by keyword, use `/recall`.
+  line pointing to the raw artifact(s) the compiled was derived from. Topic pages add
+  `updated:` and a one-line `summary:` (shown in the session-start catalog).
+- **Session injection:** surfaced at session start via `scripts/startup-context.ts`.
+  `foundational`-tagged files inject full bodies; everything else gets a one-line
+  catalog entry (stem, type, date, tags + summary). Shared budget —
+  `knowledge.compiled_budget_chars` (default 2500, range 500–6000) applies across
+  **all** compiled files, not per-file. `/hermit-doctor` and `scripts/knowledge-lint.ts`
+  surface oversize. For deep retrieval of specific past content by keyword, use `/recall`.
 - **Foundational pinning:** tag a compiled artifact `foundational` to pin it to every
   session regardless of age.
 - **Example:** `compiled/audit-kitchen-2026-04-17.md`

@@ -20,6 +20,7 @@ Use flat filenames inside each directory. The pattern is:
 ```
 raw/<type>-<slug>-<date>.md
 compiled/<type>-<slug>-<date>.md
+compiled/topic-<slug>.md          (living topic pages — undated, updated in place)
 ```
 
 Examples:

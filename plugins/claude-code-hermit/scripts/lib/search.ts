@@ -30,7 +30,7 @@ const RECENCY_HALF_LIFE_DAYS = 180;
  * Tries keys in priority order; returns null if none found.
  */
 function extractDate(fm: Json): string | null {
-  for (const key of ['created', 'date', 'accepted_date', 'start_date']) {
+  for (const key of ['updated', 'created', 'date', 'accepted_date', 'start_date']) {
     if (fm[key] && typeof fm[key] === 'string') return fm[key];
   }
   return null;

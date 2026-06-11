@@ -260,6 +260,46 @@ describe('knowledge-lint', () => {
     });
   });
 
+  // 5b. Topic pages — staleness on updated ?? created, all topics checked, missing-updated lint
+  describe('topic pages', () => {
+    let wd: Workdir;
+    let out = '';
+    beforeAll(async () => {
+      wd = setupWorkdir();
+      const dir = wd.dir;
+      fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+      write(hermit(dir, 'config.json'), '{}');
+      // Old created but fresh updated — must NOT be stale
+      write(hermit(dir, 'compiled', 'topic-fresh.md'),
+        `---\ntitle: Fresh topic\ntype: topic\ncreated: ${isoSec(daysAgo(90))}\nupdated: ${isoSec(daysAgo(5))}\n---\nbody`);
+      // Stale by updated; second stale topic proves the per-type collapse is gone
+      write(hermit(dir, 'compiled', 'topic-stale-a.md'),
+        `---\ntitle: Stale A\ntype: topic\ncreated: ${isoSec(daysAgo(200))}\nupdated: ${isoSec(daysAgo(90))}\n---\nbody`);
+      write(hermit(dir, 'compiled', 'topic-stale-b.md'),
+        `---\ntitle: Stale B\ntype: topic\ncreated: ${isoSec(daysAgo(150))}\nupdated: ${isoSec(daysAgo(70))}\n---\nbody`);
+      // Missing updated field
+      write(hermit(dir, 'compiled', 'topic-no-updated.md'),
+        `---\ntitle: No updated\ntype: topic\ncreated: ${isoSec(daysAgo(5))}\n---\nbody`);
+      const r = await runLint(dir);
+      out = r.stdout + r.stderr;
+    });
+    afterAll(() => wd.cleanup());
+
+    test('knowledge-lint (fresh updated not stale despite old created)', () => {
+      expect(out).not.toContain('topic-fresh');
+    });
+    test('knowledge-lint (stale topic flagged by updated)', () => {
+      expect(out).toContain('topic-stale-a.md');
+    });
+    test('knowledge-lint (all topic pages stale-checked, not just newest)', () => {
+      expect(out).toContain('topic-stale-b.md');
+    });
+    test('knowledge-lint (topic-missing-updated flagged)', () => {
+      expect(out).toContain('topic-missing-updated');
+      expect(out).toContain('topic-no-updated.md');
+    });
+  });
+
   // 6. Clean state — valid files with matching schema, no findings
   test('knowledge-lint (clean state)', withDir(async (dir) => {
     fs.mkdirSync(hermit(dir, 'raw'), { recursive: true });
@@ -289,7 +329,7 @@ describe('knowledge-lint', () => {
     const template = fs.readFileSync(
       path.join(PLUGIN_ROOT, 'state-templates', 'knowledge-schema.md.template'), 'utf-8');
     write(hermit(dir, 'knowledge-schema.md'),
-      template.split('\n').filter((l) => !/^- (note|input|review|procedure-brief):/.test(l)).join('\n'));
+      template.split('\n').filter((l) => !/^- (note|input|review|procedure-brief|topic):/.test(l)).join('\n'));
     const r = await runLint(dir); // exit code intentionally not asserted (bash used `|| true`)
     expect(r.stdout + r.stderr).toContain('schema-empty');
   }));
@@ -1767,6 +1807,18 @@ describe('search', () => {
       expect(out).toContain(':');
     });
   });
+
+  // search: topic page result date reflects `updated`, not `created`
+  test('search (updated wins over created for result date)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    write(hermit(dir, 'config.json'), '{}');
+    write(hermit(dir, 'compiled', 'topic-rota.md'),
+      '---\ntitle: Support rota\ntype: topic\ncreated: 2024-01-01T00:00:00+00:00\nupdated: 2026-06-05T00:00:00+00:00\n---\nThe on-call rota rotates weekly.');
+    const out = await runSearch(dir, 'rota');
+    expect(out).toContain('topic-rota');
+    expect(out).toContain('2026-06-05');
+    expect(out).not.toContain('2024-01-01');
+  }));
 
   // search: session and proposal scope — finds hits across directories
   describe('session and proposal scope', () => {
