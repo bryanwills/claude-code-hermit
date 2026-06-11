@@ -6,7 +6,7 @@
 
 # hermit-scribe
 
-Files GitHub issues via a configured GitHub App so they're attributed to a bot identity rather than a personal account. Pure Node stdlib; no dependencies, no build step. Maintainer tool.
+Files GitHub issues via a configured GitHub App so they're attributed to a bot identity rather than a personal account. Pure Node stdlib APIs run with Bun; no dependencies, no build step. Maintainer tool.
 
 ## Install
 
@@ -88,7 +88,7 @@ The cleaned title and body are shown to the operator before filing as a single m
 - `*.pem` is gitignored. Private key never committed.
 - Key is read at runtime; never appears in session files, proposals, or memory.
 - Missing env vars produce a clear error and non-zero exit. No silent no-ops.
-- **Sandbox**: `file-issue.js` makes two HTTPS calls to `api.github.com`. The hermit's standard sandbox profile has unrestricted network; custom profiles that restrict outbound HTTPS need to allow `api.github.com`.
+- **Sandbox**: `file-issue.ts` makes two HTTPS calls to `api.github.com`. The hermit's standard sandbox profile has unrestricted network; custom profiles that restrict outbound HTTPS need to allow `api.github.com`.
 
 ## Architecture
 
@@ -98,10 +98,10 @@ hermit-scribe/
   │     └── issue-sanitizer.md  redacts non-hermit content from draft body
   └── skills/hermit-scribe/
         ├── SKILL.md            trigger phrases + filing flow
-        └── file-issue.js       stdlib: JWT → install token → POST /issues; --check flag
+        └── file-issue.ts       stdlib: JWT → install token → POST /issues; --check flag
 ```
 
-`file-issue.js` is a single-shot Node script: signs an RS256 JWT from the App private key, exchanges it for an installation access token at `POST /app/installations/{id}/access_tokens`, then `POST /repos/{owner}/{repo}/issues` with the derived label set (`hermit-filed` always, plus any extra labels passed as trailing positional args). Two HTTPS round-trips per invocation. Node is required (Claude Code already provides it).
+`file-issue.ts` is a single-shot script run with Bun: signs an RS256 JWT from the App private key, exchanges it for an installation access token at `POST /app/installations/{id}/access_tokens`, then `POST /repos/{owner}/{repo}/issues` with the derived label set (`hermit-filed` always, plus any extra labels passed as trailing positional args). Two HTTPS round-trips per invocation. Bun is required (Claude Code already provides it).
 
 ## License
 

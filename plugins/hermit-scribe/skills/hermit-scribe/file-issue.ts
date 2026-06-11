@@ -1,16 +1,17 @@
-#!/usr/bin/env node
-"use strict";
+#!/usr/bin/env bun
 
-const { createSign } = require("crypto");
-const https = require("https");
-const { readFileSync } = require("fs");
+import { createSign } from "node:crypto";
+import https from "node:https";
+import { readFileSync } from "node:fs";
 
-function b64url(input) {
+type Json = any;
+
+function b64url(input: Buffer | string): string {
   const buf = Buffer.isBuffer(input) ? input : Buffer.from(input);
   return buf.toString("base64url");
 }
 
-function makeJWT(appId, pem) {
+function makeJWT(appId: string, pem: string): string {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const payload = b64url(JSON.stringify({ iat: now - 60, exp: now + 540, iss: String(appId) }));
@@ -19,7 +20,7 @@ function makeJWT(appId, pem) {
   return `${input}.${sig}`;
 }
 
-function ghRequest(method, path, auth, body) {
+function ghRequest(method: string, path: string, auth: string, body?: Json): Promise<Json> {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : undefined;
     const req = https.request(
@@ -39,9 +40,9 @@ function ghRequest(method, path, auth, body) {
         let raw = "";
         res.on("data", (c) => (raw += c));
         res.on("end", () => {
-          let json;
+          let json: Json;
           try { json = JSON.parse(raw); } catch { json = { message: raw }; }
-          if (res.statusCode >= 400) reject(new Error(`GH ${res.statusCode}: ${json.message || raw}`));
+          if (res.statusCode! >= 400) reject(new Error(`GH ${res.statusCode}: ${json.message || raw}`));
           else resolve(json);
         });
       }
@@ -52,7 +53,7 @@ function ghRequest(method, path, auth, body) {
   });
 }
 
-function loadEnv() {
+function loadEnv(): Json {
   const {
     HERMIT_GH_APP_ID,
     HERMIT_GH_APP_INSTALL_ID,
@@ -81,8 +82,8 @@ function loadEnv() {
   return { HERMIT_GH_APP_ID, HERMIT_GH_APP_INSTALL_ID, HERMIT_GH_APP_KEY_FILE, owner, repo };
 }
 
-async function getInstallToken({ HERMIT_GH_APP_ID, HERMIT_GH_APP_INSTALL_ID, HERMIT_GH_APP_KEY_FILE }) {
-  let pem;
+async function getInstallToken({ HERMIT_GH_APP_ID, HERMIT_GH_APP_INSTALL_ID, HERMIT_GH_APP_KEY_FILE }: Json): Promise<string> {
+  let pem: string;
   try {
     pem = readFileSync(HERMIT_GH_APP_KEY_FILE, "utf8");
   } catch {
@@ -103,7 +104,7 @@ async function getInstallToken({ HERMIT_GH_APP_ID, HERMIT_GH_APP_INSTALL_ID, HER
 async function checkMode() {
   const proposalId = process.argv[3];
   if (!proposalId) {
-    process.stderr.write("Usage: node file-issue.js --check <proposal-id>\n");
+    process.stderr.write("Usage: bun file-issue.ts --check <proposal-id>\n");
     process.exit(1);
   }
 
@@ -136,7 +137,7 @@ async function commentMode() {
   const issueNumber = parseInt(process.argv[3], 10);
   const bodyFile = process.argv[4];
   if (!issueNumber || issueNumber <= 0 || !bodyFile) {
-    process.stderr.write("Usage: node file-issue.js --comment <issue-number> <body-file>\n");
+    process.stderr.write("Usage: bun file-issue.ts --comment <issue-number> <body-file>\n");
     process.exit(1);
   }
 
@@ -159,7 +160,7 @@ async function commentMode() {
   process.stdout.write(comment.html_url + "\n");
 }
 
-function buildLabels(extra = []) {
+function buildLabels(extra: string[] = []): string[] {
   return [...new Set(["hermit-filed", ...extra])];
 }
 
@@ -179,7 +180,7 @@ async function main() {
   const extraLabels = process.argv.slice(4);
 
   if (!titleFile || !bodyFile) {
-    process.stderr.write("Usage: node file-issue.js <title-file> <body-file> [label...]\n");
+    process.stderr.write("Usage: bun file-issue.ts <title-file> <body-file> [label...]\n");
     process.exit(1);
   }
 
@@ -205,11 +206,11 @@ async function main() {
   process.stdout.write(issue.html_url + "\n");
 }
 
-if (require.main === module) {
-  main().catch((err) => {
+export { buildLabels };
+
+if (import.meta.main) {
+  main().catch((err: any) => {
     process.stderr.write(err.message + "\n");
     process.exit(1);
   });
 }
-
-module.exports = { buildLabels };

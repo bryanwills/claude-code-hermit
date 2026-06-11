@@ -1,50 +1,51 @@
-#!/usr/bin/env node
-"use strict";
+#!/usr/bin/env bun
 
-const { spawnSync } = require("child_process");
-const { mkdtempSync, writeFileSync } = require("fs");
-const { tmpdir } = require("os");
-const { generateKeyPairSync } = require("crypto");
-const path = require("path");
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { generateKeyPairSync } from "node:crypto";
+import path from "node:path";
+import { buildLabels } from "../skills/hermit-scribe/file-issue";
 
-const SCRIPT = path.join(__dirname, "..", "skills", "hermit-scribe", "file-issue.js");
-const { buildLabels } = require(SCRIPT);
+type Json = any;
+
+const SCRIPT = path.join(import.meta.dir, "..", "skills", "hermit-scribe", "file-issue.ts");
 
 let pass = 0;
 let fail = 0;
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     pass++;
     console.log(`  ok    ${name}`);
-  } catch (err) {
+  } catch (err: any) {
     fail++;
     console.log(`  FAIL  ${name}`);
     console.log(`        ${err.message}`);
   }
 }
 
-function run(env, args) {
+function run(env: Json, args: string[]) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     env: { PATH: process.env.PATH, ...env },
     encoding: "utf8",
   });
 }
 
-function assertEqual(actual, expected, label) {
+function assertEqual(actual: any, expected: any, label: string) {
   if (actual !== expected) {
     throw new Error(`${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
   }
 }
 
-function assertMatch(actual, pattern, label) {
+function assertMatch(actual: string, pattern: RegExp, label: string) {
   if (!pattern.test(actual)) {
     throw new Error(`${label}: ${JSON.stringify(actual)} does not match ${pattern}`);
   }
 }
 
-function assertFails(env, args, pattern) {
+function assertFails(env: Json, args: string[], pattern: RegExp) {
   const r = run(env, args);
   assertEqual(r.status, 1, "exit code");
   assertMatch(r.stderr, pattern, "stderr");
@@ -73,11 +74,11 @@ const fullEnv = {
 console.log("hermit-scribe CLI tests");
 
 test("no args prints usage and exits 1", () => {
-  assertFails({}, [], /Usage: node file-issue\.js/);
+  assertFails({}, [], /Usage: bun file-issue\.ts/);
 });
 
 test("one arg prints usage and exits 1", () => {
-  assertFails({}, [titleFile], /Usage: node file-issue\.js/);
+  assertFails({}, [titleFile], /Usage: bun file-issue\.ts/);
 });
 
 test("missing HERMIT_GH_APP_ID is named in error", () => {
@@ -125,7 +126,7 @@ test("missing key file shows labeled error with var name and path", () => {
 });
 
 test("--check with no proposal id prints usage and exits 1", () => {
-  assertFails({}, ["--check"], /Usage: node file-issue\.js --check/);
+  assertFails({}, ["--check"], /Usage: bun file-issue\.ts --check/);
 });
 
 test("--check with missing env var reports the var name", () => {
@@ -164,7 +165,7 @@ test("whitespace-only title file is rejected after trim", () => {
 
 // --- buildLabels unit tests ---
 
-function assertDeepEqual(actual, expected, label) {
+function assertDeepEqual(actual: any, expected: any, label: string) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
   if (a !== e) {

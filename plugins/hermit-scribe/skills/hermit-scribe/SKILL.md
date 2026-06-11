@@ -81,7 +81,7 @@ The proposal file under `.claude-code-hermit/proposals/` is NOT modified — tra
 
 Run:
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.js" --check {id}
+bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --check {id}
 ```
 
 - Exit 0 + URL printed → an issue already exists for this proposal. Show the URL to the operator and ask whether to skip filing or proceed anyway.
@@ -127,19 +127,19 @@ Use the Write tool to create two files inside that directory:
 Substitute the same path from step 5 and append the derived type label and (if resolved) scope label as trailing arguments. Do NOT include `hermit-filed` — the script always adds it.
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.js" \
+bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" \
   /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md <type-label> [<scope-label>]
 ```
 
 For example, a `capability` proposal scoped to `homeassistant-hermit`:
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.js" \
+bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" \
   /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md enhancement homeassistant-hermit
 ```
 
 For an ad-hoc issue (no proposal), omit the label args entirely:
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.js" /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md
+bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md
 ```
 
 Capture stdout: it is the issue URL on success. Stderr has any error message.
@@ -200,7 +200,7 @@ Run `mktemp -d` and capture the path. Use the Write tool to create:
 **Step 5: run the script.**
 
 ```bash
-node "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.js" --comment {issue-number} /tmp/tmp.AbCdEf/body.md
+bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --comment {issue-number} /tmp/tmp.AbCdEf/body.md
 ```
 
 Capture stdout: it is the comment URL on success. Stderr has any error message.

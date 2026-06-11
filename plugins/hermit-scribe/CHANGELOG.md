@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- **tests run on bun** — `run-all.sh` invokes `bun`; `cli.test.js` spawns `process.execPath` (bun migration, core #18).
+- **bun runtime; file-issue is TypeScript** — `file-issue.js` → `file-issue.ts` (typed ESM, run with bun; usage strings and SKILL/docs updated), tests renamed and run via `bun` (bun migration, core #18).
 
 ---
 
