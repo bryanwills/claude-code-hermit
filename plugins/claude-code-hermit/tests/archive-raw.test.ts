@@ -349,3 +349,95 @@ test('fail-open: exit 0 with missing state dir', async () => {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   }
 });
+
+// -------------------------------------------------------
+// 13. Purge: archive_retention_days set → deletes old .archive entries
+// -------------------------------------------------------
+describe('purge: archive_retention_days set, expired .archive entry deleted', () => {
+  let h: Hermit;
+  let out: string;
+
+  beforeAll(async () => {
+    h = makeHermit();
+    // Seed config with archive_retention_days: 90
+    fs.writeFileSync(
+      path.join(h.dir, '.claude-code-hermit', 'config.json'),
+      '{"knowledge":{"raw_retention_days":14,"archive_retention_days":90}}\n',
+    );
+    // Place an already-archived file older than 90d
+    fs.mkdirSync(raw(h.dir, '.archive'), { recursive: true });
+    fs.writeFileSync(
+      raw(h.dir, '.archive', `note-${PAST}.md`),
+      `---\ncreated: ${PAST}\n---\nold archive entry`,
+    );
+    out = await runArchive(h.dir);
+  });
+  afterAll(() => h.cleanup());
+
+  test('purge: expired .archive entry deleted', () => {
+    expect(fs.existsSync(raw(h.dir, '.archive', `note-${PAST}.md`))).toBe(false);
+  });
+  test('purge: output says 1 purged', () => {
+    expect(out).toMatch(/1 purged/);
+  });
+  test('purge: deletion logged to stderr', () => {
+    expect(out).toContain(`purged note-${PAST}.md`);
+  });
+});
+
+// -------------------------------------------------------
+// 14. Purge: archive_retention_days null → nothing deleted
+// -------------------------------------------------------
+describe('purge: archive_retention_days null → no deletion', () => {
+  let h: Hermit;
+  let out: string;
+
+  beforeAll(async () => {
+    h = makeHermit();
+    // Default config has archive_retention_days: null (implicit — key absent is treated as null)
+    fs.mkdirSync(raw(h.dir, '.archive'), { recursive: true });
+    fs.writeFileSync(
+      raw(h.dir, '.archive', `note-${PAST}.md`),
+      `---\ncreated: ${PAST}\n---\nold archive entry`,
+    );
+    out = await runArchive(h.dir);
+  });
+  afterAll(() => h.cleanup());
+
+  test('purge: null retention keeps the .archive entry', () => {
+    expect(fs.existsSync(raw(h.dir, '.archive', `note-${PAST}.md`))).toBe(true);
+  });
+});
+
+// -------------------------------------------------------
+// 15. Purge: -latest pin survives even with archive_retention_days set
+// -------------------------------------------------------
+describe('purge: -latest pin in .archive survives purge', () => {
+  let h: Hermit;
+
+  beforeAll(async () => {
+    h = makeHermit();
+    fs.writeFileSync(
+      path.join(h.dir, '.claude-code-hermit', 'config.json'),
+      '{"knowledge":{"raw_retention_days":14,"archive_retention_days":1}}\n',
+    );
+    fs.mkdirSync(raw(h.dir, '.archive'), { recursive: true });
+    fs.writeFileSync(
+      raw(h.dir, '.archive', `snapshot-${PAST}-latest.md`),
+      `---\ncreated: ${PAST}\n---\nlatest alias`,
+    );
+    fs.writeFileSync(
+      raw(h.dir, '.archive', `note-${PAST}.md`),
+      `---\ncreated: ${PAST}\n---\nregular old entry`,
+    );
+    await runArchive(h.dir);
+  });
+  afterAll(() => h.cleanup());
+
+  test('purge: -latest alias in .archive is not deleted', () => {
+    expect(fs.existsSync(raw(h.dir, '.archive', `snapshot-${PAST}-latest.md`))).toBe(true);
+  });
+  test('purge: regular expired .archive entry is deleted', () => {
+    expect(fs.existsSync(raw(h.dir, '.archive', `note-${PAST}.md`))).toBe(false);
+  });
+});
