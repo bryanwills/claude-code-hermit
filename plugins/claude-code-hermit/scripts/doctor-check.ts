@@ -741,7 +741,6 @@ function runAllChecks() {
     checkReflectLoop(),
     checkScheduler(),
     checkWatchdog(),
-    checkWatchdog(),
     checkOpusWake(),
     checkHeartbeat(),
   ];
