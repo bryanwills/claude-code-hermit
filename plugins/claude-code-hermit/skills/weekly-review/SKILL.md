@@ -25,6 +25,7 @@ Generates the weekly review for the current ISO week.
      - Autonomy: N% self-directed (vs M% prior, Δ+/-N pp)
      - Proposals: +A created, B resolved (C pending review, D in flight)
      - Oldest open accepted: PROP-NNN (Nd since accepted) [or "none"]
+     - Reflect: <the `reflect:` line from the review body's ### Reflect section, or "no reflect runs">
      ```
    - If no prior week file exists: omit the "vs" comparisons and show this week's numbers only.
    - If the current-week file is missing (script failed): skip the evolution block entirely.

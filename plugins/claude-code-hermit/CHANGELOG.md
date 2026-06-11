@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **reflect: observations ledger with mechanical graduation** — sub-threshold observations (cost spikes, quick-mode deferrals, failed three-condition candidates) append to `state/observations.jsonl` instead of project memory; step 3b prunes (30-day TTL, recurrence keeps a pattern's history) and promotes patterns seen in ≥2 distinct sessions to candidates carrying a ledger `Artifact:` citation. New `scripts/prune-observations.js`.
+- **reflection-judge: ledger artifact verification + covered-by-memory exemption** — §1.4 verifies `state/observations.jsonl` citations directly (sub-threshold patterns live only in the ledger); ledger-graduated candidates are never suppressed `covered-by-memory`. Closes the lifecycle bug where recording a pattern to memory got it suppressed at graduation.
+- **reflect: ephemerality exception for procedure capture** — single-session eligibility when the procedure's artifacts are ephemeral (outside repo/state, e.g. `/tmp`) and the cost is already quantified in session content; Tier 3, kill criteria still apply.
+- **weekly-review: reflect vital-signs line** — review gains `reflect_runs/candidates/surfaced/accepted/cost_usd` frontmatter and a `### Reflect` section with a suppression digest (slug:code), computed week-scoped from session-report Progress Log lines and proposal-metrics.jsonl events; evolution block relays it. Makes a healthy-quiet reflect loop distinguishable from a dead one.
+- **session-close: close debrief in Lessons** — step 1 asks what was built ad-hoc this session (throwaway scripts, manual procedures, long waits a tool would remove) and what had to be re-derived that a compiled note should have covered; persists one quantified Lesson line per item (substantial re-derived knowledge goes to `compiled/`); arms procedure-capture recurrence upstream.
+
+### Changed
+
+- **reflect/judge: artifact-cited evidence path** — efficiency/cost candidates may pass the judge with `Sessions: none` plus an `Artifact:` citation to a machine-written state file (`cost-log.jsonl`, `proposal-metrics.jsonl`, `observations.jsonl`); the judge verifies the file contains the cited values instead of suppressing `no-sessions`. The evidence-integrity rule softens accordingly — prose self-certification stays barred.
+- **proposal-create: push for measurable success_signal** — cost-measurable proposals must fill `## Success Signal` with a `--validate`-checked predicate; an empty section is the documented exception and `## Verification` must say why.
+- **reflect: pattern-absence resolution requires same-area overlap** — absence across 3 sessions only counts when at least one checked session shares a tag with the proposal (tags pooled from the proposal itself and its `related_sessions`); otherwise skip-and-revisit. Stops "stopped doing that kind of work" from auto-resolving as "fixed".
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. Create `.claude-code-hermit/state/observations.jsonl` as an empty file if it does not exist (append-only ledger; `append-metrics.js` also creates it lazily on first write, so pre-upgrade hermits fail open).
+2. No migration of existing sub-threshold memory entries is performed — future observations land in the ledger. Stale pattern-label notes in operator MEMORY.md can be pruned manually at the operator's convenience.
+
 ## [1.1.12] - 2026-06-10
 
 ### Added
