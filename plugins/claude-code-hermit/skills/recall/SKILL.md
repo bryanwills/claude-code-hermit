@@ -1,6 +1,5 @@
 ---
 name: recall
-model: haiku
 description: "Full-text retrieval over session reports, compiled artifacts, and proposals by keyword. Activates on messages like 'recall X', 'what did I learn about X', 'when did we last touch X', 'what did we decide about X'."
 ---
 # Recall
@@ -33,7 +32,11 @@ Relay the script output to the operator. Each result shows:
 - Title (when it differs from the filename)
 - Matching line snippets with `:line` references
 
-If no results: report "Nothing found for '`<query>`' in sessions, compiled artifacts, or proposals."
+## Step 1b — Recall from auto-memory
+
+Also surface entries from your loaded `MEMORY.md` that relate to the query under a **From memory** heading, each tagged `memory/<file>.md`. Read the few that matter; don't chase cross-links or read the full corpus. Skip silently if no `MEMORY.md` is loaded.
+
+If neither the script nor auto-memory returned anything: report "Nothing found for '`<query>`' in sessions, compiled artifacts, proposals, or auto-memory."
 
 ## Step 2 — Orientation line (optional)
 
@@ -48,4 +51,4 @@ If the operator asks for more detail on a specific result, Read that file and su
 
 ## Scope
 
-Searches `.claude-code-hermit/sessions/`, `.claude-code-hermit/compiled/`, and `.claude-code-hermit/proposals/` only. Strictly read-only — does not move, delete, or modify any file.
+Searches `.claude-code-hermit/sessions/`, `.claude-code-hermit/compiled/`, and `.claude-code-hermit/proposals/` via `search.ts`, and the loaded auto-memory index + topic files. Strictly read-only — does not move, delete, or modify any file.
