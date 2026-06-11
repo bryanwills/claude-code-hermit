@@ -61,12 +61,22 @@ grep NoNewPrivs /proc/self/status                    # NoNewPrivs: 1
 echo "pids.max: $(cat /sys/fs/cgroup/pids.max)"      # 2048
 
 echo "=== LAN containment (when on) ==="
-python3 -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('192.168.1.1',22))" 2>&1 \
+bun -e '
+const s = require("net").connect({ host: "192.168.1.1", port: 22, timeout: 2000 });
+s.on("connect", () => { console.error("connected"); process.exit(0); });
+s.on("timeout", () => { console.error("timed out"); process.exit(1); });
+s.on("error", (e) => {
+  console.error(e.code === "ECONNREFUSED" ? "refused"
+    : e.code === "ENETUNREACH" || e.code === "EHOSTUNREACH" ? "Network is unreachable"
+    : String(e));
+  process.exit(1);
+});
+' 2>&1 \
   | grep -qE 'timed out|refused|Network is unreachable' && echo "OK"
 
 echo "=== DNS policy (enforce mode) ==="
 getent hosts api.anthropic.com >/dev/null && echo "allow OK"
-python3 -c "import socket; socket.gethostbyname('example.com')" 2>&1 \
+bun -e 'require("dns").lookup("example.com", (e) => { if (e) { console.error(e.code === "ENOTFOUND" ? "Name or service not known" : String(e)); process.exit(1); } console.log("resolved"); });' 2>&1 \
   | grep -q 'Name or service not known' && echo "block OK"
 
 echo "=== Resource bounds + sysctls (when on, applicable) ==="

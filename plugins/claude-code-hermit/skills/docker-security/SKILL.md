@@ -270,9 +270,9 @@ Parse each output line into a subnet string and a Labels JSON object. Skip lines
 **Exclude** networks belonging to this project's own `hermit-net` from the collision list. Identify these by labels:
 - `com.docker.compose.project == <our project name>` AND `com.docker.compose.network == "hermit-net"`
 
-Derive `<our project name>` from `timeout 10s docker compose -f docker-compose.hermit.yml config --format json 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('name',''))"` — fall back to `basename "$PROJECT_DIR"` if the command fails.
+Derive `<our project name>` from `timeout 10s docker compose -f docker-compose.hermit.yml config --format json 2>/dev/null | bun -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).name ?? "")'` — fall back to `basename "$PROJECT_DIR"` if the command fails.
 
-Use Python `ipaddress.ip_network` for overlap checking. Walk candidate /24 subnets in order: `172.28.0.0/24`, `172.29.0.0/24`, `172.30.0.0/24`, `172.31.0.0/24`, `10.244.0.0/24`, `10.245.0.0/24`, `10.246.0.0/24`, `10.247.0.0/24`. Pick the first that doesn't overlap any occupied subnet. Treat parse failures as "subnet unknown, skip."
+Check subnet overlap with a `bun -e` snippet (convert each /24 candidate and occupied CIDR to an integer range and compare). Walk candidate /24 subnets in order: `172.28.0.0/24`, `172.29.0.0/24`, `172.30.0.0/24`, `172.31.0.0/24`, `10.244.0.0/24`, `10.245.0.0/24`, `10.246.0.0/24`, `10.247.0.0/24`. Pick the first that doesn't overlap any occupied subnet. Treat parse failures as "subnet unknown, skip."
 
 If all candidates collide, `AskUserQuestion` (header: `"Custom subnet"`) with Other field accepting an IPv4 /24 CIDR (reject if prefix != 24; re-prompt on invalid or still-colliding).
 
@@ -424,7 +424,7 @@ On `"No — I'll restart manually later"`: skip to step 9 with the note "Overlay
 ### 7. Restart + smoke test
 
 **Hard gate — re-check base ports before starting:**
-Before running `hermit-docker up`, re-run the step 5 port detection: `timeout 10s docker compose -f docker-compose.hermit.yml config --format json 2>/dev/null | python3 -c "import json,sys; p=json.load(sys.stdin)['services'].get('hermit',{}).get('ports',[]); print(len(p))"`. If the result is non-zero (or the command output from the grep fallback is non-empty) AND `docker.security.network.enabled === true` (LAN containment is on):
+Before running `hermit-docker up`, re-run the step 5 port detection: `timeout 10s docker compose -f docker-compose.hermit.yml config --format json 2>/dev/null | bun -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")); console.log((((d.services ?? {}).hermit ?? {}).ports ?? []).length)'`. If the result is non-zero (or the command output from the grep fallback is non-empty) AND `docker.security.network.enabled === true` (LAN containment is on):
 
 Ask with `AskUserQuestion` (header: `"Ports conflict"`):
 - `"Auto-fix — I'll remove the \`ports:\` block (backup first)"` (Recommended)
@@ -452,7 +452,7 @@ If operator chose to restart now AND container was running before this skill (an
    Then stop.
 ### 8. Verify
 
-Run the verification block via `docker exec hermit sh -c '...'`. The hermit base image has `python3`, `jq`, `curl`, and glibc (`getent`) — no `nc` or `nslookup`. Use Python and getent.
+Run the verification block via `docker exec hermit sh -c '...'`. The hermit base image has `bun`, `jq`, `curl`, and glibc (`getent`) — no `python3`, `nc`, or `nslookup`. Use bun and getent.
 
 ```bash
 docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml \
@@ -465,7 +465,17 @@ echo "pids.max: $(cat /sys/fs/cgroup/pids.max)"
 
 echo
 echo "=== LAN containment ==="
-python3 -c "import socket; s=socket.socket(); s.settimeout(2); s.connect(('192.168.1.1',22))" 2>&1 \
+bun -e '
+const s = require("net").connect({ host: "192.168.1.1", port: 22, timeout: 2000 });
+s.on("connect", () => { console.error("connected"); process.exit(0); });
+s.on("timeout", () => { console.error("timed out"); process.exit(1); });
+s.on("error", (e) => {
+  console.error(e.code === "ECONNREFUSED" ? "refused"
+    : e.code === "ENETUNREACH" || e.code === "EHOSTUNREACH" ? "Network is unreachable"
+    : String(e));
+  process.exit(1);
+});
+' 2>&1 \
   | grep -qE 'timed out|refused|Network is unreachable' \
   && echo "  LAN-block:    OK (192.168.1.1:22 unreachable)" \
   || echo "  LAN-block:    NOT BLOCKED (compromised hermit could reach LAN)"
@@ -477,7 +487,7 @@ getent hosts api.anthropic.com >/dev/null \
   || echo "  DNS-allow:    FAIL (allowlisted domain does not resolve)"
 _dns_err=$(mktemp)
 trap 'rm -f "$_dns_err"' EXIT
-timeout 2s python3 -c "import socket; socket.gethostbyname('example.com')" >/dev/null 2>"$_dns_err"
+timeout 2s bun -e 'require("dns").lookup("example.com", (e) => { if (e) { console.error(e.code === "ENOTFOUND" ? "Name or service not known" : String(e)); process.exit(1); } console.log("resolved"); });' >/dev/null 2>"$_dns_err"
 dns_rc=$?
 if [ $dns_rc -eq 124 ]; then
   echo "  DNS-block:    FAIL — query timed out (likely DNS leak; no-resolv missing or upstream unreachable)"
@@ -486,22 +496,22 @@ elif grep -qE 'Name or service not known|nodename nor servname' "$_dns_err"; the
 else
   echo "  DNS-block:    FAIL — example.com resolved or unexpected error"
 fi
-python3 -c "
-import socket
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.settimeout(2)
-# Hand-crafted DNS query for example.com type A. Using bytes.fromhex avoids
-# escape-processing pitfalls when this SKILL travels through model -> shell -> python.
-# Layout: header(12B: id=1234 flags=0100 qdcount=1 the rest 0) + qname(7example3com0) + qtype 0001 + qclass 0001
-q = bytes.fromhex('123401000001000000000000076578616d706c6503636f6d0000010001')
-sock.sendto(q, ('8.8.8.8', 53))
-try:
-    resp, _ = sock.recvfrom(512)
-    rcode = resp[3] & 0x0f
-    print('NXDOMAIN' if rcode == 3 else f'rcode={rcode}')
-except Exception as e:
-    print(f'no-response ({e})')
-" | grep -q NXDOMAIN \
+bun -e '
+const sock = require("dgram").createSocket("udp4");
+// Hand-crafted DNS query for example.com type A. Using Buffer.from(hex) avoids
+// escape-processing pitfalls when this SKILL travels through model -> shell -> bun.
+// Layout: header(12B: id=1234 flags=0100 qdcount=1 the rest 0) + qname(7example3com0) + qtype 0001 + qclass 0001
+const q = Buffer.from("123401000001000000000000076578616d706c6503636f6d0000010001", "hex");
+const timer = setTimeout(() => { console.log("no-response (timeout)"); sock.close(); }, 2000);
+sock.on("message", (resp) => {
+  clearTimeout(timer);
+  const rcode = resp[3] & 0x0f;
+  console.log(rcode === 3 ? "NXDOMAIN" : "rcode=" + rcode);
+  sock.close();
+});
+sock.on("error", (e) => { clearTimeout(timer); console.log("no-response (" + e + ")"); sock.close(); });
+sock.send(q, 53, "8.8.8.8");
+' | grep -q NXDOMAIN \
   && echo "  DNS-redirect: OK (port-53 redirected even with explicit upstream)" \
   || echo "  DNS-redirect: NOT ENFORCED (or in log-only mode — expected)"
 

@@ -74,11 +74,24 @@ describe('docker-security SKILL.md', () => {
 
   // Hardened DNS-block verifier
   test("SKILL.md: DNS-block check uses 'timeout 2s' (catches timeout vs NXDOMAIN)", () => {
-    expect(skill).toContain('timeout 2s python3');
+    expect(skill).toContain('timeout 2s bun -e');
   });
 
   test('SKILL.md: DNS-block check classifies timeout explicitly (not just grep-on-stderr)', () => {
     expect(skill).toContain('query timed out');
+  });
+
+  // Python retired from the Docker layer (bun migration WP9) — the base image
+  // no longer ships python3, so no verification snippet may invoke it.
+  test('SKILL.md: no python3 invocations (only the "image has no python3" note)', () => {
+    const invocations = skill.split('\n').filter((l) => l.includes('python3') && !l.includes('no `python3`'));
+    expect(invocations).toEqual([]);
+  });
+
+  test('SKILL.md: verification block uses bun for LAN/DNS checks', () => {
+    expect(skill).toContain('require("net").connect');
+    expect(skill).toContain('require("dns").lookup');
+    expect(skill).toContain('require("dgram").createSocket');
   });
 
   // --no-cache netguard rebuild
@@ -118,5 +131,9 @@ describe('tune instruction (SKILL.md + docs)', () => {
 
   test("docs/docker-security.md: no stale 'restart hermit-netguard' instruction in tune section", () => {
     expect(docs).not.toContain('restart hermit-netguard');
+  });
+
+  test('docs/docker-security.md: no python3 in the verify block (Python retired from image)', () => {
+    expect(docs).not.toContain('python3');
   });
 });

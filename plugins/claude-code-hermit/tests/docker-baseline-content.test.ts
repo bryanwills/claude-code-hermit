@@ -17,6 +17,8 @@ const dockerfile = fs.readFileSync(
   path.join(PLUGIN_ROOT, 'state-templates', 'docker', 'Dockerfile.hermit.template'), 'utf-8');
 const compose = fs.readFileSync(
   path.join(PLUGIN_ROOT, 'state-templates', 'docker', 'docker-compose.hermit.yml.template'), 'utf-8');
+const entrypoint = fs.readFileSync(
+  path.join(PLUGIN_ROOT, 'state-templates', 'docker', 'docker-entrypoint.hermit.sh.template'), 'utf-8');
 
 const dockerfileLines = dockerfile.split('\n');
 const rmLine = dockerfileLines.findIndex((l) => l.includes('rm -rf /var/lib/apt/lists'));
@@ -93,5 +95,50 @@ describe('Dockerfile: sandbox deps', () => {
     expect(bwrapLine).toBeGreaterThanOrEqual(0);
     expect(rmLine).toBeGreaterThanOrEqual(0);
     expect(bwrapLine).toBeLessThan(rmLine);
+  });
+});
+
+// -------------------------------------------------------
+// Python retired from the Docker layer (bun migration WP9).
+// Bun is the hermit runtime; Node/npm stay solely for the
+// Claude Code CLI and its self-update path.
+// -------------------------------------------------------
+describe('Dockerfile: Python retired, bun pinned', () => {
+  test('Dockerfile: no python3 packages remain', () => {
+    expect(dockerfile).not.toContain('python3');
+  });
+
+  test('Dockerfile: bun installed via native installer with BUN_VERSION pin', () => {
+    expect(dockerfile).toContain('curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"');
+  });
+
+  test('Dockerfile: BUN_VERSION build arg pinned to a concrete version', () => {
+    expect(dockerfile).toMatch(/^ARG BUN_VERSION=\d+\.\d+\.\d+$/m);
+  });
+
+  test('Dockerfile: .bun/bin on ENV PATH', () => {
+    expect(dockerfile).toMatch(/^ENV PATH=\/home\/claude\/\.bun\/bin:\$PATH$/m);
+  });
+
+  test('Dockerfile: Node layer kept for the Claude Code CLI', () => {
+    expect(dockerfile).toContain('deb.nodesource.com');
+    expect(dockerfile).toContain('npm install -g @anthropic-ai/claude-code');
+  });
+});
+
+describe('Entrypoint: Python retired, PATH covers bun', () => {
+  test('entrypoint: no python3 invocations remain', () => {
+    expect(entrypoint).not.toContain('python3');
+  });
+
+  test('entrypoint: explicit PATH line includes both .npm-global/bin and .bun/bin', () => {
+    const pathLine = entrypoint.split('\n').find((l) => l.startsWith('export PATH='));
+    expect(pathLine).toBeDefined();
+    expect(pathLine).toContain('/home/claude/.npm-global/bin');
+    expect(pathLine).toContain('/home/claude/.bun/bin');
+  });
+
+  test('entrypoint: npm self-heal for the claude binary kept', () => {
+    expect(entrypoint).toContain('npm install -g @anthropic-ai/claude-code');
   });
 });

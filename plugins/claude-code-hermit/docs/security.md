@@ -108,7 +108,7 @@ Honest weighting:
 | `cap_drop: ALL`                          | Revokes Linux capabilities (NET_RAW, SETUID, DAC_OVERRIDE, …)                  | Incremental — non-root `claude` user already had no ambient caps; this closes the kernel-enforced ceiling  |
 | `pids_limit: 2048`                       | Caps process count (fork-bomb / runaway-subprocess bound)                      | Resource bound, not a security primitive on its own — limits collateral damage                             |
 
-Hermit's runtime (tmux, claude CLI, python3, jq, npm, git+HTTPS plugin installs) needs none of what these stanzas remove. Steady-state PID usage is ~80; install bursts can spike higher but stay well below 2048.
+Hermit's runtime (tmux, claude CLI, bun, jq, npm, git+HTTPS plugin installs) needs none of what these stanzas remove. Steady-state PID usage is ~80; install bursts can spike higher but stay well below 2048.
 
 **Override path.** Operators with custom workloads (services on ports <1024, setuid helpers, high-PID frameworks) edit `docker-compose.hermit.yml` directly to relax or remove the relevant stanza. The defaults are conservative because the recommended-plugins flow accepts third-party marketplaces — every operator who didn't audit every plugin benefits from the floor.
 

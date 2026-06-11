@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-export PATH="/home/claude/.npm-global/bin:${PATH}"
+export PATH="/home/claude/.npm-global/bin:/home/claude/.bun/bin:${PATH}"
 set -euo pipefail
 
 PROJECT_DIR="$(pwd)"
@@ -85,21 +85,22 @@ fi
 
 # --- 0b. Check if OAuth token has expired ---
 if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -f "$CRED_FILE" ]; then
-  EXPIRED=$(python3 -c "
-import json, sys, time
-try:
-    with open(sys.argv[1]) as f:
-        creds = json.load(f)
-    # Credentials are nested under 'claudeAiOauth'; expiresAt is in milliseconds
-    oauth = creds.get('claudeAiOauth', {})
-    expires_at_ms = oauth.get('expiresAt')
-    if expires_at_ms and float(expires_at_ms) / 1000 < time.time():
-        print('expired')
-    else:
-        print('ok')
-except Exception:
-    print('unknown')
-" "$CRED_FILE" 2>/dev/null || echo "unknown")
+  EXPIRED=$(bun -e '
+try {
+  const creds = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  // Credentials are nested under "claudeAiOauth"; expiresAt is in milliseconds
+  const expiresAt = (creds.claudeAiOauth ?? {}).expiresAt;
+  if (!expiresAt) {
+    console.log("ok");
+  } else {
+    const ms = Number(expiresAt);
+    if (Number.isNaN(ms)) throw new Error("bad expiresAt");
+    console.log(ms < Date.now() ? "expired" : "ok");
+  }
+} catch {
+  console.log("unknown");
+}
+' "$CRED_FILE" 2>/dev/null || echo "unknown")
 
   if [ "$EXPIRED" = "expired" ]; then
     echo ""
@@ -112,12 +113,12 @@ except Exception:
     echo "  Waiting for fresh credentials (timeout: 10 minutes)..."
     echo "=============================================="
     echo ""
-    ORIG_MTIME=$(python3 -c "import os,sys; print(int(os.path.getmtime(sys.argv[1])))" "$CRED_FILE" 2>/dev/null || echo "0")
+    ORIG_MTIME=$(bun -e 'try { console.log(Math.floor(require("fs").statSync(process.argv[1]).mtimeMs / 1000)); } catch { console.log("0"); }' "$CRED_FILE" 2>/dev/null || echo "0")
     WAIT_SECS=0
     while true; do
       sleep 5
       WAIT_SECS=$((WAIT_SECS + 5))
-      NEW_MTIME=$(python3 -c "import os,sys; print(int(os.path.getmtime(sys.argv[1])))" "$CRED_FILE" 2>/dev/null || echo "0")
+      NEW_MTIME=$(bun -e 'try { console.log(Math.floor(require("fs").statSync(process.argv[1]).mtimeMs / 1000)); } catch { console.log("0"); }' "$CRED_FILE" 2>/dev/null || echo "0")
       if [ "$NEW_MTIME" != "$ORIG_MTIME" ]; then
         echo "[docker-entrypoint] Credentials updated! Continuing startup..."
         break
@@ -159,72 +160,88 @@ fi
 # --- 1. Bypass onboarding, pre-approve MCP servers, patch permission_mode ---
 CLAUDE_JSON="${CLAUDE_CONFIG_DIR}/.claude.json"
 CC_VERSION=$(claude --version 2>/dev/null | grep -oP '[\d.]+' | head -1 || echo "0.0.0")
-INIT_OUTPUT=$(python3 -c "
-import json, sys, os
-claude_json, version, project = sys.argv[1], sys.argv[2], sys.argv[3]
+INIT_OUTPUT=$(bun - "$CLAUDE_JSON" "$CC_VERSION" "$PROJECT_DIR" <<'JSEOF'
+const fs = require("fs");
+const path = require("path");
+const [claudeJson, version, project] = process.argv.slice(2);
 
-# --- .claude.json: onboarding + MCP approval ---
-if os.path.exists(claude_json):
-    with open(claude_json) as f: d = json.load(f)
-else:
-    d = {}
-changed = False
+// Fail loud: bun exits 0 on uncaught fs errors, which would silently yield an
+// empty INIT_OUTPUT. Exit 1 explicitly so set -e aborts the entrypoint instead.
+try {
 
-if not d.get('hasCompletedOnboarding') or d.get('lastOnboardingVersion') != version:
-    d.update({'hasCompletedOnboarding': True, 'lastOnboardingVersion': version})
-    changed = True
-    print(f'[docker-entrypoint] Onboarding bypass set for Claude Code v{version}', file=sys.stderr)
+// --- .claude.json: onboarding + MCP approval ---
+let d = {};
+if (fs.existsSync(claudeJson)) d = JSON.parse(fs.readFileSync(claudeJson, "utf8"));
+let changed = false;
 
-config_path = os.path.join(project, '.claude-code-hermit', 'config.json')
-channels = []
-if os.path.exists(config_path):
-    with open(config_path) as f: cfg = json.load(f)
-    channels_raw = cfg.get('channels', {})
-    if isinstance(channels_raw, dict):
-        channels = [name for name, entry in channels_raw.items()
-                    if not isinstance(entry, dict) or entry.get('enabled', True)]
-    else:
-        channels = list(channels_raw)
-if channels:
-    plugin_ids = {
-        'discord': 'plugin:discord:discord',
-        'telegram': 'plugin:telegram:telegram',
+if (!d.hasCompletedOnboarding || d.lastOnboardingVersion !== version) {
+  d.hasCompletedOnboarding = true;
+  d.lastOnboardingVersion = version;
+  changed = true;
+  console.error(`[docker-entrypoint] Onboarding bypass set for Claude Code v${version}`);
+}
+
+const configPath = path.join(project, ".claude-code-hermit", "config.json");
+const configExists = fs.existsSync(configPath);
+let cfg = {};
+let channels = [];
+if (configExists) {
+  cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  const channelsRaw = cfg.channels ?? {};
+  if (Array.isArray(channelsRaw)) {
+    channels = [...channelsRaw];
+  } else {
+    channels = Object.entries(channelsRaw)
+      .filter(([, entry]) => typeof entry !== "object" || entry === null || (entry.enabled ?? true))
+      .map(([name]) => name);
+  }
+}
+if (channels.length > 0) {
+  const pluginIds = {
+    discord: "plugin:discord:discord",
+    telegram: "plugin:telegram:telegram",
+  };
+  d.projects = d.projects ?? {};
+  const proj = (d.projects[project] = d.projects[project] ?? {});
+  const enabled = proj.enabledMcpjsonServers ?? [];
+  const disabledJson = proj.disabledMcpjsonServers ?? [];
+  const disabledMcp = proj.disabledMcpServers ?? [];
+  for (const ch of channels) {
+    const pid = pluginIds[ch];
+    if (!pid) continue;
+    if (!enabled.includes(pid)) {
+      enabled.push(pid);
+      changed = true;
+      console.error(`[docker-entrypoint] MCP server ${pid}: added to enabledMcpjsonServers`);
     }
-    proj = d.setdefault('projects', {}).setdefault(project, {})
-    enabled = proj.get('enabledMcpjsonServers', [])
-    disabled_json = proj.get('disabledMcpjsonServers', [])
-    disabled_mcp = proj.get('disabledMcpServers', [])
-    for ch in channels:
-        pid = plugin_ids.get(ch)
-        if not pid:
-            continue
-        if pid not in enabled:
-            enabled.append(pid)
-            changed = True
-            print(f'[docker-entrypoint] MCP server {pid}: added to enabledMcpjsonServers', file=sys.stderr)
-        if pid in disabled_json:
-            disabled_json.remove(pid)
-            changed = True
-        if pid in disabled_mcp:
-            disabled_mcp.remove(pid)
-            changed = True
-    proj['enabledMcpjsonServers'] = enabled
-    proj['disabledMcpjsonServers'] = disabled_json
-    proj['disabledMcpServers'] = disabled_mcp
+    let i = disabledJson.indexOf(pid);
+    if (i !== -1) { disabledJson.splice(i, 1); changed = true; }
+    i = disabledMcp.indexOf(pid);
+    if (i !== -1) { disabledMcp.splice(i, 1); changed = true; }
+  }
+  proj.enabledMcpjsonServers = enabled;
+  proj.disabledMcpjsonServers = disabledJson;
+  proj.disabledMcpServers = disabledMcp;
+}
 
-if changed:
-    with open(claude_json, 'w') as f: json.dump(d, f)
+if (changed) fs.writeFileSync(claudeJson, JSON.stringify(d));
 
-# permission_mode is handled at launch by hermit-start.py (--permission-mode flag, or
-# --dangerously-skip-permissions for the bypassPermissions opt-in).
-# Do NOT mutate config.json here — it lives on the host bind mount and would persist
-# container-only privilege escalation into the shared project config.
+// permission_mode is handled at launch by hermit-start (--permission-mode flag, or
+// --dangerously-skip-permissions for the bypassPermissions opt-in).
+// Do NOT mutate config.json here — it lives on the host bind mount and would persist
+// container-only privilege escalation into the shared project config.
 
-# Emit channel list on stdout line 1, recommended plugins as JSON on line 2
-print(' '.join(ch for ch in channels if ch != 'imessage'))
-rec = cfg.get('docker', {}).get('recommended_plugins', []) if os.path.exists(config_path) else []
-print(json.dumps([e for e in rec if e.get('enabled', False)]))
-" "$CLAUDE_JSON" "$CC_VERSION" "$PROJECT_DIR")
+// Emit channel list on stdout line 1, recommended plugins as JSON on line 2
+console.log(channels.filter((ch) => ch !== "imessage").join(" "));
+const rec = configExists ? (cfg.docker ?? {}).recommended_plugins ?? [] : [];
+console.log(JSON.stringify(rec.filter((e) => e.enabled)));
+
+} catch (e) {
+  console.error(`[docker-entrypoint] init block failed: ${e}`);
+  process.exit(1);
+}
+JSEOF
+)
 CHANNELS=$(echo "$INIT_OUTPUT" | sed -n '1p')
 RECOMMENDED_PLUGINS_JSON=$(echo "$INIT_OUTPUT" | sed -n '2p')
 
@@ -325,101 +342,116 @@ if [ -n "$RECOMMENDED_PLUGINS_JSON" ] && [ "$RECOMMENDED_PLUGINS_JSON" != "[]" ]
   if [ "${HERMIT_PLUGIN_INSTALL_AUDIT:-0}" = "1" ]; then
     AUDIT_LOG_PATH="${AGENT_DIR}/state/plugin-installs.jsonl"
   fi
-  python3 -c "
-import json, os, subprocess, sys, time
+  bun - "$RECOMMENDED_PLUGINS_JSON" "$INSTALLED_PLUGINS" "$AUDIT_LOG_PATH" <<'JSEOF' || echo "[docker-entrypoint] Warning: recommended plugin install block encountered errors, continuing"
+const fs = require("fs");
+const path = require("path");
+const { spawnSync } = require("child_process");
 
-plugins = json.loads(sys.argv[1])
-# 'claude plugin list' output is free-form: each plugin appears as '  ❯ plugin@slug'.
-# Matching on '❯ {target}' pins the check to the entry line, preventing false positives
-# where a short target (e.g. 'hermit@foo') is a substring of a longer entry.
-installed_blob = sys.argv[2]
-marketplace_dir = sys.argv[3]
-audit_log_path = sys.argv[4] if len(sys.argv) > 4 else ''
+// "claude plugin list" output is free-form: each plugin appears as "  ❯ plugin@slug".
+// Matching on "❯ {target}" pins the check to the entry line, preventing false positives
+// where a short target (e.g. "hermit@foo") is a substring of a longer entry.
+const [pluginsJson, installedBlob, auditLogPath = ""] = process.argv.slice(2);
+const plugins = JSON.parse(pluginsJson);
 
-def audit(marketplace, plugin, scope):
-    if not audit_log_path:
-        return
-    try:
-        os.makedirs(os.path.dirname(audit_log_path), exist_ok=True)
-        with open(audit_log_path, 'a') as f:
-            f.write(json.dumps({
-                'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                'marketplace': marketplace,
-                'plugin': plugin,
-                'scope': scope,
-            }) + '\n')
-    except Exception as e:
-        print(f'[docker-entrypoint] Warning: audit log write failed: {e}', flush=True)
+// stdin is the heredoc (already consumed as program source) — children must not
+// inherit it, so every claude CLI call runs with stdin ignored.
+const INHERIT = { stdio: ["ignore", "inherit", "inherit"] };
 
-# Resolve marketplace canonical names from the CLI's source of truth. We need the
-# 'name' field to build install targets (<plugin>@<name>) and check the on-disk
-# cache dir (which is keyed by name). Storing both name and org/repo in config
-# would just duplicate this lookup; one subprocess call here is cheaper than a
-# permanent schema bifurcation.
-def fetch_marketplace_names():
-    try:
-        result = subprocess.run(['claude', 'plugin', 'marketplace', 'list', '--json'],
-                                capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            return {}
-        return {m.get('repo'): m.get('name') for m in json.loads(result.stdout) if m.get('repo')}
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+function audit(marketplace, plugin, scope) {
+  if (!auditLogPath) return;
+  try {
+    fs.mkdirSync(path.dirname(auditLogPath), { recursive: true });
+    fs.appendFileSync(auditLogPath, JSON.stringify({
+      ts: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      marketplace,
+      plugin,
+      scope,
+    }) + "\n");
+  } catch (e) {
+    console.log(`[docker-entrypoint] Warning: audit log write failed: ${e}`);
+  }
+}
 
-name_by_repo = fetch_marketplace_names()
+// Resolve marketplace canonical names from the CLI's source of truth. We need the
+// 'name' field to build install targets (<plugin>@<name>) and check the on-disk
+// cache dir (which is keyed by name). Storing both name and org/repo in config
+// would just duplicate this lookup; one subprocess call here is cheaper than a
+// permanent schema bifurcation.
+function fetchMarketplaceNames() {
+  const result = spawnSync("claude", ["plugin", "marketplace", "list", "--json"],
+    { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  if (result.error || result.status !== 0) return {};
+  try {
+    const names = {};
+    for (const m of JSON.parse(result.stdout)) {
+      if (m.repo) names[m.repo] = m.name;
+    }
+    return names;
+  } catch {
+    return {};
+  }
+}
 
-for entry in plugins:
-    plugin = entry['plugin']
-    marketplace = entry.get('marketplace', 'anthropics/claude-plugins-official')
-    scope = entry.get('scope', 'project')
+let nameByRepo = fetchMarketplaceNames();
 
-    # Schema check: marketplace must be org/repo. Pre-v1.0.34 entries that stored
-    # the literal name (e.g. 'claude-plugins-official' instead of
-    # 'anthropics/claude-plugins-official') hit this path. One warning, skip,
-    # operator re-runs /docker-setup to rebuild config from the current host plugin list.
-    if '/' not in marketplace:
-        print(f'[docker-entrypoint] Warning: {plugin} entry has outdated marketplace \"{marketplace}\" (expected org/repo) — re-run /claude-code-hermit:docker-setup to rebuild config.', flush=True)
-        continue
+for (const entry of plugins) {
+  const plugin = entry.plugin;
+  const marketplace = entry.marketplace ?? "anthropics/claude-plugins-official";
+  const scope = entry.scope ?? "project";
 
-    marketplace_name = name_by_repo.get(marketplace)
-    if not marketplace_name:
-        # Marketplace not yet registered in this container — add it, then re-fetch.
-        print(f'[docker-entrypoint] Adding marketplace: {marketplace}', flush=True)
-        try:
-            result = subprocess.run(['claude', 'plugin', 'marketplace', 'add', marketplace], check=False)
-        except FileNotFoundError:
-            print(f'[docker-entrypoint] Warning: claude not found adding marketplace {marketplace} — skipping {plugin}', flush=True)
-            continue
-        if result.returncode != 0:
-            print(f'[docker-entrypoint] Warning: failed to add marketplace {marketplace} — skipping {plugin}', flush=True)
-            continue
-        name_by_repo = fetch_marketplace_names()
-        marketplace_name = name_by_repo.get(marketplace)
-        if not marketplace_name:
-            print(f'[docker-entrypoint] Warning: marketplace {marketplace} added but name not resolvable — skipping {plugin}', flush=True)
-            continue
+  // Schema check: marketplace must be org/repo. Pre-v1.0.34 entries that stored
+  // the literal name (e.g. 'claude-plugins-official' instead of
+  // 'anthropics/claude-plugins-official') hit this path. One warning, skip,
+  // operator re-runs /docker-setup to rebuild config from the current host plugin list.
+  if (!marketplace.includes("/")) {
+    console.log(`[docker-entrypoint] Warning: ${plugin} entry has outdated marketplace "${marketplace}" (expected org/repo) — re-run /claude-code-hermit:docker-setup to rebuild config.`);
+    continue;
+  }
 
-    install_target = f'{plugin}@{marketplace_name}'
-    if f'❯ {install_target}' in installed_blob:
-        continue
-    print(f'[docker-entrypoint] Installing recommended plugin: {plugin}', flush=True)
-    try:
-        result = subprocess.run(['claude', 'plugin', 'install', install_target, '--scope', scope])
-    except FileNotFoundError:
-        print(f'[docker-entrypoint] Warning: claude not found installing {plugin} — may have self-updated; will retry on next restart', flush=True)
-        continue
-    if result.returncode != 0:
-        print(f'[docker-entrypoint] Warning: failed to install {plugin} — install manually', flush=True)
-        continue
-    audit(marketplace, plugin, scope)
-    try:
-        result = subprocess.run(['claude', 'plugin', 'enable', install_target, '--scope', scope])
-    except FileNotFoundError:
-        print(f'[docker-entrypoint] Warning: claude not found enabling {plugin} — plugin installed but enable skipped; will self-heal on next restart', flush=True)
-        continue
-    if result.returncode != 0:
-        print(f'[docker-entrypoint] Warning: failed to enable {plugin} — run: claude plugin enable {install_target}', flush=True)
-" "$RECOMMENDED_PLUGINS_JSON" "$INSTALLED_PLUGINS" "$MARKETPLACE_DIR" "$AUDIT_LOG_PATH" || echo "[docker-entrypoint] Warning: recommended plugin install block encountered errors, continuing"
+  let marketplaceName = nameByRepo[marketplace];
+  if (!marketplaceName) {
+    // Marketplace not yet registered in this container — add it, then re-fetch.
+    console.log(`[docker-entrypoint] Adding marketplace: ${marketplace}`);
+    const result = spawnSync("claude", ["plugin", "marketplace", "add", marketplace], INHERIT);
+    if (result.error) {
+      console.log(`[docker-entrypoint] Warning: claude not found adding marketplace ${marketplace} — skipping ${plugin}`);
+      continue;
+    }
+    if (result.status !== 0) {
+      console.log(`[docker-entrypoint] Warning: failed to add marketplace ${marketplace} — skipping ${plugin}`);
+      continue;
+    }
+    nameByRepo = fetchMarketplaceNames();
+    marketplaceName = nameByRepo[marketplace];
+    if (!marketplaceName) {
+      console.log(`[docker-entrypoint] Warning: marketplace ${marketplace} added but name not resolvable — skipping ${plugin}`);
+      continue;
+    }
+  }
+
+  const installTarget = `${plugin}@${marketplaceName}`;
+  if (installedBlob.includes(`❯ ${installTarget}`)) continue;
+  console.log(`[docker-entrypoint] Installing recommended plugin: ${plugin}`);
+  let result = spawnSync("claude", ["plugin", "install", installTarget, "--scope", scope], INHERIT);
+  if (result.error) {
+    console.log(`[docker-entrypoint] Warning: claude not found installing ${plugin} — may have self-updated; will retry on next restart`);
+    continue;
+  }
+  if (result.status !== 0) {
+    console.log(`[docker-entrypoint] Warning: failed to install ${plugin} — install manually`);
+    continue;
+  }
+  audit(marketplace, plugin, scope);
+  result = spawnSync("claude", ["plugin", "enable", installTarget, "--scope", scope], INHERIT);
+  if (result.error) {
+    console.log(`[docker-entrypoint] Warning: claude not found enabling ${plugin} — plugin installed but enable skipped; will self-heal on next restart`);
+    continue;
+  }
+  if (result.status !== 0) {
+    console.log(`[docker-entrypoint] Warning: failed to enable ${plugin} — run: claude plugin enable ${installTarget}`);
+  }
+}
+JSEOF
 fi
 
 # --- Plugin updates are NOT run on boot ---
