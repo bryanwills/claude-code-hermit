@@ -40,7 +40,7 @@ Before the setup-mode gate or any file writes, gather context silently. Run all 
 3. **Detect git-init eligibility** — run in parallel with items 1–2. Set `git_init_eligible = true` if and only if all three hold:
    - `is_reinit == false`.
    - `git rev-parse --is-inside-work-tree 2>/dev/null` is falsy (not already under version control).
-   - `ls -A` of the project root yields only names from this **explicit allowed set**: `.claude-code-hermit`, `.claude`, `.gitignore`, `.bash_profile`, `.bashrc`, `.zshrc`, `.zprofile`, `.profile`, `.gitconfig`, `.ripgreprc`. The dotfile entries (`.bash_profile` through `.ripgreprc`) come from the sandbox-dotfile block at the bottom of `state-templates/GITIGNORE-APPEND.txt` — keep those in sync if that block changes.
+   - `ls -A` of the project root yields only names from this **explicit allowed set**: `.claude-code-hermit`, `.claude`, `.gitignore`, `.worktreeinclude`, `.bash_profile`, `.bashrc`, `.zshrc`, `.zprofile`, `.profile`, `.gitconfig`, `.ripgreprc`. The dotfile entries (`.bash_profile` through `.ripgreprc`) come from the sandbox-dotfile block at the bottom of `state-templates/GITIGNORE-APPEND.txt` — keep those in sync if that block changes.
 
 4. **Print one summary line** so the operator sees what was detected:
 
@@ -564,6 +564,16 @@ Read the template. Determine which lines are missing from the project's `.gitign
 - If `.gitignore` exists and no lines are missing: skip silently.
 - If `.gitignore` doesn't exist: show the operator the full template that will be written, and ask with `AskUserQuestion` (header: "Create .gitignore") — options: **Yes — create** (default) / **No — skip**. Create only if confirmed.
 
+### 7a. Update .worktreeinclude
+
+Use `${CLAUDE_SKILL_DIR}/../../state-templates/WORKTREEINCLUDE-APPEND.txt`.
+
+The file contains a managed block bounded by marker comments (`# >>> claude-code-hermit ...` / `# <<< claude-code-hermit >>>`). This block carries read-only hermit context (OPERATOR.md, compiled/) into `claude --worktree` worktrees. **Write it unconditionally — no git-repo gate.** A `.worktreeinclude` in a non-git project is harmless and ready when the operator later runs `git init`.
+
+- If `.worktreeinclude` is absent: show the operator the template that will be written, and ask with `AskUserQuestion` (header: "Create .worktreeinclude") — options: **Yes — create** (default) / **No — skip**. Create only if confirmed.
+- If `.worktreeinclude` exists and the `# >>> claude-code-hermit` marker is already present: skip silently.
+- If `.worktreeinclude` exists and the marker is absent: append the managed block (preceded by a blank line) — ask with `AskUserQuestion` (header: "Update .worktreeinclude") — options: **Yes — append** (default) / **No — skip**. Append only if confirmed.
+
 ### 7.5. Initialize git repo (fresh dirs only)
 
 **Skip this step entirely if `git_init_eligible` is false.** Skip silently with no operator interaction.
@@ -870,7 +880,7 @@ Quick setup will apply:
   Hermit ext:  {activated or none}
   Visibility:  {.local — plugin installed at <scope> scope | committed — plugin installed at project scope}
   Git:         {initialize local repo (tracks build output; hermit internals gitignored) | not applicable}
-  Files:       {CLAUDE.local.md | CLAUDE.md}, .gitignore, {.claude/settings.local.json | .claude/settings.json}
+  Files:       {CLAUDE.local.md | CLAUDE.md}, .gitignore, .worktreeinclude, {.claude/settings.local.json | .claude/settings.json}
   OPERATOR.md: drafted from scan + your answers (written below)
 
 Customize restarts the wizard from scratch; your Quick answers won't carry over.
@@ -910,6 +920,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Advanced Phase 6 equivalent | permission_mode, routines | permission_mode = `auto`; routines = morning 08:30 + evening 22:30 + (template) heartbeat 04:00 |
 | Step 6 | CLAUDE.md / CLAUDE.local.md append | apply silently to `hatch_target` file (default "keep" if marker already present) |
 | Step 7 | .gitignore append | apply silently (per-line idempotent) |
+| Step 7a | .worktreeinclude managed block | apply silently (marker-block idempotent — skip if marker already present) |
 | Step 7.5 | git init (fresh dirs only) | run `git init` if `git_init_eligible`; omit otherwise |
 | Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file |
 | Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
@@ -971,6 +982,7 @@ Visibility:
 Updated:
   {CLAUDE.local.md | CLAUDE.md} — session discipline block appended
   .gitignore — hermit entries added
+  .worktreeinclude — git worktree include entries added   ← omit if skipped
   {.claude/settings.local.json | .claude/settings.json} — plugin permissions added
   .claude-code-hermit/state/hatch-options.json — target stamped
   .git/ — initialized (tracks build output; hermit internals gitignored)   ← omit if git init was skipped or declined
