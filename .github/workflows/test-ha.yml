@@ -22,31 +22,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tests/gate-corpus.test.ts materializes the retired Python gates
+          # from git history (42c0c8f~1) for side-by-side equivalence runs.
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.3.11'
+      # Python here is a TEST FIXTURE only (nothing shipped runs it): the
+      # golden-corpus test replays the retired Python hooks against the TS
+      # ports, and yaml-parity.test.ts compares against PyYAML.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml python-dotenv
       - run: bun install --frozen-lockfile
       - run: bunx tsc
       - run: bun test
         working-directory: plugins/claude-code-homeassistant-hermit
-  hook-gates:
-    # WP8 scope: hooks/mcp-safety-gate.py and hooks/curl-host-gate.py stay
-    # Python until the hook port lands. Their pytest files import only the
-    # stdlib and run the hooks as subprocesses.
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: plugins/claude-code-homeassistant-hermit
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install pyyaml pytest
-      - run: python -m pytest tests/test_curl_host_gate.py -v
-      # Pre-existing failures: mcp-safety-gate.py imports ha_agent_lab.policy,
-      # which no system python can resolve (the WP7 swap removed the Python
-      # package; the import was already unresolvable outside `pip install -e`).
-      # WP8 makes the hook self-contained and flips this step strict.
-      - run: python -m pytest tests/test_safety_hook.py -v
-        continue-on-error: true
