@@ -223,6 +223,28 @@ if (archiveDue) {
 const onlyArchive = archiveDue && Object.keys(phases).length === 0;
 if (archiveTaken && !onlyArchive) phases.archive_due = true;
 
+// Run archive-raw.ts on a 7-day debounce so raw/.archive/ is bounded on every hermit
+// regardless of whether weekly-review is configured.
+if (pluginRoot && daysSince(runtime.last_raw_archive_at) >= 7) {
+  try {
+    execFileSync(process.execPath, [
+      path.join(pluginRoot, 'scripts', 'archive-raw.ts'),
+      stateDir,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Re-read before writing — archive-shell may have updated runtime.json concurrently.
+    const runtimePath = path.join(stateDir, 'state', 'runtime.json');
+    const freshRuntime = readJSON(runtimePath) ?? runtime;
+    freshRuntime.last_raw_archive_at = new Date().toISOString();
+    try {
+      fs.writeFileSync(
+        runtimePath,
+        JSON.stringify(freshRuntime, null, 2) + '\n',
+        'utf-8',
+      );
+    } catch { /* fail-open */ }
+  } catch { /* fail-open */ }
+}
+
 if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify(phases));
 
 // EMPTY path: update reflection-state.json and append Progress Log line.

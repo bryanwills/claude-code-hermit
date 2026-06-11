@@ -724,6 +724,58 @@ function checkHeartbeat() {
   }
 }
 
+function checkRawSize() {
+  try {
+    const rawDir = path.join(hermitDir, 'raw');
+    if (!fs.existsSync(rawDir)) {
+      return { id: 'raw-size', status: 'ok', detail: 'raw/ absent' };
+    }
+
+    let bytes = 0;
+    let rawFileCount = 0;
+    for (const entry of fs.readdirSync(rawDir, { withFileTypes: true })) {
+      if (entry.isFile()) {
+        if (/^[^.].*\.(md|json)$/.test(entry.name)) rawFileCount++;
+        try { bytes += fs.statSync(path.join(rawDir, entry.name)).size; } catch {}
+      }
+    }
+    const archiveDir = path.join(rawDir, '.archive');
+    if (fs.existsSync(archiveDir)) {
+      for (const entry of fs.readdirSync(archiveDir, { withFileTypes: true })) {
+        if (entry.isFile()) {
+          try { bytes += fs.statSync(path.join(archiveDir, entry.name)).size; } catch {}
+        }
+      }
+    }
+
+    const mb = bytes / (1024 * 1024);
+    const WARN_MB = 50;
+
+    let lastRawArchive: string | null = null;
+    try {
+      const rt = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf8'));
+      lastRawArchive = rt.last_raw_archive_at ?? null;
+    } catch {}
+    const archiveDays = daysSince(lastRawArchive);
+    const sizeWarn = mb > WARN_MB;
+    const staleWarn = rawFileCount > 0 && (archiveDays === null || archiveDays > 14);
+
+    if (sizeWarn || staleWarn) {
+      const parts: string[] = [];
+      if (sizeWarn) parts.push(`${mb.toFixed(1)} MB (>${WARN_MB} MB threshold)`);
+      if (staleWarn) parts.push(archiveDays === null ? 'archive-raw has never run' : `archive-raw last ran ${archiveDays.toFixed(0)}d ago`);
+      return { id: 'raw-size', status: 'warn', detail: `raw/: ${parts.join('; ')}` };
+    }
+
+    return {
+      id: 'raw-size', status: 'ok',
+      detail: `raw/ ${mb.toFixed(1)} MB, archive-raw ${archiveDays !== null ? `${archiveDays.toFixed(0)}d ago` : 'never run'}`,
+    };
+  } catch (e: any) {
+    return { id: 'raw-size', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
 // ----------------- Orchestration -----------------
 
 function runAllChecks() {
@@ -743,6 +795,7 @@ function runAllChecks() {
     checkWatchdog(),
     checkOpusWake(),
     checkHeartbeat(),
+    checkRawSize(),
   ];
 }
 
@@ -764,7 +817,7 @@ export {
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
   checkCost, checkProposals, checkDependencies, checkPermissions,
   checkDockerSecurity, checkArchival, checkReflectLoop, checkScheduler,
-  checkWatchdog, checkOpusWake, checkHeartbeat,
+  checkWatchdog, checkOpusWake, checkHeartbeat, checkRawSize,
   satisfiesRange, cidrOverlap,
   runAllChecks, writeReport,
 };

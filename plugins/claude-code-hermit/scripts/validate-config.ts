@@ -238,6 +238,11 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           errors.push('knowledge.working_set_warn: must be a positive integer');
         }
       }
+      if (k.archive_retention_days !== undefined) {
+        if (k.archive_retention_days !== null && (!Number.isInteger(k.archive_retention_days) || k.archive_retention_days <= 0)) {
+          errors.push('knowledge.archive_retention_days: must be a positive integer or null');
+        }
+      }
     }
   }
 
