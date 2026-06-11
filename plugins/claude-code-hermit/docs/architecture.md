@@ -183,8 +183,8 @@ One writer per state file. No shared mutation bus.
 | `state/.heartbeat`             | heartbeat-touch.js only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.py only                                | hermit-stop.py (cleanup)                                      |
 | `state/cost-index.json`        | cost-tracker.ts only                                | cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts |
-| `state/watchdog-state.json`    | hermit-watchdog.py only                             | doctor-check.ts (consecutive_stale)                           |
-| `state/watchdog-events.jsonl`  | hermit-watchdog.py only (append)                    | doctor-check.ts (event counts), session-start (restart reason)|
+| `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (consecutive_stale)                           |
+| `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), session-start (restart reason)|
 
 ---
 

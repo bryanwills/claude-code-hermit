@@ -39,7 +39,7 @@ function loadConfig(): Json {
 
 function getSessionName(config: Json): string {
   const name = config.tmux_session_name ?? 'hermit-{project_name}';
-  return name.replace('{project_name}', path.basename(process.cwd()));
+  return name.replaceAll('{project_name}', path.basename(process.cwd()));
 }
 
 function sessionExists(name: string): boolean {

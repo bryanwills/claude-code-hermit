@@ -1,6 +1,6 @@
 // bun test port of tests/test-watchdog.sh — black-box tests of
-// scripts/hermit-watchdog.py, the single-shot watchdog decision flow.
-// The watchdog stays a spawned subprocess (it is a standalone python script);
+// scripts/hermit-watchdog.ts, the single-shot watchdog decision flow.
+// The watchdog stays a spawned subprocess (it is a standalone script);
 // fake tmux/pgrep live as executable stubs in a temp bin dir prepended to PATH
 // in the spawn env, driving each branch without live sessions.
 //
@@ -15,9 +15,10 @@ import path from 'node:path';
 import { runScript, SCRIPTS_DIR } from './helpers/run';
 
 // The one line to flip when hermit-watchdog is ported to TypeScript.
-// (Absolute python3 path: Bun.spawn resolves the executable against the child
-// env PATH, which the no-systemctl cases restrict to the fake bin dir.)
-const WATCHDOG_CMD = [Bun.which('python3') ?? 'python3', path.join(SCRIPTS_DIR, 'hermit-watchdog.py')];
+// (Absolute bun path via process.execPath: Bun.spawn resolves the executable
+// against the child env PATH, which the no-systemctl cases restrict to the
+// fake bin dir.)
+const WATCHDOG_CMD = [process.execPath, path.join(SCRIPTS_DIR, 'hermit-watchdog.ts')];
 
 // ---------- fixture scaffolding ----------
 
