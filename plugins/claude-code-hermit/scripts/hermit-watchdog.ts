@@ -23,7 +23,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
 import { utcISOStamp as utcStamp } from './lib/time';
-import { writeRuntimeJson, RUNTIME_JSON, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
+import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 
 type Json = any;
 
@@ -270,7 +270,7 @@ function main(): void {
   const escalateAfter = watchdogCfg.escalate_after ?? 3;
   const operatorGraceSecs = parseDuration(watchdogCfg.operator_grace ?? '15m');
 
-  const runtime = readJson(RUNTIME_JSON);
+  const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
 
   // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit
