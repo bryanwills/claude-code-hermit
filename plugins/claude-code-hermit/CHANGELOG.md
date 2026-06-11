@@ -4,6 +4,16 @@
 
 ### Added
 
+- **living topic pages (`type: topic`)** — undated `compiled/topic-<slug>.md` updated in place at session-close (merge findings, bump `updated`, refresh one-line `summary`) instead of accumulating dated copies; exempt from archive rotation; staleness linted on `updated ?? created` across all topic pages; new `topic-missing-updated` lint; declared in the knowledge-schema template alongside a `## Conventions` section for `[[wikilink]]` cross-references (#316).
+- **recall write-back** — after a synthesis drawing on 3+ distinct sources, recall offers (operator-confirmed, never automatic) to file it: small durable fact → auto-memory, domain synthesis → topic page.
+- **weekly-review: topic-page semantic check** — read-only scan for contradictions, stale claims, and broken `[[wikilinks]]` across topic pages; up to 3 findings join the channel summary.
+
+### Changed
+
+- **startup knowledge injection: catalog-only for non-foundational artifacts** — recent-artifact bodies are replaced by a one-line-per-artifact catalog (stem, type, date, tags + summary line); nothing silently drops out of the injection window anymore. Foundational pages keep full-body/stub injection at the 40% pinned budget, now without the per-type newest-wins collapse (multiple same-type foundational pages all pin); unused pinned budget rolls into the catalog. `procedure-brief` artifacts are excluded from injection, enforcing the schema's existing not-session-injected contract. `search.ts` recency and result dates read `updated` before `created`. `injection_stub` is now only read for foundational artifacts.
+
+### Added
+
 - **post-close context reset via `/clear`** (#340) — after `daily-auto-close` archives a session, the watchdog sends `/clear` on the next tick when the session is idle and unattended, so the next sparse wake reads only the startup-context injection instead of the full stale conversation (drops the 1.25× cold cache-write). Preserves process-scoped `CronCreate` routines and `Monitor` tasks; no re-arm needed. Enabled by default (`post_close_clear: true`); only fires when the watchdog runs on a schedule (Docker: automatic; bare-metal: requires `hermit-watchdog install`).
 
 ### Changed
@@ -69,7 +79,11 @@
 
 Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
-1. Create `.claude-code-hermit/state/observations.jsonl` as an empty file if it does not exist (append-only ledger; `append-metrics.js` also creates it lazily on first write, so pre-upgrade hermits fail open).
+1. Open `.claude-code-hermit/knowledge-schema.md`. If `## Work Products` has no `- topic:` bullet, add: `- topic: living topic page, updated in place — merge new findings; never write a second dated copy. Frontmatter: title, type, created, updated, tags, summary (one-liner), optional session. Exempt from archive rotation. location: compiled/topic-<slug>.md (undated)`. Without this, the first topic page triggers Schema Drift at session start.
+2. If the same file has no `## Conventions` section, append: `## Conventions` followed by `- Wikilinks: compiled pages cross-reference each other with [[name]] (the target's filename stem). Pages may also link auto-memory entries the same way. Dangling links are fine — they mark pages worth writing.` and `- summary: a plain one-line string. Don't wrap it in [...] (parses as an array) and avoid \` # \` (parses as an inline comment).`
+3. No config changes for the catalog injection — it reuses `knowledge.compiled_budget_chars`. Non-foundational artifacts now appear as catalog lines instead of truncated bodies; tell the operator depth is available via `/recall` or by Reading the listed file.
+4. Optional, at the operator's pace: clusters of dated notes on one evolving subject can be consolidated into a single `compiled/topic-<slug>.md` (keep the oldest note's `created`, set today's `updated`); the superseded dated notes then rotate out via the normal weekly archive.
+5. Create `.claude-code-hermit/state/observations.jsonl` as an empty file if it does not exist (append-only ledger; `append-metrics.js` also creates it lazily on first write, so pre-upgrade hermits fail open).
 2. No migration of existing sub-threshold memory entries is performed — future observations land in the ledger. Stale pattern-label notes in operator MEMORY.md can be pruned manually at the operator's convenience.
 3. Verify bun is installed before anything else (Step 0b is the hard gate): `bun --version` must be >= 1.3.0. If missing: `curl -fsSL https://bun.sh/install | bash`.
 4. Refresh ALL on-disk boot wrappers (Step 5b's byte-compare will list every `bin/` file as changed — copy each from `state-templates/bin/`). The old wrappers exec `python3` directly and break when the Python scripts are removed from the plugin.

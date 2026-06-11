@@ -607,6 +607,91 @@ BODY_MARKER this long body should never be injected when a stub is present.
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain('Schema Drift');
   }));
+
+  test('startup-context (catalog: non-foundational gets line, not body)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    write(hermit(dir, 'compiled', 'note-billing-2026-06-01.md'), `---
+title: Billing quirks
+created: 2026-06-01T00:00:00+00:00
+type: note
+tags: [billing]
+summary: Stripe webhook retry quirks and how we handle them
+---
+BODY_MARKER this body must not be injected for non-foundational artifacts.
+`);
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('note-billing-2026-06-01 [note] (2026-06-01) #billing');
+    expect(r.stdout).toContain('Stripe webhook retry quirks');
+    expect(r.stdout).not.toContain('BODY_MARKER');
+  }));
+
+  test('startup-context (catalog: multiple foundational same type all pinned)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    write(hermit(dir, 'compiled', 'topic-alpha.md'),
+      '---\ntitle: Alpha\ntype: topic\ncreated: 2026-01-01\ntags: [foundational]\n---\nALPHA_BODY\n');
+    write(hermit(dir, 'compiled', 'topic-beta.md'),
+      '---\ntitle: Beta\ntype: topic\ncreated: 2026-02-01\ntags: [foundational]\n---\nBETA_BODY\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('ALPHA_BODY');
+    expect(r.stdout).toContain('BETA_BODY');
+  }));
+
+  test('startup-context (catalog: overflow shows +N more)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":500}}');
+    for (let i = 0; i < 12; i++) {
+      write(hermit(dir, 'compiled', `note-subject-${i}-2026-06-0${(i % 9) + 1}.md`),
+        `---\ntitle: Subject ${i}\ntype: note\ncreated: 2026-06-0${(i % 9) + 1}\nsummary: One liner about subject number ${i} for the catalog\n---\nBody ${i}.\n`);
+    }
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/\(\+\d+ more\)/);
+    expect(r.stdout.trimEnd().length).toBeLessThan(9000);
+  }));
+
+  test('startup-context (catalog: unused pinned budget rolls into catalog)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    // Budget 200: without rollover the catalog would get only 120 chars, and the
+    // ~150-char entry below would not fit. No foundational pages → full 200 available.
+    write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":200}}');
+    write(hermit(dir, 'compiled', 'note-rollover-2026-06-01.md'),
+      `---\ntitle: Rollover\ntype: note\ncreated: 2026-06-01\nsummary: ${'s'.repeat(90)}\n---\nBody.\n`);
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('note-rollover-2026-06-01');
+  }));
+
+  test('startup-context (catalog: procedure-brief excluded)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    write(hermit(dir, 'compiled', 'procedure-brief-deploy-2026-06-01.md'),
+      '---\ntitle: Deploy procedure\ntype: procedure-brief\ncreated: 2026-06-01\n---\nAudit record.\n');
+    write(hermit(dir, 'compiled', 'note-visible-2026-06-01.md'),
+      '---\ntitle: Visible\ntype: note\ncreated: 2026-06-01\n---\nBody.\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('note-visible-2026-06-01');
+    expect(r.stdout).not.toContain('procedure-brief-deploy');
+    expect(r.stdout).not.toMatch(/\(\+\d+ more\)/);
+  }));
+
+  test('startup-context (catalog: topic page shows updated date)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
+    write(hermit(dir, 'compiled', 'topic-rota.md'), `---
+title: Support rota
+created: 2025-01-01T00:00:00+00:00
+updated: 2026-06-10T00:00:00+00:00
+type: topic
+summary: On-call rotation rules
+---
+Rota body.
+`);
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('topic-rota [topic] (2026-06-10)');
+    expect(r.stdout).not.toContain('(2025-01-01)');
+  }));
 });
 
 // -------------------------------------------------------

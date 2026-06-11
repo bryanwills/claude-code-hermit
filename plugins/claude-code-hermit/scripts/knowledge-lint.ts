@@ -6,7 +6,7 @@
 // Usage as lib:   import { lint } from './knowledge-lint' — lint(hermitDir) => { findings, counts }
 //
 // findings: array of { type, file, age, reason }
-//   type: 'unreferenced' | 'stale' | 'missing-type' | 'oversized' | 'working-set' | 'stale-compiled' | 'line-limit' | 'tag-variant' | 'undeclared-type' | 'unused-declaration'
+//   type: 'unreferenced' | 'stale' | 'missing-type' | 'oversized' | 'working-set' | 'stale-compiled' | 'line-limit' | 'tag-variant' | 'undeclared-type' | 'unused-declaration' | 'topic-missing-updated'
 // counts: { raw, compiled, archived }
 // options: { verbose: false } — unused-declaration findings only included when verbose=true
 
@@ -191,12 +191,20 @@ function lint(hermitDir: string, options: Json = {}): { findings: Json[]; counts
       });
     }
 
-    // Stale compiled (not foundational, older than 60 days)
-    for (const a of workingSet) {
-      if (!a.fm.created) continue;
+    // Stale compiled (not foundational, older than 60 days by updated ?? created).
+    // Topic pages all share one type, so the newestByType working set would only
+    // stale-check the most recent one — include every topic page explicitly.
+    const staleCandidates: Json[] = [
+      ...Array.from(newestByType(compiledArtifacts.filter(a => a.fm.type !== 'topic')).values()),
+      ...compiledArtifacts.filter(a => a.fm.type === 'topic'),
+    ];
+    for (const a of staleCandidates) {
+      const lastTouch = (typeof a.fm.updated === 'string' && a.fm.updated) || a.fm.created;
+      if (!lastTouch) continue;
       if ((a.fm.tags || []).includes('foundational')) continue;
-      if (now - new Date(a.fm.created).getTime() > staleCutoffMs) {
-        const age = Math.floor((now - new Date(a.fm.created).getTime()) / 86400000);
+      const lastTouchMs = new Date(lastTouch).getTime();
+      if (now - lastTouchMs > staleCutoffMs) {
+        const age = Math.floor((now - lastTouchMs) / 86400000);
         findings.push({
           type: 'stale-compiled',
           file: `compiled/${a.file}`,
@@ -217,6 +225,16 @@ function lint(hermitDir: string, options: Json = {}): { findings: Json[]; counts
         });
       }
 
+      // Topic pages are update-in-place — they must carry an `updated` field
+      if (a.fm.type === 'topic' && !a.fm.updated) {
+        findings.push({
+          type: 'topic-missing-updated',
+          file: `compiled/${a.file}`,
+          age: '—',
+          reason: 'Topic pages are update-in-place — add an `updated` field.'
+        });
+      }
+
       // Oversized by char budget (skip if artifact has an injection_stub — body is never injected)
       const stub = typeof a.fm.injection_stub === 'string' ? a.fm.injection_stub.trim() : '';
       if (a.bodyChars > compiledBudgetChars && !stub) {
@@ -224,7 +242,7 @@ function lint(hermitDir: string, options: Json = {}): { findings: Json[]; counts
           type: 'oversized',
           file: `compiled/${a.file}`,
           age: '—',
-          reason: `Body is ${a.bodyChars} chars (budget: ${compiledBudgetChars}). Will be truncated when injected into session context.`
+          reason: `Body is ${a.bodyChars} chars (budget: ${compiledBudgetChars}). Exceeds the compiled budget — compact or split; foundational bodies are truncated at injection.`
         });
       }
 
@@ -328,7 +346,8 @@ if (import.meta.main) {
   // Advice
   console.log('');
   if (groups.has('stale')) console.log('Stale raw files will be archived on next weekly review.');
-  if (groups.has('oversized')) console.log('Oversized compiled artifacts will be truncated when injected into session context.');
+  if (groups.has('oversized')) console.log('Oversized compiled artifacts exceed the compiled budget — compact or split them.');
+  if (groups.has('topic-missing-updated')) console.log('Topic pages are update-in-place — set `updated` whenever you merge new findings.');
   if (groups.has('unreferenced')) console.log('Possibly unreferenced — verify before cleanup.');
   if (groups.has('missing-type')) console.log('Add a `type` field to frontmatter for proper grouping at session start.');
   if (groups.has('undeclared-type')) console.log('Undeclared types — add entries to knowledge-schema.md or remove unused type values.');

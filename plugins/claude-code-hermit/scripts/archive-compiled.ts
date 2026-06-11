@@ -5,7 +5,8 @@
 //   hermit-state-dir: path to .claude-code-hermit/ in the target project (default: .claude-code-hermit)
 //
 // Retention: keeps the newest KEEP_PER_TYPE artifacts per type; foundational-tagged
-// artifacts are always retained and excluded from the per-type count.
+// artifacts and topic pages (type: topic) are always retained and excluded from the
+// per-type count — living pages compact by merging, not archival.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -52,7 +53,8 @@ for (const filePath of fullPaths) {
 
 const rotatable: Json[] = [];
 for (const a of artifacts) {
-  if ((a.fm.tags || []).includes('foundational')) {
+  // topic pages are living documents — they compact by merging, not archival
+  if ((a.fm.tags || []).includes('foundational') || a.fm.type === 'topic') {
     retained++;
   } else {
     rotatable.push(a);
