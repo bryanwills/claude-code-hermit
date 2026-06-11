@@ -55,16 +55,18 @@ Start the heartbeat as a persistent CC Monitor subprocess.
 1. Read `heartbeat.every` from config (default: `"2h"`). Parse to seconds (`"30m"` → 1800, `"2h"` → 7200, etc).
 2. Resolve the script path: `${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-monitor.sh` (resolve at skill execution time — not available inside the subprocess).
 3. Sweep any pre-existing CronCreate entry for the old recurring-cron approach: `CronList` → if an entry's `prompt` matches `/claude-code-hermit:heartbeat run`, `CronDelete` it. Idempotent.
-4. Read `state/heartbeat-monitor.runtime.json` if it exists. If it contains a `task_id`, TaskStop that task — ignore not-found errors (the monitor may have already exited). Then TaskList → TaskStop any remaining task with description `heartbeat-monitor` (fallback for orphans where the runtime file was never written). Clear any prior entry from `state/heartbeat-monitor.runtime.json`.
+4. Read `state/heartbeat-monitor.runtime.json` if it exists. If it contains a `task_id`, TaskStop that task — ignore not-found errors (the monitor may have already exited). Then TaskList → TaskStop any remaining task with description `heartbeat-monitor` (fallback for orphans where the runtime file was never written). Clear any prior entry from `state/heartbeat-monitor.runtime.json`. Delete `state/heartbeat-liveness.json` if it exists — this clears the previous monitor's liveness record so the doctor check does not flag stale data from the prior session during the new monitor's startup window.
 5. Register a new Monitor:
    - `description`: `heartbeat-monitor` (reserved slot — operators must not reuse this description for ad-hoc `/watch` entries)
    - `command`: `bash <abs_script_path> <interval_seconds> $PWD/.claude-code-hermit`
    - `timeout_ms`: 86400000  (24h; re-armed daily by `heartbeat-restart`)
    - `persistent`: true
 6. Write the new entry (description, task_id, command, interval, started_at) to `state/heartbeat-monitor.runtime.json`. Do NOT use `state/monitors.runtime.json` — that file is owned exclusively by /watch and is cleared on every session start.
-7. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: monitor started (interval: <every>)`.
+7. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: monitor registered (interval: <every>) — liveness confirmed by /hermit-doctor heartbeat check`.
 
 Safe to call from a routine — idempotent (legacy cron swept + existing Monitor stopped + state file rewritten).
+
+The monitor's poll interval is fixed at registration from `heartbeat.every`. The `/hermit-doctor` heartbeat check derives its staleness threshold from the current `config.heartbeat.every`, so editing `every` without re-running `start` leaves the live monitor on the old cadence while the doctor judges it against the new one. Re-run `start` after changing `every` to resync.
 
 ### stop
 
@@ -78,10 +80,11 @@ Safe to call from a routine — idempotent (legacy cron swept + existing Monitor
 Report current heartbeat state by reading:
 - `state/heartbeat-monitor.runtime.json` — running yes/no, registered interval, task_id, started_at
 - `CronList` filtered for `/claude-code-hermit:heartbeat run` — should be empty post-migration; if present, surface as "legacy CronCreate still active — run /heartbeat start to clean up"
-- `state/alert-state.json` for `total_ticks` and last-tick metadata
+- `state/alert-state.json` for `total_ticks`
+- `state/heartbeat-liveness.json` for `last_peek_at` (proof-of-life timestamp written by the monitor loop every interval)
 - `config.json` for active hours window
 
-Report: monitor running (yes/no), configured interval, active hours window, total ticks since last clear, legacy-cron warning if applicable.
+Report: monitor running (yes/no), configured interval, active hours window, total ticks since last clear, last-peek-at timestamp (or "never ticked" if liveness file absent), legacy-cron warning if applicable.
 
 ### edit
 
