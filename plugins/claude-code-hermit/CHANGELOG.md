@@ -14,13 +14,22 @@
 
 - **doctor-check: `runtime` check (bun)** — verifies bun presence and version against `required_bun_version` in `hermit-meta.json` (report grows to 13 checks); `hermit-start` preflight hard-errors when bun is missing or below 1.3.0.
 
+- **doctor-check + cost-summary: Opus automated-wake warning** — new 14th doctor check (`opus-wake`) and a `## This Week` line surface automated-source turns (`heartbeat` / `routine:*`) running on Opus over the trailing 7 days; soft warn, no block. Closes the silent $529-Opus-spend failure mode (#342).
+
 - **reflect: observations ledger with mechanical graduation** — sub-threshold observations (cost spikes, quick-mode deferrals, failed three-condition candidates) append to `state/observations.jsonl` instead of project memory; step 3b prunes (30-day TTL, recurrence keeps a pattern's history) and promotes patterns seen in ≥2 distinct sessions to candidates carrying a ledger `Artifact:` citation. New `scripts/prune-observations.js`.
 - **reflection-judge: ledger artifact verification + covered-by-memory exemption** — §1.4 verifies `state/observations.jsonl` citations directly (sub-threshold patterns live only in the ledger); ledger-graduated candidates are never suppressed `covered-by-memory`. Closes the lifecycle bug where recording a pattern to memory got it suppressed at graduation.
 - **reflect: ephemerality exception for procedure capture** — single-session eligibility when the procedure's artifacts are ephemeral (outside repo/state, e.g. `/tmp`) and the cost is already quantified in session content; Tier 3, kill criteria still apply.
 - **weekly-review: reflect vital-signs line** — review gains `reflect_runs/candidates/surfaced/accepted/cost_usd` frontmatter and a `### Reflect` section with a suppression digest (slug:code), computed week-scoped from session-report Progress Log lines and proposal-metrics.jsonl events; evolution block relays it. Makes a healthy-quiet reflect loop distinguishable from a dead one.
 - **session-close: close debrief in Lessons** — step 1 asks what was built ad-hoc this session (throwaway scripts, manual procedures, long waits a tool would remove) and what had to be re-derived that a compiled note should have covered; persists one quantified Lesson line per item (substantial re-derived knowledge goes to `compiled/`); arms procedure-capture recurrence upstream.
 
+### Added
+
+- **cost-tracker: `api_calls` and `context_usage` per log entry** — each cost-log.jsonl entry now records the number of API calls summed for that turn and the context-window fill fraction from the Stop payload (null when absent); enables per-turn call-count analysis and context/cost correlation (#341).
+
 ### Fixed
+
+- **cost-tracker: sums all API calls in a turn** (#341) — the previous code returned usage from the last API call only; multi-step tool-calling turns (each billed separately) were undercounted. The `sumTurnUsage` helper now sums every billed entry back to the turn boundary. **Reported costs will rise — this is not a regression.** A `schema: 2` marker entry is written to `cost-log.jsonl` at upgrade so operators see the boundary clearly.
+- **session reports: cost derived from immutable cost-log** (#341) — `cost_usd` and `tokens` in session report frontmatter are now summed from cost-log.jsonl per session-id by the main session before passing to session-mgr (via `session-cost.ts`), eliminating the double-count caused by the skippable per-task `.status.json` reset. Session-mgr falls back to `.status.json` only when the payload value is absent. The redundant prose reset steps are removed from session-mgr.
 
 - **hermit-watchdog: active_hours evaluated in the configured timezone** (#347) — `inActiveHours()` read the host wall clock (`new Date().getHours()`) while its sibling `heartbeat-precheck` already evaluated the same window through `currentHHMM(config.timezone)`; on any host where system TZ differed from `config.timezone` (headless Docker pinned to UTC) the watchdog fired in the wrong window. It now delegates to `currentHHMM`, fails open on an unparseable tz or malformed `HH:MM` bounds, and treats the window end as exclusive to match `heartbeat-precheck`.
 - **hermit-watchdog: reads runtime.json through lib/runtime** (code-review cleanup) — the watchdog wrote runtime.json via the shared `writeRuntimeJson` but still read it through a local `readJson`; it now uses `lib/runtime.readRuntimeJson` so the read/write semantics for that file live in one place.
@@ -29,6 +38,7 @@
 
 ### Changed
 
+- **daily-auto-close defaults to Haiku** — the silent, stateless midnight close routine ships `model: "haiku"`; near-zero risk on Sonnet fleets, insures against session-model tier-drift cost on Opus fleets (#342).
 - **hermit-evolution: merged into a full evolution report** — the skill now produces a unified 6-section digest (cost trend + 30d source split, autonomy, proposal velocity, routines/watches with cadence, top-3 produced (inferred), grown since hatch (approximated)) instead of the prior terse 4-section snapshot; trigger phrases extended to include "evolution report", "monthly report", "how have I grown", "what did I produce last month".
 
 - **bun is now a required runtime (>=1.3)** — first step of the bun migration (#18): declared in `hermit-meta.json`, gated by `hermit-evolve` Step 0b (upgrade refuses to proceed without it), pinned in the Docker template (`BUN_VERSION` arg, native installer; the Claude Code CLI stays on npm).
@@ -59,6 +69,14 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 4. Refresh ALL on-disk boot wrappers (Step 5b's byte-compare will list every `bin/` file as changed — copy each from `state-templates/bin/`). The old wrappers exec `python3` directly and break when the Python scripts are removed from the plugin.
 5. Note for Docker operators: `hermit-status`, `hermit-attach`, and `hermit-docker` run on the HOST and now use bun there — install bun on the host even when the hermit itself runs in the container.
 6. Docker operators: refresh the on-disk `docker-entrypoint.hermit.sh` from the template (re-run `/docker-setup` or let this skill patch it) BEFORE running `hermit-docker update` — `update` rebuilds with the on-disk entrypoint, and the old one shells `python3`, which the new image no longer has. Then `hermit-docker update` rebuilds the image (drops Python, keeps Node for the Claude Code CLI).
+7. **Set the Haiku default on `daily-auto-close`.** Read `config.routines`, find the entry with `id: "daily-auto-close"`. If it has **no** `model` key, set `"model": "haiku"`. If a `model` is already present, leave it unchanged. (Revert: remove the `model` field from that entry to return it to the session model.)
+1. Append a schema-marker line to `.claude/cost-log.jsonl`: `{"schema": 2, "timestamp": "<ISO now>", "note": "api_calls + context_usage added; pre-marker entries undercount multi-step turns"}`. This stamps the upgrade boundary so operators do not read the post-upgrade cost jump as a regression. Backfill of pre-marker entries is not performed.
+2. Create `.claude-code-hermit/state/observations.jsonl` as an empty file if it does not exist (append-only ledger; `append-metrics.js` also creates it lazily on first write, so pre-upgrade hermits fail open).
+3. No migration of existing sub-threshold memory entries is performed — future observations land in the ledger. Stale pattern-label notes in operator MEMORY.md can be pruned manually at the operator's convenience.
+4. Verify bun is installed before anything else (Step 0b is the hard gate): `bun --version` must be >= 1.3.0. If missing: `curl -fsSL https://bun.sh/install | bash`.
+5. Refresh ALL on-disk boot wrappers (Step 5b's byte-compare will list every `bin/` file as changed — copy each from `state-templates/bin/`). The old wrappers exec `python3` directly and break when the Python scripts are removed from the plugin.
+6. Note for Docker operators: `hermit-status`, `hermit-attach`, and `hermit-docker` run on the HOST and now use bun there — install bun on the host even when the hermit itself runs in the container.
+7. Docker operators: refresh the on-disk `docker-entrypoint.hermit.sh` from the template (re-run `/docker-setup` or let this skill patch it) BEFORE running `hermit-docker update` — `update` rebuilds with the on-disk entrypoint, and the old one shells `python3`, which the new image no longer has. Then `hermit-docker update` rebuilds the image (drops Python, keeps Node for the Claude Code CLI).
 
 ## [1.1.12] - 2026-06-10
 
