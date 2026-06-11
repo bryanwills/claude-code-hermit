@@ -880,7 +880,7 @@ Quick setup will apply:
   Hermit ext:  {activated or none}
   Visibility:  {.local — plugin installed at <scope> scope | committed — plugin installed at project scope}
   Git:         {initialize local repo (tracks build output; hermit internals gitignored) | not applicable}
-  Files:       {CLAUDE.local.md | CLAUDE.md}, .gitignore, {.claude/settings.local.json | .claude/settings.json}
+  Files:       {CLAUDE.local.md | CLAUDE.md}, .gitignore, .worktreeinclude, {.claude/settings.local.json | .claude/settings.json}
   OPERATOR.md: drafted from scan + your answers (written below)
 
 Customize restarts the wizard from scratch; your Quick answers won't carry over.
