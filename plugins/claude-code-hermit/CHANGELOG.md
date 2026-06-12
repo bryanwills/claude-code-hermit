@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Docker: entrypoint reboot-loop after 1.2.0 upgrade** — `docker-entrypoint.hermit.sh.template` contained `SESSION_NAME="{{TMUX_SESSION_NAME}}"` (a placeholder previously substituted only by `/docker-setup`). The 1.2.0 Upgrade Instructions told Docker operators to `cp` the raw template without a substitution step, leaving the literal string `{{TMUX_SESSION_NAME}}`. The keep-alive watch loop (`tmux has-session -t "{{TMUX_SESSION_NAME}}"`) exited immediately, PID 1 fell through, and `restart: unless-stopped` reboot-looped the container. The entrypoint now resolves the session name from `config.json` at runtime using the same logic as `lib/tmux.getSessionName`; the file is safe to raw-copy with no substitution.
+- **Docker: `${PWD}` bind-mount mounts wrong tree when compose runs from wrong directory** — added a comment in `docker-compose.hermit.yml.template` clarifying that `docker compose` must run from the project root (`hermit-docker up` always does this). This was the secondary cause of collateral container failures during manual recovery after the reboot-loop above.
+
+### Upgrade Instructions
+
+Docker operators: re-copy the now-placeholder-free entrypoint (no substitution needed after the copy) then rebuild:
+```
+cp "$(claude plugin path claude-code-hermit)"/state-templates/docker/docker-entrypoint.hermit.sh.template \
+  ./docker-entrypoint.hermit.sh
+.claude-code-hermit/bin/hermit-docker update
+```
+For normal start/stop use `.claude-code-hermit/bin/hermit-docker up` (it runs compose from the project root); if invoking `docker compose` directly, do it from the project root so `${PWD}` resolves correctly.
+
 ## [1.2.0] - 2026-06-12
 
 ### Added
@@ -99,7 +116,22 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
    cp "$(claude plugin path claude-code-hermit)"/state-templates/docker/docker-entrypoint.hermit.sh.template \
      ./docker-entrypoint.hermit.sh
    ```
-   The old entrypoint shells `python3` for credential-expiry checks, mtime watches, and JSON init blocks; the new one uses `bun -e`. Do NOT re-run `/docker-setup` to do this — that wizard regenerates `Dockerfile.hermit` from the new Python-free template and would silently overwrite any operator customizations to it. `Dockerfile.hermit` and `docker-compose.hermit.yml` are not touched by this upgrade; existing hermits keep their full image definition including any custom layers or Python packages. After replacing the entrypoint, run `hermit-docker update` to rebuild the image with it.
+   The old entrypoint shells `python3` for credential-expiry checks, mtime watches, and JSON init blocks; the new one uses `bun -e`. Do NOT re-run `/docker-setup` to do this — that wizard regenerates `Dockerfile.hermit` from the new Python-free template and would silently overwrite any operator customizations to it. `Dockerfile.hermit` and `docker-compose.hermit.yml` are not touched by this upgrade; existing hermits keep their full image definition including any custom layers or Python packages.
+
+   **Backpatch (1.2.0 template only):** The 1.2.0 template shipped with an unsubstituted `{{TMUX_SESSION_NAME}}` placeholder in the entrypoint. If you are upgrading from 1.2.0, run this after the `cp` to replace the literal placeholder with the resolved session name:
+   ```
+   bun -e "
+   const fs = require('fs'), path = require('path');
+   const cfg = JSON.parse(fs.readFileSync('.claude-code-hermit/config.json','utf8'));
+   const name = String(cfg.tmux_session_name ?? 'hermit-{project_name}')
+     .replaceAll('{project_name}', path.basename(process.cwd()));
+   const f = './docker-entrypoint.hermit.sh';
+   fs.writeFileSync(f, fs.readFileSync(f,'utf8').replaceAll('{{TMUX_SESSION_NAME}}', name));
+   "
+   ```
+   On >=1.2.1 templates the placeholder is already gone; the snippet above is a harmless no-op.
+
+   After replacing the entrypoint, run `hermit-docker update` to rebuild the image with it.
 5. Append a schema-marker line to `.claude/cost-log.jsonl`: `{"schema": 2, "timestamp": "<ISO now>", "note": "api_calls + context_usage added; pre-marker entries undercount multi-step turns"}`. This stamps the upgrade boundary so operators do not read the post-upgrade cost jump as a regression. Backfill of pre-marker entries is not performed.
 6. Add `"post_close_clear": true` to `.claude-code-hermit/config.json` (top-level, not nested under `watchdog`). This enables the post-close context reset that ships enabled by default in new hermits. To disable: set `"post_close_clear": false`.
    Note: the reset only fires when `hermit-watchdog run` is invoked on a schedule. Docker hermits get this automatically (the entrypoint runs it every ~5 min). Bare-metal hermits need `hermit-watchdog install` to set up the systemd/launchd timer — without a timer the marker sits until the next watchdog invocation, which may never come on bare metal.

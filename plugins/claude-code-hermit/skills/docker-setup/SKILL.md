@@ -130,7 +130,8 @@ The three templates live in `${CLAUDE_SKILL_DIR}/../../state-templates/docker/`.
   If empty, remove the `{{PACKAGES_BLOCK}}` line entirely. The block is placed after the npm install layer so changing project packages doesn't bust the npm cache.
 
 **docker-entrypoint.hermit.sh** (from `docker-entrypoint.hermit.sh.template`):
-- `{{TMUX_SESSION_NAME}}` — resolved session name
+- No placeholder substitution needed — the entrypoint resolves the tmux session name from
+  `config.json` at runtime. Copy verbatim; the resulting file is correct without any edits.
 
 **docker-compose.hermit.yml** (from `docker-compose.hermit.yml.template`):
 - `{{AUTH_ENV_LINE}}` — If apikey: `      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}\n`. If oauth: empty string (remove the line entirely — OAuth credentials live in `.credentials.json` inside the named volume, written by `claude /login`).
@@ -331,7 +332,7 @@ After plugin selection is finalized, union the two sources of apt package candid
 Now that `docker.packages` (Step 7b.packages), `docker.recommended_plugins` (Step 7b), channel state dirs (Step 7), and the auth/network choices (Step 2) are all finalized, perform the template rendering described in Step 4 above. Write the three rendered files to project root:
 
 - `Dockerfile.hermit` — substitute `{{PACKAGES_BLOCK}}` with the finalized `docker.packages`.
-- `docker-entrypoint.hermit.sh` — substitute `{{TMUX_SESSION_NAME}}`.
+- `docker-entrypoint.hermit.sh` — copy verbatim; no placeholder substitution (session name is resolved from `config.json` at container startup).
 - `docker-compose.hermit.yml` — substitute `{{AUTH_ENV_LINE}}`, `{{CHANNEL_ENV_LINES}}`, `{{CHANNEL_VOLUME_LINES}}`, `{{AGENT_HOOK_PROFILE}}`, `{{TMUX_SESSION_NAME}}`, `{{NETWORK_MODE_LINE}}`, plus the git-identity bind-mount handling.
 
 Use the placeholder rules from Step 4 verbatim.
