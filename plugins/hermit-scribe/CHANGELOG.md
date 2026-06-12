@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [0.0.5] - 2026-06-12
 
 ### Added
 
@@ -13,6 +13,25 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - **bun runtime; file-issue is TypeScript** — `file-issue.js` → `file-issue.ts` (typed ESM, run with bun; usage strings and SKILL/docs updated), tests renamed and run via `bun` (bun migration, core #18).
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/hermit-scribe/file-issue.ts` | Renamed from `file-issue.js`; added auto-label logic and TypeScript types |
+| `skills/hermit-scribe/SKILL.md` | Updated runtime references and label preview wording |
+| `CLAUDE.md` | Updated runtime description; smoke-test uses bun |
+| `README.md` | Minor cleanup |
+| `tests/cli.test.ts` | Renamed from `cli.test.js`; added `buildLabels` unit tests |
+| `tests/run-all.sh` | Updated to invoke bun for test runner |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Update the skill** — pulls the revised `SKILL.md` and `file-issue.ts` (renamed from `file-issue.js`; now runs with `bun`).
+
+No `config.json` changes required.
 
 ---
 
