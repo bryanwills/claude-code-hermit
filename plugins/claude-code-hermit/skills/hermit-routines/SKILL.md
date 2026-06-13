@@ -51,7 +51,9 @@ The Agent runs in isolated context (no live session conversation, but full files
 
 **rdw=true** — routine fires even when `session_state` is `waiting`:
 ```
-[hermit-routine:<id>] Invoke /<skill>. After it completes, run:
+[hermit-routine:<id>] First run:
+<pluginRoot>/scripts/log-routine-event.sh <id> started
+Then Invoke /<skill>. After it completes, run:
 <pluginRoot>/scripts/log-routine-event.sh <id> fired
 ```
 
@@ -59,7 +61,9 @@ The Agent runs in isolated context (no live session conversation, but full files
 ```
 [hermit-routine:<id>] Read .claude-code-hermit/state/runtime.json. If session_state is "waiting", run:
 <pluginRoot>/scripts/log-routine-event.sh <id> skipped-waiting
-and stop. Otherwise: invoke /<skill>. After it completes, run:
+and stop. Otherwise: first run:
+<pluginRoot>/scripts/log-routine-event.sh <id> started
+Then invoke /<skill>. After it completes, run:
 <pluginRoot>/scripts/log-routine-event.sh <id> fired
 ```
 

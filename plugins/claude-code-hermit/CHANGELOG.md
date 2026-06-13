@@ -4,6 +4,7 @@
 
 ### Added
 
+- **routine-metrics: `started` marker before skill invocation** — distinguishes "routine fired but errored before completion" (emits `started`, no `fired`) from "correctly never fired" (no entries). `reflect` now surfaces routines where `errored = count(started) − count(fired) >= 2` over 14 days as a diagnostic finding. Closes #378.
 - **watchdog: context-size auto-clear** — sends `/clear` when a hermit-owned turn's prompt-side tokens (`input + cache_write + cache_read`) exceed `watchdog.context_clear_tokens` (default 700 000), preventing scheduled routines from re-reading a bloated context at 5–22× normal cost. Fires independently of `watchdog.enabled`; gated on always-on mode, operator silence ≥ 10 min, and 2-tick pane-hash quiescence. Fixes #373.
 
 ### Upgrade Instructions

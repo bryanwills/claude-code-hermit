@@ -400,6 +400,26 @@ test('heartbeat-restart fired < 26h → no re-arm', withHermit(async (h) => {
 }));
 
 // -------------------------------------------------------
+// 11b. started event is not treated as fired by re-arm check
+// -------------------------------------------------------
+
+test('started event does not count as fired for re-arm check', withHermit(async (h) => {
+  writeConfig(h);
+  touchAgo(state(h, '.heartbeat'), 1800);
+  // started 1h ago (recent) + fired 28h ago. If started were counted as fired, re-arm
+  // would be suppressed. With correct behavior (only event==="fired" counts), re-arm fires.
+  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), [
+    JSON.stringify({ ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create' }),
+    JSON.stringify({ ts: isoAgoSeconds(1), routine_id: 'heartbeat-restart', event: 'started', delivery: 'cron-create' }),
+  ].join('\n') + '\n');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 0);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('re-arm-fallback');
+}));
+
+// -------------------------------------------------------
 // 12. checkWatchdog in doctor-check.ts: disabled → ok
 // -------------------------------------------------------
 

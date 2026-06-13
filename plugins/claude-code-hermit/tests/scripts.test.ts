@@ -1182,6 +1182,13 @@ describe('log-routine-event', () => {
       const content = fs.readFileSync(metrics(), 'utf-8');
       expect(content).toContain('"routine_id":"weekly-review","event":"skipped-waiting"');
     });
+
+    test('log-routine-event (started event serializes correctly)', async () => {
+      // started marker emitted before skill invocation — must serialize like other events
+      await runBash(SCRIPT, { args: ['daily-brief', 'started'], cwd: wd.dir });
+      const content = fs.readFileSync(metrics(), 'utf-8');
+      expect(content).toContain('"routine_id":"daily-brief","event":"started"');
+    });
   });
 
   describe('no hermit ancestor', () => {

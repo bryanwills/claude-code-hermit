@@ -17,7 +17,7 @@ The skill is invoked by the `daily-auto-close` routine at `0 0 * * *` (local). T
 
    **a. `session_state` not in `{"in_progress", "idle"}`** — nothing to close.
    - If `pending-close.json` exists → delete it (stale flag from a prior session that already closed). Use the Bash tool: `rm -f .claude-code-hermit/state/pending-close.json`.
-   - Stop. Do not notify the operator. Do not write to `routine-metrics.jsonl` (no-op events are not part of the existing `log-routine-event.sh` vocabulary).
+   - Stop. Do not notify the operator. Do not write to `routine-metrics.jsonl` (no-op events are not part of the `log-routine-event.sh` vocabulary: `fired`, `skipped-waiting`, `started`).
 
    **b. `session_state` in `{"in_progress", "idle"}` AND `now - last_operator_action > 10min`** — safe lull; close directly.
    - Invoke `/claude-code-hermit:session-close --auto`. The auto-close path archives the session and clears `pending-close.json` itself on archive success.
