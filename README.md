@@ -41,7 +41,7 @@ Just Claude Code everything is yours to shape: channels (Discord/Telegram), MCP 
 - **Routines** wrap `CronCreate` jobs that expire in 7 days and fire in the machine's timezone: they self-rearm daily, run on your wall clock, and are managed by `/hermit-routines`.
 - **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
 - **Channels** let you DM a session; the hermit agent acts on it (*"accept PROP-014"*, *"status"*) and **pings you first** when something needs a yes/no.
-- **Auto-memory** Hermit adds a `raw/` → `compiled/` — including living topic pages updated in place — and re-injects a catalog within a context budget at session start; `/recall` pulls the full depth on demand.
+- **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget at session start. `/recall` searches both.
 - **Task snapshots** persist native `Tasks` past session end, so the plan survives archives.
 - **Profile-gated guardrails** scope `deny patterns + sandbox` per profile, locking the unattended agent down harder than the one you're watching.
 - **One runtime.** Everything is TypeScript running on [Bun](https://bun.sh) — zero npm packages, zero Python, across the whole fleet. Install Bun, done.
