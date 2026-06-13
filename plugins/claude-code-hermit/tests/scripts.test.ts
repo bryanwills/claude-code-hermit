@@ -429,9 +429,9 @@ describe('knowledge-lint', () => {
     write(hermit(dir, 'knowledge-schema.md'),
       '## Work Products\n- briefing: daily summary\n\n## Raw Captures\n- source: fetched articles\n');
     write(hermit(dir, 'raw', 'fresh-snap.md'),
-      '---\ntitle: fresh\ntype: source\ncreated: 2026-04-14T00:00:00+00:00\n---\ndata');
+      `---\ntitle: fresh\ntype: source\ncreated: ${isoSec(daysAgo(5))}\n---\ndata`);
     write(hermit(dir, 'compiled', 'summary.md'),
-      '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\nBased on fresh-snap.md data');
+      `---\ntitle: summary\ntype: briefing\ncreated: ${isoSec(daysAgo(5))}\n---\nBased on fresh-snap.md data`);
     const r = await runLint(dir);
     expect(r.stdout).toContain('Knowledge base is clean');
   }));
@@ -481,7 +481,7 @@ describe('knowledge-lint', () => {
     test('knowledge-lint (schema: declared type is clean)', async () => {
       // Matching type: schema has 'briefing', file has type: briefing
       write(hermit(wd.dir, 'compiled', 'unknown.md'),
-        '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\ndata');
+        `---\ntitle: summary\ntype: briefing\ncreated: ${isoSec(daysAgo(5))}\n---\ndata`);
       const r = await runLint(wd.dir);
       expect(r.stdout).toContain('Knowledge base is clean');
     });
@@ -495,9 +495,9 @@ describe('knowledge-lint', () => {
     write(hermit(dir, 'knowledge-schema.md'),
       '## Work Products\n- **briefing**: daily summary\n\n## Raw Captures\n- **source**: fetched articles\n');
     write(hermit(dir, 'raw', 'fresh-snap.md'),
-      '---\ntitle: fresh\ntype: source\ncreated: 2026-04-14T00:00:00+00:00\n---\ndata');
+      `---\ntitle: fresh\ntype: source\ncreated: ${isoSec(daysAgo(5))}\n---\ndata`);
     write(hermit(dir, 'compiled', 'summary.md'),
-      '---\ntitle: summary\ntype: briefing\ncreated: 2026-04-14T00:00:00+00:00\n---\nBased on fresh-snap.md data');
+      `---\ntitle: summary\ntype: briefing\ncreated: ${isoSec(daysAgo(5))}\n---\nBased on fresh-snap.md data`);
     const r = await runLint(dir);
     expect(r.stdout).toContain('Knowledge base is clean');
   }));
