@@ -510,6 +510,18 @@ test('doctor checkWatchdog: enabled + stale last_run + unknown runtime → warn,
   expect(w.detail).toContain('force-recreate');
 }));
 
+test('doctor checkWatchdog: stale last_run + recent restart → not-firing wins, summary suppressed', withHermit(async (h) => {
+  writeDoctorConfig(h);
+  fs.writeFileSync(eventsFile(h), JSON.stringify({
+    ts: isoAgoSeconds(0), action: 'restart', reason: 'dead-process',
+  }) + '\n');
+  setLastRun(h, isoAgo(1)); // stale → liveness takes precedence
+  const w = await doctorWatchdogCheck(h);
+  expect(w.status).toBe('warn');
+  expect(w.detail).toContain('not firing');
+  expect(w.detail).not.toContain('restarts:');
+}));
+
 // -------------------------------------------------------
 // install / uninstall without systemctl (Linux-only path)
 // -------------------------------------------------------
