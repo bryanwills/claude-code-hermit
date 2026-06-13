@@ -2,11 +2,28 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.2.1] - 2026-06-13
 
 ### Fixed
 
 - **mcp-safety-gate: operator-defined sensitivity restored under drifted cwd** — `projectRoot()` added to `src/config.ts` resolves the project root via `CLAUDE_PROJECT_DIR`+`existsSync` → cwd walk-up → fail-open, so `HA_EXTRA_SENSITIVE_*` overrides in `.env` are found even when hook cwd has drifted inside `.claude-code-hermit/`. Before this fix the gate failed open for those operator-configured domains. Fixes #384.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `src/config.ts` | Adds `projectRoot()` — resolves project root surviving cwd drift |
+| `hooks/mcp-safety-gate.ts` | Threads `projectRoot()` through `classifyEntity` call |
+| `src/cli.ts` | Threads `projectRoot()` through `loadConfig` call |
+| `tests/config.test.ts` | Tests for `projectRoot()` under drift and normal conditions |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Update the plugin** — run `claude plugin update claude-code-homeassistant-hermit` to get the fixed hook.
+
+No `config.json` changes required.
 
 ## [0.2.0] - 2026-06-12
 
