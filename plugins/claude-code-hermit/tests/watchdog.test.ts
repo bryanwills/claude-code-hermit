@@ -416,6 +416,26 @@ async function doctorWatchdogCheck(h: Hermit) {
   return checks[0];
 }
 
+const readWatchdogStateFile = (h: Hermit) => readJson(state(h, 'watchdog-state.json'));
+
+/** Seed watchdog-state.json with a given last_run (null ⇒ omit the field). */
+function setLastRun(h: Hermit, iso: string | null): void {
+  const p = state(h, 'watchdog-state.json');
+  const cur = fs.existsSync(p) ? readJson(p) : { consecutive_stale: 0 };
+  if (iso === null) delete cur.last_run; else cur.last_run = iso;
+  fs.writeFileSync(p, JSON.stringify(cur) + '\n');
+}
+
+function writeDoctorConfig(h: Hermit, enabled = true): void {
+  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
+    JSON.stringify({
+      watchdog: enabled
+        ? { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' }
+        : { enabled: false },
+      ...DOCTOR_BASE,
+    }, null, 2) + '\n');
+}
+
 test('doctor checkWatchdog: disabled → ok', withHermit(async (h) => {
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
     JSON.stringify({ watchdog: { enabled: false }, ...DOCTOR_BASE }, null, 2) + '\n');
@@ -429,16 +449,65 @@ test('doctor checkWatchdog: disabled → ok', withHermit(async (h) => {
 // -------------------------------------------------------
 
 test('doctor checkWatchdog: restart in last 7d → warn', withHermit(async (h) => {
-  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
-    JSON.stringify({
-      watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' },
-      ...DOCTOR_BASE,
-    }, null, 2) + '\n');
+  writeDoctorConfig(h);
   fs.writeFileSync(eventsFile(h), JSON.stringify({
     ts: isoAgoSeconds(0), action: 'restart', reason: 'dead-process',
   }) + '\n');
+  setLastRun(h, new Date().toISOString()); // fresh liveness → exercise the restart-summary path, not the liveness warn
   const w = await doctorWatchdogCheck(h);
   expect(w.status).toBe('warn');
+  expect(w.detail).toContain('restarts: 1');
+}));
+
+// -------------------------------------------------------
+// liveness: last_run stamp (script) + doctor liveness branches
+// -------------------------------------------------------
+
+test('run stamps last_run before the enabled gate (enabled:false)', withHermit(async (h) => {
+  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
+    '{"watchdog": {"enabled": false}}\n');
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  const ws = readWatchdogStateFile(h);
+  expect(typeof ws.last_run).toBe('string');
+  expect(Date.now() - Date.parse(ws.last_run)).toBeLessThan(60_000);
+}));
+
+test('doctor checkWatchdog: enabled + fresh last_run + quiet → ok, shows last tick', withHermit(async (h) => {
+  writeDoctorConfig(h);
+  setLastRun(h, new Date().toISOString());
+  const w = await doctorWatchdogCheck(h);
+  expect(w.status).toBe('ok');
+  expect(w.detail).toContain('last tick');
+}));
+
+test('doctor checkWatchdog: enabled + stale last_run + tmux → warn, install hint', withHermit(async (h) => {
+  writeDoctorConfig(h);          // setupHermit runtime_mode = tmux
+  setLastRun(h, isoAgo(1));      // 1h ago → stale
+  const w = await doctorWatchdogCheck(h);
+  expect(w.status).toBe('warn');
+  expect(w.detail).toContain('not firing');
+  expect(w.detail).toContain('hermit-watchdog install');
+}));
+
+test('doctor checkWatchdog: enabled + missing last_run + docker → warn, recreate hint', withHermit(async (h) => {
+  writeDoctorConfig(h);
+  patchRuntime(h, { runtime_mode: 'docker' });
+  // no watchdog-state.json → last_run missing
+  const w = await doctorWatchdogCheck(h);
+  expect(w.status).toBe('warn');
+  expect(w.detail).toContain('not firing');
+  expect(w.detail).toContain('force-recreate');
+}));
+
+test('doctor checkWatchdog: enabled + stale last_run + unknown runtime → warn, both hints', withHermit(async (h) => {
+  writeDoctorConfig(h);
+  fs.rmSync(state(h, 'runtime.json')); // runtime_mode unknown
+  setLastRun(h, isoAgo(1));
+  const w = await doctorWatchdogCheck(h);
+  expect(w.status).toBe('warn');
+  expect(w.detail).toContain('hermit-watchdog install');
+  expect(w.detail).toContain('force-recreate');
 }));
 
 // -------------------------------------------------------
@@ -503,6 +572,10 @@ test('post_close_clear: marker + idle + tmux alive + operator silent → /clear 
     expect(tmuxLog).toContain('/clear');
     expect(fs.existsSync(state(h, 'clear-requested.json'))).toBe(false);
     expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('post-close-clear');
+    // last_run stamp precedes the maybePostCloseClear process.exit(0) (finding 2)
+    const ws = readWatchdogStateFile(h);
+    expect(typeof ws.last_run).toBe('string');
+    expect(Date.now() - Date.parse(ws.last_run)).toBeLessThan(60_000);
   }));
 
 test('post_close_clear: operator active < 10 min → no send, marker kept',

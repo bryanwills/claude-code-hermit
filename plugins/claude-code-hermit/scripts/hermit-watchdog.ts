@@ -386,6 +386,14 @@ function main(): void {
     process.exit(0);
   }
 
+  // 0. Liveness stamp — record that the scheduler/loop invoked us, before any gate or
+  // pre-gate handler (which can process.exit(0)). A fresh last_run proves the watchdog
+  // is firing (systemd/launchd/cron or the Docker entrypoint loop); doctor reads it as
+  // the liveness signal. Stamped even when watchdog.enabled is false.
+  const liveness = readWatchdogState();
+  liveness.last_run = utcStamp();
+  writeWatchdogState(liveness);
+
   // 0a. Post-close clear — independent of watchdog.enabled; runs on any hermit with a scheduler
   maybePostCloseClear(config);
 

@@ -110,6 +110,7 @@ Out-of-session supervisor that detects dead or wedged sessions and restarts them
 | `context_clear_tokens` | number \| null | `700000` | Auto-send `/clear` when the last hermit-owned turn's prompt-side tokens (`input + cache_write + cache_read`) exceed this threshold. Prevents scheduled routines from re-reading a bloated context on every wake. Set to `null` or `0` to disable. Only fires on always-on hermits (not interactive), when the session is quiescent (pane unchanged across two scheduler ticks) and the operator has been silent ≥ 10 min. |
 
 **Decision flow (one `run` cycle):**
+0. Stamp `last_run` (current UTC) into `state/watchdog-state.json` — before any gate or early exit, so it records that the scheduler/loop fired the script even when `enabled: false`. `hermit-doctor` reads this as the watchdog liveness signal (stale/missing ⇒ "enabled but not firing").
 1. If `post_close_clear: true` and session-close marker present → send `/clear`, exit.
 2. If context-clear conditions met (prompt tokens over threshold, always-on, quiescent, operator silent) → send `/clear`, exit.
 3. If `enabled: false` → exit (restart/nudge machinery disabled).

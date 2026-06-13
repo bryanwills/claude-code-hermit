@@ -5,6 +5,7 @@
 ### Added
 
 - **watchdog: context-size auto-clear** — sends `/clear` when a hermit-owned turn's prompt-side tokens (`input + cache_write + cache_read`) exceed `watchdog.context_clear_tokens` (default 700 000), preventing scheduled routines from re-reading a bloated context at 5–22× normal cost. Fires independently of `watchdog.enabled`; gated on always-on mode, operator silence ≥ 10 min, and 2-tick pane-hash quiescence. Fixes #373.
+- **watchdog: liveness signal + doctor detection** — `hermit-watchdog run` now stamps `last_run` into `state/watchdog-state.json` on every invocation, before any gate, so a fresh stamp proves the scheduler/loop (systemd/launchd/cron or the Docker entrypoint loop) is firing the script. `hermit-doctor`'s `watchdog` check reads it: a stale (>20 min) or missing stamp reports `enabled but not firing` with remediation keyed to `runtime_mode` (tmux → `bin/hermit-watchdog install`; docker → recreate the container; unknown → both). Replaces the `systemctl`/`crontab`/`ps` self-diagnosis that false-alarmed on healthy Docker hermits (the loop runs no OS timer by design, and `watchdog.log` only captures stderr, so it stays stale even when firing).
 
 ### Upgrade Instructions
 
@@ -21,6 +22,14 @@ Add `context_clear_tokens: 700000` to the `watchdog` block in `.claude-code-herm
 ```
 
 To disable: set `"context_clear_tokens": null` (or `0`).
+
+Seed the new watchdog liveness stamp so `hermit-doctor` does not false-warn before the first tick. Run once:
+
+```
+.claude-code-hermit/bin/hermit-watchdog run
+```
+
+This writes `last_run` immediately (it is stamped before any gate, so it works even with `watchdog.enabled: false`) and no-ops otherwise during an active session. A healthy watchdog keeps the stamp fresh on every ~5 min tick; a genuinely uninstalled/non-firing one lets it go stale within 20 min, which is when the new doctor warning is meant to fire.
 
 ### Fixed
 
