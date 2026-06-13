@@ -1,22 +1,46 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.3] - 2026-06-13
+
+### Added
+
+- **Community Discord** — dev-community invite published in both READMEs with channel shape, starter threads, moderation notes, and invite publishing checklist.
 
 ### Fixed
 
 - **capability-brainstorm: use fully-qualified skill name for proposal-create** — short-form `/proposal-create` fails when the model autonomously invokes a skill; changed to `/claude-code-hermit:proposal-create` so the Skill tool resolves it correctly.
 - **proposal-act/reflect/proposal-create: fully-qualify skill-creator invocations** — short-form `/skill-creator` fails when the model invokes the skill (procedure-capture install, skill-improvement, `NEXT-TASK.md` plan bullets); changed to `/skill-creator:skill-creator` so the Skill tool resolves it.
+- **session-start: suppress duplicate startup ping after watchdog context-clear (#385)** — when the watchdog sends `/clear` to refresh context, a scheduled task could re-invoke `session-start` and re-send the "Hermit online" ping. The watchdog now writes `context_cleared: true` to `state/runtime.json` before `/clear`; session-start detects and consumes the marker and suppresses the ping for that invocation only.
+- **hooks: cwd-drift bug class resolved (#384)** — `hermitDir()` added to `scripts/lib/cc-compat.ts` resolves `.claude-code-hermit/` via `AGENT_DIR` → `CLAUDE_PROJECT_DIR`+`existsSync` → cwd walk-up → fail-open, surviving any `cd` that drifts shell cwd inside `.claude-code-hermit/`. All 10 affected hook scripts updated; payload-anchored hooks anchor on the absolute `file_path` from the hook payload instead.
 
-### Added
+### Files affected
 
-- **Community Discord** — publishes the dev-community invite in both READMEs
-  and documents the channel shape, starter message, starter threads, moderation
-  notes, and invite publishing checklist.
+| File | Change |
+|------|--------|
+| `scripts/lib/cc-compat.ts` | Adds `hermitDir()` — resolves `.claude-code-hermit/` surviving cwd drift |
+| `scripts/channel-hook.ts` | Uses `hermitDir()` |
+| `scripts/cost-tracker.ts` | Uses `hermitDir()` |
+| `scripts/session-diff.ts` | Uses `hermitDir()` |
+| `scripts/startup-context.ts` | Uses `hermitDir()` |
+| `scripts/stop-pipeline.ts` | Uses `hermitDir()` |
+| `scripts/record-operator-action.ts` | Uses `hermitDir()` |
+| `scripts/channel-reply-reminder.ts` | Uses `hermitDir()` |
+| `scripts/cache-edit-guard.ts` | Uses `hermitDir()` |
+| `scripts/prompt-context.ts` | Uses `hermitDir()` |
+| `skills/capability-brainstorm/SKILL.md` | Fully-qualified `proposal-create` invocation |
+| `skills/proposal-act/SKILL.md` | Fully-qualified `skill-creator` invocations |
+| `skills/proposal-create/SKILL.md` | Fully-qualified `skill-creator` invocation |
+| `skills/reflect/SKILL.md` | Fully-qualified `skill-creator` invocation |
+| `agents/session-mgr.md` | Updated for watchdog `context_cleared` marker |
+| `README.md` / plugin `README.md` | Community Discord invite added |
 
-### Fixed
+### Upgrade Instructions
 
-- **session-start: suppress duplicate startup ping after watchdog context-clear (#385)** — when the watchdog sends `/clear` to refresh a hermit's context (post-close-clear or context-size-clear), a scheduled task could re-invoke `session-start` which re-sent the "Hermit online" channel ping even though the session never stopped. The watchdog now writes `context_cleared: true` to `state/runtime.json` before sending `/clear`; session-start step 3 detects and consumes the marker (sets it to `false`) and suppresses the step-8 startup ping for that invocation only.
-- **hooks: cwd-drift bug class resolved** — `hermitDir()` added to `scripts/lib/cc-compat.ts` resolves `.claude-code-hermit/` via `AGENT_DIR` (absolute only) → `CLAUDE_PROJECT_DIR`+`existsSync` → cwd walk-up → fail-open, surviving any `cd` that leaves shell cwd inside `.claude-code-hermit/`. All 10 affected hook scripts updated; payload-anchored hooks (`validate-config`, `generate-summary`) anchor on the absolute `file_path` from the hook payload instead. Fixes #384.
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Update the plugin** — run `claude plugin update claude-code-hermit` to get the fixed hooks and skills.
+
+No `config.json` changes required.
 
 ## [1.2.2] - 2026-06-13
 
