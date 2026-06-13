@@ -624,10 +624,39 @@ function checkWatchdog() {
 
     const statePath = path.join(stateDir, 'watchdog-state.json');
     let consecutive = 0;
+    let lastRun: string | null = null;
     try {
       const ws = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
       consecutive = ws.consecutive_stale || 0;
+      lastRun = typeof ws.last_run === 'string' ? ws.last_run : null;
     } catch {}
+
+    // Liveness: the watchdog stamps last_run on every invocation, before any gate. A
+    // missing or stale last_run means the scheduler/loop isn't firing the script — a
+    // higher-severity signal than any past restart, so it takes precedence.
+    const STALE_MS = 20 * 60 * 1000; // ~4× the ~5 min tick interval
+    const lastRunMs = lastRun ? Date.parse(lastRun) : NaN;
+    const stale = !Number.isFinite(lastRunMs) || Date.now() - lastRunMs > STALE_MS;
+
+    if (stale) {
+      let mode: string | undefined;
+      try {
+        const rt = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf-8'));
+        mode = rt.runtime_mode;
+      } catch {}
+      const ageNote = Number.isFinite(lastRunMs)
+        ? `last ran ${Math.round((Date.now() - lastRunMs) / 60000)}m ago`
+        : 'never ran';
+      let remedy: string;
+      if (mode === 'tmux') {
+        remedy = 'run `bin/hermit-watchdog install`';
+      } else if (mode === 'docker') {
+        remedy = 'recreate the container (`docker compose up -d --force-recreate`) — containers built before v1.1.11 predate the entrypoint watchdog loop';
+      } else {
+        remedy = 'native: run `bin/hermit-watchdog install`; Docker: recreate the container (`docker compose up -d --force-recreate`)';
+      }
+      return { id: 'watchdog', status: 'warn', detail: `watchdog: enabled but not firing (${ageNote}) — ${remedy}` };
+    }
 
     const eventsPath = path.join(stateDir, 'watchdog-events.jsonl');
     const cutoff = new Date(Date.now() - 7 * MS_PER_DAY).toISOString();
@@ -650,7 +679,8 @@ function checkWatchdog() {
 
     const parts = [`restarts: ${restarts}`, `nudges: ${nudges}`, `re-arms: ${rearms}`];
     if (consecutive > 0) parts.push(`stale cycles in progress: ${consecutive}`);
-    const detail = `watchdog: enabled — ${parts.join(', ')} (last 7d)`;
+    const tickNote = `last tick ${Math.round((Date.now() - lastRunMs) / 60000)}m ago`;
+    const detail = `watchdog: enabled, ${tickNote} — ${parts.join(', ')} (last 7d)`;
 
     if (restarts > 0 || consecutive > 0) {
       return { id: 'watchdog', status: 'warn', detail };
