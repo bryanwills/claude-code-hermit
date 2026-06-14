@@ -1019,6 +1019,20 @@ describe('hermit-evolve delegation contract', () => {
   test('evolve-runner declares no memory (non-gate agent)', () => {
     expect(agentFrontmatter('evolve-runner')).not.toContain('memory:');
   });
+
+  test('report contract is identical in evolve-runner.md and SKILL.md', () => {
+    // The report format is duplicated: the agent emits it, step 10 parses it.
+    // Drift between the two copies would desync producer and consumer.
+    const block = (text: string): string => {
+      const start = text.indexOf('Upgrade: vOLD -> vNEW');
+      const end = text.indexOf('--- end ---', start);
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(end).toBeGreaterThan(start);
+      return text.slice(start, end + '--- end ---'.length);
+    };
+    const agent = read(path.join(AGENTS, 'evolve-runner.md'));
+    expect(block(agent)).toBe(block(skill));
+  });
 });
 
 // ============================================================

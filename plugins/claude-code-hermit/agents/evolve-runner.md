@@ -71,7 +71,7 @@ Deferred for operator: <none | one or more verbatim blocks, each:>
   instruction: |
     <exact verbatim ### Upgrade Instructions step text — copied, not summarized>
   options: <the either/or choices presented>
-  skipped: <the safe/no-op branch you took instead, or "skipped pending operator">
+  skipped: <the safe/no-op branch taken, or "skipped pending operator">
   --- end ---
 ```
 

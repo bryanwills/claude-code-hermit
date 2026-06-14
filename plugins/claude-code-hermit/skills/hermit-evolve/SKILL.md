@@ -105,7 +105,7 @@ Within `changelog_slice` (already ordered oldest-first), each version entry may 
 
 1. Find the `### Upgrade Instructions` section within each version's entry
 2. If found, execute every instruction in that section — these are the authoritative migration steps
-3. Present version-specific operator notes as you go
+3. Collect any version-specific operator notes for the step-10 report (delegated mode has no operator to present to live)
 4. **Delegated mode:** if a step is interactive (poses an either/or), do not ask. Apply the non-destructive default (e.g. a delete/cleanup offer → keep the file) and note it for step 10. If the step has **no safe default**, **defer** — skip it and record a verbatim deferred-migration block per the Delegated mode rules.
 
 The CHANGELOG.md `### Upgrade Instructions` sections are the single source of truth for migrations — do not skip or merely display them. The same pattern applies to sibling-hermit upgrades in Step 7.
@@ -119,7 +119,7 @@ The plan's `new_config_keys` array lists every key in the current `config.json.t
 **Delegated mode:** add **every** entry in the plan's `new_config_keys` silently with its `default` from the plan — operator-set values are never listed by the plan, so this never overwrites a choice. There is no prompting (the subagent can't `AskUserQuestion`). The former identity/preference keys below are almost always already set by evolve time, so they rarely appear; when one does, it takes the plan `default` and the operator adjusts via `/hermit-settings`. Collect every silently-set key for the step-10 report. If `new_config_keys` is empty, skip this step.
 
 Special-default keys (apply the noted default when the key is in `new_config_keys`):
-- `language` (0.0.1) / `timezone` (0.0.1): keep their auto-detected default (`$LANG` / system).
+- `language` (0.0.1) / `timezone` (0.0.1): when missing, the subagent **auto-detects** the value (`$LANG` / system timezone via `date +%Z`/`timedatectl`) and writes that, rather than the static plan default. (These are 0.0.1 keys, set at hatch, so they are almost never missing at evolve time.)
 - `remote` (0.0.1): `true` · `agent_name` (0.0.1) / `sign_off` (0.0.1) / `escalation` (0.0.1) / `idle_behavior` (0.0.9): plan default (operator tunes via `/hermit-settings`).
 - `always_on` (0.0.1): `false` | `auto_session` (0.0.1): `true` | `model` (0.0.1): `"sonnet"` | `permission_mode` (0.0.1): `"auto"`
 - `tmux_session_name` (0.0.1): `"hermit-{project_name}"` | `chrome` (0.0.1): `false` | `push_notifications` (1.1.2): `true`
@@ -283,7 +283,7 @@ Deferred for operator: <none | one or more verbatim blocks, each:>
   instruction: |
     <exact verbatim ### Upgrade Instructions step text — copied, not summarized>
   options: <the either/or choices presented>
-  skipped: <the safe/no-op branch the subagent took>
+  skipped: <the safe/no-op branch taken, or "skipped pending operator">
   --- end ---
 ```
 
