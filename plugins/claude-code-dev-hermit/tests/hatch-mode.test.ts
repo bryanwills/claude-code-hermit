@@ -37,7 +37,7 @@ if (fs.existsSync(SAFETY)) {
   ok("safety: §Git Safety blesses /dev-pr's own push (carve-out present)",
     text.includes("run it, don't stop to ask"));
   ok('safety: no short-form /dev-pr in injected rules',
-    !/(?<!claude-code-dev-hermit:)\/dev-pr\b/.test(text));
+    !/\/dev-pr\b/.test(text));
   ok('no commands.test reference', !text.includes('commands.test'));
   ok('no §Implementation Flow section', !text.includes('## Implementation Flow'));
   ok('no §Tests Before PR section', !text.includes('## Tests Before PR'));
@@ -68,7 +68,7 @@ if (fs.existsSync(STANDARD)) {
   ok("standard: §Git Safety blesses /dev-pr's own push (carve-out present)",
     text.includes("run it, don't stop to ask"));
   ok('standard: no short-form /dev-pr in injected rules',
-    !/(?<!claude-code-dev-hermit:)\/dev-pr\b/.test(text));
+    !/\/dev-pr\b/.test(text));
 
   // Each preamble ends with "fallback for projects without one" or "fallback."
   const branchSection = text.match(/## Branch Discipline[\s\S]*?## Implementation Flow/);
