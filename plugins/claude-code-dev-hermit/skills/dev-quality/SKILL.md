@@ -178,7 +178,7 @@ dev-quality
 
 ## Rules
 
-- **Main session only.** Subagents cannot invoke skills (see CLAUDE-APPEND §Technical Constraints) — `/dev-quality` only fires from the main session.
+- **Main session only.** `/dev-quality` fires from the main session, not a subagent.
 - **Never invokes `/code-review`.** Suggests it to the operator; the operator decides.
 - **Never commits.** Leaves the diff uncommitted for the operator.
 - **Never modifies the working tree on test failure.** Surfaces the regression and stops; no rollback.

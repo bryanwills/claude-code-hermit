@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **CLAUDE-APPEND: correct the subagent-delegation framing (#406)** — §Technical Constraints in `CLAUDE-APPEND.md` and `CLAUDE-APPEND-SAFETY.md` no longer claims "subagents cannot invoke skills" (false). It now states the delegation contract: subagents can invoke skills and nest, but a delegated sub-step returns a verdict + optional `operator_message`, and the main session owns `AskUserQuestion` and operator notification. `/dev-quality` and the `HOW-TO-USE` parallel-work note keep their main-session rule without the false rationale.
+- **min CC version: floor bumped to `>=2.1.172`** — aligns the dev-hermit install gate with core (core #389); the corrected CLAUDE-APPEND framing references nested-subagent dispatch, which requires it.
+
 ### Fixed
 
 - **CLAUDE-APPEND/dev-pr: bless `/dev-pr`'s own push in §Git Safety** — the absolute "Never `git push`" rule made auto-mode agents refuse `/dev-pr`'s Gate 1 push; carve-out scopes the prohibition to ad-hoc pushes (#404).

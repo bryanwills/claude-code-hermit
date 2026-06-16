@@ -55,6 +55,8 @@ Rules:
 
 ## Operator Notification
 
+When a sub-step is delegated under the Context-hygiene heuristic, the subagent returns the message and main runs this protocol to send it. Main owns the outbound send and any `AskUserQuestion`.
+
 When you need to notify the operator proactively:
 
 - **If no channel is enabled** (channels block absent, `channels === {}`, or every channel-config entry has `enabled === false` — exclude the `primary` string pointer when iterating):
@@ -88,7 +90,7 @@ Auto-memory handles all learning. `compiled/` is for durable domain outputs and 
 
 - **Rate limits:** Log pause/resume in Progress Log. Never silently stall.
 - **Self-awareness:** If stuck — say so, log it, alert via channel. Don't push through silently.
-- **Context hygiene:** For broad file scans, archive traversals, or research where only the conclusion is needed, delegate to the built-in `Explore` subagent. Keeps context lean on long runs.
+- **Context hygiene & delegation:** For broad file scans, archive traversals, or research where only the conclusion is needed, delegate to the built-in `Explore` subagent. The same logic extends to *execution* steps. Delegate a sub-step to a subagent when **all three** hold: (a) its intermediate context is much larger than its conclusion (multi-file edits, search sweeps, test output qualify; a frontmatter flip does not); (b) it needs no operator contact mid-flight; (c) main needs only the verdict, not the artifact. **Comms contract:** a delegated sub-step returns its verdict plus an optional `operator_message`; **main owns `AskUserQuestion`, channel resolution, and `PushNotification`**. `AskUserQuestion` is unavailable to a subagent, and outbound routing/cost/dedup live in § Operator Notification. **Break-even:** subagents inherit `CLAUDE.md`/`CLAUDE.local.md`, so each dispatch re-pays that seed as a fixed token tax. It is a net win only on the long-lived always-on session for steps above that noise threshold; fanning out trivial steps *raises* total tokens. Inheritance is also a feature: a dispatched implementer gets git-safety, worktree discipline, and project conventions for free, which is why `general-purpose` is the right pick for write tasks.
 - **Calibration:** Before publishing specifics you didn't verify in this conversation (version-pinned behavior, external system state, recalled API/function signatures, menu paths, prices/dates/counts), either verify against a source (`WebSearch`, project docs, read the code, ask the operator) or label as recalled-not-verified. Trigger is specificity of the claim, not topic; general domain knowledge (principles, patterns, semantics) is fine to answer directly. `OPERATOR.md` can tighten or relax.
 - **Secrets:** Never log API keys, tokens, passwords, or credentials to SHELL.md, reports, or proposals. Session files may be committed to git.
 - **OPERATOR.md:** Never edit autonomously. If you notice stale or contradictory context, draft the minimal change, show a diff, and apply only after the operator confirms. In always-on mode, flag it via channel instead — the operator edits directly.

@@ -59,7 +59,7 @@ If the project defines its own pre-PR validation (e.g. a custom test runner, CI 
 
 ## Technical Constraints
 
-Subagents cannot invoke skills (`/claude-code-hermit:simplify`, `/batch`, etc.) — those must run in the main session only.
+Subagents can invoke skills and spawn nested subagents. For delegated sub-steps the contract is: the subagent returns a verdict (plus an optional `operator_message`), and the **main session owns `AskUserQuestion` and operator notification**.
 
 Session state (`in_progress`/`waiting`/`idle`/`dead_process`) lives in `.claude-code-hermit/state/runtime.json` (`.session_state`). SHELL.md `Status:` is cosmetic — never parse it for programmatic checks.
 

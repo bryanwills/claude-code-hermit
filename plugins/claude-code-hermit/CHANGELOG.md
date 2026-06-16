@@ -4,6 +4,7 @@
 
 ### Changed
 
+- **CLAUDE-APPEND: codify the main-as-orchestrator delegation guideline (#406)** — the Context-hygiene rule now also covers *execution* delegation: a three-condition test for when to delegate a sub-step, the comms contract (subagent returns a verdict + optional `operator_message`; main owns `AskUserQuestion`, channel resolution, and `PushNotification`), and the `CLAUDE.md`-inheritance break-even. A cross-reference in § Operator Notification routes delegated sub-steps back through main for the outbound send. Same framing added to the monorepo-dev `CLAUDE.md`.
 - **proposal-act: dispatch the whole accept-flow tail to a general-purpose subagent (#402)** — implement, quality gate (`/simplify`), and verification all run in one isolated subagent context; only a compact structured report returns. Main keeps just the `resolve` lifecycle mutation and operator/channel notification. Skill-authoring (`## Skill Improvement` with skill-creator, `## Skill Draft`) and routine proposals stay in main and are unaffected; a `## Skill Improvement` proposal with skill-creator absent now runs the falsification gate and dispatches as a normal code edit.
 
 ## [1.2.4] - 2026-06-14

@@ -92,7 +92,7 @@ Or set up a recurring routine via `/claude-code-hermit:hermit-routines` if you w
 
 - **Same change across many files** — use `/batch` (built-in)
 - **Independent tasks** — use multiple `Agent` tool calls in a single message, or implement sequentially
-- **After parallel work** — run `/claude-code-hermit:simplify` in the main session (subagents can't invoke skills)
+- **After parallel work** — run `/claude-code-hermit:simplify` in the main session
 
 ---
 

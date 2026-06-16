@@ -3,5 +3,5 @@
   "requires": {
     "claude-code-hermit": ">=1.2.0"
   },
-  "min_claude_code_version": ">=2.1.150"
+  "min_claude_code_version": ">=2.1.172"
 }
