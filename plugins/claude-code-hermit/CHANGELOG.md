@@ -1,11 +1,28 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.5] - 2026-06-16
 
 ### Changed
 
-- **CLAUDE-APPEND: codify the main-as-orchestrator delegation guideline (#406)** — the Context-hygiene rule now also covers *execution* delegation: a three-condition test for when to delegate a sub-step, the comms contract (subagent returns a verdict + optional `operator_message`; main owns `AskUserQuestion`, channel resolution, and `PushNotification`), and the `CLAUDE.md`-inheritance break-even. A cross-reference in § Operator Notification routes delegated sub-steps back through main for the outbound send. Same framing added to the monorepo-dev `CLAUDE.md`.
-- **proposal-act: dispatch the whole accept-flow tail to a general-purpose subagent (#402)** — implement, quality gate (`/simplify`), and verification all run in one isolated subagent context; only a compact structured report returns. Main keeps just the `resolve` lifecycle mutation and operator/channel notification. Skill-authoring (`## Skill Improvement` with skill-creator, `## Skill Draft`) and routine proposals stay in main and are unaffected; a `## Skill Improvement` proposal with skill-creator absent now runs the falsification gate and dispatches as a normal code edit.
+- **CLAUDE-APPEND: codify main-as-orchestrator delegation guideline (#406)** — §Context-hygiene now covers execution delegation: a three-condition test for when to dispatch a sub-step, the comms contract (subagent returns verdict + optional `operator_message`; main owns `AskUserQuestion`, channel resolution, `PushNotification`), and the `CLAUDE.md`-inheritance break-even.
+- **proposal-act: dispatch the accept-flow tail to a general-purpose subagent (#402)** — implement, quality gate, and verification run in one isolated subagent context; only a compact structured report returns. Skill-authoring (`## Skill Improvement`, `## Skill Draft`) and routine proposals remain in main.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `state-templates/CLAUDE-APPEND.md` | Added delegation guideline to §Context-hygiene + §Operator Notification cross-reference |
+| `CLAUDE.md` | Same framing added to plugin dev CLAUDE.md |
+| `skills/proposal-act/SKILL.md` | Step (e) dispatches implement+gate+verify to general-purpose subagent |
+| `tests/contracts.test.ts` | Added `proposal-act dispatch contract` assertions |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. Update the plugin — run `claude plugin update claude-code-hermit`.
+
+No `config.json` changes required.
 
 ## [1.2.4] - 2026-06-14
 
