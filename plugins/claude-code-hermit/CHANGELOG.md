@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.6] - 2026-06-17
 
 ### Added
 
@@ -13,6 +13,31 @@
 - **reflect step 3b: graduation threshold is now config-driven** — removed "at least one not the current session" sub-clause; replaced hardcoded ≥2 with `graduation_min_sessions`.
 - **reflection-judge §1.4: config-agnostic verification** — verifies ≥1 ledger row per cited session instead of hardcoded ≥2 distinct sessions.
 - **proposal-triage + proposal-create: accept ledger graduates** — broadened the artifact exception so any judge-verified `Artifact: state/observations.jsonl` candidate satisfies condition 1 (was limited to efficiency/cost-class candidates).
+- **channel-responder: delegation nudge at §2** — adds a one-sentence pointer before the handler list so archive traversals and multi-file research dispatched from channel questions delegate to Explore rather than running inline in the long-lived session.
+- **CLAUDE-APPEND: trim reference sections** — removed Agent State table, Subagents catalog, and Quick Reference list (~100 → ~75 lines); content covered by `architecture.md` and `docs/skills.md`, which don't reload every turn. Fixed 23 stale `.py`/`.js` doc references (all scripts migrated to `.ts`). Added missing core agents to `architecture.md` Layer 3. Added "Scheduling ownership boundaries" subsection to `architecture.md`.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `scripts/reflect-precheck.ts` | Write drift rows to observations ledger; dedup by pattern |
+| `scripts/lib/drift.ts` | Shared drift-slug helper |
+| `scripts/startup-context.ts` | Pass `graduation_min_sessions` to precheck |
+| `scripts/validate-config.ts` | Validate `reflection.graduation_min_sessions` |
+| `skills/reflect/SKILL.md` | Freshness gate, config-driven graduation, origin aggregation |
+| `skills/reflect/reference.md` | Updated schema for origin field |
+| `agents/reflection-judge.md` | §1.4 config-agnostic verification |
+| `agents/proposal-triage.md` | Accept ledger graduates as condition-1 evidence |
+| `skills/proposal-create/SKILL.md` | Same artifact exception broadening |
+| `skills/hermit-settings/SKILL.md` | Document `reflection.graduation_min_sessions` |
+| `state-templates/config.json.template` | Add `reflection.graduation_min_sessions: 1` |
+| `skills/channel-responder/SKILL.md` | Delegation nudge at §2 |
+| `state-templates/CLAUDE-APPEND.md` | Trim reference sections (~100 → ~75 lines) |
+| `docs/architecture.md` | Add missing agents; scheduling ownership subsection |
+| `docs/config-reference.md` | Update `watchdog.enabled` description |
+| `tests/reflect-first-sighting.test.ts` | New: covers drift-row dedup and freshness gate |
+| `tests/reflect-loop.test.ts` | New: covers graduation threshold |
+| `tests/procedure-capture.test.ts` | Updated for config-driven threshold |
 
 ### Upgrade Instructions
 
