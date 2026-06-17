@@ -133,7 +133,7 @@ describe('reflect-precheck: drift capture', () => {
     expect(driftRow?.session_id).toBe('unknown');
   });
 
-  test('dedup by (slug, session_id): same session does not write duplicate rows', async () => {
+  test('dedup by pattern: same session does not write duplicate rows', async () => {
     fs.mkdirSync(path.join(hermitDir, 'reports'));
 
     // Run twice
@@ -146,7 +146,7 @@ describe('reflect-precheck: drift capture', () => {
     expect(rows.length).toBe(1);
   });
 
-  test('dedup by (slug, session_id): different session writes a second row', async () => {
+  test('dedup by pattern: a different session does NOT write a duplicate drift row', async () => {
     fs.mkdirSync(path.join(hermitDir, 'reports'));
 
     // First run: session_id = "S-001"
@@ -154,7 +154,8 @@ describe('reflect-precheck: drift capture', () => {
     fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'), JSON.stringify(runtime1), 'utf-8');
     await runPrecheck(hermitDir);
 
-    // Second run: session_id = "S-002" (different session)
+    // Second run: session_id = "S-002" (different session). Drift is structural, so the
+    // standing pattern is not re-written — otherwise it would flip reflect to RUN every session.
     const runtime2 = { session_state: 'idle', session_id: 'S-002' };
     fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'), JSON.stringify(runtime2), 'utf-8');
     await runPrecheck(hermitDir);
@@ -162,10 +163,33 @@ describe('reflect-precheck: drift capture', () => {
     const rows = readObservations(hermitDir).filter(r =>
       typeof r.pattern === 'string' && r.pattern === 'storage-drift:reports'
     );
-    expect(rows.length).toBe(2);
-    const ids = rows.map(r => r.session_id);
-    expect(ids).toContain('S-001');
-    expect(ids).toContain('S-002');
+    expect(rows.length).toBe(1);
+    expect(rows[0].session_id).toBe('S-001');
+  });
+
+  test('storage-drift slug preserves the full subpath under raw/', async () => {
+    fs.mkdirSync(path.join(hermitDir, 'raw', 'sub'), { recursive: true });
+
+    await runPrecheck(hermitDir);
+
+    const rows = readObservations(hermitDir);
+    const driftRow = rows.find(r => typeof r.pattern === 'string' && r.pattern.startsWith('storage-drift:raw'));
+    expect(driftRow?.pattern).toBe('storage-drift:raw/sub');
+  });
+
+  test('precheck writes a schema-drift row for an undeclared compiled type', async () => {
+    fs.writeFileSync(path.join(hermitDir, 'knowledge-schema.md'),
+      '## Work Products\n\n- guide:\n- design:\n', 'utf-8');
+    fs.writeFileSync(path.join(hermitDir, 'compiled', 'note.md'),
+      '---\ntitle: x\ntype: spike\ncreated: 2026-01-01T00:00:00Z\n---\n# x\n', 'utf-8');
+
+    await runPrecheck(hermitDir);
+
+    const rows = readObservations(hermitDir);
+    const driftRow = rows.find(r => r.pattern === 'schema-drift:spike');
+    expect(driftRow).toBeDefined();
+    expect(driftRow?.source).toBe('startup-drift');
+    expect(driftRow?.origin).toBe('own-work');
   });
 
   test('precheck is fail-open: exits 0 even when hermitDir is missing', async () => {

@@ -213,6 +213,8 @@ Optional. Tunes how the self-improvement pipeline graduates patterns from the ob
 }
 ```
 
+At `1`, a ledger candidate graduates on its first sighting — the three-condition rule's cross-session *recurrence* (condition 1) is satisfied by the ledger entry itself, while *meaningful consequence* and *operator-actionable* still gate through triage and the judge. Structural drift (`storage-drift:*`, `schema-drift:*`) is recorded once per occurrence rather than once per session, so it graduates only at `1`; set `2` to suppress single-sighting drift proposals while still graduating genuinely recurring behavioral patterns.
+
 Set to `2` if the operator channel gets noisy. Applies to both the observations-ledger graduation gate and the procedure-capture recurrence bar. Validated by `validate-config.ts` when present. Modify with `/hermit-settings reflection`.
 
 ---

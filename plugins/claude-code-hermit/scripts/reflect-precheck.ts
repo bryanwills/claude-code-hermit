@@ -249,49 +249,47 @@ if (pluginRoot && daysSince(runtime.last_raw_archive_at) >= 7) {
 const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
 
 // --- Drift capture: write storage/schema drift rows to observations ledger ---
-// Each distinct (pattern, session_id) pair gets one row (dedup-on-write).
-// Mechanical drift is always own-work; writing happens before the freshness gate
-// so newly-written rows trigger RUN on the same precheck invocation.
+// Drift is structural (a dir/type is present or absent), not a recurring behavior, so
+// dedup by pattern alone: a standing unresolved drift writes exactly one row and then
+// stays silent, instead of writing a fresh row every session (which would flip the
+// freshness gate to RUN on every session forever). The row ages out of the ledger after
+// prune-observations' 30-day window, so persistent drift re-surfaces ~monthly on the next
+// reflect run rather than never. Mechanical drift is always own-work; writing happens
+// before the freshness gate so a first-sighting row triggers RUN on the same invocation.
 try {
   // runtime.session_id is commonly null (written at startup, cleared on shutdown) — treat null as 'unknown'
   const sessionId = (runtime.session_id ?? 'unknown') as string;
 
-  // Load existing (pattern, session_id) pairs to dedup-on-write
-  const existingPairs = new Set<string>();
+  // Load existing pattern labels to dedup-on-write. Drift slugs are namespaced
+  // (storage-drift:/schema-drift:), so scanning all patterns can't collide with
+  // reflect-noticed/cost-spike rows.
+  const existingPatterns = new Set<string>();
   try {
     for (const line of fs.readFileSync(ledgerPath, 'utf-8').trim().split('\n').filter(Boolean)) {
       try {
         const row = JSON.parse(line);
-        if (row.pattern && row.session_id !== undefined) {
-          existingPairs.add(`${row.pattern}\t${row.session_id ?? 'unknown'}`);
-        }
+        if (row.pattern) existingPatterns.add(row.pattern);
       } catch {}
     }
   } catch {}
 
   const newRows: string[] = [];
   const nowIso = new Date().toISOString();
+  const capture = (slug: string) => {
+    if (existingPatterns.has(slug)) return;
+    existingPatterns.add(slug);
+    newRows.push(JSON.stringify({ ts: nowIso, pattern: slug, session_id: sessionId, source: 'startup-drift', origin: 'own-work' }));
+  };
 
-  // Storage drift
+  // Storage drift — capture the full subpath so raw/foo and raw/bar get distinct slugs
   for (const hit of findStorageDrift(stateDir)) {
-    const m = hit.match(/\.claude-code-hermit\/(.+?)\//);
-    const slug = m ? `storage-drift:${m[1]}` : null;
-    if (!slug) continue;
-    const key = `${slug}\t${sessionId}`;
-    if (!existingPairs.has(key)) {
-      existingPairs.add(key);
-      newRows.push(JSON.stringify({ ts: nowIso, pattern: slug, session_id: sessionId, source: 'startup-drift', origin: 'own-work' }));
-    }
+    const m = hit.match(/\.claude-code-hermit\/(.+)\/ \(/);
+    if (m) capture(`storage-drift:${m[1]}`);
   }
 
   // Schema drift
   for (const { type } of findSchemaDrift(stateDir)) {
-    const slug = `schema-drift:${type}`;
-    const key = `${slug}\t${sessionId}`;
-    if (!existingPairs.has(key)) {
-      existingPairs.add(key);
-      newRows.push(JSON.stringify({ ts: nowIso, pattern: slug, session_id: sessionId, source: 'startup-drift', origin: 'own-work' }));
-    }
+    capture(`schema-drift:${type}`);
   }
 
   if (newRows.length > 0) {
