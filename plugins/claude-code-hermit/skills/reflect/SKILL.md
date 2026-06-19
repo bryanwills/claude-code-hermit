@@ -40,6 +40,9 @@ If `$ARGUMENTS` contains `--quick` (invoked as `/claude-code-hermit:reflect --qu
      - `Sessions: <the distinct session_ids>`
      - `Artifact: state/observations.jsonl — pattern "<label>" in N sessions`
      Route it through triage + judge like any other candidate (§ Evidence Validation, § Outcomes). Patterns below the threshold stay in the ledger untouched.
+   - **`skill-correction:*` routing.** When a graduated pattern's label matches `skill-correction:<name>`, classify it as a skill-improvement candidate and resolve the procedure brief deterministically: glob `.claude-code-hermit/compiled/procedure-brief-*.md` first, then `.claude-code-hermit/compiled/.archive/procedure-brief-*.md`; match `proposed_skill_name:` frontmatter against `<name>`; prefer a live `compiled/` match over an archived one; among same-location matches pick the one with the newest `created:` frontmatter date. Then branch:
+     - **Brief found (self-authored, strong signal):** read the `## Lessons` section from each session listed in the graduated ledger rows' `session_id` fields to recover the correction what/why (the ledger row is a bare counter; the Lessons line carries the reason). Build a candidate with a `## Skill Improvement` section listing the component name, those corrected behaviors, and `source_artifact: <brief path>` as a body line. The candidate carries `Artifact: state/observations.jsonl` (judge §1.4 validates recurrence) and is Tier 2 (Component Health finding, meaningful but non-critical). Proceed via § Evidence Validation and § Outcomes — Tier 2 routes through triage then micro-approval queue, not directly to proposal-create.
+     - **No brief found (human/plugin or brief fully gone, moderate signal):** proceed via § Evidence Validation and § Outcomes as a plain Tier 2 improvement proposal (no `## Skill Improvement`, no skill-creator). The candidate carries `Artifact: state/observations.jsonl`.
 4. **Compute phase** — gates adapt to hermit age so cold-start installs produce visible output without eroding mature-hermit rigor.
    - Read `counters.since` from `state/reflection-state.json` (set once at hatch, never rewritten). If missing or unparseable → default `$PHASE = adult` and continue. Never block.
    - `age_days` = whole days between `counters.since` and now.
@@ -135,7 +138,7 @@ If `runtime.json` `session_state` is `idle` — think broader:
 Check whether any skill, agent, or hook is underperforming.
 
 **Skills:**
-- Is a skill's output consistently corrected or reworked after use?
+- Is a skill's output consistently corrected or reworked after use? (Backed by the `skill-correction:*` ledger graduation in step 3b — patterns with ≥`graduation_min_sessions` distinct sessions graduate into Skill Improvement proposals; Component Health's role here is to ensure the question is answered from accumulated data, not re-derived from session prose.)
 - Is a skill being avoided in favor of manual steps?
 - Did a skill fail to catch something it should have?
 - Is a skill burning disproportionate tokens for the value it delivers?

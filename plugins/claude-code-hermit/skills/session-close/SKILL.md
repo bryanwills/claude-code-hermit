@@ -48,7 +48,17 @@ If the archive in step 8 fails, leave `pending-close.json` in place so the next 
 1. Compile final session data **in context** — do NOT write to SHELL.md yet. session-mgr owns the final write. Gather:
    - `Status:` one of `completed` | `partial` | `blocked`
    - `Blockers:` one line each, enough context for a cold start
-   - `Lessons:` only genuinely useful ones. Before compiling, run the close debrief — answer two self-directed questions: *"What did I build ad-hoc this session (throwaway scripts, repeated manual procedures, long waits a tool would remove) that should persist?"* and *"What did I have to re-derive or re-discover that a compiled note or memory entry should have told me?"* One Lesson line per qualifying item, with quantified cost where known (e.g. `rebuilt wm pipeline in /tmp, 5 scripts, ~40 min/rerun`). Substantial re-derived knowledge goes to `compiled/` via the Artifacts bullet below instead of a Lesson line. If nothing qualifies, add nothing — no placeholder lines. These lines are the input procedure-capture recurs on (reflect reads `## Lessons` of archived reports).
+   - `Lessons:` only genuinely useful ones. Before compiling, run the close debrief — answer three self-directed questions:
+     1. *"What did I build ad-hoc this session (throwaway scripts, repeated manual procedures, long waits a tool would remove) that should persist?"*
+     2. *"What did I have to re-derive or re-discover that a compiled note or memory entry should have told me?"*
+     3. *"Did a skill produce output this session that was wrong, incomplete, or had to be reworked — and which skill + why? (Exclude preference, scope, or context changes — only genuine quality defects count.)"*
+     One Lesson line per qualifying item, with quantified cost where known (e.g. `rebuilt wm pipeline in /tmp, 5 scripts, ~40 min/rerun`). Substantial re-derived knowledge goes to `compiled/` via the Artifacts bullet below instead of a Lesson line. If nothing qualifies, add nothing — no placeholder lines. These lines are the input procedure-capture recurs on (reflect reads `## Lessons` of archived reports).
+     **For question 3** — on a positive answer, for each defective skill: (a) record the what/why as a `## Lessons` line above (the durable content channel reflect reads at graduation); (b) append one observations-ledger counter row using the **canonical bare skill name** (read the `name:` frontmatter from `.claude/skills/<name>/SKILL.md`; strip any `claude-code-hermit:`/`<plugin>:` prefix; lowercase) — fail-open so the close never aborts:
+     ```
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl \
+       '{"ts":"<now ISO>","pattern":"skill-correction:<canonical-name>","session_id":"<S-NNN>","source":"skill-correction","origin":"own-work"}' || true
+     ```
+     The row is a bare recurrence counter; the Lessons line carries the reason content. Gated to operator-close — `--auto` skips step 1 and writes no correction rows.
    - `Changed:` list of files modified
    - `Artifacts:` if this session produced a durable output, route it by shape:
      - **Evolving subject** the hermit will touch again (a monitored domain, a recurring decision area, accumulated know-how): **update or create** `compiled/topic-<slug>.md`. Merge new findings into the existing sections rather than appending a dated copy; bump `updated`, refresh the one-line `summary`, keep the page under 150 lines (compact older material when merging), and cross-link related pages with `[[wikilinks]]`.
