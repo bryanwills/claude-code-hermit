@@ -151,6 +151,20 @@
         ],
         "description": "Stop pipeline: cost tracking, compact suggestion, session diff, evaluation, heartbeat"
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/subagent-cost.ts"],
+            "timeout": 10
+          }
+        ],
+        "description": "Capture async-dispatched subagent token cost (invisible to Stop-time cost-tracker)"
+      }
     ]
   }
 }
