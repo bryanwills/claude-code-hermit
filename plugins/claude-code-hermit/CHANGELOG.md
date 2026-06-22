@@ -4,6 +4,7 @@
 
 ### Added
 
+- **CLAUDE-APPEND: auto-mode denial alert** — hermit now notifies the operator (channel-first, per § Operator Notification) with the blocked action and reason when the auto-mode classifier denies a tool call.
 - **heartbeat: dedicated update-alert-state.ts** — deterministic alert-state merge replacing the model-performed write; mirrors reflect's update-reflection-state pattern. Payload is delivered on stdin via a quoted heredoc so free-text alert content (apostrophes, quotes) can't break the command.
 
 ### Fixed
