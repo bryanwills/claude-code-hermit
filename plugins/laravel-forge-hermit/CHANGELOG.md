@@ -1,10 +1,26 @@
 # Changelog — laravel-forge-hermit
 
-## [Unreleased]
+## [0.0.2] - 2026-06-23
 
 ### Fixed
+
 - **hatch: correct Forge API token URL** — was `/user-profile/api`, now `/profile/api` (also corrected in `forge.php` "no orgs found" error).
 - **hatch: domain resume after core hatch** — Step 1 now prints the re-run instruction before invoking core as the terminal action, so the operator sees it. Removes the "then continue" assumption that silently dropped Step 2.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `skills/hatch/SKILL.md` | Correct token URL in setup prompt and invalid-token message; domain resume stop-instead-of-continue |
+| `php/forge.php` | Correct token URL in "no orgs found" error message |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Refresh the laravel-forge hermit plugin** — `/claude-code-hermit:hermit-evolve` pulls the updated skill and script.
+
+No `config.json` changes required.
 
 ## [0.0.1] — 2026-06-22
 
