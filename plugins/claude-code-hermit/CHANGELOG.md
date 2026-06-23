@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **scripts/manifest-seed.ts** — shared script that writes the `template-manifest.json` sha256 baselines for `hatch`, `docker-setup`, and `hermit-evolve`. Replaces model-hand-computed hashes (an LLM cannot sha256 reliably), fixing silent `hermit-evolve` drift mis-classification. Fail-loud, refuses to overwrite a present-but-corrupt manifest, preserves foreign keys; enumerates source `state-templates/bin/`, never the project destination.
+
+### Changed
+
+- **docker-setup: batch read-only prerequisite probes** — the blanket "run everything sequentially" rule now batches the read-only shell probes (docker version, config/WSL/file checks, gitconfig) into one Bash call while keeping the Step 0 container short-circuit, container-state, and tmux operations strictly sequential.
+
 ## [1.2.9] - 2026-06-22
 
 ### Added

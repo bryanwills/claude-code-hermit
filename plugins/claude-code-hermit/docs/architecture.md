@@ -192,7 +192,7 @@ One writer per state file. No shared mutation bus.
 | `state/cost-index.json`        | cost-tracker.ts only                                | cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts |
 | `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (`last_run` liveness + consecutive_stale)     |
 | `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), session-start (restart reason)|
-| `state/template-manifest.json` | hatch (seed) + hermit-evolve Steps 5/5b (update after copy) | evolve-plan.ts (classify), doctor-check.ts (shape check) |
+| `state/template-manifest.json` | `manifest-seed.ts` (called by hatch seed, docker-setup baselines, hermit-evolve update-after-copy) | evolve-plan.ts (classify), doctor-check.ts (shape check) |
 
 Per-file update policies for managed files under `.claude-code-hermit/`:
 
