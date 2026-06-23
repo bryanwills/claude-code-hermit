@@ -39,4 +39,4 @@ When this skill fires from a routine or proactively (i.e., not from a direct ope
 ## Notes
 
 - **Scheduling:** this skill doesn't self-register a routine. To run it weekly, add it via `/claude-code-hermit:hermit-settings` — a Sunday 22:00 cadence (`0 22 * * 0`) before weekly-review works well.
-- **What it measures:** token-type cost composition (cache_read / cache_write / output / input), cold-start turns (context warm-ups with no prior cache hit), and per-session cost attribution. For week-over-week totals and autonomy trends, use `/claude-code-hermit:hermit-evolution` instead.
+- **What it measures:** token-type cost composition (cache_read / cache_write / output / input), per-model breakdown (shown when ≥2 models appear, e.g. Sonnet main + Haiku heartbeat), cold-start turns (context warm-ups with no prior cache hit), and per-session cost attribution. For week-over-week totals and autonomy trends, use `/claude-code-hermit:hermit-evolution` instead.

@@ -62,6 +62,7 @@ function run() {
   let coldStartCost = 0;
   const sessionMap: Record<string, Json> = {}; // session_id -> { cost, turns, byType }
   const sourceMap: Record<string, number> = {};
+  const modelMap: Record<string, { cost: number; byType: { input: number; cacheWrite: number; cacheRead: number; output: number } }> = {};
 
   for (const e of window) {
     const model = e.model || 'sonnet';
@@ -101,6 +102,15 @@ function run() {
     // Per-source attribution; legacy entries without 'source' bucket to 'other'
     const src = e.source || 'other';
     sourceMap[src] = (sourceMap[src] || 0) + entryCost;
+
+    // subagent lines included intentionally — they carry a resolved model unlike the cold-start guard above
+    if (!modelMap[model]) modelMap[model] = { cost: 0, byType: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 } };
+    const mm = modelMap[model];
+    mm.cost += entryCost;
+    mm.byType.input      += types.input;
+    mm.byType.cacheWrite += types.cacheWrite;
+    mm.byType.cacheRead  += types.cacheRead;
+    mm.byType.output     += types.output;
   }
 
   const total = totals.input + totals.cacheWrite + totals.cacheRead + totals.output;
@@ -145,6 +155,30 @@ function run() {
     return `\n### Cost by source\n${rows.join('\n')}\n${footnote}`;
   }
 
+  function buildModelSection() {
+    // Only render when ≥2 distinct models are present — a single-model window learns
+    // nothing new from this vs the combined token-type header.
+    const entries = Object.entries(modelMap);
+    if (entries.length < 2) return '';
+    const rows = entries
+      .sort((a, b) => b[1].cost - a[1].cost)
+      .map(([mdl, { cost, byType }]) => {
+        const components = (
+          [
+            ['cache_read',  byType.cacheRead],
+            ['cache_write', byType.cacheWrite],
+            ['output',      byType.output],
+            ['input',       byType.input],
+          ] as [string, number][]
+        )
+          .filter(([, v]) => v > 0)
+          .map(([label, v]) => `${label} ${formatCost(v)}`)
+          .join(', ');
+        return `- ${mdl} ${formatCost(cost)} (${pct(cost, total)})${components ? ` — ${components}` : ''}`;
+      });
+    return `\n### Cost by model\n${rows.join('\n')}\n`;
+  }
+
   function buildTopSection(n: number) {
     if (n <= 0 || topSessions.length === 0) return '';
     const lines = topSessions.slice(0, n).map(s =>
@@ -153,17 +187,19 @@ function run() {
     return `\n### Top sessions\n${lines}\n`;
   }
 
+  const modelSection = buildModelSection();
+
   // Enforce ≤1500 chars. Shed source rows first (lowest-value for operators with
   // many routines) down to zero, then shed top-sessions — a single monotonic path.
   for (let m = MAX_TOP_SOURCES; m >= 1; m--) {
-    const body = header + coldSection + buildSourceSection(m) + buildTopSection(MAX_TOP_SESSIONS);
+    const body = header + modelSection + coldSection + buildSourceSection(m) + buildTopSection(MAX_TOP_SESSIONS);
     if (body.length <= MAX_CHARS) {
       process.stdout.write(body);
       return;
     }
   }
   for (let n = MAX_TOP_SESSIONS; n >= 0; n--) {
-    const body = header + coldSection + buildTopSection(n);
+    const body = header + modelSection + coldSection + buildTopSection(n);
     if (body.length <= MAX_CHARS || n === 0) {
       process.stdout.write(body);
       return;

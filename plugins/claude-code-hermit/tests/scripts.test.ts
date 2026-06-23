@@ -1995,7 +1995,29 @@ describe('cost-reflect', () => {
     test('cost-reflect: output ≤1500 chars', () => {
       expect(out.length).toBeLessThanOrEqual(1500);
     });
+
+    // Per-model section: fixture mixes sonnet, haiku, opus → section must appear
+    test('cost-reflect: Cost by model section present for mixed-model window', () => {
+      expect(out).toContain('Cost by model');
+    });
+    test('cost-reflect: per-model section contains sonnet row', () => {
+      expect(out).toMatch(/- sonnet /);
+    });
+    test('cost-reflect: per-model section contains haiku row', () => {
+      expect(out).toMatch(/- haiku /);
+    });
   });
+
+  // Single-model window: Cost by model section must be absent
+  test('cost-reflect: Cost by model section absent for single-model window', withDir(async (dir) => {
+    const inWindow = utcDate(daysAgo(1));
+    write(path.join(dir, '.claude', 'cost-log.jsonl'), [
+      `{"timestamp":"${inWindow}T10:00:00.000Z","session_id":"s1","model":"sonnet","input_tokens":0,"cache_write_tokens":10000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":10500,"estimated_cost_usd":0.05}`,
+      `{"timestamp":"${inWindow}T10:01:00.000Z","session_id":"s1","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":50000,"output_tokens":200,"total_tokens":50200,"estimated_cost_usd":0.018}`,
+    ].join('\n'));
+    const o = await runCostReflect(dir);
+    expect(o).not.toContain('Cost by model');
+  }));
 
   // Empty log: no entries at all
   test("cost-reflect: empty log → 'No cost data'", withDir(async (dir) => {
