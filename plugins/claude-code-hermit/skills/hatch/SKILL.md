@@ -788,6 +788,24 @@ This file is read by `hermit-evolve`, `docker-setup`, and `claude-code-dev-hermi
 
 ---
 
+### Domain hatch continuation protocol
+
+When a domain plugin's hatch detects that core is not yet set up, it uses this protocol to resume automatically after core's terminus:
+
+**Writer (domain hatch, "yes" branch):**
+1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "<domain-slug>:hatch", "requested_at": "<ISO 8601 timestamp with timezone offset>" }`.
+2. Print one fallback line: "(If setup doesn't continue automatically when core finishes, re-run `/<domain>:hatch`.)"
+3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
+
+**Consumer (core terminus — "Resume pending domain hatch" at end of this skill):**
+Read, immediately delete, then invoke the named skill via the Skill tool.
+
+**Idempotency and fail-open:** The marker is self-consuming (delete-before-invoke). The domain hatch's Step 1/2 re-checks `_hermit_versions` independently, so a plain manual re-run is always the fallback. Every failure mode (Esc mid-core, core error, stale marker, un-bumped core) degrades to today's manual behavior.
+
+**5th-domain authors:** follow this pattern exactly. Core's terminus handles the return hop.
+
+---
+
 ## Quick Branch
 
 Replaces Steps 3-4 with batched turns + confirm; resumes shared Steps 5-9 after approval. Same files written, same `config.json` fields populated, same OPERATOR.md questionnaire, same security gates, same `.baseline-pending` eligibility — Quick just defaults incidental decisions and shows the resolved bundle before any config writes.
@@ -1032,3 +1050,14 @@ Next steps:
 ```
 
 **Quick-mode report adjustment**: collapse "Pick how you'll run hermit" to one line confirming Turn 3's deployment + channel, then emit the auto-chain slash command(s) per the mapping in "Quick — auto-chain at end of Step 10". Keep the "Anytime:" block unchanged.
+
+---
+
+### Resume pending domain hatch
+
+Applies on **both** Quick and Advanced paths — runs after Step 10's report (and after Quick's auto-chain output for the Quick branch).
+
+1. Attempt to read `.claude-code-hermit/state/hatch-resume.json`. If the file does not exist or is empty, stop — no domain hatch is pending.
+2. Read the `skill` field (e.g. `"laravel-forge-hermit:hatch"`).
+3. **Immediately delete** `.claude-code-hermit/state/hatch-resume.json`.
+4. Invoke the named skill **via the Skill tool** to complete domain setup — terminal action, stop after the call.

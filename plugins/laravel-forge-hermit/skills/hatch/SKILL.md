@@ -19,7 +19,10 @@ If the file does not exist or `_hermit_versions["claude-code-hermit"]` is absent
 
 Use `AskUserQuestion`: "Would you like to run `/claude-code-hermit:hatch` now? (yes / no)"
 
-- **yes** → print: "Core setup will run next. When it finishes, re-run `/laravel-forge-hermit:hatch` to complete Forge hermit setup." Then invoke `/claude-code-hermit:hatch` as the terminal action and stop.
+- **yes** → Follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
+  1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "laravel-forge-hermit:hatch", "requested_at": "<current ISO 8601 timestamp with timezone offset>" }`.
+  2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/laravel-forge-hermit:hatch`.)"
+  3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
 - **no** → stop.
 
 If present but below `1.1.1` (compare major.minor.patch numerically):
