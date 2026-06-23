@@ -16,7 +16,7 @@ Read `.claude-code-hermit/config.json`.
 - If the file is missing or `_hermit_versions["claude-code-hermit"]` is absent or less than `1.0.16`:
   - `AskUserQuestion`: "Core hermit is not initialized. Run `/claude-code-hermit:hatch` now?"
   - Yes → Follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
-    1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "claude-code-homeassistant-hermit:hatch", "requested_at": "<current ISO 8601 timestamp with timezone offset>" }`.
+    1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "claude-code-homeassistant-hermit:hatch" }`.
     2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/claude-code-homeassistant-hermit:hatch`.)"
     3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
   - No → stop and explain what is required.

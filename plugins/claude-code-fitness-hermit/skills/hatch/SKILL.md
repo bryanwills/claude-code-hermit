@@ -20,7 +20,7 @@ If the file does not exist or `_hermit_versions["claude-code-hermit"]` is absent
 Use `AskUserQuestion`: "Would you like to run `/claude-code-hermit:hatch` now? (yes / no)"
 
 - **yes** → Follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
-  1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "claude-code-fitness-hermit:hatch", "requested_at": "<current ISO 8601 timestamp with timezone offset>" }`.
+  1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "claude-code-fitness-hermit:hatch" }`.
   2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/claude-code-fitness-hermit:hatch`.)"
   3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
 - **no** → stop.

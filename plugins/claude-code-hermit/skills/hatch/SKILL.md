@@ -11,10 +11,10 @@ Set up the autonomous agent for this project. This creates the per-project state
 
 ### 1. Check if already initialized
 
-Check if `.claude-code-hermit/` exists in the current project.
+Check whether `.claude-code-hermit/config.json` exists in the current project. That file (written at Step 5) is the authoritative "already initialized" signal — not the bare presence of the `.claude-code-hermit/` directory. A lone `state/hatch-resume.json` marker (written by a domain hatch before it delegates here), an empty `state/` tree, or a half-written tree left by an aborted prior run all count as **not** initialized.
 
-- If it exists and has content: inform the operator that the agent is already initialized. Ask if they want to reinitialize (which resets templates but preserves sessions, proposals, config, and OPERATOR.md). Record the choice as `is_reinit` (true if operator opted to reinitialize).
-- If it doesn't exist: `is_reinit = false`, proceed with initialization.
+- If `.claude-code-hermit/config.json` exists: inform the operator that the agent is already initialized. Ask if they want to reinitialize (which resets templates but preserves sessions, proposals, config, and OPERATOR.md). Record the choice as `is_reinit` (true if operator opted to reinitialize).
+- Otherwise: `is_reinit = false`, proceed with initialization.
 
 ### 1.5. Pre-flight (silent — no operator interaction)
 
@@ -793,14 +793,14 @@ This file is read by `hermit-evolve`, `docker-setup`, and `claude-code-dev-hermi
 When a domain plugin's hatch detects that core is not yet set up, it uses this protocol to resume automatically after core's terminus:
 
 **Writer (domain hatch, "yes" branch):**
-1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "<domain-slug>:hatch", "requested_at": "<ISO 8601 timestamp with timezone offset>" }`.
+1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "<domain-slug>:hatch" }`.
 2. Print one fallback line: "(If setup doesn't continue automatically when core finishes, re-run `/<domain>:hatch`.)"
 3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
 
 **Consumer (core terminus — "Resume pending domain hatch" at end of this skill):**
 Read, immediately delete, then invoke the named skill via the Skill tool.
 
-**Idempotency and fail-open:** The marker is self-consuming (delete-before-invoke). The domain hatch's Step 1/2 re-checks `_hermit_versions` independently, so a plain manual re-run is always the fallback. Every failure mode (Esc mid-core, core error, stale marker, un-bumped core) degrades to today's manual behavior.
+**Idempotency and fail-open:** The marker is self-consuming (delete-before-invoke). Core's Step 1 keys "already initialized" on `config.json`, never on the marker, so writing the marker before delegating here cannot trip the reinit prompt. The domain hatch's Step 1/2 re-checks `_hermit_versions` independently, so a plain manual re-run is always the fallback. Every failure mode (Esc mid-core, core error, un-bumped core) degrades to today's manual behavior. One residual edge: if core is aborted before its terminus, the marker persists and the *next* core hatch consumes it — surfacing one domain-hatch re-prompt the operator didn't explicitly ask for. That re-prompt is itself idempotent (the domain hatch re-checks state) and Esc-able, so it's a benign annoyance, not a failure — which is why no staleness timestamp is tracked.
 
 **5th-domain authors:** follow this pattern exactly. Core's terminus handles the return hop.
 
@@ -967,6 +967,8 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 
 ### Quick — auto-chain at end of Step 10
 
+**Skip this entire auto-chain if `.claude-code-hermit/state/hatch-resume.json` exists.** A domain hatch is pending, and the "Resume pending domain hatch" terminus below will drive continuation instead — the two continuations must never both fire (whichever runs first drops the other). When a marker is present, emit no auto-chain slash command and fall straight through to the terminus.
+
 After Step 10 prints the standard report, output the next slash command on its own line so Claude Code's harness can pick it up and run it. Map from Turn 3's deployment + channel:
 
 | Deployment | Channel | Output |
@@ -1055,7 +1057,7 @@ Next steps:
 
 ### Resume pending domain hatch
 
-Applies on **both** Quick and Advanced paths — runs after Step 10's report (and after Quick's auto-chain output for the Quick branch).
+Applies on **both** Quick and Advanced paths and is the **last** action of the skill. On Quick, when a marker is present the Step-10 auto-chain is skipped (see above), so this terminus is the sole continuation — the two never both fire.
 
 1. Attempt to read `.claude-code-hermit/state/hatch-resume.json`. If the file does not exist or is empty, stop — no domain hatch is pending.
 2. Read the `skill` field (e.g. `"laravel-forge-hermit:hatch"`).

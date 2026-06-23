@@ -8,6 +8,8 @@
 ### Fixed
 - **hatch: domain auto-resume** — domain hatch writes a state marker before delegating to core; core terminus reads, deletes, and invokes the pending domain hatch via the Skill tool. Removes the dead printed-command return hop and the competing-signal freeze. Adds the domain hatch continuation protocol doc.
 - **hermit-docker login: re-authenticate on expired token** — gate the "already authenticated" short-circuit on credential freshness (`claudeAiOauth.expiresAt < Date.now()`), not just presence; an expired OAuth token now opens the login REPL instead of falsely reporting success.
+- **hatch: init gate keys on `config.json`** — Step 1 now treats `config.json` (not bare directory content) as the "already initialized" signal, so a pre-core resume marker, an empty `state/` tree, or a half-written aborted run no longer trips the reinit prompt on a genuine first hatch.
+- **hatch: Quick auto-chain vs resume** — the Quick auto-chain is suppressed when a resume marker is present, so it and the resume terminus can't both fire and drop each other. Resume marker no longer carries an unused `requested_at` field.
 
 ## [1.2.10] - 2026-06-23
 
