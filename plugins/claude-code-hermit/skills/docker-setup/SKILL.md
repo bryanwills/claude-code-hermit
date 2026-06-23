@@ -8,7 +8,7 @@ Generate Docker scaffolding for running hermit as an always-on autonomous agent 
 
 **Tone:** Friendly guided wizard. Celebrate progress. When something fails, help fix it.
 
-**Important:** Run all checks and commands sequentially — do not use parallel tool calls.
+**Important:** Step 0's container check is a hard short-circuit — run it first and abort on `container` before anything else. After confirming host execution, batch the remaining read-only **shell** probes (Step 1's `docker --version` / config.json existence / WSL-path / existing-file checks, and the `~/.gitconfig` existence check) into a single Bash call to save round-trips. Step 2's project-dependency scan stays normal file reads (Read tool) plus analysis — do not cram it into the Bash batch. Everything that mutates state or drives the container (file backups, `docker compose`, `tmux`, `mkdir`/`touch` setup-mode, status polls, channel `send-keys`) must run strictly sequentially in its documented order — never batch those.
 
 Templates live in `${CLAUDE_SKILL_DIR}/../../state-templates/docker/`.
 
@@ -338,12 +338,24 @@ Now that `docker.packages` (Step 7b.packages), `docker.recommended_plugins` (Ste
 
 Use the placeholder rules from Step 4 verbatim.
 
-**Record docker template baselines in the manifest** (arms the `hermit-evolve` drift signals). After writing the three files, merge these keys into `.claude-code-hermit/state/template-manifest.json` (read existing first; create `{ "version": 1, "files": {} }` if absent; overwrite only these keys, keep all others — same merge rule as `hatch`):
+**Record docker template baselines in the manifest** (arms the `hermit-evolve` drift signals) via `manifest-seed.ts` — **do not hand-compute the hashes**. Read the current plugin version from `${CLAUDE_SKILL_DIR}/../../.claude-plugin/plugin.json`. Anchor the state-dir argv and the entrypoint file path to the **absolute project root** (verified in Step 1), not a cwd-relative path — cwd can drift after the `docker compose` / `tmux` calls earlier in this skill. Using `<PROJECT_ROOT>` for that absolute path, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts <PROJECT_ROOT>/.claude-code-hermit` with this JSON on stdin:
 
-- `"docker/docker-entrypoint.hermit.sh"`: `{ "sha256": "<hash of the UPSTREAM state-templates/docker/docker-entrypoint.hermit.sh.template>", "plugin_version": "<current plugin version>" }` — the entrypoint is copied verbatim, so the upstream-template hash equals the on-disk hash. This baseline lets `hermit-evolve` Step 5c manage the entrypoint as a boot-critical file (keep operator edits, refresh when upstream moves).
-- `"docker/docker-compose.hermit.yml.template"` and `"docker/Dockerfile.hermit.template"`: `{ "sha256": "<hash of the UPSTREAM template>", "plugin_version": "<current version>" }` — these render with substitution, so hash the **upstream template**, not the rendered output. Lets `hermit-evolve` Step 10 report upstream drift (`status: changed`) without false positives from placeholder substitution.
+```json
+{
+  "pluginVersion": "<version>",
+  "entries": [
+    { "key": "docker/docker-entrypoint.hermit.sh", "file": "<PROJECT_ROOT>/docker-entrypoint.hermit.sh" },
+    { "key": "docker/docker-compose.hermit.yml.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/docker/docker-compose.hermit.yml.template" },
+    { "key": "docker/Dockerfile.hermit.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/docker/Dockerfile.hermit.template" }
+  ]
+}
+```
 
-Compute the current plugin version from `${CLAUDE_SKILL_DIR}/../../.claude-plugin/plugin.json`. Use `bun ${CLAUDE_PLUGIN_ROOT}/scripts/lib/hash.ts` semantics (sha256 of the file bytes) — match how `hatch` hashes `templates/`/`bin/`.
+The **file each key hashes is deliberate**:
+- `docker/docker-entrypoint.hermit.sh` hashes the **on-disk rendered** entrypoint at the project root — it is copied verbatim, so its hash equals the upstream template's. It is anchored to `<PROJECT_ROOT>` (absolute) so it resolves correctly regardless of the current working directory. This baseline lets `hermit-evolve` Step 5c manage the entrypoint as a boot-critical file (keep operator edits, refresh when upstream moves).
+- The two `.template` keys hash the **upstream templates**, never the rendered output — they render with placeholder substitution, so rendered ≠ upstream forever. This lets `hermit-evolve` Step 10 report upstream drift (`status: changed`) without false positives from substitution.
+
+The script preserves every other manifest key (the `templates/`/`bin/` baselines `hatch` seeded, sibling-hermit keys) and refuses to overwrite a present-but-corrupt manifest.
 
 ### 7c. Write Docker settings to config.json
 
