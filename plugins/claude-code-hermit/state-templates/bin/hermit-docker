@@ -179,9 +179,11 @@ case "$CMD" in
     EMAIL="${PARSED#*$'\n'}"
     # Token freshness — mirrors docker-entrypoint.hermit.sh §0b (expiresAt vs Date.now()).
     # Duplicated intentionally: the two scripts are cp'd independently with no sourcing path.
-    # Outputs: "ok" (valid or no expiresAt field), "expired" (access token lapsed), "unknown" (read/parse error).
+    # The ANTHROPIC_API_KEY guard is evaluated in-container (where the var lives, unlike the
+    # host that runs this wrapper) so api_key auth — which has no expiresAt — short-circuits to "ok".
+    # Outputs: "ok" (api_key auth, valid token, or no expiresAt field), "expired" (access token lapsed), "unknown" (read/parse error).
     FRESH=$(cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" sh -c \
-      'bun -e "try{const f=(process.env.CLAUDE_CONFIG_DIR||\"/home/claude/.claude\")+\"/.credentials.json\";const e=(JSON.parse(require(\"fs\").readFileSync(f,\"utf8\")).claudeAiOauth??{}).expiresAt;if(!e){console.log(\"ok\")}else{const ms=Number(e);if(Number.isNaN(ms))throw 0;console.log(ms<Date.now()?\"expired\":\"ok\")}}catch{console.log(\"unknown\")}"' \
+      '[ -n "${ANTHROPIC_API_KEY:-}" ] && { echo ok; exit; }; bun -e "try{const f=(process.env.CLAUDE_CONFIG_DIR||\"/home/claude/.claude\")+\"/.credentials.json\";const e=(JSON.parse(require(\"fs\").readFileSync(f,\"utf8\")).claudeAiOauth??{}).expiresAt;if(!e){console.log(\"ok\")}else{const ms=Number(e);if(Number.isNaN(ms))throw 0;console.log(ms<Date.now()?\"expired\":\"ok\")}}catch{console.log(\"unknown\")}"' \
       2>/dev/null || echo "unknown")
     if { [ "$LOGGED_IN" = "True" ] || [ "$LOGGED_IN" = "true" ]; } && [ "$FRESH" = "ok" ]; then
       echo "[hermit] Already authenticated as ${EMAIL}."
