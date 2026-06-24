@@ -687,9 +687,15 @@ Configure the Claude Code bash sandbox for this hermit when the system supports 
    ```
    Parse the JSON `status` field.
 
-4. **Branch on probe status:**
+4. **Branch on deployment + probe status:**
+
+   **If `deployment == docker`**: regardless of probe result, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> sandbox off`. One-line note: "Sandbox off for Docker — the container is the isolation boundary (Anthropic-recommended): https://code.claude.com/docs/en/sandboxing". Skip the rest of Step 4a.
+
+   For non-Docker deployments (`tmux` or `interactive`), branch on probe status:
    - `"pass"`: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> sandbox standard` (reads `state-templates/sandbox-profiles.json` `standard` entry and merges `sandbox.filesystem.denyRead` from `deny-patterns.json`). One-line note to the operator: "Sandbox enabled (standard profile, written to {file})."
-   - `"warn"`: surface the probe `message` verbatim to the operator first (e.g., "user-namespaces appear disabled — sandbox may not start"), then run the same command as `pass`. One-line note: "Sandbox configured (standard profile, may degrade silently per warning above; written to {file})."
+   - `"warn"`:
+     - If `deployment == tmux`: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> sandbox off`. Note: "Sandbox off — user-namespaces appear blocked on this host (`{message}`). An always-on hermit relies on sandbox-free spawn for heartbeat and /watch monitors. Install the host bwrap AppArmor profile (`{install_hint}`) to re-enable later, then set `sandbox.enabled:true`."
+     - Otherwise (`deployment == interactive`): surface the probe `message` verbatim to the operator first, then run the `sandbox standard` command. One-line note: "Sandbox configured (standard profile, may degrade silently per warning above; written to {file})."
    - `"fail"`: do NOT write any sandbox block. Print a single line with the install hint from the probe result: "Sandbox unavailable: {message} — run `{install_hint}` to enable later, then re-run `/claude-code-hermit:hermit-evolve`." Continue.
 
 No `AskUserQuestion`. Operators who want the sandbox off can set `sandbox.enabled: false` in their settings file at any time — documented in `docs/faq.md`.
