@@ -50,14 +50,27 @@ interface PolicyOverrides {
 }
 
 const overridesCache = new Map<string, PolicyOverrides>();
-const safetyModeCache = new Map<string, string>();
-const assistControlCache = new Map<string, boolean>();
+const configCache = new Map<string, Record<string, unknown>>();
 
 /** Test hook — replaces Python's `_load_policy_overrides.cache_clear()` etc. */
 export function clearPolicyCaches(): void {
   overridesCache.clear();
-  safetyModeCache.clear();
-  assistControlCache.clear();
+  configCache.clear();
+}
+
+// Parse .claude-code-hermit/config.json once per root. Fail-closed: any read or
+// parse error (or a non-object payload) yields {}, so every config-derived
+// guard below falls back to its own safe default.
+function loadHermitConfig(root: string): Record<string, unknown> {
+  const cached = configCache.get(root);
+  if (cached !== undefined) return cached;
+  let cfg: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(readFileSync(join(root, '.claude-code-hermit', 'config.json'), 'utf8'));
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) cfg = parsed;
+  } catch {}
+  configCache.set(root, cfg);
+  return cfg;
 }
 
 function loadPolicyOverrides(root: string): PolicyOverrides {
@@ -80,18 +93,8 @@ function loadPolicyOverrides(root: string): PolicyOverrides {
 }
 
 function loadSafetyMode(root: string): string {
-  const cached = safetyModeCache.get(root);
-  if (cached !== undefined) return cached;
-  let mode = 'strict';
-  try {
-    const cfg = JSON.parse(readFileSync(join(root, '.claude-code-hermit', 'config.json'), 'utf8'));
-    const value = cfg?.ha_safety_mode ?? 'strict';
-    mode = typeof value === 'string' && Object.hasOwn(MODE_TO_SEVERITY, value) ? value : 'strict';
-  } catch {
-    mode = 'strict';
-  }
-  safetyModeCache.set(root, mode);
-  return mode;
+  const value = loadHermitConfig(root)['ha_safety_mode'] ?? 'strict';
+  return typeof value === 'string' && Object.hasOwn(MODE_TO_SEVERITY, value) ? value : 'strict';
 }
 
 /** Read ha_safety_mode from .claude-code-hermit/config.json. Fail-closed: returns 'strict'. */
@@ -100,17 +103,7 @@ export function safetyMode(root?: string | null): string {
 }
 
 function loadAssistControl(root: string): boolean {
-  const cached = assistControlCache.get(root);
-  if (cached !== undefined) return cached;
-  let enabled = false;
-  try {
-    const cfg = JSON.parse(readFileSync(join(root, '.claude-code-hermit', 'config.json'), 'utf8'));
-    enabled = cfg?.ha_assist_control_enabled === true;
-  } catch {
-    enabled = false;
-  }
-  assistControlCache.set(root, enabled);
-  return enabled;
+  return loadHermitConfig(root)['ha_assist_control_enabled'] === true;
 }
 
 /** Read ha_assist_control_enabled from .claude-code-hermit/config.json. Fail-closed: returns false. */

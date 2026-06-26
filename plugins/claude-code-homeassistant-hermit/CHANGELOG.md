@@ -31,7 +31,9 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 
 - **safety-gate: cover script-derived MCP tools** — widened the PreToolUse matcher from `mcp__homeassistant__Hass.*` to `mcp__homeassistant__.*` so exposed HA scripts (which surface as MCP tools with no `Hass` prefix and no `entity_id`) reach the gate instead of actuating ungated (#469). Read-only `GetLiveContext`/`GetDateTime` are allowlisted in-gate; bare-named script tools with no classifiable target block under `strict` and prompt under `ask`; unresolvable selectors and `Hass*` intent tools that target by `name`/`area` still hard-block in every mode.
 
-## [0.2.3] - 2026-06-24
+### Upgrade Instructions
+
+- **Keyword classification removed — restore cover/switch/button blocking if you relied on it.** Releases ≤0.2.3 flagged `cover`/`switch`/`button` entities as sensitive by keyword (e.g. `garage`, `gate`, `pump`). This release classifies by domain only. If you depended on that keyword blocking — or set `HA_EXTRA_SENSITIVE_KEYWORDS` in `.env` (now an inert no-op) — add the relevant domains to `HA_EXTRA_SENSITIVE_DOMAINS` instead (e.g. `HA_EXTRA_SENSITIVE_DOMAINS=cover` blocks every cover). Inform the operator: their sensitive-entity coverage narrowed and needs this opt-in to restore.
 
 ### Fixed
 - **hatch: domain auto-resume** — writes a state marker before delegating to core; core terminus invokes this skill via the Skill tool automatically. Removes the manual re-run. Requires `claude-code-hermit` ≥1.2.11.

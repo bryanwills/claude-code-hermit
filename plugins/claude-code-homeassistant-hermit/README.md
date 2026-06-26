@@ -126,8 +126,7 @@ Policy overrides (allow-lists, extra sensitive domains/keywords) are configured 
 | `HOMEASSISTANT_USER_AGENT` | `.env` — optional custom User-Agent |
 | `ha_safety_mode` | actuation gate (`config.json`) — **`strict`** (never actuate autonomously; blocked work becomes a proposal) / `ask` (prompt before any sensitive actuation) |
 | `HA_SAFE_ENTITIES` | `.env` — per-entity allow-list, exact IDs (always allowed) |
-| `HA_EXTRA_SENSITIVE_DOMAINS` | `.env` — block additional domains entirely |
-| `HA_EXTRA_SENSITIVE_KEYWORDS` | `.env` — block extra keywords in conditionally-sensitive domains |
+| `HA_EXTRA_SENSITIVE_DOMAINS` | `.env` — block additional domains entirely (e.g. `cover`) |
 
 Full policy in [SAFETY.md](SAFETY.md). Everything else — model, heartbeat, idle behavior, per-routine model — is core, tuned with `/hermit-settings`: see core's [Configure it](https://github.com/gtapps/claude-code-hermit/blob/main/plugins/claude-code-hermit/README.md#configure-it) and [Tips & tuning](https://github.com/gtapps/claude-code-hermit/blob/main/plugins/claude-code-hermit/README.md#tips--tuning).
 
