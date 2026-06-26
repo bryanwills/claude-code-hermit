@@ -125,19 +125,14 @@ export async function listHelpers(client: WsCommandClient, type?: string): Promi
   }
   const types = type ? [type as HelperType] : [...HELPER_TYPES];
   // Fan out concurrently — the WS client correlates responses by id, so all
-  // list commands can be in flight at once (≈1×RTT instead of 8×). Use
-  // allSettled so one unavailable integration (e.g. `schedule` on a host
-  // without default_config) doesn't discard the other helper lists.
-  const settled = await Promise.all(
-    types.map((t) =>
-      client
-        .command(`${t}/list`)
-        .then((r) => ({ t, r, err: null as string | null }))
-        .catch((exc) => ({ t, r: null, err: exc instanceof HomeAssistantError ? exc.message : String(exc) })),
-    ),
+  // list commands can be in flight at once (≈1×RTT instead of 8×). allSettled
+  // so one unavailable integration (e.g. `schedule` on a host without
+  // default_config) doesn't discard the other helper lists.
+  const settled = await Promise.allSettled(types.map((t) => client.command(`${t}/list`)));
+  const data = Object.fromEntries(
+    settled.flatMap((s, i) => (s.status === 'fulfilled' ? [[types[i]!, s.value]] : [])),
   );
-  const data = Object.fromEntries(settled.filter((s) => s.err === null).map((s) => [s.t, s.r]));
-  const unavailable = settled.filter((s) => s.err !== null).map((s) => s.t);
+  const unavailable = settled.flatMap((s, i) => (s.status === 'rejected' ? [types[i]!] : []));
   const message = unavailable.length ? `ok; unavailable: ${unavailable.join(', ')}` : 'ok';
   return { ok: true, data, message };
 }

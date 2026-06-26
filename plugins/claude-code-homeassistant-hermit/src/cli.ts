@@ -29,7 +29,7 @@ import { auditAutomations, auditScripts } from './audits';
 import { automationDiff, formatAutomationDiff } from './automation-diff';
 import { bootStatus, saveBootPreferences } from './boot';
 import { AppConfig, loadConfig, normalizedContextPath, projectRoot } from './config';
-import { HomeAssistantClient, HomeAssistantError, extractHaErrorMessage } from './ha-api';
+import { HomeAssistantClient, HomeAssistantError, expandArea, extractHaErrorMessage } from './ha-api';
 import { HomeAssistantWsClient } from './ha-ws';
 import { fetchHistorySnapshot } from './history';
 import {
@@ -155,6 +155,7 @@ const HA_COMMANDS = [
   'list-scripts',
   'resolve-entity',
   'actuate',
+  'actuate-area',
   'delete-automation',
   'delete-script',
   'get-automation-config',
@@ -220,6 +221,10 @@ positional arguments:
     actuate             Call an HA REST service for a resolved entity_id. Prints
                         {status:ok} | {status:blocked} | {status:needs_confirmation}
                         | {status:error}.
+    actuate-area        Actuate all eligible entities in an HA area. Expands the
+                        area via POST /api/template, filters to the verb's domain,
+                        then gates each entity. Prints {status:ok} | {status:partial}
+                        | {status:needs_confirmation} | {status:error}.
     delete-automation   Delete an automation config by ID.
     delete-script       Delete a script config by ID.
     get-automation-config
@@ -479,6 +484,17 @@ const LEAF_SPECS: Record<string, LeafSpec> = {
       '--confirmed': { kind: 'store_true' },
     },
   },
+  'ha actuate-area': {
+    prog: 'ha_agent_lab ha actuate-area',
+    usage:
+      'usage: ha_agent_lab ha actuate-area [-h] [--level LEVEL] [--confirmed]\n' +
+      '                                    area verb',
+    positionals: ['area', 'verb'],
+    flags: {
+      '--level': { kind: 'value', int: true },
+      '--confirmed': { kind: 'store_true' },
+    },
+  },
   'ha delete-automation': {
     prog: 'ha_agent_lab ha delete-automation',
     usage: 'usage: ha_agent_lab ha delete-automation [-h] id',
@@ -683,6 +699,18 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
 
   if (args.command === 'ha' && args.sub === 'actuate') {
     return handleActuate(
+      args.positionals[0]!,
+      args.positionals[1]!,
+      (args.flags['--level'] as number | undefined) ?? null,
+      Boolean(args.flags['--confirmed']),
+      root,
+      config,
+      deps,
+    );
+  }
+
+  if (args.command === 'ha' && args.sub === 'actuate-area') {
+    return handleActuateArea(
       args.positionals[0]!,
       args.positionals[1]!,
       (args.flags['--level'] as number | undefined) ?? null,
@@ -1346,6 +1374,97 @@ async function handleActuate(
     console.log(jsonDumps({ status: 'error', message: extractHaErrorMessage(exc) }, { ensureAscii: false }));
     return 1;
   }
+}
+
+async function handleActuateArea(
+  area: string,
+  verb: string,
+  level: number | null,
+  confirmed: boolean,
+  root: string,
+  config: AppConfig,
+  deps: CliDeps,
+): Promise<number> {
+  let client: CliClient;
+  let allEntityIds: string[];
+  try {
+    client = await deps.createClient(config);
+    allEntityIds = await expandArea(client, area);
+  } catch (exc) {
+    if (!(exc instanceof HomeAssistantError)) throw exc;
+    console.log(jsonDumps({ status: 'error', message: extractHaErrorMessage(exc) }, { ensureAscii: false }));
+    return 1;
+  }
+
+  const actuatable = allEntityIds.filter((id) => resolveService(id, verb, level).ok);
+
+  if (actuatable.length === 0) {
+    const msg =
+      allEntityIds.length === 0
+        ? `no entities found in area '${area}'`
+        : `no entities in area '${area}' support verb '${verb}'`;
+    console.log(jsonDumps({ status: 'error', area, message: msg }, { ensureAscii: false }));
+    return 2;
+  }
+
+  const allowed: string[] = [];
+  const needsAsk: string[] = [];
+  const blocked: string[] = [];
+
+  for (const entityId of actuatable) {
+    const [sev] = classifyEntity(entityId, root);
+    if (sev === Severity.BLOCK) {
+      blocked.push(entityId);
+    } else if (sev === Severity.ASK && !confirmed) {
+      needsAsk.push(entityId);
+    } else {
+      allowed.push(entityId); // Severity.ALLOW, or ASK+confirmed
+    }
+  }
+
+  // All-or-nothing: if any entity needs confirmation, report without actuating
+  if (needsAsk.length > 0) {
+    const out: Record<string, unknown> = {
+      status: 'needs_confirmation',
+      area,
+      verb,
+      sensitive: needsAsk,
+      blocked,
+      actuatable: allowed,
+    };
+    if (level != null) out['level'] = level;
+    console.log(jsonDumps(out, { ensureAscii: false }));
+    return 0;
+  }
+
+  const actuated: string[] = [];
+  const errors: Array<{ entity_id: string; message: string }> = [];
+
+  await Promise.all(
+    allowed.map(async (entityId) => {
+      const resolved = resolveService(entityId, verb, level);
+      if (!resolved.ok) return;
+      try {
+        await client.callService(resolved.call.domain, resolved.call.service, resolved.call.data);
+        actuated.push(entityId);
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        errors.push({ entity_id: entityId, message: extractHaErrorMessage(exc) });
+      }
+    }),
+  );
+
+  const out: Record<string, unknown> = {
+    status: errors.length > 0 || blocked.length > 0 ? 'partial' : 'ok',
+    area,
+    verb,
+    actuated,
+    blocked,
+  };
+  if (errors.length > 0) out['errors'] = errors;
+  if (level != null) out['level'] = level;
+  console.log(jsonDumps(out, { ensureAscii: false }));
+  return errors.length > 0 ? 1 : 0;
 }
 
 function handleResolveEntity(

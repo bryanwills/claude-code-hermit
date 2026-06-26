@@ -295,6 +295,20 @@ export function extractHaErrorMessage(exc: HomeAssistantError): string {
   return exc.message;
 }
 
+/** Expand an HA area to its member entity IDs via the Jinja2 template engine.
+ *  Uses REST POST /api/template — the only path that returns device-inherited entities. */
+export async function expandArea(
+  client: { post(path: string, payload: Record<string, unknown>): Promise<any> },
+  area: string,
+): Promise<string[]> {
+  const escaped = area.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const result: unknown = await client.post('/api/template', {
+    template: `{{ area_entities("${escaped}") | tojson }}`,
+  });
+  if (!Array.isArray(result)) return [];
+  return result.filter((id): id is string => typeof id === 'string');
+}
+
 export async function probeHomeAssistantUrl(
   baseUrl: string,
   token: string,

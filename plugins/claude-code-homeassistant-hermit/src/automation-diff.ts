@@ -103,10 +103,7 @@ export function computeAutomationDiff(
     if (before.state === 'off' && after.state === 'on') base.enabled.push(entry(current, id));
   }
   for (const id of [...priorIds].sort()) {
-    if (!currentIds.has(id)) {
-      const a = prior.automations[id]!;
-      base.removed.push({ id, entity_id: a.entity_id, friendly_name: a.friendly_name });
-    }
+    if (!currentIds.has(id)) base.removed.push(entry(prior, id));
   }
   return base;
 }

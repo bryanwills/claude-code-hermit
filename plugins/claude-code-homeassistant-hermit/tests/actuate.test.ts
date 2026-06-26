@@ -256,3 +256,137 @@ test('CLI actuate: needs_confirmation path never creates a client', async () => 
   expect(code).toBe(0);
   expect(clientCreated).toBe(false);
 });
+
+// --- CLI: ha actuate-area (in-process, no subprocess, no live HA) ---
+
+function runActuateArea(
+  root: string,
+  argv: string[],
+  templateEntities: string[],
+): { run: Promise<{ code: number; out: string }>; serviceCalls: PostRecord[] } {
+  const cfg = new AppConfig(root, 'http://ha.local:8123', null, null, 'tok', 5, 0);
+  const serviceCalls: PostRecord[] = [];
+  const run = captureOutput(() =>
+    main(argv, {
+      loadConfig: () => cfg,
+      createClient: async () => ({
+        baseUrlSource: 'single',
+        get: async () => ({}),
+        post: async (path: string, _payload?: unknown) => {
+          if (path === '/api/template') return templateEntities;
+          return {};
+        },
+        delete: async () => ({}),
+        callService: async (domain: string, service: string, data: unknown) => {
+          serviceCalls.push({ path: `/api/services/${domain}/${service}`, body: data });
+          return {};
+        },
+        getStates: async () => [],
+        getHistory: async () => ({}),
+      }),
+    }),
+  );
+  return { run, serviceCalls };
+}
+
+test('CLI actuate-area: empty area → error, exit 2', async () => {
+  const root = makeHaRoot();
+  const { run, serviceCalls } = runActuateArea(root, ['ha', 'actuate-area', 'Kitchen', 'on'], []);
+  const { code, out } = await run;
+  expect(code).toBe(2);
+  expect(JSON.parse(out)).toMatchObject({ status: 'error', message: expect.stringContaining("no entities found") });
+  expect(serviceCalls).toHaveLength(0);
+});
+
+test('CLI actuate-area: non-actuatable domains only → error, exit 2', async () => {
+  const root = makeHaRoot();
+  const { run, serviceCalls } = runActuateArea(
+    root,
+    ['ha', 'actuate-area', 'Kitchen', 'on'],
+    ['sensor.kitchen_temp', 'input_boolean.mode'],
+  );
+  const { code, out } = await run;
+  expect(code).toBe(2);
+  expect(JSON.parse(out)).toMatchObject({ status: 'error', message: expect.stringContaining("no entities in area 'Kitchen' support verb 'on'") });
+  expect(serviceCalls).toHaveLength(0);
+});
+
+test('CLI actuate-area: all-allowed → ok, all actuated', async () => {
+  const root = makeHaRoot();
+  const { run, serviceCalls } = runActuateArea(
+    root,
+    ['ha', 'actuate-area', 'Kitchen', 'on'],
+    ['light.kitchen_main', 'switch.coffee'],
+  );
+  const { code, out } = await run;
+  expect(code).toBe(0);
+  const result = JSON.parse(out);
+  expect(result.status).toBe('ok');
+  expect(result.actuated).toHaveLength(2);
+  expect(result.blocked).toHaveLength(0);
+  expect(serviceCalls).toHaveLength(2);
+});
+
+test('CLI actuate-area: non-actuatable domain filtered out, rest actuated', async () => {
+  const root = makeHaRoot();
+  const { run, serviceCalls } = runActuateArea(
+    root,
+    ['ha', 'actuate-area', 'Kitchen', 'on'],
+    ['light.kitchen', 'sensor.kitchen_temp', 'binary_sensor.motion'],
+  );
+  const { code, out } = await run;
+  expect(code).toBe(0);
+  expect(JSON.parse(out)).toMatchObject({ status: 'ok', actuated: ['light.kitchen'], blocked: [] });
+  expect(serviceCalls).toHaveLength(1);
+});
+
+test('CLI actuate-area: strict blocks sensitive, rest actuated (partial)', async () => {
+  const root = makeHaRoot(); // no config = strict
+  // cover.garage_door: keywords 'garage'+'door' → sensitive → blocked in strict
+  const { run, serviceCalls } = runActuateArea(
+    root,
+    ['ha', 'actuate-area', 'Outdoors', 'close'],
+    ['cover.living_room', 'cover.garage_door'],
+  );
+  const { code, out } = await run;
+  expect(code).toBe(0);
+  const result = JSON.parse(out);
+  expect(result.status).toBe('partial');
+  expect(result.actuated).toContain('cover.living_room');
+  expect(result.blocked).toContain('cover.garage_door');
+  expect(serviceCalls).toHaveLength(1);
+  expect(serviceCalls[0]!.path).toBe('/api/services/cover/close_cover');
+});
+
+test('CLI actuate-area: ask mode + sensitive → needs_confirmation, no service call', async () => {
+  const root = makeHaRoot();
+  makeHaConfig('ask', root);
+  const { run, serviceCalls } = runActuateArea(
+    root,
+    ['ha', 'actuate-area', 'Garage', 'close'],
+    ['cover.garage_door', 'cover.living_room'],
+  );
+  const { code, out } = await run;
+  expect(code).toBe(0);
+  const result = JSON.parse(out);
+  expect(result.status).toBe('needs_confirmation');
+  expect(result.sensitive).toContain('cover.garage_door');
+  expect(result.actuatable).toContain('cover.living_room');
+  expect(serviceCalls).toHaveLength(0);
+});
+
+test('CLI actuate-area: ask mode + --confirmed → actuates all including sensitive', async () => {
+  const root = makeHaRoot();
+  makeHaConfig('ask', root);
+  const { run, serviceCalls } = runActuateArea(
+    root,
+    ['ha', 'actuate-area', 'Garage', 'close', '--confirmed'],
+    ['cover.garage_door', 'cover.living_room'],
+  );
+  const { code, out } = await run;
+  expect(code).toBe(0);
+  const result = JSON.parse(out);
+  expect(result.status).toBe('ok');
+  expect(result.actuated).toHaveLength(2);
+  expect(serviceCalls).toHaveLength(2);
+});

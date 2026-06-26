@@ -52,6 +52,7 @@ MCP tool IDs follow the pattern `mcp__homeassistant__*`. The `homeassistant` nam
 ```
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha resolve-entity "<phrase>" [--domain <domain>]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate <entity_id> <verb> [--level <N>] [--confirmed]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate-area "<area name>" <verb> [--level <N>] [--confirmed]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha refresh-context [--incremental]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha simulate <artifact>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact> [--reload automation|script|scene]
@@ -98,7 +99,7 @@ Run `--help` for current flags. Source of truth: `src/cli.ts`.
 
 Before changing HA endpoint usage, verify against upstream (WebFetch or the `find-docs` skill) or probe a live instance with `./bin/ha-agent-lab ha probe <path>`. Do not assume an endpoint exists.
 
-- Automations have no bulk REST listing. Enumerate via `/api/states` (filter `domain=automation`), fetch each config via `/api/config/automation/config/{automation_id}`. YAML-packaged automations lack a numeric `id` and are not retrievable via REST (use WebSocket `config/automation/list` for full coverage).
+- Automations have no bulk REST listing. Enumerate via `/api/states` (filter `domain=automation`), fetch each config via `/api/config/automation/config/{automation_id}`. YAML-packaged automations with a slug `id` (e.g. `accao_boa_noite_via_notificacao`) carry an `id` in their state attributes and are REST-retrievable via that slug — the `/api/states`+id approach covers 100% in practice. `config/automation/list` WebSocket command returns "Unknown command" on real HA instances — do not rely on it.
 - `POST /api/config/{automation|script}/config/{id}` — create/update (upsert). URL `id` is sufficient; body `id` field is ignored by HA. Returns `{"result":"ok"}` on success. Returns 403 if HA is in YAML config mode (REST config API unavailable).
 - `DELETE /api/config/{automation|script}/config/{id}` — remove config. **A missing id returns 400** (not 404) with `{"message":"Resource not found"}` — do not special-case 404. All HA error responses carry `{"message":"..."}` — surface it verbatim.
 - After `POST`, `GET` reflects the change synchronously (verified against HA 2026.x). No retry or delay needed for verify calls.

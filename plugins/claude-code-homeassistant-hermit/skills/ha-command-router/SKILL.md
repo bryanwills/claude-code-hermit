@@ -39,7 +39,9 @@ Turn a spoken/typed house command into a concrete, safe Home Assistant call.
    - `{"none": true}` or `{"none": true, "reason": "no_snapshot"}` → reply that you
      don't recognize the device and suggest `/claude-code-homeassistant-hermit:ha-refresh-context`.
 
-5. **Actuate** by calling:
+5. **Actuate** the target. Choose the command based on the target type:
+
+   **Single entity** (resolved via `resolve-entity`):
    ```
    ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate <entity_id> <verb> [--level <N>]
    ```
@@ -48,6 +50,21 @@ Turn a spoken/typed house command into a concrete, safe Home Assistant call.
    - `{"status": "blocked", ...}` → the entity is in `strict` mode; surface a proposal instead.
    - `{"status": "needs_confirmation", ...}` → the entity needs confirmation (see Confirmation).
    - `{"status": "error", "message": "..."}` → surface the message as a friendly error.
+
+   **Area command** (utterance targets a room/zone, e.g. "turn off all the kitchen lights"):
+   ```
+   ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate-area "<area name>" <verb> [--level <N>]
+   ```
+   Expands the area via `POST /api/template`, filters to the verb's domain, then gates each entity.
+   Branch on the JSON:
+   - `{"status": "ok", ...}` → confirm to operator (list friendly names or count).
+   - `{"status": "partial", actuated:[...], blocked:[...], errors?:[...]}` → some entities were
+     blocked or failed; surface which and, if `blocked` is non-empty under `ask` mode, surface a
+     proposal for those.
+   - `{"status": "needs_confirmation", sensitive:[...], actuatable:[...], blocked:[...]}` → one or
+     more entities need confirmation (see Confirmation — area variant).
+   - `{"status": "error", "message": "..."}` → unknown area or verb has no actuatable members;
+     surface a friendly error.
 
 ## Verb Lexicon (English → CLI verb)
 
@@ -84,16 +101,17 @@ Sensitive domains (`lock`, `alarm_control_panel`, security-keyworded
 
 - **Interactive session**: use `AskUserQuestion` and re-run with `--confirmed` on
   approval:
-  ```
-  ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate <entity_id> <verb> [--level <N>] --confirmed
-  ```
+  - Single entity: `ha actuate <entity_id> <verb> [--level <N>] --confirmed`
+  - Area: `ha actuate-area "<area>" <verb> [--level <N>] --confirmed`
 - **Channel session** (any channel — Telegram/Discord/voice): do NOT call with
-  `--confirmed` yet. Append a pending entry to
+  `--confirmed` yet. Append **one** pending entry to
   `.claude-code-hermit/state/pending-ha-actions.json` — create the file as
-  `{"pending": []}` if it does not exist — with entries shaped
-  `{id, entity_id, verb, level?, channel, created_at}`. Reply
-  "Confirm <action>? (yes/no)". On the operator's next affirmative, this skill is
-  re-invoked in `--resolve` mode.
+  `{"pending": []}` if it does not exist. Entry schema:
+  - Single entity: `{id, entity_id, verb, level?, channel, created_at}`
+  - Area command: `{id, area, verb, level?, channel, created_at}` (no `entity_id`)
+
+  Reply "Confirm <action>? (yes/no)". On the operator's next affirmative, this
+  skill is re-invoked in `--resolve` mode.
 
 `strict` mode never actuates sensitive entities — the CLI returns `{status:"blocked"}`
 and a proposal is surfaced instead.
@@ -113,12 +131,15 @@ and do nothing.
 confirmation window has expired, and do nothing. Clean up any other expired
 entries in the same pass.
 
-After matching and TTL checks pass: call
-`ha actuate <entity_id> <verb> [--level <N>] --confirmed`, remove the entry from
-`pending`, write the file back, and confirm the result in the operator's locale.
+After matching and TTL checks pass: dispatch based on the entry shape:
+- Entry has `entity_id` → `ha actuate <entity_id> <verb> [--level <N>] --confirmed`
+- Entry has `area` → `ha actuate-area "<area>" <verb> [--level <N>] --confirmed`
 
-`--resolve` only handles **entity-targeting** pending actions. Scripts have no
-confirmed path — route them to a proposal (see Scripts).
+Remove the entry from `pending`, write the file back, and confirm the result in
+the operator's locale.
+
+`--resolve` only handles **entity-targeting and area** pending actions. Scripts
+have no confirmed path — route them to a proposal (see Scripts).
 
 ## Format
 
