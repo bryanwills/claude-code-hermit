@@ -37,6 +37,9 @@ This project has the `claude-code-homeassistant-hermit` plugin installed. The ru
 | `/claude-code-homeassistant-hermit:ha-automation-explorer` | Browse and explain active automations by topic, keyword, or last-fired |
 | `/claude-code-homeassistant-hermit:ha-evening-brief` | End-of-day security check: locks, alarm, open covers, device status, energy |
 | `/claude-code-homeassistant-hermit:ha-presence-report` | Presence history, tracker health, and arrival/departure diagnostics |
+| `/claude-code-homeassistant-hermit:ha-automation-diff` | Report automations added/removed/edited since the last snapshot (change drift) |
+| `/claude-code-homeassistant-hermit:ha-snapshot-restore` | Capture entity state to a named artifact and restore it via scene.apply |
+| `/claude-code-homeassistant-hermit:ha-setup-house` | Guided house build-out: create areas, assign entities/devices, provision helpers, scaffold automations |
 | `/claude-code-homeassistant-hermit:domain-brainstorm` | On-demand capability-gap brainstorm — surfaces missing automations/coverage as proposals (operator-invoked) |
 
 ### Channel Command Routing

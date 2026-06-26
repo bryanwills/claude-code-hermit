@@ -2,41 +2,65 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.3.0] - 2026-06-26
 
 ### Added
 - **`ha trigger-automation <automation_id>`** — fires an automation on demand via `automation.trigger`; provides the fire-to-test step in the build → simulate → apply → fire → observe → restore loop. No policy gate (triggering an automation you've already applied is not a sensitive actuation path).
-- **`ha_assist_control_enabled` config flag** — opt-in that passes HA Assist intent tools (`HassTurnOn`, `HassLightSet`, `HassSetPosition`, `HassFanSetSpeed`, etc.) through the MCP safety gate; HA's own expose-to-Assist setting becomes the control boundary. Disabled by default (fail-closed). Set via hatch Step 7.55 or write `ha_assist_control_enabled: true` to `.claude-code-hermit/config.json`. Requires the HA MCP Server's control tools to be enabled and each entity exposed in HA.
-- **ha-build-automation: helper provisioning step** — step 3 scans drafted YAML for missing `input_*/timer/counter/schedule` entities and creates them via the existing `ha create-helper` CLI before validation. Gate-respecting: strict → proposal, ask → operator prompt then `--confirm`. Runs `ha refresh-context --incremental` after creation so simulate sees the new helpers. Closes #471.
+- **`ha_assist_control_enabled` config flag** — opt-in that passes HA Assist intent tools (`HassTurnOn`, `HassLightSet`, `HassSetPosition`, `HassFanSetSpeed`, etc.) through the MCP safety gate; HA's own expose-to-Assist setting becomes the control boundary. Disabled by default (fail-closed). Set via hatch Step 7.55 or write `ha_assist_control_enabled: true` to `.claude-code-hermit/config.json`.
+- **ha-build-automation: helper provisioning step** — step 3 scans drafted YAML for missing `input_*/timer/counter/schedule` entities and creates them via `ha create-helper` before validation. Gate-respecting: strict → proposal, ask → operator prompt then `--confirm`. Runs `ha refresh-context --incremental` after creation so simulate sees the new helpers. (#471)
 - **`/ha-setup-house` skill** — guided house build-out: create areas, assign entities and devices, provision helpers, scaffold starter automations. Thin orchestration of existing `ha-agent-lab` commands; all structural writes gated by `ha_safety_mode`.
+- **`ha automation-diff`** — change memory across sessions: reports automations added/removed/edited/enabled/disabled since the last snapshot, including UI edits that bypass the plugin. Read-only; complements `ha-safety-audit` (policy drift vs. change drift). (#472)
+- **`ha snapshot-states` / `ha restore-states`** — capture an entity set's state to a named artifact and restore it via `scene.apply`. Restore gated by `ha_safety_mode`: sensitive entities block under strict and require `--confirm` under ask. (#472)
+- **`ha-automation-diff`, `ha-snapshot-restore` skills** — thin skill wrappers over the new CLI subcommands.
+- **CLI: `scene` config domain** — `validate-apply --reload scene`, plus scene create/remove via `/api/config/scene/config/{id}` + `scene.reload`. (#466)
+- **WebSocket client (`src/ha-ws.ts`)** — single-shot `wss://<host>/api/websocket` client; auth handshake + id-correlated commands. Reaches HA surfaces REST cannot. (#466)
+- **CLI: helpers, areas, registries** — `list/create/delete-helper` (8 helper types), `list/create/delete-area`, `list-entities --registry`, `rename-entity`, `set-entity-area`, `set-entity-enabled`, `list-devices`, `set-device-area`, `rename-device`. (#466)
+- **Safety: WS mutations gated by `ha_safety_mode`** — reads always allowed; under `strict` writes surface as proposal, under `ask` require `--confirm`. Each mutation writes an `audit-ha-ws-*` report. (#466)
 
 ### Changed
 - **mcp-safety-gate: `Hass*` intent tools conditionally allowed** — when `ha_assist_control_enabled: true` is set, `Hass*` tools are passed through; HA's expose-to-Assist gate is the control boundary. Default (opt-in absent) is unchanged: hard-block.
-- **CLI REST control surface removed** — `ha actuate`, `ha actuate-area`, `ha resolve-entity`, `ha-command-router`, `src/actuate.ts`, and `src/resolve.ts` deleted; these were unreleased and never reached operators via `/plugin update`. Runtime device control now routes through HA Assist intent tools (see `ha_assist_control_enabled`).
-- **mcp-safety-gate: confirmation-token bridge removed** — `consumeConfirmationToken`, `canonicalJson`, and `TOKEN_TTL_MS` deleted; the ask-tier path now emits `permissionDecision:"ask"` JSON directly (Python-equivalent behavior).
-- **policy: keyword heuristic removed** — `CONDITIONALLY_SENSITIVE_DOMAINS`, `SENSITIVE_KEYWORDS`, and `HA_EXTRA_SENSITIVE_KEYWORDS` removed; `classifyEntity` now uses domain-only matching (`SENSITIVE_DOMAINS` + `HA_EXTRA_SENSITIVE_DOMAINS`). Cover/button/switch entities are no longer flagged by keyword; use `HA_EXTRA_SENSITIVE_DOMAINS=cover` if you want the old blanket behavior.
-
-### Security
-- **mcp-safety-gate: widened to the whole `mcp__homeassistant__.*` namespace** — the matcher previously covered only `Hass*`, so script-derived actuation tools (e.g. `armar_alarme`) bypassed the gate entirely. Read-only tools (`GetLiveContext`/`GetDateTime`) are allow-listed by explicit name; every other non-entity tool fails closed. Intent tools (`HassTurnOn` etc.) now fail-close by design — they cannot carry `entity_id`. (G4)
-
-- **ha automation-diff** — change memory across sessions: reports automations added/removed/edited/enabled/disabled since the last snapshot, including UI edits that bypass the plugin. Read-only; complements `ha-safety-audit` (policy drift vs. change drift). (#472)
-- **ha snapshot-states / ha restore-states** — capture an entity set's state to a named artifact and restore it via `scene.apply`. Restore is the plugin's first device-actuation path, gated by the existing `ha_safety_mode` policy: sensitive entities block under strict and require `--confirm` under ask. (#472)
-- **skills: ha-automation-diff, ha-snapshot-restore** — thin wrappers over the new CLI subcommands.
-- **CLI: `scene` config domain** — `validate-apply --reload scene`, plus scene create/remove, via the existing REST config path (`/api/config/scene/config/{id}` + `scene.reload`). (#466)
-- **WebSocket client (`src/ha-ws.ts`)** — single-shot `wss://<host>/api/websocket` client reusing the REST URL selection and token; auth handshake + id-correlated commands. Reaches HA surfaces REST cannot. (#466)
-- **CLI: helpers, areas, registries** — `list/create/delete-helper` (8 helper types), `list/create/delete-area`, `list-entities --registry`, `rename-entity`, `set-entity-area`, `set-entity-enabled`, `list-devices`, `set-device-area`, `rename-device`. (#466)
-- **Safety: WS mutations gated by `ha_safety_mode`** — reads always allowed; under `strict` writes are blocked (surface as proposal), under `ask` writes require `--confirm`. Each mutation writes an `audit-ha-ws-*` report. (#466)
+- **CLI REST control surface removed** — `ha actuate`, `ha actuate-area`, `ha resolve-entity`, `ha-command-router`, `src/actuate.ts`, and `src/resolve.ts` deleted; these were unreleased and never reached operators via `/plugin update`. Runtime device control now routes through HA Assist intent tools.
+- **mcp-safety-gate: confirmation-token bridge removed** — `consumeConfirmationToken`, `canonicalJson`, and `TOKEN_TTL_MS` deleted; the ask-tier path now emits `permissionDecision:"ask"` JSON directly.
+- **policy: keyword heuristic removed** — `CONDITIONALLY_SENSITIVE_DOMAINS`, `SENSITIVE_KEYWORDS`, and `HA_EXTRA_SENSITIVE_KEYWORDS` removed; `classifyEntity` now uses domain-only matching. Cover/button/switch entities are no longer flagged by keyword.
+- **hatch: domain auto-resume** — writes a state marker before delegating to core; core terminus invokes this skill via the Skill tool automatically. Removes the manual re-run. Requires `claude-code-hermit` ≥1.2.12.
 
 ### Fixed
+- **safety-gate: cover script-derived MCP tools** — widened the PreToolUse matcher from `mcp__homeassistant__Hass.*` to `mcp__homeassistant__.*` so exposed HA scripts (which surface as MCP tools with no `Hass` prefix) reach the gate instead of actuating ungated (#469). Read-only `GetLiveContext`/`GetDateTime` are allowlisted in-gate; bare-named script tools with no classifiable target block under `strict` and prompt under `ask`.
 
-- **safety-gate: cover script-derived MCP tools** — widened the PreToolUse matcher from `mcp__homeassistant__Hass.*` to `mcp__homeassistant__.*` so exposed HA scripts (which surface as MCP tools with no `Hass` prefix and no `entity_id`) reach the gate instead of actuating ungated (#469). Read-only `GetLiveContext`/`GetDateTime` are allowlisted in-gate; bare-named script tools with no classifiable target block under `strict` and prompt under `ask`; unresolvable selectors and `Hass*` intent tools that target by `name`/`area` still hard-block in every mode.
+### Security
+- **mcp-safety-gate: widened to the whole `mcp__homeassistant__.*` namespace** — the matcher previously covered only `Hass*`, so script-derived actuation tools (e.g. `armar_alarme`) bypassed the gate entirely. Read-only tools are allow-listed by explicit name; every other non-entity tool fails closed. Intent tools (`HassTurnOn` etc.) now fail-close by design — they cannot carry `entity_id`. (G4)
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `hooks/hooks.json` | Matcher widened to `mcp__homeassistant__.*` |
+| `hooks/mcp-safety-gate.ts` | Namespace widening, assist opt-in, token bridge removed |
+| `src/policy.ts` | Keyword heuristic removed; domain-only classification |
+| `src/ha-ws.ts` | New: WebSocket client |
+| `src/structure.ts` | New: helpers/areas/registry WS commands |
+| `src/automation-diff.ts` | New: automation change-diff logic |
+| `src/snapshot-restore.ts` | New: entity state capture and scene.apply restore |
+| `src/cli.ts` | New subcommands: trigger-automation, automation-diff, snapshot-states, restore-states, scene, helpers, areas, registries |
+| `src/artifacts.ts` | Snapshot/diff artifact support |
+| `src/ha-api.ts` | Scene REST path |
+| `src/apply.ts` | Scene apply support |
+| `skills/ha-automation-diff/SKILL.md` | New skill |
+| `skills/ha-snapshot-restore/SKILL.md` | New skill |
+| `skills/ha-setup-house/SKILL.md` | New skill |
+| `skills/ha-build-automation/SKILL.md` | Helper provisioning step |
+| `skills/hatch/SKILL.md` | Domain auto-resume; assist opt-in step 7.55 |
+| `state-templates/CLAUDE-APPEND.md` | Added new skills to quick-reference table |
 
 ### Upgrade Instructions
 
-- **Keyword classification removed — restore cover/switch/button blocking if you relied on it.** Releases ≤0.2.3 flagged `cover`/`switch`/`button` entities as sensitive by keyword (e.g. `garage`, `gate`, `pump`). This release classifies by domain only. If you depended on that keyword blocking — or set `HA_EXTRA_SENSITIVE_KEYWORDS` in `.env` (now an inert no-op) — add the relevant domains to `HA_EXTRA_SENSITIVE_DOMAINS` instead (e.g. `HA_EXTRA_SENSITIVE_DOMAINS=cover` blocks every cover). Inform the operator: their sensitive-entity coverage narrowed and needs this opt-in to restore.
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
-### Fixed
-- **hatch: domain auto-resume** — writes a state marker before delegating to core; core terminus invokes this skill via the Skill tool automatically. Removes the manual re-run. Requires `claude-code-hermit` ≥1.2.11.
+1. **Restore keyword-sensitive entity blocking if you relied on it.** Check whether you set `HA_EXTRA_SENSITIVE_KEYWORDS` in `.claude-code-hermit/.env`. If so, identify the domains those keywords targeted (e.g. `cover`, `switch`, `button`) and add them to `HA_EXTRA_SENSITIVE_DOMAINS` in `.env` instead (`HA_EXTRA_SENSITIVE_DOMAINS=cover,switch`). Remove the now-inert `HA_EXTRA_SENSITIVE_KEYWORDS` line.
+
+**Note:** `ha_assist_control_enabled` defaults to `false`; HA Assist intent tools remain blocked unless you explicitly opt in via hatch Step 7.55 or by writing `ha_assist_control_enabled: true` to `.claude-code-hermit/config.json`.
+
+No other `config.json` changes required.
 
 ## [0.2.2] - 2026-06-23
 
