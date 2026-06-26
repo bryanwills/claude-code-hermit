@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+### Added
+- **session-close: Completed-vs-Artifacts closeout check** — a quality-check item flags when `## Completed` claims a deliverable a skill persists to `compiled/` but it's absent from `## Artifacts`, catching silently-dropped outputs at close instead of in a later session. Report template now labels `## Completed` as narrative. (#465)
 ### Fixed
 - **routines: suppress duplicate `fired` metric** — heartbeat-restart's self-re-arm (`hermit-routines load` at its own prompt tail) could log a second `fired` with no intervening `started` (#464); `log-routine-event.sh` now skips a `fired` that immediately follows another `fired` for the same routine.
 
