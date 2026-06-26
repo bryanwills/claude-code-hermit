@@ -2,6 +2,15 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **CLI: `scene` config domain** — `validate-apply --reload scene`, plus scene create/remove, via the existing REST config path (`/api/config/scene/config/{id}` + `scene.reload`). (#466)
+- **WebSocket client (`src/ha-ws.ts`)** — single-shot `wss://<host>/api/websocket` client reusing the REST URL selection and token; auth handshake + id-correlated commands. Reaches HA surfaces REST cannot. (#466)
+- **CLI: helpers, areas, registries** — `list/create/delete-helper` (8 helper types), `list/create/delete-area`, `list-entities --registry`, `rename-entity`, `set-entity-area`, `set-entity-enabled`, `list-devices`, `set-device-area`, `rename-device`. (#466)
+- **Safety: WS mutations gated by `ha_safety_mode`** — reads always allowed; under `strict` writes are blocked (surface as proposal), under `ask` writes require `--confirm`. Each mutation writes an `audit-ha-ws-*` report. (#466)
+
 ## [0.2.3] - 2026-06-24
 
 ### Fixed
