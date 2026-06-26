@@ -76,11 +76,13 @@ interface PolicyOverrides {
 
 const overridesCache = new Map<string, PolicyOverrides>();
 const safetyModeCache = new Map<string, string>();
+const assistControlCache = new Map<string, boolean>();
 
 /** Test hook — replaces Python's `_load_policy_overrides.cache_clear()` etc. */
 export function clearPolicyCaches(): void {
   overridesCache.clear();
   safetyModeCache.clear();
+  assistControlCache.clear();
 }
 
 function loadPolicyOverrides(root: string): PolicyOverrides {
@@ -121,6 +123,25 @@ function loadSafetyMode(root: string): string {
 /** Read ha_safety_mode from .claude-code-hermit/config.json. Fail-closed: returns 'strict'. */
 export function safetyMode(root?: string | null): string {
   return loadSafetyMode(resolve(root ?? process.cwd()));
+}
+
+function loadAssistControl(root: string): boolean {
+  const cached = assistControlCache.get(root);
+  if (cached !== undefined) return cached;
+  let enabled = false;
+  try {
+    const cfg = JSON.parse(readFileSync(join(root, '.claude-code-hermit', 'config.json'), 'utf8'));
+    enabled = cfg?.ha_assist_control_enabled === true;
+  } catch {
+    enabled = false;
+  }
+  assistControlCache.set(root, enabled);
+  return enabled;
+}
+
+/** Read ha_assist_control_enabled from .claude-code-hermit/config.json. Fail-closed: returns false. */
+export function assistControl(root?: string | null): boolean {
+  return loadAssistControl(resolve(root ?? process.cwd()));
 }
 
 export interface MutationGate {

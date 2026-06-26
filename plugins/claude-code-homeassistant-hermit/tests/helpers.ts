@@ -46,6 +46,14 @@ export function makeHaConfig(mode: string, root: string | null = null): string {
   return base;
 }
 
+export function makeHaConfigWith(mode: string, extra: Record<string, unknown>): string {
+  const base = tmpPath();
+  const cfgDir = join(base, '.claude-code-hermit');
+  mkdirSync(cfgDir, { recursive: true });
+  writeFileSync(join(cfgDir, 'config.json'), JSON.stringify({ ha_safety_mode: mode, ...extra }), 'utf8');
+  return base;
+}
+
 /** conftest make_mock_config: a real AppConfig rooted at a fresh tmp dir. */
 export function makeMockConfig(url = 'http://homeassistant.local:8123'): AppConfig {
   return new AppConfig(tmpPath(), url, null, null, 'fake-token', 5, 0);

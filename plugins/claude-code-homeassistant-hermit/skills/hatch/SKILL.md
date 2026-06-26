@@ -157,6 +157,15 @@ Read `ha_safety_mode` from `.claude-code-hermit/config.json`.
 
 Write the chosen value to `config.json` as `ha_safety_mode`. Default to `strict` if the operator skips or is unsure.
 
+### 7.55 HA Assist control (optional)
+
+Read `ha_assist_control_enabled` from `.claude-code-hermit/config.json`.
+
+- **If the key is already set**: skip (idempotent).
+- **If absent**: ask — "Enable HA Assist as the runtime device-control path? When enabled, HA Assist intent tools (`HassTurnOn`, `HassLightSet`, etc.) pass through the safety gate and HA's expose-to-Assist setting controls which devices the agent can reach. Requires the HA MCP Server's control tools to be enabled and each entity exposed in HA (Settings → Voice assistants → Expose)."
+  - **Yes** → write `ha_assist_control_enabled: true` to `config.json`.
+  - **No / skip** → leave the key absent (fail-closed default; CLI remains available for automation triggering).
+
 ### 7.6 Knowledge-schema extension
 
 Read `.claude-code-hermit/knowledge-schema.md`.

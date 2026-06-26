@@ -42,7 +42,7 @@ A Home Assistant domain layer for `claude-code-hermit`: skills, subagents, a saf
 
 ## MCP vs CLI
 
-- **Home Assistant MCP Server** (`homeassistant`): read-only live ops — `GetLiveContext`, `GetDateTime`. MCP actuation is blocked by `hooks/mcp-safety-gate.ts` (fail-closed on unresolvable targets; intent tools never carry `entity_id`).
+- **Home Assistant MCP Server** (`homeassistant`): read-only live ops by default — `GetLiveContext`, `GetDateTime`. `Hass*` intent tools (`HassTurnOn`, `HassLightSet`, `HassSetPosition`, `HassFanSetSpeed`, etc.) are hard-blocked unless `ha_assist_control_enabled: true` is set in `config.json` (set during hatch Step 7.55). When enabled, HA's own expose-to-Assist gate is the control boundary — the gate defers to it rather than blocking.
 - **CLI** (`bin/ha-agent-lab`): all write operations — `ha actuate <entity_id> <verb> [--level N] [--confirmed]` for device control (light/switch/fan/cover/lock); `ha resolve-entity` to map a phrase to an `entity_id`; plus bulk work — context refresh, YAML simulation, policy checks, apply, audits.
 
 MCP tool IDs follow the pattern `mcp__homeassistant__*`. The `homeassistant` name is required — the safety hook matches on it.

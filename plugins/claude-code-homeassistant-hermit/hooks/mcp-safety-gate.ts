@@ -29,7 +29,7 @@
 
 import { readFileSync, writeSync } from 'node:fs';
 
-import { Severity, classifyEntity, isReadOnlyTool, safetyMode } from '../src/policy';
+import { Severity, assistControl, classifyEntity, isReadOnlyTool, safetyMode } from '../src/policy';
 import { projectRoot } from '../src/config';
 
 // Emitted on both fail-closed branches (hard unresolvable target + opaque
@@ -201,16 +201,20 @@ function main(): void {
 
     // Opaque tool: no targeting selector and no concrete entity_id (e.g. a
     // script-derived MCP tool, which carries only its own fields). We can't
-    // classify it by entity. Only a bare-named script tool is mode-dependent:
-    // prompt under ask, hard-block under strict. A `Hass*` intent tool targets
-    // by `name`/`area` — HA fans those out server-side to an entity set we
-    // cannot enumerate, exactly like an area_id selector — so it stays
-    // hard-blocked in EVERY mode (restoring the guarantee the old Hass.*
-    // matcher gave; the widened matcher must not relax it). Garbage with no
-    // tool_name also always fails closed.
+    // classify it by entity. Script tools are mode-dependent: prompt under
+    // ask, hard-block under strict. A `Hass*` intent tool targets by
+    // `name`/`area` — when `ha_assist_control_enabled` is set the operator
+    // delegates target resolution to HA's own Assist/expose-to-Assist gate
+    // and we pass through; when the opt-in is absent (default) `Hass*` stays
+    // hard-blocked because we cannot enumerate its fan-out entity set.
+    // Garbage with no tool_name also always fails closed.
     if (resolved.length === 0) {
-      const isScriptTool =
-        typeof toolName === 'string' && !toolName.startsWith('mcp__homeassistant__Hass');
+      const isHassIntent =
+        typeof toolName === 'string' && toolName.startsWith('mcp__homeassistant__Hass');
+      if (isHassIntent && assistControl(root)) {
+        process.exit(0);
+      }
+      const isScriptTool = typeof toolName === 'string' && !isHassIntent;
       if (isScriptTool && safetyMode(root) === 'ask') {
         emitAsk(`Unverified tool call: ${toolName} (no concrete entity target)`);
       }

@@ -11,20 +11,21 @@
 //   ask    -> prompt (exit 0 + permissionDecision "ask")
 // Read-only tools (GetLiveContext/GetDateTime) allow in BOTH modes.
 // The unresolvable-selector fan-out invariant still hard-blocks in BOTH modes.
+// Hass* intent tools (name/area targeting) hard-block unless ha_assist_control_enabled.
 
 import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
 
-import { cleanEnv, cleanupTmp, makeHaConfig, tmpPath } from './helpers';
+import { cleanEnv, cleanupTmp, makeHaConfig, makeHaConfigWith, tmpPath } from './helpers';
 
 const MCP_HOOK = join(import.meta.dir, '..', 'hooks', 'mcp-safety-gate.ts');
 
 afterEach(cleanupTmp);
 
-function runGate(stdin: string, mode?: string) {
-  const cwd = mode !== undefined ? makeHaConfig(mode) : tmpPath();
+function runGate(stdin: string, mode?: string, cwd?: string) {
+  const effectiveCwd = cwd ?? (mode !== undefined ? makeHaConfig(mode) : tmpPath());
   const r = Bun.spawnSync([process.execPath, MCP_HOOK], {
-    cwd,
+    cwd: effectiveCwd,
     env: cleanEnv(),
     stdin: Buffer.from(stdin, 'utf8'),
     timeout: 10_000,
@@ -80,17 +81,30 @@ test('unresolvable area_id selector hard-blocks even under ask', () => {
   expect(r.stdout).toBe('');
 });
 
-// A Hass* intent tool targets by name/area, which HA fans out server-side to
-// an entity set the gate cannot enumerate. It must hard-block in EVERY mode
-// (the old Hass.* matcher did; the widened matcher must not downgrade it to a
-// prompt). Only bare-named script tools are mode-dependent.
-test('Hass* intent tool with name/area target hard-blocks even under ask', () => {
+// Without ha_assist_control_enabled, Hass* intent tools that target by name/area
+// cannot be enumerated at the gate, so they hard-block in every safety mode.
+// With ha_assist_control_enabled, HA's own expose-to-Assist gate is the control
+// boundary — see the following test.
+test('Hass* intent tool with name/area target hard-blocks even under ask (assist control disabled)', () => {
   for (const input of [{ name: 'front gate' }, { area: 'garage' }]) {
     const r = runGate(
       JSON.stringify({ tool_name: 'mcp__homeassistant__HassTurnOff', tool_input: input }),
       'ask',
     );
     expect(r.exit).toBe(2);
+    expect(r.stdout).toBe('');
+  }
+});
+
+test('Hass* intent tool with name/area target allows when assist control is enabled', () => {
+  const cwd = makeHaConfigWith('ask', { ha_assist_control_enabled: true });
+  for (const input of [{ name: 'front gate' }, { area: 'garage' }]) {
+    const r = runGate(
+      JSON.stringify({ tool_name: 'mcp__homeassistant__HassTurnOff', tool_input: input }),
+      undefined,
+      cwd,
+    );
+    expect(r.exit).toBe(0);
     expect(r.stdout).toBe('');
   }
 });

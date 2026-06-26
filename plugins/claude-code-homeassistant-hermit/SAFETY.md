@@ -13,7 +13,7 @@ A small explicit allowlist of **read-only** tools (`GetLiveContext`, `GetDateTim
 - **Sensitive domains**: `lock`, `alarm_control_panel`
 - **Security-tagged devices**: `cover`, `button`, `switch` entities matching security-related keywords (door, gate, garage, etc.)
 - **Unresolvable targets**: any call carrying an `area_id`/`floor_id`/`label_id`/`device_id` selector that does not resolve to a concrete, well-formed `entity_id` — blocked even when a safe concrete `entity_id` is also present (the selector fans out server-side to entities the gate cannot enumerate). Domain matching is case-insensitive (`LOCK.front_door` is treated as `lock`); malformed ids with an empty domain (e.g. `.lock`) are rejected as unresolvable.
-- **Opaque (script-derived) tools**: a call that carries no `entity_id` and no targeting selector — the canonical case is an exposed HA script, which has no classifiable target. Blocked under `strict` (becomes a proposal); under `ask`, the operator is prompted. (An unnamed/garbage call with no `tool_name` always hard-blocks. A `Hass*` intent tool that targets by `name`/`area` is **not** opaque in this sense — it fans out server-side like an `area_id` selector, so it hard-blocks in every mode.)
+- **Opaque (script-derived) tools**: a call that carries no `entity_id` and no targeting selector — the canonical case is an exposed HA script, which has no classifiable target. Blocked under `strict` (becomes a proposal); under `ask`, the operator is prompted. (An unnamed/garbage call with no `tool_name` always hard-blocks. A `Hass*` intent tool that targets by `name`/`area` hard-blocks unless `ha_assist_control_enabled: true` is set — see [Assist Control](#assist-control) below.)
 - **Anything explicitly listed** in the sensitive-domain or sensitive-keyword policy
 
 Blocked operations do not silently fail — they become proposals for human review.
@@ -29,7 +29,7 @@ The safety gate has a two-tier configurable mode stored in `.claude-code-hermit/
 
 Both tiers enforce confirmation through the runtime; there is no "operator-owns-the-risk" mode by design — actuation of locks and alarms has no software undo.
 
-The mode dial does **not** relax the hard fail-closed branch: an unresolvable `area_id`/`floor_id`/`label_id`/`device_id` fan-out, a `Hass*` intent tool that targets by `name`/`area`, a malformed `entity_id`, or an unnamed/garbage call all still block regardless of mode (the target set can't be enumerated, so it could hit a sensitive entity). The one mode-dependent case is an **opaque named script tool** (a bare-`object_id` call with no concrete target and no fan-out selector): `strict` blocks it, `ask` prompts the operator — same as it does for a concrete sensitive entity. The `HA_SAFE_ENTITIES` per-entity allowlist still takes precedence over both modes — a listed entity is always allowed.
+The mode dial does **not** relax the hard fail-closed branch: an unresolvable `area_id`/`floor_id`/`label_id`/`device_id` fan-out, a malformed `entity_id`, or an unnamed/garbage call all still block regardless of mode. `Hass*` intent tools that target by `name`/`area` also hard-block unless `ha_assist_control_enabled: true` is set (see below). The one mode-dependent case is an **opaque named script tool** (a bare-`object_id` call with no concrete target and no fan-out selector): `strict` blocks it, `ask` prompts the operator — same as it does for a concrete sensitive entity. The `HA_SAFE_ENTITIES` per-entity allowlist still takes precedence over both modes — a listed entity is always allowed.
 
 ### Channel confirmation (any channel — Telegram/Discord/voice)
 
@@ -42,6 +42,18 @@ In a channel or always-on session there is no terminal to answer a `permissionDe
 Channel confirmation is *agent-asserted* — strictly weaker than a harness-enforced terminal `ask`. It only ever upgrades the `ask` tier; it never relaxes `strict` mode. Practical guidance: do not enable `ask` mode for any entity whose actuation you would not accept the agent self-approving. Locks and alarms are best left on `strict` (channel control then surfaces a proposal instead of actuating).
 
 Change the mode by editing `ha_safety_mode` in `.claude-code-hermit/config.json` or re-running `/claude-code-homeassistant-hermit:hatch`.
+
+## Assist Control
+
+By default HA Assist intent tools (`Hass*` — `HassTurnOn`, `HassLightSet`, `HassSetPosition`, `HassFanSetSpeed`, etc.) are hard-blocked: they carry a `name`/`area` target that the gate cannot enumerate, so the gate cannot guarantee the fan-out set is safe.
+
+When you set `ha_assist_control_enabled: true` in `.claude-code-hermit/config.json` (via `/claude-code-homeassistant-hermit:hatch` Step 7.55), the gate defers to HA's own **expose-to-Assist** boundary instead of blocking. HA only routes intent calls to entities the operator has explicitly exposed in Settings → Voice assistants → Expose — locks and alarms you haven't exposed are unreachable by these tools regardless of plugin safety mode.
+
+**Prerequisites before enabling:**
+- HA MCP Server integration must have control tools enabled (not just read-only mode).
+- Each device you want the agent to control must be exposed in HA.
+
+**Trade-off accepted:** the fail-closed *enumeration* guarantee is traded for trust in the HA exposure list. The per-entity `HA_SAFE_ENTITIES` / `HA_EXTRA_SENSITIVE_DOMAINS` overrides still apply to concrete `entity_id`-based calls (those resolve and are checked normally); Assist intent calls bypass enumeration entirely and rely on HA's exposure gate.
 
 ## Policy Overrides
 

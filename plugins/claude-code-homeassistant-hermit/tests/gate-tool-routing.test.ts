@@ -12,6 +12,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { makeHaConfigWith } from './helpers';
+
 const MCP_HOOK = join(import.meta.dir, '..', 'hooks', 'mcp-safety-gate.ts');
 
 function cleanEnv(): Record<string, string> {
@@ -43,6 +45,7 @@ function askModeCwd(): string {
   );
   return dir;
 }
+
 
 test('read-only tool with no entity is allowed', () => {
   const r = runGate(JSON.stringify({ tool_name: 'mcp__homeassistant__GetLiveContext', tool_input: {} }));
@@ -119,6 +122,28 @@ test('ask mode: sensitive entity asks (no token bridge — confirmation is now v
     const r = runGate(SENSITIVE_CALL, dir);
     expect(r.exit).toBe(0);
     expect(r.stdout).toContain('"permissionDecision": "ask"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Hass* intent tool with no entity_id blocks when assist control is disabled', () => {
+  const r = runGate(
+    JSON.stringify({ tool_name: 'mcp__homeassistant__HassTurnOn', tool_input: { name: 'living room lights' } }),
+  );
+  expect(r.exit).toBe(2);
+  expect(r.stdout).toBe('');
+});
+
+test('Hass* intent tool with no entity_id allows when assist control is enabled', () => {
+  const dir = makeHaConfigWith('ask', { ha_assist_control_enabled: true });
+  try {
+    const r = runGate(
+      JSON.stringify({ tool_name: 'mcp__homeassistant__HassTurnOn', tool_input: { name: 'living room lights' } }),
+      dir,
+    );
+    expect(r.exit).toBe(0);
+    expect(r.stdout).toBe('');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
