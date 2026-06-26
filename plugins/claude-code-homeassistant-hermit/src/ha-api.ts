@@ -123,6 +123,10 @@ export class HomeAssistantClient {
     return this.get(`/api/states/${entityId}`);
   }
 
+  callService(domain: string, service: string, data: Record<string, unknown>): Promise<any> {
+    return this.post(`/api/services/${domain}/${service}`, data);
+  }
+
   /**
    * Fetch state-change history for the given entities over [startTime, endTime].
    *

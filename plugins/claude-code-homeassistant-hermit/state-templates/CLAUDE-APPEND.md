@@ -30,6 +30,7 @@ This project has the `claude-code-homeassistant-hermit` plugin installed. The ru
 | `/claude-code-homeassistant-hermit:ha-apply-change` | Validate and apply YAML with safety checks |
 | `/claude-code-homeassistant-hermit:ha-analyze-patterns` | Identify patterns and automation opportunities |
 | `/claude-code-homeassistant-hermit:ha-house-status` | Live house status via MCP |
+| `/claude-code-homeassistant-hermit:ha-command-router` | Route a natural-language house command to a safe HA actuation (control verbs) |
 | `/claude-code-homeassistant-hermit:ha-morning-brief` | Morning brief — live status, overnight anomalies, recommendations |
 | `/claude-code-homeassistant-hermit:ha-safety-audit` | Re-audit live automations against the safety policy (weekly scheduled_check) |
 | `/claude-code-homeassistant-hermit:ha-integration-health` | Detect dropped integrations via per-domain unavailable ratios (daily scheduled_check) |
@@ -38,6 +39,28 @@ This project has the `claude-code-homeassistant-hermit` plugin installed. The ru
 | `/claude-code-homeassistant-hermit:ha-evening-brief` | End-of-day security check: locks, alarm, open covers, device status, energy |
 | `/claude-code-homeassistant-hermit:ha-presence-report` | Presence history, tracker health, and arrival/departure diagnostics |
 | `/claude-code-homeassistant-hermit:domain-brainstorm` | On-demand capability-gap brainstorm — surfaces missing automations/coverage as proposals (operator-invoked) |
+
+### Channel Command Routing
+
+When an inbound channel message (Discord/Telegram/voice, handled by
+`/claude-code-hermit:channel-responder`) is about the house, route it before the
+generic categories:
+
+- **Control utterance** — an imperative naming a device or routine ("turn on the
+  living room light", "close the blind", "good morning"): dispatch to
+  `/claude-code-homeassistant-hermit:ha-command-router`.
+- **State question** — asks about house state ("what's on?", "is the door
+  locked?"): dispatch to `/claude-code-homeassistant-hermit:ha-house-status`.
+- **Affirmative/negative with a pending HA action** — a bare "yes"/"no" while
+  `.claude-code-hermit/state/pending-ha-actions.json` has a `pending` entry:
+  dispatch to `/claude-code-homeassistant-hermit:ha-command-router` in `--resolve`
+  mode to execute (or cancel) the held action. Check this **before** the core
+  micro-approval branch. `--resolve` only executes **entity-targeting** actions;
+  sensitive script routines have no confirmed path and surface a proposal instead.
+
+This routing is declarative — `channel-responder` is not modified; it reads these
+rules. Sensitive actuations still follow the gated confirmation flow in
+`/claude-code-homeassistant-hermit:ha-command-router`.
 
 ### Subagents
 
@@ -49,15 +72,16 @@ This project has the `claude-code-homeassistant-hermit` plugin installed. The ru
 
 ### MCP vs CLI
 
-- **MCP (`homeassistant`)**: live operations — `GetLiveContext`, `GetDateTime`, light/cover/fan control.
-- **CLI** (`${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab`): bulk work — context refresh, simulation, policy checks, apply, audits.
-- **Safety hook**: MCP actuation tools are gated by `hooks/mcp-safety-gate.ts` before reaching HA.
+- **MCP (`homeassistant`)**: read-only live operations — `GetLiveContext`, `GetDateTime`. Actuation via MCP is blocked by `hooks/mcp-safety-gate.ts`.
+- **CLI** (`${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab`): all write operations — `ha actuate <entity_id> <verb> [--level N] [--confirmed]` for device control; `ha resolve-entity` for entity lookup; plus context refresh, simulation, policy checks, apply, audits.
 
 MCP tool IDs follow `mcp__homeassistant__*`. If you registered the HA MCP Server under a different name, update `hooks/hooks.json` accordingly.
 
 ### CLI Commands
 
 ```
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha resolve-entity "<phrase>" [--domain <domain>]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate <entity_id> <verb> [--level <N>] [--confirmed]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha refresh-context [--incremental]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha simulate <artifact>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact> [--reload automation|script|scene]
@@ -110,7 +134,7 @@ Requires `.env` at the project root (gitignored):
 
 Use these prefixes in capability-gap proposal titles (from `domain-brainstorm`):
 - **[automation-gap]** — a device/sensor/area wired into zero automations
-- **[coverage-asymmetry]** — a paired-pattern gap (e.g. `bom_dia` with no `boa_noite`)
+- **[coverage-asymmetry]** — a paired-pattern gap (e.g. `morning_mode` with no `evening_mode`)
 - **[unbuilt-intent]** — an operator-stated want with no automation implementing it
 
 Ideas surfaced by `/claude-code-homeassistant-hermit:domain-brainstorm` are single-pass — the brainstorm establishes the candidate, so the cross-session recurrence condition is waived (consequence + operator-actionable still apply).

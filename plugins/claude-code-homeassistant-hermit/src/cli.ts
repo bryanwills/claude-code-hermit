@@ -29,7 +29,7 @@ import { auditAutomations, auditScripts } from './audits';
 import { automationDiff, formatAutomationDiff } from './automation-diff';
 import { bootStatus, saveBootPreferences } from './boot';
 import { AppConfig, loadConfig, normalizedContextPath, projectRoot } from './config';
-import { HomeAssistantClient, HomeAssistantError } from './ha-api';
+import { HomeAssistantClient, HomeAssistantError, extractHaErrorMessage } from './ha-api';
 import { HomeAssistantWsClient } from './ha-ws';
 import { fetchHistorySnapshot } from './history';
 import {
@@ -37,7 +37,9 @@ import {
   formatIntegrationHealthStdout,
   writeDegradedDomainsArtifact,
 } from './integration-health';
-import { checkEntity, gateStructuralMutation, normalizeEntityIndex } from './policy';
+import { Severity, checkEntity, classifyEntity, gateStructuralMutation, normalizeEntityIndex } from './policy';
+import { resolveService } from './actuate';
+import { resolveEntity } from './resolve';
 import { evaluateYamlPolicy, simulateArtifact } from './simulate';
 import { computeSilenceSummary } from './silence';
 import { captureStates, restoreStates, DEFAULT_DOMAINS } from './snapshot-restore';
@@ -102,6 +104,7 @@ export interface CliClient {
   get(path: string): Promise<any>;
   post(path: string, payload?: Record<string, unknown> | null): Promise<any>;
   delete(path: string): Promise<any>;
+  callService(domain: string, service: string, data: Record<string, unknown>): Promise<any>;
   getStates(): Promise<Array<Record<string, any>>>;
   getHistory(
     entityIds: string[],
@@ -150,6 +153,8 @@ const HA_COMMANDS = [
   'fetch-history',
   'list-automations',
   'list-scripts',
+  'resolve-entity',
+  'actuate',
   'delete-automation',
   'delete-script',
   'get-automation-config',
@@ -209,6 +214,12 @@ positional arguments:
                         \`refresh-context\` first if none exists.
     list-automations    List all automation entity IDs and config IDs.
     list-scripts        List all script entity IDs and config IDs.
+    resolve-entity      Resolve a natural-language phrase to an entity_id using
+                        the local snapshot's friendly names. Prints
+                        {match} | {candidates} | {none}.
+    actuate             Call an HA REST service for a resolved entity_id. Prints
+                        {status:ok} | {status:blocked} | {status:needs_confirmation}
+                        | {status:error}.
     delete-automation   Delete an automation config by ID.
     delete-script       Delete a script config by ID.
     get-automation-config
@@ -445,6 +456,29 @@ const LEAF_SPECS: Record<string, LeafSpec> = {
     positionals: [],
     flags: {},
   },
+  'ha resolve-entity': {
+    prog: 'ha_agent_lab ha resolve-entity',
+    usage:
+      'usage: ha_agent_lab ha resolve-entity [-h] [--domain DOMAIN]\n' +
+      '                                      [--include-scripts]\n' +
+      '                                      phrase',
+    positionals: ['phrase'],
+    flags: {
+      '--domain': { kind: 'value' },
+      '--include-scripts': { kind: 'store_true' },
+    },
+  },
+  'ha actuate': {
+    prog: 'ha_agent_lab ha actuate',
+    usage:
+      'usage: ha_agent_lab ha actuate [-h] [--level LEVEL] [--confirmed]\n' +
+      '                               entity_id verb',
+    positionals: ['entity_id', 'verb'],
+    flags: {
+      '--level': { kind: 'value', int: true },
+      '--confirmed': { kind: 'store_true' },
+    },
+  },
   'ha delete-automation': {
     prog: 'ha_agent_lab ha delete-automation',
     usage: 'usage: ha_agent_lab ha delete-automation [-h] id',
@@ -638,6 +672,25 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
 
   if (args.command === 'ha' && args.sub === 'policy-check') {
     return handlePolicyCheck(args.positionals[0]!, root);
+  }
+
+  if (args.command === 'ha' && args.sub === 'resolve-entity') {
+    return handleResolveEntity(args.positionals[0]!, root, {
+      domain: (args.flags['--domain'] as string | undefined) ?? null,
+      includeScripts: Boolean(args.flags['--include-scripts']),
+    });
+  }
+
+  if (args.command === 'ha' && args.sub === 'actuate') {
+    return handleActuate(
+      args.positionals[0]!,
+      args.positionals[1]!,
+      (args.flags['--level'] as number | undefined) ?? null,
+      Boolean(args.flags['--confirmed']),
+      root,
+      config,
+      deps,
+    );
   }
 
   if (args.command === 'boot' && args.sub === 'status') {
@@ -1238,6 +1291,89 @@ function printSafetyAuditSummary(summary: Record<string, any>, domain = 'automat
   if (acknowledged.length > 0) console.log(`Acknowledged (suppressed): ${acknowledged.length}`);
   if (unmanaged.length > 0) console.log(`Skipped (no numeric id): ${unmanaged.length}`);
   if (fetchFailures.length > 0) console.log(`Skipped (404 on config fetch): ${fetchFailures.length}`);
+}
+
+async function handleActuate(
+  entityId: string,
+  verb: string,
+  level: number | null,
+  confirmed: boolean,
+  root: string,
+  config: AppConfig,
+  deps: CliDeps,
+): Promise<number> {
+  // Reject malformed entity_id (must have a non-empty domain segment before the dot).
+  if (!entityId.includes('.') || entityId.split('.', 1)[0] === '') {
+    console.log(
+      jsonDumps({ status: 'error', message: `malformed entity_id: '${entityId}'` }, { ensureAscii: false }),
+    );
+    return 2;
+  }
+
+  const resolved = resolveService(entityId, verb, level);
+  if (!resolved.ok) {
+    console.log(jsonDumps({ status: 'error', message: resolved.reason }, { ensureAscii: false }));
+    return 2;
+  }
+
+  const [sev, reasons] = classifyEntity(entityId, root);
+
+  if (sev === Severity.BLOCK) {
+    console.log(jsonDumps({ status: 'blocked', entity_id: entityId, reasons }, { ensureAscii: false }));
+    return 0;
+  }
+
+  if (sev === Severity.ASK && !confirmed) {
+    const out: Record<string, unknown> = { status: 'needs_confirmation', entity_id: entityId, verb };
+    if (level != null) out['level'] = level;
+    console.log(jsonDumps(out, { ensureAscii: false }));
+    return 0;
+  }
+
+  // allow, or ask+confirmed
+  try {
+    const client = await deps.createClient(config);
+    await client.callService(resolved.call.domain, resolved.call.service, resolved.call.data);
+    console.log(
+      jsonDumps(
+        { status: 'ok', entity_id: entityId, service: `${resolved.call.domain}.${resolved.call.service}` },
+        { ensureAscii: false },
+      ),
+    );
+    return 0;
+  } catch (exc) {
+    if (!(exc instanceof HomeAssistantError)) throw exc;
+    console.log(jsonDumps({ status: 'error', message: extractHaErrorMessage(exc) }, { ensureAscii: false }));
+    return 1;
+  }
+}
+
+function handleResolveEntity(
+  phrase: string,
+  root: string,
+  opts: { domain: string | null; includeScripts: boolean },
+): number {
+  const snapshotPath = normalizedContextPath(root);
+  let index: Record<string, Record<string, unknown>>;
+  try {
+    const snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8'));
+    const ei = snapshot?.entity_index;
+    // A parsed-but-corrupt snapshot (missing/non-object entity_index) is a snapshot
+    // problem, not an unknown device — report no_snapshot so the caller suggests
+    // refresh-context rather than "device not recognized".
+    if (ei === null || typeof ei !== 'object' || Array.isArray(ei)) {
+      console.log(jsonDumps({ none: true, reason: 'no_snapshot' }, { ensureAscii: false }));
+      return 0;
+    }
+    index = ei as Record<string, Record<string, unknown>>;
+  } catch {
+    // Missing or unreadable snapshot — the caller should suggest refresh-context.
+    console.log(jsonDumps({ none: true, reason: 'no_snapshot' }, { ensureAscii: false }));
+    return 0;
+  }
+  const result = resolveEntity(index, phrase, opts);
+  console.log(jsonDumps(result, { ensureAscii: false }));
+  return 0;
 }
 
 function handlePolicyCheck(target: string, root: string): number {

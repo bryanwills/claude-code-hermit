@@ -5,6 +5,16 @@ All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are d
 ## [Unreleased]
 
 ### Added
+- **House assistant over any channel (Telegram/Discord/voice) (`ha-command-router` + `ha resolve-entity` + `ha actuate`)** — natural-language house control via CLI REST: `ha resolve-entity` maps a phrase to a concrete `entity_id` (accent/article-insensitive, never-guess disambiguation); `ha actuate <entity_id> <verb> [--level N]` POSTs to `/api/services/<domain>/<service>` with policy enforcement via `classifyEntity`. Routing declared in the HA `CLAUDE-APPEND` block. Closes #467.
+- **`ha actuate` CLI command** — entity_id-precise device control (light/switch/fan/cover/lock). Outputs `{status:"ok"|"blocked"|"needs_confirmation"|"error"}`. Non-actuating paths (strict+sensitive, ask+unconfirmed) never create an HA client. `--confirmed` flag for channel-confirmed sensitive actions.
+- **Channel-native sensitive confirmation via `needs_confirmation`/`--confirmed`** — `ha actuate` returns `{status:"needs_confirmation"}` for sensitive entities in `ask` mode; `ha-command-router` stores a pending entry, asks "sim/não" over the channel, and re-calls with `--confirmed` on affirmative. No token file; simpler and race-free.
+
+### Changed
+- **MCP actuation path removed** — HA Assist intent tools (`HassTurnOn` etc.) accept only `name`/`area`/`floor`/`domain`/`device_class`, never `entity_id`, so the safety gate fail-closes every real call. Actuation now goes through the CLI REST path. MCP remains read-only (`GetLiveContext`, `GetDateTime`).
+- **mcp-safety-gate: confirmation-token bridge removed** — `consumeConfirmationToken`, `canonicalJson`, and `TOKEN_TTL_MS` deleted; the ask-tier path now emits `permissionDecision:"ask"` JSON directly (Python-equivalent behavior). Confirmation is now `ha actuate --confirmed` in the CLI.
+
+### Security
+- **mcp-safety-gate: widened to the whole `mcp__homeassistant__.*` namespace** — the matcher previously covered only `Hass*`, so script-derived actuation tools (e.g. `armar_alarme`) bypassed the gate entirely. Read-only tools (`GetLiveContext`/`GetDateTime`) are allow-listed by explicit name; every other non-entity tool fails closed. Intent tools (`HassTurnOn` etc.) now fail-close by design — they cannot carry `entity_id`. (G4)
 
 - **ha automation-diff** — change memory across sessions: reports automations added/removed/edited/enabled/disabled since the last snapshot, including UI edits that bypass the plugin. Read-only; complements `ha-safety-audit` (policy drift vs. change drift). (#472)
 - **ha snapshot-states / ha restore-states** — capture an entity set's state to a named artifact and restore it via `scene.apply`. Restore is the plugin's first device-actuation path, gated by the existing `ha_safety_mode` policy: sensitive entities block under strict and require `--confirm` under ask. (#472)

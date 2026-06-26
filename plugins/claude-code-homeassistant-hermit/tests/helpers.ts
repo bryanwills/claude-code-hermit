@@ -97,6 +97,9 @@ export function fakeClient(handlers: FakeClientHandlers = {}) {
       if (handlers.getStates) return handlers.getStates();
       return this.get('/api/states');
     },
+    async callService(domain: string, service: string, data: Record<string, unknown>): Promise<any> {
+      return this.post(`/api/services/${domain}/${service}`, data);
+    },
     async getHistory(
       entityIds: string[],
       start: Date,

@@ -4,7 +4,9 @@ This plugin controls real home devices. The safety model is layered — the agen
 
 ## How Actuation Is Gated
 
-Every MCP call to the Home Assistant server (`mcp__homeassistant__*`) is pre-screened by `hooks/mcp-safety-gate.ts` (importing the policy from `src/policy.ts` directly) before it reaches Home Assistant. The matcher covers **all** HA MCP tools — including script-derived tools (an exposed HA script becomes a tool named by its bare object_id, with no `Hass` prefix and no `entity_id` parameter), which would otherwise bypass the gate entirely. The read-only `GetLiveContext` / `GetDateTime` tools are allowlisted inside the gate (they carry no target and never actuate). The hook fails closed — if the policy check errors, the input can't be parsed, or the target can't be resolved to a concrete entity, the call is blocked (exit 2).
+Every MCP call matching `mcp__homeassistant__.*` is pre-screened by `hooks/mcp-safety-gate.ts` (importing the policy from `src/policy.ts` directly) before it reaches Home Assistant. The matcher covers the **whole** `homeassistant` server namespace — a default-deny chokepoint — so script-derived and any other non-`Hass`-prefixed actuation tools cannot bypass the gate. The hook fails closed — if the policy check errors, the input can't be parsed, or the target can't be resolved to a concrete entity, the call is blocked (exit 2).
+
+A small explicit allowlist of **read-only** tools (`GetLiveContext`, `GetDateTime` — see `READ_ONLY_TOOLS` in `src/policy.ts`) is short-circuited to allow before entity resolution, since they carry no `entity_id` and would otherwise fail closed. The allowlist is an explicit name set, not a pattern, so a future mutating tool cannot be granted by accident.
 
 ## What's Blocked by Default
 
@@ -28,6 +30,16 @@ The safety gate has a two-tier configurable mode stored in `.claude-code-hermit/
 Both tiers enforce confirmation through the runtime; there is no "operator-owns-the-risk" mode by design — actuation of locks and alarms has no software undo.
 
 The mode dial does **not** relax the hard fail-closed branch: an unresolvable `area_id`/`floor_id`/`label_id`/`device_id` fan-out, a `Hass*` intent tool that targets by `name`/`area`, a malformed `entity_id`, or an unnamed/garbage call all still block regardless of mode (the target set can't be enumerated, so it could hit a sensitive entity). The one mode-dependent case is an **opaque named script tool** (a bare-`object_id` call with no concrete target and no fan-out selector): `strict` blocks it, `ask` prompts the operator — same as it does for a concrete sensitive entity. The `HA_SAFE_ENTITIES` per-entity allowlist still takes precedence over both modes — a listed entity is always allowed.
+
+### Channel confirmation (any channel — Telegram/Discord/voice)
+
+In a channel or always-on session there is no terminal to answer a `permissionDecision: "ask"` prompt (verified: a headless session returns the ask reason to the model rather than presenting a UI). Actuation does not go through MCP intent tools — it goes through `ha actuate` in the CLI. When `ha actuate` returns `{"status":"needs_confirmation", ...}` (sensitive entity, `ask` mode, no `--confirmed`), `ha-command-router`:
+
+1. Stores a pending entry in `.claude-code-hermit/state/pending-ha-actions.json` with the entity, verb, optional level, channel, and timestamp.
+2. Replies "Confirmas `<action>`? (sim/não)" over the channel.
+3. On the operator's next affirmative, re-invokes itself in `--resolve` mode, which re-calls `ha actuate <entity_id> <verb> [--level N] --confirmed` and removes the pending entry.
+
+Channel confirmation is *agent-asserted* — strictly weaker than a harness-enforced terminal `ask`. It only ever upgrades the `ask` tier; it never relaxes `strict` mode. Practical guidance: do not enable `ask` mode for any entity whose actuation you would not accept the agent self-approving. Locks and alarms are best left on `strict` (channel control then surfaces a proposal instead of actuating).
 
 Change the mode by editing `ha_safety_mode` in `.claude-code-hermit/config.json` or re-running `/claude-code-homeassistant-hermit:hatch`.
 

@@ -7,7 +7,7 @@ A Home Assistant domain layer for `claude-code-hermit`: skills, subagents, a saf
 - `skills/ha-*/` — workflow skills namespaced as `/claude-code-homeassistant-hermit:ha-*`
 - `skills/domain-brainstorm/` — on-demand capability-gap brainstorm: reads entity inventory, automation/script listing, and operator intent to surface at most 2 `[prefix]`-tagged improvement proposals. Operator-invoked only. Kill criteria: retire if triage-survival < 25% after ≥8 runs.
 - `agents/` — `ha-safety-reviewer`, `ha-automation-builder`, `ha-pattern-analyst`
-- `hooks/` — `mcp-safety-gate.ts` + `hooks.json` (PreToolUse on `mcp__homeassistant__.*` — all HA MCP tools, incl. script-derived; read-only `GetLiveContext`/`GetDateTime` allowlisted in-gate)
+- `hooks/` — `mcp-safety-gate.ts` + `hooks.json` (PreToolUse on `mcp__homeassistant__.*` — the whole server namespace; read-only tools are allow-listed inside the gate)
 - `bin/ha-agent-lab` + `src/*.ts` — TypeScript CLI run by bun (REST client, policy engine, simulation, apply)
 - `settings.json` — pre-approved permissions for safe CLI and read-only MCP tools
 - `state-templates/CLAUDE-APPEND.md` — block injected into the target project's `CLAUDE.md` by `hatch`
@@ -42,14 +42,16 @@ A Home Assistant domain layer for `claude-code-hermit`: skills, subagents, a saf
 
 ## MCP vs CLI
 
-- **Home Assistant MCP Server** (`homeassistant`): live ops — `GetLiveContext`, `GetDateTime`, light/cover/fan control. Gated by `hooks/mcp-safety-gate.ts`.
-- **CLI** (`bin/ha-agent-lab`): bulk work — context refresh, YAML simulation, policy checks, apply, audits.
+- **Home Assistant MCP Server** (`homeassistant`): read-only live ops — `GetLiveContext`, `GetDateTime`. MCP actuation is blocked by `hooks/mcp-safety-gate.ts` (fail-closed on unresolvable targets; intent tools never carry `entity_id`).
+- **CLI** (`bin/ha-agent-lab`): all write operations — `ha actuate <entity_id> <verb> [--level N] [--confirmed]` for device control (light/switch/fan/cover/lock); `ha resolve-entity` to map a phrase to an `entity_id`; plus bulk work — context refresh, YAML simulation, policy checks, apply, audits.
 
 MCP tool IDs follow the pattern `mcp__homeassistant__*`. The `homeassistant` name is required — the safety hook matches on it.
 
 ## CLI Commands
 
 ```
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha resolve-entity "<phrase>" [--domain <domain>]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha actuate <entity_id> <verb> [--level <N>] [--confirmed]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha refresh-context [--incremental]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha simulate <artifact>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact> [--reload automation|script|scene]

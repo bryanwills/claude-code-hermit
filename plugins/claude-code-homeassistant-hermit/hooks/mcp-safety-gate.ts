@@ -29,22 +29,8 @@
 
 import { readFileSync, writeSync } from 'node:fs';
 
-import { Severity, classifyEntity, safetyMode } from '../src/policy';
+import { Severity, classifyEntity, isReadOnlyTool, safetyMode } from '../src/policy';
 import { projectRoot } from '../src/config';
-
-// Read-only HA MCP tools: they carry no entity_id and never actuate. The
-// widened matcher (mcp__homeassistant__.*) now routes them here, so they must
-// be allowed outright — otherwise the boot-time context fetch would fail
-// closed. The retired Python gate never saw these (its matcher was Hass.*), so
-// gate-corpus marks the allow verdicts as documented divergences.
-//
-// Keep this in sync with HA's prefix-less read-only tool surface: any other
-// read-only HA MCP tool not listed here falls through to the fail-closed
-// branch and hard-blocks under strict (safe, but a usability regression).
-const READONLY_TOOLS = new Set([
-  'mcp__homeassistant__GetLiveContext',
-  'mcp__homeassistant__GetDateTime',
-]);
 
 // Emitted on both fail-closed branches (hard unresolvable target + opaque
 // tool with no concrete target). Pinned to one literal so the two paths can't
@@ -184,8 +170,11 @@ function main(): void {
   try {
     const toolName = (payload as Record<string, unknown>)['tool_name'];
 
-    // Read-only tools never actuate — allow before any target evaluation.
-    if (typeof toolName === 'string' && READONLY_TOOLS.has(toolName)) {
+    // Read-only tools (GetLiveContext/GetDateTime) carry no entity_id and never
+    // actuate. The widened matcher routes them here — allow before any target
+    // evaluation. isReadOnlyTool strips the mcp__homeassistant__ prefix so both
+    // bare and qualified names match READ_ONLY_TOOLS in policy.ts.
+    if (typeof toolName === 'string' && isReadOnlyTool(toolName)) {
       process.exit(0);
     }
 
