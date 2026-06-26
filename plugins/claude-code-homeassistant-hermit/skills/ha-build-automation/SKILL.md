@@ -27,11 +27,28 @@ allowed-tools:
    - Set `mode` explicitly where concurrency matters.
    - Write to `.claude-code-hermit/raw/automation-<automation_id>.yaml`.
 
-3. **Validate**:
+3. **Provision missing helpers**:
+   - Scan the drafted YAML for helper entity IDs (`input_boolean.*`, `input_number.*`, `input_text.*`, `input_select.*`, `input_datetime.*`, `timer.*`, `counter.*`, `schedule.*`) that are absent from the entity inventory snapshot. If none are absent, skip to step 4.
+   - For each distinct helper type among the absent helpers, run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha list-helpers --type <type>` once to check whether any absent helper of that type already exists under a different `entity_id`. If found, reference that entity instead.
+   - For each helper that genuinely needs to be created, compose the JSON payload. Minimum required fields by type:
+     - `input_boolean` / `input_text`: `{"name": "Friendly Name"}`
+     - `input_number`: `{"name": "...", "min": <N>, "max": <N>}` (optional: `step`, `initial`, `mode`)
+     - `input_select`: `{"name": "...", "options": ["opt_a", "opt_b"]}`
+     - `input_datetime`: `{"name": "...", "has_date": true, "has_time": true}`
+     - `timer`: `{"name": "...", "duration": "HH:MM:SS"}`
+     - `counter`: `{"name": "...", "initial": 0, "step": 1}`
+     - `schedule`: `{"name": "..."}` with weekday blocks — run `ha list-helpers --type schedule` to inspect the schema of any existing helper; if none exists, check the HA schedule integration docs for the required block format.
+   - Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha create-helper <type> '<json>'` and handle the result:
+     - `"requires_confirm": true` — `ha_safety_mode` is `ask`; describe the helper to the operator and ask for confirmation. On confirm, re-run with `--confirm`.
+     - `"blocked": true, "requires_confirm": false` — `ha_safety_mode` is `strict`; explain the boundary and create a proposal via `/claude-code-hermit:proposal-create`. Do **not** retry with `--confirm`. Continue to validation so the operator sees which entities are still missing.
+     - `"ok": true` — helper created; continue.
+   - If any helpers were created, run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha refresh-context --incremental` to update the snapshot before validation.
+
+4. **Validate**:
    - Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha simulate <path>` to check entity references and policy.
    - Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha policy-check <path>` for a safety assessment.
 
-4. **Handle results**:
+5. **Handle results**:
    - `severity: "allow"` — valid and safe: offer to apply via `/claude-code-homeassistant-hermit:ha-apply-change`.
    - `severity: "ask"` (ask mode) — explain which sensitive entities are involved, then offer to apply. The apply step will require explicit operator confirmation.
    - `severity: "block"` (strict mode) — explain why and create a proposal using `/claude-code-hermit:proposal-create`.
@@ -48,4 +65,4 @@ allowed-tools:
 
 ## Safety
 
-Under `ha_safety_mode: strict` (the default): never draft automations that actuate `lock`, `alarm_control_panel`, or security-related `cover`/`button`/`switch`. If the user requests this, explain the safety boundary and create a proposal for manual review. Under `ask`: draft and run `ha policy-check` — the severity field in the result drives step 4.
+Under `ha_safety_mode: strict` (the default): never draft automations that actuate `lock`, `alarm_control_panel`, or security-related `cover`/`button`/`switch`. If the user requests this, explain the safety boundary and create a proposal for manual review. Under `ask`: draft and run `ha policy-check` — the severity field in the result drives step 5.
