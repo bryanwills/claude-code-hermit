@@ -35,21 +35,13 @@ export function resolveService(
   }
 
   switch (domain) {
-    case 'light': {
-      if (verb === 'on') return simple(domain, 'turn_on', entityId);
-      if (verb === 'off') return simple(domain, 'turn_off', entityId);
-      if (verb === 'set') return levelSet(domain, 'turn_on', entityId, level, 'brightness_pct');
-      break;
-    }
-    case 'switch': {
-      if (verb === 'on') return simple(domain, 'turn_on', entityId);
-      if (verb === 'off') return simple(domain, 'turn_off', entityId);
-      break;
-    }
+    case 'light':
+    case 'switch':
     case 'fan': {
       if (verb === 'on') return simple(domain, 'turn_on', entityId);
       if (verb === 'off') return simple(domain, 'turn_off', entityId);
-      if (verb === 'set') return levelSet(domain, 'turn_on', entityId, level, 'percentage');
+      if (verb === 'set' && domain === 'light') return levelSet(domain, 'turn_on', entityId, level, 'brightness_pct');
+      if (verb === 'set' && domain === 'fan') return levelSet(domain, 'turn_on', entityId, level, 'percentage');
       break;
     }
     case 'cover': {
