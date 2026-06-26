@@ -71,7 +71,7 @@ function artifactName(kind: string, ext: string, directory: string): string {
 }
 
 // json.dumps(sort_keys=True) parity: recursive key sort (code-point order).
-function sortKeysDeep(value: unknown): unknown {
+export function sortKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (value !== null && typeof value === 'object') {
     return Object.fromEntries(
