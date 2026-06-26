@@ -11,10 +11,10 @@ A small explicit allowlist of **read-only** tools (`GetLiveContext`, `GetDateTim
 ## What's Blocked by Default
 
 - **Sensitive domains**: `lock`, `alarm_control_panel`
-- **Security-tagged devices**: `cover`, `button`, `switch` entities matching security-related keywords (door, gate, garage, etc.)
+- **Extra sensitive domains**: any domain listed in `HA_EXTRA_SENSITIVE_DOMAINS` (see [Policy Overrides](#policy-overrides))
 - **Unresolvable targets**: any call carrying an `area_id`/`floor_id`/`label_id`/`device_id` selector that does not resolve to a concrete, well-formed `entity_id` — blocked even when a safe concrete `entity_id` is also present (the selector fans out server-side to entities the gate cannot enumerate). Domain matching is case-insensitive (`LOCK.front_door` is treated as `lock`); malformed ids with an empty domain (e.g. `.lock`) are rejected as unresolvable.
 - **Opaque (script-derived) tools**: a call that carries no `entity_id` and no targeting selector — the canonical case is an exposed HA script, which has no classifiable target. Blocked under `strict` (becomes a proposal); under `ask`, the operator is prompted. (An unnamed/garbage call with no `tool_name` always hard-blocks. A `Hass*` intent tool that targets by `name`/`area` hard-blocks unless `ha_assist_control_enabled: true` is set — see [Assist Control](#assist-control) below.)
-- **Anything explicitly listed** in the sensitive-domain or sensitive-keyword policy
+- **Anything explicitly listed** in `HA_EXTRA_SENSITIVE_DOMAINS` (block)
 
 Blocked operations do not silently fail — they become proposals for human review.
 
@@ -59,14 +59,12 @@ Configured via environment variables in `.env` (see `.env.example`):
 | ----------------------------- | ---------------------------------------------------------- |
 | `HA_SAFE_ENTITIES`            | Per-entity allow-list. Exact IDs only, no wildcards.       |
 | `HA_EXTRA_SENSITIVE_DOMAINS`  | Block additional domains entirely.                         |
-| `HA_EXTRA_SENSITIVE_KEYWORDS` | Block extra keywords in conditionally-sensitive domains.   |
 
 Example:
 
 ```
 HA_SAFE_ENTITIES=cover.garage_door,switch.coffee_machine
 HA_EXTRA_SENSITIVE_DOMAINS=vacuum,media_player
-HA_EXTRA_SENSITIVE_KEYWORDS=pool,pump
 ```
 
 ## Checking a Target

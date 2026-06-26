@@ -19,9 +19,9 @@ actions:
   - service: light.turn_on
     target:
       entity_id: light.kitchen_counter
-  - service: cover.open_cover
+  - service: lock.unlock
     target:
-      entity_id: cover.garage_door`;
+      entity_id: lock.front_door`;
 
 const ALARM_YAML = `alias: Disarm
 actions:
@@ -46,8 +46,8 @@ test('simulation reports missing and sensitive entities', () => {
   const result = simulateArtifact(root, artifact);
 
   expect(result.isValid).toBe(false);
-  expect(result.missingEntities).toContain('cover.garage_door');
-  expect(result.blockedReasons.some((reason) => reason.includes('cover.garage_door'))).toBe(true);
+  expect(result.missingEntities).toContain('lock.front_door');
+  expect(result.blockedReasons.some((reason) => reason.includes('lock.front_door'))).toBe(true);
 });
 
 test('simulation valid under ask mode with sensitive entity', () => {

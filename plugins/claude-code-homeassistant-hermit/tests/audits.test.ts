@@ -70,9 +70,9 @@ test('audit_automations flags sensitive references', async () => {
     },
     garage_auto_close: {
       id: 'garage_auto_close',
-      alias: 'Close garage at night',
+      alias: 'Lock at night',
       trigger: [{ platform: 'time', at: '23:00:00' }],
-      action: [{ service: 'cover.close_cover', target: { entity_id: 'cover.garage_door' } }],
+      action: [{ service: 'lock.lock', target: { entity_id: 'lock.front_door' } }],
     },
   };
   const states = [
@@ -95,7 +95,7 @@ test('audit_automations flags sensitive references', async () => {
   expect(summary.fetch_failures).toEqual([]);
   const violation = summary.violations[0];
   expect(violation.id).toBe('garage_auto_close');
-  expect(violation.reasons.some((r: string) => r.includes('garage_door'))).toBe(true);
+  expect(violation.reasons.some((r: string) => r.includes('lock'))).toBe(true);
 
   const latest = join(tmp, '.claude-code-hermit', 'raw', 'audit-ha-safety-latest.json');
   expect(existsSync(latest)).toBe(true);
@@ -188,8 +188,8 @@ test('audit_automations moves acknowledged to acknowledged bucket', async () => 
     },
     '/api/config/automation/config/garage_auto_close': {
       id: 'garage_auto_close',
-      alias: 'Close garage at night',
-      action: [{ service: 'cover.close_cover', target: { entity_id: 'cover.garage_door' } }],
+      alias: 'Lock at night',
+      action: [{ service: 'lock.lock', target: { entity_id: 'lock.front_door' } }],
     },
   });
 

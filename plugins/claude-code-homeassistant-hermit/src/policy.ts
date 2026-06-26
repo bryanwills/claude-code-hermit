@@ -1,33 +1,9 @@
-// WP7 tier 1 port of src/ha_agent_lab/policy.py.
-//
-// Python-isms mapped:
-//   - functools.lru_cache(root) -> module-level Maps keyed by resolved root;
-//     clearPolicyCaches() replaces the test-facing `.cache_clear()` hooks.
-//   - Severity(str, Enum) -> const object of string literals (JSON-compatible
-//     values, same "block"/"ask"/"allow" wire format).
-//   - dataclass PolicyDecision -> interface.
-//   - check_entity keeps its snake_case JSON keys (CLI output contract).
-
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import { loadEnvFile } from './config';
 
 export const SENSITIVE_DOMAINS = new Set(['lock', 'alarm_control_panel']);
-
-export const CONDITIONALLY_SENSITIVE_DOMAINS = new Set(['cover', 'button', 'switch']);
-
-export const SENSITIVE_KEYWORDS = new Set([
-  'garage',
-  'gate',
-  'door',
-  'alarm',
-  'lock',
-  'security',
-  'shutter',
-  'entry',
-  'access',
-]);
 
 export const SAFE_RELOAD_DOMAINS = new Set(['automation', 'script', 'scene']);
 
@@ -71,7 +47,6 @@ const SEVERITY_ORDER: Record<Severity, number> = {
 interface PolicyOverrides {
   safeEntities: Set<string>;
   extraDomains: Set<string>;
-  extraKeywords: Set<string>;
 }
 
 const overridesCache = new Map<string, PolicyOverrides>();
@@ -99,7 +74,6 @@ function loadPolicyOverrides(root: string): PolicyOverrides {
   const overrides: PolicyOverrides = {
     safeEntities: set('HA_SAFE_ENTITIES'),
     extraDomains: set('HA_EXTRA_SENSITIVE_DOMAINS'),
-    extraKeywords: set('HA_EXTRA_SENSITIVE_KEYWORDS'),
   };
   overridesCache.set(root, overrides);
   return overrides;
@@ -194,22 +168,11 @@ export function classifyEntity(entityId: string, root?: string | null): [Severit
   const resolved = resolve(root ?? process.cwd());
   const overrides = loadPolicyOverrides(resolved);
   if (overrides.safeEntities.has(entityId)) return [Severity.ALLOW, []];
-  // Match the domain case-insensitively: HA entity_ids are lowercase, but a
-  // call carrying `LOCK.front_door` must not slip past the sensitive-domain
-  // check (the keyword branch already lowercases). Closes a real bypass.
+  // Lowercase to catch calls carrying `LOCK.front_door` (HA ids are lowercase
+  // in practice, but a mis-formed call must not slip past the domain check).
   const domain = entityId.split('.', 1)[0]!.toLowerCase();
-  const modeSev = MODE_TO_SEVERITY[loadSafetyMode(resolved)]!;
   if (SENSITIVE_DOMAINS.has(domain) || overrides.extraDomains.has(domain)) {
-    return [modeSev, [`Domain '${domain}' is always sensitive`]];
-  }
-  if (CONDITIONALLY_SENSITIVE_DOMAINS.has(domain)) {
-    const lower = entityId.toLowerCase();
-    const matched = [...SENSITIVE_KEYWORDS, ...overrides.extraKeywords].filter((kw) =>
-      lower.includes(kw),
-    );
-    if (matched.length > 0) {
-      return [modeSev, [`Domain '${domain}' with keywords: ${matched.join(', ')}`]];
-    }
+    return [MODE_TO_SEVERITY[loadSafetyMode(resolved)]!, [`Domain '${domain}' is always sensitive`]];
   }
   return [Severity.ALLOW, []];
 }

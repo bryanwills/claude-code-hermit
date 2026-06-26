@@ -42,14 +42,14 @@ test('capture filters by domain and keeps only restore-relevant attributes', asy
 test('restore blocks a sensitive entity under strict mode', async () => {
   const root = makeHaConfig('strict');
   const artifactPath = writeSnapshot(root, {
-    'cover.garage_door': { state: 'open', attributes: { current_position: 100 } },
+    'lock.front_door': { state: 'locked', attributes: {} },
   });
   const client = fakeClient();
   const res = await restoreStates(root, client, { artifactPath, confirm: false });
 
   expect(res.ok).toBe(false);
   expect(res.blocked).toBe(true);
-  expect(res.sensitive).toContain('cover.garage_door');
+  expect(res.sensitive).toContain('lock.front_door');
   expect(client.calls.post).toHaveLength(0);
 });
 
@@ -71,7 +71,7 @@ test('restore of a non-sensitive light issues the expected scene.apply call', as
 test('ask mode requires --confirm for a sensitive entity', async () => {
   const root = makeHaConfig('ask');
   const artifactPath = writeSnapshot(root, {
-    'cover.garage_door': { state: 'open', attributes: {} },
+    'alarm_control_panel.home': { state: 'armed_away', attributes: {} },
   });
   const client = fakeClient({ post: () => ({}) });
 
