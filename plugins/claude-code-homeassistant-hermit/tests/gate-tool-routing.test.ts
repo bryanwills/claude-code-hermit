@@ -124,12 +124,14 @@ function writeToken(dir: string, token: unknown): void {
 function freshToken(overrides: Record<string, unknown> = {}) {
   return {
     tool: 'mcp__homeassistant__HassTurnOn',
-    entity_ids: ['lock.front_door'],
+    tool_input: { entity_id: 'lock.front_door' },
     expiry: Date.now() + 30_000,
     nonce: 'probe-nonce',
     ...overrides,
   };
 }
+
+const TOKEN_PATH = join('.claude-code-hermit', 'state', 'ha-confirm-token.json');
 
 test('ask mode + no token: sensitive entity asks', () => {
   const dir = askModeCwd();
@@ -150,8 +152,8 @@ test('ask mode + valid one-shot token: allowed and token consumed', () => {
     expect(r.exit).toBe(0);
     expect(r.stdout).toBe('');
     // single-use: consumed by atomic rename
-    expect(existsSync(join(dir, '.claude-code-hermit', 'state', 'ha-confirm-token.json'))).toBe(false);
-    expect(existsSync(join(dir, '.claude-code-hermit', 'state', 'ha-confirm-token.json.consumed'))).toBe(true);
+    expect(existsSync(join(dir, TOKEN_PATH))).toBe(false);
+    expect(existsSync(join(dir, TOKEN_PATH + '.consumed'))).toBe(true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -187,10 +189,80 @@ test('ask mode + expired token: asks', () => {
 test('ask mode + entity-mismatch token: asks', () => {
   const dir = askModeCwd();
   try {
-    writeToken(dir, freshToken({ entity_ids: ['lock.back_door'] }));
+    writeToken(dir, freshToken({ tool_input: { entity_id: 'lock.back_door' } }));
     const r = runGate(SENSITIVE_CALL, dir);
     expect(r.exit).toBe(0);
     expect(r.stdout).toContain('"permissionDecision": "ask"');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- Full tool_input binding (a token cannot authorize a different param value) ---
+
+const GARAGE_50 = JSON.stringify({
+  tool_name: 'mcp__homeassistant__HassSetPosition',
+  tool_input: { entity_id: 'cover.garage_door', position: 50 },
+});
+const GARAGE_100 = JSON.stringify({
+  tool_name: 'mcp__homeassistant__HassSetPosition',
+  tool_input: { entity_id: 'cover.garage_door', position: 100 },
+});
+
+function positionToken(position: number) {
+  return {
+    tool: 'mcp__homeassistant__HassSetPosition',
+    tool_input: { entity_id: 'cover.garage_door', position },
+    expiry: Date.now() + 30_000,
+    nonce: 'probe-nonce',
+  };
+}
+
+test('ask mode + token bound to the full input allows the exact matching call', () => {
+  const dir = askModeCwd();
+  try {
+    writeToken(dir, positionToken(50));
+    const r = runGate(GARAGE_50, dir);
+    expect(r.exit).toBe(0);
+    expect(r.stdout).toBe('');
+    expect(existsSync(join(dir, TOKEN_PATH))).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ask mode + token bound to position=50 does NOT authorize position=100 (asks, token kept)', () => {
+  const dir = askModeCwd();
+  try {
+    writeToken(dir, positionToken(50));
+    const r = runGate(GARAGE_100, dir);
+    expect(r.exit).toBe(0);
+    expect(r.stdout).toContain('"permissionDecision": "ask"');
+    // a non-matching call must NOT consume the token meant for a different call
+    expect(existsSync(join(dir, TOKEN_PATH))).toBe(true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ask mode + an unrelated ask-tier call does not drop a pending matching token', () => {
+  const dir = askModeCwd();
+  try {
+    writeToken(dir, freshToken()); // confirmed for lock.front_door / HassTurnOn
+    // A different sensitive ask-tier call arrives first.
+    const other = JSON.stringify({
+      tool_name: 'mcp__homeassistant__HassTurnOn',
+      tool_input: { entity_id: 'lock.back_door' },
+    });
+    const r1 = runGate(other, dir);
+    expect(r1.exit).toBe(0);
+    expect(r1.stdout).toContain('"permissionDecision": "ask"');
+    expect(existsSync(join(dir, TOKEN_PATH))).toBe(true); // token survived
+    // The intended call still consumes it and is allowed.
+    const r2 = runGate(SENSITIVE_CALL, dir);
+    expect(r2.exit).toBe(0);
+    expect(r2.stdout).toBe('');
+    expect(existsSync(join(dir, TOKEN_PATH))).toBe(false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

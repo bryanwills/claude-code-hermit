@@ -54,7 +54,9 @@ generic categories:
 - **Affirmative/negative with a pending HA action** — a bare "sim"/"não" (or
   yes/no) while `.claude-code-hermit/state/pending-ha-actions.json` has a `pending`
   entry: dispatch to `ha-command-router` in `--resolve` mode to execute (or cancel)
-  the held action. Check this **before** the core micro-approval branch.
+  the held action. Check this **before** the core micro-approval branch. `--resolve`
+  only executes **entity-targeting** actions; a sensitive *script* (no `entity_id`)
+  cannot be token-bridged through the gate — it surfaces a proposal instead.
 
 This routing is declarative — `channel-responder` is not modified; it reads these
 rules. Sensitive actuations still follow the gated confirmation flow in

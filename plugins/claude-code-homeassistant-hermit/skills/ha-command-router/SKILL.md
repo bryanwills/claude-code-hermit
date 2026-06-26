@@ -40,6 +40,8 @@ names and friendly names are blocked — so always resolve the target first.
    - `{"candidates": [...]}` → **ask, never guess**. Present the friendly names and
      let the operator pick (interactive: `AskUserQuestion`; over a channel: reply
      with a short numbered list and wait for the reply). Re-run with the chosen id.
+     If the result also carries `"truncated": true`, the list was capped — tell the
+     operator there are more matches and ask them to narrow the phrase.
    - `{"none": true}` or `{"none": true, "reason": "no_snapshot"}` → reply that you
      don't recognize the device and suggest `/claude-code-homeassistant-hermit:ha-refresh-context`.
 
@@ -60,12 +62,15 @@ names and friendly names are blocked — so always resolve the target first.
 |---------------------------|--------------------|-------|
 | acende, liga, ligar       | `HassTurnOn`       | domain `light`/`switch` |
 | apaga, desliga, desligar  | `HassTurnOff`      | domain `light`/`switch` |
-| abre, abrir               | `HassTurnOn` / open-cover intent | covers |
-| fecha, fechar             | `HassTurnOff` / close-cover intent | covers |
+| abre, abrir               | `HassTurnOn`       | covers (open) |
+| fecha, fechar             | `HassTurnOff`      | covers (close) |
 | põe a N%, define N%       | `HassLightSet` (brightness) / `HassSetPosition` (cover) | set the level param per the tool schema |
 
-Use the dedicated cover/lock/etc. intents your MCP server actually exposes — consult
-your available `mcp__homeassistant__*` tools rather than assuming a tool name.
+These four tools (`HassTurnOn`, `HassTurnOff`, `HassLightSet`, `HassSetPosition`)
+are the skill's `allowed-tools` and cover light/switch/cover/level. Any other tool —
+a dedicated lock/alarm intent, or a dynamically-named script tool (see Scripts) —
+is outside the allowlist and will trigger a permission prompt; that is expected, and
+for sensitive locks/alarms the strict-mode proposal path applies anyway.
 
 ## Scripts (optional fallback)
 
@@ -85,7 +90,7 @@ Sensitive domains (`lock`, `alarm_control_panel`, security-keyworded
 `cover`/`switch`/`button`) are never actuated without confirmation:
 
 - **Interactive session**: use `AskUserQuestion` and actuate on approval.
-- **Channel session** (Discord/voice): do NOT call the MCP tool. Append a pending
+- **Channel session** (any channel — Telegram/Discord/voice): do NOT call the MCP tool. Append a pending
   entry to `.claude-code-hermit/state/pending-ha-actions.json` — create the file as
   `{"pending": []}` if it does not exist — with `pending[]` entries shaped
   `{id, tool, entity_id, verb, channel, created_at}`. Then reply
@@ -97,17 +102,24 @@ Sensitive domains (`lock`, `alarm_control_panel`, security-keyworded
 
 ### `--resolve` mode
 
-When invoked to resolve a pending confirmation: read
+`--resolve` only ever handles **entity-targeting** pending actions. A sensitive
+*script* has no `entity_id`, so the gate fail-closes it before the token is ever
+consulted — never write a token for a script; route it to a proposal instead (see
+Scripts).
+
+When invoked to resolve an entity-targeting pending confirmation: read
 `state/pending-ha-actions.json`, take the matching pending entry, write the one-shot
-token `state/ha-confirm-token.json` as `{"tool": "<mcp tool id>", "entity_ids":
-["<entity_id>"], "expiry": <now + 30000 epoch ms>, "nonce": "<random>"}`, then
-immediately call the entity-targeting MCP intent tool (the gate consumes the token
-and allows the call). Finally remove the pending entry and confirm the result in the
-operator's locale. The token is single-use and expires in ~30s — if the call does
-not fire promptly, re-confirm rather than reusing it.
+token `state/ha-confirm-token.json` as `{"tool": "<mcp tool id>", "tool_input":
+{ ...the exact args the call will send, incl. "entity_id" and any level/position },
+"expiry": <now + 30000 epoch ms>, "nonce": "<random>"}`, then **immediately** call
+that MCP intent tool with those exact args (the gate consumes the token and allows
+the call). The token binds the **whole `tool_input`** — it must be byte-for-byte the
+args the call sends, or the gate falls back to `ask`. Finally remove the pending
+entry and confirm the result in the operator's locale. The token is single-use and
+expires in ~30s — if the call does not fire promptly, re-confirm rather than reusing it.
 
 ## Format
 
-- **Discord/text**: short, markdown allowed, name the device by its friendly name.
+- **Text channel** (Telegram/Discord/etc.): short, markdown allowed, name the device by its friendly name.
 - **Voice**: 1–2 short sentences, numbers spelled out, no symbols or entity IDs.
 - Friendly errors only — never surface raw `entity_id`s or stack traces to the operator.

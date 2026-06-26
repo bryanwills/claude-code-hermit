@@ -30,17 +30,17 @@ export function normalizePhrase(s: string): string[] {
  *   2 = superset (every query token present; name carries extra tokens)
  *   1 = partial (some but not all query tokens present)
  *   0 = no overlap */
-function scoreWithSets(q: Set<string>, n: Set<string>): number {
-  if (q.size === 0) return 0;
+function scoreWithSets(q: Set<string>, n: Set<string>): { score: number; present: number } {
+  if (q.size === 0) return { score: 0, present: 0 };
   let present = 0;
   for (const t of q) if (n.has(t)) present += 1;
-  if (present === 0) return 0;
-  if (present < q.size) return 1;
-  return q.size === n.size ? 3 : 2;
+  if (present === 0) return { score: 0, present: 0 };
+  const score = present < q.size ? 1 : q.size === n.size ? 3 : 2;
+  return { score, present };
 }
 
 export function scoreEntity(queryTokens: string[], nameTokens: string[]): number {
-  return scoreWithSets(new Set(queryTokens), new Set(nameTokens));
+  return scoreWithSets(new Set(queryTokens), new Set(nameTokens)).score;
 }
 
 export interface ResolveOptions {
@@ -54,7 +54,10 @@ export interface Candidate {
   state: string | null;
 }
 
-export type ResolveResult = { match: string } | { candidates: Candidate[] } | { none: true; reason?: string };
+export type ResolveResult =
+  | { match: string }
+  | { candidates: Candidate[]; truncated?: boolean }
+  | { none: true; reason?: string };
 
 const CANDIDATE_CAP = 5;
 
@@ -68,11 +71,16 @@ export function resolveEntity(
   if (queryTokens.length === 0) return { none: true };
 
   const domain = opts.domain ?? null;
-  const includeScripts = opts.includeScripts ?? false;
+  // An explicit `--domain script` request implies the operator wants scripts —
+  // otherwise the domain filter and the script guard contradict each other and
+  // every query returns none.
+  const includeScripts = (opts.includeScripts ?? false) || domain === 'script';
 
   const querySet = new Set(queryTokens);
-  const scored: Array<Candidate & { score: number }> = [];
+  const scored: Array<Candidate & { score: number; present: number }> = [];
   for (const [entityId, state] of Object.entries(index)) {
+    // Skip malformed snapshot entries instead of dereferencing a non-object.
+    if (!state || typeof state !== 'object') continue;
     const entDomain = entityId.split('.', 1)[0]!;
     if (domain && entDomain !== domain) continue;
     if (!includeScripts && entDomain === 'script') continue;
@@ -82,7 +90,10 @@ export function resolveEntity(
     // Match on friendly_name; fall back to the object_id (underscores -> spaces)
     // so entities without a friendly_name are still addressable.
     const nameSource = friendly ?? entityId.slice(entDomain.length + 1).replace(/_/g, ' ');
-    const score = scoreWithSets(querySet, new Set(normalizePhrase(nameSource)));
+    const nameSet = new Set(normalizePhrase(nameSource));
+    // present (query tokens matched) is a finer rank signal than the coarse tier,
+    // used to keep the strongest partial overlap from being truncated out.
+    const { score, present } = scoreWithSets(querySet, nameSet);
     if (score > 0) {
       const st = state['state'];
       scored.push({
@@ -90,13 +101,16 @@ export function resolveEntity(
         friendly_name: friendly,
         state: typeof st === 'string' ? st : null,
         score,
+        present,
       });
     }
   }
 
   if (scored.length === 0) return { none: true };
 
-  scored.sort((a, b) => b.score - a.score || a.entity_id.localeCompare(b.entity_id));
+  scored.sort(
+    (a, b) => b.score - a.score || b.present - a.present || a.entity_id.localeCompare(b.entity_id),
+  );
   const topScore = scored[0]!.score;
   const topHits = scored.filter((c) => c.score === topScore);
 
@@ -111,5 +125,7 @@ export function resolveEntity(
   const candidates: Candidate[] = pool
     .slice(0, CANDIDATE_CAP)
     .map(({ entity_id, friendly_name, state }) => ({ entity_id, friendly_name, state }));
-  return { candidates };
+  // Signal truncation so the caller can prompt the operator to narrow the phrase
+  // instead of silently hiding the entity they meant.
+  return pool.length > CANDIDATE_CAP ? { candidates, truncated: true } : { candidates };
 }

@@ -99,6 +99,40 @@ test('falls back to object_id when friendly_name is absent', () => {
   expect(resolveEntity(idx, 'varanda', { domain: 'fan' })).toEqual({ match: 'fan.varanda' });
 });
 
+test('partial matches rank by overlap count and signal truncation', () => {
+  // "luz sala inexistente" -> partial tier (no exact/superset). The three 2-token
+  // overlaps must rank ahead of the 1-token overlaps, and the >5 pool is flagged.
+  const r = resolveEntity(INDEX, 'luz sala inexistente', { domain: 'light' });
+  expect('candidates' in r).toBe(true);
+  if ('candidates' in r) {
+    expect(r.candidates.slice(0, 3).map((c) => c.entity_id)).toEqual([
+      'light.luz_da_sala',
+      'light.luz_sala_teto',
+      'light.luz_sala_tv',
+    ]);
+    expect(r.candidates.length).toBe(5);
+    expect(r.truncated).toBe(true);
+  }
+});
+
+test('candidate list under the cap is not flagged truncated', () => {
+  const r = resolveEntity(INDEX, 'sala', { domain: 'light' });
+  expect('candidates' in r).toBe(true);
+  if ('candidates' in r) expect(r.truncated).toBeUndefined();
+});
+
+test('--domain script resolves a script even without --include-scripts', () => {
+  expect(resolveEntity(INDEX, 'bom dia', { domain: 'script' })).toEqual({ match: 'script.bom_dia' });
+});
+
+test('a null / non-object entity_index entry is skipped, not thrown', () => {
+  const idx: Record<string, Record<string, unknown>> = {
+    'light.broken': null as unknown as Record<string, unknown>,
+    'light.luz_sala': ent('light.luz_sala', 'Luz Sala'),
+  };
+  expect(resolveEntity(idx, 'luz sala', { domain: 'light' })).toEqual({ match: 'light.luz_sala' });
+});
+
 // --- CLI-level ---
 
 function runResolve(root: string, argv: string[]) {
