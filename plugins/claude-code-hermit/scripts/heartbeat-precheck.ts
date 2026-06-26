@@ -29,8 +29,11 @@ const readJSON = (p: string): Json => {
 };
 
 const writeJSON = (p: string, obj: Json): void => {
-  try { fs.writeFileSync(p, JSON.stringify(obj, null, 2) + '\n', 'utf-8'); }
-  catch { /* fail-open */ }
+  try {
+    const tmp = `${p}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
+    fs.renameSync(tmp, p);
+  } catch { /* fail-open */ }
 };
 
 // Normalises a HEARTBEAT.md checklist item to its dedup key.
@@ -108,7 +111,16 @@ if (activeHours?.start && activeHours?.end) {
 }
 
 const alertStatePath = path.join(stateDir, 'state', 'alert-state.json');
-const alertState = readJSON(alertStatePath) ?? { alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 0 };
+let alertState = readJSON(alertStatePath);
+if (alertState === null) {
+  // null = first run (absent) OR present-but-unparseable. Never reinit skill-owned
+  // alerts/self_eval over a file that exists: quarantine the corrupt bytes and let a
+  // full EVALUATE rebuild it. Quarantine skipped in --peek (read-only).
+  const isCorrupt = fs.existsSync(alertStatePath);
+  if (isCorrupt && !peek) { try { fs.renameSync(alertStatePath, `${alertStatePath}.corrupt-${now}`); } catch { /* fail-open */ } }
+  if (isCorrupt) emit('EVALUATE');
+  alertState = { alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 0 };
+}
 if (typeof alertState.total_ticks !== 'number' || !Number.isFinite(alertState.total_ticks)) {
   alertState.total_ticks = 0;
 }

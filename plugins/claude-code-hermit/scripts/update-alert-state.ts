@@ -24,12 +24,16 @@ function apply(payloadJson: string): void {
     process.exit(1);
   }
 
-  let state: Json = {};
+  let state: Json = { alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 0 };
   try {
     state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
-  } catch {
-    // first run or unreadable — seed with the precheck's default shape
-    state = { alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 0 };
+  } catch (err: any) {
+    // ENOENT = first run, seed with the precheck's default shape. Anything else =
+    // present-but-unparseable: quarantine the corrupt bytes for forensics rather than
+    // silently merging the payload onto a blank state and dropping accumulated alerts.
+    if (err?.code !== 'ENOENT') {
+      try { fs.renameSync(stateFile, `${stateFile}.corrupt-${Date.now()}`); } catch { /* fail-open */ }
+    }
   }
 
   const alerts: Json = {
@@ -62,7 +66,9 @@ function apply(payloadJson: string): void {
   };
 
   try {
-    fs.writeFileSync(stateFile, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+    const tmp = `${stateFile}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(updated, null, 2) + '\n', 'utf-8');
+    fs.renameSync(tmp, stateFile);
   } catch (err: any) {
     console.error(`update-alert-state: write failed: ${err.message}`);
   }
