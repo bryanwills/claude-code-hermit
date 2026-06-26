@@ -27,7 +27,7 @@ Run `git branch --show-current`. If not on `main` or the repo's default branch: 
 
 **Explicit slugs:** validate each exists at `plugins/<slug>/.claude-plugin/plugin.json`. For any unknown slug, abort and list available slugs.
 
-**Auto-detect (no args):** collect plugins where both:
+**Auto-detect (no args):** discover all slugs from `ls plugins/` (never hardcode or rely on session context), then collect plugins where both:
 1. Files under `plugins/<slug>/` changed on this branch vs base: `git diff <base>..HEAD --name-only -- plugins/<slug>/` is non-empty
 2. `plugin.json` version is ahead of the last `<slug>--v*` tag — same "already-bumped" detection as `/release` step 2
 
