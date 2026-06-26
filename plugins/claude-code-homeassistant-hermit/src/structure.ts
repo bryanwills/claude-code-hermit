@@ -49,7 +49,9 @@ function isHelperType(value: string): value is HelperType {
 
 /**
  * Execute a (pre-gated) mutation and write its audit report. HA failures are
- * caught and reported (ok: false) so a report always lands, like removeConfig.
+ * caught and reported (ok: false) so a report lands for them too, like
+ * removeConfig; a report-write failure degrades to reportPath: null rather
+ * than escaping.
  */
 async function runMutation(
   root: string,
@@ -71,7 +73,15 @@ async function runMutation(
     message = exc.message;
   }
 
-  const reportPath = writeMutationReport(root, label, type, payload, ok, message);
+  // Never let a report-write failure (disk full, permissions) escape as a
+  // non-HomeAssistantError and crash the CLI past its per-command catch — the
+  // mutation already landed; report a null path instead.
+  let reportPath: string | null = null;
+  try {
+    reportPath = writeMutationReport(root, label, type, payload, ok, message);
+  } catch {
+    // intentionally empty: mutation already landed, reportPath stays null
+  }
   return { ok, data, message, reportPath };
 }
 
@@ -115,11 +125,21 @@ export async function listHelpers(client: WsCommandClient, type?: string): Promi
   }
   const types = type ? [type as HelperType] : [...HELPER_TYPES];
   // Fan out concurrently — the WS client correlates responses by id, so all
-  // list commands can be in flight at once (≈1×RTT instead of 8×).
-  const results = await Promise.all(
-    types.map((t) => client.command(`${t}/list`).then((r) => [t, r] as const)),
+  // list commands can be in flight at once (≈1×RTT instead of 8×). Use
+  // allSettled so one unavailable integration (e.g. `schedule` on a host
+  // without default_config) doesn't discard the other helper lists.
+  const settled = await Promise.all(
+    types.map((t) =>
+      client
+        .command(`${t}/list`)
+        .then((r) => ({ t, r, err: null as string | null }))
+        .catch((exc) => ({ t, r: null, err: exc instanceof HomeAssistantError ? exc.message : String(exc) })),
+    ),
   );
-  return { ok: true, data: Object.fromEntries(results), message: 'ok' };
+  const data = Object.fromEntries(settled.filter((s) => s.err === null).map((s) => [s.t, s.r]));
+  const unavailable = settled.filter((s) => s.err !== null).map((s) => s.t);
+  const message = unavailable.length ? `ok; unavailable: ${unavailable.join(', ')}` : 'ok';
+  return { ok: true, data, message };
 }
 
 export async function createHelper(
