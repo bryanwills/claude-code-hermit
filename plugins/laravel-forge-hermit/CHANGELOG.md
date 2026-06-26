@@ -1,5 +1,10 @@
 # Changelog — laravel-forge-hermit
 
+## [Unreleased]
+
+### Fixed
+- **forge-logs: server-log key format** — nginx log keys are hyphenated (`nginx-error`, `nginx-access`); underscored variants return a 404.
+
 ## [0.0.3] - 2026-06-24
 
 ### Fixed
