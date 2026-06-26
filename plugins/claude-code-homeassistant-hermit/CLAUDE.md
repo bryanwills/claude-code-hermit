@@ -62,6 +62,9 @@ ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha delete-automation <id>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha delete-script <id>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha get-automation-config <id>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha get-script-config <id>
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha automation-diff
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha snapshot-states [--name <label>] [--domains light,cover,climate,switch] [--entities <id> …]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha restore-states <artifact> [--confirm]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha integration-health
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha fetch-history [--window-days N] [--entities <glob> …] [--include-transitions]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha probe <path>

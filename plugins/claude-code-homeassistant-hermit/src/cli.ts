@@ -26,6 +26,7 @@ import {
   writeMarkdownArtifact,
 } from './artifacts';
 import { auditAutomations, auditScripts } from './audits';
+import { automationDiff, formatAutomationDiff } from './automation-diff';
 import { bootStatus, saveBootPreferences } from './boot';
 import { AppConfig, loadConfig, normalizedContextPath, projectRoot } from './config';
 import { HomeAssistantClient, HomeAssistantError } from './ha-api';
@@ -38,6 +39,7 @@ import {
 import { checkEntity, normalizeEntityIndex } from './policy';
 import { evaluateYamlPolicy, simulateArtifact } from './simulate';
 import { computeSilenceSummary } from './silence';
+import { captureStates, restoreStates, DEFAULT_DOMAINS } from './snapshot-restore';
 
 // ---------------------------------------------------------------------------
 // JSON output helpers — Python json.dumps parity
@@ -133,6 +135,9 @@ const HA_COMMANDS = [
   'delete-script',
   'get-automation-config',
   'get-script-config',
+  'automation-diff',
+  'snapshot-states',
+  'restore-states',
 ] as const;
 const HA_USAGE = [
   'usage: ha_agent_lab ha [-h]',
@@ -177,6 +182,12 @@ positional arguments:
     get-automation-config
                         Read an automation's stored config from HA.
     get-script-config   Read a script's stored config from HA.
+    automation-diff     Report automations added/removed/edited/disabled since
+                        the last snapshot (change memory across sessions).
+    snapshot-states     Capture entity states to a named artifact for later
+                        restore.
+    restore-states      Restore captured entity states via scene.apply
+                        (gated by ha_safety_mode).
 
 options:
   -h, --help            show this help message and exit`;
@@ -411,6 +422,31 @@ const LEAF_SPECS: Record<string, LeafSpec> = {
     usage: 'usage: ha_agent_lab ha get-script-config [-h] id',
     positionals: ['id'],
     flags: {},
+  },
+  'ha automation-diff': {
+    prog: 'ha_agent_lab ha automation-diff',
+    usage: 'usage: ha_agent_lab ha automation-diff [-h]',
+    positionals: [],
+    flags: {},
+  },
+  'ha snapshot-states': {
+    prog: 'ha_agent_lab ha snapshot-states',
+    usage:
+      'usage: ha_agent_lab ha snapshot-states [-h] [--name NAME]\n' +
+      '                                       [--domains DOMAINS]\n' +
+      '                                       [--entities ENTITY [ENTITY ...]]',
+    positionals: [],
+    flags: {
+      '--name': { kind: 'value' },
+      '--domains': { kind: 'value' },
+      '--entities': { kind: 'plus' },
+    },
+  },
+  'ha restore-states': {
+    prog: 'ha_agent_lab ha restore-states',
+    usage: 'usage: ha_agent_lab ha restore-states [-h] [--confirm] artifact',
+    positionals: ['artifact'],
+    flags: { '--confirm': { kind: 'store_true' } },
   },
 };
 
@@ -675,6 +711,80 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
           { ensureAscii: false },
         ),
       );
+      return result.ok ? 0 : 1;
+    } catch (exc) {
+      if (!(exc instanceof HomeAssistantError)) throw exc;
+      console.log(exc.message);
+      return 1;
+    }
+  }
+
+  if (args.command === 'ha' && args.sub === 'automation-diff') {
+    try {
+      const client = await deps.createClient(config);
+      const result = await automationDiff(root, client);
+      console.log(formatAutomationDiff(result));
+      return 0;
+    } catch (exc) {
+      if (!(exc instanceof HomeAssistantError)) throw exc;
+      console.log(exc.message);
+      return 1;
+    }
+  }
+
+  if (args.command === 'ha' && args.sub === 'snapshot-states') {
+    try {
+      const client = await deps.createClient(config);
+      const domainsFlag = args.flags['--domains'] as string | undefined;
+      const entities = args.flags['--entities'] as string[] | undefined;
+      const result = await captureStates(root, client, {
+        name: (args.flags['--name'] as string | undefined) ?? 'snapshot',
+        domains: domainsFlag
+          ? domainsFlag.split(',').map((d) => d.trim()).filter(Boolean)
+          : DEFAULT_DOMAINS,
+        entities,
+      });
+      console.log(
+        jsonDumps(
+          {
+            ok: result.ok,
+            name: result.name,
+            captured: result.captured,
+            entities: result.entities,
+            report_path: relative(root, result.reportPath),
+            message: result.message,
+          },
+          { ensureAscii: false },
+        ),
+      );
+      return result.ok ? 0 : 1;
+    } catch (exc) {
+      if (!(exc instanceof HomeAssistantError)) throw exc;
+      console.log(exc.message);
+      return 1;
+    }
+  }
+
+  if (args.command === 'ha' && args.sub === 'restore-states') {
+    try {
+      const client = await deps.createClient(config);
+      const result = await restoreStates(root, client, {
+        artifactPath: resolve(args.positionals[0]!),
+        confirm: Boolean(args.flags['--confirm']),
+      });
+      const payload: Record<string, unknown> = {
+        ok: result.ok,
+        blocked: result.blocked,
+        needs_confirm: result.needsConfirm,
+        applied: result.applied,
+        entities: result.entities,
+        sensitive: result.sensitive,
+        reason: result.reason,
+        message: result.message,
+      };
+      if (result.suggestion) payload.suggestion = result.suggestion;
+      if (result.reportPath) payload.report_path = relative(root, result.reportPath);
+      console.log(jsonDumps(payload, { ensureAscii: false }));
       return result.ok ? 0 : 1;
     } catch (exc) {
       if (!(exc instanceof HomeAssistantError)) throw exc;

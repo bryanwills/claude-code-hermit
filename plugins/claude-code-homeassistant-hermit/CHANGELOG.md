@@ -2,6 +2,14 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **ha automation-diff** — change memory across sessions: reports automations added/removed/edited/enabled/disabled since the last snapshot, including UI edits that bypass the plugin. Read-only; complements `ha-safety-audit` (policy drift vs. change drift). (#472)
+- **ha snapshot-states / ha restore-states** — capture an entity set's state to a named artifact and restore it via `scene.apply`. Restore is the plugin's first device-actuation path, gated by the existing `ha_safety_mode` policy: sensitive entities block under strict and require `--confirm` under ask. (#472)
+- **skills: ha-automation-diff, ha-snapshot-restore** — thin wrappers over the new CLI subcommands.
+
 ## [0.2.3] - 2026-06-24
 
 ### Fixed
