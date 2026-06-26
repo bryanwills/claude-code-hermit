@@ -52,7 +52,7 @@ MCP tool IDs follow the pattern `mcp__homeassistant__*`. The `homeassistant` nam
 ```
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha refresh-context [--incremental]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha simulate <artifact>
-${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact> [--reload automation|script]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact> [--reload automation|script|scene]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha policy-check <entity_id_or_yaml>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha audit-automations
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha audit-scripts
@@ -65,6 +65,20 @@ ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha get-script-config <id>
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha integration-health
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha fetch-history [--window-days N] [--entities <glob> …] [--include-transitions]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha probe <path>
+# WebSocket-backed structural commands (helpers, areas, registries). Writes are gated by ha_safety_mode.
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha list-helpers [--type <helper_type>]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha create-helper <type> <json> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha delete-helper <type> <id> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha list-areas
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha create-area <name> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha delete-area <id> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha list-entities --registry
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha rename-entity <entity_id> --name <name> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha set-entity-area <entity_id> --area <area_id> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha set-entity-enabled <entity_id> --enabled true|false [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha list-devices
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha set-device-area <device_id> --area <area_id> [--confirm]
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha rename-device <device_id> --name <name> [--confirm]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status [--probe]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot store --language <locale> --url <url> [--token <token>]
 bun test
@@ -83,7 +97,14 @@ Before changing HA endpoint usage, verify against upstream (WebFetch or the `fin
 - `POST /api/config/{automation|script}/config/{id}` — create/update (upsert). URL `id` is sufficient; body `id` field is ignored by HA. Returns `{"result":"ok"}` on success. Returns 403 if HA is in YAML config mode (REST config API unavailable).
 - `DELETE /api/config/{automation|script}/config/{id}` — remove config. **A missing id returns 400** (not 404) with `{"message":"Resource not found"}` — do not special-case 404. All HA error responses carry `{"message":"..."}` — surface it verbatim.
 - After `POST`, `GET` reflects the change synchronously (verified against HA 2026.x). No retry or delay needed for verify calls.
-- `--reload {automation|script}` in `ha validate-apply` is overloaded: it controls both the REST push endpoint and the reload service call. There is no push-only mode; add `--no-reload` if that use case arises.
+- `--reload {automation|script|scene}` in `ha validate-apply` is overloaded: it controls both the REST push endpoint and the reload service call. There is no push-only mode; add `--no-reload` if that use case arises. Scenes use the same REST config API (`/api/config/scene/config/{id}`) and `scene.reload` service as automation/script — no special path.
+
+### WebSocket commands (`src/ha-ws.ts` + `src/structure.ts`)
+
+- Helpers, areas, and entity/device registries have **no REST endpoint** — they are reachable only over `wss://<host>/api/websocket`. `HomeAssistantWsClient` opens a single-shot connection per CLI invocation (auth handshake → commands → close), reusing the same URL selection and token as the REST client.
+- Command types: helpers `<type>/create|list|delete` (8 types: `input_boolean|input_number|input_text|input_select|input_datetime|timer|counter|schedule`); areas `config/area_registry/create|list|delete`; registries `config/entity_registry/list|update` and `config/device_registry/list|update`.
+- **Confirm the exact command `type` and payload fields against a live instance before relying on them** (the docs index documents only the auth/result envelope). Probe pattern: run the new commands against a real HA and read the responses.
+- **All WS mutations are gated by `ha_safety_mode`** (`gateStructuralMutation` in `policy.ts`). Reads are never gated. Under `strict` (default) a mutation is refused (`blocked: true`) — surface it as a proposal. Under `ask` it requires `--confirm`, which the main session passes after prompting the operator (the CLI is non-interactive). Every mutation writes an audit report to `.claude-code-hermit/raw/` (`audit-ha-ws-*`).
 
 ## Development constraints
 
