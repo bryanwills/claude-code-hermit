@@ -702,6 +702,11 @@ describe('kill metrics contract', () => {
     expect(proposalTemplate).toContain('## Verification');
   });
 
+  test('PROPOSAL.md.template must carry a References section', () => {
+    // missing → proposal-create has no header to fill backward-looking sources into
+    expect(proposalTemplate).toContain('## References');
+  });
+
   test('proposal-create triage-verdict event must include evidence_source', () => {
     // missing → triage-survival rate cannot be segmented by brainstorm origin
     expect(proposalCreate).toContain(
