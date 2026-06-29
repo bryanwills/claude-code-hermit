@@ -44,7 +44,6 @@ Just Claude Code and everything is yours to shape: channels (Discord/Telegram), 
 - **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget at session start. `/recall` searches both.
 - **Task snapshots** persist native `Tasks` past session end, so the plan survives archives.
 - **Profile-gated guardrails** scope `deny patterns + sandbox` per profile, locking the unattended agent down harder than the one you're watching.
-- **One runtime.** Everything is TypeScript running on [Bun](https://bun.sh) — zero npm packages, zero Python, across the whole fleet. Install Bun, done.
 
 **Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, and clears stale context after a midnight close — recovery never depends on the session being conscious.
 
