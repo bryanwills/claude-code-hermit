@@ -68,6 +68,8 @@ ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha restore-states <artifact> [--confirm]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha integration-health
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha fetch-history [--window-days N] [--entities <glob> …] [--include-transitions]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha probe <path>
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha render-template <file|->
+${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha check-config
 # WebSocket-backed structural commands (helpers, areas, registries). Writes are gated by ha_safety_mode.
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha list-helpers [--type <helper_type>]
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha create-helper <type> <json> [--confirm]
@@ -107,6 +109,7 @@ Before changing HA endpoint usage, verify against upstream (WebFetch or the `fin
 - `DELETE /api/config/{automation|script}/config/{id}` — remove config. **A missing id returns 400** (not 404) with `{"message":"Resource not found"}` — do not special-case 404. All HA error responses carry `{"message":"..."}` — surface it verbatim.
 - After `POST`, `GET` reflects the change synchronously (verified against HA 2026.x). No retry or delay needed for verify calls.
 - `--reload {automation|script|scene}` in `ha validate-apply` is overloaded: it controls both the REST push endpoint and the reload service call. There is no push-only mode; add `--no-reload` if that use case arises. Scenes use the same REST config API (`/api/config/scene/config/{id}`) and `scene.reload` service as automation/script — no special path.
+- `POST /api/template` returns the rendered template as a **raw plain-text body**, not JSON (confirmed against HA core source and live) — `client.post()`'s unconditional `JSON.parse` would throw `Malformed JSON` on any non-JSON-looking render (e.g. `idle`). Use `client.postText()` (raw-response variant) for this and any other endpoint that returns plain text, like `/api/error_log` (a `getText()` GET counterpart will be needed when that command lands).
 
 ### WebSocket commands (`src/ha-ws.ts` + `src/structure.ts`)
 

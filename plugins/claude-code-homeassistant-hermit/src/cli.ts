@@ -17,7 +17,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
-import { readConfig, removeConfig, validateAndApply } from './apply';
+import { isConfigCheckOk, readConfig, removeConfig, validateAndApply } from './apply';
 import {
   currentSessionId,
   standardMetadata,
@@ -108,6 +108,7 @@ export interface CliClient {
   get(path: string): Promise<any>;
   post(path: string, payload?: Record<string, unknown> | null): Promise<any>;
   delete(path: string): Promise<any>;
+  postText(path: string, payload?: Record<string, unknown> | null): Promise<string>;
   callService(domain: string, service: string, data: Record<string, unknown>): Promise<any>;
   getStates(): Promise<Array<Record<string, any>>>;
   getHistory(
@@ -182,6 +183,8 @@ const HA_COMMANDS = [
   'apply-dashboard',
   'create-dashboard',
   'delete-dashboard',
+  'render-template',
+  'check-config',
   'trigger-automation',
 ] as const;
 const HA_USAGE = [
@@ -255,6 +258,11 @@ positional arguments:
     create-dashboard    Create a dashboard from JSON via WebSocket (gated
                         write).
     delete-dashboard    Delete a dashboard by id via WebSocket (gated write).
+    render-template     Render a Jinja2 template against live state
+                        (POST /api/template). Not gated (read-only against
+                        HA's template engine).
+    check-config        Validate the HA configuration
+                        (POST /api/config/core/check_config). Not gated.
     trigger-automation  Fire an automation by entity_id via automation.trigger.
 
 options:
@@ -626,6 +634,18 @@ const LEAF_SPECS: Record<string, LeafSpec> = {
     usage: 'usage: ha_agent_lab ha delete-dashboard [-h] [--confirm] dashboard_id',
     positionals: ['dashboard_id'],
     flags: { '--confirm': { kind: 'store_true' } },
+  },
+  'ha render-template': {
+    prog: 'ha_agent_lab ha render-template',
+    usage: 'usage: ha_agent_lab ha render-template [-h] template',
+    positionals: ['template'],
+    flags: {},
+  },
+  'ha check-config': {
+    prog: 'ha_agent_lab ha check-config',
+    usage: 'usage: ha_agent_lab ha check-config [-h]',
+    positionals: [],
+    flags: {},
   },
   'ha trigger-automation': {
     prog: 'ha_agent_lab ha trigger-automation',
@@ -1075,6 +1095,34 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
     return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
       deleteDashboard(root, ws, args.positionals[0]!),
     );
+  }
+
+  if (args.command === 'ha' && args.sub === 'render-template') {
+    try {
+      const client = await deps.createClient(config);
+      const source = args.positionals[0]!;
+      const template = source === '-' ? await Bun.stdin.text() : readFileSync(resolve(source), 'utf8');
+      const rendered = await client.postText('/api/template', { template });
+      console.log(rendered);
+      return 0;
+    } catch (exc) {
+      if (!(exc instanceof HomeAssistantError)) throw exc;
+      console.log(exc.message);
+      return 1;
+    }
+  }
+
+  if (args.command === 'ha' && args.sub === 'check-config') {
+    try {
+      const client = await deps.createClient(config);
+      const result = await client.post('/api/config/core/check_config');
+      console.log(jsonDumps(result, { ensureAscii: false }));
+      return isConfigCheckOk(result) ? 0 : 1;
+    } catch (exc) {
+      if (!(exc instanceof HomeAssistantError)) throw exc;
+      console.log(exc.message);
+      return 1;
+    }
   }
 
   if (args.command === 'ha' && args.sub === 'trigger-automation') {
