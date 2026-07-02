@@ -410,20 +410,32 @@ function main(source: string | null) {
 }
 
 if (import.meta.main) {
+  // main() must run exactly once. It runs when stdin reaches EOF (the normal hook
+  // path, carrying the `source` field) — but if stdin never closes (TTY, unpiped
+  // invocation, a held-open pipe), a short fallback still emits the source-less
+  // startup context rather than silently injecting nothing at all.
+  let ran = false;
+  const runOnce = (source: string | null): void => {
+    if (ran) return;
+    ran = true;
+    try { main(source); } catch { /* fail-open */ }
+  };
   try {
     let buf = '';
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', chunk => { buf += chunk; });
     process.stdin.on('error', () => {});
+    const fallback = setTimeout(() => runOnce(null), 2000);
     process.stdin.on('end', () => {
+      clearTimeout(fallback); // normal path — no need to wait out the fallback
       let source: string | null = null;
       try {
         const payload = JSON.parse(buf);
         if (payload && typeof payload.source === 'string') source = payload.source;
       } catch { /* empty/non-JSON stdin — treat as unknown source */ }
-      try { main(source); } catch { /* fail-open */ }
+      runOnce(source);
     });
   } catch {
-    try { main(null); } catch { /* fail-open */ }
+    runOnce(null);
   }
 }

@@ -478,14 +478,21 @@ function maybeContextCompact(config: Json): void {
   const sessionName = passesLifecycleGuards(runtime);
   if (!sessionName) return;
 
-  // Boundary marker: consumed every qualifying tick regardless of outcome — a stale
-  // or already-acted-on marker must never linger to influence a later tick/arc.
+  // Boundary marker: a fresh marker keeps its interval-cooldown waiver until the
+  // compact it enables actually fires (deleted in the success block below). The
+  // two-tick quiescence gate lands a full tick after this read, so a fresh marker
+  // consumed here would be gone before the pane is confirmed stable — wasting the
+  // waiver in exactly the interval-cooldown case it exists for. A stale marker is
+  // consumed on read so it can never linger into a later tick/arc.
   let boundaryWaive = false;
   const marker = readJson(COMPACT_REQUESTED_JSON);
   if (marker && typeof marker.requested_at === 'string') {
     const markerAge = ageSecs(marker.requested_at);
-    if (markerAge !== null && markerAge <= COMPACT_MARKER_TTL_SECS) boundaryWaive = true;
-    try { fs.rmSync(COMPACT_REQUESTED_JSON); } catch {}
+    if (markerAge !== null && markerAge <= COMPACT_MARKER_TTL_SECS) {
+      boundaryWaive = true; // fresh — leave on disk until the compact fires or it goes stale
+    } else {
+      try { fs.rmSync(COMPACT_REQUESTED_JSON); } catch {} // stale — never let it linger
+    }
   }
 
   // Midnight-adjacency suppression: the post-close /clear wipes context for free
@@ -541,6 +548,7 @@ function maybeContextCompact(config: Json): void {
     watchdogState.last_compacted_at = utcStamp();
     watchdogState.last_pane_hash_compact = null; // reset so next bloat cycle re-arms
     writeWatchdogState(watchdogState);
+    try { fs.rmSync(COMPACT_REQUESTED_JSON); } catch {} // consume the boundary waiver now that it fired
     // Prompt-token count travels in the event so the next cost-log entry gives a
     // before/after for free — feeds /hermit-evolution and threshold calibration.
     appendEvent('context-compact', `prompt tokens ${prompt} over threshold ${threshold}`);

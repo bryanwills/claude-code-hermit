@@ -1069,8 +1069,10 @@ test('context_compact: boundary marker waives min_interval but not the 60k floor
     const r = await watchdog(h, 'run');
     expect(r.exitCode).toBe(0);
     expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
-    // Marker is consumed on the qualifying read regardless of whether compaction fires.
-    expect(fs.existsSync(state(h, 'compact-requested.json'))).toBe(false);
+    // A fresh marker is preserved (not wasted) when the floor blocks the compact —
+    // it keeps its interval-cooldown waiver until the compact it enables actually
+    // fires or it goes stale. Consuming it here would drop the waiver a tick early.
+    expect(fs.existsSync(state(h, 'compact-requested.json'))).toBe(true);
   }));
 
 test('context_compact: min_interval suppresses a second compact inside the window (no marker)',
@@ -1121,6 +1123,41 @@ test('context_compact: fresh boundary marker waives min_interval and fires again
     const events = fs.readFileSync(eventsFile(h), 'utf-8').split('\n').filter(l => l.includes('context-compact'));
     expect(events.length).toBe(2);
     expect(fs.existsSync(state(h, 'compact-requested.json'))).toBe(false); // consumed
+  }));
+
+test('context_compact: fresh boundary marker survives the two-tick quiescence wait under an active interval cooldown',
+  withHermit(async (h) => {
+    // Regression: the marker used to be consumed on read (tick 1), a full tick before
+    // the quiescence gate confirms the pane is stable (tick 2) — so under an active
+    // interval cooldown the waiver was gone by the time the compact could fire, and
+    // the compact the boundary requested never happened. The hash is deliberately NOT
+    // pre-primed here, mirroring a real boundary where work just churned the pane.
+    writeContextCompactConfig(h, { minContextTokens: 150000, minInterval: '4h' });
+    writeAlwaysOnRuntime(h, 'idle');
+    // Interval cooldown active: compacted 1h ago, on a *different* cost entry so
+    // idempotence isn't the blocker — this isolates min_interval as the thing the
+    // marker must waive.
+    fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+      last_compacted_at: new Date(Date.now() - 3600_000).toISOString(),
+      last_compacted_cost_ts: 'earlier-entry',
+    }) + '\n');
+    const ts = new Date().toISOString();
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000, timestamp: ts }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+    writeCompactMarker(h); // fresh marker, hash not pre-primed
+
+    const r1 = await watchdog(h, 'run'); // tick 1: records hash, not yet stable → no compact, marker preserved
+    expect(r1.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    expect(fs.existsSync(state(h, 'compact-requested.json'))).toBe(true); // waiver survives to the next tick
+
+    const r2 = await watchdog(h, 'run'); // tick 2: pane stable, marker still waives the cooldown → fires
+    expect(r2.exitCode).toBe(0);
+    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
+    expect(tmuxLog).toContain('/compact');
+    expect(fs.existsSync(state(h, 'compact-requested.json'))).toBe(false); // consumed on fire
   }));
 
 describe('isNearDailyAutoClose (midnight-adjacency, unit)', () => {
