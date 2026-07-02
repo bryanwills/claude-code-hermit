@@ -36,6 +36,15 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 Operators who don't want the merged behavior can keep using the old natural-language triggers — `status`/`progress` reach `brief`; `what's stuck`/`recent learnings` reach `hermit-health`; `check knowledge` reaches `hermit-health`.
 ### Added
 - **contract tests: version-triad and marketplace sync** — the sibling manifest walk in `hooks.contract.test.ts` now also asserts each domain plugin's `plugin.json` `dependencies[claude-code-hermit]` base version matches its `hermit-meta.json` `required_core_version`, and a new test enforces `marketplace.json` ↔ `plugin.json` name/version parity in both directions. Runs under `test-hooks.yml`.
+### Changed
+- **CLAUDE-APPEND slimmed 10.6KB → ~6.8KB** — the operator-notification branch matrix moved to `channel-responder` § Outbound notification protocol, watch-authoring rules to the `watch` skill, and knowledge-storage detail to `docs/plugin-hermit-storage.md`. The block is re-paid on every session load and every subagent dispatch, so this cuts recurring context cost across the fleet. Load-bearing anchors and the `resolve-outbound-channel.ts` invocation are retained (guarded by `tests/claude-append-budget.test.ts`).
+- **Six verbose skill descriptions trimmed** — hermit-doctor, cost-reflect, hermit-health, docker-security, capability-brainstorm, hermit-evolution dropped inline check/trigger enumerations. Every distinctive trigger phrase was preserved, so auto-invocation recall is unchanged.
+
+### Fixed
+- **heartbeat: default proposal-scan item now matches the real status vocabulary** — the eval spec scanned `status: pending`, but proposals are written `status: proposed`, so the default checklist item could never fire and the 6h clean-recheck damper was the only thing capping wasted heartbeat dispatches.
+
+### Upgrade Instructions
+- No manual steps. The CLAUDE-APPEND block in `CLAUDE.md`/`CLAUDE.local.md` is replaced automatically by Step 6 of this evolve run; if you customized text inside the hermit-managed block, re-apply it afterward (the replaced block is shown in the evolve report). `HEARTBEAT.md` is not touched.
 
 ## [1.2.14] - 2026-07-02
 
