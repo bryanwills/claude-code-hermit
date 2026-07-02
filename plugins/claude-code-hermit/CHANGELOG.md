@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **channel-log: episodic DM capture (PROP-010)** — hook-level capture of Discord/Telegram DM text into `state/channel-log.sqlite` (FTS5), gated by the existing operator allowlist and `knowledge.channel_log_enabled`. Feature-detected: inert until a channel delivers a message.
+- **recall: channel log as a fourth source** — `/recall` and `search.ts` now search past DM text alongside sessions/compiled/proposals, labelled `[channel]` and flagged as untrusted external input.
+- **weekly-review: channel-log consolidation step** — distills durable decisions from the week's DM log into memory/compiled via a read-only skill-eval-runner dispatch; prunes only already-consolidated rows past `knowledge.channel_log_retention_days`.
+
 ## [1.2.13] - 2026-06-29
 
 ### Added

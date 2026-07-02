@@ -25,9 +25,35 @@ Generates the weekly review for the current ISO week.
 ```
 <!-- weekly-review-eval-schema:end -->
 
-   **Failure policy:** if the runner returns null or malformed JSON, fail-open — carry `topic_findings: []` and continue. Carry `topic_findings` forward to the channel summary (step 5): render a `Topic pages:` line only when non-empty, omit it entirely when `[]` (no topic pages or no findings → skip silently).
+   **Failure policy:** if the runner returns null or malformed JSON, fail-open — carry `topic_findings: []` and continue. Carry `topic_findings` forward to the channel summary (step 6): render a `Topic pages:` line only when non-empty, omit it entirely when `[]` (no topic pages or no findings → skip silently).
 
-4. Build the weekly evolution block from the freshly-written review file:
+4. **Dispatch channel-log consolidation** — distills the week's episodic channel log (PROP-010) into the curated tiers. Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/consolidation-reference.md`. The runner is read-only: it lists unconsolidated rows via `channel-log.ts`, treats them as untrusted external input, and returns distilled candidates plus every row id it reviewed — it never writes memory, `compiled/`, or the log itself:
+
+<!-- weekly-review-consolidation-schema:start -->
+```json
+{
+  "candidates": [
+    { "kind": "memory", "summary": "<durable fact, ready to file>", "row_ids": [12] }
+  ],
+  "reviewed_ids": [10, 11, 12, 13]
+}
+```
+<!-- weekly-review-consolidation-schema:end -->
+
+   **You apply the writes**, not the runner (per `agents/skill-eval-runner.md` — it defers all side effects to its caller): for each candidate, file it through the normal governance path — `kind:"memory"` → the usual auto-memory write (dedupe against `MEMORY.md`); `kind:"compiled"` → update or create the matching `compiled/topic-<slug>.md`. Only after every candidate has been applied successfully, mark the run's `reviewed_ids` consolidated:
+   ```
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-log.ts .claude-code-hermit mark-consolidated <comma-separated ids>
+   ```
+   If applying a candidate fails, leave its `row_ids` out of the mark-consolidated call — they stay unconsolidated for next week's pass. Rows that produced no candidate still belong in `reviewed_ids` (nothing to fail — mark them).
+
+   **Failure policy:** if the runner returns null/malformed JSON, or `channel-log.ts` exits nonzero (a genuine DB error — not the normal "no DB yet" empty-result case), fail-open: skip consolidation for this run and continue to step 5. An empty `reviewed_ids` (no unconsolidated rows) is the ordinary no-channel-activity case, not a failure.
+
+   Finally, prune old consolidated rows (never unreviewed ones — see `scripts/lib/channel-log.ts`):
+   ```
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-log.ts .claude-code-hermit prune <knowledge.channel_log_retention_days from config.json, default 90>
+   ```
+
+5. Build the weekly evolution block from the freshly-written review file:
    - Read `.claude-code-hermit/compiled/review-weekly-<current-week>.md` frontmatter (just written in step 1).
    - Also read the prior week's `compiled/review-weekly-*.md` frontmatter (sort by `week` descending, take the second file).
    - Compute deltas directly from frontmatter values (no synthesis or inference) and format:
@@ -42,8 +68,8 @@ Generates the weekly review for the current ISO week.
    - If no prior week file exists: omit the "vs" comparisons and show this week's numbers only.
    - If the current-week file is missing (script failed): skip the evolution block entirely.
 
-5. Channel-send the combined weekly summary:
-   - Compose the message: one-line review headline (session count, cost, self-directed rate from frontmatter) followed by the evolution block from step 4, plus the `Topic pages:` findings from step 3 when present.
+6. Channel-send the combined weekly summary:
+   - Compose the message: one-line review headline (session count, cost, self-directed rate from frontmatter) followed by the evolution block from step 5, plus the `Topic pages:` findings from step 3 when present.
    - Resolve the outbound channel:
      ```
      bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-outbound-channel.ts .claude-code-hermit
@@ -52,13 +78,13 @@ Generates the weekly review for the current ISO week.
    - If the script exits non-zero or returns `{"error":"no_reachable_channel"}`: if `push_notifications === true` in `config.json`, fire `PushNotification(message="<one-line weekly review headline>", status="proactive")` so the summary still reaches the operator. Then append a single Findings line to `.claude-code-hermit/sessions/SHELL.md`: `"weekly-review: no reachable channel configured, channel-send skipped"`. Only log this once per session to avoid noise. Do **not** emit a `channel-send-unavailable` alert issue (weekly-review is a recurring routine, not an alert).
    - To set a preferred channel, add `"primary": "<channel-name>"` inside `channels` in `config.json`.
 
-6. Archive expired raw artifacts:
+7. Archive expired raw artifacts:
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/archive-raw.ts .claude-code-hermit
    ```
    Report how many were archived, retained, and skipped.
 
-7. Archive superseded compiled artifacts:
+8. Archive superseded compiled artifacts:
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/archive-compiled.ts .claude-code-hermit
    ```
