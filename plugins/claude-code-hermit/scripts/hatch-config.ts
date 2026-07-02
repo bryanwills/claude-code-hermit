@@ -128,7 +128,7 @@ function timeToCron(hhmm: string): string {
 if (Object.hasOwn(answers, 'routines')) {
   const routinesAnswer = answers.routines || {};
   config.routines = Array.isArray(config.routines) ? config.routines : [];
-  config.routines = config.routines.filter((r: Json) => r.id !== 'morning' && r.id !== 'evening');
+  config.routines = config.routines.filter((r: Json) => r?.id !== 'morning' && r?.id !== 'evening');
   if (routinesAnswer.enabled) {
     if (routinesAnswer.morning_time) {
       config.routines.push({
@@ -155,7 +155,16 @@ function stampIfAbsent(key: string, version: string): void {
 
 stampIfAbsent('claude-code-hermit', coreVersion);
 if (Object.hasOwn(answers, 'activated_hermit') && answers.activated_hermit) {
-  stampIfAbsent(answers.activated_hermit.slug, answers.activated_hermit.version);
+  // slug/version are hand-built by the model from detected_hermits + the sibling's
+  // plugin.json — refuse a malformed pair rather than stamp `_hermit_versions["undefined"]`
+  // (which evolve-plan.ts would then treat as a real sibling) or an undefined value
+  // (which JSON.stringify silently drops, desyncing the written file from validate()).
+  const { slug, version } = answers.activated_hermit;
+  if (typeof slug !== 'string' || !slug) die('activated_hermit.slug must be a non-empty string');
+  if (typeof version !== 'string' || !version) {
+    die(`activated_hermit.version must be a non-empty string (slug "${slug}")`);
+  }
+  stampIfAbsent(slug, version);
 }
 
 // --- boot_skill: only touched when a hermit was (re)activated this run ---
@@ -164,8 +173,9 @@ if (Object.hasOwn(answers, 'activated_hermit')) {
 }
 
 // --- scheduled_checks: reconcile core-owned ids, preserve custom/domain entries ---
-// Canonical mapping — mirrors hatch/SKILL.md Phase 4 (also listed at SKILL.md:178/222;
-// update all three when a new scheduled-check-contributing plugin is added).
+// Canonical mapping — mirrors hatch/SKILL.md Phase 4 and its answers-payload note
+// (the two `scheduled_checks` blocks in hatch/SKILL.md); update both there when a new
+// scheduled-check-contributing plugin is added.
 const SCHEDULED_CHECK_MAP: Record<string, Json[]> = {
   'claude-code-setup': [
     {
@@ -192,23 +202,29 @@ const CORE_OWNED_SCHEDULED_CHECK_IDS = new Set(
 );
 
 if (Object.hasOwn(answers, 'scheduled_checks_plugins')) {
+  const selected = answers.scheduled_checks_plugins;
+  if (!Array.isArray(selected)) die('scheduled_checks_plugins must be an array');
   config.scheduled_checks = Array.isArray(config.scheduled_checks) ? config.scheduled_checks : [];
   // Drop any existing core-owned entries, then re-add per the (possibly changed)
   // selection — this reconciles additions/removals while leaving any custom/domain
   // entry (an id outside CORE_OWNED_SCHEDULED_CHECK_IDS) untouched.
   config.scheduled_checks = config.scheduled_checks.filter(
-    (c: Json) => !CORE_OWNED_SCHEDULED_CHECK_IDS.has(c.id),
+    (c: Json) => !CORE_OWNED_SCHEDULED_CHECK_IDS.has(c?.id),
   );
-  for (const plugin of answers.scheduled_checks_plugins as string[]) {
-    const entries = SCHEDULED_CHECK_MAP[plugin];
+  // dedup the selection so a repeated plugin can't push duplicate check ids
+  for (const plugin of new Set(selected)) {
+    const entries = SCHEDULED_CHECK_MAP[plugin as string];
     if (entries) config.scheduled_checks.push(...entries);
   }
 }
 
 // --- channels: field-level merge, preserve learned/unknown state on re-init ---
 if (Object.hasOwn(answers, 'channels')) {
+  const answerChannels = answers.channels;
+  if (!answerChannels || typeof answerChannels !== 'object') die('channels must be an object');
   config.channels = config.channels && typeof config.channels === 'object' ? config.channels : {};
-  for (const [name, ans] of Object.entries<Json>(answers.channels)) {
+  for (const [name, ansRaw] of Object.entries<Json>(answerChannels)) {
+    const ans = ansRaw && typeof ansRaw === 'object' ? ansRaw : {};
     const existing = config.channels[name] && typeof config.channels[name] === 'object' ? config.channels[name] : {};
     const merged: Json = { ...existing };
     if (Object.hasOwn(ans, 'enabled')) merged.enabled = ans.enabled;
@@ -216,8 +232,12 @@ if (Object.hasOwn(answers, 'channels')) {
     if (!Object.hasOwn(merged, 'dm_channel_id')) merged.dm_channel_id = null;
     if (!Object.hasOwn(merged, 'state_dir')) merged.state_dir = `.claude.local/channels/${name}`;
     if (Object.hasOwn(ans, 'allowed_users')) merged.allowed_users = ans.allowed_users;
+    // morning_brief is a two-way switch: a time enables it, an explicit null/empty
+    // time disables it (so re-init can turn off a brief the operator previously set).
     if (Object.hasOwn(ans, 'morning_brief_time')) {
-      merged.morning_brief = { enabled: true, time: ans.morning_brief_time };
+      merged.morning_brief = ans.morning_brief_time
+        ? { enabled: true, time: ans.morning_brief_time }
+        : { enabled: false };
     }
     config.channels[name] = merged;
   }

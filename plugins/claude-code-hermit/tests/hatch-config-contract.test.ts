@@ -233,4 +233,66 @@ describe('hatch-config.ts', () => {
     expect(r.exitCode).not.toBe(0);
     expect(fs.readFileSync(path.join(hermit, 'config.json'), 'utf8')).toBe(malformed);
   });
+
+  test('malformed activated_hermit (missing slug or version) is refused, no file written', async () => {
+    for (const activated_hermit of [
+      { version: '1.2.3' },                       // missing slug
+      { slug: 'x' },                              // missing version
+      { slug: '', version: '1.2.3' },             // empty slug
+      { slug: 'x', version: 42 },                 // non-string version
+    ]) {
+      const dir = freshDir();
+      const r = await runHatchConfig(dir, { project_name: 'x', activated_hermit });
+      expect(r.exitCode).not.toBe(0);
+      expect(fs.existsSync(configPathFor(dir))).toBe(false);
+    }
+  });
+
+  test('null channels / scheduled_checks_plugins payloads are refused cleanly, not crashed', async () => {
+    for (const answers of [
+      { project_name: 'x', channels: null },
+      { project_name: 'x', scheduled_checks_plugins: null },
+    ]) {
+      const dir = freshDir();
+      const r = await runHatchConfig(dir, answers);
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stderr).toContain('hatch-config:');
+      expect(fs.existsSync(configPathFor(dir))).toBe(false);
+    }
+  });
+
+  test('a null per-channel entry is tolerated (treated as empty)', async () => {
+    const dir = freshDir();
+    const r = await runHatchConfig(dir, { project_name: 'x', channels: { discord: null } });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+    expect(out.channels.discord.enabled).toBe(true);
+    expect(out.channels.discord.state_dir).toBe('.claude.local/channels/discord');
+  });
+
+  test('re-init: morning_brief_time=null disables an existing morning brief', async () => {
+    const dir = freshDir();
+    const seed = {
+      ...JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8')),
+      channels: { discord: { enabled: true, dm_channel_id: 'D1', state_dir: '.claude.local/channels/discord', morning_brief: { enabled: true, time: '07:00' } } },
+    };
+    seedConfig(dir, seed);
+    const r = await runHatchConfig(dir, { channels: { discord: { morning_brief_time: null } } }, true);
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+    expect(out.channels.discord.morning_brief).toEqual({ enabled: false });
+    expect(out.channels.discord.dm_channel_id).toBe('D1');
+  });
+
+  test('duplicate plugin in scheduled_checks_plugins does not produce duplicate check ids', async () => {
+    const dir = freshDir();
+    const r = await runHatchConfig(dir, {
+      project_name: 'x',
+      scheduled_checks_plugins: ['claude-md-management', 'claude-md-management'],
+    });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+    const ids = out.scheduled_checks.map((c: any) => c.id).sort();
+    expect(ids).toEqual(['md-audit', 'md-revise']);
+  });
 });
