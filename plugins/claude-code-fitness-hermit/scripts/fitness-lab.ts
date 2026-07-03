@@ -56,17 +56,18 @@ export const THRESHOLDS = {
   // activity-deep-dive §5 — cardiac drift
   CARDIAC_DRIFT_WINDOW_PCT: 0.2, // first/last 20% of the HR stream
   CARDIAC_DRIFT_FLAG_BPM: 10, // drift > 10 bpm → flag
+  CARDIAC_DRIFT_PACE_TOLERANCE_SEC: 15, // flag only when first/last-20% pace within ±15 sec/km
   // activity-deep-dive §5 — GAP estimate
   GAP_ELEV_COEFF: 0.008, // equiv_flat_km = dist_km + 0.008 × elev_gain_m
   // activity-deep-dive §5 — recovery estimate (1–5) band boundaries
   // Read as: band = max across three ladders (Z3+% , Z4+% , duration).
   RECOVERY_Z3_PLUS_MODERATE_PCT: 5, // ≥5 → band 2
   RECOVERY_Z3_PLUS_QUALITY_PCT: 20, // ≥20 → band 3
-  RECOVERY_Z3_PLUS_HARD_PCT: 50, // ≥50 → band 4
+  RECOVERY_Z3_PLUS_HARD_PCT: 50, // >50 → band 4 (exactly 50 stays band 3, per "20–50% Z3")
   RECOVERY_Z4_PLUS_QUALITY_PCT: 0, // >0 (any Z4) → band 3
   RECOVERY_Z4_PLUS_HARD_PCT: 10, // >10 → band 4
   RECOVERY_Z4_PLUS_RACE_PCT: 20, // >20 → band 5
-  RECOVERY_HARD_DURATION_MIN: 90, // >90 min → floors to band 4
+  RECOVERY_HARD_DURATION_MIN: 90, // >90 min AND already hard (intensity band ≥3) → band 4; else → band 2
   RECOVERY_WINDOW_HOURS: { 1: 24, 2: 36, 3: 48, 4: 72, 5: null } as Record<number, number | null>,
   // activity-deep-dive §5 — trail recovery extension (elev_gain_per_km)
   TRAIL_RECOVERY_EXT_LOW_ELEV: 15, // <15 → no extension
@@ -322,15 +323,32 @@ export function efficiency(
   };
 }
 
-/** Cardiac drift (activity-deep-dive §5): last-20% avg − first-20% avg, signed. */
-export function cardiacDrift(hrData: number[]): { drift_bpm: number; flagged: boolean } | null {
+/**
+ * Cardiac drift (activity-deep-dive §5): last-20% avg − first-20% avg HR, signed.
+ * Per the SKILL, the flag only fires "at similar pace (±15 sec/km)": a negative
+ * split raises HR for pacing reasons, not aerobic decoupling, so drift over a
+ * material pace change is reported but NOT flagged. When no velocity data is
+ * supplied the pace guard is skipped (flag on drift alone).
+ */
+export function cardiacDrift(
+  hrData: number[],
+  velocityData: number[] = [],
+): { drift_bpm: number; flagged: boolean } | null {
   const hr = hrData.filter((h) => Number.isFinite(h) && h > 0);
   const w = Math.floor(hr.length * THRESHOLDS.CARDIAC_DRIFT_WINDOW_PCT);
   if (w < 1) return null;
   const first = hr.slice(0, w);
   const last = hr.slice(hr.length - w);
   const drift_bpm = Math.round(mean(last) - mean(first));
-  return { drift_bpm, flagged: drift_bpm > THRESHOLDS.CARDIAC_DRIFT_FLAG_BPM };
+  // Pace guard: suppress the flag when first/last-20% pace differs by > tolerance.
+  const v = velocityData.filter((x) => Number.isFinite(x) && x > 0);
+  const vw = Math.floor(v.length * THRESHOLDS.CARDIAC_DRIFT_WINDOW_PCT);
+  const vFirst = v.slice(0, vw);
+  const vLast = v.slice(v.length - vw);
+  const paceConfounded =
+    vw >= 1 &&
+    Math.abs(1000 / mean(vLast) - 1000 / mean(vFirst)) > THRESHOLDS.CARDIAC_DRIFT_PACE_TOLERANCE_SEC;
+  return { drift_bpm, flagged: drift_bpm > THRESHOLDS.CARDIAC_DRIFT_FLAG_BPM && !paceConfounded };
 }
 
 /** VAM — vertical ascent m/h (trail, activity-deep-dive §5). */
@@ -356,6 +374,12 @@ export function gapPerKm(
  * SKILL bands. NOTE: the SKILL's band-5 "peak HR > 95% max" clause is OMITTED —
  * Strava's API exposes no athlete max-HR field and the SKILL forbids using the
  * Z5 floor as HRmax, so the clause is uncomputable. Band 5 relies on Z4+% > 20.
+ *
+ * Duration ladder honours the SKILL's "> 90 min HARD" qualifier: a long session
+ * floors to band 4 only when the intensity ladders already reached band ≥3. A
+ * long EASY/moderate session (e.g. a 2 h Z1–Z2 long run) floors to band 2 for
+ * accumulated volume, not band 4 — so it doesn't recommend 72 h rest after an
+ * easy run.
  */
 export function recoveryBand(input: {
   z3PlusPct: number;
@@ -365,15 +389,15 @@ export function recoveryBand(input: {
   const T = THRESHOLDS;
   let band = 1;
   // Z3+ ladder
-  if (input.z3PlusPct >= T.RECOVERY_Z3_PLUS_HARD_PCT) band = Math.max(band, 4);
+  if (input.z3PlusPct > T.RECOVERY_Z3_PLUS_HARD_PCT) band = Math.max(band, 4);
   else if (input.z3PlusPct >= T.RECOVERY_Z3_PLUS_QUALITY_PCT) band = Math.max(band, 3);
   else if (input.z3PlusPct >= T.RECOVERY_Z3_PLUS_MODERATE_PCT) band = Math.max(band, 2);
   // Z4+ ladder
   if (input.z4PlusPct > T.RECOVERY_Z4_PLUS_RACE_PCT) band = Math.max(band, 5);
   else if (input.z4PlusPct > T.RECOVERY_Z4_PLUS_HARD_PCT) band = Math.max(band, 4);
   else if (input.z4PlusPct > T.RECOVERY_Z4_PLUS_QUALITY_PCT) band = Math.max(band, 3);
-  // duration ladder
-  if (input.durationMin > T.RECOVERY_HARD_DURATION_MIN) band = Math.max(band, 4);
+  // duration ladder — long+hard → 4; long+easy → at least 2 (not 4)
+  if (input.durationMin > T.RECOVERY_HARD_DURATION_MIN) band = Math.max(band, band >= 3 ? 4 : 2);
   return band;
 }
 
@@ -586,8 +610,10 @@ export async function analyze(token: string, activityId: number): Promise<any> {
     .map((a: any) => ({ avgSpeedMs: a.average_speed || 0, avgHr: a.average_heartrate || 0 }));
   const eff = efficiency({ avgSpeedMs, avgHr }, priors);
 
-  // Cardiac drift (steady semantics; script always computes, skill decides use)
-  const driftResult = terrain === 'road' ? cardiacDrift(hrData) : null;
+  // Cardiac drift (steady semantics; script always computes, skill decides use).
+  // Pass velocity so the flag is suppressed on a negative split (pace-confounded).
+  const driftResult =
+    terrain === 'road' ? cardiacDrift(hrData, streamData(streams, 'velocity_smooth')) : null;
 
   // Trail-only metrics
   const vamVal = terrain === 'trail' ? vam(elevGainM, movingTimeS) : null;
@@ -658,7 +684,7 @@ export function aggregateWeeklyLoad(
   zoneBounds: { min: number; max: number }[],
   weeks: number,
 ): any {
-  // Bucket by ISO Monday, keep the N most recent week buckets that have data.
+  // Bucket by ISO Monday.
   const byWeek = new Map<string, any[]>();
   for (const a of activities) {
     const dateStr = a.start_date_local || a.start_date;
@@ -667,7 +693,18 @@ export function aggregateWeeklyLoad(
     if (!byWeek.has(key)) byWeek.set(key, []);
     byWeek.get(key)!.push(a);
   }
-  const weekKeys = [...byWeek.keys()].sort().reverse().slice(0, weeks);
+  // Walk back N CONSECUTIVE calendar weeks from the most recent activity week,
+  // including zero-activity rest/deload weeks — so "last N weeks" spans exactly N
+  // calendar weeks instead of silently skipping weeks with no runs.
+  const dataKeys = [...byWeek.keys()].sort();
+  const weekKeys: string[] = [];
+  if (dataKeys.length) {
+    let cursor = new Date(dataKeys[dataKeys.length - 1] + 'T00:00:00Z').getTime();
+    for (let i = 0; i < weeks; i++) {
+      weekKeys.push(new Date(cursor).toISOString().slice(0, 10));
+      cursor -= 7 * 24 * 60 * 60 * 1000;
+    }
+  }
   const zoneOf = (hr: number): number | null => {
     if (!zoneBounds.length || !(hr > 0)) return null;
     for (let i = 0; i < zoneBounds.length; i++) {
@@ -677,7 +714,7 @@ export function aggregateWeeklyLoad(
     return null;
   };
   const result = weekKeys.map((wk) => {
-    const acts = byWeek.get(wk)!;
+    const acts = byWeek.get(wk) ?? [];
     let km = 0;
     let movingMin = 0;
     let elevation = 0;
@@ -722,6 +759,8 @@ export function aggregateWeeklyLoad(
         'avg-HR of each activity bucketed into athlete HR zones, time-weighted by moving_time (approximation — not stream-based, since summary activities carry no HR stream)',
       tss_proxy:
         'Σ (moving_time_min × avg_hr / max_hr) per activity, per week — rolling load proxy (strava-data-cruncher formula), using per-activity max_heartrate',
+      weeks:
+        'N consecutive calendar weeks ending at the most recent activity week; zero-activity (rest/deload) weeks are included as empty rows, most-recent first',
     },
   };
 }
@@ -822,9 +861,15 @@ async function main() {
       console.log(JSON.stringify(weeklyPatterns(projectRoot)));
       process.exit(0);
     } else if (cmd === 'rpe') {
-      const arg = positionals[0];
-      const rpeRaw = positionals[1];
-      const notesJoined = positionals.slice(2).join(' ').trim();
+      // Notes are free text and may contain tokens like "--off"; parse them from
+      // the raw args (only --project-root is a flag here) so parseArgs doesn't
+      // swallow a note starting with "--".
+      const raw = [...rest];
+      const prIdx = raw.indexOf('--project-root');
+      if (prIdx >= 0) raw.splice(prIdx, 2);
+      const arg = raw[0];
+      const rpeRaw = raw[1];
+      const notesJoined = raw.slice(2).join(' ').trim();
       const notes = notesJoined.length ? notesJoined : null;
       const rpe = parseInt(rpeRaw, 10);
       if (!arg || rpeRaw === undefined || !Number.isFinite(rpe) || rpe < 1 || rpe > 10)

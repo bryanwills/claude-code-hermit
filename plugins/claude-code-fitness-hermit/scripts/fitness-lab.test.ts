@@ -62,6 +62,13 @@ eq('drift +16 rising', cardiacDrift(ramp), { drift_bpm: 16, flagged: true });
 const falling = Array.from({ length: 20 }, (_, i) => 159 - i); // 159..140
 eq('drift -16 falling (sign preserved)', cardiacDrift(falling), { drift_bpm: -16, flagged: false });
 ok('drift null on short stream', cardiacDrift([150, 151]) === null);
+// pace guard: same +16 HR ramp, but a big negative split (slow→fast) suppresses the flag
+const negSplit = Array.from({ length: 20 }, (_, i) => 2.5 + i * 0.1); // 2.5→4.4 m/s: pace drops ~90 s/km
+eq('drift value still reported under pace guard', cardiacDrift(ramp, negSplit)!.drift_bpm, 16);
+eq('flag suppressed on negative split (pace-confounded)', cardiacDrift(ramp, negSplit)!.flagged, false);
+// steady pace (within ±15 s/km) leaves the flag intact
+const steadyPace = Array.from({ length: 20 }, () => 3.3);
+eq('flag intact at steady pace', cardiacDrift(ramp, steadyPace)!.flagged, true);
 
 console.log('\ninterval detection:');
 eq(
@@ -135,8 +142,11 @@ eq('band 1 easy', recoveryBand({ z3PlusPct: 0, z4PlusPct: 0, durationMin: 30 }),
 eq('band 2 moderate', recoveryBand({ z3PlusPct: 10, z4PlusPct: 0, durationMin: 30 }), 2);
 eq('band 3 quality (Z3+ ≥20)', recoveryBand({ z3PlusPct: 30, z4PlusPct: 0, durationMin: 30 }), 3);
 eq('band 3 any-Z4', recoveryBand({ z3PlusPct: 10, z4PlusPct: 3, durationMin: 30 }), 3);
-eq('band 4 hard (Z3+ ≥50)', recoveryBand({ z3PlusPct: 60, z4PlusPct: 0, durationMin: 30 }), 4);
-eq('band 4 duration >90', recoveryBand({ z3PlusPct: 0, z4PlusPct: 0, durationMin: 100 }), 4);
+eq('band 4 hard (Z3+ >50)', recoveryBand({ z3PlusPct: 60, z4PlusPct: 0, durationMin: 30 }), 4);
+eq('band 3 exactly 50% Z3 (not >50)', recoveryBand({ z3PlusPct: 50, z4PlusPct: 0, durationMin: 40 }), 3);
+// duration ladder honours "> 90 min HARD": long easy run → band 2, long hard run → band 4
+eq('band 2 long easy run (>90 min, no intensity)', recoveryBand({ z3PlusPct: 0, z4PlusPct: 0, durationMin: 120 }), 2);
+eq('band 4 long hard run (>90 min + quality intensity)', recoveryBand({ z3PlusPct: 30, z4PlusPct: 0, durationMin: 120 }), 4);
 eq('band 5 race (Z4+ >20)', recoveryBand({ z3PlusPct: 60, z4PlusPct: 25, durationMin: 30 }), 5);
 eq('band 3 window road', recoveryWindow(3, 'road', 0).window, '48h');
 eq('band 3 window trail +1 day', recoveryWindow(3, 'trail', 20).trail_extended, true);
@@ -157,10 +167,21 @@ const wlActs = [
   { start_date_local: '2026-06-03T07:00:00Z', distance: 5000, moving_time: 1500, total_elevation_gain: 20, average_heartrate: 130, max_heartrate: 160 },
 ];
 const wl = aggregateWeeklyLoad(wlActs, zb, 4);
-eq('one week bucket (same ISO week)', wl.weeks.length, 1);
-eq('week km summed', wl.weeks[0].km, 15);
+eq('4 calendar weeks incl. rest weeks', wl.weeks.length, 4);
+eq('latest week active, km summed', wl.weeks[0].km, 15);
+eq('older rest weeks included as empty rows', wl.weeks[1].activities, 0);
 ok('tss_proxy computed', wl.weeks[0].tss_proxy > 0);
 ok('method documented', typeof wl.method.zone_pct === 'string' && typeof wl.method.tss_proxy === 'string');
+
+// interior rest week is surfaced (gap between active weeks), not compressed away
+const gapActs = [
+  { start_date_local: '2026-06-01T07:00:00Z', distance: 10000, moving_time: 3000, total_elevation_gain: 0, average_heartrate: 150, max_heartrate: 175 },
+  { start_date_local: '2026-05-18T07:00:00Z', distance: 8000, moving_time: 2400, total_elevation_gain: 0, average_heartrate: 145, max_heartrate: 170 },
+];
+const gapWl = aggregateWeeklyLoad(gapActs, zb, 3);
+eq('gap spans exactly 3 consecutive weeks', gapWl.weeks.length, 3);
+eq('interior rest week empty', gapWl.weeks[1].activities, 0);
+eq('older active week km present', gapWl.weeks[2].km, 8);
 
 // ===========================================================================
 // Contract layer
@@ -396,6 +417,16 @@ console.log('\ncontract: rpe upsert:');
   eq('previous returned on overwrite', j2?.previous?.rpe, 7);
   const stored2 = JSON.parse(fs.readFileSync(path.join(proj, '.claude-code-hermit', 'state', 'activity-notes.json'), 'utf-8'));
   eq('notes null when omitted', stored2['555'].notes, null);
+  fs.rmSync(proj, { recursive: true });
+}
+
+console.log('\ncontract: rpe notes with a "--" token (not swallowed as a flag):');
+{
+  const proj = tmpProject();
+  const { code } = await run(['rpe', '556', '6', 'felt', '--off', 'today', '--project-root', proj]);
+  ok('exit 0 rpe with -- note', code === 0);
+  const stored = JSON.parse(fs.readFileSync(path.join(proj, '.claude-code-hermit', 'state', 'activity-notes.json'), 'utf-8'));
+  eq('-- note preserved verbatim', stored['556'].notes, 'felt --off today');
   fs.rmSync(proj, { recursive: true });
 }
 
