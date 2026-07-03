@@ -10,6 +10,7 @@
 
 ### Added
 - **contract tests: version-triad and marketplace sync** — the sibling manifest walk in `hooks.contract.test.ts` now also asserts each domain plugin's `plugin.json` `dependencies[claude-code-hermit]` base version matches its `hermit-meta.json` `required_core_version`, and a new test enforces `marketplace.json` ↔ `plugin.json` name/version parity in both directions. Runs under `test-hooks.yml`.
+- **`state/proposals-index.json` — derived proposal frontmatter cache (token efficiency)** — `proposals-index.ts` mirrors every proposal's frontmatter (id/status/source/category/title/created/session/responded), rebuilt on every proposal write by the `generate-summary` PostToolUse hook. `proposal-list` now renders from the index instead of reading every `PROP-*.md` body (~22K tokens → ~1K for a dozen proposals), and the index is the single source of proposal counts. Legacy pre-frontmatter proposals are parsed with a `legacy: true` flag; the cache is safe to delete and rebuilds on demand.
 
 ### Changed
 - **brief absorbs pulse** — the no-flag path now serves live session status (per-session cost from `sessions/.status.json`, active-alert pointer) and gains pulse's `status`/`progress`/`what are you working on` triggers. Preserves pulse's blocked-session `/debug` hint and idle cumulative-cost source (`cost-summary.md`).
@@ -43,6 +44,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 2. **Scrub the stale permission.** Remove `Bash(bun */scripts/run-with-profile.ts*)` from the target settings file's `permissions.allow` if present (Step 8 already lists this removal). No new permissions are required.
 3. **No config-key additions** this release.
 4. **CLAUDE-APPEND block (token efficiency).** The hermit-managed block in `CLAUDE.md`/`CLAUDE.local.md` is replaced automatically by Step 6; if you customized text inside it, re-apply it afterward (the replaced block is shown in the evolve report). `HEARTBEAT.md` is not touched, and no new config keys are added.
+5. **Build the proposals index (token efficiency).** Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposals-index.ts .claude-code-hermit` once to create `state/proposals-index.json` (derived state — safe to delete and rebuild anytime; the `generate-summary` hook refreshes it on every subsequent proposal write). Step 8 already adds the `Bash(bun */scripts/proposals-index.ts*)` permission.
 
 Operators who don't want the merged behavior can keep using the old natural-language triggers — `status`/`progress` reach `brief`; `what's stuck`/`recent learnings` reach `hermit-health`; `check knowledge` reaches `hermit-health`.
 
