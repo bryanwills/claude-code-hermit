@@ -96,7 +96,7 @@ Read `target_file` (treat a missing file as marker-absent — Edit will create t
 Compare against the run's chosen mode (from Step 2's answer this run) and `prior_hatch_mode` (captured in Step 1, before Step 5 overwrites `hatch_mode`):
 
 - **Marker present, stamped version matches plugin version, AND Step 2's mode equals `prior_hatch_mode`**: skip — block is current. Do not read the template.
-- **All other cases** (marker absent, stamped version stale, OR mode changed): read the mode template — `safety` → `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND-SAFETY.md`; `standard` → `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` — and either append (marker absent) or replace the marked block (marker present). The template is the source of truth; no operator prompt is needed.
+- **All other cases** (marker absent, stamped version stale, OR mode changed): render the mode block from the single source — capture the stdout of `bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-append.ts <mode>` (`<mode>` is `safety` or `standard`), which emits the mode-specific rendering of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md`. Write that stdout into the target as either an append (marker absent) or a replacement of the marked block (marker present). The rendered output is the source of truth; no operator prompt is needed.
 
 Stray-block migration (block stranded in the non-target file after a target flip) is handled one-shot by the Upgrade Instructions in this version's CHANGELOG entry, executed by `hermit-evolve` Step 7. Hatch itself stays focused on target-aware setup and steady-state refresh.
 
@@ -313,7 +313,7 @@ Read by `/claude-code-hermit:docker-security` when the operator enables LAN cont
 
 - **Strict-by-default.** The wizard defaults to installing `git-push-guard` at strict. Do not ask "which profile?" — ask "yes or opt out?".
 - **Idempotent.** Re-running detects existing `config.json` values and offers `Keep current (<value>)` as the first option per key, so operators can fast-confirm with Enter presses.
-- **Single source of truth.** The selected template (`CLAUDE-APPEND.md` or `CLAUDE-APPEND-SAFETY.md`) is the source for the project's dev conventions. Step 3 always overwrites the marked block when versions differ or mode changes; do not preserve operator edits to that block (operators who want overrides put them elsewhere in their CLAUDE.md).
+- **Single source of truth.** `CLAUDE-APPEND.md` rendered for the chosen mode by `scripts/render-append.ts` is the source for the project's dev conventions. Step 3 always overwrites the marked block when versions differ or mode changes; do not preserve operator edits to that block (operators who want overrides put them elsewhere in their CLAUDE.md).
 - **Never downgrade hook profile.** If the operator chooses "No — leave at standard" but `env.AGENT_HOOK_PROFILE` is already `strict`, preserve `strict`. The opt-out only applies on first install.
 - **No stack detection magic.** Detection seeds defaults for prompts; operators always confirm. Never write `commands.test` from detection alone — it must be operator-confirmed.
 - **Safety mode skips workflow prompts.** In `safety` mode, do not prompt for `commands.test`, `commands.lint`, `commands.format`, `commands.pr_create`, `pr_template_path`, or `pr_base_branch`. These keys feed workflow sections that safety mode does not inject.

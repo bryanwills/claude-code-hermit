@@ -1,6 +1,4 @@
-<!-- mode:standard-only -->
 
-<!-- /mode:standard-only -->
 ---
 <!-- claude-code-dev-hermit: Development Workflow -->
 
@@ -39,7 +37,6 @@ Before starting code changes:
 
 Examples: `PROJ-123 add auth flow` → `feature/proj-123-add-auth-flow`. `Fix login redirect (urgent!)` → `fix/login-redirect-urgent`. `feature/foo/bar` → `feature/foo-bar`.
 
-<!-- mode:standard-only -->
 ## Implementation Flow
 
 If the project's own CLAUDE.md or skills define an implementation flow (e.g. its own commit/test/PR sequence), follow that. The steps below are the fallback for projects without one.
@@ -60,7 +57,6 @@ If the project defines its own pre-PR validation (e.g. a custom test runner, CI 
 3. If you committed after `/claude-code-dev-hermit:dev-quality` ran and `commands.test` is configured, re-run it once — `/claude-code-dev-hermit:dev-pr` Gate 0 checks `last-test.json` against the current HEAD sha.
 4. Run `/claude-code-dev-hermit:dev-pr`. Gate 0 reads `last-test.json` and refuses if missing, on a stale sha, or with a non-pass status. Pass `--cwd <path>` if you used it for `/claude-code-dev-hermit:dev-quality` — the PR opens against the child repo's remote.
 
-<!-- /mode:standard-only -->
 ## Technical Constraints
 
 Subagents can invoke skills and spawn nested subagents. For delegated sub-steps the contract is: the subagent returns a verdict (plus an optional `operator_message`), and the **main session owns `AskUserQuestion` and operator notification**.
@@ -71,12 +67,7 @@ Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev wo
 
 ## Before Archiving a Task
 
-<!-- mode:standard-only -->
 - `/claude-code-dev-hermit:dev-pr` run, or PR opened via other means — URL recorded in `state/bindings.json`.
-<!-- /mode:standard-only -->
-<!-- mode:safety-only -->
-- PR opened.
-<!-- /mode:safety-only -->
 - Feature branch committed, no uncommitted changes.
 - If partial: Session Summary describes what remains.
 
@@ -107,15 +98,10 @@ Tier mapping:
 ## Dev Quick Reference
 
 - One-time setup / re-config: `/claude-code-dev-hermit:hatch`
-<!-- mode:standard-only -->
 - Mid-task test run + cache warm: `/claude-code-dev-hermit:dev-test` (supports `--cwd <path>`)
 - Pre-wrap quality gate: `/claude-code-dev-hermit:dev-quality` (supports `--cwd <path>`)
 - Open the PR: `/claude-code-dev-hermit:dev-pr` (supports `--cwd <path>`)
 - Cleanup pass: `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits; `/claude-code-dev-hermit:dev-quality` wraps it)
-<!-- /mode:standard-only -->
-<!-- mode:safety-only -->
-- Cleanup pass: `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits)
-<!-- /mode:safety-only -->
 - Parallel changes across many files: `/batch` (built-in)
 - Diagnostics: `/debug` (built-in)
 - High-stakes review: `/code-review` (built-in)
