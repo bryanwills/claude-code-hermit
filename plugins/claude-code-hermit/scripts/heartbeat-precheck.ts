@@ -44,11 +44,16 @@ function normalizeItemKey(itemText: string): string | null {
 // The default HEARTBEAT.md checklist item scans `proposals/` for review-worthy
 // proposals. Its alerts are keyed `proposal-pending:<PROP-NNN>`, NOT the generic
 // `checklist:<hash>` key the item loop below uses — so the generic rule can never
-// satisfy it and the item always forces EVALUATE (the bug this resolves). Detect
-// it by its `proposals/` reference and resolve it against the real proposal
-// frontmatter + proposal-pending alerts instead.
+// satisfy it and the item always forces EVALUATE (the bug this resolves). Resolve
+// it against real proposal frontmatter + proposal-pending alerts instead.
+//
+// Match the shipped default item ("Review `proposals/` for any with
+// `status: proposed` …") specifically: it references proposals AND the
+// `proposed` status it scans for. A custom item that merely mentions proposals
+// without that status keyword falls through to the generic alert-based rule
+// (unchanged, conservative — EVALUATE until the operator's alert is suppressed).
 function isProposalScanItem(itemText: string): boolean {
-  return /proposals\//i.test(itemText);
+  return /proposals?[\/\s]/i.test(itemText) && /\bproposed\b/i.test(itemText);
 }
 
 // 'clean' → item satisfied, continue the loop. 'evaluate' → dispatch the LLM.
