@@ -72,6 +72,8 @@ export const THRESHOLDS = {
   // activity-deep-dive §5 — trail recovery extension (elev_gain_per_km)
   TRAIL_RECOVERY_EXT_LOW_ELEV: 15, // <15 → no extension
   TRAIL_RECOVERY_EXT_HIGH_ELEV: 30, // 15..<30 → +1 day; ≥30 → +1–2 days
+  // activity-deep-dive §5 — trail HR/altitude coupling (Pearson r of HR vs altitude)
+  HR_ALTITUDE_TRACK_CORR: 0.3, // r ≥ 0.3 → HR broadly tracks the climb/descent (heuristic)
 } as const;
 
 // The exact operator-facing recovery message from routine-strava-health-check.md
@@ -188,20 +190,30 @@ export function detectSessionKind(segmentHrs: number[]): {
   cycles: number;
   differential_bpm: number;
   work_bouts: number;
+  work_hrs: number[];
 } {
   const valid = segmentHrs.filter((h) => Number.isFinite(h) && h > 0);
-  if (valid.length < 3) return { kind: 'steady', cycles: 0, differential_bpm: 0, work_bouts: 0 };
+  if (valid.length < 3)
+    return { kind: 'steady', cycles: 0, differential_bpm: 0, work_bouts: 0, work_hrs: [] };
   const midline = (Math.max(...valid) + Math.min(...valid)) / 2;
-  const labels = valid.map((h) => (h >= midline ? 'H' : 'L'));
-  // Collapse consecutive same labels into runs.
-  const runs: string[] = [];
-  for (const l of labels) if (runs[runs.length - 1] !== l) runs.push(l);
+  // Collapse consecutive same labels into runs, keeping each run's members so the
+  // per-work-bout HR progression survives whether laps or HR-windows fed us.
+  const runs: { label: 'H' | 'L'; values: number[] }[] = [];
+  for (const h of valid) {
+    const label = h >= midline ? 'H' : 'L';
+    const last = runs[runs.length - 1];
+    if (last && last.label === label) last.values.push(h);
+    else runs.push({ label, values: [h] });
+  }
   // Cycles = L-runs flanked by H on both sides.
   let cycles = 0;
   for (let i = 1; i < runs.length - 1; i++) {
-    if (runs[i] === 'L' && runs[i - 1] === 'H' && runs[i + 1] === 'H') cycles++;
+    if (runs[i].label === 'L' && runs[i - 1].label === 'H' && runs[i + 1].label === 'H') cycles++;
   }
-  const work_bouts = runs.filter((r) => r === 'H').length;
+  const workRuns = runs.filter((r) => r.label === 'H');
+  const work_bouts = workRuns.length;
+  // Mean HR of each work bout in order — the I1→IN progression the skill renders.
+  const work_hrs = workRuns.map((r) => Math.round(mean(r.values)));
   const highs = valid.filter((h) => h >= midline);
   const lows = valid.filter((h) => h < midline);
   const differential_bpm = Math.round(mean(highs) - mean(lows));
@@ -210,7 +222,7 @@ export function detectSessionKind(segmentHrs: number[]): {
     differential_bpm >= THRESHOLDS.INTERVAL_MIN_DIFFERENTIAL_BPM
       ? 'interval'
       : 'steady';
-  return { kind, cycles, differential_bpm, work_bouts };
+  return { kind, cycles, differential_bpm, work_bouts, work_hrs };
 }
 
 /** Terrain classification (activity-deep-dive §4c). */
@@ -369,6 +381,38 @@ export function gapPerKm(
 }
 
 /**
+ * HR-vs-altitude coupling (trail, activity-deep-dive §5). On trail the first/last-20%
+ * cardiac-drift split is confounded by the climb profile, so the skill instead reports
+ * whether HR broadly tracked the terrain. This reduces the two streams (aligned by
+ * index) to a single Pearson r so the raw time-series never enter model context:
+ * positive → HR rose on climbs / fell on descents (expected); near-zero/negative →
+ * decoupled. Returns null when either stream is too short or flat to correlate.
+ */
+export function hrAltitudeCorr(
+  hrData: number[],
+  altitudeData: number[],
+): { corr: number; tracks: 'tracks' | 'decoupled' } | null {
+  const n = Math.min(hrData.length, altitudeData.length);
+  const hr: number[] = [];
+  const alt: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (Number.isFinite(hrData[i]) && hrData[i] > 0 && Number.isFinite(altitudeData[i])) {
+      hr.push(hrData[i]);
+      alt.push(altitudeData[i]);
+    }
+  }
+  if (hr.length < 2) return null;
+  const sdHr = stddev(hr);
+  const sdAlt = stddev(alt);
+  if (sdHr === 0 || sdAlt === 0) return null; // flat HR or flat altitude — no signal
+  const mh = mean(hr);
+  const ma = mean(alt);
+  const covMean = mean(hr.map((h, i) => (h - mh) * (alt[i] - ma)));
+  const corr = Math.round((covMean / (sdHr * sdAlt)) * 100) / 100;
+  return { corr, tracks: corr >= THRESHOLDS.HR_ALTITUDE_TRACK_CORR ? 'tracks' : 'decoupled' };
+}
+
+/**
  * Recovery estimate 1–5 (activity-deep-dive §5). Read as the max across three
  * ladders — Z3+% , Z4+% , duration — which captures every OR clause in the
  * SKILL bands. NOTE: the SKILL's band-5 "peak HR > 95% max" clause is OMITTED —
@@ -515,9 +559,16 @@ function streamData(streams: any, key: string): number[] {
   return s && Array.isArray(s.data) ? s.data : [];
 }
 
-/** Await a Strava fetch, recording `message` in `warnings` and falling back on any failure. */
+/**
+ * Await a Strava fetch, recording `message` in `warnings` and falling back on any
+ * non-auth failure. An auth failure re-throws so the CLI still honours the
+ * `strava_auth` exit-1 contract: swallowing a 401 here (e.g. a token missing
+ * `profile:read_all` for `/athlete/zones`) would zero out zones and silently
+ * understate the recovery band instead of signalling that re-auth is needed.
+ */
 function optionalFetch<T>(p: Promise<T>, warnings: string[], message: string, fallback: T): Promise<T> {
-  return p.catch(() => {
+  return p.catch((e) => {
+    if (e instanceof StravaAuthError) throw e;
     warnings.push(message);
     return fallback;
   });
@@ -615,9 +666,12 @@ export async function analyze(token: string, activityId: number): Promise<any> {
   const driftResult =
     terrain === 'road' ? cardiacDrift(hrData, streamData(streams, 'velocity_smooth')) : null;
 
-  // Trail-only metrics
+  // Trail-only metrics. On trail the drift split is confounded, so instead reduce
+  // HR-vs-altitude to a single coupling figure the coaching note can cite.
   const vamVal = terrain === 'trail' ? vam(elevGainM, movingTimeS) : null;
   const gapVal = terrain === 'trail' ? gapPerKm(distanceKm, elevGainM, movingTimeS) : null;
+  const hrAltitude =
+    terrain === 'trail' ? hrAltitudeCorr(hrData, streamData(streams, 'altitude')) : null;
 
   // Recovery
   const band = recoveryBand({ z3PlusPct, z4PlusPct, durationMin: movingTimeS / 60 });
@@ -653,6 +707,7 @@ export async function analyze(token: string, activityId: number): Promise<any> {
       differential_bpm: session.differential_bpm,
       work_bouts: session.work_bouts,
       avg_bout_min: avgBoutMin,
+      work_segment_hrs: session.work_hrs,
     },
     terrain,
     zones,
@@ -660,6 +715,7 @@ export async function analyze(token: string, activityId: number): Promise<any> {
     efficiency: eff,
     cardiac_drift_bpm: driftResult ? driftResult.drift_bpm : null,
     cardiac_drift_flagged: driftResult ? driftResult.flagged : false,
+    hr_altitude: hrAltitude,
     vam: vamVal,
     gap_per_km: gapVal,
     laps: compactLaps,
@@ -760,13 +816,16 @@ export function aggregateWeeklyLoad(
       tss_proxy:
         'Σ (moving_time_min × avg_hr / max_hr) per activity, per week — rolling load proxy (strava-data-cruncher formula), using per-activity max_heartrate',
       weeks:
-        'N consecutive calendar weeks ending at the most recent activity week; zero-activity (rest/deload) weeks are included as empty rows, most-recent first',
+        'N consecutive calendar weeks ending at the most recent activity week; zero-activity (rest/deload) weeks are included as empty rows, most-recent first. Bounded to the ≤200 most-recent activities.',
     },
   };
 }
 
 export async function weeklyLoad(token: string, weeks: number): Promise<any> {
-  const perPage = Math.min(200, Math.max(30, weeks * 15));
+  // ~30 activities/week of headroom (capped at Strava's 200 page max) so a
+  // high-frequency / multi-sport athlete doesn't have the oldest weeks in the
+  // window render as phantom rest weeks just because the fetch stopped short.
+  const perPage = Math.min(200, Math.max(30, weeks * 30));
   const activities = await stravaGet(token, '/athlete/activities', { per_page: perPage });
   let zoneBounds: { min: number; max: number }[] = [];
   try {

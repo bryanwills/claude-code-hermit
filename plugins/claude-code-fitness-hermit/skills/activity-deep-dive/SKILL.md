@@ -39,14 +39,15 @@ Interval sessions get work-interval HR progression and between-bout recovery qua
 3. **Interpret the JSON.** The object has these fields (see `thresholds` in the payload for the exact cutoffs behind each classification — cite them in coaching prose without hardcoding a second copy):
 
    - `meta` — `name, date, sport_type, distance_km, moving_time_s, avg_hr, max_hr, total_elevation_gain_m, elev_gain_per_km`.
-   - `session_kind` — `"interval"` or `"steady"`. `session_detail` carries `cycles`, `differential_bpm`, `work_bouts`, `avg_bout_min` for the `Interval (N×~Xmin)` header.
+   - `session_kind` — `"interval"` or `"steady"`. `session_detail` carries `cycles`, `differential_bpm`, `work_bouts`, `avg_bout_min` for the `Interval (N×~Xmin)` header, plus `work_segment_hrs` — the ordered per-work-bout average HR (from laps when there were ≥3, else from the HR-stream windows the classifier used). This is the authoritative source for the `I1 → IN` progression, so it renders even on lap-sparse activities.
    - `terrain` — `"road"` or `"trail"`.
    - `zones` — `[{zone, pct}]` (Z1–Z5), or `null` when HR/zone data is absent (render "HR data unavailable").
    - `cadence` — `{avg, sd, cv, flags}` or `null`. `flags` is `["over-striding"]` and/or `["high-variability"]`; it is empty on trail (road-calibrated thresholds are suppressed). Omit the cadence line entirely when `null`.
    - `efficiency` — `{current, prior_mean, delta_pct, priors_used}`. Cite on **steady + road** only. `delta_pct` is the signed % vs the prior mean (negative = more efficient). Skip the line when `priors_used` is 0.
-   - `cardiac_drift_bpm` / `cardiac_drift_flagged` — signed int (rising HR = positive), and whether it cleared the flag threshold. Cite on **steady** sessions only — on an interval session the first-20%/last-20% split straddles work and recovery bouts, so the figure is noise; skip the drift line. `null` on trail (use the `HR/altitude` qualitative note instead, grounded in the altitude profile). `flagged` is already pace-guarded (a negative split won't trip it), so relay it as-is.
+   - `cardiac_drift_bpm` / `cardiac_drift_flagged` — signed int (rising HR = positive), and whether it cleared the flag threshold. Cite on **steady** sessions only — on an interval session the first-20%/last-20% split straddles work and recovery bouts, so the figure is noise; skip the drift line. `null` on trail (use the `hr_altitude` field instead — see below). `flagged` is already pace-guarded (a negative split won't trip it), so relay it as-is.
+   - `hr_altitude` — trail only (`null` on road, and `null` on trail when HR/altitude streams are too short or flat to correlate). `{corr, tracks}`: `corr` is the Pearson r of HR vs altitude (rounded); `tracks` is `"tracks"` (r ≥ 0.3 — HR broadly rose on climbs / fell on descents, expected) or `"decoupled"` (HR did not follow the terrain — worth flagging). Render the `HR/altitude:` line from this; when `null`, state the coupling couldn't be assessed rather than inventing one.
    - `vam` (m/h) and `gap_per_km` (seconds/km) — trail only; `null` on road. Render GAP as `M:SS/km`.
-   - `laps` — `[{index, avg_hr, max_hr, distance_km, moving_time_s}]`. For **interval** sessions, read the work-lap `avg_hr` sequence to build the `I1 → IN` progression and the between-bout recovery note. Use `meta.max_hr` as HRmax for the peak-bout callout — never a zone floor.
+   - `laps` — `[{index, avg_hr, max_hr, distance_km, moving_time_s}]`. For **interval** sessions, build the `I1 → IN` progression from `session_detail.work_segment_hrs` (above), not the raw laps — it already sequences the work bouts whether laps or HR-windows fed the classifier. Use `laps` (and `meta.max_hr` as HRmax, never a zone floor) for the between-bout recovery note and the peak-bout callout; when `laps` is empty, ground those from the progression alone.
    - `recovery` — `{band, hours, window, trail_extended}`. `band` is 1–5; `window` is the rendered rest recommendation (already includes any `(+trail vert)` extension).
    - `warnings` — degraded-metric notes (short/absent streams). Surface anything material in the coaching note rather than silently dropping it.
 
@@ -74,7 +75,7 @@ Interval sessions get work-interval HR progression and between-bout recovery qua
    Zones: Z1 N% / Z2 N% / Z3 N% / Z4 N% / Z5 N%
    Cadence: N spm avg (CV: X%)   ← reference only on trail (no ⚠ flags); omit line when cadence absent or non-running
    Trail: VAM N m/h | GAP ~M:SS/km (est, vs actual P:SS/km)
-   HR/altitude: <qualitative note on whether HR tracked the climb/descent profile>
+   HR/altitude: HR <tracked / decoupled from> the climb/descent profile (r=X.XX)   ← from hr_altitude; if null, "coupling not assessable (stream too short)"
    Recovery: N/5 — recommended rest: Xh[(+trail vert)]
    Subjective: RPE N/10 — <notes>          ← include only when RPE data exists from step 1
    Coaching: <2–3 sentences>

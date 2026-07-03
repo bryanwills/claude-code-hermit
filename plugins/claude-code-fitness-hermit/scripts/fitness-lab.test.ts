@@ -21,6 +21,7 @@ import {
   cadenceFlags,
   efficiency,
   cardiacDrift,
+  hrAltitudeCorr,
   vam,
   gapPerKm,
   recoveryBand,
@@ -74,7 +75,13 @@ console.log('\ninterval detection:');
 eq(
   '3 cycles + big differential → interval',
   detectSessionKind([160, 130, 160, 130, 160, 130, 160]),
-  { kind: 'interval', cycles: 3, differential_bpm: 30, work_bouts: 4 },
+  { kind: 'interval', cycles: 3, differential_bpm: 30, work_bouts: 4, work_hrs: [160, 160, 160, 160] },
+);
+// work_hrs carries the per-bout progression even when HR windows (not laps) fed us
+eq(
+  'rising work bouts → work_hrs progression',
+  detectSessionKind([150, 130, 160, 128, 170, 132, 168]).work_hrs,
+  [150, 160, 170, 168],
 );
 const twoCycle = detectSessionKind([160, 130, 160, 130, 160]);
 eq('2 cycles → steady', { kind: twoCycle.kind, cycles: twoCycle.cycles }, { kind: 'steady', cycles: 2 });
@@ -136,6 +143,28 @@ eq('efficiency drops priors with no HR', efficiency({ avgSpeedMs: 3, avgHr: 150 
 console.log('\nVAM + GAP:');
 eq('VAM 600m in 1h', vam(600, 3600), 600);
 eq('GAP per km', gapPerKm(10, 500, 3000), 214); // equiv 14km, 3000/14
+
+console.log('\nHR/altitude coupling (trail):');
+// HR rises monotonically with altitude → perfect positive r → tracks
+eq(
+  'HR tracks the climb (r=1)',
+  hrAltitudeCorr([140, 150, 160, 170], [100, 110, 120, 130]),
+  { corr: 1, tracks: 'tracks' },
+);
+// HR falls while altitude climbs → negative r → decoupled
+eq(
+  'HR decoupled from terrain (inverse)',
+  hrAltitudeCorr([170, 160, 150, 140], [100, 110, 120, 130]),
+  { corr: -1, tracks: 'decoupled' },
+);
+ok('null on flat HR (no variance)', hrAltitudeCorr([150, 150, 150, 150], [100, 110, 120, 130]) === null);
+ok('null on too-short stream', hrAltitudeCorr([150], [100]) === null);
+// misaligned lengths align to the shorter; invalid HR samples are dropped
+eq(
+  'aligns to shorter stream, drops invalid HR',
+  hrAltitudeCorr([0, 150, 160, 170], [100, 110, 120, 130, 140])!.tracks,
+  'tracks',
+);
 
 console.log('\nrecovery band (max across ladders):');
 eq('band 1 easy', recoveryBand({ z3PlusPct: 0, z4PlusPct: 0, durationMin: 30 }), 1);
@@ -247,13 +276,17 @@ const SUMMARIES = [
   { id: 202, sport_type: 'Run', type: 'Run', start_date_local: '2026-05-25T07:00:00Z', distance: 12000, moving_time: 3800, total_elevation_gain: 60, average_heartrate: 152, max_heartrate: 176, average_speed: 3.1 },
 ];
 
-function makeServer(mode: 'ok' | 'auth') {
+function makeServer(mode: 'ok' | 'auth' | 'zones-auth') {
   return Bun.serve({
     port: 0,
     fetch(req) {
       if (mode === 'auth') return new Response('unauthorized', { status: 401 });
       const p = new URL(req.url).pathname;
       const json = (o: unknown) => new Response(JSON.stringify(o), { headers: { 'content-type': 'application/json' } });
+      // 'zones-auth' models a token with activity scope but not profile:read_all —
+      // /athlete/zones 401s while everything else succeeds.
+      if (p === '/athlete/zones' && mode === 'zones-auth')
+        return new Response('unauthorized', { status: 401 });
       if (p === '/athlete/zones') return json(ZONES);
       if (p === '/athlete/activities') return json(SUMMARIES);
       const m = p.match(/^\/activities\/(\d+)(\/laps|\/streams)?$/);
@@ -286,6 +319,8 @@ console.log('\ncontract: analyze (happy path):');
   ok('warnings is array', Array.isArray(j?.warnings));
   ok('laps trimmed (no raw stream arrays)', Array.isArray(j?.laps) && j.laps.length === 4 && !('data' in (j.laps[0] || {})));
   ok('efficiency priors used', j?.efficiency?.priors_used >= 1);
+  ok('work_segment_hrs present (interval progression source)', Array.isArray(j?.session_detail?.work_segment_hrs));
+  ok('hr_altitude null on road', j?.hr_altitude === null);
   fs.rmSync(proj, { recursive: true });
 }
 
@@ -314,6 +349,24 @@ console.log('\ncontract: 401 auth failure:');
   } catch {}
   eq('error kind', j?.error, 'strava_auth');
   eq('verbatim recovery message', j?.message, AUTH_RECOVERY_MESSAGE);
+  fs.rmSync(proj, { recursive: true });
+}
+
+console.log('\ncontract: partial-scope 401 on /athlete/zones propagates (not swallowed):');
+{
+  // Regression: a 401 on an optionalFetch call (zones) must surface as strava_auth
+  // exit 1, not be swallowed into a soft warning that silently understates recovery.
+  const server = makeServer('zones-auth');
+  const base = `http://localhost:${server.port}`;
+  const proj = tmpProject();
+  const { code, out } = await run(['analyze', '123', '--project-root', proj], base);
+  server.stop(true);
+  ok('exit 1 on zones 401', code === 1, `code ${code}, out ${out.slice(0, 200)}`);
+  let j: any = {};
+  try {
+    j = JSON.parse(out);
+  } catch {}
+  eq('zones 401 → strava_auth', j?.error, 'strava_auth');
   fs.rmSync(proj, { recursive: true });
 }
 
