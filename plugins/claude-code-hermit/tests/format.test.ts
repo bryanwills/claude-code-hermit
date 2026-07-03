@@ -26,6 +26,13 @@ describe('kStr', () => {
   test('B range', () => {
     expect(kStr(2156563000)).toBe('2.2B');
   });
+
+  test('tier-boundary rounding promotes instead of overflowing to 1000', () => {
+    expect(kStr(999999)).toBe('1.0M');
+    expect(kStr(999500)).toBe('1.0M');
+    expect(kStr(999499)).toBe('999K');
+    expect(kStr(999999999)).toBe('1.0B');
+  });
 });
 
 describe('formatTokens', () => {
