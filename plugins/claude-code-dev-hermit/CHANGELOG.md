@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **CLAUDE-APPEND: collapse two mode templates into one source** — `CLAUDE-APPEND-SAFETY.md` is deleted; `CLAUDE-APPEND.md` carries mode markers and is rendered per mode by the new `scripts/render-append.ts` (both renderings byte-identical to the pre-collapse files, golden-tested). `/hatch` now captures the render script's stdout instead of picking a file.
+
+### Files affected
+
+| File | Change |
+|------|--------|
+| `state-templates/CLAUDE-APPEND.md` | Annotated with mode markers; single source for both renderings |
+| `state-templates/CLAUDE-APPEND-SAFETY.md` | Deleted — safety mode now generated |
+| `scripts/render-append.ts` | New — renders `CLAUDE-APPEND.md` for `standard`/`safety`; exports pure `render()` |
+| `scripts/render-append.test.ts` | New — golden test proving byte-exact renderings |
+| `tests/fixtures/append-standard.golden.md` | New — pre-collapse standard golden |
+| `tests/fixtures/append-safety.golden.md` | New — pre-collapse safety golden |
+| `skills/hatch/SKILL.md` | Step 3 renders via `render-append.ts` instead of selecting a template file |
+| `tests/hatch-mode.test.ts` | Safety-shape checks run against `render('safety', …)`; hatch reference asserts `render-append.ts` |
+| `CLAUDE.md` | Plugin Structure, Core Contracts #2/#5, target-routing paragraph reflect single source |
+| `docs/WORKFLOW.md` | Safety source points to the render script |
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
+
+1. **Re-render the dev CLAUDE-APPEND block from the single source.** Read `claude-code-dev-hermit.hatch_mode` from `.claude-code-hermit/config.json` (default `standard`). Capture the stdout of `bun ${plugin_root}/scripts/render-append.ts <hatch_mode>`. In the operator's dev CLAUDE target file (`CLAUDE.md` or `CLAUDE.local.md` per `hatch-options.json` `target`), replace the block delimited by the `<!-- claude-code-dev-hermit: Development Workflow -->` marker with that rendered output. The rendering is byte-identical to the operator's existing block for their mode, so this is a no-op refresh — safety-mode operators see no visible change. If the marker is absent, leave the file untouched.
+
+No `config.json` changes required.
+
 ## [0.4.6] - 2026-06-29
 
 ### Added

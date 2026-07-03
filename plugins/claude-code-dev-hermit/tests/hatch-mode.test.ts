@@ -5,23 +5,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { makeReporter } from './test-utils';
+import { render } from '../scripts/render-append';
 
 const PLUGIN_ROOT = path.join(import.meta.dir, '..');
 const TEMPLATES = path.join(PLUGIN_ROOT, 'state-templates');
 const STANDARD = path.join(TEMPLATES, 'CLAUDE-APPEND.md');
-const SAFETY = path.join(TEMPLATES, 'CLAUDE-APPEND-SAFETY.md');
 const HATCH_SKILL = path.join(PLUGIN_ROOT, 'skills', 'hatch', 'SKILL.md');
 
 const { ok, summary } = makeReporter();
 
-// ── Safety template shape ────────────────────────────────────────────────────
+// ── Safety rendering shape ───────────────────────────────────────────────────
+// Safety mode is now generated from the single-source template, not a file.
 
-console.log('\nCLAUDE-APPEND-SAFETY.md shape:');
+console.log('\nrender("safety") shape:');
 
-ok('file exists', fs.existsSync(SAFETY), SAFETY);
+ok('standard template exists', fs.existsSync(STANDARD), STANDARD);
 
-if (fs.existsSync(SAFETY)) {
-  const text = fs.readFileSync(SAFETY, 'utf-8');
+if (fs.existsSync(STANDARD)) {
+  const text = render('safety', fs.readFileSync(STANDARD, 'utf-8'));
   const marker = '<!-- claude-code-dev-hermit: Development Workflow -->';
 
   ok('marker present', text.includes(marker));
@@ -96,7 +97,7 @@ if (fs.existsSync(HATCH_SKILL)) {
   ok('references hatch_mode', text.includes('hatch_mode'));
   ok('references safety mode', text.includes('"safety"') || text.includes("'safety'") || text.includes('`safety`'));
   ok('references standard mode', text.includes('"standard"') || text.includes("'standard'") || text.includes('`standard`'));
-  ok('references CLAUDE-APPEND-SAFETY.md', text.includes('CLAUDE-APPEND-SAFETY.md'));
+  ok('renders block via render-append.ts', text.includes('render-append.ts'));
   ok('references capability scan slugs', text.includes('create-pr') && text.includes('release'));
 
   console.log('\nskills/hatch/SKILL.md target routing + schema stamping:');
