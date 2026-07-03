@@ -44,6 +44,7 @@
 - **enforce-deny-patterns: also split on newlines and skip escaped quotes** — a newline-separated command and an escaped quote (`\'`) before a separator no longer hide a dangerous segment (e.g. `rm -rf`) from the leading-anchored deny globs.
 - **hermit-doctor: guard the versioned-cache sibling scan against non-semver dir names** — `Bun.semver.order` throws on a non-semver dir (e.g. a `backup/` copy), which degraded the whole dependency check to a generic warn; non-semver names are filtered before the sort.
 - **brief / hermit-health: preserve folded skills' triggers and pointers** — restore the `hermit brain` activation phrase on `hermit-health`, and pulse's `/claude-code-hermit:session-start` (idle) and `/claude-code-hermit:session` (blocked) recovery pointers on `brief`, all dropped during the fold.
+- **channels: enforce string sender IDs** — `validate-config` now rejects a non-string `allowed_users` entry, and `channel-hook` coerces `dm_channel_id` to a string when persisting a live `chat_id`. A numeric channel ID silently fails the string-based sender allow-list gate (`channel-reply-reminder.ts`), locking out an authorized operator; the type is now enforced at both entry points.
 
 ### Upgrade Instructions
 
