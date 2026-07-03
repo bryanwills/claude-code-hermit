@@ -28,27 +28,37 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-function matchesPattern(toolCall: { tool: string; content: string }, pattern: string): boolean {
+function matchesPattern(toolCall: { tool: string; candidates: string[] }, pattern: string): boolean {
   const m = pattern.match(/^(\w+)\((.+)\)$/);
   if (!m) return false;
 
   const [, patternTool, patternGlob] = m;
   if (toolCall.tool !== patternTool) return false;
 
-  return globToRegex(patternGlob).test(toolCall.content);
+  const rx = globToRegex(patternGlob);
+  return toolCall.candidates.some(c => rx.test(c));
 }
 
-function buildToolCall(event: Json): { tool: string; content: string } {
+function buildToolCall(event: Json): { tool: string; content: string; candidates: string[] } {
   const name = event.tool_name || '';
   const input = event.tool_input || {};
 
   if (name === 'Bash') {
-    return { tool: 'Bash', content: input.command || '' };
+    const command = input.command || '';
+    // Match the whole command AND each compound segment, so a deny pattern
+    // anchored to a leading command (e.g. `Bash(rm -rf *)`) still fires inside
+    // `cd /tmp && rm -rf x`. Same separator set as git-push-guard.ts. Dedup —
+    // a non-compound command otherwise appears twice (whole + its one segment).
+    const segments = command.split(/(?:&&|\|\||;|\|)/).map((s: string) => s.trim());
+    const candidates = [...new Set([command, ...segments])].filter(Boolean);
+    return { tool: 'Bash', content: command, candidates };
   }
   if (name === 'Edit' || name === 'Write') {
-    return { tool: name, content: input.file_path || input.path || '' };
+    // File paths are never segmented — a `|` in a filename must not fragment it.
+    const content = input.file_path || input.path || '';
+    return { tool: name, content, candidates: [content] };
   }
-  return { tool: name, content: '' };
+  return { tool: name, content: '', candidates: [] };
 }
 
 function main() {
