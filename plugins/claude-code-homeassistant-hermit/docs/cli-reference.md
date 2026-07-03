@@ -1,6 +1,6 @@
 # ha-agent-lab CLI reference
 
-Full command catalog for `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab`. Run `ha-agent-lab --help` for current flags; the source of truth is `src/cli.ts`. Structural writes (helpers/areas/registries) are gated by `ha_safety_mode` (strict → proposal, ask → `--confirm`).
+Core commands for `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab` — run `ha-agent-lab --help` for the complete, current surface (`src/cli.ts` is the source of truth; the plugin `CLAUDE.md` carries the full catalog). Structural writes (helpers/areas/registries) are gated by `ha_safety_mode` (strict → proposal, ask → `--confirm`).
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha refresh-context [--incremental]

@@ -41,11 +41,11 @@ Just Claude Code and everything is yours to shape: channels (Discord/Telegram), 
 - **Routines** wrap `CronCreate` jobs that expire in 7 days and fire in the machine's timezone: they self-rearm daily, run on your wall clock, and are managed by `/hermit-routines`.
 - **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
 - **Channels** let you DM a session; the hermit agent acts on it (*"accept PROP-014"*, *"status"*) and **pings you first** when something needs a yes/no.
-- **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget at session start. `/recall` searches both.
+- **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget at session start. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
 - **Task snapshots** persist native `Tasks` past session end, so the plan survives archives.
 - **Profile-gated guardrails** scope `deny patterns + sandbox` per profile, locking the unattended agent down harder than the one you're watching.
 
-**Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, and clears stale context after a midnight close — recovery never depends on the session being conscious.
+**Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, clears stale context after a midnight close, and compacts long-running context so cold wakes don't re-pay the full accumulated history — recovery never depends on the session being conscious.
 
 **It reaches you first.** Notifications default to a native push (headless-friendly), or a Discord/Telegram DM you can reply to if you've paired a channel.
 
@@ -77,7 +77,7 @@ What it proposes: improvements, routines, new capabilities (skills, agents, hear
 
 On-demand skills — pullable from the Claude app, your terminal, or a DM:
 
-- **`/recall`** — full-text search over past sessions, compiled knowledge, and proposals ("what did I decide about X?")
+- **`/recall`** — full-text search over past sessions, compiled knowledge, proposals, and your channel DM history ("what did I decide about X?")
 - **`/hermit-evolution`** — cost trend and behavior drift over weeks
 - **`/hermit-health`** — alerts, routines, channels, heartbeat state, plus fragile zones, stale proposals, and recent learnings
 - **`/hermit-doctor`** — install diagnostic, from hook registration to heartbeat liveness
@@ -125,6 +125,8 @@ claude plugin update claude-code-hermit@claude-code-hermit --scope local
 /claude-code-hermit:hermit-evolve
 ```
 
+Or run `.claude-code-hermit/bin/hermit-update` (local/tmux) or `.claude-code-hermit/bin/hermit-docker update` (Docker): one command that moves the pin, reloads the session, and runs `hermit-evolve` for you.
+
 ---
 
 ## Configure it
@@ -165,7 +167,7 @@ Tune via `/hermit-settings` (or just by asking the hermit). Some of the settings
 | `COMPACT_THRESHOLD` | tool-count compact hint — **`75`** |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | auto-compact at % of context — **`65`** |
 | `MAX_THINKING_TOKENS` | thinking-token cap per turn — **`10000`** |
-| `watchdog.enabled` | external dead-session recovery — **`false`** |
+| `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it |
 
 
 Full schema in the [Config Reference](plugins/claude-code-hermit/docs/config-reference.md)
