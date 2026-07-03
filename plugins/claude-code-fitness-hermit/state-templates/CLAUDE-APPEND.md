@@ -12,7 +12,7 @@ This project has the `claude-code-fitness-hermit` plugin installed. The rules be
 - Never commit real Strava tokens or credentials.
 - Never write tokens, credentials, or raw Strava user IDs to session files, proposals, or memory.
 - Never call `star-segment`, `connect-strava`, or `disconnect-strava` without explicit operator instruction.
-- Use `get-activity-streams` for load/intensity analysis — it's the richest data source.
+- Per-activity and weekly load analysis goes through `scripts/fitness-lab.ts` (via the `activity-deep-dive`, `weekly-coaching-patterns`, and `strava-data-cruncher` paths): it fetches and reduces the streams so raw time-series never enter context and the metrics stay reproducible. The MCP stream/detail tools are for ad-hoc questions only, not the standard load pipeline.
 - HR zone boundaries come from `mcp__strava__get-athlete-zones` — never hardcode numeric thresholds.
 - Records, PBs, all-time totals, counts, and cross-block comparisons depend on older activities that context or compaction may drop. Ground them in a full-history Strava query (see the Strava MCP Tools table), or flag the number as unverified and offer to check. Recent-activity questions are fine from live context.
 
@@ -31,9 +31,11 @@ This project has the `claude-code-fitness-hermit` plugin installed. The rules be
 
 | Agent | Purpose |
 |-------|---------|
-| `@claude-code-fitness-hermit:strava-data-cruncher` | Bulk Strava data aggregation — weekly load tables, zone distributions (Haiku, cheap) |
+| `@claude-code-fitness-hermit:strava-data-cruncher` | Bulk Strava data aggregation — runs `scripts/fitness-lab.ts weekly-load` for weekly load tables + zone distributions; MCP tools only for shapes the script doesn't emit (Haiku, cheap) |
 
 ### Strava MCP Tools
+
+Deterministic load analysis runs through `scripts/fitness-lab.ts` (see the streams Core Rule above) — the tools below are for ad-hoc lookups the script doesn't cover.
 
 MCP server `strava` is configured in `.mcp.json` (written by `hatch`). Tool IDs follow `mcp__strava__*`.
 
@@ -78,7 +80,7 @@ These run via the core `scheduled-checks` routine (daily) and fire at most once 
 - Activity notes: `compiled/activity-<id>-<YYYY-MM-DD>.md` (written by activity-deep-dive)
 - Strava state cursor: `state/strava-last-activity-id.txt` (written by strava-sync)
 - Weekly load baselines: `state/strava-weekly-baselines.json` (written by weekly-load-review, read by monday-planning)
-- Subjective notes: `state/activity-notes.json` (written by capture-activity-rpe + set-rpe, read by activity-deep-dive + weekly-load-review)
+- Subjective notes: `state/activity-notes.json` (written by `scripts/fitness-lab.ts rpe` — invoked by capture-activity-rpe + set-rpe; read by activity-deep-dive + weekly-load-review)
 - Pending RPE: `state/strava-pending-rpe.json` (written by strava-sync after a successful channel send, read and deleted by capture-activity-rpe)
 
 ### Fitness Proposal Categories
