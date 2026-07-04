@@ -13,6 +13,7 @@ import { kStr } from './lib/format';
 import { costIndexPath, readCostIndex, scanAutomatedOpus } from './lib/cost-log';
 import { costLogPath } from './lib/cc-compat';
 import { PRICING } from './lib/pricing';
+import { getEnabledChannels } from './hermit-start';
 
 type Json = any;
 
@@ -954,10 +955,20 @@ function checkModelPricingKnown() {
     const config = read.config;
 
     const known = new Set(Object.keys(PRICING));
+    // A model is priced correctly iff cost-tracker's detectModel() maps it to a
+    // real tier before pricing (cost-tracker.ts → calculateCost). detectModel
+    // substring-matches haiku/opus/sonnet, so full ids like "claude-opus-4-8"
+    // ARE priced — only a name with no tier substring silently falls back to
+    // sonnet. Mirror that predicate here rather than comparing against the
+    // alias-only PRICING keys, which would false-warn on every full model id.
+    const isPriced = (m: string) => {
+      const lower = m.toLowerCase();
+      return known.has(m) || lower.includes('haiku') || lower.includes('opus') || lower.includes('sonnet');
+    };
     const unknown: string[] = [];
     const seen = new Set<string>();
     const consider = (m: unknown, where: string) => {
-      if (typeof m !== 'string' || !m || known.has(m)) return;
+      if (typeof m !== 'string' || !m || isPriced(m)) return;
       const key = `${m}|${where}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -1041,7 +1052,11 @@ async function checkChannelLiveness() {
     const config = read.config;
 
     const channels = config.channels && typeof config.channels === 'object' ? config.channels : {};
-    const enabled = Object.keys(channels).filter(n => n !== 'primary' && channels[n]?.enabled !== false);
+    // Reuse hermit-start's canonical enumeration: it iterates dict-valued
+    // channel entries only (so the `channels.primary` string pointer is skipped
+    // generically, no name hardcoding) and applies the same pyTruthy default-on
+    // `enabled` semantics used everywhere else.
+    const enabled = getEnabledChannels(config);
 
     if (enabled.length === 0) {
       return { id: 'channel-liveness', status: 'ok', detail: 'no channels configured — probe skipped' };

@@ -1765,11 +1765,20 @@ describe('doctor model-pricing-known check', () => {
   }), 20000);
 
   test('unknown config.model → warn naming config.model', withTmpdir(async (dir) => {
-    writeConfig(dir, { ...BASE_CONFIG, model: 'claude-sonnet-4-5' });
+    writeConfig(dir, { ...BASE_CONFIG, model: 'gpt-mini' });
     const report = await runDoctorCheck(dir);
     const c = priceCheck(report);
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('config.model');
+  }), 20000);
+
+  test('full Claude model id (detectModel-priced) → ok, not a false warn', withTmpdir(async (dir) => {
+    // "claude-opus-4-8" is priced correctly (detectModel substring-maps it to
+    // opus), so it must not be flagged as unpriced. Guards the fix for the
+    // alias-only false positive.
+    writeConfig(dir, { ...BASE_CONFIG, model: 'claude-opus-4-8' });
+    const report = await runDoctorCheck(dir);
+    expect(priceCheck(report).status).toBe('ok');
   }), 20000);
 
   test('unknown routine model → warn naming the routine', withTmpdir(async (dir) => {
