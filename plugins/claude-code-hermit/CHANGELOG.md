@@ -5,9 +5,13 @@
 ### Added
 - **Binding pause/stop/resume (PROP-015)** — `state/pause.json` (new `lib/pause.ts`) is the single source of truth for a hard stop, enforced by a `PreToolUse` gate (`pause-gate.ts`) that denies every tool call while paused except a channel reply and `PushNotification`. A `UserPromptSubmit` hook (`pause-keyword.ts`) sets/clears it from an exact `pause`/`stop`/`resume`/`snooze <dur>` channel message (gated by the same `allowed_users` allowlist as replies); heartbeat, routines, and the watchdog (which also sends `tmux Escape` to interrupt an in-flight call) consult it. New `bin/hermit-pause on|off|snooze <dur>|status` operator CLI. Inert until the flag is set.
 
+### Fixed
+- **cron-tz-shift: emit range+step (`8-23/6`) not bare `8/6`** — a shifted hour/minute/DOW field that formed an arithmetic sequence ending at the field max but starting above the field min collapsed to a bare `N/step` token, which `CronCreate` rejects as invalid syntax. Affected routines silently failed to register every load cycle. (#515)
+
 ### Upgrade Instructions
 - The two new hooks (`pause-gate.ts`, `pause-keyword.ts`) ship in `hooks/hooks.json`, which Claude Code loads straight from the installed plugin package — a normal `/plugin update` picks them up with no per-project migration step. The new `bin/hermit-pause` CLI is copied into `.claude-code-hermit/bin/` by `hatch`/`hermit-evolve`'s existing bin-wrapper refresh (detected as a missing boot wrapper) — a normal `/claude-code-hermit:hermit-evolve` restores it for already-installed operators.
 - No config toggle: the mechanism is inert by construction (`state/pause.json` absent = fully unpaused, identical to pre-1.2.17 behavior) until an operator or an authorized channel sender invokes it — there is nothing to opt into or out of.
+- `cron-tz-shift.ts` is invoked fresh from the installed plugin script on every `hermit-routines load` — no per-project state to migrate, the fix applies on next `/plugin update`.
 
 ## [1.2.16] - 2026-07-03
 
