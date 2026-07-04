@@ -28,11 +28,7 @@ function todayYMD(timezone: string, ref: Date = new Date()): string {
 
 // Returns the 'YYYY-MM' (year-month) for `ref` in the given timezone.
 function thisMonthYYYYMM(timezone: string, ref: Date = new Date()): string {
-  try {
-    return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' }).format(ref);
-  } catch {
-    return ref.toISOString().slice(0, 7);
-  }
+  return todayYMD(timezone, ref).slice(0, 7);
 }
 
 // Extract {year, month, day} for `ref` as observed in `timezone`. Shared by

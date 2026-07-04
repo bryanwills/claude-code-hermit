@@ -27,6 +27,8 @@ const peek = process.argv[2] === '--peek';
 const stateDir = peek ? process.argv[3] : process.argv[2];
 if (!stateDir) emit('EVALUATE');
 
+const alertStatePath = path.join(stateDir, 'state', 'alert-state.json');
+
 // Earliest gate (PROP-015) — ahead of the pending-close drain below, so a
 // paused hermit also suppresses AUTO_CLOSE, not just the checklist. Read-only:
 // identical under --peek since it writes nothing.
@@ -40,7 +42,7 @@ if (pauseStatus.paused) {
   // heartbeat skill announces and marks `notified:true`, and every subsequent tick
   // falls back to the plain SKIP|paused here (no un-notified entry left to escape on).
   if (pauseStatus.reason === 'budget') {
-    const peekAlerts = readAlertState(path.join(stateDir, 'state', 'alert-state.json'));
+    const peekAlerts = readAlertState(alertStatePath);
     const pendingAlerts: Json = peekAlerts.kind === 'ok' && peekAlerts.value.alerts && typeof peekAlerts.value.alerts === 'object'
       ? peekAlerts.value.alerts : {};
     const budgetUnannounced = Object.values(pendingAlerts).some((e: Json) => e?.kind === 'budget' && e.notified === false);
@@ -186,7 +188,6 @@ if (activeHours?.start && activeHours?.end) {
   }
 }
 
-const alertStatePath = path.join(stateDir, 'state', 'alert-state.json');
 // Split read from parse so a transient read error never destroys a healthy file:
 // only a genuine parse failure (corrupt) quarantines and rebuilds. ioerror
 // (EACCES/EMFILE/EIO) leaves the file untouched and re-evaluates next tick.

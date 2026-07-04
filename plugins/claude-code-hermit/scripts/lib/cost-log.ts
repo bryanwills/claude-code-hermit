@@ -285,4 +285,38 @@ function scanUnpricedModels(costLogFile: string, sinceDateInclusive: string, tim
   return { count, cost };
 }
 
-export { costIndexPath, readCostIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels };
+// writeCostSummary needs both scanAutomatedOpus and scanUnpricedModels every regeneration
+// (once/day, gated by writeCostSummary's own mtime freshness check). Calling them separately
+// means two full reads+parses of cost-log.jsonl, which — unlike cost-index.json — is never
+// pruned or rotated and only grows over the hermit's life. This does both scans in one pass;
+// scanAutomatedOpus/scanUnpricedModels stay exported standalone for doctor-check.ts (opus-only)
+// and their own unit tests.
+function scanCostLogWarnings(costLogFile: string, sinceDateInclusive: string, timezone: string = 'UTC'): {
+  opusWake: { count: number; cost: number };
+  unpriced: { count: number; cost: number };
+} {
+  const opusWake = { count: 0, cost: 0 };
+  const unpriced = { count: 0, cost: 0 };
+  if (!fs.existsSync(costLogFile)) return { opusWake, unpriced };
+  for (const line of fs.readFileSync(costLogFile, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      const ts = e.timestamp ? new Date(e.timestamp) : null;
+      const date = ts && !isNaN(ts.getTime()) ? todayYMD(timezone, ts) : '';
+      if (date < sinceDateInclusive) continue;
+      const src = e.source || 'other';
+      if (e.model === 'opus' && (src === 'heartbeat' || src.startsWith('routine:'))) {
+        opusWake.count += 1;
+        opusWake.cost += e.estimated_cost_usd || 0;
+      }
+      if (e.model_unpriced) {
+        unpriced.count += 1;
+        unpriced.cost += e.estimated_cost_usd || 0;
+      }
+    } catch { /* skip corrupt lines — checkCost already surfaces corruption */ }
+  }
+  return { opusWake, unpriced };
+}
+
+export { costIndexPath, readCostIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanCostLogWarnings };

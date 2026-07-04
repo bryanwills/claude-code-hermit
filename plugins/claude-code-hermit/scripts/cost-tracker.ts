@@ -8,11 +8,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { calculateCost } from './lib/pricing';
+import { calculateCost, PRICING } from './lib/pricing';
 import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, costLogPath, hermitDir } from './lib/cc-compat';
-import { costIndexPath, updateCostIndex, readCostIndex, scanAutomatedOpus, scanUnpricedModels } from './lib/cost-log';
+import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM } from './lib/time';
 import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState } from './lib/alert-state';
 import { setPause } from './lib/pause';
@@ -384,12 +384,11 @@ function writeCostSummary(index: Json, timezone: string = 'UTC'): void {
   const weekSessionCount = weekSessionIds.size;
   const weekAvg = weekSessionCount > 0 ? weekCost / weekSessionCount : 0;
 
-  const opusWake = scanAutomatedOpus(COST_LOG, weekAgo, timezone);
+  const { opusWake, unpriced } = scanCostLogWarnings(COST_LOG, weekAgo, timezone);
   const opusWakeLine = opusWake.count > 0
     ? `\n- ⚠ ${opusWake.count} automated wake(s) on Opus this week ($${opusWake.cost.toFixed(2)}) — consider a lower session model`
     : '';
 
-  const unpriced = scanUnpricedModels(COST_LOG, weekAgo, timezone);
   const unpricedLine = unpriced.count > 0
     ? `\n- ⚠ ${unpriced.count} turn(s) this week priced at the sonnet fallback for an unrecognized model string ($${unpriced.cost.toFixed(2)}) — pricing.ts may need a new model entry`
     : '';
@@ -566,7 +565,10 @@ async function run(data: Json): Promise<string | null> {
     // Unknown model string → still priced at sonnet rates (refusing would zero the log),
     // but flagged so the drift is auditable instead of a silent mis-bill. A falsy/absent
     // rawModel is a different, unflagged case (no model info at all, not an unrecognized one).
-    const modelUnpriced = !!rawModel && !/haiku|opus|sonnet/i.test(rawModel);
+    // Derived from PRICING's own keys (not a hand-copied literal list) so a new tier can't
+    // silently drift out of sync with this check.
+    const rawModelLower = rawModel ? rawModel.toLowerCase() : '';
+    const modelUnpriced = !!rawModel && !Object.keys(PRICING).some(tier => rawModelLower.includes(tier));
 
     // Log to JSONL
     const logEntry = {
