@@ -44,7 +44,8 @@ const STDOUT_CASES: [string, string, string, string, string, string][] = [
   // --- Multi-hour (list) that allows DOW=* shift ---
   ['multi-hour DOW=* allowed',       '0 11,23 * * *', 'UTC',          S, '0 0,12 * * *', 'Europe/Lisbon'],
   // --- Step patterns that survive shift ---
-  ['*/2 step preserved after 1h shift', '0 1/2 * * *', 'UTC',         S, '0 */2 * * *',  'Europe/Lisbon'],
+  ['*/2 step preserved after 1h shift', '0 1-23/2 * * *', 'UTC',      S, '0 */2 * * *',  'Europe/Lisbon'],
+  ['hour range/step, shifted start off field-min', '0 8-23/6 * * *', 'UTC', S, '0 9-21/6 * * *', 'Europe/Lisbon'],
 ];
 
 // checkWarn cases: exit 0, stdout matches, stderr contains the pattern.
