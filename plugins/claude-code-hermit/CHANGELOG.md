@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Binding pause/stop/resume (PROP-015)** — a channel "stop" was cooperative prose only; heartbeat, routines, and the watchdog kept running regardless. `state/pause.json` (new `lib/pause.ts`) is now the single source of truth, enforced by a new `PreToolUse` gate (`pause-gate.ts`, matcher `*`) that denies every tool call while paused except a channel's `reply` tool and `PushNotification` — probe-verified binding within one tool call, zero model cooperation. A new `UserPromptSubmit` hook (`pause-keyword.ts`) writes/clears the flag directly from an exact `pause`/`stop`/`resume`/`snooze <duration>` channel message, before the model's turn even starts, gated by the same `allowed_users` allowlist as channel replies. `heartbeat-precheck.ts` gains the earliest `SKIP|paused` gate (ahead of the pending-close/AUTO_CLOSE drain); `hermit-watchdog.ts` suppresses nudges and auto-`/clear`/`/compact` while paused, and sends `tmux Escape` once per pause episode to kill an already-in-flight tool call the gate couldn't have caught — dead-session restart deliberately keeps running while paused, since the channel plugin lives inside the session and a dead+paused session can never hear "resume." New operator CLI `bin/hermit-pause on|off|snooze <dur>|status` always works, even while the hermit itself is paused and blocked from resuming via its own tool calls. `hermit-routines`' baked prompt templates consult the flag (`hermit-pause.ts status --quiet`) before firing, logging `skipped-paused`; routine *registration* stays unconditional so routines aren't dead after resume.
+
+### Upgrade Instructions
+- The two new hooks (`pause-gate.ts`, `pause-keyword.ts`) ship in `hooks/hooks.json`, which Claude Code loads straight from the installed plugin package — a normal `/plugin update` picks them up with no per-project migration step. The new `bin/hermit-pause` CLI is copied into `.claude-code-hermit/bin/` by `hatch`/`hermit-evolve`'s existing bin-wrapper refresh (detected as a missing boot wrapper) — a normal `/claude-code-hermit:hermit-evolve` restores it for already-installed operators.
+- No config toggle: the mechanism is inert by construction (`state/pause.json` absent = fully unpaused, identical to pre-1.2.17 behavior) until an operator or an authorized channel sender invokes it — there is nothing to opt into or out of.
+
 ## [1.2.16] - 2026-07-03
 
 ### Fixed
