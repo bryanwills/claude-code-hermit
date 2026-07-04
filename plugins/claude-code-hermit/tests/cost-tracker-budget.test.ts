@@ -177,3 +177,52 @@ describe('cost-tracker: inert budget block (all caps null) writes no alert', () 
     expect(fs.existsSync(path.join(s.cchDir, 'state', 'alert-state.json'))).toBe(false);
   });
 });
+
+describe('cost-tracker: budget breach does not clobber a stronger operator pause', () => {
+  let s: Setup;
+
+  beforeAll(async () => {
+    s = setup({ timezone: null, budget: { daily_usd: 1.0, weekly_usd: null, monthly_usd: null, action: 'pause' } });
+    // Operator has already issued an indefinite hard stop (PROP-015).
+    fs.writeFileSync(path.join(s.cchDir, 'state', 'pause.json'), JSON.stringify({
+      paused: true, paused_until: null, reason: 'operator', by: 'operator', ts: '2026-07-04T12:00:00Z',
+    }));
+    await runTurn(s.dir, 'claude-sonnet-4-6', 100000, 50000); // breaches the $1 daily cap
+  });
+  afterAll(() => { fs.rmSync(s.dir, { recursive: true }); });
+
+  test('the operator pause is left intact (still indefinite, reason:"operator")', () => {
+    const pause = JSON.parse(fs.readFileSync(path.join(s.cchDir, 'state', 'pause.json'), 'utf-8'));
+    expect(pause.reason).toBe('operator');
+    expect(pause.paused_until).toBeNull();
+  });
+
+  test('the breach is still recorded as an alert (so it can be announced)', () => {
+    const state = JSON.parse(fs.readFileSync(path.join(s.cchDir, 'state', 'alert-state.json'), 'utf-8'));
+    expect(Object.keys(state.alerts).filter(k => k.startsWith('budget-breach:daily:'))).toHaveLength(1);
+  });
+});
+
+describe('cost-tracker: stale budget alert entries from prior periods are reaped', () => {
+  let s: Setup;
+
+  beforeAll(async () => {
+    s = setup({ timezone: null, budget: { daily_usd: 1.0, weekly_usd: null, monthly_usd: null, action: 'alert' } });
+    // Seed a leftover alert from a long-past day that nothing ever removed.
+    fs.writeFileSync(path.join(s.cchDir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts: {
+        'budget-breach:daily:2020-01-01': { kind: 'budget', level: 'breach', period: 'daily', action: 'alert', spend: 9, cap: 1, ratio: 9, notified: true, ts: '2020-01-01T00:00:00Z' },
+      },
+      last_digest_date: null, self_eval: {}, total_ticks: 3,
+    }));
+    await runTurn(s.dir, 'claude-sonnet-4-6', 100000, 50000); // breach today
+  });
+  afterAll(() => { fs.rmSync(s.dir, { recursive: true }); });
+
+  test('the past-period entry is dropped, today\'s entry remains', () => {
+    const state = JSON.parse(fs.readFileSync(path.join(s.cchDir, 'state', 'alert-state.json'), 'utf-8'));
+    const keys = Object.keys(state.alerts).filter(k => k.startsWith('budget-'));
+    expect(keys.some(k => k.endsWith(':2020-01-01'))).toBe(false);
+    expect(keys.filter(k => k.startsWith('budget-breach:daily:'))).toHaveLength(1);
+  });
+});

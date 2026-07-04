@@ -15,7 +15,7 @@ import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM } from './lib/time';
 import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState } from './lib/alert-state';
-import { setPause } from './lib/pause';
+import { setPause, isPaused } from './lib/pause';
 import { evaluateBudget, pauseBoundary } from './lib/budget';
 
 type Json = any;
@@ -513,12 +513,29 @@ function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): 
       };
       wrote = true;
     }
+    // Reap budget-* entries from prior periods — they are created on breach/warn
+    // but nothing else removes them, so alert-state.json would grow unbounded on a
+    // hermit that breaches regularly. A key is `budget-<level>:<period>:<period-key>`;
+    // any whose trailing period-key isn't the current one is a past period.
+    for (const key of Object.keys(alerts)) {
+      const e = alerts[key];
+      if (e?.kind !== 'budget') continue;
+      const current = periodKey[e.period as keyof typeof periodKey];
+      if (current && !key.endsWith(`:${current}`)) { delete alerts[key]; wrote = true; }
+    }
     if (wrote) writeAlertState(ALERT_STATE_JSON, { ...state, alerts });
 
     if (result.action === 'pause' && result.level === 'breach') {
-      const breachedPeriods = result.periods.filter(p => p.level === 'breach').map(p => p.period);
-      const until = pauseBoundary(breachedPeriods, timezone);
-      setPause(HERMIT_DIR, { reason: 'budget', by: 'cost-tracker', until });
+      // Only assert the budget pause when unpaused (or already paused for budget) —
+      // never downgrade a stronger operator/watchdog stop (often indefinite) into an
+      // auto-resuming budget pause that silently lifts at the next boundary. isPaused
+      // applies reader-side expiry, so an already-lapsed pause counts as unpaused.
+      const existing = isPaused(HERMIT_DIR);
+      if (!existing.paused || existing.reason === 'budget') {
+        const breachedPeriods = result.periods.filter(p => p.level === 'breach').map(p => p.period);
+        const until = pauseBoundary(breachedPeriods, timezone);
+        setPause(HERMIT_DIR, { reason: 'budget', by: 'cost-tracker', until });
+      }
     }
   } catch (err: any) {
     console.error(`[cost-tracker] budget check error: ${err.message}`);
