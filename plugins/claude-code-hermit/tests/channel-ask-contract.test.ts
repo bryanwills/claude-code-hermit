@@ -5,10 +5,15 @@
 // channel-tagged turn must never strand on a terminal-shaped ask. A skill
 // either carries the Step-0 "channel reply" marker (and routes its asks
 // through the reply tool / channel-safe ask bridge accordingly), or it must
-// contain no AskUserQuestion call and no unguarded interactive "Ask:" line.
+// contain no AskUserQuestion call and no interactive "Ask" line (both the
+// colon form `Ask:` and the imperative prose form `Ask the operator …`).
 //
-// Fails the build the moment a new skill adds an ask without also adding the
-// Step-0 marker — the drift guard this proposal's item 5 asks for.
+// Fails the build the moment a new skill adds an ask (in any of those spellings)
+// without also adding the Step-0 marker — the drift guard this proposal's item 5
+// asks for. Coverage note: this is a static string/regex scan, so an ask phrased
+// without a leading `Ask` token or the literal `AskUserQuestion` (e.g. "prompt the
+// operator …") would slip through; it also asserts only that the marker is
+// present, not that every ask is wired through the bridge.
 //
 // Usage: bun test tests/channel-ask-contract.test.ts   (from the plugin root)
 
@@ -21,7 +26,10 @@ import { PLUGIN_ROOT } from './helpers/run';
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
 const STEP0_MARKER = 'Step 0 — Channel reply';
 const CHANNEL_TAG_FRAGMENT = '<channel source="';
-const UNGUARDED_ASK_RE = /^\s*(?:\d+\.\s*|[a-z]\d*\.\s*|-\s*)?Ask:/m;
+// Matches a line-leading ask in either the colon form (`Ask:`) or the imperative
+// prose form (`Ask what to add`, `Ask the operator …`). The `(?::|\s)` after `Ask`
+// keeps `Asking`/`Asks` from matching.
+const UNGUARDED_ASK_RE = /^\s*(?:\d+\.\s*|[a-z]\d*\.\s*|-\s*)?Ask(?::|\s)/m;
 
 // Skills exempt from the "must bridge or have no ask" rule, with the reason
 // each is exempt spelled out — this list is a deliberate exception, not a

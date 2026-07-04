@@ -112,13 +112,13 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
     - Entry has `options` (2-4 labels): a bare number `k` within range (1 through the option count) selects `options[k-1]`; a number outside that range is ambiguous. Otherwise, case-insensitive prefix match the answer against the labels; a unique match resolves, no match or a multi-label prefix match is ambiguous. A bare `yes`/`no` against an options entry is ambiguous — reply with the numbered options and ask once, do not resolve.
   - **On resolved entry:**
     - Read `question` from the entry before modifying.
-    - **Entry has `on_resolve`** → substitute the selected label into the `{answer}` placeholder and invoke the resulting skill command. Set `status: "approved"`. Append `micro-resolved` event via stdin heredoc (question/answer are operator text and may contain apostrophes):
+    - **Entry has `on_resolve`** → **resolve the entry on disk FIRST, then invoke.** Set `status: "approved"`, remove the entry from `pending`, write the file, and append the `micro-resolved` event below — all *before* invoking the command. The `on_resolve` command can run a long implementation (e.g. `proposal-act … --answer "implement now"` runs the falsification gate + full implementation); if the durable-queue removal were left until after that, a crash or compaction mid-implementation would leave the entry `status: "pending"` and heartbeat would keep re-nudging a question already acted on. Append `micro-resolved` event via stdin heredoc (question/answer are operator text and may contain apostrophes):
       ```bash
       bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl <<'HERMIT_METRICS_JSON'
       {"ts":"<now ISO>","type":"micro-resolved","micro_id":"<id>","action":"answered","answer":"<selected label>","question":"<question>"}
       HERMIT_METRICS_JSON
       ```
-      This is how a channel-bridged ask (e.g. a 3-option proposal-act entry) re-enters the asking skill at the right branch — the invoked command itself detects it's a re-entry and skips straight to acting on the answer. See § Channel-safe ask bridge below.
+      Then substitute the selected label into the `on_resolve` `{answer}` placeholder — **wrap it in double quotes** so a multi-word label (e.g. `session task`) stays a single `--answer` argument — and invoke the resulting skill command. This is how a channel-bridged ask (e.g. a 3-option proposal-act entry) re-enters the asking skill at the right branch — the invoked command itself detects it's a re-entry and skips straight to acting on the answer. The `answered` event is audit-only (neither an approval nor a rejection, so it's outside the micro approval-rate metrics). See § Channel-safe ask bridge below. Because this branch already removed the entry and wrote the file, skip the shared "Remove the resolved entry" step below.
     - **No `on_resolve`, "yes" on tier 1** → execute the change at next idle, log outcome in SHELL.md, set `status: "approved"`. Append `micro-resolved` event via stdin heredoc (question is operator text and may contain apostrophes):
       ```bash
       bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl <<'HERMIT_METRICS_JSON'
@@ -128,7 +128,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
     - **No `on_resolve`, "yes" on tier 2** → create PROP-NNN via `/claude-code-hermit:proposal-create`, queue for next idle, set `status: "approved"`. Append `micro-resolved` event (same stdin heredoc form, `"action":"approved"`).
     - **No `on_resolve`, "no"** → set `status: "rejected"`. Append `micro-resolved` event (stdin heredoc, `"action":"rejected","question":"<question>"`).
 
-    - Remove the resolved entry from `pending`. Write the file.
+    - **(yes/no branches only)** Remove the resolved entry from `pending`. Write the file. (The `on_resolve` branch already did this above, before invoking the command.)
   - If no pending micro-proposals: classify as normal message (fall through to categories below).
 
 - **Proposal approval** ("accept PROP-", "go ahead with PROP-", "approve PROP-", or referencing proposal numbers)

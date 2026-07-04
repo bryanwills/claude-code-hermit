@@ -168,7 +168,7 @@ No `package.json`, no `node_modules`, no build step.
 
 #### state/ ownership model
 
-One writer per state file. No shared mutation bus.
+One writer per state file. No shared mutation bus. (Exception: `state/micro-proposals.json` has several writers — reflect and the channel-bridged asking skills queue entries, channel-responder/brief resolve them — but the hermit runs as a single sequential session, so these never overlap; the "one writer" rule is about avoiding concurrent mutation, which single-session execution already guarantees here.)
 
 | File                           | Owner (sole writer)                                 | Readers                                                       |
 | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------- |
