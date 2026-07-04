@@ -32,7 +32,7 @@ function collapseField(vals: number[], lo: number, hi: number): string | null {
     if (vals.length < 3) return vals.join(',');
     const endsAtHi = last + step > hi;
     if (first === lo && endsAtHi) return `*/${step}`;
-    if (endsAtHi) return `${first}/${step}`;
+    if (endsAtHi) return `${first}-${hi}/${step}`;
     return `${first}-${last}/${step}`;
   }
   return vals.join(',');
