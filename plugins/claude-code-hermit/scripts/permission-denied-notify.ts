@@ -91,6 +91,12 @@ async function main(raw: string): Promise<void> {
 
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : 'unknown_tool';
   const toolInput = payload.tool_input;
+  // Best-effort: Claude Code's PermissionDenied payload carries tool_name/
+  // tool_input but not the classifier's reason text (that surfaces in the
+  // transcript and the Recently-denied view, not on stdin). Read it optionally
+  // so a future CC version that adds it is picked up automatically, but the
+  // alert's primary signal is the tool + its input (extractDetail below), never
+  // this field — the message stays useful when it's absent, which is the norm.
   const reason = typeof payload.reason === 'string' ? safe(payload.reason).slice(0, DETAIL_MAX_LEN) : '';
 
   const key = dedupKey(toolName, toolInput);

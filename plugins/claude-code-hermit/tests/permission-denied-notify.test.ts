@@ -30,10 +30,15 @@ function setupChannelWorkdir(): Workdir {
   return wd;
 }
 
+// Mirrors Claude Code's real PermissionDenied stdin payload: tool_name +
+// tool_input + permission_mode, and NO reason field — the classifier's reason
+// text stays in the transcript / Recently-denied view, it is not delivered on
+// the hook's stdin. The alert must be useful from this shape alone.
 const DENIAL_PAYLOAD = {
+  hook_event_name: 'PermissionDenied',
+  permission_mode: 'auto',
   tool_name: 'Bash',
   tool_input: { command: 'bun scripts/apply-settings.ts .claude/settings.local.json artifact-allow' },
-  reason: '[Self-Modification] blocked',
 };
 
 const run = (payload: object, dir: string, stubUrl: string, env: Record<string, string> = {}) =>
@@ -61,6 +66,16 @@ describe('permission-denied-notify', () => {
     expect(r.exitCode).toBe(0);
     expect(stub.requests.length).toBe(1);
     expect(stub.requests[0].body.text).toContain('Auto-mode denied: Bash');
+    // The alert points at *what* was blocked (tool + input), the only signal
+    // the real payload carries — not a reason string it doesn't deliver.
+    expect(stub.requests[0].body.text).toContain('apply-settings.ts');
+  });
+
+  test('includes the classifier reason when a payload happens to carry one (forward-compat)', async () => {
+    stub = startHttpStub();
+    wd = setupChannelWorkdir();
+    const r = await run({ ...DENIAL_PAYLOAD, reason: '[Self-Modification] blocked' }, wd.dir, stub.url);
+    expect(r.exitCode).toBe(0);
     expect(stub.requests[0].body.text).toContain('Self-Modification');
   });
 
