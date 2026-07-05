@@ -13,10 +13,11 @@ import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings } from './lib/cost-log';
-import { todayYMD, thisWeekKey, thisMonthYYYYMM } from './lib/time';
+import { todayYMD, thisWeekKey, thisMonthYYYYMM, currentHHMM } from './lib/time';
 import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState } from './lib/alert-state';
 import { setPause, isPaused } from './lib/pause';
 import { evaluateBudget, pauseBoundary } from './lib/budget';
+import { sendToChannel } from './lib/channel-send';
 
 type Json = any;
 
@@ -457,14 +458,45 @@ function updateShellSession(content: string, costStr: string, tokenStr: string):
   return content;
 }
 
+// Friendly "YYYY-MM-DD HH:MM" rendering of an ISO boundary in `timezone` — plain
+// HH:MM would be ambiguous for a monthly resume days away.
+function friendlyBoundary(iso: string, timezone: string): string {
+  const d = new Date(iso);
+  const date = todayYMD(timezone, d);
+  const hhmm = currentHHMM(timezone, d) ?? '';
+  return `${date} ${hhmm}`.trim();
+}
+
+const PERIOD_LABEL: Record<string, string> = { daily: "today's", weekly: "this week's", monthly: "this month's" };
+
+// Operator-language push for the periods that just newly crossed a warn/breach
+// threshold this tick (never for periods whose alert already existed — see the
+// create-only dedup in applyBudgetCheck). Exported for tests.
+function composeBudgetMessage(newPeriods: Json[], action: 'alert' | 'pause', until: string | null, timezone: string): string {
+  const level = newPeriods.some((p) => p.level === 'breach') ? 'breach' : 'warn';
+  const summary = newPeriods
+    .map((p) => `${PERIOD_LABEL[p.period] ?? p.period} spend is $${p.spend.toFixed(2)} of your $${p.cap.toFixed(2)} cap (${Math.round(p.ratio * 100)}%)`)
+    .join('; ');
+  if (level === 'breach') {
+    if (action === 'pause' && until) {
+      return `Budget cap reached — ${summary}. I've paused until ${friendlyBoundary(until, timezone)}.`;
+    }
+    return `Budget cap reached — ${summary}.`;
+  }
+  return `Heads up — ${summary}.`;
+}
+
 // PROP-016 budget enforcement: compare this turn's freshly-updated index against
 // config.budget's caps and, on a breach/warn, write a deduped alert-state entry
 // (one per period per level — `budget-<level>:<period>:<period-key>`, create-only so
 // a re-detected breach later the same period never resets `notified` back to false)
 // and, for `action:"pause"`, set the PROP-015 pause flag with an auto-resume boundary.
+// Newly-created entries also get a direct channel push (deterministic channel voice);
+// `notified` is only flipped true on a confirmed send, so a failed send leaves the
+// existing heartbeat-precheck EVALUATE wake as the fallback announcement path.
 // Fail-open throughout — never throws, since run()'s caller must never be blocked by
 // this check.
-function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): void {
+async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): Promise<void> {
   try {
     if (!budgetConfig || typeof budgetConfig !== 'object') return;
     const caps = {
@@ -497,6 +529,8 @@ function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): 
 
     const alerts: Json = { ...(state.alerts && typeof state.alerts === 'object' ? state.alerts : {}) };
     let wrote = false;
+    const newPeriods: Json[] = [];
+    const newKeys: string[] = [];
     for (const p of result.periods) {
       const key = `budget-${p.level}:${p.period}:${periodKey[p.period]}`;
       if (alerts[key]) continue; // dedup: one entry per period+level, create-only
@@ -512,6 +546,8 @@ function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): 
         ts: new Date().toISOString(),
       };
       wrote = true;
+      newPeriods.push(alerts[key]);
+      newKeys.push(key);
     }
     // Reap budget-* entries from prior periods — they are created on breach/warn
     // but nothing else removes them, so alert-state.json would grow unbounded on a
@@ -523,19 +559,28 @@ function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): 
       const current = periodKey[e.period as keyof typeof periodKey];
       if (current && !key.endsWith(`:${current}`)) { delete alerts[key]; wrote = true; }
     }
+
+    // Only assert the budget pause when unpaused (or already paused for budget) —
+    // never downgrade a stronger operator/watchdog stop (often indefinite) into an
+    // auto-resuming budget pause that silently lifts at the next boundary. isPaused
+    // applies reader-side expiry, so an already-lapsed pause counts as unpaused.
+    const existing = isPaused(HERMIT_DIR);
+    const willPause = result.action === 'pause' && result.level === 'breach' && (!existing.paused || existing.reason === 'budget');
+    const breachedPeriods = result.periods.filter(p => p.level === 'breach').map(p => p.period);
+    const until = willPause ? pauseBoundary(breachedPeriods, timezone) : null;
+
+    if (newPeriods.length > 0) {
+      const message = composeBudgetMessage(newPeriods, result.action, until, timezone);
+      const sendResult = await sendToChannel(HERMIT_DIR, message);
+      if (sendResult.ok) {
+        for (const key of newKeys) alerts[key].notified = true;
+      }
+      // On failure, notified stays false — heartbeat-precheck's EVALUATE wake remains the fallback.
+    }
     if (wrote) writeAlertState(ALERT_STATE_JSON, { ...state, alerts });
 
-    if (result.action === 'pause' && result.level === 'breach') {
-      // Only assert the budget pause when unpaused (or already paused for budget) —
-      // never downgrade a stronger operator/watchdog stop (often indefinite) into an
-      // auto-resuming budget pause that silently lifts at the next boundary. isPaused
-      // applies reader-side expiry, so an already-lapsed pause counts as unpaused.
-      const existing = isPaused(HERMIT_DIR);
-      if (!existing.paused || existing.reason === 'budget') {
-        const breachedPeriods = result.periods.filter(p => p.level === 'breach').map(p => p.period);
-        const until = pauseBoundary(breachedPeriods, timezone);
-        setPause(HERMIT_DIR, { reason: 'budget', by: 'cost-tracker', until });
-      }
+    if (willPause) {
+      setPause(HERMIT_DIR, { reason: 'budget', by: 'cost-tracker', until });
     }
   } catch (err: any) {
     console.error(`[cost-tracker] budget check error: ${err.message}`);
@@ -643,7 +688,7 @@ async function run(data: Json): Promise<string | null> {
     const costIdx = updateCostIndex(COST_LOG, COST_INDEX, timezone);
 
     // PROP-016: compare the freshly-updated index against config.budget's caps.
-    applyBudgetCheck(costIdx, timezone, config.budget);
+    await applyBudgetCheck(costIdx, timezone, config.budget);
 
     // Running total from .status.json (O(1)), falls back to index (O(1)) on first run.
     // Include subagent spend so .status.json stays consistent with the index.
@@ -669,7 +714,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, scanTriggerMarkers, sumTurnUsage, collectSubagentUsage, detectModel };
+export { run, getCumulativeCost, classifySource, scanTriggerMarkers, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage };
 
 if (import.meta.main) {
   (async () => {
