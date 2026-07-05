@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **operator doc pointers no longer dangle** — CLAUDE-APPEND, the SessionStart storage-drift line, and the docker-compose template stopped naming plugin-root docs by a bare `docs/…` path (unresolvable from the operator's project cwd, where the plugin's `docs/` doesn't exist); the artifact-refresh skill refs now use `${CLAUDE_PLUGIN_ROOT}/docs/`. New `operator-doc-refs` test fails the build on any bare `docs/…` ref in a state-template or SessionStart injection.
+
 ## [1.2.17] - 2026-07-05
 
 ### Added

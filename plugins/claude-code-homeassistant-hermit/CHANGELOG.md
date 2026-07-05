@@ -2,6 +2,11 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **CLAUDE-APPEND CLI pointer** — dropped the bare `docs/cli-reference.md` pointer (unresolvable from the operator's project cwd); `ha-agent-lab --help` is the resolvable catalog pointer, `src/cli.ts` the source of truth. The doc still ships under the plugin root.
+
 ## [0.4.1] - 2026-07-03
 
 ### Changed
