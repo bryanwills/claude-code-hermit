@@ -491,9 +491,9 @@ function composeBudgetMessage(newPeriods: Json[], action: 'alert' | 'pause', unt
 // (one per period per level — `budget-<level>:<period>:<period-key>`, create-only so
 // a re-detected breach later the same period never resets `notified` back to false)
 // and, for `action:"pause"`, set the PROP-015 pause flag with an auto-resume boundary.
-// Newly-created entries also get a direct channel push (deterministic channel voice);
-// `notified` is only flipped true on a confirmed send, so a failed send leaves the
-// existing heartbeat-precheck EVALUATE wake as the fallback announcement path.
+// Newly-created entries also get a direct channel push; `notified` is only
+// flipped true on a confirmed send, so a failed send leaves the existing
+// heartbeat-precheck EVALUATE wake as the fallback announcement path.
 // Fail-open throughout — never throws, since run()'s caller must never be blocked by
 // this check.
 async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json): Promise<void> {
@@ -530,7 +530,6 @@ async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: J
     const alerts: Json = { ...(state.alerts && typeof state.alerts === 'object' ? state.alerts : {}) };
     let wrote = false;
     const newPeriods: Json[] = [];
-    const newKeys: string[] = [];
     for (const p of result.periods) {
       const key = `budget-${p.level}:${p.period}:${periodKey[p.period]}`;
       if (alerts[key]) continue; // dedup: one entry per period+level, create-only
@@ -547,7 +546,6 @@ async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: J
       };
       wrote = true;
       newPeriods.push(alerts[key]);
-      newKeys.push(key);
     }
     // Reap budget-* entries from prior periods — they are created on breach/warn
     // but nothing else removes them, so alert-state.json would grow unbounded on a
@@ -564,16 +562,23 @@ async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: J
     // never downgrade a stronger operator/watchdog stop (often indefinite) into an
     // auto-resuming budget pause that silently lifts at the next boundary. isPaused
     // applies reader-side expiry, so an already-lapsed pause counts as unpaused.
-    const existing = isPaused(HERMIT_DIR);
-    const willPause = result.action === 'pause' && result.level === 'breach' && (!existing.paused || existing.reason === 'budget');
-    const breachedPeriods = result.periods.filter(p => p.level === 'breach').map(p => p.period);
-    const until = willPause ? pauseBoundary(breachedPeriods, timezone) : null;
+    // The isPaused() read only runs on the rare pause+breach path, not every tick.
+    let willPause = false;
+    let until: string | null = null;
+    if (result.action === 'pause' && result.level === 'breach') {
+      const existing = isPaused(HERMIT_DIR);
+      willPause = !existing.paused || existing.reason === 'budget';
+      if (willPause) {
+        const breachedPeriods = result.periods.filter(p => p.level === 'breach').map(p => p.period);
+        until = pauseBoundary(breachedPeriods, timezone);
+      }
+    }
 
     if (newPeriods.length > 0) {
       const message = composeBudgetMessage(newPeriods, result.action, until, timezone);
       const sendResult = await sendToChannel(HERMIT_DIR, message);
       if (sendResult.ok) {
-        for (const key of newKeys) alerts[key].notified = true;
+        for (const p of newPeriods) p.notified = true;
       }
       // On failure, notified stays false — heartbeat-precheck's EVALUATE wake remains the fallback.
     }

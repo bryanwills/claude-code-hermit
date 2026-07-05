@@ -27,7 +27,7 @@ import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './
 import { tmuxSessionAlive, getSessionName as deriveSessionName } from './lib/tmux';
 import { costLogPath } from './lib/cc-compat';
 import { wallMinutes } from './cron-tz-shift';
-import { isPaused } from './lib/pause';
+import { isPaused, pauseReasonLabel } from './lib/pause';
 
 type Json = any;
 
@@ -107,22 +107,27 @@ function pushOperatorMessage(text: string): void {
   }
 }
 
+/** Current time as "HH:MM" in `timezone`, falling back to the UTC clock if the zone is invalid. */
+function nowHHMM(timezone: string): string {
+  return currentHHMM(timezone) ?? new Date().toISOString().slice(11, 16);
+}
+
 /** Operator-language message for a watchdog restart. */
 export function composeRestartMessage(reason: string, timezone: string): string {
-  const hhmm = currentHHMM(timezone) ?? new Date().toISOString().slice(11, 16);
+  const hhmm = nowHHMM(timezone);
   const cause = reason === 'dead-process' ? "it wasn't running" : 'it had frozen';
   return `I restarted your hermit at ${hhmm} — ${cause}.`;
 }
 
 /** Operator-language message for the first tick of a wedge episode. */
 export function composeWedgeMessage(timezone: string): string {
-  const hhmm = currentHHMM(timezone) ?? new Date().toISOString().slice(11, 16);
+  const hhmm = nowHHMM(timezone);
   return `Your hermit hasn't responded in a while — checking on it now (${hhmm}).`;
 }
 
 /** Operator-language message for a forced pause enforcement (any reason). */
 export function composePauseMessage(reason: string, until: string | null, timezone: string): string {
-  const label = reason === 'budget' ? 'a budget cap' : reason === 'watchdog' ? 'the watchdog' : 'your request';
+  const label = pauseReasonLabel(reason);
   if (!until) return `Your hermit is paused (${label}) until you resume it.`;
   const hhmm = currentHHMM(timezone, new Date(until)) ?? until;
   return `Your hermit is paused (${label}) until ${hhmm}.`;
@@ -298,8 +303,8 @@ function doRestart(sessionName: string, reason: string, runtime: Json, timezone:
     child.unref();
     appendEvent('restart', reason);
     process.stderr.write(`[watchdog] restarted "${sessionName}", reason: ${reason}\n`);
-    // Lock is already released above (line 291) — a slow send here never holds it.
-    // Only reached on the success path, not the catch below.
+    // Lock is already released above, so a slow send here never holds it —
+    // and this only runs on the success path, not the catch below.
     pushOperatorMessage(composeRestartMessage(reason, timezone));
   } catch (e) {
     process.stderr.write(`[watchdog] restart failed: ${e}\n`);

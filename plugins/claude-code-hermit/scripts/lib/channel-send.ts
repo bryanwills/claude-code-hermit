@@ -19,6 +19,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { resolve as resolveOutboundChannel } from '../resolve-outbound-channel';
 import { logMessage, isLoggingEnabled } from './channel-log';
+import { loadConfig } from './channel-auth';
 
 type Json = any;
 
@@ -36,14 +37,6 @@ const TOKEN_ENV_VAR: Record<string, string> = {
   telegram: 'TELEGRAM_BOT_TOKEN',
   discord: 'DISCORD_BOT_TOKEN',
 };
-
-function readConfig(hermitDir: string): Json | null {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(hermitDir, 'config.json'), 'utf8'));
-  } catch {
-    return null;
-  }
-}
 
 /** Mirrors hermit-start.ts's resolveStateDir: absolute pass-through, relative against the project root (hermitDir's parent). */
 function resolveStateDir(hermitDir: string, stateDir: string): string {
@@ -171,7 +164,7 @@ const SENDERS: Record<string, (token: string, chatId: string, text: string) => P
  */
 export async function sendToChannel(hermitDir: string, text: string): Promise<SendResult> {
   try {
-    const config = readConfig(hermitDir);
+    const config = loadConfig(hermitDir);
     if (!config) return { ok: false, error: 'config_read_failed' };
 
     const target = resolveOutboundChannel(config.channels);

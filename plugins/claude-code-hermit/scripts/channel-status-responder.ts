@@ -22,7 +22,7 @@ import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { loadConfig, isAllowedSender } from './lib/channel-auth';
-import { isPaused } from './lib/pause';
+import { isPaused, pauseReasonLabel } from './lib/pause';
 import { costIndexPath, readCostIndex } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, currentHHMM, parseSimpleCronTime } from './lib/time';
 import { wallMinutes } from './cron-tz-shift';
@@ -49,7 +49,7 @@ function resolveTimezone(config: Json): string {
 function pauseLine(dir: string, timezone: string): string | null {
   const status = isPaused(dir);
   if (!status.paused) return null;
-  const label = status.reason === 'budget' ? 'a budget cap' : status.reason === 'watchdog' ? 'the watchdog' : 'your request';
+  const label = pauseReasonLabel(status.reason);
   if (!status.until) return `Paused (${label}) until you resume it.`;
   const hhmm = currentHHMM(timezone, new Date(status.until)) ?? status.until;
   return `Paused (${label}) until ${hhmm}.`;
