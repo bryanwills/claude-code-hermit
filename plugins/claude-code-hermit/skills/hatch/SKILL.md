@@ -683,26 +683,13 @@ After Steps 6–9 complete, write `.claude-code-hermit/state/hatch-options.json`
 
 This file is read by `hermit-evolve`, `docker-setup`, and `claude-code-dev-hermit:hatch` to inherit the operator's target choice without re-running scope detection.
 
-### 9c. Artifact publish authorization (AskUserQuestion, single question)
+### 9c. Artifact publish permission
 
-Skip this step entirely if `artifacts.dashboard`, `artifacts.proposals`, and `artifacts.weekly_review` are all `false` in the config just written (Step 5) — nothing to authorize. Otherwise, an unattended (non-interactive/channel) session cannot answer the first-publish permission ask for the `Artifact` tool — a headless "ask" is an effective deny — so this step resolves that up front rather than leaving every artifact refresh to silently no-op later.
+Skip this step entirely if `artifacts.dashboard`, `artifacts.proposals`, and `artifacts.weekly_review` are all `false` in the config just written (Step 5) — nothing to authorize.
 
-```
-questions: [
-  {
-    header: "Artifact publish",
-    question: "This hermit publishes status/proposal/weekly-review pages via Claude Code's Artifact tool. Unattended sessions can't answer a permission prompt, so authorize it now, or publish the first version of each page yourself right now instead?",
-    options: [
-      { label: "Yes — allow", description: "Adds \"Artifact\" to permissions.allow so refreshes never prompt (default)" },
-      { label: "No — publish first versions now", description: "Publish once, inline, in this attended session; every later refresh redeploys to the same URL without a prompt" }
-    ]
-  }
-]
-```
+Otherwise, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> artifact-allow` (same target-file resolution as Step 8; additive merge, never removes existing entries). This adds `Artifact` to `permissions.allow` so unattended sessions never stall on the first-publish permission ask — a headless "ask" is an effective deny, which would otherwise silently no-op every artifact refresh. No prompt: it follows the same opt-out model as the feature itself (default-on, disable any page via `/hermit-settings`), and rides Claude Code's own governed Artifacts path (org toggle, RBAC, retention, audit log).
 
-- If **allow**: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> artifact-allow` (same target-file resolution as Step 8; additive merge, never removes existing entries). Note: "Artifact publishes authorized — refreshes from `/brief`, `/weekly-review`, `/proposal-create`, and `/proposal-act` will never prompt."
-- If **publish first versions now**: for each artifact type enabled in config (`dashboard`, `proposals`, `weekly_review`), run its render script per `docs/artifacts.md` and call `Artifact` once, recording the returned URL in `.claude-code-hermit/state/artifacts.json` exactly as the refresh protocol's step 4 describes. If a render script has nothing to publish yet (e.g. no weekly review exists on day one), skip that type silently — it publishes on its own first natural trigger instead. Note: "Published the first version of each ready page — later refreshes redeploy to the same URL without a prompt. Pages with nothing to show yet (e.g. weekly review) will publish on their first natural trigger."
-- Neither answer blocks hatch from completing: without the allow rule or banked URLs, unattended publishes silently no-op (per `docs/artifacts.md` step 5) with a one-line SHELL.md Findings entry — a deliberate choice, not a bug. Say so if the operator picks neither branch explicitly (e.g. via a future `/hermit-settings` toggle-off of all three artifact types after this step already ran).
+Note to the operator: "Artifact publishing is on — added `Artifact` to `permissions.allow` so refreshes from `/brief`, `/weekly-review`, `/proposal-create`, and `/proposal-act` never prompt. Disable any page via `/hermit-settings artifact-dashboard|artifact-proposals|artifact-weekly-review`."
 
 ---
 
@@ -891,7 +878,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Step 7.5 | git init (fresh dirs only) | run `git init` if `git_init_eligible`; omit otherwise |
 | Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file |
 | Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
-| Step 9c | Artifact publish authorization | "allow" branch applied silently (skip entirely if all three `artifacts.*` are `false`, same skip condition as Advanced) |
+| Step 9c | Artifact publish permission | same as Advanced — `artifact-allow` applied silently (skip entirely if all three `artifacts.*` are `false`) |
 
 ### Quick — auto-chain at end of Step 10
 
