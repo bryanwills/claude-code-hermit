@@ -419,6 +419,10 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     errors.push('push_notifications: must be a boolean');
   }
 
+  if (config.ask_gate !== undefined && typeof config.ask_gate !== 'boolean') {
+    errors.push('ask_gate: must be a boolean');
+  }
+
   if (config.artifacts !== undefined) {
     if (typeof config.artifacts !== 'object' || config.artifacts === null || Array.isArray(config.artifacts)) {
       errors.push('artifacts: must be an object');
