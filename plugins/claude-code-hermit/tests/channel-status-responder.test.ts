@@ -110,11 +110,17 @@ describe('channel-status-responder', () => {
     expect(stub.requests.length).toBe(0);
   });
 
-  test('failed send (dead listener) -> no block, model falls through', async () => {
+  // #10b: a failed deterministic send no longer falls through to a blind model turn —
+  // it injects the composed status via stdout (probe-verified to reach the model) for
+  // the model to relay verbatim, and does NOT block.
+  test('failed send -> injects composed status for the model to relay (not a blind fallthrough)', async () => {
     wd = setupChannelWorkdir();
-    const r = await run(wd, 'status', 'http://127.0.0.1:1');
+    const r = await run(wd, 'status', 'http://127.0.0.1:1'); // dead listener -> send fails
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('"decision":"block"'); // not blocked — model turn proceeds
+    expect(r.stdout).toContain('[status]');               // relay instruction emitted
+    expect(r.stdout).toContain('reply tool');             // tells the model to relay
+    expect(r.stdout).toContain('All quiet');              // carries the composed status text
   });
 
   test('non-channel prompt -> no-op', async () => {

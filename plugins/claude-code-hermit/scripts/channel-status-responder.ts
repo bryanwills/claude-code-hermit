@@ -232,18 +232,31 @@ async function main(raw: string): Promise<void> {
   const reply = composeStatusReply(dir, config, { redact: !trusted });
   // Reply to the chat the request arrived on — not the globally-resolved
   // outbound channel — so a status asked in a group or a non-primary channel is
-  // answered where it was asked (the model reply path already targets the origin
-  // chat_id). This also keeps the destination aligned with the allowed_users gate
-  // above, which is checked against the inbound channel. A tight timeout bounds
-  // this hook's blocking; on any failure we emit nothing and the model answers.
+  // answered where it was asked. This also keeps the destination aligned with the
+  // allowed_users gate above. A tight timeout bounds this hook's blocking.
   const result = await sendToChannel(dir, reply, {
     target: { id: envelope.source, chat_id: envelope.chatId },
     timeoutMs: 6000,
   });
   if (result.ok) {
     console.log(JSON.stringify({ decision: 'block', reason: 'status answered deterministically' }));
+    return;
   }
-  // On failure: print nothing — the prompt falls through and the model answers normally.
+
+  // Deterministic delivery failed — an unsupported platform (iMessage/webhook aren't
+  // in lib/channel-send's SENDERS) or a transient send error. Rather than fall through
+  // to a blind model turn — which, while paused, can't Read state and would answer from
+  // nothing — inject the already-composed (and redaction-correct) status as context and
+  // have the model relay it verbatim via its channel reply tool (pause-gate exempts that
+  // tool). Not a block, so the model's turn proceeds. Probe-verified that a
+  // UserPromptSubmit hook's stdout reaches the model on the same turn
+  // (compiled/spike-userprompt-additionalcontext-probe-2026-07-05.md) — the same
+  // mechanism channel-reply-reminder.ts relies on.
+  process.stdout.write(
+    `[status] Deterministic status delivery is unavailable on this channel. Relay the ` +
+    `following status to the operator verbatim via the channel reply tool (to the chat ` +
+    `this message arrived on), then stop — add no commentary:\n${reply}\n`
+  );
 }
 
 try {
