@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.19] - 2026-07-06
 
 ### Added
 - **watchdog: `last_hygiene_eval` telemetry** — each `maybeContextClear`/`maybeContextCompact` tick records why it fired or skipped in `watchdog-state.json`, keyed per mechanism so the clear and compact tiers keep separate records, surfaced in `hermit-doctor`. Previously every gate was a silent `return`.
