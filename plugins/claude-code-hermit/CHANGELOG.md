@@ -5,6 +5,9 @@
 ### Added
 - **watchdog: `last_hygiene_eval` telemetry** — each `maybeContextClear`/`maybeContextCompact` tick records why it fired or skipped in `watchdog-state.json`, keyed per mechanism so the clear and compact tiers keep separate records, surfaced in `hermit-doctor`. Previously every gate was a silent `return`.
 
+### Changed
+- **hermit-routines: quiet success-path load log** — a clean `load` run now logs registration counts only; the full per-ID CronCreate list is reserved for runs with at least one failure. Cuts a recurring ~21-ID dump from SHELL.md on every session start and daily `heartbeat-restart` re-arm. (#533)
+
 ### Fixed
 - **watchdog: context-hygiene thresholds measure real context size, not the per-turn billing sum** — a multi-call turn summed every API call, so a ~300k context could log ~1.5M tokens and misfire the 700k `/clear`. `cost-tracker.ts` records `max_prompt_tokens` (the largest single call) per turn; the destructive `/clear` requires that real metric and never fires on the per-call-average fallback used for legacy entries.
 - **watchdog: a subagent's own cost-log line no longer masks its dispatching turn** — `getLastCostLogEntry` skips subagent-appended lines, which could otherwise read as under the compaction floor while the real turn was bloated.
@@ -18,8 +21,6 @@
 Run `/claude-code-hermit:hermit-evolve`. No new config keys this release; the evolve skill handles one state repair:
 
 1. **Clear a stuck shutdown stamp.** Read `.claude-code-hermit/state/runtime.json`. If `session_state` is `in_progress` or `waiting`, or a tmux/docker session for this hermit is currently alive, AND either `shutdown_requested_at` or `shutdown_completed_at` is non-null: set both fields to `null` and write the file back. This is the exact fleet pathology this release fixes — a nightly auto-close (or any close routed through `/session-close`'s "Full Shutdown" framing without a matching `hermit-stop.ts`-initiated `shutdown_requested_at`) leaves a stamp that silently disables watchdog restart recovery and both context-hygiene tiers (`maybeContextClear`/`maybeContextCompact`) until the hermit's next restart. Skip this step if the session is genuinely idle/stopped — a stamp on a stopped hermit is correct and must not be cleared.
-### Changed
-- **hermit-routines: quiet success-path load log** — a clean `load` run now logs registration counts only; the full per-ID CronCreate list is reserved for runs with at least one failure. Cuts a recurring ~21-ID dump from SHELL.md on every session start and daily `heartbeat-restart` re-arm. (#533)
 
 ## [1.2.18] - 2026-07-05
 
