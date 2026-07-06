@@ -2,7 +2,7 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
-## [Unreleased]
+## [0.4.2] - 2026-07-06
 
 ### Added
 - **hatch: auto-mode environment seed** — new Step 7.7 runs `scripts/automode-env.ts`, naming the operator's Home Assistant instance (read from `.env`) as a trusted `autoMode.environment` entry in `.claude/settings.local.json`, so Claude Code's auto-mode classifier stops treating the hermit's nightly unattended reads (briefs, audits, context refresh) as unrecognized outbound calls. Environment-only — no `autoMode.allow` exception is seeded.
