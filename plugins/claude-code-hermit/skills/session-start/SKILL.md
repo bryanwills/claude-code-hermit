@@ -11,7 +11,19 @@ Notify the operator per the channel policy in CLAUDE.md (§ Operator Notificatio
 
 ## `--task` flag (non-interactive autonomous start)
 
-If invoked as `session-start --task '<text>'`: use `<text>` as the task and bypass interactive prompts/questions only. Operator notifications in step 8 still follow the channel policy above. Skip the NEXT-TASK.md presentation (step 6), the "What should I work on next?" / "What should I help with?" prompts (steps 9b/10), the Tags prompt (step 11), the step-12 first-step confirmation, and the "After confirming the plan with the operator" plan-confirmation prose in the task-source paths. Do not ask for plan confirmation. Steps 1–4 run unchanged; create the session via `claude-code-hermit:session-mgr` and proceed autonomously.
+If invoked as `session-start --task '<text>'`: use `<text>` as the task and bypass interactive prompts/questions only. Operator notifications in step 8 still follow the channel policy above. Skip the NEXT-TASK.md presentation (step 6), the "What should I work on next?" / "What should I help with?" prompts (steps 9b/10), the Tags prompt (step 11), the step-12 first-step confirmation, and the "After confirming the plan with the operator" plan-confirmation prose in the task-source paths. Do not ask for plan confirmation. Steps 1–4 run unchanged.
+
+**Collision guard (runs after step 3, before creating/updating the session via session-mgr).** This is the `--task` path's non-interactive resolution of step 9's resume check (`:129-132`), which this path otherwise bypasses along with the other interactive prompts.
+
+- **Trigger:** `runtime.json` `session_state` is `in_progress` or `waiting` (both are live-with-a-real-task states — a `waiting` session with `waiting_reason` of `operator_input`/`conservative_pickup`/null still has a genuine pending task, per `channel-responder/SKILL.md`), AND SHELL.md's current `## Task` is non-placeholder, AND it collides with `<text>`.
+- **Task-text comparison:** take the first non-comment, non-empty line under `## Task` in SHELL.md, trimmed, and compare it to `<text>`, also trimmed. The placeholder `<!-- Awaiting next task -->` counts as empty (not a collision). Equal (post-trim) → **not** a collision, this is the same task continuing (e.g. a routine's own re-entrant call) — proceed unchanged. Different → collision.
+- **On collision:**
+  1. Do **not** overwrite `## Task`. Do **not** create or renumber a session.
+  2. Defer `<text>` to `.claude-code-hermit/sessions/NEXT-TASK.md`, using the same markdown shape `proposal-act`'s "Create a session task" step writes (`# Next Task` / `## Task` / `## Context` / `## Suggested Plan`). If `NEXT-TASK.md` already exists (another task is already pending), do **not** overwrite it — this incoming task is dropped, not queued.
+  3. Append one line to SHELL.md `## Findings` and `## Progress Log`: `[HH:MM] session-start --task deferred "<incoming task, one line>": session <session_state> with "<current task, one line>"`. If NEXT-TASK.md already existed (step 2's drop case), say "dropped (NEXT-TASK already pending)" instead of "deferred".
+  4. Notify the operator per the channel policy above with the same information.
+  5. Abort the start — do not proceed past this point. The caller (routine subagent or operator) receives the decline as this invocation's result.
+- **No collision** (`idle`, or `## Task` is placeholder/empty, or same task) → proceed as normal below.
 
 When starting a new session:
 
