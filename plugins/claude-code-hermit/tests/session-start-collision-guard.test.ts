@@ -53,4 +53,22 @@ describe('session-start --task collision guard', () => {
   test('same task (post-trim match) proceeds unchanged, not a collision', () => {
     expect(skill).toMatch(/Equal \(post-trim\).*not\*\* a collision/s);
   });
+
+  test('--task adopts the task verbatim so same-task comparison stays valid', () => {
+    expect(skill).toContain('write it **verbatim**');
+  });
+
+  test('--task path skips step 9 resume prompt (no interactive stall on same-task re-entry)', () => {
+    expect(skill).toContain('resume prompt (step 9');
+  });
+
+  test('recovery waiting_reason archives-as-partial instead of deferring the fresh task', () => {
+    expect(skill).toContain('recovery `waiting_reason`');
+    expect(skill).toContain('archive the crashed session as `partial`');
+  });
+
+  test('step 6 autonomous drain auto-accepts and only deletes after adoption', () => {
+    expect(skill).toContain('Autonomous drain');
+    expect(skill).toContain('Never delete a queued task that was not started');
+  });
 });

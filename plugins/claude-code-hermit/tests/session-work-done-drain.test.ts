@@ -48,4 +48,12 @@ describe('session work-done NEXT-TASK drain', () => {
   test('step 7b (compaction marker) is unconditional regardless of the drain branch', () => {
     expect(skill).toContain('Run this step unchanged regardless of step 8');
   });
+
+  test('step 7b names the watchdog as the primary marker reaper (accurate for conservative branch)', () => {
+    expect(skill).toContain('maybeContextCompact');
+  });
+
+  test('conservative queued branch omits the misleading "Ready for what\'s next" tail', () => {
+    expect(skill).toContain('only when no task is queued');
+  });
 });
