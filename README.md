@@ -205,9 +205,9 @@ Because idle always-on cost is effectively zero, one Claude subscription can run
 
 ---
 
-## Pre-built Hermits
+## Extensions
 
-Domain plugins you stack on top of any hermit you've hatched.
+Extension plugins you stack on top of any hermit you've hatched.
 
 - [**`dev-hermit`**](plugins/claude-code-dev-hermit/README.md) — *For software builders.* Safety layer for code-writing agents: push guard, branch discipline, gated PRs.
 - [**`homeassistant-hermit`**](plugins/claude-code-homeassistant-hermit/README.md) — *For Home Assistant users.* HA skills, safety hook, automation builder, zero-dependency CLI.
