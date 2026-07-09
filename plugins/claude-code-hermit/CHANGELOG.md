@@ -4,6 +4,7 @@
 
 ### Added
 - **cost attribution: inbound-channel turns get their own `by_source` bucket** — `classifySource` now recognizes the `<channel source="...">` transcript envelope and tags the turn `channel:<name>` (e.g. `channel:discord`) instead of collapsing into the catch-all `other` bucket. Redaction collapses `channel:*` the same way it already does `routine:*`.
+- **context-reset breadcrumb: a new `PreCompact` hook plus a watchdog pre-`/clear` flush** — `precompact-stamp.ts` stamps SHELL.md's Progress Log before every `/compact` (manual or native auto-compaction); the watchdog's emergency 700k `/clear` (which never fires `PreCompact`) flushes the same breadcrumb directly before sending the keystroke. A trace only — it does not recover in-context observations, just marks that a mid-arc reset happened.
 
 ### Fixed
 - **session-cost: per-session `cost_usd` no longer reads `0.00` for real work** — cost-log rows carry the shared transcript UUID, never the logical `S-NNN`, so the old exact-id match never hit; `session-cost.ts` now sums the arc window `[opened_at, closed_at]`. `cost-tracker.ts` re-stamps `opened_at` per arc keyed on the transcript id (so a crash/restart's stale window can't over-count the next session) and stamps `closed_at` on the idle transition (so a close running after idle still recovers the window instead of falling back to the always-zero exact-id match).
