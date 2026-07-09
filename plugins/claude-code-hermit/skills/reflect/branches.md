@@ -20,7 +20,7 @@ Invoked from SKILL.md § Scheduled-checks mode. Run at most one due check, then 
      Evidence: <one-paragraph summary>
      Sessions: none
      ```
-     Pass it to § Candidate processing → Evidence Validation (`claude-code-hermit:reflection-judge`). On ACCEPT/DOWNGRADE, gate with the Proposal triage gate (`claude-code-hermit:proposal-triage`) — when appending the `triage-verdict` metric, set `"caller":"scheduled-checks"`. On triage `CREATE`: Tier 1/2 → Micro-approval queuing; Tier 3 → `/claude-code-hermit:proposal-create`. SUPPRESS/DUPLICATE from triage, or SUPPRESS from the judge → drop silently (note in the Progress Log). An unrecognized judge or triage verdict → fail closed per § Gate failure handling; the candidate re-surfaces on the next scheduled-checks run.
+     Pass it to § Candidate processing → Evidence Validation (`claude-code-hermit:reflection-judge`). On ACCEPT/DOWNGRADE, gate with the Proposal triage gate (`claude-code-hermit:proposal-triage`, a batch of one here — single candidate) — when appending the `triage-verdict` metric, set `"caller":"scheduled-checks"`. On triage `CREATE: <title>`: Tier 1/2 → Micro-approval queuing; Tier 3 → `/claude-code-hermit:proposal-create`. `SUPPRESS: <title> — ...`/`DUPLICATE: <title> — ...` from triage, or SUPPRESS from the judge → drop silently (note in the Progress Log). An unrecognized judge or triage verdict → fail closed per § Gate failure handling; the candidate re-surfaces on the next scheduled-checks run.
    - **`empty`:** no candidate. `consecutive_empty += 1` (persisted in step 7). Check the interval-adjustment rule below.
    - **`unavailable`:** note in SHELL.md `## Findings`: `Scheduled check skipped: <id> — skill unavailable (cooldown 4h)`. No candidate.
    - **`error`:** note in SHELL.md `## Findings`: `Scheduled check error: <id> — retrying after interval_days`. No candidate.
@@ -91,7 +91,7 @@ Reflect-generated inferences **never** use bypass Evidence Sources (`scheduled-c
 
 ### Evidence Validation
 
-Before acting on any proposal candidate, delegate to `claude-code-hermit:reflection-judge`. Collect **all** candidates first — including `routine_candidates` and `procedure_candidates` from the eval runner alongside think-hard and procedure-capture candidates — then make a **single** invocation. Dedup by title-slug before passing (reflection-judge matches verdicts by title; duplicates would produce ambiguous routing). A single candidate is still passed as a batch of one. (Quick mode's stated order — per-candidate triage first, then one judge batch for the CREATE survivors — is the exception; follow the order the calling mode specifies.)
+Before acting on any proposal candidate, delegate to `claude-code-hermit:reflection-judge`. Collect **all** candidates first — including `routine_candidates` and `procedure_candidates` from the eval runner alongside think-hard and procedure-capture candidates — then make a **single** invocation. Dedup by title-slug before passing (reflection-judge matches verdicts by title; duplicates would produce ambiguous routing). A single candidate is still passed as a batch of one. (Quick mode's stated order — one batched triage call first, then one judge batch for the CREATE survivors — is the exception in ordering only, not batching; follow the order the calling mode specifies.)
 
 Pass candidates as a sequence of blocks separated by a blank line:
 ```
@@ -145,7 +145,7 @@ Classify every candidate into a tier before creating a proposal or acting:
 
 ### Proposal triage gate
 
-Before queuing a micro-approval or calling `proposal-create`, call `claude-code-hermit:proposal-triage` (single-candidate — invoke per-candidate, never as a batch). Pass `Evidence Source:` and `Evidence Origin:` when known:
+Before queuing micro-approvals or calling `proposal-create`, gate **all** candidates reaching this step with `claude-code-hermit:proposal-triage` in a **single batched call** (a single candidate is still passed as a batch of one). Pass `Evidence Source:` and `Evidence Origin:` when known, as a sequence of blocks separated by a blank line:
 ```
 Title: <title>
 Evidence Source: <value from the candidate, or omit to default to archived-session>
@@ -153,14 +153,15 @@ Evidence Origin: <own-work | external-content, or omit to default to own-work>
 Evidence: <one-paragraph evidence summary>
 ```
 
-- `CREATE` — proceed
-- `DUPLICATE:<PROP-ID>` — link to existing proposal in SHELL.md Findings instead, do not create
-- `SUPPRESS` — drop silently
-- **Unrecognized line 1** — fail closed per § Gate failure handling with `"agent":"proposal-triage"`.
+The gate returns one verdict block per candidate, matched by `<title>`:
+- `CREATE: <title>` — proceed
+- `DUPLICATE: <title> — <PROP-ID>: <reason>` — link to existing proposal in SHELL.md Findings instead, do not create
+- `SUPPRESS: <title> — <code>: <reason>` — drop silently
+- **Unrecognized or missing verdict for a candidate's title** — fail closed per § Gate failure handling with `"agent":"proposal-triage"`, for that candidate only; the rest of the batch proceeds on its own verdicts.
 
-Parse line 1 as the verdict. Lines 2+ are additive metadata (`closest_prop`, `aligned`, `operator_excerpt`, `overlap_compiled`, `prior_discussion`, `failed_condition`) — read for context if useful, but do not treat as part of the verdict for branching.
+Parse each block's line 1 as that candidate's verdict. Lines 2+ in a block are additive metadata (`closest_prop`, `aligned`, `operator_excerpt`, `overlap_compiled`, `prior_discussion`, `failed_condition`) — read for context if useful, but do not treat as part of the verdict for branching.
 
-After receiving the verdict, append one event to `state/proposal-metrics.jsonl`. Use `"caller":"reflect"` on a normal reflect run, or `"caller":"scheduled-checks"` when invoked via § Scheduled checks:
+After receiving the verdicts, append one `triage-verdict` event per candidate to `state/proposal-metrics.jsonl` (loop over the batch). Use `"caller":"reflect"` on a normal reflect run, or `"caller":"scheduled-checks"` when invoked via § Scheduled checks:
 ```bash
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts \
   .claude-code-hermit/state/proposal-metrics.jsonl \
@@ -173,7 +174,7 @@ After validating with `claude-code-hermit:reflection-judge`, choose exactly one 
 
 1. **No action** — pattern not strong enough, already handled, or already addressed by the Resolution Check.
 2. **Memory update** — for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked. Issue the standard "remember it" reflection — the trained auto-memory flow handles the write, with its own discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE). Save nothing if nothing rises above noise. Sub-threshold *patterns* do NOT go to memory — they go to the observations ledger; keeping the recurrence store separate from operator memory is what prevents the judge's `covered-by-memory` check from suppressing a pattern at the moment it graduates.
-3. **Proposal candidate** — classify tier (§ Proposal Tier Classification), then: Tier 1/2 → gate with `claude-code-hermit:proposal-triage` first, then queue micro-approval in `state/micro-proposals.json`; Tier 3 → gate with triage first, then call `/claude-code-hermit:proposal-create` (exception: procedure-capture candidates skip the separate pre-gate — see § Procedure capture).
+3. **Proposal candidate** — classify tier (§ Proposal Tier Classification) for every candidate reaching this outcome, batch them all through the Proposal triage gate together, then per candidate on its own verdict: Tier 1/2 CREATE → queue micro-approval in `state/micro-proposals.json`; Tier 3 CREATE → call `/claude-code-hermit:proposal-create` (exception: procedure-capture candidates skip the separate pre-gate — see § Procedure capture).
 
 Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label via stdin heredoc (labels are free text and may contain apostrophes):
 ```bash
@@ -244,6 +245,8 @@ Recurrence signal (as evaluated by the runner): the same multi-step procedure ap
 2. Consult the harness available-skills list (authoritative — never disk checks or `claude plugin list`). If any `/claude-code-hermit:*` or sibling-plugin skill already covers the procedure → suppress.
 3. The standard `proposal-triage` gate still runs and catches an already-open PROP (DUPLICATE verdict).
 
+**Preference ladder (extend before create).** The dedup guard above is binary — *full* coverage suppresses. Between "fully covered" and "no related skill at all" sits the common case: an **adjacent** skill whose domain or trigger phrases overlap the procedure but that does not fully cover it. Prefer **extending the adjacent skill** over drafting a new one: route the procedure as a Component Health `## Skill Improvement` candidate naming that skill (Tier 2, the existing edit path — see § `skill-correction:*` routing and § Component Health) instead of the Tier-3 `## Skill Draft` below, and follow § Candidate processing. Draft a brand-new skill only when no installed or sibling skill can absorb the procedure. Rationale: a proliferation of narrow single-use skills is a failure of the skill library, not a success (reuse over build). When extending, skip the procedure-brief and `## Skill Draft` steps below.
+
 **Write the procedure brief (audit artifact):**
 
 Write `.claude-code-hermit/compiled/procedure-brief-<slug>-YYYY-MM-DD.md` before queuing the candidate. This is a housekeeping artifact (not evidence injected into the judged session content), so writing it before the judge call is permitted.
@@ -266,6 +269,8 @@ Body (concise — fits the `compiled/` char-budget/lint contract; do NOT write a
 - The recurring steps in order
 - Evidence sessions (which sessions and what Lessons/memory entries show the recurrence)
 - Proposed skill name and trigger phrases
+
+**Naming (applies to both `proposed_skill_name` above and the `## Skill Draft` `name` below).** Name the skill for the recurring *capability* it provides, never for the incident that surfaced it — no issue/PR numbers, error strings, dates, or `fix-<X>` phrasings in the name or slug (`fix-issue-44`, `handle-enoent`, `stop-verbose-brief` are all wrong). A skill named after its triggering event never routes on the capability it actually delivers, and the operator gate may rubber-stamp a bad name.
 
 **Routing:** classify **Tier 3** (a new skill auto-loads into every future session, its triggers can fire autonomously, and writing under `.claude/` is operator-space — effectively irreversible/cross-cutting). This matches the Tier-3 definition and the convention that all `category: capability` writers go straight to `proposal-create`.
 

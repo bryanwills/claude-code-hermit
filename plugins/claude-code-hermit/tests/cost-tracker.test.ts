@@ -321,3 +321,106 @@ describe('cost-tracker: max_prompt_tokens (real context size vs per-turn sum)', 
     expect(entry.api_calls).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Subprocess: cost-tracker stamps/clears runtime.json's opened_at (PR-6 part b —
+// session-cost.ts's window-delta mode reads this field). See maintainOpenedAt in
+// cost-tracker.ts.
+// ---------------------------------------------------------------------------
+
+async function runCostTrackerWithRuntime(dir: string, runtimeState: object): Promise<string> {
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  const stateDir = path.join(dir, '.claude-code-hermit', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const runtimePath = path.join(stateDir, 'runtime.json');
+  fs.writeFileSync(runtimePath, JSON.stringify(runtimeState));
+
+  // A non-zero-usage turn is required — run() returns early (before touching
+  // runtime.json at all) when totalTokens === 0.
+  const transcriptLines = [
+    triggerPrompt('operator message'),
+    assistantEntry('claude-sonnet-4-6', 100, 50),
+  ];
+  const transcriptPath = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(transcriptPath, transcriptLines.join('\n') + '\n');
+
+  const stdin = JSON.stringify({ session_id: 'proc-uuid', transcript_path: transcriptPath });
+  await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+
+  return runtimePath;
+}
+
+// The subprocess stdin tags the transcript id as 'proc-uuid'; maintainOpenedAt keys
+// the arc-reset on it. A stale opened_transcript (a prior/dead process) forces a new arc.
+describe('cost-tracker: opened_at / closed_at arc window', () => {
+  test('in_progress with no opened_at → opens an arc (opened_at ISO, closed_at null, transcript recorded)', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(typeof rt.opened_at).toBe('string');
+    expect(Number.isFinite(Date.parse(rt.opened_at))).toBe(true);
+    expect(rt.closed_at).toBeNull();
+    expect(rt.opened_transcript).toBe('proc-uuid');
+  }));
+
+  test('in_progress, same transcript + live arc → opened_at left unchanged', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing, closed_at: null, opened_transcript: 'proc-uuid' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBe(existing);
+  }));
+
+  test('in_progress with a stale transcript → arc reset (crash/restart no longer over-counts)', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing, opened_transcript: 'dead-uuid' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).not.toBe(existing);
+    expect(Number.isFinite(Date.parse(rt.opened_at))).toBe(true);
+    expect(rt.opened_transcript).toBe('proc-uuid');
+    expect(rt.closed_at).toBeNull();
+  }));
+
+  test('in_progress after a closed arc (closed_at set) → new arc opens, closed_at cleared', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing, closed_at: '2020-01-01T01:00:00.000Z', opened_transcript: 'proc-uuid' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).not.toBe(existing);
+    expect(rt.closed_at).toBeNull();
+  }));
+
+  test('idle with a live arc → stamps closed_at, keeps opened_at (close after idle can still recover the window)', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle', opened_at: existing, opened_transcript: 'proc-uuid' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBe(existing);
+    expect(typeof rt.closed_at).toBe('string');
+    expect(Number.isFinite(Date.parse(rt.closed_at))).toBe(true);
+  }));
+
+  test('idle with an already-closed arc → closed_at left unchanged', withTmpdir(async (dir) => {
+    const closed = '2020-01-01T01:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle', opened_at: '2020-01-01T00:00:00.000Z', closed_at: closed, opened_transcript: 'proc-uuid' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.closed_at).toBe(closed);
+  }));
+
+  test('idle with no opened_at → stays unset, no spurious write', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBeUndefined();
+    expect(rt.closed_at).toBeUndefined();
+  }));
+
+  test('waiting with opened_at set → left unchanged, not closed (bounce stays one arc)', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'waiting', opened_at: existing, opened_transcript: 'proc-uuid' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBe(existing);
+    expect(rt.closed_at).toBeUndefined();
+  }));
+
+  test('waiting with no opened_at → stays unset', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'waiting' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBeUndefined();
+  }));
+});

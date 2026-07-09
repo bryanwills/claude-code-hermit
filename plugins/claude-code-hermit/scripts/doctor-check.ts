@@ -1083,6 +1083,81 @@ function checkOpusWake() {
   }
 }
 
+// Advisory-only: $/run joins two independent mechanisms (transcript-classified cost vs.
+// a shell-stamped fired count), so treat it as an estimate. Skip routines with too few
+// runs to avoid divide-by-small-N false positives.
+const ROUTINE_COST_MIN_RUNS = 3;
+const ROUTINE_COST_DEFAULT_FLOOR_USD = 2;
+const ROUTINE_COST_MEDIAN_MULTIPLE = 3;
+
+function checkRoutineCost() {
+  try {
+    const idx = readCostIndex(costIndexPath(hermitDir));
+    if (!idx || !idx.by_source) {
+      return { id: 'routine-cost', status: 'ok', detail: 'no cost-index data yet' };
+    }
+
+    const read = readConfigOrCovered('routine-cost');
+    if ('covered' in read) return read.covered;
+    const floorCfg = read.config.doctor?.routine_cost_floor_usd;
+    const floor = typeof floorCfg === 'number' ? floorCfg : ROUTINE_COST_DEFAULT_FLOOR_USD;
+
+    const routineSources: { id: string; cost: number }[] = [];
+    for (const [source, bucket] of Object.entries<Json>(idx.by_source)) {
+      if (!source.startsWith('routine:')) continue;
+      routineSources.push({ id: source.slice('routine:'.length), cost: bucket?.cost || 0 });
+    }
+    const noRunsYet = { id: 'routine-cost', status: 'ok', detail: 'no routine has enough runs yet for cost analysis' };
+    // Skip the unbounded routine-metrics.jsonl scan entirely when no routine has spent
+    // anything yet — a routine-less install shouldn't pay to parse the whole file.
+    if (routineSources.length === 0) return noRunsYet;
+
+    const firedCounts: Record<string, number> = {};
+    const metricsPath = path.join(stateDir, 'routine-metrics.jsonl');
+    if (fs.existsSync(metricsPath)) {
+      for (const line of fs.readFileSync(metricsPath, 'utf-8').split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const e = JSON.parse(line);
+          if (e && e.event === 'fired' && typeof e.routine_id === 'string') {
+            // Match cost-tracker's 64-char id cap so the fired key joins the
+            // (already-truncated) routine: cost-source key.
+            const id = e.routine_id.slice(0, 64);
+            firedCounts[id] = (firedCounts[id] || 0) + 1;
+          }
+        } catch {}
+      }
+    }
+
+    const perRun: { id: string; costPerRun: number }[] = [];
+    for (const { id, cost } of routineSources) {
+      const runs = firedCounts[id] || 0;
+      if (runs < ROUTINE_COST_MIN_RUNS) continue;
+      perRun.push({ id, costPerRun: cost / runs });
+    }
+
+    if (perRun.length === 0) return noRunsYet;
+
+    const sorted = [...perRun].sort((a, b) => a.costPerRun - b.costPerRun);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0 ? (sorted[mid - 1].costPerRun + sorted[mid].costPerRun) / 2 : sorted[mid].costPerRun;
+
+    const worst = sorted[sorted.length - 1];
+    const outlierThreshold = Math.max(floor, ROUTINE_COST_MEDIAN_MULTIPLE * median);
+    if (worst.costPerRun > outlierThreshold) {
+      return {
+        id: 'routine-cost',
+        status: 'warn',
+        detail: `${worst.id} $${worst.costPerRun.toFixed(2)}/run (median $${median.toFixed(2)}) — check its scope, model, and wake timing`,
+      };
+    }
+
+    return { id: 'routine-cost', status: 'ok', detail: `${perRun.length} routine(s) analyzed, worst $${worst.costPerRun.toFixed(2)}/run (median $${median.toFixed(2)})` };
+  } catch (e: any) {
+    return { id: 'routine-cost', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
 function checkHeartbeat() {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -1435,6 +1510,7 @@ async function runAllChecks() {
     checkWatchdog(),
     checkContextAge(),
     checkOpusWake(),
+    checkRoutineCost(),
     checkHeartbeat(),
     checkRawSize(),
     checkCredentialExpiry(),
@@ -1461,7 +1537,7 @@ export {
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
   checkCost, checkProposals, checkDependencies, checkVersionCurrency, checkPermissions,
   checkDockerSecurity, checkArchival, checkReflectLoop, checkScheduler,
-  checkWatchdog, checkContextAge, checkOpusWake, checkHeartbeat, checkRawSize,
+  checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRawSize,
   checkCredentialExpiry, checkModelPricingKnown, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // runAllChecks is async (checkChannelLiveness performs network I/O) — callers must await it.

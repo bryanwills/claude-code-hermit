@@ -1793,12 +1793,12 @@ describe('reflect routine gating contract (token efficiency)', () => {
 const DOCTOR_CHECK_IDS = [
   'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
   'permissions', 'docker-security', 'archive', 'reflect', 'scheduler', 'watchdog', 'context-age',
-  'opus-wake', 'heartbeat', 'raw-size', 'credential-expiry', 'model-pricing-known',
+  'opus-wake', 'routine-cost', 'heartbeat', 'raw-size', 'credential-expiry', 'model-pricing-known',
   'channel-liveness',
 ];
 
 describe('doctor report contract (PROP-018 count pin)', () => {
-  test('report emits exactly the 21 pinned check ids, in order', withTmpdir(async (dir) => {
+  test('report emits exactly the 22 pinned check ids, in order', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     const report = await runDoctorCheck(dir);
     expect((report.checks ?? []).map((c: any) => c.id)).toEqual(DOCTOR_CHECK_IDS);
@@ -1818,9 +1818,9 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
     expect(missing).toEqual([]);
   });
 
-  test('counts read twenty-two, not fifteen', () => {
+  test('counts read twenty-three, not fifteen', () => {
     expect(skill).not.toContain('fifteen');
-    expect(skill.toLowerCase()).toContain('twenty-two');
+    expect(skill.toLowerCase()).toContain('twenty-three');
   });
 });
 
@@ -2007,6 +2007,98 @@ describe('doctor context-age check', () => {
     const c = caCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('context hygiene may be disabled or stuck');
+  }), 20000);
+});
+
+describe('doctor routine-cost check', () => {
+  const rcCheck = (report: any) => (report.checks ?? []).find((c: any) => c.id === 'routine-cost');
+
+  function writeCostIndex(dir: string, bySource: Record<string, { cost: number; tokens: number }>) {
+    fs.writeFileSync(
+      path.join(dir, '.claude-code-hermit', 'state', 'cost-index.json'),
+      JSON.stringify({ version: 3, by_source: bySource }),
+    );
+  }
+
+  function writeRoutineMetrics(dir: string, firedCounts: Record<string, number>) {
+    const lines: string[] = [];
+    for (const [routineId, count] of Object.entries(firedCounts)) {
+      for (let i = 0; i < count; i++) {
+        // Distinct started/fired pairs — the writer's dedup guard only suppresses a
+        // *second consecutive* fired with no intervening started, so this must not
+        // trigger it.
+        lines.push(JSON.stringify({ ts: new Date().toISOString(), routine_id: routineId, event: 'started', delivery: 'cron-create' }));
+        lines.push(JSON.stringify({ ts: new Date().toISOString(), routine_id: routineId, event: 'fired', delivery: 'cron-create' }));
+      }
+    }
+    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-metrics.jsonl'), lines.join('\n') + '\n');
+  }
+
+  test('no cost-index yet → ok', withTmpdir(async (dir) => {
+    writeConfig(dir, {});
+    const c = rcCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('ok');
+    expect(c.detail).toContain('no cost-index data yet');
+  }), 20000);
+
+  test('all routines within 3x median → ok', withTmpdir(async (dir) => {
+    writeConfig(dir, {});
+    writeCostIndex(dir, {
+      'routine:cheap': { cost: 1.2, tokens: 1000 },
+      'routine:mid': { cost: 1.5, tokens: 1000 },
+    });
+    writeRoutineMetrics(dir, { cheap: 3, mid: 3 });
+    const c = rcCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('ok');
+  }), 20000);
+
+  test('an outlier over 3x the fleet median → warn, names it', withTmpdir(async (dir) => {
+    writeConfig(dir, {});
+    writeCostIndex(dir, {
+      'routine:cheap': { cost: 1.2, tokens: 1000 },
+      'routine:mid': { cost: 1.2, tokens: 1000 },
+      'routine:pricey': { cost: 45.0, tokens: 1000 }, // $15/run vs $0.40 median
+    });
+    writeRoutineMetrics(dir, { cheap: 3, mid: 3, pricey: 3 });
+    const c = rcCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('pricey');
+    expect(c.detail).toContain('$15.00/run');
+    expect(c.detail).toContain('median $0.40');
+  }), 20000);
+
+  test('a routine with under 3 fired runs is skipped (no false positive)', withTmpdir(async (dir) => {
+    writeConfig(dir, {});
+    writeCostIndex(dir, {
+      'routine:newish': { cost: 30.0, tokens: 1000 }, // would be a huge $/run if counted
+    });
+    writeRoutineMetrics(dir, { newish: 2 });
+    const c = rcCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('ok');
+    expect(c.detail).toContain('no routine has enough runs yet');
+  }), 20000);
+
+  test('doctor.routine_cost_floor_usd overrides the default floor', withTmpdir(async (dir) => {
+    // Two very cheap routines pin the median low ($0.01/run), so 3x-median ($0.03) stays
+    // well under both the default floor ($2) and 'mid' ($0.50/run) — under the default
+    // floor this is 'ok'. Only lowering the floor below $0.50 flips it to 'warn'.
+    const bySource = {
+      'routine:cheap1': { cost: 0.03, tokens: 1000 },
+      'routine:cheap2': { cost: 0.03, tokens: 1000 },
+      'routine:mid': { cost: 1.5, tokens: 1000 },
+    };
+    const fired = { cheap1: 3, cheap2: 3, mid: 3 };
+
+    writeConfig(dir, {});
+    writeCostIndex(dir, bySource);
+    writeRoutineMetrics(dir, fired);
+    const baseline = rcCheck(await runDoctorCheck(dir));
+    expect(baseline.status).toBe('ok');
+
+    writeConfig(dir, { doctor: { routine_cost_floor_usd: 0.01 } });
+    const c = rcCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('mid');
   }), 20000);
 });
 
@@ -2253,5 +2345,68 @@ describe('doctor routine template contract', () => {
     const { errors, warnings } = validate(template);
     expect(errors).toEqual([]);
     expect(warnings).toEqual([]);
+  });
+});
+
+// ============================================================
+// proposal-triage batch contract (PR-1: batch proposal-triage in reflect)
+//
+// proposal-triage used to be invoked strictly per-candidate ("never as a
+// batch"); it now accepts N candidates in one call and returns N title-tagged
+// verdict blocks, mirroring reflection-judge's existing batch grammar. Guards
+// against: the agent definition regressing to the old bare CREATE/SUPPRESS —
+// <code>/DUPLICATE:<PROP-ID> grammar, and any caller (reflect, proposal-create,
+// capability-brainstorm) still parsing the old bare grammar.
+// ============================================================
+
+describe('proposal-triage batch contract', () => {
+  const triage = read(path.join(AGENTS, 'proposal-triage.md'));
+  const branches = read(path.join(SKILLS, 'reflect', 'branches.md'));
+  const reflectSkill = read(path.join(SKILLS, 'reflect', 'SKILL.md'));
+  const proposalCreate = read(path.join(SKILLS, 'proposal-create', 'SKILL.md'));
+  const brainstorm = read(path.join(SKILLS, 'capability-brainstorm', 'SKILL.md'));
+
+  test('agents/proposal-triage.md documents multi-candidate batch input', () => {
+    expect(triage).toContain('batch of one');
+    expect(triage).toContain('separated by a blank line');
+  });
+
+  test('agents/proposal-triage.md documents the title-tagged verdict grammar', () => {
+    expect(triage).toContain('CREATE: <title>');
+    expect(triage).toContain('SUPPRESS: <title>');
+    expect(triage).toContain('DUPLICATE: <title>');
+  });
+
+  test('agents/proposal-triage.md no longer documents the old bare grammar', () => {
+    expect(triage).not.toContain('SUPPRESS — <code>');
+    expect(triage).not.toContain('DUPLICATE:<PROP-ID> — <one-line reason>');
+  });
+
+  test('reflect/branches.md gates candidates through proposal-triage in one batched call', () => {
+    expect(branches).toContain('single batched call');
+    expect(branches).not.toContain('single-candidate — invoke per-candidate, never as a batch');
+  });
+
+  test('reflect/branches.md parses the title-tagged triage verdict grammar', () => {
+    expect(branches).toContain('CREATE: <title>');
+    expect(branches).toContain('DUPLICATE: <title> — <PROP-ID>: <reason>');
+    expect(branches).toContain('SUPPRESS: <title> — <code>: <reason>');
+  });
+
+  test('reflect/SKILL.md no longer describes per-candidate triage dispatch', () => {
+    expect(reflectSkill).not.toContain('Triage each candidate');
+    expect(reflectSkill).not.toContain('per-candidate `claude-code-hermit:proposal-triage`');
+  });
+
+  test('proposal-create/SKILL.md documents its call as a batch of one and parses the new grammar', () => {
+    expect(proposalCreate).toContain('batch of one');
+    expect(proposalCreate).toContain('CREATE: <title>');
+    expect(proposalCreate).toContain('DUPLICATE: <title> — <PROP-ID>: <reason>');
+    expect(proposalCreate).toContain('SUPPRESS: <title> — <code>: <reason>');
+  });
+
+  test('capability-brainstorm/SKILL.md parses proposal-create outcome with the title-tagged grammar', () => {
+    expect(brainstorm).toContain('CREATE: <title>');
+    expect(brainstorm).toContain('DUPLICATE: <title> — <PROP-ID>');
   });
 });
