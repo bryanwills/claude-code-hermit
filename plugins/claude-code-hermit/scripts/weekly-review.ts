@@ -309,11 +309,12 @@ const frontmatter = [
   'generated: true',
   `week: ${weekKey}`,
   `sessions_count: ${sessionsCount}`,
-  // Commas neutralized (not just quotes) — the shared frontmatter array parser
-  // (lib/frontmatter.ts) naively splits on every comma with no quote-awareness,
-  // so a comma inside an annotation would corrupt this into extra array entries.
+  // Commas neutralized — the shared frontmatter array parser (lib/frontmatter.ts)
+  // naively splits on every comma with no quote-awareness, so a comma inside an
+  // annotation would corrupt this into extra array entries. Quotes need no
+  // escaping: the parser strips only the outer quote pair and never unescapes.
   `delivered_count: ${delivered.length}`,
-  `delivered: [${delivered.map(d => `"${d.replace(/"/g, '\\"').replace(/,/g, ';')}"`).join(', ')}]`,
+  `delivered: [${delivered.map(d => `"${d.replace(/,/g, ';')}"`).join(', ')}]`,
   `proposals_created: ${weekCreated.length}`,
   `proposals_accepted: ${weekAccepted.length}`,
   `proposals_resolved: ${weekResolved.length}`,
