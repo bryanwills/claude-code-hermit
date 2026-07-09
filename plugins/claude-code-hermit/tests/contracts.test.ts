@@ -846,12 +846,12 @@ describe('channel resolver contract', () => {
 // Proposal ID scheme (TestProposalIdScheme)
 //
 // Guards against silent regressions: scripts narrowing the filename regex back
-// to the legacy-only form, or session-mgr losing the full-ID capture pattern.
+// to the legacy-only form, or session-archive.ts losing the full-ID capture pattern.
 // ============================================================
 
 describe('proposal-id scheme', () => {
   const WIDENED_REGEX = String.raw`/^PROP-\d+(?:-.+)?\.md$/`;
-  const SESSION_MGR_REGEX = '/PROP-[a-z0-9][a-z0-9-]*/gi';
+  const SESSION_ARCHIVE_REGEX = '/PROP-[a-z0-9][a-z0-9-]*/gi';
   const SCRIPTS_WITH_PROPOSAL_GLOB = ['reflect-precheck.ts', 'weekly-review.ts', 'doctor-check.ts'];
 
   test('all proposal-scanning scripts must contain the widened filename regex', () => {
@@ -863,11 +863,11 @@ describe('proposal-id scheme', () => {
     }
   });
 
-  test('session-mgr must use a regex that captures the full PROP-NNN-slug-HHMMSS form', () => {
-    const p = path.join(AGENTS, 'session-mgr.md');
+  test('session-archive.ts must use a regex that captures the full PROP-NNN-slug-HHMMSS form', () => {
+    const p = path.join(SCRIPTS, 'session-archive.ts');
     expect(fs.existsSync(p)).toBe(true);
     // missing → new-format IDs truncated to PROP-NNN in session reports
-    expect(read(p)).toContain(SESSION_MGR_REGEX);
+    expect(read(p)).toContain(SESSION_ARCHIVE_REGEX);
   });
 });
 
@@ -911,6 +911,30 @@ describe('analytics skills contract', () => {
     for (const slug of ANALYTICS_SKILLS) {
       expect(readSkill(slug)).toContain('1500 chars');
     }
+  });
+});
+
+// ============================================================
+// Plain spend statement contract (cost-reflect --plain routing)
+//
+// Guards against a future edit silently reverting a channel cost question to
+// the jargon-laden raw table: cost-reflect's channel branch must run --plain,
+// and channel-responder must route spend questions to cost-reflect rather than
+// falling through to a free-form model turn (the actual no-jargon guarantee on
+// --plain's OUTPUT is verified at runtime in cost-reflect-plain.test.ts).
+// ============================================================
+
+describe('plain spend statement routing contract', () => {
+  const costReflect = read(path.join(SKILLS, 'cost-reflect', 'SKILL.md'));
+  const channelResponder = read(path.join(SKILLS, 'channel-responder', 'SKILL.md'));
+
+  test('cost-reflect channel branch runs --plain, not the raw breakdown', () => {
+    expect(costReflect).toContain('--plain');
+  });
+
+  test('channel-responder routes spend questions to cost-reflect', () => {
+    expect(channelResponder).toContain('cost-reflect');
+    expect(channelResponder.toLowerCase()).toContain('spend request');
   });
 });
 
@@ -2488,5 +2512,38 @@ describe('proposal-triage batch contract', () => {
   test('capability-brainstorm/SKILL.md parses proposal-create outcome with the title-tagged grammar', () => {
     expect(brainstorm).toContain('CREATE: <title>');
     expect(brainstorm).toContain('DUPLICATE: <title> — <PROP-ID>');
+  });
+});
+
+// ============================================================
+// Chat voice contract
+//
+// Presence/drift guard proving the "no internal IDs / no slash commands / no
+// token counts to a channel" rule is documented in the two surfaces that
+// carry it — this proves the rule is specified, not that every
+// channel-emitting skill obeys it (model-authored replies can't be enforced
+// by a markdown scan). The one deterministic (non-model) channel sender that
+// composes prose, composeBudgetMessage, is covered by a real forbidden-string
+// assertion in hooks.contract.test.ts (it shares that file's single-import
+// cost-tracker.ts fixture — see the comment there on why the module can only
+// be imported once per process).
+// ============================================================
+
+describe('chat voice contract', () => {
+  test('CLAUDE-APPEND.md documents the channel voice rule', () => {
+    const append = read(path.join(TEMPLATES, 'CLAUDE-APPEND.md'));
+    expect(append).toContain('Channel voice.');
+    expect(append).toContain('No internal IDs (PROP-NNN, S-NNN, MP-…)');
+  });
+
+  test('channel-responder/SKILL.md mirrors the channel voice rule', () => {
+    const responder = read(path.join(SKILLS, 'channel-responder', 'SKILL.md'));
+    expect(responder).toContain('Channel voice:');
+    expect(responder).toContain('no internal IDs');
+  });
+
+  test('hermit-doctor/SKILL.md channel example contains no slash command', () => {
+    const doctor = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
+    expect(doctor).not.toMatch(/then run \/channel-setup/);
   });
 });
