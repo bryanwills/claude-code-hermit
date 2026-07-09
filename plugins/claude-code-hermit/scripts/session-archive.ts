@@ -284,8 +284,11 @@ function extractProposalIds(shell: string): string[] {
 
 function resolveCost(payload: Record<string, string>, sessionsDir: string): { cost_usd: number; tokens: number } {
   const costLine = payload['Cost'] || '';
-  const m = /\$([\d.]+)\s*\((\d+)\s*tokens?\)/.exec(costLine);
-  if (m) return { cost_usd: Math.round(parseFloat(m[1]) * 10000) / 10000, tokens: parseInt(m[2], 10) };
+  // Tolerate thousands separators (`$1,234.50 (1,526,890 tokens)`) — a strict
+  // no-comma regex would miss them and fall through to .status.json, which holds
+  // a cumulative running total, silently recording the wrong cost for the session.
+  const m = /\$([\d,]+(?:\.\d+)?)\s*\(([\d,]+)\s*tokens?\)/.exec(costLine);
+  if (m) return { cost_usd: Math.round(parseFloat(m[1].replace(/,/g, '')) * 10000) / 10000, tokens: parseInt(m[2].replace(/,/g, ''), 10) };
   const statusPath = path.join(sessionsDir, '.status.json');
   const raw = readFileSafe(statusPath);
   if (raw) {
@@ -431,11 +434,19 @@ function normalizeStatus(raw: string): { status: string; note: string | null } {
   const allowed = ['completed', 'partial', 'blocked'];
   const v = (raw || '').trim().toLowerCase();
   if (allowed.includes(v)) return { status: v, note: null };
-  return { status: 'partial', note: `Status normalized: original value \`${raw || '(none)'}\` coerced to \`partial\`.` };
+  // An empty/absent Status is the ordinary idle-archive case, not a bad value —
+  // default it to `partial` silently. Only a non-empty, out-of-set value earns the
+  // normalization note (otherwise every normal archive pollutes Blockers with it).
+  if (v === '') return { status: 'partial', note: null };
+  return { status: 'partial', note: `Status normalized: original value \`${raw}\` coerced to \`partial\`.` };
 }
 
 function yamlArray(items: string[]): string {
-  return `[${items.map(s => s.includes(',') || s.includes(' ') ? `"${s}"` : s).join(', ')}]`;
+  // Quote anything that isn't a safe plain scalar. A bareword starting with a YAML
+  // indicator (`#`, `[`, `{`, `&`, `*`, `!`, etc.) or containing a comma/space breaks
+  // the flow sequence, so tags like `#urgent` must be quoted to stay parseable.
+  const safeBareword = /^[A-Za-z0-9][\w./-]*$/;
+  return `[${items.map(s => safeBareword.test(s) ? s : JSON.stringify(s)).join(', ')}]`;
 }
 
 function buildReport(opts: {
@@ -545,7 +556,7 @@ function idleReset(shell: string, sessionId: string, now: Date, payload: Record<
   const summaryBody = extractSection(out, 'Session Summary');
   const status = (payload['Status'] || 'partial');
   const dateStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
-  const summaryLine = `**${sessionId}** (${dateStr}): ${originalTask || '(no task summary)'} — ${status} ($${cost.cost_usd.toFixed(2)})`;
+  const summaryLine = `**${sessionId}** (${dateStr}): ${originalTask || '(no task summary)'} — ${normalizeStatus(status).status} ($${cost.cost_usd.toFixed(2)})`;
   const withNewLine = summaryBody ? summaryBody + '\n' + summaryLine : summaryLine;
   const compactedSummary = compactSection(withNewLine, compactCfg.summary_threshold, compactCfg.summary_keep);
   out = replaceSectionInPlace(out, 'Session Summary', '\n' + compactedSummary + '\n\n');
@@ -645,8 +656,9 @@ function verbArchive(flags: Record<string, string | true>, stdin: string): Json 
     return { ok: false, reason: 'shell-write-error: ' + e.message };
   }
 
-  const currentRuntime = mode === 'idle' ? null : readRuntimeValueOrEmpty(runtimePath);
-  const finalUpdates = closeFinalUpdates(mode, sessionsDir, currentRuntime?.shutdown_requested_at, now);
+  // advanceTransition already read+merged the full runtime, so reuse its in-memory
+  // value for shutdown_requested_at instead of re-reading runtime.json from disk.
+  const finalUpdates = closeFinalUpdates(mode, sessionsDir, advanceTransition.value?.shutdown_requested_at, now);
   const clearTransition = updateRuntime(runtimePath, now, finalUpdates);
   if (!clearTransition.ok) return { ok: false, reason: clearTransition.reason };
 
@@ -732,6 +744,17 @@ function verbRecover(flags: Record<string, string | true>): Json {
     ].join('\n');
     const syntheticPayload = `Status: partial\nBlockers: ${blockers}\nClosed Via: recovered\n`;
     const result = verbArchive({ mode, 'state-dir': stateDir }, syntheticPayload);
+    if (!result.ok) {
+      // Re-archive couldn't complete (e.g. SHELL.md itself is gone, so buildReport
+      // has nothing to work from). Clear the transition markers so the next start
+      // doesn't re-enter this same branch and fail identically, pinning the session
+      // in recovery forever — mirroring the null-shell handling further below.
+      updateRuntime(runtimePath, now, {
+        transition: null, transition_target: null, transition_started_at: null, transition_mode: null,
+        session_state: 'idle',
+      });
+      return { ok: false, recovered: false, reason: result.reason, recovery_path: 're-archive-failed' };
+    }
     return { ...result, recovered: true, recovery_path: 're-archive' };
   }
 
@@ -750,9 +773,19 @@ function verbRecover(flags: Record<string, string | true>): Json {
   }
 
   const config = readConfig(stateDir);
-  const newShell = mode === 'idle'
-    ? idleReset(shell, sessionId, now, {}, resolveCompactConfig(config), resolveCost({}, sessionsDir))
-    : closeReset(path.join(stateDir, 'templates', 'SHELL.md.template'), shell);
+  // Idempotency guard: an idle transition that crashed AFTER the SHELL reset but
+  // before the marker-clear leaves transition='cleaning' with SHELL already reset.
+  // Re-running idleReset would double-count Tasks Completed and append a duplicate
+  // Session Summary line, so skip it when this session's summary line is already
+  // present. (An `archiving`+target-exists crash lands here too, but with SHELL not
+  // yet reset — no summary line — so the guard correctly lets idleReset run then.)
+  const idleAlreadyReset = mode === 'idle' && shell.includes(`**${sessionId}**`);
+  let newShell: string;
+  if (mode === 'idle') {
+    newShell = idleAlreadyReset ? shell : idleReset(shell, sessionId, now, {}, resolveCompactConfig(config), resolveCost({}, sessionsDir));
+  } else {
+    newShell = closeReset(path.join(stateDir, 'templates', 'SHELL.md.template'), shell);
+  }
   try {
     writeFileAtomic(path.join(sessionsDir, 'SHELL.md'), newShell);
   } catch (e: any) {
@@ -786,10 +819,12 @@ function main(): void {
   return emit({ ok: false, reason: `unknown verb: ${verb || '(none)'}. Valid verbs: archive, open, recover` });
 }
 
-try {
-  main();
-} catch (e: any) {
-  emit({ ok: false, reason: 'error: ' + e.message });
+if (import.meta.main) {
+  try {
+    main();
+  } catch (e: any) {
+    emit({ ok: false, reason: 'error: ' + e.message });
+  }
 }
 
 export { parsePayload, normalizeStatus, resolveCost, extractProposalIds, compactSection, nextSessionId, readRuntime, updateRuntime };

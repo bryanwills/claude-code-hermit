@@ -425,6 +425,41 @@ describe('recovery matrix', () => {
     expect(result).toEqual({ ok: true, recovered: false, reason: 'no-interrupted-transition' });
   }));
 
+  test('idle recover on an already-reset SHELL does not double-count or duplicate the summary (regression)', withTmp(async (dir) => {
+    await open(dir, 'Task: first task\n', '2026-07-09T12:00:00Z');
+    await archive(dir, 'idle', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    // SHELL is now reset (Tasks Completed:1, one summary line). Simulate a crash
+    // AFTER that reset but before the marker-clear: transition stuck at 'cleaning',
+    // session_id still naming the just-archived session. Re-running idleReset here
+    // would bump Tasks Completed to 2 and append a '(no task summary)' garbage line.
+    writeRuntime(dir, {
+      session_state: 'in_progress', session_id: 'S-001',
+      transition: 'cleaning', transition_mode: 'idle', transition_target: 'S-001-REPORT.md',
+    });
+    await recover(dir, '2026-07-09T13:05:00Z');
+    const shell = readShell(dir);
+    expect(shell).toContain('**Tasks Completed:** 1');
+    expect(shell).not.toContain('(no task summary)');
+    expect((shell.match(/\*\*S-001\*\* \(/g) || []).length).toBe(1);
+    expect(readRuntime(dir).transition).toBeNull();
+  }));
+
+  test('re-archive with SHELL.md missing clears markers instead of pinning recovery (regression)', withTmp(async (dir) => {
+    // archiving in flight, report never written, and SHELL.md is absent -> verbArchive
+    // cannot rebuild a report. Recovery must not leave transition set, or the next
+    // start re-enters this same branch and fails identically forever.
+    writeRuntime(dir, {
+      session_state: 'in_progress', session_id: 'S-001',
+      transition: 'archiving', transition_mode: 'close', transition_target: 'S-001-REPORT.md',
+    });
+    const result = await recover(dir, '2026-07-09T13:00:00Z');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('shell-missing');
+    const runtime = readRuntime(dir);
+    expect(runtime.transition).toBeNull();
+    expect(runtime.session_state).toBe('idle');
+  }));
+
   test('all transitions clear fully after recovery (no marker survives)', withTmp(async (dir) => {
     await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
     writeRuntime(dir, {
