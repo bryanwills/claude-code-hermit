@@ -26,7 +26,12 @@ const rdw = process.argv[3] === 'true';
 
 if (!id) emit('PROCEED');
 
-const HERMIT_ROOT = hermitDir();
+let HERMIT_ROOT: string;
+try {
+  HERMIT_ROOT = hermitDir();
+} catch {
+  emit('PROCEED'); // fail-open: can't resolve the hermit dir → never silently kill the routine
+}
 const PROJECT_ROOT = path.dirname(HERMIT_ROOT);
 const LOG_SCRIPT = path.join(import.meta.dir, 'log-routine-event.sh');
 
@@ -50,7 +55,13 @@ if (!rdw && sessionStateIsWaiting()) {
   emit('SKIP');
 }
 
-if (isPaused(HERMIT_ROOT).paused) {
+let paused = false;
+try {
+  paused = isPaused(HERMIT_ROOT).paused;
+} catch {
+  paused = false; // fail-open: unresolvable pause state reads as unpaused (see header contract)
+}
+if (paused) {
   stamp('skipped-paused');
   emit('SKIP');
 }

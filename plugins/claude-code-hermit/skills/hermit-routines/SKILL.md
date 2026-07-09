@@ -61,7 +61,7 @@ Replace `<pluginRoot>` with the resolved absolute path from step 1, `<id>` with 
 
 **`reflect_after: true`:** when a routine config entry has `reflect_after: true`, append the following after the trailing `fired` log line (and after the `heartbeat-restart` append if both apply). **Skip this append when the routine's `skill` is `claude-code-hermit:reflect`** — chaining reflect after reflect is wasteful and a config foot-gun.
 ```
-Then, only if the precheck returned PROCEED (not SKIP), run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot> --quick. If its first output line is exactly `EMPTY`, do not invoke reflect — the precheck already appended the Progress Log line. Otherwise (a `RUN|<hash>` line) invoke /claude-code-hermit:reflect --quick --precheck-verdict '<that full line>'.
+Then, only if routine-precheck returned PROCEED (not SKIP), run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot> --quick. If its first output line is exactly `EMPTY`, do not invoke reflect — the precheck already appended the Progress Log line. Otherwise (a `RUN|<hash>` line) invoke /claude-code-hermit:reflect --quick --precheck-verdict '<that full line>'.
 ```
 This mirrors the scheduled-reflect gate below: the precheck runs once in bash against a content hash of SHELL.md's `## Findings`/`## Blockers`, so a `reflect_after` fire with no new candidates since the last processed quick run never loads the 49KB reflect skill body. A manual `/claude-code-hermit:reflect --quick` (not chained through a routine) bypasses this append entirely and always loads the skill, as today — see reflect/SKILL.md's quick-mode section for how it gets a deterministic hash of its own via `--force`.
 

@@ -185,9 +185,9 @@ Manage with `/claude-code-hermit:hermit-settings routines`. Changes take effect 
 
 1. Resolves `$CLAUDE_PLUGIN_ROOT` and reads `config.timezone`
 2. Calls `CronList`, `CronDelete`s every `[hermit-routine:*]` entry — clears stale registrations and resets the 7-day expiry clock
-3. For each enabled routine, shifts the `schedule` from `config.timezone` to machine local time via `scripts/cron-tz-shift.ts`, then registers a fresh `CronCreate` with that shifted schedule and a prompt that invokes the skill plus logs to `state/routine-metrics.jsonl`
+3. For each enabled routine, shifts the `schedule` from `config.timezone` to machine local time via `scripts/cron-tz-shift.ts`, then registers a fresh `CronCreate` with that shifted schedule and a prompt that runs the pre-fire gate (`scripts/routine-precheck.ts`), invokes the skill on `PROCEED`, and logs to `state/routine-metrics.jsonl`
 
-CronCreate fires only between REPL turns — never mid-task. There is no queue: if Claude is mid-task when the cron time hits, the fire is deferred (not dropped) until idle. `run_during_waiting: false` routines additionally check `runtime.json` and self-suppress with a `skipped-waiting` event when `session_state == "waiting"`.
+CronCreate fires only between REPL turns — never mid-task. There is no queue: if Claude is mid-task when the cron time hits, the fire is deferred (not dropped) until idle. `routine-precheck.ts` gates every fire: it suppresses `run_during_waiting: false` routines with a `skipped-waiting` event when `session_state == "waiting"`, and any routine with a `skipped-paused` event when the binding pause flag is set; otherwise it stamps `started` and returns `PROCEED`.
 
 **`heartbeat-restart`** fires at 4am daily and re-registers the heartbeat Monitor and routine CronCreates (both expire after 7 days; daily re-arm keeps everything fresh).
 
