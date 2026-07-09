@@ -24,7 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
-import { utcISOStamp as utcStamp, currentHHMM, parseSimpleCronTime, friendlyBoundary } from './lib/time';
+import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { tmuxSessionAlive, getSessionName as deriveSessionName } from './lib/tmux';
 import { costLogPath } from './lib/cc-compat';
@@ -113,7 +113,7 @@ function pushOperatorMessage(text: string): void {
 
 /** Current time as "HH:MM" in `timezone`, falling back to the UTC clock if the zone is invalid. */
 function nowHHMM(timezone: string): string {
-  return currentHHMM(timezone) ?? new Date().toISOString().slice(11, 16);
+  return currentHHMMOrUTC(timezone);
 }
 
 /** Operator-language message for a watchdog restart. */
@@ -613,7 +613,7 @@ function maybeContextClear(config: Json): void {
     // is fail-open internally; it must never delay or suppress the safety clear below.
     flushResetBreadcrumb(path.join(HERMIT_ROOT, 'sessions', 'SHELL.md'), {
       kind: 'cleared',
-      trigger: 'watchdog-700k',
+      trigger: `watchdog-${Math.round(threshold / 1000)}k`,
       hhmm: nowHHMM(config.timezone ?? 'UTC'),
       tokens: prompt,
     });

@@ -33,19 +33,17 @@ type ResetKind = 'compacted' | 'cleared';
 // emergency /clear) — a durable Progress Log line so the next session can see that a
 // mid-arc reset happened. Deliberately NOT a rescue of unsaved observations (those live
 // only in context and aren't deterministically extractable); this is a trace, nothing more.
-// Fully fail-open: never throws.
+// Fully fail-open: appendToProgressLog swallows all I/O errors, so this never throws.
 function flushResetBreadcrumb(shellPath: string, opts: {
   kind: ResetKind;
   trigger: string;
   hhmm: string;
   tokens?: number;
 }): void {
-  try {
-    const verb = opts.kind === 'compacted' ? 'compacted' : 'cleared';
-    const tokenSuffix = typeof opts.tokens === 'number' ? ` at ~${Math.round(opts.tokens / 1000)}k tokens` : '';
-    const line = `- [${opts.hhmm}] context ${verb} (${opts.trigger})${tokenSuffix} — arc may have unfinished work`;
-    appendToProgressLog(shellPath, line);
-  } catch { /* fail-open */ }
+  const verb = opts.kind === 'compacted' ? 'compacted' : 'cleared';
+  const tokenSuffix = typeof opts.tokens === 'number' ? ` at ~${Math.round(opts.tokens / 1000)}k tokens` : '';
+  const line = `- [${opts.hhmm}] context ${verb} (${opts.trigger})${tokenSuffix} — arc may have unfinished work`;
+  appendToProgressLog(shellPath, line);
 }
 
 export { appendToProgressLog, flushResetBreadcrumb };

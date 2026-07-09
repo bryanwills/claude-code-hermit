@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
 import { flushResetBreadcrumb } from './lib/progress-log';
-import { currentHHMM } from './lib/time';
+import { currentHHMMOrUTC } from './lib/time';
 
 type Json = any;
 
@@ -40,7 +40,7 @@ function main(raw: string): void {
 
   const agentDir = hermitDir();
   const shellPath = path.join(agentDir, 'sessions', 'SHELL.md');
-  const hhmm = currentHHMM(readConfigTimezone(agentDir)) ?? new Date().toISOString().slice(11, 16);
+  const hhmm = currentHHMMOrUTC(readConfigTimezone(agentDir));
   flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger, hhmm });
 }
 
