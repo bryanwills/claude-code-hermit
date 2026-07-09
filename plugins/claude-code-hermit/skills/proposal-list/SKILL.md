@@ -63,7 +63,7 @@ Reply YES to go ahead, LATER to hold, NO to drop it.
 
 Derive the summary from the title with any `[category]`/`[blocker]` bracket prefix stripped. Drop the stale-⚠ marker; if a card is stale, fold it into the summary in plain words instead ("been waiting a while").
 
-Non-open proposals (already `accepted`/`deferred`) that the operator explicitly asked to see ("show all") render as one plain line each, no reply prompt:
+Non-open proposals (`accepted`/`deferred`, plus `dismissed`/`resolved` when "show all" was asked — §5) that the operator explicitly asked to see render as one plain line each, no reply prompt, stating the status in plain words:
 
 ```
 Suggestion #12 — Add retry logic (already accepted).
