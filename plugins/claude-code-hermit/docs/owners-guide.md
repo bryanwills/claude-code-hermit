@@ -28,7 +28,7 @@ That's it. No forms, no IDs to type, no special phrasing. Plain "yes" works.
 
 ## Pause
 
-You can stop your assistant at any time by saying **"pause"** (or "stop for now") in the chat. This is a real stop — it will not run anything else until you tell it to continue.
+You can stop your assistant at any time by saying **"pause"** (or just **"stop"**) in the chat. This is a real stop — it will not run anything else until you tell it to continue.
 
 Say **"resume"** when you want it to pick back up. Nothing is lost while paused; it just waits.
 
