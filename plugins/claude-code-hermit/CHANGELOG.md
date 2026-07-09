@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **cost attribution: inbound-channel turns get their own `by_source` bucket** — `classifySource` now recognizes the `<channel source="...">` transcript envelope and tags the turn `channel:<name>` (e.g. `channel:discord`) instead of collapsing into the catch-all `other` bucket. Redaction collapses `channel:*` the same way it already does `routine:*`.
+
+### Fixed
+- **session-cost: per-session `cost_usd` is no longer `0.00` for real work** — `cost-log.jsonl` rows are always tagged with the transcript's process UUID, never the logical `S-NNN` id (assigned only at close), so an exact `session_id` match never hit. `session-cost.ts` now sums by time window `[opened_at, now]` instead, with `opened_at` stamped by `cost-tracker.ts` on the first `in_progress` turn of each arc; falls back to the old exact-match behavior when no `opened_at` is available.
+
 ## [1.2.19] - 2026-07-06
 
 ### Added

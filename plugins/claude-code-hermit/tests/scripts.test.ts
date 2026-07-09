@@ -1925,6 +1925,34 @@ describe('cost-log', () => {
     expect(idx.by_source.heartbeat.cost).toBeCloseTo(0.03, 9);
   });
 
+  // Acceptance criterion: replaying a log where a formerly-'other' turn is now tagged
+  // channel:* must shrink other's share while conserving the grand total — by_source
+  // storage is key-agnostic (it buckets on entry.source verbatim), so this proves the
+  // classifySource → cost-log → index pipeline end-to-end without a live transcript.
+  test('cost-log.js: channel:* tagging shrinks other share, conserves total', withDir((dir) => {
+    const baselineLog = path.join(dir, '.claude', 'cost-log-baseline.jsonl');
+    const baselineIndex = hermit(dir, 'state', 'cost-index-baseline.json');
+    write(baselineLog, [
+      '{"timestamp":"2026-01-01T10:00:00.000Z","session_id":"s1","source":"other","total_tokens":1000,"estimated_cost_usd":0.10}',
+      '{"timestamp":"2026-01-01T10:01:00.000Z","session_id":"s1","source":"other","total_tokens":2000,"estimated_cost_usd":0.20}',
+      '',
+    ].join('\n'));
+    const baseline = updateCostIndex(baselineLog, baselineIndex);
+
+    const taggedLog = path.join(dir, '.claude', 'cost-log-tagged.jsonl');
+    const taggedIndex = hermit(dir, 'state', 'cost-index-tagged.json');
+    write(taggedLog, [
+      '{"timestamp":"2026-01-01T10:00:00.000Z","session_id":"s1","source":"channel:discord","total_tokens":1000,"estimated_cost_usd":0.10}',
+      '{"timestamp":"2026-01-01T10:01:00.000Z","session_id":"s1","source":"other","total_tokens":2000,"estimated_cost_usd":0.20}',
+      '',
+    ].join('\n'));
+    const tagged = updateCostIndex(taggedLog, taggedIndex);
+
+    expect(tagged.by_source.other.cost).toBeLessThan(baseline.by_source.other.cost);
+    expect(tagged.by_source['channel:discord'].cost).toBeCloseTo(0.10, 9);
+    expect(tagged.total_cost_usd).toBeCloseTo(baseline.total_cost_usd, 9);
+  }));
+
   test('cost-log.js: byte_offset advances to file size', () => {
     const idx = readCostIndex(costIndexFile)!;
     expect(idx.byte_offset).toBe(fs.statSync(costLogFile).size);
@@ -2240,6 +2268,40 @@ describe('cost-tracker classifySource / scanTriggerMarkers', () => {
     expect(r.slice('routine:'.length).length).toBe(64);
   });
 
+  // classifySource: channel marker — real on-wire shape is plugin-qualified
+  // (e.g. `plugin:discord:discord`), not a bare channel name. Verified live
+  // against production transcripts (2026-07-09 gtapps-node-1 probe).
+  test('cost-tracker: classifySource(<channel source="plugin:discord:discord">) = channel:discord', () => {
+    expect(classifySource('<channel source="plugin:discord:discord" chat_id="123">hi</channel>')).toBe('channel:discord');
+  });
+  test('cost-tracker: classifySource(<channel source="plugin:voice:voice">) = channel:voice', () => {
+    expect(classifySource('<channel source="plugin:voice:voice" chat_id="456">hi</channel>')).toBe('channel:voice');
+  });
+  test('cost-tracker: classifySource(<channel source="telegram">) = channel:telegram (bare form)', () => {
+    expect(classifySource('<channel source="telegram" chat_id="789">hi</channel>')).toBe('channel:telegram');
+  });
+
+  // classifySource: channel source charset guard — placeholder/glob noise → other
+  test('cost-tracker: classifySource rejects <channel source="*">', () => {
+    expect(classifySource('<channel source="*" chat_id="1">hi</channel>')).toBe('other');
+  });
+  test('cost-tracker: classifySource rejects <channel source="<id>">', () => {
+    expect(classifySource('<channel source="<id>" chat_id="1">hi</channel>')).toBe('other');
+  });
+
+  // classifySource: channel kind length-capped at 64 chars, same as routine ids.
+  // Cap applies to the last colon-segment (the captured kind), not the whole source value.
+  test('cost-tracker: classifySource caps channel kind at 64 chars', () => {
+    const r = classifySource(`<channel source="plugin:${'a'.repeat(80)}" chat_id="1">hi</channel>`);
+    expect(r.startsWith('channel:')).toBe(true);
+    expect(r.slice('channel:'.length).length).toBe(64);
+  });
+
+  // classifySource: trailing colon leaves an empty last segment → other, not `channel:`
+  test('cost-tracker: classifySource rejects trailing-colon source (empty kind)', () => {
+    expect(classifySource('<channel source="plugin:" chat_id="1">hi</channel>')).toBe('other');
+  });
+
   // scanTriggerMarkers: backward scan finds routine marker past tool_result boundary
   // Simulates: human([hermit-routine:daily]) → assistant(tool_use) → user(tool_result) → assistant(usage)
   // The billed entry is the last assistant; scanTriggerMarkers should find the human entry's marker.
@@ -2278,6 +2340,20 @@ describe('cost-tracker classifySource / scanTriggerMarkers', () => {
     const text = scanTriggerMarkers(lines, 3);
     expect(text).toContain('[hermit-routine:reflect]');
     expect(classifySource(text)).toBe('routine:reflect');
+  });
+
+  // Integration: an inbound-channel turn (envelope as the triggering user prompt,
+  // matching the verbatim shape confirmed live on production transcripts) classifies
+  // as channel:discord end-to-end through scanTriggerMarkers + classifySource.
+  test('cost-tracker: channel-triggered turn classifies as channel:discord end-to-end', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: '<channel source="plugin:discord:discord" chat_id="123" message_id="456" user="op" ts="2026-07-09T10:00:00Z">hi</channel>' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'ok' }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    const text = scanTriggerMarkers(lines, 3);
+    expect(classifySource(text)).toBe('channel:discord');
   });
 });
 

@@ -321,3 +321,72 @@ describe('cost-tracker: max_prompt_tokens (real context size vs per-turn sum)', 
     expect(entry.api_calls).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Subprocess: cost-tracker stamps/clears runtime.json's opened_at (PR-6 part b —
+// session-cost.ts's window-delta mode reads this field). See maintainOpenedAt in
+// cost-tracker.ts.
+// ---------------------------------------------------------------------------
+
+async function runCostTrackerWithRuntime(dir: string, runtimeState: object): Promise<string> {
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  const stateDir = path.join(dir, '.claude-code-hermit', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const runtimePath = path.join(stateDir, 'runtime.json');
+  fs.writeFileSync(runtimePath, JSON.stringify(runtimeState));
+
+  // A non-zero-usage turn is required — run() returns early (before touching
+  // runtime.json at all) when totalTokens === 0.
+  const transcriptLines = [
+    triggerPrompt('operator message'),
+    assistantEntry('claude-sonnet-4-6', 100, 50),
+  ];
+  const transcriptPath = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(transcriptPath, transcriptLines.join('\n') + '\n');
+
+  const stdin = JSON.stringify({ session_id: 'proc-uuid', transcript_path: transcriptPath });
+  await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+
+  return runtimePath;
+}
+
+describe('cost-tracker: opened_at stamping', () => {
+  test('in_progress with no opened_at → sets it to a valid ISO timestamp', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(typeof rt.opened_at).toBe('string');
+    expect(Number.isFinite(Date.parse(rt.opened_at))).toBe(true);
+  }));
+
+  test('in_progress with opened_at already set → left unchanged', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBe(existing);
+  }));
+
+  test('idle with opened_at set → cleared to null', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle', opened_at: '2020-01-01T00:00:00.000Z' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBeNull();
+  }));
+
+  test('idle with no opened_at → stays unset, no spurious write', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBeUndefined();
+  }));
+
+  test('waiting with opened_at set → left unchanged, not cleared (bounce stays one arc)', withTmpdir(async (dir) => {
+    const existing = '2020-01-01T00:00:00.000Z';
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'waiting', opened_at: existing });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBe(existing);
+  }));
+
+  test('waiting with no opened_at → stays unset', withTmpdir(async (dir) => {
+    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'waiting' });
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
+    expect(rt.opened_at).toBeUndefined();
+  }));
+});

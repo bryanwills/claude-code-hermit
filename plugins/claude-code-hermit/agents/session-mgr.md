@@ -29,6 +29,7 @@ This file is the **single source of truth** for lifecycle decisions. All scripts
 | `version` | hermit-start.ts | Set on creation only |
 | `session_state` | session-mgr (via lifecycle skills) | Authorized secondary writers: heartbeat (waiting→idle on timeout), channel-responder (waiting→in_progress on inbound message). |
 | `session_id` | session-mgr | Pre-computed on session start (next S-NNN), confirmed on archive |
+| `opened_at` | cost-tracker.ts | Set to the current turn's ISO timestamp on the first `in_progress` turn of an arc (if unset); cleared to `null` on transition to `idle`. Not touched on `waiting`. Read by `session-cost.ts` to sum cost-log rows for this arc by time window, since `session_id` in cost-log rows is always the transcript UUID, never `S-NNN`. |
 | `created_at` | hermit-start.ts / session-start | Set once per lifecycle |
 | `updated_at` | Any writer | Updated on every write |
 | `runtime_mode` | hermit-start.ts | `interactive`, `tmux`, or `docker` |
