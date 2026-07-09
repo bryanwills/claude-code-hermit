@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **hermit-routines: consolidate the pre-fire gate into `routine-precheck.ts`** — the waiting-check, pause-check, and `started` stamp were three separate model-issued tool calls per routine fire; one script call now owns all three (still delegating the JSONL write to `log-routine-event.sh`), halving per-fire main-context ceremony. JSONL schema and readers (`hermit-watchdog`, `reflect`, `hermit-evolution`) unchanged.
+
 ## [1.2.19] - 2026-07-06
 
 ### Added

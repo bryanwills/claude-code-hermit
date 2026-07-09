@@ -24,7 +24,7 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
 
 1. Resolve the plugin root path: derive it from this skill's **Base directory**, which the harness injects into the invocation context as `<plugin_root>/skills/hermit-routines`. Strip the trailing `/skills/hermit-routines` to get `pluginRoot`. This works in both installed and `--plugin-dir` modes. (`$CLAUDE_PLUGIN_ROOT` is NOT a Bash env var at runtime — evaluating it in Bash always returns empty. The braced `${CLAUDE_PLUGIN_ROOT}` form is text-substituted in skill markdown only in installed mode. Neither is reliable here — always use the Base-directory derivation.) Read `config.timezone` from `.claude-code-hermit/config.json`. Store as `configTz` (may be null — the shift helper treats null as a no-op). The resolved `pluginRoot` must be baked into each routine's prompt at registration — it is not available inside cron-delivered prompts.
 
-   **Validate `pluginRoot` before proceeding.** If `pluginRoot` is empty or `<pluginRoot>/scripts/log-routine-event.sh` does not exist (`test -f`), abort `load` immediately — do **not** run the Step 3 reset or register any CronCreate — and log one line: `Routine load aborted: plugin scripts not found at "<pluginRoot>". No routines registered or reset.` This is a whole-`load` abort, not the per-routine isolation of Step 4: a bad `pluginRoot` breaks every routine's baked paths, and aborting before Step 3 protects the prior session's CronCreates from being torn down and left unreplaced.
+   **Validate `pluginRoot` before proceeding.** If `pluginRoot` is empty or `<pluginRoot>/scripts/log-routine-event.sh` or `<pluginRoot>/scripts/routine-precheck.ts` does not exist (`test -f`), abort `load` immediately — do **not** run the Step 3 reset or register any CronCreate — and log one line: `Routine load aborted: plugin scripts not found at "<pluginRoot>". No routines registered or reset.` This is a whole-`load` abort, not the per-routine isolation of Step 4: a bad `pluginRoot` breaks every routine's baked paths, and aborting before Step 3 protects the prior session's CronCreates from being torn down and left unreplaced.
 2. Read `config.routines`, filter `enabled: true`. If none, log "No enabled routines in config." and stop.
 3. Call `CronList`. For each entry whose prompt contains `[hermit-routine:`: call `CronDelete` with its ID. Unconditional reset — ensures stale entries from prior sessions are cleared and the 7-day auto-expiry clock is reset.
 4. For each enabled routine, build the prompt string (see templates below), then call `CronCreate`:
@@ -39,59 +39,33 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
 
 #### Prompt templates
 
-Use `run_during_waiting` (rdw) from the config entry to select the template. Default `run_during_waiting` is `false` when the field is absent.
+One shared template for both `run_during_waiting` (rdw) values — `routine-precheck.ts` takes `rdw` as an argument and consults the waiting-check and the binding pause flag (PROP-015) internally, so the prompt no longer branches on rdw or spells out those checks itself. Default `run_during_waiting` is `false` when the field is absent.
 
-**Model-override substitution.** Read the routine's optional `model` field. First, if `id === "heartbeat-restart"`, treat `model` as absent regardless of its value — its re-arm append must run in the session, so it is never dispatched to a subagent. Then: if `model` is absent/null, use the literal `invoke /<skill>` clause in the templates below (current behavior). If set to a non-null `<model>`, replace that clause — `invoke /<skill>` in the rdw=false template, `Invoke /<skill>` (capitalized) in the rdw=true template — with the **Agent-dispatch clause**:
+**Model-override substitution.** Read the routine's optional `model` field. First, if `id === "heartbeat-restart"`, treat `model` as absent regardless of its value — its re-arm append must run in the session, so it is never dispatched to a subagent. Then: if `model` is absent/null, use the literal `invoke /<skill>` clause in the template below (current behavior). If set to a non-null `<model>`, replace that clause with the **Agent-dispatch clause**:
 
 ```
 dispatch the skill via the Agent tool: subagent_type "general-purpose", model "<model>", prompt "Invoke the skill /<skill> to completion in this project, following its instructions exactly, including any reads/writes to .claude-code-hermit/ state files. Return only a one-line status."
 ```
 
-The Agent runs in isolated context (no live session conversation, but full filesystem access) and returns only a one-line status to the session. The waiting-check, `log-routine-event.sh` call, and any `heartbeat-restart`/`reflect_after` appends stay in the session turn and run at the session model.
+The Agent runs in isolated context (no live session conversation, but full filesystem access) and returns only a one-line status to the session. The `routine-precheck.ts` call, the `fired` log line, and any `heartbeat-restart`/`reflect_after` appends stay in the session turn and run at the session model.
 
-Both templates below consult the binding pause flag (PROP-015) before firing —
-`bun <pluginRoot>/scripts/hermit-pause.ts status --quiet` prints exactly
-`PAUSED` or `OK` (same deterministic-token convention as `reflect-precheck.ts`'s
-`EMPTY`/`RUN`). Registration itself stays unconditional — a registration-skip
-would leave routines dead after resume until the next daily re-arm.
-
-**rdw=true** — routine fires even when `session_state` is `waiting`:
 ```
-[hermit-routine:<id>] First run:
-bun <pluginRoot>/scripts/hermit-pause.ts status --quiet
-If the output is PAUSED, run:
-<pluginRoot>/scripts/log-routine-event.sh <id> skipped-paused
-and stop. Otherwise: run:
-<pluginRoot>/scripts/log-routine-event.sh <id> started
-Then Invoke /<skill>. After it completes, run:
+[hermit-routine:<id>] Run: bun <pluginRoot>/scripts/routine-precheck.ts <id> <rdw>
+If the output is SKIP, stop. If PROCEED, then invoke /<skill>. After it completes, run:
 <pluginRoot>/scripts/log-routine-event.sh <id> fired
 ```
 
-**rdw=false** (default) — routine is suppressed when `session_state` is `waiting`:
-```
-[hermit-routine:<id>] Read .claude-code-hermit/state/runtime.json. If session_state is "waiting", run:
-<pluginRoot>/scripts/log-routine-event.sh <id> skipped-waiting
-and stop. Otherwise: run:
-bun <pluginRoot>/scripts/hermit-pause.ts status --quiet
-If the output is PAUSED, run:
-<pluginRoot>/scripts/log-routine-event.sh <id> skipped-paused
-and stop. Otherwise: first run:
-<pluginRoot>/scripts/log-routine-event.sh <id> started
-Then invoke /<skill>. After it completes, run:
-<pluginRoot>/scripts/log-routine-event.sh <id> fired
-```
-
-Replace `<pluginRoot>` with the resolved absolute path from step 1, `<id>` with the routine's `id`, and `<skill>` with the routine's `skill` field. The skill string is passed verbatim to the slash invocation (so `claude-code-hermit:brief --morning` becomes `/claude-code-hermit:brief --morning`). `log-routine-event.sh` takes `<id> <event>` only.
+Replace `<pluginRoot>` with the resolved absolute path from step 1, `<id>` with the routine's `id`, `<rdw>` with the routine's `run_during_waiting` value (`true` or `false`; default `false`), and `<skill>` with the routine's `skill` field. The skill string is passed verbatim to the slash invocation (so `claude-code-hermit:brief --morning` becomes `/claude-code-hermit:brief --morning`). `routine-precheck.ts` takes `<id> <rdw>` and stamps `skipped-waiting`/`skipped-paused`/`started` itself (delegating the JSONL write to `log-routine-event.sh`, which stays the single writer); the trailing `log-routine-event.sh <id> fired` call is the only model-issued stamp left after a fire.
 
 **Special case — `heartbeat-restart`:** append ` Then invoke /claude-code-hermit:hermit-routines load to re-arm all routine CronCreates and reset the 7-day expiry clock.` to the prompt (after the trailing `fired` log line). Daily re-arm via this routine is what keeps routine CronCreates from ever reaching the 7-day auto-expiry in always-on deployments.
 
 **`reflect_after: true`:** when a routine config entry has `reflect_after: true`, append the following after the trailing `fired` log line (and after the `heartbeat-restart` append if both apply). **Skip this append when the routine's `skill` is `claude-code-hermit:reflect`** — chaining reflect after reflect is wasteful and a config foot-gun.
 ```
-Then, only if the skill actually fired (not skipped-waiting), run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot> --quick. If its first output line is exactly `EMPTY`, do not invoke reflect — the precheck already appended the Progress Log line. Otherwise (a `RUN|<hash>` line) invoke /claude-code-hermit:reflect --quick --precheck-verdict '<that full line>'.
+Then, only if the precheck returned PROCEED (not SKIP), run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot> --quick. If its first output line is exactly `EMPTY`, do not invoke reflect — the precheck already appended the Progress Log line. Otherwise (a `RUN|<hash>` line) invoke /claude-code-hermit:reflect --quick --precheck-verdict '<that full line>'.
 ```
 This mirrors the scheduled-reflect gate below: the precheck runs once in bash against a content hash of SHELL.md's `## Findings`/`## Blockers`, so a `reflect_after` fire with no new candidates since the last processed quick run never loads the 49KB reflect skill body. A manual `/claude-code-hermit:reflect --quick` (not chained through a routine) bypasses this append entirely and always loads the skill, as today — see reflect/SKILL.md's quick-mode section for how it gets a deterministic hash of its own via `--force`.
 
-**Special case — the routine's `skill` is exactly `claude-code-hermit:reflect`** (the scheduled full-reflect routine; not `--quick`/`--scheduled-checks` variants): reflect's 42KB body should not load on days with nothing to reflect on, so gate it in the prompt. In both templates, replace the `invoke /<skill>` / `Invoke /<skill>` clause with:
+**Special case — the routine's `skill` is exactly `claude-code-hermit:reflect`** (the scheduled full-reflect routine; not `--quick`/`--scheduled-checks` variants): reflect's 42KB body should not load on days with nothing to reflect on, so gate it in the prompt. Replace the `invoke /<skill>` clause with:
 ```
 run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot>. If its first output line is exactly `EMPTY`, do not invoke reflect — the precheck already updated reflection-state.json and appended the Progress Log line; fall through to the `fired` log line. Otherwise (a `RUN|<phases-json>` line) invoke /claude-code-hermit:reflect --precheck-verdict '<that full line>'.
 ```
