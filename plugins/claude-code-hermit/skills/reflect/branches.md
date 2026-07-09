@@ -130,7 +130,7 @@ Note `gate-failed: <agent> — <title>` in the SHELL.md Progress Log. The candid
 
 ### Component Health signal ladder
 
-For Component Health findings (SKILL.md § Component Health): weak signal (one-off or ambiguous) → no action. Moderate (pattern across 2-3 sessions) → proposal candidate via the standard gates (subject to the Three-Condition Rule). Strong (clear, repeated pattern) → candidate whose proposal carries a `## Skill Improvement` (or `## Agent Improvement`) section listing the component name, observed failures, and suggested eval criteria; when accepted via `proposal-act`, implement via `/skill-creator:skill-creator eval` + `improve`, or apply the changes to the component's definition file directly if skill-creator is unavailable.
+For Component Health findings (SKILL.md § Component Health): weak signal (one-off or ambiguous) → no action. Moderate (pattern across 2-3 sessions) → create a proposal via `/claude-code-hermit:proposal-create` with the evidence (subject to the Three-Condition Rule). Strong (clear, repeated pattern) → create a proposal via `/claude-code-hermit:proposal-create` whose body carries a `## Skill Improvement` (or `## Agent Improvement`) section listing the component name, observed failures, and suggested eval criteria; when accepted via `proposal-act`, implement via `/skill-creator:skill-creator eval` + `improve`, or apply the changes to the component's definition file directly if skill-creator is unavailable.
 
 ### Proposal Tier Classification
 
