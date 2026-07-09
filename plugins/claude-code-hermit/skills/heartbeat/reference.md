@@ -62,7 +62,7 @@ Before appending any alert to SHELL.md Monitoring:
 4. **Daily digest:** If `last_digest_date` is not today and suppressed alerts exist: notify the operator `Suppressed alert digest: {list with counts and ages}`. Set `last_digest_date` to today.
    - **Proposal entries:** For any suppressed key matching `proposal-pending:<PROP-NNN>`, render it as `PROP-NNN "<title>"` rather than the raw key. Find the title by reading frontmatter `title` from `proposals/PROP-NNN-*.md` (also check legacy `proposals/PROP-NNN.md`). If exactly one file matches, render its title; on zero or multiple matches, fall back to the bare key — never block the digest.
 5. **Micro-proposal check:** Read `state/micro-proposals.json → pending`. For each entry where `status === "pending"` and `tier === 1`: include a monitoring line `[HH:MM] Heartbeat: micro-proposal '{id}' awaiting operator input — {question}` in `shell_monitoring_lines`. If the entry has `options`, append them numbered — `[1: <label>, 2: <label>, ...]` — so the operator can answer directly instead of seeing a choice-less question. Use key `micro-proposal-pending:<id>` for dedup.
-6. **Return JSON** (do NOT write files or send notifications directly): include `new_entries`, `updated_entries`, `resolved_keys`, `last_clean_eval_at`, `self_eval_updates`, `shell_monitoring_lines`, `operator_message`, `heartbeat_result`. The calling main session applies all writes.
+6. **Return JSON** — see § Return Schema below for the required fields and exact format. The calling main session applies all writes.
 
 ## If nothing actionable
 
@@ -81,6 +81,14 @@ Before appending any alert to SHELL.md Monitoring:
 **Do NOT implement fixes — only report.**
 
 **Exception:** Auto-close (`AUTO_CLOSE` precheck verdict, SKILL.md step 2) is the one fix heartbeat is authorized to apply. It runs as a terminal branch in the MAIN SESSION before the subagent is dispatched: the session has gone idle past the actionable threshold and archiving it is the correct response, not an alert. The subagent never handles AUTO_CLOSE.
+
+## Return Schema
+
+Return exactly this JSON object — no prose, no markdown fences:
+
+`{"resolved_keys": [...], "new_entries": {...}, "updated_entries": {...}, "last_clean_eval_at": "<ISO or null>", "self_eval_updates": {...}, "shell_monitoring_lines": [...], "operator_message": "<string or null>", "heartbeat_result": "OK"|"ALERT"}`
+
+All eight keys are required. A `null` value is valid for `last_clean_eval_at` and `operator_message` — never omit the key. See §If nothing actionable / §If something found for the clean vs alerting values.
 
 ## Self-Evaluation (every 20 ticks)
 
