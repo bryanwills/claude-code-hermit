@@ -29,6 +29,7 @@ const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const STATUS_JSON = path.join(HERMIT_DIR, 'sessions', '.status.json');
 const STATUS_JSON_TMP = path.join(HERMIT_DIR, 'sessions', '.status.json.tmp');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
+const RUNTIME_JSON_TMP = path.join(HERMIT_DIR, 'state', '.runtime.json.tmp');
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
 const TASK_SNAPSHOT = path.join(HERMIT_DIR, 'tasks-snapshot.md');
@@ -87,7 +88,7 @@ function scanTriggerMarkers(lines: string[], billedIndex: number): string {
 }
 
 // Classify a turn's trigger source from the scanned text of its entries.
-// Only the two marker-driven sources are claimed; everything else is 'other'
+// Only the marker-driven sources below are claimed; everything else is 'other'
 // (the non-scheduled bucket, typically the largest row in practice).
 // Routine ids are validated only for presence/uniqueness in config — the
 // strict charset here ([A-Za-z0-9._-]+) is the classifier's own gate, and
@@ -109,6 +110,15 @@ function classifySource(triggerText: string): string {
   // log-routine-event.sh fallback: present in tool_result when the skill fires the marker
   const logMatch = triggerText.match(/log-routine-event\.sh\s+([A-Za-z0-9._-]+)/);
   if (logMatch) return `routine:${logMatch[1].slice(0, 64)}`;
+  // Inbound-channel envelope (see lib/channel-envelope.ts): source is plugin-qualified
+  // on the wire (e.g. `plugin:discord:discord`, `plugin:voice:voice`), so take the
+  // segment after the last ':' as the channel kind. Strict charset — like the routine
+  // regex above, the value must match the allowed charset to be captured at all (not
+  // captured loosely then sanitized), so `<id>`/`*` placeholder noise fails the match
+  // entirely rather than surviving as a truncated false positive.
+  const channelMatch = triggerText.match(/<channel\b[^>]*\bsource="([A-Za-z0-9._:-]+)"/);
+  const channelKind = channelMatch ? channelMatch[1].split(':').pop() : '';
+  if (channelKind) return `channel:${channelKind.slice(0, 64)}`;
   return 'other';
 }
 
@@ -280,6 +290,55 @@ const MAX_SUMMARY_LEN = 120;
 
 function readRuntimeSessionState(): string {
   return readRuntimeJsonCached().session_state || 'unknown';
+}
+
+// Fresh-reads runtime.json (bypassing the per-run cache, to avoid clobbering a
+// field written by another process since the cache was populated), applies a set
+// of field updates, and writes back atomically. Skips silently if runtime.json
+// can't be read — never fabricates a partial file missing session_state/session_id.
+function writeRuntimeFields(fields: Record<string, Json>): void {
+  let runtime: Json;
+  try {
+    runtime = JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8'));
+  } catch {
+    return;
+  }
+  Object.assign(runtime, fields);
+  fs.writeFileSync(RUNTIME_JSON_TMP, JSON.stringify(runtime, null, 2) + '\n', 'utf-8');
+  fs.renameSync(RUNTIME_JSON_TMP, RUNTIME_JSON);
+}
+
+// Maintains the [opened_at, closed_at] window that session-cost.ts sums cost-log
+// rows over — the logical-session boundary, since cost-log rows carry the shared
+// transcript UUID (never the logical S-NNN) and one transcript holds many logical
+// sessions (see session-cost.ts). Three runtime.json fields define an arc:
+//   opened_at        — arc start (first in_progress turn)
+//   closed_at        — arc end, stamped on the idle transition; null while live
+//   opened_transcript— the CC transcript/process id that owns the current arc
+// A new arc is started (opened_at re-stamped, closed_at cleared) when there is no
+// live arc, the previous one has already closed, OR the transcript changed — the
+// last case resets a *stale* opened_at left by a process that died before its idle
+// clear (a crash/restart mints a new transcript id), so the next session's window
+// never bleeds in the dead arc's rows. `closed_at` is stamped rather than nulling
+// `opened_at` so a close that runs after the idle transition can still recover the
+// window instead of falling back to the always-zero exact-id match. 'waiting' is
+// left untouched so a waiting<->in_progress bounce stays one arc. Best-effort —
+// a lost write under concurrent access just re-applies next turn.
+function maintainOpenedAt(nowIso: string, transcriptId: string): void {
+  try {
+    const cached = readRuntimeJsonCached();
+    const state = cached.session_state || 'unknown';
+    if (state === 'in_progress') {
+      const newArc = !cached.opened_at || cached.closed_at != null || cached.opened_transcript !== transcriptId;
+      if (newArc) {
+        writeRuntimeFields({ opened_at: nowIso, closed_at: null, opened_transcript: transcriptId });
+      }
+    } else if (state === 'idle' && cached.opened_at && cached.closed_at == null) {
+      writeRuntimeFields({ closed_at: nowIso });
+    }
+  } catch {
+    // Non-fatal — never block cost tracking on runtime.json write failure.
+  }
 }
 
 function writeStatusJson(shellContent: string, cumulative: { cost: number; tokens: number; operatorTurns: number }, sessionId: string): void {
@@ -640,6 +699,7 @@ async function run(data: Json): Promise<string | null> {
 
     // Read session_id from runtime.json once per turn (used for log entry + writeStatusJson)
     const runtimeSessionId = readRuntimeSessionId();
+    maintainOpenedAt(new Date().toISOString(), sessionId);
 
     // Read config once per turn — timezone drives by_date/by_week/by_month bucketing and
     // budget-window boundaries (PROP-016); budgetConfig drives the breach check below.
@@ -738,7 +798,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, scanTriggerMarkers, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage };
+export { run, getCumulativeCost, classifySource, scanTriggerMarkers, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
 
 if (import.meta.main) {
   (async () => {

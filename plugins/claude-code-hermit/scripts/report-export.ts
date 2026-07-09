@@ -119,14 +119,15 @@ function telemetryDue(cfg: Json, hermitDir: string, ref: Date = new Date()): boo
   return true;
 }
 
-// `by_source` keys are enum-like except `routine:<id>`, where the id is operator-chosen.
-// Under redaction (the default), collapse every `routine:*` bucket into a single `routine`
-// bucket so operator-authored names never leave the box; verbatim otherwise.
+// `by_source` keys are enum-like except `routine:<id>` and `channel:<name>`, where the
+// id/name is operator-chosen. Under redaction (the default), collapse every `routine:*`
+// bucket into `routine` and every `channel:*` bucket into `channel` so operator-authored
+// names never leave the box; verbatim otherwise.
 function redactBySource(bySource: Json, redact: boolean): Json {
   if (!redact || !bySource || typeof bySource !== 'object') return bySource ?? {};
   const out: Record<string, Json> = {};
   for (const [key, v] of Object.entries<Json>(bySource)) {
-    const outKey = key.startsWith('routine:') ? 'routine' : key;
+    const outKey = key.startsWith('routine:') ? 'routine' : key.startsWith('channel:') ? 'channel' : key;
     if (!out[outKey]) out[outKey] = { cost: 0, tokens: 0 };
     out[outKey].cost += v?.cost ?? 0;
     out[outKey].tokens += v?.tokens ?? 0;

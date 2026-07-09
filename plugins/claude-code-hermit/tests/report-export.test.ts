@@ -261,6 +261,29 @@ describe('buildBundle: redaction', () => {
     const unredacted = buildBundle(hermitDir, {}, { redact: false });
     expect(unredacted.cost.by_source['routine:client-acme-audit']).toEqual({ cost: 2.0, tokens: 20 });
   }));
+
+  test('by_source channel names collapse to a single "channel" bucket under redact', withHermitDir((hermitDir) => {
+    writeCostIndex(hermitDir, {
+      by_source: {
+        heartbeat: { cost: 1.5, tokens: 10 },
+        'channel:discord': { cost: 2.0, tokens: 20 },
+        'channel:telegram': { cost: 0.5, tokens: 5 },
+      },
+    });
+
+    const redacted = buildBundle(hermitDir, {}, { redact: true });
+    // Default: operator-chosen channel names never leave; their cost/tokens sum into one bucket.
+    expect(JSON.stringify(redacted)).not.toContain('discord');
+    expect(JSON.stringify(redacted)).not.toContain('telegram');
+    expect(redacted.cost.by_source).toEqual({
+      heartbeat: { cost: 1.5, tokens: 10 },
+      channel: { cost: 2.5, tokens: 25 },
+    });
+
+    // Opt-out (redact:false): per-channel keys are preserved verbatim.
+    const unredacted = buildBundle(hermitDir, {}, { redact: false });
+    expect(unredacted.cost.by_source['channel:discord']).toEqual({ cost: 2.0, tokens: 20 });
+  }));
 });
 
 // ---------- telemetryDue ----------
