@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **docs: routine-authoring playbook** — new `docs/routine-authoring.md` covers converting a costly broad-skill routine into a scoped one (haiku pin, verdict-line return, precheck gating); `hermit-routines` and `hatch` now point to it.
+
 ## [1.2.19] - 2026-07-06
 
 ### Added
