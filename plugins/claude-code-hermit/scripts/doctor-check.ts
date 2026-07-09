@@ -1344,6 +1344,12 @@ function checkModelPricingKnown() {
 // broad state and costs $15/run) so they surface without manually cross-referencing
 // cost-index.json and routine-metrics.jsonl. See docs/routine-authoring.md.
 
+function medianOf(nums: number[]): number {
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
+}
+
 function checkRoutineCost() {
   try {
     const read = readConfigOrCovered('routine-cost');
@@ -1362,10 +1368,17 @@ function checkRoutineCost() {
     }
     const bySource = index.by_source || {};
 
-    // Run counts from routine-metrics.jsonl are the authoritative source — by_source's
-    // `routine:*` keys can contain classifier artifacts (e.g. "routine:fired") from the
-    // greedy log-routine-event.sh fallback match in cost-tracker.ts's classifySource().
-    // Joining strictly against configured routine ids below filters those out.
+    // Denominator = every fire-TURN, not just proceeded fires. cost-tracker attributes a
+    // whole session turn to `routine:<id>` off the `[hermit-routine:<id>]` prompt marker
+    // whether the fire runs the skill or is idle-gated, so a skipped fire still adds cost to
+    // the bucket. routine-precheck.ts stamps exactly one of started|skipped-waiting|
+    // skipped-paused per fire (the model-issued `fired` stamp is a later, droppable duplicate
+    // of `started`), so counting those three is the true population that generated the cost.
+    // Counting only `fired` would drop skipped/errored fires from the denominator while their
+    // cost stays in the numerator, inflating $/run into false warns. Joining strictly against
+    // configured routine ids also filters classifier artifacts (e.g. a stray "routine:fired"
+    // by_source key) out.
+    const FIRE_EVENTS = new Set(['started', 'skipped-waiting', 'skipped-paused']);
     const fireCounts = new Map<string, number>();
     try {
       const lines = fs.readFileSync(path.join(stateDir, 'routine-metrics.jsonl'), 'utf-8').split('\n');
@@ -1374,7 +1387,7 @@ function checkRoutineCost() {
         if (!line) continue;
         try {
           const e = JSON.parse(line);
-          if (e && typeof e.routine_id === 'string' && e.event === 'fired') {
+          if (e && typeof e.routine_id === 'string' && FIRE_EVENTS.has(e.event)) {
             fireCounts.set(e.routine_id, (fireCounts.get(e.routine_id) || 0) + 1);
           }
         } catch {}
@@ -1393,23 +1406,25 @@ function checkRoutineCost() {
       perRun.push({ id: r.id, costPerRun: cost / runs });
     }
 
-    if (perRun.length === 0) {
-      return { id: 'routine-cost', status: 'ok', detail: 'not enough run history yet to compare routine cost' };
+    if (perRun.length < 2) {
+      return { id: 'routine-cost', status: 'ok', detail: `only ${perRun.length} routine(s) with enough run history — need ≥2 to compare` };
     }
 
-    const sorted = [...perRun].sort((a, b) => a.costPerRun - b.costPerRun);
-    const mid = Math.floor(sorted.length / 2);
-    const median = sorted.length % 2 === 0 ? (sorted[mid - 1].costPerRun + sorted[mid].costPerRun) / 2 : sorted[mid].costPerRun;
-
     const floor = typeof config.doctor?.routine_cost_floor_usd === 'number' ? config.doctor.routine_cost_floor_usd : 2;
-    const threshold = Math.max(median * 3, floor);
 
-    const outliers = perRun.filter((p) => p.costPerRun > threshold).sort((a, b) => b.costPerRun - a.costPerRun);
-    if (outliers.length > 0) {
-      const worst = outliers[0];
+    // Compare the costliest routine against the median of its PEERS (itself excluded).
+    // Including the candidate in the median lets a lone outlier drag the median toward
+    // itself — with only two routines that makes 3×median mathematically unreachable, so a
+    // genuinely expensive routine in a small fleet would never trip the gate.
+    const sorted = perRun.sort((a, b) => a.costPerRun - b.costPerRun);
+    const worst = sorted[sorted.length - 1];
+    const peerMedian = medianOf(sorted.slice(0, -1).map((p) => p.costPerRun));
+    const threshold = Math.max(peerMedian * 3, floor);
+
+    if (worst.costPerRun > threshold) {
       return {
         id: 'routine-cost', status: 'warn',
-        detail: `${worst.id} $${worst.costPerRun.toFixed(2)}/run (median $${median.toFixed(2)}) — audit what it reads`,
+        detail: `${worst.id} $${worst.costPerRun.toFixed(2)}/run vs peer median $${peerMedian.toFixed(2)} (threshold $${threshold.toFixed(2)}) — audit what it reads`,
       };
     }
     return { id: 'routine-cost', status: 'ok', detail: `${perRun.length} routine(s) compared, none over $${threshold.toFixed(2)}/run` };

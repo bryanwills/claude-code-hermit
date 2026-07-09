@@ -16,7 +16,7 @@ don't: *when* a routine needs a scoped skill instead of a broad one, and how to 
 A routine has a cost signature worth fixing when it:
 
 - Runs frequently (daily or more) and shows up as a high-\$/run line — `/claude-code-hermit:hermit-doctor`'s
-  `routine-cost` check flags it automatically (a routine whose \$/run exceeds both 3× the fleet
+  `routine-cost` check flags it automatically (a routine whose \$/run exceeds both 3× the peer
   median and `doctor.routine_cost_floor_usd`), or scan `.claude/cost-log.jsonl` /
   `/claude-code-hermit:cost-reflect` by hand.
 - Invokes a broad, `/session-start`-style skill that loads a lot of context (recovery matrices,
