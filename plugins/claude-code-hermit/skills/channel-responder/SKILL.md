@@ -40,7 +40,10 @@ If runtime.json `session_state` is `idle` (no active task):
 If runtime.json `session_state` is `waiting` (alive but blocked on input):
 
 Read `waiting_reason` from runtime.json to understand why:
-- `"unclean_shutdown"` or `"dead_process"` → operator reply is an archive/resume choice: `(1)` = archive as partial and start fresh, `(2)` = resume as-is. Handle accordingly via `claude-code-hermit:session-mgr` — session-mgr owns the full state transition including clearing `waiting_reason`.
+- `"unclean_shutdown"` or `"dead_process"` → operator reply is an archive/resume choice:
+  - `(1)` archive as partial and start fresh: pipe `Status: partial\nBlockers: none\nClosed Via: operator\n` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts archive --mode=close --state-dir=.claude-code-hermit`. On `ok === true`, clear `waiting_reason` and `last_error` in runtime.json.
+  - `(2)` resume as-is: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` with an empty `Task:` payload (SHELL.md's existing Task is left untouched) to set `session_state` back to `in_progress`; then clear `waiting_reason` and `last_error` in runtime.json.
+  - Either branch: if the script returns `ok === false`, surface the `reason` to the operator rather than silently proceeding as if the transition completed.
 - `"operator_input"`, `"conservative_pickup"`, or null → treat as normal task resumption.
 
 - **Status request** → respond with current context, stay `waiting`
