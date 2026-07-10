@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.20] - 2026-07-10
 
 ### Added
 - **cost attribution: inbound-channel turns get their own `by_source` bucket** — `classifySource` now recognizes the `<channel source="...">` transcript envelope and tags the turn `channel:<name>` (e.g. `channel:discord`) instead of collapsing into the catch-all `other` bucket. Redaction collapses `channel:*` the same way it already does `routine:*`.
@@ -17,6 +17,7 @@
 - **docs: routine-authoring playbook** — new `docs/routine-authoring.md` covers converting a costly broad-skill routine into a scoped one (haiku pin, verdict-line return, precheck gating); `hermit-routines` and `hatch` now point to it.
 
 ### Fixed
+- **hermit-start: `DEFAULT_CONFIG` back in sync with `config.json.template`** — added the missing `routine_wake_lint.max_windows` and `doctor.routine_cost_floor_usd` keys so a project relying solely on `hermit-start`'s own defaulting logic (not the hatch template) still gets both.
 - **session-cost: per-session `cost_usd` no longer reads `0.00` for real work** — cost-log rows carry the shared transcript UUID, never the logical `S-NNN`, so the old exact-id match never hit; `session-cost.ts` now sums the arc window `[opened_at, closed_at]` (new `--opened-at`/`--closed-at` overrides). `cost-tracker.ts` re-stamps `opened_at` per arc keyed on the transcript id (so a crash/restart's stale window can't over-count the next session) and stamps `closed_at` on the idle transition (so a close running after idle still recovers the window instead of falling back to the always-zero exact-id match).
 
 ### Changed
