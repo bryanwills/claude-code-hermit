@@ -40,8 +40,14 @@ function isRoutinePrompt(prompt: string): boolean {
   const t = prompt.trimStart();
   if (t.startsWith('<channel')) return true;
   // /loop re-fires and other programmatic slash injections arrive as bare strings.
-  // Operator-typed slash commands always carry a <command-message> wrapper (verified
-  // across CC v2.1.119–v2.1.145 transcripts). Drop any bare `/...` prompt.
+  // NOTE: operator-typed slash commands ALSO arrive as bare text with no
+  // <command-message> wrapper (live-probed 2026-07-10, CC v2.1.206 — the wrapper
+  // only exists in the stored transcript, added later by CC's prompt-expansion
+  // pipeline; see the skill-capture note below). This hook cannot distinguish an
+  // operator slash-command turn from a programmatic one at this boundary, so it
+  // drops both — a genuine operator `/…` turn does NOT refresh
+  // last-operator-action.json. Known limitation, not fixed here: narrowing the
+  // filter would alter AUTO_CLOSE gating.
   if (t.startsWith('/') && !prompt.includes('<command-message>')) return true;
   return false;
 }

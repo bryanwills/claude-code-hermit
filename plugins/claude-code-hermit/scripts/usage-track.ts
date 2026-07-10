@@ -9,8 +9,10 @@ type Json = any;
  *
  * Feeds weekly-review's "no tracked use" suggestions (never auto-archives).
  * Coverage is inherently partial: startup-context injection, subagent reads,
- * and user-typed slash commands (which bypass the Skill tool entirely — see
- * scripts/record-operator-action.ts for that capture path) are not seen here.
+ * user-typed slash commands (which bypass the Skill tool entirely — see
+ * scripts/record-operator-action.ts for that capture path), and Reads whose
+ * PostToolUse payload (tool_response carries the full file body) exceeds
+ * MAX_STDIN are not seen here.
  *
  * Fails open on every error path — never blocks Claude Code. Zero stdout.
  */
