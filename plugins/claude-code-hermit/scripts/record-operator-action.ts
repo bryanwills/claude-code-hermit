@@ -109,10 +109,15 @@ function main(raw: string): void {
     return;
   }
 
-  const skillName = extractSkillName(prompt);
-  if (skillName) appendSkillUsage(skillName);
-
-  if (!isRoutinePrompt(prompt)) write();
+  if (!isRoutinePrompt(prompt)) {
+    // Skill-usage capture is operator-activity only — hermit's own injected
+    // slash commands (INJECTED_EXACT) are routine prompts, so gating on the
+    // same filter keeps automated heartbeat/session-close/routines fires out
+    // of the usage ledger (they'd otherwise log as source:'prompt' skill use).
+    const skillName = extractSkillName(prompt);
+    if (skillName) appendSkillUsage(skillName);
+    write();
+  }
 }
 
 if (process.argv.includes('--force')) {
