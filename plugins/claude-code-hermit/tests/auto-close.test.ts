@@ -390,8 +390,8 @@ describe('record-operator-action: hermit-injected commands stay in sync', () => 
     const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', file), 'utf-8');
     const literals: string[] = [];
     for (const line of src.split('\n')) {
-      if (!line.includes('sendKeys(') && !line.includes("'send-keys'")) continue;
-      for (const m of line.matchAll(/'(\/[^']*)'/g)) literals.push(m[1]);
+      if (!line.includes('sendKeys(') && !line.includes('send-keys')) continue;
+      for (const m of line.matchAll(/(['"])(\/[^'"]*)\1/g)) literals.push(m[2]);
     }
     return literals;
   }
