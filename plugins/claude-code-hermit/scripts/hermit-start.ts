@@ -132,6 +132,12 @@ const DEFAULT_CONFIG: Json = {
   reflection: {
     graduation_min_sessions: 1,
   },
+  routine_wake_lint: {
+    max_windows: 6,
+  },
+  doctor: {
+    routine_cost_floor_usd: 2,
+  },
   storage_drift: {
     ignore: [],
   },

@@ -107,13 +107,19 @@ Walk the `[Unreleased]` bullets against the collected diff and flag, with a file
 
 For each plugin, also state explicitly whether these **contract surfaces changed**, since they're the ones that break downstream operators: slash commands / skills, hooks, MCP behavior, agents, customization/config points, and `required_core_version`. A "no contract changes" statement is a useful finding too — it tells the operator the release is low-risk.
 
-## Step 4 — Deep correctness review
+## Step 4 — Deep correctness review (operator-authorized only)
+
+**Never launch this step on your own.** After delivering the Step 1–3 report, ask the operator whether to run the deep review and wait for an explicit yes — `/code-review high` is expensive (multi-agent, minutes, real tokens) and `--fix` mutates the working tree. Invoking `/pre-release-review` authorizes Steps 1–3 only.
 
 Hand off to the native `/code-review`, and **scope it explicitly to the release window** rather than letting it guess a base.
 
 `/code-review` accepts a positional target: `/code-review [effort] [--fix] [--comment] [target]`, where the target can be a ref range like `<review_base>...HEAD`. Passing the range makes it review "the committed diff a pull request into `<review_base>` would contain, **regardless of how the branch's upstream is configured**" (per the CC docs, confirmed live). That's the key property: it reviews the exact release window whether you're on a feature branch, on unpushed `main`, or on an **already-pushed** `main` — removing the empty-diff hazard the default branch-vs-upstream base has once main is pushed.
 
-Run it with the `$review_base` computed in Step 1:
+**Confirmation gate (required before running the command below).** Ask the operator explicitly whether to proceed with the deep review, and wait for a clear yes. Surface the cost and the fact that `--fix` mutates the working tree so the decision is informed, e.g.:
+
+> Steps 1–3 are done (report above). The deep pass is `/code-review high --fix <review_base>...HEAD` — multi-agent, several minutes, real tokens, and `--fix` will edit the working tree. Run it now? (yes / stop here)
+
+If the operator declines or only wanted the readiness audit, stop after Step 3 and say so. Only on an explicit yes, run it with the `$review_base` computed in Step 1:
 
 ```
 /code-review high --fix <review_base>...HEAD
