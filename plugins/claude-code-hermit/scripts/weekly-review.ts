@@ -77,8 +77,8 @@ const weekSessions = allSessions.filter(s => s.parsedDate >= weekStart && s.pars
 
 // --- Deliverables (## Artifacts bullets from this week's session reports) ---
 // Reuses the session content already read above — no extra file reads. Mirrors
-// the `- [[compiled/<type>-<slug>-<date>]] — annotation` format session-mgr
-// writes (agents/session-mgr.md § On Session Close step 5).
+// the `- [[compiled/<type>-<slug>-<date>]] — annotation` format that
+// scripts/session-archive.ts writes on session close.
 const ARTIFACT_BULLET_RE = /^-\s*\[\[([^\]]+)\]\]\s*(?:—\s*(.*))?$/;
 function extractArtifacts(content: string): string[] {
   const lines = (content || '').split('\n');

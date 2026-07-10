@@ -553,6 +553,8 @@ Merge these into the target file:
       "Bash(bun */scripts/apply-settings.ts*)",
       "Bash(bun */scripts/channel-log.ts*)",
       "Bash(bun */scripts/session-archive.ts*)",
+      "Bash(bun */scripts/routine-precheck.ts*)",
+      "Bash(bun */scripts/cron-registry.ts*)",
       "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
       "Edit(.claude-code-hermit/**)",
       "Write(.claude-code-hermit/**)"
