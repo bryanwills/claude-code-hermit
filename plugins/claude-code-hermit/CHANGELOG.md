@@ -2,10 +2,24 @@
 
 ## [Unreleased]
 
+### Changed
+- **hooks: shared stdin/profile helper (`lib/hook-input.ts`)** — unifies stdin draining and `AGENT_HOOK_PROFILE` parsing across the four PreToolUse gates (`pause-gate`, `ask-gate`, `enforce-deny-patterns`, `cache-edit-guard`).
+- **hooks: PreToolUse stdin cap raised 64KB → 1MB** — fewer legitimate large payloads hit the cap. The default-allow gates (`enforce-deny-patterns`, `cache-edit-guard`) still fail open above the cap, so this narrows rather than closes the oversize gap for them.
+- **pause-gate: fails closed on oversize stdin while paused** — a payload too large to parse (>1MB) can no longer slip an action past an active pause; unpaused, oversize still fails open like any ignored stdin.
+- **hooks: `AGENT_HOOK_PROFILE` matching is now case/whitespace-insensitive** in `enforce-deny-patterns`, aligning it with the dev plugin's `git-push-guard`.
 ### Added
+- **proposal mechanics: named CLI wrappers** — `resolve-prop.ts`, `next-prop-id.ts`, `record-gate.ts`, `queue-micro-proposal.ts` replace inline prose in `proposal-act`, `proposal-create`, and `reflect` (PROP-id fuzzy resolution, ID/slug generation, gate-verdict parsing + fail-closed routing, micro-approval queuing) with deterministic scripts on the existing verdict-line contract. `append-metrics.ts`'s validate-then-append logic is extracted to `scripts/lib/append-jsonl.ts`, reused by all three new appenders.
+
+### Changed
+- **proposal-act/proposal-create/reflect: mechanics prose collapsed to script calls** — operator-facing behavior is unchanged; each dispatch is now one script invocation instead of an inline algorithm, cutting ~2-4K tokens per proposal/reflect turn.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve` — it adds the four new `Bash(bun */scripts/*.ts*)` permission entries required for the new scripts to run unattended.
 - **Artifact chrome localization** — the dashboard and proposals-page renderers now read their ~35 hardcoded UI strings (section headers, stat labels, empty states, age labels, the footer, the synthesized budget-alert line) from a new `scripts/lib/artifact-strings.ts` table instead of inline English literals. `.claude-code-hermit/state/artifact-strings.json`, when present, overlays a translated table **per key** over the English defaults — a missing key or an absent file falls back to English, so an untranslated hermit renders byte-identically to today. `hatch` (Step 5b) and `hermit-settings language` now generate/regenerate that table (model-translated once, at language-set time) whenever the operator's `language` is non-`en`, and delete it when switching back to `en`. Closes the gap where model-authored content (briefs, proposal bodies, weekly reviews) already followed `config.language` but the surrounding page chrome stayed English. See `docs/artifacts.md` § Localization.
 - **enforce-deny-patterns: closed the documented `rm -rf` bypass** — matches `rm -fr`/`rm -r -f`/`rm -f -r` and `/bin/rm`/`./rm`-prefixed spellings now, bare and behind `&&`/`;`/`|`; matching also normalizes doubled whitespace, unquoted `$IFS`, and backslash-continuation obfuscation (quote-aware — never folds quoted data). Same patterns merge into the native `settings.json` deny array via `apply-settings.ts deny`.
 - **heartbeat: injection gate on HEARTBEAT.md** — precheck scans the checklist pre-wake for injection markers (instruction-override phrases, context-marker tags, decode-pipes); a hit alerts the operator and suspends evaluation until the file is edited, one alert per file version.
+- **startup-context: injection-time threat scan** — everything the SessionStart hook injects (compiled bodies/stubs, catalog summaries, OPERATOR.md/SHELL.md excerpts, last report) is routed through the context-marker defuser plus a tight marker scan (injection phrases, credential-shaped strings); a hit replaces only that entry with `[BLOCKED: <reason>]` while the file on disk stays untouched. Hits persist to `state/context-scan.json`; new `context-scan` doctor check surfaces them. Defense-in-depth for context integrity, not a permission boundary.
 
 ### Upgrade Instructions
 
