@@ -87,6 +87,19 @@ describe('loadStrings', () => {
     expect(loadStrings(hermitDir)).toEqual(DEFAULT_STRINGS);
   }));
 
+  test('escapes HTML in overlay values — a corrupt translation file cannot inject markup', withHermitDir((hermitDir) => {
+    writeStrings(hermitDir, { status_heading: '<script>alert(1)</script>', proposals_history: 'Tom & "Jerry"' });
+    const s = loadStrings(hermitDir);
+    expect(s.status_heading).toBe('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(s.proposals_history).toBe('Tom &amp; &quot;Jerry&quot;');
+  }));
+
+  test('{placeholder} tokens in an overlay value survive escaping and still fill via fmt()', withHermitDir((hermitDir) => {
+    writeStrings(hermitDir, { dashboard_header: '{name} — O Painel do Eremita' });
+    const s = loadStrings(hermitDir);
+    expect(fmt(s.dashboard_header, { name: 'Atlas' })).toBe('Atlas — O Painel do Eremita');
+  }));
+
   test('every DEFAULT_STRINGS value is a non-empty string', () => {
     for (const [k, v] of Object.entries(DEFAULT_STRINGS)) {
       expect(typeof v, k).toBe('string');

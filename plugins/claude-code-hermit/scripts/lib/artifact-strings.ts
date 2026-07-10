@@ -6,10 +6,12 @@
 // an operator-language table (written once at language-set time) per key, so a
 // missing key or an absent file falls back to English and byte-identical output.
 //
-// Convention: values are trusted chrome injected raw by the renderers (not
-// HTML-escaped) — only *data* (proposal ids/titles, agent name, alert text) is
-// escaped. Parameterized strings use {placeholder} tokens so word order stays
-// translatable; fill them with fmt().
+// Convention: DEFAULT_STRINGS values are trusted (hardcoded, no HTML markup) and
+// injected raw by the renderers; an overlay value is file-derived, so loadStrings()
+// escapes it the same way renderer-side data (proposal ids/titles, agent name,
+// alert text) already is — a corrupt or malformed translation file can't inject
+// markup into a published page. Parameterized strings use {placeholder} tokens so
+// word order stays translatable; fill them with fmt() (escaping doesn't touch braces).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,9 +78,22 @@ export const DEFAULT_STRINGS = {
 
 export type ArtifactStrings = typeof DEFAULT_STRINGS;
 
+// Local copy of dashboard.ts's escapeHtml — that file already imports from this
+// one, so importing it back would be circular. Kept in sync by the shared
+// five-char HTML-escape contract; not worth a third shared module for one line.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /** Overlay state/artifact-strings.json over the English defaults, per key. Missing
  *  keys fall back to English; unknown keys are ignored; an absent or invalid file
- *  yields the pristine defaults (byte-identical to a hermit with no translation). */
+ *  yields the pristine defaults (byte-identical to a hermit with no translation).
+ *  Overlay values are escaped (defaults are not — they're trusted literals). */
 export function loadStrings(hermitDir: string): ArtifactStrings {
   const merged: ArtifactStrings = { ...DEFAULT_STRINGS };
   try {
@@ -87,7 +102,7 @@ export function loadStrings(hermitDir: string): ArtifactStrings {
     if (overlay && typeof overlay === 'object') {
       for (const key of Object.keys(DEFAULT_STRINGS) as (keyof ArtifactStrings)[]) {
         const v = overlay[key];
-        if (typeof v === 'string') merged[key] = v;
+        if (typeof v === 'string') merged[key] = escapeHtml(v);
       }
     }
   } catch {
