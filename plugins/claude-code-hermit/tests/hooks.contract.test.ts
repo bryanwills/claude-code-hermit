@@ -436,7 +436,6 @@ describe('enforce-deny-patterns', () => {
     expect(r.exitCode).toBe(0);
   }));
 
-<<<<<<< HEAD
   // AGENT_HOOK_PROFILE normalization (lib/hook-input.ts isStrictProfile): a
   // differently-cased or padded value must still count as strict.
   test('enforce-deny-patterns (block always-on when profile is "Strict", capitalized)', withDir(async (dir) => {
@@ -453,7 +452,11 @@ describe('enforce-deny-patterns', () => {
     const command = `rm -rf x # ${'a'.repeat(70 * 1024)}`;
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
-=======
+      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+    });
+    expect(r.exitCode).toBe(2);
+  }));
+
   // ---- rm flag-order / path-prefixed bypass regressions ----
   // Each spelling below previously slipped the `Bash(rm -rf *)`-only pattern
   // (documented caveat in root CLAUDE.md) despite being functionally identical
@@ -473,18 +476,20 @@ describe('enforce-deny-patterns', () => {
   test('enforce-deny-patterns (block rm -rf with doubled internal whitespace)', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: '{"tool_name":"Bash","tool_input":{"command":"rm  -rf  x"}}',
->>>>>>> origin/main
       cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
     expect(r.exitCode).toBe(2);
   }));
 
-<<<<<<< HEAD
   test('enforce-deny-patterns (stdin over the 1MB cap — fail-open, allow)', withDir(async (dir) => {
     const command = `rm -rf x # ${'a'.repeat(1.5 * 1024 * 1024)}`;
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
-=======
+      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+    });
+    expect(r.exitCode).toBe(0);
+  }));
+
   test('enforce-deny-patterns (block rm -rf via unquoted $IFS)', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: '{"tool_name":"Bash","tool_input":{"command":"rm${IFS}-rf${IFS}x"}}',
@@ -537,7 +542,6 @@ describe('enforce-deny-patterns', () => {
   test('enforce-deny-patterns (allow command containing "rm" as a substring)', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: '{"tool_name":"Bash","tool_input":{"command":"confirm -rf x"}}',
->>>>>>> origin/main
       cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
     expect(r.exitCode).toBe(0);
@@ -1236,14 +1240,14 @@ describe('channel-reply-reminder', () => {
 // -------------------------------------------------------
 
 describe('doctor-check', () => {
-  test('doctor-check (minimal install, 22 checks)', withDir(async (dir) => {
+  test('doctor-check (minimal install, 23 checks)', withDir(async (dir) => {
     seedDoctor(dir,
       '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"active_hours":{"start":"08:00","end":"23:00"}},"routines":[]}');
     const report = await doctorReport(dir);
     expect(report.checks.map((c: any) => c.id)).toEqual([
       'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
       'permissions', 'docker-security', 'archive', 'reflect', 'scheduler', 'watchdog', 'context-age', 'opus-wake', 'routine-cost', 'heartbeat',
-      'raw-size', 'credential-expiry', 'model-pricing-known', 'channel-liveness',
+      'raw-size', 'credential-expiry', 'model-pricing-known', 'context-scan', 'channel-liveness',
     ]);
   }));
 
