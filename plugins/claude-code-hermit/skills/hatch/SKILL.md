@@ -370,6 +370,18 @@ Set `CLAUDE_CODE_TASK_LIST_ID` in `.claude/settings.local.json` so native Claude
 
 This enables native Tasks for plan tracking. The cost-tracker hook reads task files from `~/.claude/tasks/{task_list_id}/` to generate `tasks-snapshot.md`.
 
+### 5b. Localize artifact chrome (non-`en` operators only)
+
+The script-rendered Artifact pages (dashboard, proposals) read their fixed UI chrome from `.claude-code-hermit/state/artifact-strings.json` when present, overlaying it per key over the English defaults (a missing key or an absent file falls back to English). Model-authored content already follows `language`; this closes the gap for the ~35 hardcoded chrome labels so a non-`en` dashboard isn't half-English.
+
+Run **only** when the chosen `language` is set and is not `en`:
+
+1. Emit the English scaffold: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact-strings-scaffold.ts <language> <current-ISO-timestamp>`.
+2. Translate every value inside the `strings` object into the operator's language. Leave the keys and any `{placeholder}` tokens **verbatim** (word order may move around a token, but the token text must not change or be translated). Leave the `language` and `generated` fields as emitted.
+3. Write the result to `.claude-code-hermit/state/artifact-strings.json`.
+
+When `language` is `en` or unset, skip — absent file ⇒ English chrome, byte-identical to today.
+
 ### 5a. OPERATOR.md onboarding
 
 Generate OPERATOR.md through a project scan and targeted conversation instead of asking the operator to edit it manually.
@@ -543,6 +555,10 @@ Merge these into the target file:
       "Bash(bun */scripts/archive-shell.ts*)",
       "Bash(bun */scripts/evaluate-session.ts*)",
       "Bash(bun */scripts/append-metrics.ts*)",
+      "Bash(bun */scripts/resolve-prop.ts*)",
+      "Bash(bun */scripts/next-prop-id.ts*)",
+      "Bash(bun */scripts/record-gate.ts*)",
+      "Bash(bun */scripts/queue-micro-proposal.ts*)",
       "Bash(bun */scripts/generate-summary.ts*)",
       "Bash(bun */scripts/proposals-index.ts*)",
       "Bash(bun */scripts/update-reflection-state.ts*)",
@@ -566,7 +582,7 @@ Merge these into the target file:
 **Why each one:**
 
 - `git diff`, `git status`, `git log` — session-diff.ts hook auto-populates `## Changed` in SHELL.md
-- `bun */scripts/<name>.ts` — Stop hooks (cost-tracker, suggest-compact, session-diff, evaluate-session) and precheck scripts (heartbeat-precheck, reflect-precheck), scoped to plugin scripts only. Includes `manifest-seed.ts`, which the seeding sub-step below runs to write the template-manifest baseline (deferred from Step 2 so the permission is in place first). Includes `channel-log.ts`, which weekly-review's consolidation step runs unattended to list/mark/prune the episodic channel log (PROP-010). Includes `session-archive.ts`, the deterministic session-lifecycle writer (idle/close/auto-close/open/recover) that replaced the session-mgr subagent — without this permission a hatched hermit would be asked (functionally denied headlessly) on its first idle transition
+- `bun */scripts/<name>.ts` — Stop hooks (cost-tracker, suggest-compact, session-diff, evaluate-session) and precheck scripts (heartbeat-precheck, reflect-precheck), scoped to plugin scripts only. Includes `manifest-seed.ts`, which the seeding sub-step below runs to write the template-manifest baseline (deferred from Step 2 so the permission is in place first). Includes `channel-log.ts`, which weekly-review's consolidation step runs unattended to list/mark/prune the episodic channel log (PROP-010). Includes `session-archive.ts`, the deterministic session-lifecycle writer (idle/close/auto-close/open/recover) that replaced the session-mgr subagent — without this permission a hatched hermit would be asked (functionally denied headlessly) on its first idle transition. Includes `resolve-prop.ts`, `next-prop-id.ts`, `record-gate.ts`, `queue-micro-proposal.ts` — the proposal-act/proposal-create/reflect mechanics wrappers; without these, ID resolution, ID generation, gate-verdict routing, and micro-approval queuing would all be functionally denied headlessly
 - `bash -c 'AGENT_DIR=...` — SessionStart hook that loads session context on every startup
 - `Edit`, `Write` on `.claude-code-hermit/**` — heartbeat appends to SHELL.md, increments config.json tick counter, and skills update session state without prompting
 
@@ -875,6 +891,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Advanced Phase 3 equivalent | escalation, remote | template defaults (balanced, true) — don't override |
 | Advanced Phase 4 equivalent | plugins + scheduled_checks | install all 4; write 3 scheduled_checks entries per Phase 4 mapping |
 | Advanced Phase 4b equivalent | `.baseline-pending` marker | same eligibility check as Advanced |
+| Step 5b | artifact chrome localization | run verbatim — generate the translated table only when `language` is set and not `en`; skip silently otherwise |
 | Advanced Phase 5 equivalent | channels.<name>.* | state_dir + enabled + dm_channel_id=null; omit allowed_users + morning_brief |
 | Quick Turn 3 idle choice | idle_behavior | set to answer (`discover` / `wait`) |
 | Quick Turn 3 channel choice | push_notifications | template default (true) — don't override |
