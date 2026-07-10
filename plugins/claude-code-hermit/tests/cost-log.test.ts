@@ -194,6 +194,19 @@ describe('scanRoutineCostWindowed — #573 fire-tracking window alignment', () =
     expect(result.has('routine:other')).toBe(false);
   }));
 
+  test('includes a same-second boundary entry despite ms-vs-second precision mismatch', withTmpdir((dir) => {
+    // routine-metrics.jsonl cutoffs are whole-second (`date -u +...SZ`); cost-log timestamps
+    // carry milliseconds (`toISOString()`). `...SS.mmmZ` sorts lexicographically *before*
+    // `...SSZ` ('.' < 'Z'), so a same-second boundary entry would be wrongly dropped under
+    // string comparison. The earliest tracked fire's cost lands in exactly this window.
+    const logPath = writeLog(dir, [
+      { timestamp: '2026-07-01T00:00:00.500Z', source: 'routine:weekly', estimated_cost_usd: 5 }, // same second as cutoff
+      { timestamp: '2026-06-30T23:59:59.999Z', source: 'routine:weekly', estimated_cost_usd: 9 }, // prior second, excluded
+    ]);
+    const result = scanRoutineCostWindowed(logPath, new Map([['routine:weekly', '2026-07-01T00:00:00Z']]));
+    expect(result.get('routine:weekly')).toBe(5);
+  }));
+
   test('returns an empty map on an absent log file or empty cutoff map', () => {
     expect(scanRoutineCostWindowed('/nonexistent/path/cost-log.jsonl', new Map([['routine:a', '2026-01-01T00:00:00Z']])).size).toBe(0);
     expect(scanRoutineCostWindowed('/nonexistent/path/cost-log.jsonl', new Map()).size).toBe(0);
