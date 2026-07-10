@@ -66,4 +66,4 @@ function scanInjected(s: any): string | null {
   return null;
 }
 
-export { safe, safeForLLM, safeMultiline, safeForLLMMultiline, scanInjected };
+export { safe, safeForLLM, INJECTION_TAGS, safeMultiline, safeForLLMMultiline, scanInjected };
