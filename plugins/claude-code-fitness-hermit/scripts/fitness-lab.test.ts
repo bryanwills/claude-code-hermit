@@ -11,6 +11,7 @@ import path from 'node:path';
 import {
   THRESHOLDS,
   AUTH_RECOVERY_MESSAGE,
+  getAccessToken,
   mean,
   median,
   stddev,
@@ -212,6 +213,42 @@ eq('gap spans exactly 3 consecutive weeks', gapWl.weeks.length, 3);
 eq('interior rest week empty', gapWl.weeks[1].activities, 0);
 eq('older active week km present', gapWl.weeks[2].km, 8);
 
+console.log('\ngetAccessToken (MCP config vs .env fallback):');
+{
+  const envProj = fs.mkdtempSync(path.join(os.tmpdir(), 'fitness-lab-token-'));
+  fs.writeFileSync(path.join(envProj, '.env'), 'STRAVA_ACCESS_TOKEN=env-token\n');
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fitness-lab-mcpcfg-'));
+  const configPath = path.join(configDir, 'config.json');
+  const prevConfig = process.env.STRAVA_MCP_CONFIG;
+
+  process.env.STRAVA_MCP_CONFIG = path.join(configDir, 'missing.json');
+  eq('missing config file → .env fallback', getAccessToken(envProj), 'env-token');
+
+  process.env.STRAVA_MCP_CONFIG = configPath;
+  fs.writeFileSync(configPath, JSON.stringify({ accessToken: 'mcp-token', expiresAt: Date.now() / 1000 + 3600 }));
+  eq('fresh config token wins over .env', getAccessToken(envProj), 'mcp-token');
+
+  fs.writeFileSync(configPath, JSON.stringify({ accessToken: 'mcp-token', expiresAt: Date.now() / 1000 - 3600 }));
+  eq('expired config token → .env fallback', getAccessToken(envProj), 'env-token');
+
+  fs.writeFileSync(configPath, 'not json');
+  eq('unparseable config → .env fallback', getAccessToken(envProj), 'env-token');
+
+  const noEnvProj = fs.mkdtempSync(path.join(os.tmpdir(), 'fitness-lab-noenv-'));
+  process.env.STRAVA_MCP_CONFIG = path.join(configDir, 'missing.json');
+  eq('no config, no .env → null', getAccessToken(noEnvProj), null);
+
+  fs.writeFileSync(path.join(noEnvProj, '.env'), 'STRAVA_ACCESS_TOKEN=replace_me\n');
+  eq('no config, .env placeholder → null', getAccessToken(noEnvProj), null);
+
+  if (prevConfig === undefined) delete process.env.STRAVA_MCP_CONFIG;
+  else process.env.STRAVA_MCP_CONFIG = prevConfig;
+
+  fs.rmSync(envProj, { recursive: true });
+  fs.rmSync(configDir, { recursive: true });
+  fs.rmSync(noEnvProj, { recursive: true });
+}
+
 // ===========================================================================
 // Contract layer
 // ===========================================================================
@@ -225,6 +262,9 @@ function tmpProject(): string {
 
 async function run(args: string[], base?: string): Promise<{ code: number; out: string }> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  // Isolate from any real ~/.config/strava-mcp/config.json on the host machine —
+  // contract tests must exercise the .env fixture token, not a live operator credential.
+  env.STRAVA_MCP_CONFIG = path.join(os.tmpdir(), 'fitness-lab-no-mcp-config.json');
   if (base) env.STRAVA_API_BASE = base;
   else delete env.STRAVA_API_BASE;
   const proc = Bun.spawn(['bun', SCRIPT, ...args], { env, stdout: 'pipe', stderr: 'pipe' });
