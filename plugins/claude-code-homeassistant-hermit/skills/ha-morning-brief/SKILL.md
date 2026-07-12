@@ -17,15 +17,6 @@ A house-focused morning brief that combines live HA state with hermit session co
 
 When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are installed and `morning-brief` is enabled, this skill subsumes `/claude-code-hermit:brief --morning` — operators should disable the core `morning` routine to avoid duplicate notifications. For hermits without HA, `/claude-code-hermit:brief --morning` remains the standalone path.
 
-## Delivery Guard
-
-Before doing any work, read `.claude-code-hermit/state/runtime.json` if it exists.
-
-- If `session_state` is `waiting`: the operator is absent. Check `config.json` for a configured notification channel.
-  - Channel present → proceed, notify the operator via the configured channel.
-  - No channel → suppress entirely (log `morning-brief skipped: session_state=waiting, no channel` to SHELL.md Monitoring and exit).
-- Otherwise: proceed normally.
-
 ## Steps
 
 1. **Time & context** — Call `GetDateTime` for current time. Read `.claude-code-hermit/OPERATOR.md` for priorities and language preferences.
@@ -121,6 +112,6 @@ Adapt the greeting and section headers to the operator's configured language. Ke
 
 ## Delivery
 
-- If invoked as a routine and `session_state` is `waiting` with a channel configured: notify the operator via that channel only.
-- Otherwise: output to terminal.
+- If invoked as a routine, or `config.always_on` is `true` in `.claude-code-hermit/config.json`: deliver the composed brief via the Operator Notification protocol in CLAUDE.md (core resolves the channel and falls back to push / SHELL.md logging when no channel is reachable). The terminal is unmonitored in always-on mode — never gate delivery on `session_state`.
+- Otherwise (invoked on demand in an interactive session): output to terminal.
 - Never include secrets, tokens, or internal file paths in the brief.
