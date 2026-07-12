@@ -2,6 +2,11 @@
 
 All notable changes to `claude-code-homeassistant-hermit` / `ha-agent-lab` are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **ha-morning-brief / ha-evening-brief: routine fires now notify the operator** — delivery is keyed on routine invocation / `config.always_on` via the core Operator Notification protocol; previously channel delivery only fired when `session_state` was `waiting`, so routines firing on idle always-on hermits wrote the brief to `compiled/` but never notified (#581)
+
 ## [0.4.2] - 2026-07-06
 
 ### Added
