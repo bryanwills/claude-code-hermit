@@ -14,6 +14,8 @@ Append this line to the operator's existing `HEARTBEAT.md`, under `## Standing C
 ```
 
 No `config.json` changes required — the credential registry is populated entirely by sibling plugins' `hermit-meta.json`, which `hermit-evolve` does not need to touch.
+### Changed
+- **proposals artifact page: open proposals are now collapsible** — collapsed-by-default one-line summaries with an open count, matching the dashboard; deep-link anchor moved onto the `<details>`.
 
 ## [1.2.22] - 2026-07-12
 
