@@ -1,9 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.22] - 2026-07-12
 
 ### Fixed
 - **enforce-deny-patterns: fold unquoted backslash escapes** — `r\m -rf` / `rm -r\f` no longer slip past rm and other command/flag-anchored deny globs. The fold is restricted to ordinary chars: escaped quotes/separators (`\"`, `\;`, …) are kept verbatim so they can't desync the segment split — an unquoted `\"` no longer opens a spurious run that hides a following `rm -rf`, and `\;` no longer fabricates a separator.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. No further action needed — the fix lives in `enforce-deny-patterns.ts`, picked up from the plugin install path on the next session.
+
+No config.json changes required.
 
 ## [1.2.21] - 2026-07-10
 
