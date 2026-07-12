@@ -19,8 +19,16 @@
  *   --project-root <path>   default process.cwd(); .env + .claude-code-hermit/ live there
  *
  * Env:
- *   STRAVA_API_BASE   test seam; default https://www.strava.com/api/v3
- *   STRAVA_ACCESS_TOKEN is read from <project-root>/.env (read-only parse).
+ *   STRAVA_API_BASE     test seam; default https://www.strava.com/api/v3
+ *   STRAVA_MCP_CONFIG   test seam; default ~/.config/strava-mcp/config.json
+ *
+ * Token resolution (getAccessToken): the Strava MCP server (@r-huijts/strava-mcp-server)
+ * auto-refreshes the OAuth token on 401 and persists it to its own config file
+ * (STRAVA_MCP_CONFIG), independent of this project's .env. To avoid reading a token
+ * that's gone stale the moment the MCP server refreshes, getAccessToken prefers a
+ * non-expired token from that config file and falls back to <project-root>/.env's
+ * STRAVA_ACCESS_TOKEN (read-only parse) only when the config file is absent, unparseable,
+ * or its token is expired.
  *
  * Error contract (deliberately NOT docker-preflight's always-exit-0 — the skill
  * must branch on hard auth failure):
@@ -30,6 +38,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -118,7 +127,28 @@ export function parseEnv(projectRoot: string): Record<string, string> {
   return out;
 }
 
+function mcpConfigPath(): string {
+  return process.env.STRAVA_MCP_CONFIG || path.join(os.homedir(), '.config', 'strava-mcp', 'config.json');
+}
+
+/** Non-expired accessToken from the Strava MCP server's own refreshed config, or null. */
+function readMcpConfigToken(): string | null {
+  let parsed: { accessToken?: string; expiresAt?: number };
+  try {
+    parsed = JSON.parse(fs.readFileSync(mcpConfigPath(), 'utf-8'));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.accessToken) return null;
+  // Require a numeric, non-expired expiresAt: a token we can't date isn't
+  // verifiably "non-expired", so fall back to .env rather than trust it forever.
+  if (typeof parsed.expiresAt !== 'number' || parsed.expiresAt <= Date.now() / 1000 + 60) return null;
+  return parsed.accessToken;
+}
+
 export function getAccessToken(projectRoot: string): string | null {
+  const mcpToken = readMcpConfigToken();
+  if (mcpToken) return mcpToken;
   const v = parseEnv(projectRoot)['STRAVA_ACCESS_TOKEN'];
   return v && v !== 'replace_me' ? v : null;
 }
