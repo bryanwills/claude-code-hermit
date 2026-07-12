@@ -14,23 +14,30 @@ export interface PendingUpdate {
 }
 
 const CORE_ENTITY_ID = 'update.home_assistant_core_update';
-const OS_ID_PATTERN = /operating_system/;
-const SUPERVISOR_ID_PATTERN = /supervisor/;
+const OS_ID_PATTERN = /home_assistant_operating_system/;
+const SUPERVISOR_ID_PATTERN = /home_assistant_supervisor/;
+
+// Home Assistant UpdateEntityFeature.BACKUP — supervisor-managed (add-on) update
+// entities advertise it; HACS / custom-integration update entities do not.
+const UPDATE_FEATURE_BACKUP = 8;
 
 /**
  * Classify an update.* entity into a tier. Well-known Core/OS/Supervisor
- * entity_ids are the fast path; everything else needs the entity registry's
- * `platform` field (not fetched here — a live WS call per daily check is
- * more machinery than this check's value justifies) to tell add-ons
- * (`hassio`) apart from HACS/other integrations. Absent that, unknown
- * entities default to the aggregated `hacs` bucket rather than risking
- * proposal spam for anything we can't confidently call high-signal.
+ * entity_ids are the fast path. To tell add-ons apart from HACS/other
+ * integrations we key off `hasBackup` — whether the entity advertises HA's
+ * native BACKUP update feature (`supported_features & 8`), which supervisor
+ * add-on entities carry and HACS/custom-integration ones don't. That signal
+ * rides in the `/api/states` payload already, so no registry/WS fetch is
+ * needed, and it aligns the tier with the exact capability the apply flow
+ * depends on (an `addon` entity can always take `backup:true`). An entity
+ * without the BACKUP bit falls back to the aggregated `hacs` bucket — which
+ * on apply gets the heavier full backup, a safe degradation.
  */
-export function classifyUpdateEntity(entityId: string, platform?: string | null): UpdateTier {
+export function classifyUpdateEntity(entityId: string, hasBackup?: boolean): UpdateTier {
   if (entityId === CORE_ENTITY_ID) return 'core';
   if (OS_ID_PATTERN.test(entityId)) return 'os';
   if (SUPERVISOR_ID_PATTERN.test(entityId)) return 'supervisor';
-  if (platform === 'hassio') return 'addon';
+  if (hasBackup) return 'addon';
   return 'hacs';
 }
 
@@ -38,10 +45,7 @@ export function classifyUpdateEntity(entityId: string, platform?: string | null)
  * Filter a states snapshot down to pending update.* entities, honoring HA's
  * native skipped_version so operator-dismissed updates in the HA UI stay quiet.
  */
-export function collectPendingUpdates(
-  states: Array<Record<string, any>>,
-  platforms: Record<string, string> = {},
-): PendingUpdate[] {
+export function collectPendingUpdates(states: Array<Record<string, any>>): PendingUpdate[] {
   const out: PendingUpdate[] = [];
   for (const s of states) {
     const entityId = s?.entity_id;
@@ -51,14 +55,15 @@ export function collectPendingUpdates(
     const latest = typeof attrs.latest_version === 'string' ? attrs.latest_version : null;
     const skipped = typeof attrs.skipped_version === 'string' ? attrs.skipped_version : null;
     if (skipped !== null && skipped === latest) continue;
+    const sf = typeof attrs.supported_features === 'number' ? attrs.supported_features : 0;
     out.push({
       entity_id: entityId,
-      title: attrs.title ?? attrs.friendly_name ?? entityId,
+      title: attrs.title || attrs.friendly_name || entityId,
       installed_version: typeof attrs.installed_version === 'string' ? attrs.installed_version : null,
       latest_version: latest,
       release_summary: typeof attrs.release_summary === 'string' ? attrs.release_summary : null,
       release_url: typeof attrs.release_url === 'string' ? attrs.release_url : null,
-      tier: classifyUpdateEntity(entityId, platforms[entityId] ?? null),
+      tier: classifyUpdateEntity(entityId, (sf & UPDATE_FEATURE_BACKUP) === UPDATE_FEATURE_BACKUP),
     });
   }
   out.sort((a, b) => (a.entity_id < b.entity_id ? -1 : a.entity_id > b.entity_id ? 1 : 0));

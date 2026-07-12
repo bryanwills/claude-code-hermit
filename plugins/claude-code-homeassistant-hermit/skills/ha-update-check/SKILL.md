@@ -23,7 +23,7 @@ ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha updates
 
 The CLI:
 - Fetches live entity states and filters to `update.*` entities where `state == "on"` (an update is pending) and the pending version hasn't been skipped in HA.
-- Classifies each into a tier: `core` (HA Core), `os` (Operating System), `supervisor`, `addon`, or `hacs`. Core/OS/Supervisor are recognized by their well-known entity_ids; anything not confidently classified as an add-on defaults to the `hacs` bucket rather than risking noise.
+- Classifies each into a tier: `core` (HA Core), `os` (Operating System), `supervisor`, `addon`, or `hacs`. Core/OS/Supervisor are recognized by their well-known entity_ids; add-ons are recognized by the native backup capability they advertise (HA's `supported_features` BACKUP bit), which HACS/custom-integration updates lack; anything without it aggregates into the `hacs` bucket rather than risking noise.
 - Prints the findings block to stdout in the documented format below.
 
 ## Output contract

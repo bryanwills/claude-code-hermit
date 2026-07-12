@@ -17,7 +17,7 @@ Invoked from `proposal-act`'s Accept flow for a `[ha-update]` proposal (originat
    - **Absent or `false`**: this is advisory-only. Resolve the proposal — tell the operator the update is available and where (`Settings → System → Updates` in the HA UI), and stop. Do not call `update.install`.
    - **`true`**: continue.
 
-2. **Branch on tier** (from the proposal body):
+2. **Branch on tier** (from the proposal body). The `addon` vs `hacs` split is defined by the native backup capability: `ha-update-check` tiers an entity `addon` precisely when it advertises HA's BACKUP update feature, so `backup:true` is always valid for an `addon` proposal, and a `hacs` entity is one that can't back itself up (hence the separate full-backup step).
 
    - **`addon`**: `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha call-service update.install --data '{"entity_id":"<entity_id>","backup":true}' --confirm`. HA backs up the add-on natively and rolls back on install failure. Report the result to the operator once done.
    - **`hacs`** (an individual HACS entity accepted out of an aggregated proposal — HACS entities don't support the native `backup` parameter): first `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha create-backup --agent-ids <configured agent> --confirm`. If the backup call is blocked or fails, stop and stay advisory — tell the operator why. Only on a successful backup: `ha call-service update.install --data '{"entity_id":"<entity_id>"}' --confirm`.

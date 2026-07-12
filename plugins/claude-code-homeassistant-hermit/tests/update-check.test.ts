@@ -12,13 +12,17 @@ test('classifyUpdateEntity recognizes well-known core/os/supervisor ids', () => 
   expect(classifyUpdateEntity('update.home_assistant_supervisor_update')).toBe('supervisor');
 });
 
-test('classifyUpdateEntity uses platform for add-ons', () => {
-  expect(classifyUpdateEntity('update.mosquitto_broker', 'hassio')).toBe('addon');
+test('classifyUpdateEntity uses the BACKUP feature bit for add-ons', () => {
+  expect(classifyUpdateEntity('update.mosquitto_broker', true)).toBe('addon');
 });
 
-test('classifyUpdateEntity defaults unknown platform to hacs bucket', () => {
-  expect(classifyUpdateEntity('update.frigate', 'hacs')).toBe('hacs');
-  expect(classifyUpdateEntity('update.some_integration', null)).toBe('hacs');
+test('classifyUpdateEntity defaults entities without the BACKUP bit to hacs', () => {
+  expect(classifyUpdateEntity('update.frigate', false)).toBe('hacs');
+  expect(classifyUpdateEntity('update.some_integration')).toBe('hacs');
+});
+
+test('classifyUpdateEntity id fast-path wins over the BACKUP bit (core/os also advertise BACKUP)', () => {
+  expect(classifyUpdateEntity('update.home_assistant_core_update', true)).toBe('core');
 });
 
 test('collectPendingUpdates filters to update.* entities in pending state', () => {
@@ -62,10 +66,17 @@ test('collectPendingUpdates does not skip when skipped_version is stale', () => 
   expect(updates.length).toBe(1);
 });
 
-test('collectPendingUpdates passes registry platform through for tiering', () => {
-  const states = [state('update.mosquitto_broker', { installed_version: '6.4', latest_version: '6.5' })];
-  const updates = collectPendingUpdates(states, { 'update.mosquitto_broker': 'hassio' });
-  expect(updates[0].tier).toBe('addon');
+test('collectPendingUpdates tiers add-ons via the BACKUP feature bit', () => {
+  const states = [
+    // supported_features 29 = INSTALL|PROGRESS|BACKUP|RELEASE_NOTES (supervisor add-on)
+    state('update.mosquitto_broker', { installed_version: '6.4', latest_version: '6.5', supported_features: 29 }),
+    // supported_features 23 = INSTALL|SPECIFIC_VERSION|PROGRESS|RELEASE_NOTES (HACS, no BACKUP)
+    state('update.frigate', { installed_version: '1.0', latest_version: '1.1', supported_features: 23 }),
+  ];
+  const updates = collectPendingUpdates(states);
+  const byId = Object.fromEntries(updates.map((u) => [u.entity_id, u.tier]));
+  expect(byId['update.mosquitto_broker']).toBe('addon');
+  expect(byId['update.frigate']).toBe('hacs');
 });
 
 test('collectPendingUpdates sorts by entity_id', () => {
