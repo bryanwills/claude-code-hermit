@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- **credential registry** — sibling plugins can declare expiring credentials in `hermit-meta.json` `credentials[]` (`name`, `state_path`, `expiry_probe`, `reauth_skill`); the doctor `credential-expiry` check now executes each `expiry_probe` (bash, 5s timeout, one-line `OK`/`EXPIRES:<iso>`/`EXPIRED` protocol) alongside the built-in Claude OAuth check, warning on expired or <7d credentials and naming the plugin's reauth skill. Malformed output or a timeout degrades to a "probe failed" warn, never a crash. A new HEARTBEAT.md standing check surfaces non-ok credentials to the operator. See `docs/creating-your-own-hermit.md` § Credential registry.
+
+### Upgrade Instructions
+
+Append this line to the operator's existing `HEARTBEAT.md`, under `## Standing Checks`, if not already present:
+
+```
+- Read `state/doctor-report.json` → the `credential-expiry` check; if its status is warn or fail, tell the operator which credential needs re-auth and name the plugin's reauth skill from the report detail.
+```
+
+No `config.json` changes required — the credential registry is populated entirely by sibling plugins' `hermit-meta.json`, which `hermit-evolve` does not need to touch.
 ### Changed
 - **proposals artifact page: open proposals are now collapsible** — collapsed-by-default one-line summaries with an open count, matching the dashboard; deep-link anchor moved onto the `<details>`.
 
