@@ -140,7 +140,9 @@ function readMcpConfigToken(): string | null {
     return null;
   }
   if (!parsed || typeof parsed !== 'object' || !parsed.accessToken) return null;
-  if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now() / 1000 + 60) return null;
+  // Require a numeric, non-expired expiresAt: a token we can't date isn't
+  // verifiably "non-expired", so fall back to .env rather than trust it forever.
+  if (typeof parsed.expiresAt !== 'number' || parsed.expiresAt <= Date.now() / 1000 + 60) return null;
   return parsed.accessToken;
 }
 

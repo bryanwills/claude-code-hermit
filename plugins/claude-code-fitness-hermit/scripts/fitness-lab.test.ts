@@ -234,6 +234,9 @@ console.log('\ngetAccessToken (MCP config vs .env fallback):');
   fs.writeFileSync(configPath, 'not json');
   eq('unparseable config → .env fallback', getAccessToken(envProj), 'env-token');
 
+  fs.writeFileSync(configPath, JSON.stringify({ accessToken: 'mcp-token' }));
+  eq('config token without expiresAt → .env fallback', getAccessToken(envProj), 'env-token');
+
   const noEnvProj = fs.mkdtempSync(path.join(os.tmpdir(), 'fitness-lab-noenv-'));
   process.env.STRAVA_MCP_CONFIG = path.join(configDir, 'missing.json');
   eq('no config, no .env → null', getAccessToken(noEnvProj), null);
@@ -264,7 +267,7 @@ async function run(args: string[], base?: string): Promise<{ code: number; out: 
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
   // Isolate from any real ~/.config/strava-mcp/config.json on the host machine —
   // contract tests must exercise the .env fixture token, not a live operator credential.
-  env.STRAVA_MCP_CONFIG = path.join(os.tmpdir(), 'fitness-lab-no-mcp-config.json');
+  env.STRAVA_MCP_CONFIG = path.join(os.tmpdir(), `fitness-lab-no-mcp-config-${process.pid}.json`);
   if (base) env.STRAVA_API_BASE = base;
   else delete env.STRAVA_API_BASE;
   const proc = Bun.spawn(['bun', SCRIPT, ...args], { env, stdout: 'pipe', stderr: 'pipe' });
