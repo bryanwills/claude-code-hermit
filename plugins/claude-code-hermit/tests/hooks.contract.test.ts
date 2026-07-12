@@ -1829,6 +1829,18 @@ describe('checkCredentialExpiry (registry)', () => {
     expect(d.status).toBe('warn');
     expect(d.detail).toContain('probe failed');
   }));
+
+  test('checkCredentialExpiry (probe $CLAUDE_PLUGIN_ROOT points at the declaring sibling, not core)', withDir(async (dir) => {
+    const root = path.join(dir, 'plugins', 'claude-code-hermit');
+    // The sibling's own hermit-meta.json contains "expiry_probe"; core's dir has
+    // no hermit-meta.json. A probe grepping $CLAUDE_PLUGIN_ROOT resolves to OK
+    // only when the env points at the sibling that declared it.
+    const probe = 'grep -q expiry_probe "$CLAUDE_PLUGIN_ROOT/.claude-plugin/hermit-meta.json" && echo OK || echo EXPIRED';
+    const meta = JSON.stringify({ credentials: [{ name: 'c1', expiry_probe: probe }] });
+    const d = await credCheck(dir, root, meta);
+    expect(d.status).toBe('ok');
+    expect(d.detail).toContain('1 plugin credential(s) ok');
+  }));
 });
 
 // -------------------------------------------------------

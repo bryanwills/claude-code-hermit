@@ -1202,11 +1202,18 @@ type ProbeResult =
 // Runs one hermit-meta.json expiry_probe. Protocol: bash -c <cmd>, one line of
 // stdout, exactly OK | EXPIRED | EXPIRES:<iso8601>. Anything else (multi-word
 // first line, unparseable date, timeout, nonzero exit) degrades to a warn-level
-// "probe failed" — never crashes the doctor check.
-function runExpiryProbe(cmd: string): ProbeResult {
+// "probe failed" — never crashes the doctor check. CLAUDE_PLUGIN_ROOT is set to
+// the declaring plugin's dir (not core's) so a probe like
+// `bun ${CLAUDE_PLUGIN_ROOT}/scripts/check-token.ts` resolves against its own scripts.
+function runExpiryProbe(cmd: string, pluginDir: string): ProbeResult {
   let out: string;
   try {
-    out = execFileSync('bash', ['-c', cmd], { encoding: 'utf8', timeout: CRED_PROBE_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'] });
+    out = execFileSync('bash', ['-c', cmd], {
+      encoding: 'utf8',
+      timeout: CRED_PROBE_TIMEOUT_MS,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir },
+    });
   } catch (e: any) {
     return { kind: 'probe-failed', reason: e?.code === 'ETIMEDOUT' || e?.signal === 'SIGTERM' ? 'timeout' : 'exit error' };
   }
@@ -1232,24 +1239,22 @@ function probeSiblingCredentials(): { okCount: number; badNotes: string[] } {
   let okCount = 0;
   const badNotes: string[] = [];
   let probesRun = 0;
+  let skipped = 0;
 
   for (const dir of siblingPluginDirs(pluginRoot, coreName)) {
-    if (probesRun >= CRED_PROBE_CEILING) break;
     const meta = readHermitMeta(dir);
     const credentials = Array.isArray(meta.credentials) ? meta.credentials : [];
-    let manifestName: string | null = null;
-    try {
-      manifestName = JSON.parse(fs.readFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), 'utf8')).name || null;
-    } catch {}
-    const pluginLabel = manifestName || path.basename(dir);
+    const pluginLabel = readCoreName(dir) || path.basename(dir);
 
     for (const cred of credentials) {
-      if (probesRun >= CRED_PROBE_CEILING) break;
       if (!cred || typeof cred.expiry_probe !== 'string' || !cred.expiry_probe) continue;
+      // Past the ceiling, count remaining credentials as skipped rather than
+      // silently dropping them — an unchecked credential must not read as ok.
+      if (probesRun >= CRED_PROBE_CEILING) { skipped++; continue; }
       probesRun++;
       const who = `${pluginLabel}/${cred.name || 'credential'}`;
       const fix = cred.reauth_skill ? ` — run ${cred.reauth_skill}` : '';
-      const result = runExpiryProbe(cred.expiry_probe);
+      const result = runExpiryProbe(cred.expiry_probe, dir);
       if (result.kind === 'ok') {
         okCount++;
       } else if (result.kind === 'expired') {
@@ -1268,6 +1273,7 @@ function probeSiblingCredentials(): { okCount: number; badNotes: string[] } {
       }
     }
   }
+  if (skipped > 0) badNotes.push(`${skipped} credential(s) not checked (probe ceiling ${CRED_PROBE_CEILING} reached)`);
   return { okCount, badNotes };
 }
 
