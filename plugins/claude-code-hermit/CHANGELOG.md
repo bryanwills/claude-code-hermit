@@ -22,6 +22,7 @@ No other config.json changes required.
 
 ### Fixed
 - **startup-context: a post-compaction start no longer clears a prior context-scan warning** — the `source=compact` path only scans the delta capsule (task/progress), so it now merges the scan record instead of overwriting it; a compaction can no longer flip the doctor `context-scan` check to "clean" while an injection marker still sits in OPERATOR.md/compiled/report. The next full start re-scans comprehensively and overwrites, self-healing any stale merged hit.
+- **hermit-doctor: `credential-expiry` no longer warns on the Claude Code session's own OAuth token** — the access token auto-refreshes via its refresh token roughly every 8h with no operator action (confirmed live: unattended hermits rewrite `.credentials.json` hours after boot with no `/login` run), so warning on its `expiresAt` was a false "re-login" alarm every cycle. The check now reports only sibling-plugin `expiry_probe` results.
 
 ## [1.2.23] - 2026-07-12
 
