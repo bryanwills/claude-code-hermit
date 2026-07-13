@@ -2,8 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- **session-archive: structured report frontmatter** — archived reports now carry `blockers`, `lessons`, `artifacts`, and `next_start` as frontmatter fields alongside their existing prose sections; the report's own frontmatter doubles as its index row, no separate index file needed.
+
 ### Changed
 - **startup-context: SessionStart injection is now source-gated** — post-compaction (`source=compact`) injects only a ≤1,200-char delta capsule (lifecycle state, task + last progress line, file pointers; never cost/upgrade/catalog/drift/report bodies), and resumed sessions skip the Last Report section when SHELL.md is active — the resumed transcript already contains it. Fresh starts unchanged.
+- **reflect/brief/weekly-review/startup-context: frontmatter-first report reads** — these read a report's structured frontmatter row first and open the full body only for a legacy report (no `next_start` key) or when a check needs prose the row can't witness; a no-change reflect run now reads zero full report bodies.
 
 ### Fixed
 - **startup-context: a post-compaction start no longer clears a prior context-scan warning** — the `source=compact` path only scans the delta capsule (task/progress), so it now merges the scan record instead of overwriting it; a compaction can no longer flip the doctor `context-scan` check to "clean" while an injection marker still sits in OPERATOR.md/compiled/report. The next full start re-scans comprehensively and overwrites, self-healing any stale merged hit.

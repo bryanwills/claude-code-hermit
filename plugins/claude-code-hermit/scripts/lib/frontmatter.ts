@@ -12,6 +12,27 @@ type Json = any;
  * offset of the closing --- delimiter (-1 if no valid frontmatter found).
  * Arrays like [a, b, c] are parsed; null is preserved; inline comments stripped.
  */
+// Split a `[...]` flow-array's inner content on top-level commas only — items
+// quoted with " " (e.g. prose lines in session-report blockers/lessons/artifacts
+// arrays) may themselves contain commas, which must not split the item.
+function splitFlowArray(inner: string): string[] {
+  const items: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c === '"' && inner[i - 1] !== '\\') inQuotes = !inQuotes;
+    if (c === ',' && !inQuotes) {
+      items.push(cur.trim());
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  if (cur.trim()) items.push(cur.trim());
+  return items;
+}
+
 function _parseFrontmatterWithEnd(content: string): { fm: Json | null; end: number } {
   if (!content.startsWith('---')) return { fm: null, end: -1 };
   const end = content.indexOf('\n---', 3);
@@ -25,7 +46,7 @@ function _parseFrontmatterWithEnd(content: string): { fm: Json | null; end: numb
     let val = m[2].trim();
     if (val.startsWith('[') && val.endsWith(']')) {
       const inner = val.slice(1, -1).trim();
-      result[key] = inner ? inner.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')) : [];
+      result[key] = inner ? splitFlowArray(inner).map(s => s.replace(/^["']|["']$/g, '')) : [];
     } else if (val === 'null') {
       result[key] = null;
     } else {
