@@ -108,11 +108,10 @@ Skills are namespaced `/claude-code-hermit:*`; the full set is listed in the plu
 | Config validator    | PostToolUse  | strict    | Validates config.json after mutations                  |
 | Context loader      | SessionStart | all       | Loads OPERATOR.md, SHELL.md, latest report, cost data  |
 | Cost tracker        | Stop         | all       | Logs tokens/cost                                       |
-| Compact suggestion  | Stop         | standard+ | Suggests `/compact` by tool-call count                 |
 | Session diff        | Stop         | standard+ | Auto-populates `## Changed` from `git diff`            |
 | Session evaluator   | Stop         | standard+ | Validates SHELL.md quality, detects zombie/stale/bloat |
 | PermissionDenied notify | PermissionDenied | all | Deduped channel alert when a tool call is denied      |
-| Stop pipeline       | Stop         | all       | Cost tracking, compact suggestion, session diff, evaluation, heartbeat |
+| Stop pipeline       | Stop         | all       | Cost tracking, session diff, evaluation, heartbeat |
 | Precompact stamp    | PreCompact   | all       | Breadcrumb in SHELL.md before `/compact` (manual or auto); watchdog's emergency `/clear` flushes the same breadcrumb separately since PreCompact never fires on `/clear` |
 
 Hermits may add hooks at `strict` (e.g., git-push-guard). Profile-gated hooks check `AGENT_HOOK_PROFILE` internally and return early when the active profile doesn't match.
