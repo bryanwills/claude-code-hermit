@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+- **suggest-compact Stop-hook stage deleted** — the tool-call compact nudge counted Stop events, not tool calls or context usage, and duplicated the three real compaction tiers (native autocompact, watchdog backstop, emergency clear). Stop-pipeline no longer emits anything on stdout; `COMPACT_THRESHOLD` env key removed.
+
+### Upgrade Instructions
+
+1. **Remove `COMPACT_THRESHOLD` from `.claude-code-hermit/config.json`** — delete the key from the `env` block if present.
+2. **Remove `COMPACT_THRESHOLD` from the operator's settings env block** — check the hatch target settings file (`.claude/settings.local.json` or `.claude/settings.json` per `state/hatch-options.json`) and delete the `"COMPACT_THRESHOLD"` entry from `env` if present.
+3. Stale permission cleanup (`Bash(bun */scripts/suggest-compact.ts*)`) is handled by the standard permissions step — no separate action.
+4. **Optional:** delete leftover counter files at `<os tmpdir>/claude-agent-compact-<uid>/` (`rm -r`, not `rm -rf`). Safe to skip — the OS tmpdir is ephemeral and container-local in Docker deployments.
+
+No other config.json changes required.
+
 ## [1.2.23] - 2026-07-12
 
 ### Fixed

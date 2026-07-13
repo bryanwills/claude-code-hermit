@@ -367,7 +367,7 @@ config.json "env"  →  hermit-start.ts  →  .claude/settings.local.json "env" 
 
 **Bucket A (shell env only):** `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY` — must be in shell env before `claude` starts. Forwarded via temp file in tmux, or Docker `environment:`. OAuth credentials live in `.credentials.json` (written by `claude /login`), not in env vars.
 
-**Bucket B (settings.local.json only):** `AGENT_HOOK_PROFILE`, `COMPACT_THRESHOLD`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `MAX_THINKING_TOKENS` — consumed by hooks and Claude Code itself.
+**Bucket B (settings.local.json only):** `AGENT_HOOK_PROFILE`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `MAX_THINKING_TOKENS` — consumed by hooks and Claude Code itself.
 
 **Bucket C (derived at boot, written to both):** `DISCORD_STATE_DIR`, `TELEGRAM_STATE_DIR` — derived by `hermit-start` from `channels.<name>.state_dir` in config.json (relative paths resolved against project root). Written to `settings.local.json` for hooks and forwarded into the tmux shell env (or Docker compose `environment:`) for MCP servers (channel plugins), which inherit shell env but don't read `settings.local.json`.
 
@@ -378,9 +378,10 @@ config.json "env"  →  hermit-start.ts  →  .claude/settings.local.json "env" 
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | `65`       | Auto-compact at 65% context                        |
 | `MAX_THINKING_TOKENS`             | `10000`    | Cap thinking budget                                |
 | `AGENT_HOOK_PROFILE`              | `standard` | Active hook profile                                |
-| `COMPACT_THRESHOLD`               | `75`       | Tool-call-count threshold for compact suggestion   |
 | `DISCORD_STATE_DIR`               | (derived)  | Derived from `channels.discord.state_dir` at boot  |
 | `TELEGRAM_STATE_DIR`              | (derived)  | Derived from `channels.telegram.state_dir` at boot |
+
+**Compaction ownership.** Context compaction has exactly three tiers: native autocompact (primary, tuned via `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`), the watchdog's `maybeContextCompact` backstop (fires with an explicit reason code when native compaction hasn't kept up), and the emergency clear tier. No hook injects model-visible compaction suggestions.
 
 ### Denied operations
 
