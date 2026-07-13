@@ -3,3 +3,6 @@
 .claude-code-hermit/config.json
 .claude-code-hermit/compiled/
 # <<< claude-code-hermit <<<
+
+# graphify
+**/graphify-out
