@@ -1841,12 +1841,12 @@ describe('reflect routine gating contract (token efficiency)', () => {
 const DOCTOR_CHECK_IDS = [
   'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
   'permissions', 'docker-security', 'archive', 'reflect', 'scheduler', 'watchdog', 'context-age',
-  'opus-wake', 'routine-cost', 'heartbeat', 'raw-size', 'credential-expiry', 'model-pricing-known',
+  'opus-wake', 'routine-cost', 'heartbeat', 'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known',
   'context-scan', 'channel-liveness',
 ];
 
 describe('doctor report contract (PROP-018 count pin)', () => {
-  test('report emits exactly the 23 pinned check ids, in order', withTmpdir(async (dir) => {
+  test('report emits exactly the 24 pinned check ids, in order', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     const report = await runDoctorCheck(dir);
     expect((report.checks ?? []).map((c: any) => c.id)).toEqual(DOCTOR_CHECK_IDS);
@@ -1866,9 +1866,9 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
     expect(missing).toEqual([]);
   });
 
-  test('counts read twenty-three, not fifteen', () => {
+  test('counts read twenty-four, not fifteen', () => {
     expect(skill).not.toContain('fifteen');
-    expect(skill.toLowerCase()).toContain('twenty-three');
+    expect(skill.toLowerCase()).toContain('twenty-four');
   });
 });
 
@@ -2268,6 +2268,52 @@ describe('doctor routine-cost check', () => {
     expect(c.detail).not.toContain('skippy');
   }), 20000);
 
+  test('monitor-delivered skips are excluded from the run denominator (unlike CronCreate skips)', withTmpdir(async (dir) => {
+    // 'monitored' has 3 real (cost-generating) started fires totaling $30 — true cost is
+    // $10/run. It's also skipped 20x via the routine-monitor subprocess, which costs zero
+    // model tokens. If those 20 monitor-delivered skips were (wrongly) counted in the
+    // denominator like CronCreate skips are, $30/23 ≈ $1.30/run would slip under the
+    // threshold and hide a genuinely expensive routine — the opposite of the "skipped fires
+    // count toward the run denominator" case above, which is the CronCreate-delivery path.
+    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('monitored'), routine('peer')] });
+    writeCostIndex(dir, {
+      'routine:monitored': { cost: 30, tokens: 30000 }, // 3 real fires → $10/run if counted correctly
+      'routine:peer': { cost: 3, tokens: 3000 },         // $1.00/run
+    });
+    const rows = [
+      ...runs('monitored', 3, 'started'),
+      ...runs('monitored', 20, 'skipped-waiting'),
+      ...runs('peer', 3, 'started'),
+    ];
+    const lines = rows.map((r, i) => JSON.stringify({
+      ts: new Date().toISOString(), routine_id: r.routine_id, event: r.event,
+      delivery: r.event === 'skipped-waiting' && r.routine_id === 'monitored' ? 'monitor' : 'cron-create',
+    })).join('\n') + '\n';
+    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-metrics.jsonl'), lines);
+    const c = routineCostCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('monitored');
+    expect(c.detail).toContain('10.00'); // $30/3 real fires, not $30/23
+  }), 20000);
+
+  test('co-fire cost bucketed to routine:multi is excluded from the per-routine comparison', withTmpdir(async (dir) => {
+    // 'a' and 'b' only ever co-fire; classifySource attributes their shared wake turn to the
+    // synthetic routine:multi bucket (not the first id). Since the check iterates only
+    // configured ids, routine:multi is ignored — neither routine shows an inflated $/run.
+    // Without the bucket the whole $900 would land on routine:a → $300/run → a false warn.
+    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a'), routine('b'), routine('x'), routine('y')] });
+    writeCostIndex(dir, {
+      'routine:multi': { cost: 900, tokens: 900000 }, // co-fire cost — not a configured id, excluded
+      'routine:x': { cost: 3, tokens: 3000 },          // $1.00/run
+      'routine:y': { cost: 3.3, tokens: 3000 },        // $1.10/run
+    });
+    writeRoutineMetrics(dir, [...runs('a', 3), ...runs('b', 3), ...runs('x', 3), ...runs('y', 3)]);
+    const c = routineCostCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('ok');
+    expect(c.detail).not.toContain('multi');
+    expect(c.detail).not.toContain('900');
+  }), 20000);
+
   test('expensive routine in a two-routine fleet is flagged (peer median, not self-inclusive)', withTmpdir(async (dir) => {
     // With a self-inclusive median, 3×median is unreachable at n=2 and the outlier escapes;
     // comparing against the peer median (self excluded) catches it.
@@ -2441,7 +2487,7 @@ describe('doctor routine template contract', () => {
     const template = readJson(path.join(TEMPLATES, 'config.json.template'));
     const routine = template.routines.find((r: any) => r.id === 'doctor');
     expect(routine).toBeDefined();
-    expect(routine.schedule).toBe('0 10 * * 1');
+    expect(routine.schedule).toBe('10 9 * * 1');
     expect(routine.skill).toBe('claude-code-hermit:hermit-doctor');
     expect(routine.enabled).toBe(true);
 
