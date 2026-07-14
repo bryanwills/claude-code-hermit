@@ -17,10 +17,12 @@
 // Fails open throughout: missing log or unreadable state prints {"cost_usd": 0, "tokens": 0}.
 
 import fs from 'node:fs';
-import { costLogPath } from './lib/cc-compat';
+import path from 'node:path';
+import { costLogPath, hermitDir } from './lib/cc-compat';
 import { readRuntimeJson } from './lib/runtime';
 
-const COST_LOG = costLogPath('.claude-code-hermit');
+const ROOT = hermitDir();
+const COST_LOG = costLogPath(ROOT);
 
 const argv = process.argv.slice(2);
 let sessionId = '';
@@ -36,7 +38,7 @@ for (let i = 0; i < argv.length; i++) {
 // Arc-window rationale is in the file header above; this just applies the
 // --opened-at / --closed-at overrides on top of runtime.json's values.
 function readWindow(): { openedAt?: string; closedAt?: string } {
-  const rt = readRuntimeJson() || {};
+  const rt = readRuntimeJson(path.join(ROOT, 'state')) || {};
   return {
     openedAt: openedAtOverride ?? (typeof rt.opened_at === 'string' ? rt.opened_at : undefined),
     closedAt: closedAtOverride ?? (typeof rt.closed_at === 'string' ? rt.closed_at : undefined),

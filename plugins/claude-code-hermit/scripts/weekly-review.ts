@@ -7,14 +7,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, readFileWithFrontmatter, parseFrontmatter, isEmptyAutoArchive, newestByType, globDir } from './lib/frontmatter';
-import { costLogPath } from './lib/cc-compat';
+import { costLogPath, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { formatTokens } from './lib/format';
 import { lint as knowledgeLint } from './knowledge-lint';
 
 type Json = any;
 
 // --- Args ---
-const hermitDir = process.argv[2] || '.claude-code-hermit';
+// An absolute arg (as tests pass) is used verbatim; a relative/absent arg is
+// resolved via the anchored hermitDir() so state access survives cwd drift.
+const hermitArg = process.argv[2];
+const hermitDir = hermitArg && path.isAbsolute(hermitArg) ? hermitArg : resolveHermitRoot();
 
 // --- ISO week calculation ---
 
@@ -134,11 +137,11 @@ let totalTokens = 0;
 if (allHaveTokens) {
   totalTokens = weekSessions.reduce((sum, s) => sum + s.fm.tokens, 0);
 } else {
-  const costLogPath = path.resolve(process.cwd(), '.claude/cost-log.jsonl');
+  const weekCostLog = costLogPath(hermitDir);
   const weekStartStr = weekStart.toISOString().slice(0, 10);
   const weekEndStr = weekEnd.toISOString().slice(0, 10);
   try {
-    const lines = fs.readFileSync(costLogPath, 'utf-8').trim().split('\n');
+    const lines = fs.readFileSync(weekCostLog, 'utf-8').trim().split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
