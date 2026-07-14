@@ -6,6 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 
+// Explicit env per case: runScript merges process.env into the child, so an
+// ambient CLAUDE_PROJECT_DIR/AGENT_DIR would otherwise leak in and resolve
+// against this repo's real .claude-code-hermit/ instead of the fixture.
+function baseEnv(dir: string) {
+  return { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_PROJECT_DIR: dir, AGENT_DIR: '' };
+}
+
 function withTmpdir(fn: (dir: string) => Promise<void>) {
   return async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-session-cost-'));
@@ -45,7 +52,7 @@ describe('session-cost.ts', () => {
     ]);
 
     const r = await runScript('session-cost.ts', {
-      args: ['S-001'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      args: ['S-001'], cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -59,7 +66,7 @@ describe('session-cost.ts', () => {
     ]);
 
     const r = await runScript('session-cost.ts', {
-      args: ['S-999'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      args: ['S-999'], cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -70,7 +77,7 @@ describe('session-cost.ts', () => {
   test('returns zeros when cost-log is absent', withTmpdir(async (dir) => {
     // no cost-log seeded
     const r = await runScript('session-cost.ts', {
-      args: ['S-001'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      args: ['S-001'], cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -85,7 +92,7 @@ describe('session-cost.ts', () => {
     ]);
 
     const r = await runScript('session-cost.ts', {
-      args: ['S-001'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      args: ['S-001'], cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -113,7 +120,7 @@ describe('session-cost.ts: window-delta mode', () => {
     ]);
     const r = await runScript('session-cost.ts', {
       args: ['S-XXX', '--opened-at', '2026-06-01T10:00:00Z', '--closed-at', '2026-06-01T11:00:00Z'],
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -127,7 +134,7 @@ describe('session-cost.ts: window-delta mode', () => {
       { timestamp: '2026-06-01T10:30:00Z', session_id: 'uuid-1', estimated_cost_usd: 0.50, total_tokens: 500, source: 'other' },  // after opened_at
     ]);
     seedRuntime(dir, { opened_at: '2026-06-01T10:00:00Z' });
-    const r = await runScript('session-cost.ts', { args: ['S-XXX'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+    const r = await runScript('session-cost.ts', { args: ['S-XXX'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
     expect(out.cost_usd).toBeCloseTo(0.50, 4);
@@ -142,7 +149,7 @@ describe('session-cost.ts: window-delta mode', () => {
     ]);
     const r = await runScript('session-cost.ts', {
       args: ['S-YYY', '--opened-at', '2026-06-01T13:00:00Z', '--closed-at', '2026-06-01T15:00:00Z'],
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -156,7 +163,7 @@ describe('session-cost.ts: window-delta mode', () => {
       { timestamp: '2026-06-01T11:00:00Z', session_id: 'S-002', estimated_cost_usd: 0.9999, total_tokens: 99999, source: 'other' },
     ]);
     seedRuntime(dir, { session_state: 'in_progress' }); // no opened_at key
-    const r = await runScript('session-cost.ts', { args: ['S-001'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+    const r = await runScript('session-cost.ts', { args: ['S-001'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
     expect(out.cost_usd).toBeCloseTo(0.1234, 4);
@@ -168,7 +175,7 @@ describe('session-cost.ts: window-delta mode', () => {
       { timestamp: '2026-06-01T10:00:00Z', session_id: 'S-001', estimated_cost_usd: 0.5, total_tokens: 500, source: 'other' },
     ]);
     seedRuntime(dir, { opened_at: 'not-a-date' });
-    const r = await runScript('session-cost.ts', { args: ['S-001'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+    const r = await runScript('session-cost.ts', { args: ['S-001'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
     expect(out.cost_usd).toBeCloseTo(0.5, 4);
@@ -183,7 +190,7 @@ describe('session-cost.ts: window-delta mode', () => {
     // 2026-06-01T12:00:00+02:00 == 2026-06-01T10:00:00Z
     const r = await runScript('session-cost.ts', {
       args: ['S-XXX', '--opened-at', '2026-06-01T12:00:00+0200'],
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -195,7 +202,7 @@ describe('session-cost.ts: window-delta mode', () => {
     // no cost-log seeded
     const r = await runScript('session-cost.ts', {
       args: ['S-XXX', '--opened-at', '2026-06-01T10:00:00Z'],
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
@@ -209,7 +216,7 @@ describe('session-cost.ts: window-delta mode', () => {
       { timestamp: '2026-06-01T14:00:00Z', session_id: 'uuid-1', estimated_cost_usd: 0.99, total_tokens: 999, source: 'routine:reflect' }, // autonomous, after closed_at → excluded
     ]);
     seedRuntime(dir, { opened_at: '2026-06-01T10:00:00Z', closed_at: '2026-06-01T11:00:00Z' });
-    const r = await runScript('session-cost.ts', { args: ['S-XXX'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+    const r = await runScript('session-cost.ts', { args: ['S-XXX'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
     expect(out.cost_usd).toBeCloseTo(0.20, 4);
@@ -223,11 +230,27 @@ describe('session-cost.ts: window-delta mode', () => {
     // Unparseable --closed-at previously → closedMs NaN → `ts <= NaN` false for every row → false 0.
     const r = await runScript('session-cost.ts', {
       args: ['S-XXX', '--opened-at', '2026-06-01T10:00:00Z', '--closed-at', 'not-a-date'],
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      cwd: dir, env: baseEnv(dir),
     });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout.trim());
     expect(out.cost_usd).toBeCloseTo(0.20, 4);
     expect(out.tokens).toBe(200);
+  }));
+
+  test('drift regression: window resolves when cwd has drifted into a subdir', withTmpdir(async (dir) => {
+    seedCostLog(dir, [
+      { timestamp: '2026-06-01T09:00:00Z', session_id: 'uuid-1', estimated_cost_usd: 1.00, total_tokens: 1000, source: 'other' }, // before opened_at
+      { timestamp: '2026-06-01T10:30:00Z', session_id: 'uuid-1', estimated_cost_usd: 0.50, total_tokens: 500, source: 'other' },  // inside window
+    ]);
+    seedRuntime(dir, { opened_at: '2026-06-01T10:00:00Z' });
+    const hermitRoot = path.join(dir, '.claude-code-hermit');
+    fs.writeFileSync(path.join(hermitRoot, 'config.json'), '{}');
+    const drifted = path.join(hermitRoot, 'state');
+    const r = await runScript('session-cost.ts', { args: ['S-XXX'], cwd: drifted, env: baseEnv(dir) });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(r.stdout.trim());
+    expect(out.cost_usd).toBeCloseTo(0.50, 4);
+    expect(out.tokens).toBe(500);
   }));
 });
