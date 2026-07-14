@@ -1,19 +1,28 @@
-// Fails open: missing log or parse errors print $0.00 and exit 0.
+// Prints today's spend: "$X.XX (<tokens>) across N session(s)".
+// Log resolved against the anchored hermit root (survives cwd drift), not cwd.
+// Unreadable log -> "cost data unavailable" (not a misleading $0.00); a readable
+// log with no rows today -> honest $0.00.
 
 import fs from 'node:fs';
-import path from 'node:path';
 import { formatTokens } from './lib/format';
+import { costLogPath, hermitDir } from './lib/cc-compat';
 
-const COST_LOG = path.resolve('.claude/cost-log.jsonl');
+const COST_LOG = costLogPath(hermitDir());
+const UNAVAILABLE = 'cost data unavailable';
 
-try {
-  const today = new Date().toISOString().slice(0, 10);
-  let cost = 0;
-  let tokens = 0;
-  const sessions = new Set<string>();
-
+function render(): string {
+  let raw: string;
   try {
-    for (const line of fs.readFileSync(COST_LOG, 'utf8').split('\n')) {
+    raw = fs.readFileSync(COST_LOG, 'utf8');
+  } catch {
+    return UNAVAILABLE;
+  }
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    let cost = 0;
+    let tokens = 0;
+    const sessions = new Set<string>();
+    for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try {
         const e = JSON.parse(line);
@@ -24,13 +33,10 @@ try {
         }
       } catch {}
     }
-  } catch (err: any) {
-    if (err.code !== 'ENOENT') throw err;
+    return `$${cost.toFixed(2)} (${formatTokens(tokens)}) across ${sessions.size} session(s)`;
+  } catch {
+    return UNAVAILABLE;
   }
-
-  process.stdout.write(
-    `$${cost.toFixed(2)} (${formatTokens(tokens)}) across ${sessions.size} session(s)\n`
-  );
-} catch {
-  process.stdout.write('$0.00 (0 tokens) across 0 session(s)\n');
 }
+
+process.stdout.write(render() + '\n');

@@ -23,10 +23,12 @@ function writeRuntimeJson(data: Json): void {
   fs.renameSync(RUNTIME_TMP, RUNTIME_JSON);
 }
 
-/** Read state/runtime.json; null when missing or invalid. */
-function readRuntimeJson(): Json | null {
+/** Read state/runtime.json; null when missing or invalid. Pass an absolute
+ *  stateDir to read from an anchored location instead of the cwd-relative default. */
+function readRuntimeJson(stateDir?: string): Json | null {
+  const p = stateDir ? path.join(stateDir, 'runtime.json') : RUNTIME_JSON;
   try {
-    return JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8'));
+    return JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch {
     return null;
   }
