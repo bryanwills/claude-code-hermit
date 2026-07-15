@@ -2,8 +2,15 @@
 
 ## [Unreleased]
 
+### Removed
+- **hatch: stop probing/auto-configuring the bash sandbox** — hermit no longer writes `sandbox.*`; Claude Code's native sandbox (`/sandbox`) owns setup. Fixes a false-positive probe that bricked Bash mid-hatch on nested-userns hosts (#601).
+
 ### Fixed
 - **docker-security docs: clarify that DNS log-only mode ignores the allowlist entirely** — static `address=` records only apply in enforce mode; documented `extra_hosts` on the `hermit` service as the mode-independent way to pin an internal hostname to an IP.
+
+### Upgrade Instructions
+
+No settings mutation. Existing installs keep whatever `sandbox.*` they already have — a previously hatch-enabled sandbox that works stays enabled and working; hermit simply stops managing the key. If your Bash is failing with a nested-userns/seccomp error, set `sandbox.enabled: false` yourself. The doctor `sandbox` report line is gone.
 
 ## [1.2.26] - 2026-07-15
 
@@ -466,12 +473,7 @@ No `config.json` changes required. (`storage_drift.ignore` is additive and fail-
 
 ### Upgrade Instructions
 
-Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
-
-**Step 1 — Docker sandbox posture (Docker hermits only).** Check for `docker-entrypoint.hermit.sh` at the project root — skip this step entirely if absent (non-Docker deployment). Otherwise determine the effective `sandbox.enabled`: read `.claude/settings.json` then `.claude/settings.local.json`, the last file to declare it wins (Claude Code's merge order). If it is not `true`, skip (already off). If it is `true`, this overrides an operator-set key with no safe default, so **defer to the step-10 operator prompt**:
-
-- **question:** "This hermit runs in Docker with the bash sandbox on. Inside a container the container itself is the isolation boundary (Anthropic's recommended posture for unattended runs), and on Ubuntu 24.04+ hosts the nested sandbox can't start and silently kills the heartbeat and `/watch` monitors. Set `sandbox.enabled:false`?"
-- **options:** `Set sandbox off (recommended)` → resolve the target settings file (`.claude-code-hermit/state/hatch-options.json` key `"target"`: `"local"` → `.claude/settings.local.json`, else `.claude/settings.json`) and run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <target-file> sandbox off`, then note "Rebuild to apply: `.claude-code-hermit/bin/hermit-docker update`." · `Keep sandbox on` → no change.
+~~Step 1 — Docker sandbox posture (Docker hermits only).~~ — **superseded, no-op.** Hermit no longer probes for or configures the Claude Code bash sandbox; that's the operator's call via Claude Code's own `/sandbox` command. Do not write any `sandbox.*` key. Existing installs keep whatever `sandbox.*` they already have.
 
 ## [1.2.10] - 2026-06-23
 
@@ -1465,18 +1467,7 @@ No config.json changes required.
 
 ### Upgrade Instructions
 
-1. **Apply the standard sandbox profile when supported** (or confirm existing config).
-
-   Read the target settings file — resolve via `hatch_target` (`local` → `.claude/settings.local.json`; `committed` → `.claude/settings.json`; fallback chain: `.claude-code-hermit/state/hatch-options.json` → marker scan → scope detection).
-
-   - If the file already contains any *operator-intent* sandbox key (`enabled`, `filesystem`, `network`, `failIfUnavailable`, `autoAllowBashIfSandboxed`, or `allowUnsandboxedCommands`): tell the operator "Your existing sandbox config was preserved." **Skip the rest of this step.** Note: `enableWeakerNestedSandbox` is hermit-managed (auto-written by `hermit-start` in Docker) and does NOT count as operator config — ignore it when deciding whether to skip.
-   - **If running inside a container** (`/.dockerenv` or `/run/.containerenv` exists): skip the probe (it would fail unconditionally on `unshare --user --pid true` in unprivileged containers). Apply the standard profile directly (see below). Tell the operator: "Sandbox enabled (standard profile, container — enableWeakerNestedSandbox auto-managed by hermit-start)."
-   - Otherwise (not a container, no operator config): run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/sandbox-probe.py`.
-     - If status is `"pass"`: apply the standard profile (see below). Tell the operator: "Sandbox enabled (standard profile, written to {file})."
-     - If status is `"warn"`: surface the probe `message` to the operator first, then apply the standard profile. Tell the operator: "Sandbox configured (may degrade silently per warning above; written to {file})."
-     - If status is `"fail"`: do NOT write any sandbox block. Print one line: "Sandbox unavailable: {message} — run `{install_hint}` to enable later, then re-run this migration."
-
-   **Apply the standard profile** means: read `${CLAUDE_PLUGIN_ROOT}/state-templates/sandbox-profiles.json` (select the `standard` entry — includes `enabled`, `failIfUnavailable`, `autoAllowBashIfSandboxed`, `allowUnsandboxedCommands`); read `${CLAUDE_PLUGIN_ROOT}/state-templates/deny-patterns.json` and extract `sandbox.filesystem.denyRead`; merge `profile.filesystem = { "denyRead": <that array> }`; merge into the target settings file under the `sandbox` key.
+1. ~~Apply the standard sandbox profile when supported~~ — **superseded, no-op.** Hermit no longer probes for or configures the Claude Code bash sandbox; that's the operator's call via Claude Code's own `/sandbox` command. Do not write any `sandbox.*` key. Existing installs keep whatever `sandbox.*` they already have.
 
 2. **Rebuild the Docker image** (Docker operators only).
 
