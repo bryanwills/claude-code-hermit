@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.27] - 2026-07-15
 
 ### Removed
 - **hatch: stop probing/auto-configuring the bash sandbox** — hermit no longer writes `sandbox.*`; Claude Code's native sandbox (`/sandbox`) owns setup. Fixes a false-positive probe that bricked Bash mid-hatch on nested-userns hosts (#601).
@@ -15,9 +15,7 @@ For hermits with the Docker security overlay installed (`.claude-code-hermit/doc
 2. Run `.claude-code-hermit/bin/hermit-docker update` to rebuild the `hermit-netguard` image with the new entrypoint and bounce the stack.
 3. Do **not** re-run the full `/docker-security` wizard for this upgrade — it regenerates `dnsmasq.allowlist` from your fleet/domain selections and would erase any hand-added `address=` records. No `dnsmasq.allowlist` change is needed; the fix only changes how the entrypoint parses the file that's already there.
 
-### Upgrade Instructions
-
-No settings mutation. Existing installs keep whatever `sandbox.*` they already have — a previously hatch-enabled sandbox that works stays enabled and working; hermit simply stops managing the key. If your Bash is failing with a nested-userns/seccomp error, set `sandbox.enabled: false` yourself. The doctor `sandbox` report line is gone.
+No settings mutation for the sandbox-probing removal. Existing installs keep whatever `sandbox.*` they already have — a previously hatch-enabled sandbox that works stays enabled and working; hermit simply stops managing the key. If your Bash is failing with a nested-userns/seccomp error, set `sandbox.enabled: false` yourself. The doctor `sandbox` report line is gone.
 
 ## [1.2.26] - 2026-07-15
 
