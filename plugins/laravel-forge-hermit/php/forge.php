@@ -396,8 +396,6 @@ if ($cmd === 'server-log') {
 // ---------------------------------------------------------------------------
 if ($cmd === 'site-log') {
     check(isset($positional[2]), "Usage: forge.php site-log <server> <site> <application|nginx-access|nginx-error>");
-    $server = resolveServer($forge, $org, $positional[0]);
-    $site   = resolveSite($forge, $org, $server, $positional[1]);
 
     $methods = [
         'application'  => 'siteApplicationLog',
@@ -409,6 +407,9 @@ if ($cmd === 'site-log') {
         fwrite(STDERR, "Unknown log type '$type'. Valid types: " . implode(', ', array_keys($methods)) . "\n");
         exit(1);
     }
+
+    $server = resolveServer($forge, $org, $positional[0]);
+    $site   = resolveSite($forge, $org, $server, $positional[1]);
 
     try {
         $log = $forge->{$methods[$type]}($org, $server->id, $site->id);
