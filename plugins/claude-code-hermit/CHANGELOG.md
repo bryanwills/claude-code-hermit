@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **heartbeat/routines: monitor wake notifications no longer count as operator activity** — `HEARTBEAT_EVALUATE`/`HEARTBEAT_ERROR`/`ROUTINE_DUE`/`ROUTINE_MONITOR_ERROR` prompts were stamping `last-operator-action.json`, spuriously resetting the AUTO_CLOSE lull and suppressing daily-close drains. The UserPromptSubmit filter now drops the monitor emission grammar.
+
 ## [1.2.25] - 2026-07-14
 
 ### Fixed
