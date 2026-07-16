@@ -571,8 +571,7 @@ Merge these into the target file:
       "Bash(bun */scripts/routine-precheck.ts*)",
       "Bash(bun */scripts/cron-registry.ts*)",
       "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
-      "Edit(.claude-code-hermit/**)",
-      "Write(.claude-code-hermit/**)"
+      "Edit(.claude-code-hermit/**)"
     ]
   }
 }
@@ -583,7 +582,7 @@ Merge these into the target file:
 - `git diff`, `git status`, `git log` — session-diff.ts hook auto-populates `## Changed` in SHELL.md
 - `bun */scripts/<name>.ts` — Stop hooks (cost-tracker, session-diff, evaluate-session) and precheck scripts (heartbeat-precheck, reflect-precheck), scoped to plugin scripts only. Includes `manifest-seed.ts`, which the seeding sub-step below runs to write the template-manifest baseline (deferred from Step 2 so the permission is in place first). Includes `channel-log.ts`, which weekly-review's consolidation step runs unattended to list/mark/prune the episodic channel log (PROP-010). Includes `session-archive.ts`, the deterministic session-lifecycle writer (idle/close/auto-close/open/recover) that replaced the session-mgr subagent — without this permission a hatched hermit would be asked (functionally denied headlessly) on its first idle transition. Includes `resolve-prop.ts`, `next-prop-id.ts`, `record-gate.ts`, `queue-micro-proposal.ts` — the proposal-act/proposal-create/reflect mechanics wrappers; without these, ID resolution, ID generation, gate-verdict routing, and micro-approval queuing would all be functionally denied headlessly
 - `bash -c 'AGENT_DIR=...` — SessionStart hook that loads session context on every startup
-- `Edit`, `Write` on `.claude-code-hermit/**` — heartbeat appends to SHELL.md, increments config.json tick counter, and skills update session state without prompting
+- `Edit` on `.claude-code-hermit/**` — heartbeat appends to SHELL.md, increments config.json tick counter, and skills update session state without prompting (Edit rules cover all file-editing tools, including Write)
 
 **Steps:**
 

@@ -59,7 +59,6 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/cron-registry.ts*)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
-  'Write(.claude-code-hermit/**)',
 ];
 
 // Sealed autoMode entries — operator-owned policy seeded at attended hatch and
@@ -164,6 +163,22 @@ function mergeDeny(settings: Json, entries: string[]): void {
   }
 }
 
+// Claude Code's permission engine treats an Edit(glob) rule as covering the
+// Write tool too, and (v2.1.211+) warns at boot on Write(glob) rules. So a
+// Write(<glob>) whose Edit(<glob>) twin is present is a dead no-op that only
+// produces that warning — drop it before seeding settings.json. deny-patterns.json
+// keeps both spellings on purpose: the runtime enforce-deny-patterns hook matches
+// tool-name-specifically and still needs the Write variant.
+function dropRedundantWriteRules(entries: string[]): string[] {
+  const editGlobs = new Set(
+    entries.map((e) => e.match(/^Edit\((.+)\)$/)?.[1]).filter(Boolean) as string[],
+  );
+  return entries.filter((e) => {
+    const writeGlob = e.match(/^Write\((.+)\)$/)?.[1];
+    return writeGlob === undefined || !editGlobs.has(writeGlob);
+  });
+}
+
 const [, , targetFile, op, ...rest] = process.argv;
 
 if (!targetFile || !op) {
@@ -216,7 +231,7 @@ switch (op) {
       ...(patterns.default ?? []),
       ...(profile === 'hardened' ? HARDENED_DENY_EXTRAS : []),
     ];
-    mergeDeny(settings, deny);
+    mergeDeny(settings, dropRedundantWriteRules(deny));
     break;
   }
 
