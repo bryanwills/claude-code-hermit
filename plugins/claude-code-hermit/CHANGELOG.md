@@ -8,6 +8,7 @@
 ### Upgrade Instructions
 
 Run `/claude-code-hermit:hermit-evolve`. In your hatch-target settings file (`.claude/settings.local.json` or `.claude/settings.json`, whichever `hatch` wrote to) it removes any `Write(<glob>)` line from both `permissions.allow` and `permissions.deny` whose `Edit(<glob>)` twin is already present — at minimum the stale `"Write(.claude-code-hermit/**)"` allow line and the `"Write(*/.claude/plugins/marketplaces/*)"` deny line. No config.json changes.
+- **hermit-routines: model-override dispatch anchors the subagent to the absolute project dir** — stops relative-path misresolution (doubled `.claude-code-hermit` path) that caused false doctor alerts under cheap-model routines.
 
 ## [1.2.27] - 2026-07-15
 
