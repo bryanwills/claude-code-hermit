@@ -26,8 +26,7 @@
       "mcp__strava__explore-segments",
       "mcp__strava__export-route-gpx",
       "mcp__strava__export-route-tcx",
-      "Edit(.claude-code-hermit/**)",
-      "Write(.claude-code-hermit/**)"
+      "Edit(.claude-code-hermit/**)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -37,9 +36,7 @@
       "Bash(curl * | bash*)",
       "Bash(wget * | bash*)",
       "Edit(**/.claude-code-hermit/OPERATOR.md)",
-      "Write(**/.claude-code-hermit/OPERATOR.md)",
       "Edit(.env)",
-      "Write(.env)",
       "mcp__strava__star-segment",
       "mcp__strava__connect-strava",
       "mcp__strava__disconnect-strava"
