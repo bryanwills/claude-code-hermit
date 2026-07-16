@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Fixed
+- **watchdog: liveness-keyed re-arm of dead heartbeat/routine monitors** — a Monitor subprocess that dies mid-session (e.g. at a restart) is now detected from its stale liveness file and re-armed within one watchdog cycle, damped to one attempt per monitor per 6h. Previously recovery waited on the `heartbeat-restart` anchor (up to 3 days on slow cadences) or the 26h fired-age fallback, which stays inert when the model-issued `fired` metric is missing.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. Additive and backward-compatible — the new per-monitor damper is stored under `last_monitor_rearm` in `watchdog-state.json` (created on demand), and the step is gated on the existing `watchdog.enabled`; no config or state migration needed.
 - **hatch/apply-settings: stop seeding no-op `Write(path)` permission rules** — Claude Code only matches file-permission checks against `Edit(path)` rules (Edit covers all file-editing tools, including Write), and (v2.1.211+) warns at boot on `Write(path)` rules. The seeded allow rule `Write(.claude-code-hermit/**)` is dropped, and `apply-settings deny` now strips redundant `Write(<glob>)` rules whose `Edit(<glob>)` twin is present (e.g. `Write(*/.claude/plugins/marketplaces/*)`) before writing settings, so a freshly-hatched hermit no longer trips the boot warning. `deny-patterns.json` keeps both spellings — the tool-specific `enforce-deny-patterns` runtime hook still needs the `Write` variant.
 
 ### Upgrade Instructions
