@@ -59,7 +59,6 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/cron-registry.ts*)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
-  'Write(.claude-code-hermit/**)',
 ];
 
 // Sealed autoMode entries — operator-owned policy seeded at attended hatch and

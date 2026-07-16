@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **hatch/apply-settings: dropped the no-op `Write(.claude-code-hermit/**)` allow rule** — Claude Code only matches file-permission checks against `Edit(path)` rules (Edit covers all file-editing tools, including Write), so the seeded `Write(...)` entry was dead and triggered a boot warning on every hermit. `Edit(.claude-code-hermit/**)` alone still grants the same access.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`. It strips the stale `"Write(.claude-code-hermit/**)",` line from your hatch-target settings file (`.claude/settings.local.json` or `.claude/settings.json`, whichever `hatch` wrote to) wherever its `Edit(.claude-code-hermit/**)` twin is already present. No config.json changes.
+
 ## [1.2.27] - 2026-07-15
 
 ### Removed
