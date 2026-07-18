@@ -9,14 +9,14 @@
 
 # claude-code-hermit
 
-Claude Code plugin that turns a Claude Code instance into a 24/7 agent. **Orchestrates**, **Self-improves**, **Pro-Active**, **Cost-aware**, **Observable**, **One Claude subscription, multiple hermits**.
+Claude Code plugin that turns a Claude Code instance into a 24/7 agent. **Always-on. Stateful. Proactive. Self-improving through an operator-gated proposal system. Cost-aware. Observable. Works with your Claude Subscription**.
 
 <p align="center">
   <img src="plugins/claude-code-hermit/assets/cover.png" alt="Always-on Claude Code Agent" />
 </p>
 
 
-**A hermit is a Claude Code session that doesn't end**: It wires the native primitives (`/loop`, `CronCreate`, `Channels`, `Monitor`, `Auto-memory`, `native Tasks`, `Sub Agents`, etc) into an **always-on agent** that orchestrates, keeps its own state, routines, knowledge and reaches you on Discord, Telegram, or the Claude app when something needs a decision. It can run on your existing subscription, and one subscription runs several hermits.
+Setup your agent in any folder, empty or existing project with `/hatch` and shape its identity, priorities, routines, knowledge, autonomy, guardrails and make it yours.
 
 ```
 # Install
@@ -32,13 +32,13 @@ claude plugin install claude-code-hermit@claude-code-hermit --scope local
 
 ---
 
-## What you get
+## What it adds
 
-Just Claude Code and everything is yours to shape: channels (Discord/Telegram), MCP servers, routines, watches, the heartbeat checklist. Hermit adds persistence, a learning loop, and a quick setup to wire everything.
+Hermit adds a persistent operating layer around Claude Code, a learning loop, and a quick setup to wire everything.
 
-- **Orchestrator** instructed to delegate tasks & exploration to other agents, main context stays clean for token efficiency.
+- **Stateful** live working state, archived session handoffs, runtime observations, lessons, findings, blockers, completed tasks, files created/modified/deleted.
+- **Agent Routines** Add your own routines that run from one persistent `Monitor` subprocess that decides eligibility outside the session, so a skipped fire costs zero tokens and co-due routines batch into one wake; a daily `CronCreate` anchor re-arms it. Falls back to per-routine `CronCreate` where `Monitor` is unavailable. Managed by `/hermit-routines`.
 - **Heartbeat** gates `/loop` behind a filesystem-only precheck so it stops paying the model every tick, sweeping your checklist for **zero tokens**.
-- **Routines** run from one persistent `Monitor` subprocess that decides eligibility outside the session, so a skipped fire costs zero tokens and co-due routines batch into one wake; a daily `CronCreate` anchor re-arms it. Falls back to per-routine `CronCreate` where `Monitor` is unavailable. Managed by `/hermit-routines`.
 - **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
 - **Channels** let you DM a session; the hermit agent acts on it (*"accept PROP-014"*, *"status"*) and **pings you first** when something needs a yes/no.
 - **Pause it from your phone — and it actually stops.** Ask for status, pause, resume, or snooze over Discord or Telegram. The pause is enforced at the tool boundary, not merely treated as a conversational request.
@@ -46,6 +46,7 @@ Just Claude Code and everything is yours to shape: channels (Discord/Telegram), 
 - **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget on fresh and resumed starts. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
 - **Task snapshots** persist native `Tasks` past session end, so the plan survives archives.
 - **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context.
+- **Orchestrator** instructed to delegate tasks & exploration to other agents, main context stays clean for token efficiency.
 
 **Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, clears stale context after a midnight close, and compacts long-running context so cold wakes don't re-pay the full accumulated history — recovery never depends on the session being conscious.
 
