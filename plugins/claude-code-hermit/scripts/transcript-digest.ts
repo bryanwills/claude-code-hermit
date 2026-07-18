@@ -39,9 +39,9 @@ import {
   isTurnTrigger,
   isCompactBoundary,
   toolUseNames,
-  errorToolResultIds,
-  toolRejectionKind,
+  classifyToolResults,
   transcriptDirFor,
+  hermitDir as resolveHermitRoot,
 } from './lib/cc-compat';
 import { classifySource } from './lib/trigger-source';
 import { resolveHermitNowMs } from './lib/time';
@@ -196,14 +196,12 @@ function digestLines(lines: string[], cutoffMs: number): FileDigest {
       continue;
     }
 
-    // Remaining case: a user tool_result carrier. Rejections carry is_error:true,
-    // so classify the rejection FIRST and never double-count it as a failure.
-    const rejKind = toolRejectionKind(entry);
-    if (rejKind) {
-      d.rejections[rejKind] = (d.rejections[rejKind] ?? 0) + 1;
-      continue;
-    }
-    for (const id of errorToolResultIds(entry)) {
+    // Remaining case: a user tool_result carrier. Denials and genuine failures
+    // both carry is_error:true and can co-occur in one parallel batch, so
+    // classify per block — a denial never masks a sibling's real failure.
+    const { rejections, failureIds } = classifyToolResults(entry);
+    for (const kind of rejections) d.rejections[kind] = (d.rejections[kind] ?? 0) + 1;
+    for (const id of failureIds) {
       const key = idToName.get(id) ?? 'unknown';
       d.failures[key] = (d.failures[key] ?? 0) + 1;
     }
@@ -282,7 +280,19 @@ function main(argv: string[]): number {
   }
   const now = resolveHermitNowMs();
   const cutoffMs = now - args.days * DAY_MS;
-  const dir = args.dir ?? transcriptDirFor(path.dirname(path.resolve(args.stateDir)));
+  // Derive the transcript dir from the hermit root, not raw path.resolve(stateDir):
+  // reflect invokes us with a relative `.claude-code-hermit`, and a drifted cwd
+  // would otherwise key a nonexistent dir and silently return all-zero counters.
+  // resolveHermitRoot() anchors on AGENT_DIR/CLAUDE_PROJECT_DIR then walks up to
+  // the .claude-code-hermit/config.json (same guard as reflect-precheck.ts). Only
+  // the arg's absolute-ness matters — a relative stateDir's value is intentionally
+  // ignored in favor of the resolved root. Resolve lazily: an explicit --dir
+  // supersedes this, so don't pay the walk-up when the caller already named the dir.
+  let dir = args.dir;
+  if (!dir) {
+    const hermitRoot = path.isAbsolute(args.stateDir) ? args.stateDir : resolveHermitRoot();
+    dir = transcriptDirFor(path.dirname(hermitRoot));
+  }
 
   const perFile: FileDigest[] = [];
   let truncated = 0;

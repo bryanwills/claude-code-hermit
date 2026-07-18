@@ -245,51 +245,42 @@ function toolUseNames(entry: Json): Array<{ id: string; name: string }> {
 }
 
 /**
- * The tool_use_id of every `is_error:true` tool_result block in a carrier user
- * entry. A single entry may hold several (parallel tool calls), so this returns
- * an array rather than a boolean. Rejections also carry `is_error:true`, so a
- * caller must check toolRejectionKind FIRST and skip this when it's a rejection.
+ * Classify the tool_result blocks of a carrier user entry into denials (with
+ * kind) and genuine-failure tool_use_ids, per block. Both denials and failures
+ * carry `is_error:true`, so we walk each is_error block and separate them:
+ *
+ *   - Current CC stamps a top-level `toolDenialKind` field
+ *     (`user-rejected` | `automode-blocked` | `permission-rule`); when present
+ *     it is authoritative and entry-scoped — CC writes one denial per carrier,
+ *     so every is_error block in that entry is attributed to it.
+ *   - Older CC lacked the field, so fall back to sniffing each block's text
+ *     (CC-authored, drift-prone phrases, hence they live here in cc-compat).
+ *     Only `is_error` blocks are sniffed, so benign output that merely quotes a
+ *     denial phrase is never mistaken for a rejection.
+ *
+ * Any is_error block that is neither field- nor phrase-flagged is a real
+ * failure. Returning per block (not one verdict per entry) means a parallel
+ * batch that mixes a rejection with a genuine error counts both, and N denials
+ * count as N.
  * @param {object} entry
- * @returns {string[]}
+ * @returns {{ rejections: string[]; failureIds: string[] }}
  */
-function errorToolResultIds(entry: Json): string[] {
-  if (entry.type !== 'user') return [];
+function classifyToolResults(entry: Json): { rejections: string[]; failureIds: string[] } {
+  const rejections: string[] = [];
+  const failureIds: string[] = [];
+  if (entry.type !== 'user') return { rejections, failureIds };
   const c = entry.message?.content;
-  if (!Array.isArray(c)) return [];
-  const out: string[] = [];
+  if (!Array.isArray(c)) return { rejections, failureIds };
+  const fieldKind = (typeof entry.toolDenialKind === 'string' && entry.toolDenialKind) ? entry.toolDenialKind : null;
   for (const b of c) {
-    if (b && b.type === 'tool_result' && b.is_error === true && typeof b.tool_use_id === 'string') {
-      out.push(b.tool_use_id);
-    }
-  }
-  return out;
-}
-
-/**
- * The denial kind for a rejected tool call, or null if the entry is not a
- * rejection carrier. Current CC stamps a top-level `toolDenialKind` field
- * (`user-rejected` | `automode-blocked` | `permission-rule`); when present it
- * is authoritative. Older CC lacked the field, so fall back to sniffing the
- * tool_result text — the phrase families are CC-authored and drift-prone, hence
- * they live here in cc-compat. Rejections carry `is_error:true`, so this is what
- * separates them from genuine tool failures.
- * @param {object} entry
- * @returns {string|null}
- */
-function toolRejectionKind(entry: Json): string | null {
-  if (entry.type !== 'user') return null;
-  if (typeof entry.toolDenialKind === 'string' && entry.toolDenialKind) {
-    return entry.toolDenialKind;
-  }
-  const c = entry.message?.content;
-  if (!Array.isArray(c)) return null;
-  for (const b of c) {
-    if (!b || b.type !== 'tool_result') continue;
+    if (!b || b.type !== 'tool_result' || b.is_error !== true) continue;
+    if (fieldKind) { rejections.push(fieldKind); continue; }
     const t = typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? '');
-    if (t.includes("doesn't want to proceed with this tool use")) return 'user-rejected';
-    if (t.includes('Permission for this action was denied') || t.includes('Permission to use')) return 'automode-blocked';
+    if (t.includes("doesn't want to proceed with this tool use")) { rejections.push('user-rejected'); continue; }
+    if (t.includes('Permission for this action was denied') || t.includes('Permission to use')) { rejections.push('automode-blocked'); continue; }
+    if (typeof b.tool_use_id === 'string') failureIds.push(b.tool_use_id);
   }
-  return null;
+  return { rejections, failureIds };
 }
 
 /**
@@ -383,8 +374,7 @@ export {
   isTurnTrigger,
   isCompactBoundary,
   toolUseNames,
-  errorToolResultIds,
-  toolRejectionKind,
+  classifyToolResults,
   transcriptDirFor,
   // Cost-log
   costLogPath,

@@ -228,6 +228,31 @@ describe('transcript-digest (subprocess)', () => {
       expect(res.exitCode).not.toBe(0);
     }
   });
+
+  // Exercises the production path: no --dir, so the script must derive the
+  // transcript dir from the hermit root (resolveHermitRoot) rather than a
+  // cwd-relative path.resolve. AGENT_DIR anchors the hermit root and HOME
+  // anchors os.homedir(), so transcriptDirFor lands on the seeded dir.
+  test('derives the transcript dir from the hermit root when --dir is omitted', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-home-'));
+    tmpRoots.push(home);
+    const projRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-proj-'));
+    tmpRoots.push(projRoot);
+    const hermitRoot = path.join(projRoot, '.claude-code-hermit');
+    const derivedDir = transcriptDirFor(projRoot, home);
+    fs.mkdirSync(derivedDir, { recursive: true });
+    fs.writeFileSync(path.join(derivedDir, 's.jsonl'),
+      [triggerEntry('HEARTBEAT_EVALUATE'), assistantToolUse('u1', 'Agent')].join('\n') + '\n');
+
+    const res = await runScript('transcript-digest.ts', {
+      args: ['.claude-code-hermit'],
+      env: { HOME: home, AGENT_DIR: hermitRoot },
+    });
+    const json = JSON.parse(res.stdout.trim());
+    expect(res.exitCode).toBe(0);
+    expect(json.window.files).toBe(1);
+    expect(json.counters.subagent_dispatches).toBe(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -316,6 +341,34 @@ describe('digestLines — rejection vs failure', () => {
   test('error with unmapped tool_use_id keyed as unknown', () => {
     const d = digestLines([toolResultEntry('never-seen', { isError: true, text: 'orphan error' })], OPEN);
     expect(d.failures).toEqual({ unknown: 1 });
+  });
+  test('a rejection and a genuine failure in one parallel batch both count', () => {
+    // One carrier entry holds two is_error tool_results: one legacy-phrase
+    // rejection, one real Bash error. The rejection must not swallow the failure.
+    const d = digestLines([
+      assistantToolUse('m1', 'Read'),
+      assistantToolUse('m2', 'Bash'),
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: [
+          { type: 'tool_result', tool_use_id: 'm1', is_error: true, content: "The user doesn't want to proceed with this tool use." },
+          { type: 'tool_result', tool_use_id: 'm2', is_error: true, content: 'bash: foo: command not found' },
+        ] },
+        timestamp: RECENT(),
+      }),
+    ], OPEN);
+    expect(d.rejections).toEqual({ 'user-rejected': 1 });
+    expect(d.failures).toEqual({ Bash: 1 });
+  });
+  test('a successful tool_result that merely quotes a denial phrase is not a rejection', () => {
+    // is_error is absent, so the drift-prone phrase-sniff must not fire — the
+    // hermit greps its own transcripts/source, where these phrases appear.
+    const d = digestLines([
+      assistantToolUse('q1', 'Bash'),
+      toolResultEntry('q1', { text: 'grep hit: Permission for this action was denied' }),
+    ], OPEN);
+    expect(d.rejections).toEqual({});
+    expect(d.failures).toEqual({});
   });
 });
 
