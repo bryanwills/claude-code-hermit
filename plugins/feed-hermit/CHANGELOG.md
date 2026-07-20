@@ -11,9 +11,5 @@ All notable changes to this project will be documented in this file.
 - **`fetch-guard` PreToolUse hook** — WebFetch domain allowlist derived from `feed-sources.md` plus an infra list; blocks off-allowlist fetches (fail-open on unreadable registry) as prompt-injection containment.
 - **`hatch`** — seeds empty `feed-sources.md`/`feed-categories.md`/`FEEDS.md` (opt-in starter pack), registers morning/evening/weekly routines and a monthly `source-scout` scheduled check, and appends the Feed Workflow block to the consumer's `CLAUDE.md`.
 
-### Fixed
-- **feed-brief/weekly-digest/deep-dive: route channel delivery through core's Operator Notification protocol** — the skills invoked core's channel-resolver script via the feed-hermit plugin root, where it doesn't exist, so scheduled/proactive delivery silently degraded to `pending-delivery.md` every time.
-- **compiled-state paths: normalize to `.claude-code-hermit/compiled/`** — bare `compiled/` paths resolved outside the hermit dir, invisible to core's retention/injection logic.
-
 ### Upgrade Instructions
 No manual steps. New plugin — run `/feed-hermit:hatch` in a project that already has the core hermit hatched.

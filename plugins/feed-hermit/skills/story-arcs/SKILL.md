@@ -2,7 +2,7 @@
 name: story-arcs
 description: >-
   Manage developing story arcs tracked across briefs — add, resolve, and list active
-  arcs in .claude-code-hermit/compiled/story-arcs-*.md. Arc Watch keywords drive the feed-brief arc-tagging
+  arcs in compiled/story-arcs-*.md. Arc Watch keywords drive the feed-brief arc-tagging
   enrichment. Invoke with /feed-hermit:story-arcs add|resolve|list.
 ---
 

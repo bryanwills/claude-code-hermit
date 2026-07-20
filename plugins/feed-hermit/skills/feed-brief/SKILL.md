@@ -108,10 +108,13 @@ Write the brief per `FEEDS.md` philosophy, tone, and format. Apply the slot's or
 ### Phase 5 — Deliver
 
 Deliver via the Operator Notification protocol in CLAUDE.md § Operator Notification (core resolves the
-channel and falls back to push / SHELL.md logging when no channel is reachable). On success, `text` is
-the brief.
+channel and falls back to push when no channel is reachable). On success, `text` is the brief.
+For the push-fallback branch, condense to a single line (≤200 chars, no markdown): lead with the top P1
+item, then the item count. Example: `Anthropic ships Opus 4.8, 6 more items — open CC to read`.
 
-**On delivery failure** (resolve miss, partial channel object, send error) write the full brief to
+**On delivery failure** (resolve miss, partial channel object, send error) this skill's queue supersedes
+the protocol's SHELL.md-logging branch — do not log the brief to SHELL.md Findings and do not record a
+`channel-send-unavailable` issue. Instead write the full brief to
 `.claude-code-hermit/compiled/pending-delivery.md` for delivery on the operator's next inbound message:
 ```yaml
 ---
