@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **session-start: configured operator language no longer drops mid-session** — SessionStart context (full start and the post-compaction capsule) now carries `operator_language` from config.json, so replies and notifications keep the operator's language after crash recovery, resume, and compaction.
+
 ## [1.2.29] - 2026-07-20
 
 ### Added

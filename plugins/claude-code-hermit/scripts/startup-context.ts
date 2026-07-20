@@ -15,6 +15,7 @@ import { readFrontmatter, readFileWithFrontmatter, globDir } from './lib/frontma
 import { hermitDir } from './lib/cc-compat';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { safe, safeForLLMMultiline, scanInjected } from './lib/sanitize';
+import { loadConfig } from './lib/channel-auth';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { formatTokens } from './lib/format';
 
@@ -102,6 +103,19 @@ function lastLines(text: string, n: number): string {
   return lines.slice(-n).join('\n');
 }
 
+// Operator-language fact for injected context. Provenance is operator-local
+// (hermit-settings prompt or hatch $LANG auto-detect), which is why a
+// structural whitelist is the single gate — no scan, no sanitize needed:
+// the accepted shape cannot contain tags, newlines, or control bytes.
+// Revisit if any path ever writes config.language from channel/remote input.
+function operatorLanguage(agentDir: string): string | null {
+  const config = loadConfig(agentDir);
+  if (!config) return null;
+  const v = typeof config.language === 'string' ? config.language.trim() : '';
+  if (v && v.length <= 40 && /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.()-]*$/u.test(v)) return v;
+  return null;
+}
+
 // Build the post-compaction delta capsule: the ONLY injection on
 // source === "compact". Carries hermit lifecycle state (never assumed
 // preserved by the native summary — its quality varies) plus file pointers;
@@ -169,6 +183,9 @@ function buildCompactionPointers(agentDir: string): string {
     }
   } catch {}
 
+  const lang = operatorLanguage(agentDir);
+  if (lang) parts.push(`operator language: ${safe(lang)} (reply in this language)`);
+
   if (parts.length === 0) return '';
 
   parts.push('Full state: SHELL.md + runtime.json. Task list: native Tasks. Don\'t re-read large files to reconstruct context.');
@@ -216,6 +233,11 @@ function emitFullContext(source: string | null) {
     }
     process.stdout.write(header + body + '\n');
     totalChars += header.length + body.length + 1;
+  }
+
+  const lang = operatorLanguage(AGENT_DIR);
+  if (lang) {
+    emit('Operator Preferences', `operator_language: ${safe(lang)}\nAll operator-facing prose uses this language.`);
   }
 
   // -------------------------------------------------------
