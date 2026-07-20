@@ -192,9 +192,9 @@ Read `.claude-code-hermit/knowledge-schema.md`. If the string `brief-summary:` i
 ```
 - brief: a delivered morning/evening brief. Triggered by feed-brief-morning/evening routines. location: briefs/YYYY-MM-DD-<slot>.md
 - weekly-brief: weekly synthesis over the week's briefs. Triggered by weekly-digest routine. location: briefs/weekly/YYYY-WNN.md
-- brief-summary: one-line last-brief summary injected at session start. Triggered by feed-brief. location: compiled/brief-summary-last-<YYYY-MM-DD>.md
-- story-arcs: developing-story tracker. Triggered by story-arcs skill. location: compiled/story-arcs-<slug>.md
-- pending-delivery: queued brief awaiting redelivery. Triggered by feed-brief on send failure. location: compiled/pending-delivery.md
+- brief-summary: one-line last-brief summary injected at session start. Triggered by feed-brief. location: .claude-code-hermit/compiled/brief-summary-last-<YYYY-MM-DD>.md
+- story-arcs: developing-story tracker. Triggered by story-arcs skill. location: .claude-code-hermit/compiled/story-arcs-<slug>.md
+- pending-delivery: queued brief awaiting redelivery. Triggered by feed-brief on send failure. location: .claude-code-hermit/compiled/pending-delivery.md
 ```
 
 And under `## Raw Captures` (create if absent):
@@ -230,7 +230,7 @@ Next steps:
   - Optional reddit auth: see docs/reddit.md (works unauthenticated by default).
 
 Suggested HEARTBEAT check (add to HEARTBEAT.md if you run heartbeats):
-  - If compiled/pending-delivery.md exists and is older than 30 min, a brief failed to deliver — retry or alert.
+  - If .claude-code-hermit/compiled/pending-delivery.md exists and is older than 30 min, a brief failed to deliver — retry or alert.
 
 Go always-on (recommended):
   - Docker:     /claude-code-hermit:docker-setup
