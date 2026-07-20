@@ -103,17 +103,20 @@ function lastLines(text: string, n: number): string {
   return lines.slice(-n).join('\n');
 }
 
-// Operator-language fact for injected context. Provenance is operator-local
-// (hermit-settings prompt or hatch $LANG auto-detect), which is why a
-// structural whitelist is the single gate — no scan, no sanitize needed:
-// the accepted shape cannot contain tags, newlines, or control bytes.
-// Revisit if any path ever writes config.language from channel/remote input.
+// Operator-language fact for injected context. The structural whitelist is the
+// first gate — it rejects anything tag-, newline-, or control-byte-shaped, and
+// accepts locale codes (`pt`, `pt-BR`, `pt_BR`) plus human language names.
+// It is NOT the only gate: `hermit-settings language` can be driven from a
+// channel-tagged turn, so the value is remote-influenceable and still gets the
+// same threat scan every other injected surface goes through — the whitelist
+// alone would pass a letters-and-spaces injection phrase.
 function operatorLanguage(agentDir: string): string | null {
   const config = loadConfig(agentDir);
   if (!config) return null;
   const v = typeof config.language === 'string' ? config.language.trim() : '';
-  if (v && v.length <= 40 && /^[\p{L}\p{M}][\p{L}\p{M}\p{N} '.()-]*$/u.test(v)) return v;
-  return null;
+  if (!v || v.length > 40 || !/^[\p{L}\p{M}][\p{L}\p{M}\p{N} '._()-]*$/u.test(v)) return null;
+  if (checkThreat('config.json:language', v)) return null;
+  return v;
 }
 
 // Build the post-compaction delta capsule: the ONLY injection on
@@ -124,6 +127,12 @@ function operatorLanguage(agentDir: string): string | null {
 // state file must not blank the rest. Returns "" if nothing is available.
 function buildCompactionPointers(agentDir: string): string {
   const parts: string[] = [];
+
+  // First: the capsule is hard-sliced at COMPACT_CAP, so anything appended
+  // late is what a state-heavy hermit loses. Language is the one fact here
+  // that has no other post-compaction source.
+  const lang = operatorLanguage(agentDir);
+  if (lang) parts.push(`operator language: ${safe(lang)} (reply in this language)`);
 
   try {
     const runtime = JSON.parse(fs.readFileSync(path.resolve(agentDir, 'state', 'runtime.json'), 'utf-8'));
@@ -182,9 +191,6 @@ function buildCompactionPointers(agentDir: string): string {
       parts.push('proposals dir: proposals/');
     }
   } catch {}
-
-  const lang = operatorLanguage(agentDir);
-  if (lang) parts.push(`operator language: ${safe(lang)} (reply in this language)`);
 
   if (parts.length === 0) return '';
 
