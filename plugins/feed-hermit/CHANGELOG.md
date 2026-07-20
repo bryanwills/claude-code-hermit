@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [0.1.0] - 2026-07-20
 
 ### Added
 - **Initial plugin — feed-to-brief pipeline extracted from a standalone feed hermit.** One domain plugin, four internal layers: (1) brief engine (`feed-brief`, `weekly-digest`, the `source-fetcher` Haiku agent, `FEEDS.md` tone template, archive-frontmatter analytics contract, `pending-delivery` recovery queue), (2) source curation (`feed-sources.md`/`feed-categories.md` registry with a `validate-sources` PostToolUse hook, plus `add-source`/`source-scout`/`source-health`), (3) fetch adapters (`reddit-fetch.ts` unauthenticated-by-default with optional authed path; Chrome-typed sources skip gracefully when Chrome is down), (4) `story-arcs` + `deep-dive` follow-ups.
