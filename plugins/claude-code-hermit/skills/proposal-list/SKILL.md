@@ -14,7 +14,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 ### 1. Read the proposals index
 
-Read `.claude-code-hermit/state/proposals-index.json` — a derived cache of every proposal's frontmatter (`id`, `status`, `source`, `category`, `title`, `created`, `session`, `responded`, plus a `legacy` flag), refreshed on every proposal write by the `generate-summary` PostToolUse hook. **(fresh read — re-read the file now; do not reuse a value cached in context from before compaction.)**
+Read `.claude-code-hermit/state/proposals-index.json` — a derived cache of every proposal's frontmatter (`id`, `status`, `source`, `category`, `title`, `created`, `session`, `responded`, plus an `unparseable` flag), refreshed on every proposal write by the `generate-summary` PostToolUse hook. **(fresh read — re-read the file now; do not reuse a value cached in context from before compaction.)**
 
 Rebuild the index first, then read it:
 ```
@@ -26,7 +26,7 @@ The rebuild reads frontmatter off disk — idempotent, no LLM/token cost — so 
 
 ### 2. (metadata is already parsed)
 
-The index rows are the parsed metadata — use them directly. Legacy pre-frontmatter proposals appear with `legacy: true` and whatever fields could be recovered (`source` defaults to `manual`).
+The index rows are the parsed metadata — use them directly. A file whose frontmatter can't be read (unreadable, or no `---` block) appears with `unparseable: true` and every field null, counting as status `unknown` — the lifecycle can't act on it, since proposal.ts only writes frontmatter.
 
 ### 3. Calculate age
 

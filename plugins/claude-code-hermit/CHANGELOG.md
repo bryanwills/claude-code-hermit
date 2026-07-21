@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+- **proposal lifecycle: fully Bash-scripted state writes** — new `scripts/proposal.ts` CLI (`create`, `patch`, `shell-append`, `next-task`, `routine`) replaces the Write/Edit tool calls on `.claude-code-hermit/`, which the harness blocks in background/worktree sessions. `create` claims the ID atomically with the file write, closing the burned-ID half-created-state hazard.
+
+### Changed
+- **proposal-create/proposal-act: no Write/Edit tool calls on `.claude-code-hermit/` remain** — both skills invoke `proposal.ts` verbs; the next-prop-id/append-metrics/generate-summary steps in proposal-create fold into `proposal.ts create`; Resolve's compact-requested.json write moves to `--request-compact`.
+- Internal: transactional markdown helpers promoted from `apply-reflection-actions.ts` into `scripts/lib/md-write.ts`; proposal-ID logic extracted into `scripts/lib/prop-id.ts` (`next-prop-id.ts` is now a thin CLI wrapper over it, contract unchanged); `generate-summary.ts` gains an `import.meta.main` guard and exports `run` so other scripts can call it directly instead of spawning a subprocess.
+
+### Removed
+- **proposals: dropped the pre-frontmatter bullet-metadata reader** — `**Status:**`-style metadata is no longer parsed. Frontmatter has been the canonical proposal format since 1.0.0 and no write path has been able to patch a bullet-metadata file for some time, so a legacy file listed as actionable but could not be accepted, deferred, dismissed, or resolved. Such a file now surfaces in `proposal-list` as status `unknown` rather than showing recovered metadata it can't act on; it is still listed, never silently dropped. The `proposals-index.json` row flag is renamed `legacy` → `unparseable` to match what it now means; nothing reads the value, and the index is fully regenerated on the next proposal write.
+
+### Upgrade Instructions
+1. Re-run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <hatch-target settings file> allow` to seed the permission for `scripts/proposal.ts`. Without this, proposal lifecycle actions (create/accept/defer/dismiss/resolve) prompt for permission — functionally denied in headless/channel/background sessions.
+
 ### Fixed
 - **session-start: configured operator language no longer drops mid-session** — SessionStart context (full start and the post-compaction capsule) now carries `operator_language` from config.json, so replies and notifications keep the operator's language after crash recovery, resume, and compaction. Underscore locale codes (`pt_BR`) are accepted, and the capsule emits the fact first so a state-heavy hermit doesn't lose it to the compaction-capsule size cap.
 - **startup-context: `config.json` `language` runs the injection threat scan** — the value is settable via `hermit-settings` on a channel turn, so it is remote-influenceable; the structural whitelist alone would have passed a letters-and-spaces injection phrase into every session's context. It now blocks and records a `config.json:language` hit like every other injected surface.
