@@ -67,6 +67,13 @@ test("CLAUDE-APPEND has matched block markers", () => {
   expect(raw).toContain("<!-- /feed-hermit: Feed Workflow -->");
 });
 
+test("hatch idempotently registers the plugin-owned brief archive", () => {
+  const raw = readFileSync(join(ROOT, "skills", "hatch", "SKILL.md"), "utf8");
+  expect(raw).toContain("config.storage_drift.ignore");
+  expect(raw).toContain('Append the bare directory name `"briefs"` when it is absent');
+  expect(raw).toContain("if already present, leave the array");
+});
+
 for (const f of [
   "routine-feed-brief-morning.md",
   "routine-feed-brief-evening.md",

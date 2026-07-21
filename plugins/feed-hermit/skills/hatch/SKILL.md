@@ -181,6 +181,14 @@ In `config.scheduled_checks`, check for `id: "source-scout"`. If absent, append;
 {"id": "source-scout", "plugin": "feed-hermit", "skill": "feed-hermit:source-scout", "enabled": true, "trigger": "interval", "interval_days": 30}
 ```
 
+### 7e — Register the brief archive
+
+Ensure `config.storage_drift` is an object and `config.storage_drift.ignore` is an array. If either is
+absent or malformed, normalize it while preserving any valid sibling keys and existing array entries.
+Append the bare directory name `"briefs"` when it is absent; if already present, leave the array
+unchanged. This registers feed-hermit's plugin-owned archive without teaching core about a
+domain-specific directory.
+
 Write the updated `config.json` using the Write tool (full-file replacement to keep valid JSON).
 
 ---
