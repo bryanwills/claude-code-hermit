@@ -52,7 +52,7 @@ function writeStaleIndex(hermitDir: string, rows: Array<{ id: string; file: stri
       id: r.id, file: r.file, status: 'proposed', source: 'manual', category: null,
       title: r.title, created: '2026-07-12T10:00:00Z', session: null,
       responded: false, accepted_date: null, resolved_date: null, tags: [],
-      self_eval_key: null, legacy: false,
+      self_eval_key: null, unparseable: false,
     })),
   });
 }

@@ -32,7 +32,10 @@ export interface ProposalRow {
   resolved_date: string | null;
   tags: string[];
   self_eval_key: string | null;
-  legacy: boolean;
+  // True when this row is a placeholder because the file's frontmatter couldn't
+  // be read at all — every other field is null. Not "old format": bullet
+  // metadata is no longer parsed, so there is nothing to recover.
+  unparseable: boolean;
 }
 
 export interface ProposalsIndex {
@@ -61,7 +64,7 @@ function placeholderRow(id: string, file: string): ProposalRow {
     id, file, status: null, source: null, category: null,
     title: null, created: null, session: null, responded: false,
     accepted_date: null, resolved_date: null, tags: [], self_eval_key: null,
-    legacy: true,
+    unparseable: true,
   };
 }
 
@@ -101,7 +104,7 @@ export function rebuildIndex(stateDir: string, bodyOut?: Map<string, string>): P
         resolved_date: typeof fm.resolved_date === 'string' ? fm.resolved_date : null,
         tags: Array.isArray(fm.tags) ? fm.tags.filter((t: unknown) => typeof t === 'string') : [],
         self_eval_key: typeof fm.self_eval_key === 'string' ? fm.self_eval_key : null,
-        legacy: false,
+        unparseable: false,
       });
     } else {
       proposals.push(placeholderRow(idStem, base));

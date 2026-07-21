@@ -46,7 +46,7 @@ describe('rebuildIndex', () => {
     expect(p1.status).toBe('proposed');
     expect(p1.source).toBe('auto-detected');
     expect(p1.title).toBe('Foo'); // from heading (no frontmatter title)
-    expect(p1.legacy).toBe(false);
+    expect(p1.unparseable).toBe(false);
 
     const p2 = idx.proposals.find(p => p.id === 'PROP-002-bar-130000')!;
     expect(p2.title).toBe('Bar direct'); // frontmatter title wins over heading
@@ -62,7 +62,7 @@ describe('rebuildIndex', () => {
       '# Proposal: PROP-006 — Legacy one\n\n**Status:** accepted\n**Created:** 2026-01-01\n');
     const idx = rebuildIndex(hermit(dir))!;
     const p = idx.proposals[0];
-    expect(p.legacy).toBe(true);
+    expect(p.unparseable).toBe(true);
     expect(p.id).toBe('PROP-006');
     expect(p.file).toBe('PROP-006.md');
     expect(p.status).toBeNull();
