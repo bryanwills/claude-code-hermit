@@ -44,7 +44,12 @@ differ per type (called out in each subsection below):
 3. Changed or no prior record → call `Artifact` with `file_path` set to the rendered
    path, a stable `<title>` for that type, a stable favicon (pick once, keep it across
    republishes), and `url` set to `<key>.url` from `state/artifacts.json` when present
-   (redeploys to the same address instead of minting a new one).
+   (redeploys to the same address instead of minting a new one), plus `force: true`
+   whenever `url` is present — these pages are single-writer, regenerated from
+   authoritative state, so Claude Code 2.1.x's "hasn't viewed the latest version"
+   redeploy guard (fires after any restart, since the session only read the URL from
+   state) is overridden here, not resolved by re-fetching. First publish (no `url`)
+   omits it.
 4. On success, write `.claude-code-hermit/state/artifacts.json`:
    `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>"}}`
    (merge — never drop sibling keys belonging to other artifact types).
@@ -144,6 +149,7 @@ the weekly-review page (no HTML render step). The URL is recorded under
 `documents.<basename>` in `state/artifacts.json` so a repeated request for the same
 document redeploys to the same URL instead of minting a new one — same hash-gate
 discipline as the other types (skip the publish call when the file's content hash is
-unchanged from the last recorded one). No automatic per-document publishing; the
+unchanged from the last recorded one), plus `force: true` on redeploy (verbatim copy of
+the local file, which is authoritative). No automatic per-document publishing; the
 dashboard's compiled-docs index is the discovery surface for what's available to ask
 for.
