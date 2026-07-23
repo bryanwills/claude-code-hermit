@@ -172,11 +172,14 @@ describe('pause-keyword', () => {
       expect(isPaused(hermit(dir)).paused).toBe(false);
     }));
 
-    test('config keyed by the full qualified source still works (exact match wins)', withDir(async (dir) => {
+    test('config keyed ONLY by the qualified source does not resolve — bare-name key is authoritative', withDir(async (dir) => {
+      // Off-convention config keyed solely by the qualified form: the auth gate
+      // resolves by the normalized bare name (matching the send path), so this
+      // trusts nobody and the pause is not applied.
       write(hermit(dir, 'config.json'), '{"channels":{"plugin:discord:discord":{"dm_channel_id":"1"}}}');
       const r = await run('<channel source="plugin:discord:discord" chat_id="1" user="U1">pause</channel>', dir);
       expect(r.exitCode).toBe(0);
-      expect(isPaused(hermit(dir)).paused).toBe(true);
+      expect(isPaused(hermit(dir)).paused).toBe(false);
     }));
 
     test('genericity pin: an unrecognized custom channel plugin normalizes the same way', withDir(async (dir) => {

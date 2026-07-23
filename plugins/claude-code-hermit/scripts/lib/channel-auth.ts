@@ -19,21 +19,17 @@ export function loadConfig(dir: string): Json | null {
 
 /**
  * Resolves an envelope's (possibly plugin-qualified) source to its configured
- * channel entry. Exact key match wins first — so an operator can pin a config
- * entry to the fully-qualified source if they ever need to — otherwise falls
- * back to the normalized (bare server name) key. Config keys by server name
- * is the convention (see normalizeChannelSource); this is the one place both
- * gate functions below resolve it, so they can't drift apart.
+ * channel entry via the normalized (bare server name) key — the same key the
+ * send path derives from `envelope.sourceKey`, so the auth gate and the reply
+ * target can never disagree about which channel config applies. Config keyed by
+ * bare server name is the convention (see normalizeChannelSource); this is the
+ * one place both gate functions below resolve it, so they can't drift apart.
  */
 function channelEntry(config: Json, source: string): Json {
   const channels = config?.channels;
   if (!channels || typeof channels !== 'object') return undefined;
-  if (Object.prototype.hasOwnProperty.call(channels, source)) return channels[source];
-  const normalized = normalizeChannelSource(source);
-  if (normalized !== source && Object.prototype.hasOwnProperty.call(channels, normalized)) {
-    return channels[normalized];
-  }
-  return undefined;
+  const key = normalizeChannelSource(source);
+  return Object.prototype.hasOwnProperty.call(channels, key) ? channels[key] : undefined;
 }
 
 /**

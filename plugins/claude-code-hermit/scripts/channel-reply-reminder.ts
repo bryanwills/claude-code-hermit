@@ -70,10 +70,9 @@ function main(raw: string): void {
     const config = loadConfig(dir);
     if (!isLoggingEnabled(config)) return;
 
-    // Raw (not sourceKey): channelEntry tries an exact key match on the qualified
-    // source before falling back to the normalized one, so an operator can pin
-    // config to the literal qualified source — matches the raw source pause-keyword.ts
-    // and channel-status-responder.ts pass into the same gate.
+    // Raw source (not sourceKey): channelEntry normalizes it internally, and
+    // pause-keyword.ts and channel-status-responder.ts feed the same raw source
+    // into this gate — one convention across every caller.
     if (!isAllowedSender(config, envelope.source, envelope.userId)) return;
 
     const result = logMessage(dir, {

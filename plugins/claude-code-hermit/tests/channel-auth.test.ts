@@ -69,15 +69,23 @@ describe('isTrustedController with plugin-qualified sources', () => {
     expect(isTrustedController(config, 'plugin:discord:discord', 'ANYONE', '1')).toBe(false);
   });
 
-  test('exact qualified key in config wins over the normalized fallback', () => {
-    const config = {
+  test('normalized bare key is authoritative — the send path uses the same key, so auth must too', () => {
+    // A config keyed ONLY by the qualified form is off-convention and does not
+    // resolve: the send path always looks up the normalized bare name, so if the
+    // auth gate honored the qualified key it would pass a sender the send path
+    // can't route/token (the #634 auth/send split). The bare key is the one truth.
+    const qualifiedOnly = { channels: { 'plugin:discord:discord': { dm_channel_id: '1' } } };
+    expect(isTrustedController(qualifiedOnly, 'plugin:discord:discord', 'U1', '1')).toBe(false);
+
+    // When both forms are present, the normalized (bare) key wins.
+    const both = {
       channels: {
         'plugin:discord:discord': { dm_channel_id: '1' },
-        discord: { dm_channel_id: '99' }, // would trust a different chat if normalization won
+        discord: { dm_channel_id: '99' },
       },
     };
-    expect(isTrustedController(config, 'plugin:discord:discord', 'U1', '1')).toBe(true);
-    expect(isTrustedController(config, 'plugin:discord:discord', 'U1', '99')).toBe(false);
+    expect(isTrustedController(both, 'plugin:discord:discord', 'U1', '99')).toBe(true);
+    expect(isTrustedController(both, 'plugin:discord:discord', 'U1', '1')).toBe(false);
   });
 
   test('genericity: an unrecognized custom channel plugin normalizes the same way', () => {

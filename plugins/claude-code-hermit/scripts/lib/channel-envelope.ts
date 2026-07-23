@@ -33,11 +33,9 @@ export interface ChannelEnvelope {
  * through unchanged, so a caller's own lookup fails closed on unfamiliar
  * input rather than this function guessing.
  *
- * Note: lib/trigger-source.ts's classifySource does its own similar
- * last-segment split of the same wire shape for cost-attribution bucketing —
- * it is not wired to this function, so the two can diverge. For a 3+-segment
- * source, classifySource extracts a segment via split(':').pop(), while this
- * function treats that shape as unrecognized and passes it through unchanged.
+ * This is the single normalizer for the wire source shape: lib/trigger-source.ts's
+ * classifySource calls it too (for cost-attribution bucketing), so config lookup
+ * and cost attribution can't drift apart on how they parse a `plugin:` source.
  */
 export function normalizeChannelSource(source: string): string {
   const m = /^plugin:[^:]+:([^:]+)$/.exec(source);

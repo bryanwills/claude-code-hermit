@@ -15,12 +15,16 @@ Terminal output is invisible to the operator: they read Discord, Telegram, or
 the configured channel, never the raw transcript.
 
 For each channel plugin, the reply tool is the `reply` action exposed by the
-channel's MCP server, named `mcp__plugin_<channel>_<channel>__reply` where
-`<channel>` is the MCP server name — the value the `source` attribute
-normalizes to (the harness injects a plugin-qualified source on the wire,
-e.g. `source="plugin:discord:discord"`; the reply tool name and every
-`config.channels` key below use the bare `discord`, not the qualified
-string — see `lib/channel-envelope.ts`'s `normalizeChannelSource`). Pass the
+channel's MCP server, named `mcp__plugin_<plugin-name>_<server-name>__reply` —
+the two segments are exactly the plugin name and server name the harness puts in
+the plugin-qualified source on the wire (`source="plugin:<plugin-name>:<server-name>"`).
+For the built-in channels the two coincide (e.g. `plugin:discord:discord` →
+`mcp__plugin_discord_discord__reply`), but a custom channel plugin whose names
+differ fills each slot from its own wire segment (e.g. `plugin:acme-crm:crm` →
+`mcp__plugin_acme-crm_crm__reply`) — build the tool name from the raw `source`,
+not by doubling one segment. Every `config.channels` key below instead uses the
+normalized bare server name (`discord`, not the qualified string — see
+`lib/channel-envelope.ts`'s `normalizeChannelSource`). Pass the
 inbound `chat_id` back. Optionally pass `reply_to` (the inbound `message_id`)
 to thread under the operator's message.
 
