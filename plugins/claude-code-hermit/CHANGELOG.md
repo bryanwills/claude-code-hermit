@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **artifact republish: `force: true` on redeploys** — Claude Code 2.1.x rejects a same-URL `Artifact` redeploy from a session that never viewed the current version ("hasn't viewed the latest version"), which fired on every dashboard/proposals/weekly-review refresh after a restart. These pages are single-writer and deterministically re-rendered, so there's nothing to merge; redeploys now pass `force: true`.
+
 ## [1.2.31] - 2026-07-22
 
 ### Fixed
