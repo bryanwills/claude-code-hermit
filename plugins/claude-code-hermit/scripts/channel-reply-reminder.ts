@@ -45,10 +45,10 @@ function main(raw: string): void {
   const envelope = parseChannelEnvelope(prompt);
   if (!envelope) return;
 
-  const sourceRaw = envelope.source;
+  const sourceKey = envelope.sourceKey;
   const chatIdRaw = envelope.chatId;
 
-  const source = safeForLLM(sourceRaw.slice(0, MAX_SOURCE_LEN));
+  const source = safeForLLM(sourceKey.slice(0, MAX_SOURCE_LEN));
   const chatId = safeForLLM(chatIdRaw.slice(0, MAX_CHAT_ID_LEN));
 
   const tool = REPLY_TOOLS[source];
@@ -70,10 +70,14 @@ function main(raw: string): void {
     const config = loadConfig(dir);
     if (!isLoggingEnabled(config)) return;
 
-    if (!isAllowedSender(config, sourceRaw, envelope.userId)) return;
+    // Raw (not sourceKey): channelEntry tries an exact key match on the qualified
+    // source before falling back to the normalized one, so an operator can pin
+    // config to the literal qualified source — matches the raw source pause-keyword.ts
+    // and channel-status-responder.ts pass into the same gate.
+    if (!isAllowedSender(config, envelope.source, envelope.userId)) return;
 
     const result = logMessage(dir, {
-      source: sourceRaw,
+      source: sourceKey,
       chat_id: chatIdRaw,
       direction: 'in',
       sender: envelope.userId,

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **channel hooks: resolve plugin-qualified envelope sources to the configured channel key** — inbound messages carry `source="plugin:discord:discord"` on the wire, but `config.json` keys channels by the bare server name; the mismatch silently dead-ended `pause`/`stop`/`resume`/`snooze` and the deterministic `status` reply fleet-wide. `allowed_users` now also enforces correctly on the reply-reminder/log path for plugin-qualified sources (previously fell through to accept-all).
+
 ## [1.2.31] - 2026-07-22
 
 ### Fixed
