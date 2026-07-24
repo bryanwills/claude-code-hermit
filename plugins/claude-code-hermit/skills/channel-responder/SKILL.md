@@ -102,6 +102,12 @@ This is how the agent learns the DM channel ID for proactive outbound notificati
 
 Before running any heavy sub-step — an archive traversal, a multi-file search, or a delegated execution step — apply the **Context-hygiene & delegation** rule: delegate when its criteria hold and keep only the verdict.
 
+- **Harness command** (exactly `/compact`, `/clear`, `/model <arg>`, or `/effort <arg>`)
+  - Intercepted by the `harness-command-keyword.ts` `UserPromptSubmit` hook **before this skill runs** — the request is already recorded, and the `Stop` hook types it into the session when this turn ends. There is nothing for you to do; acknowledge briefly via the channel if you like.
+  - Do **not** try to run it yourself, and do not treat it as a skill invocation.
+  - It applies to *this* session only: the next `hermit-start` re-asserts `config.model` / `config.effort`. If Claude Code rejects the argument, that shows in the terminal, not in chat — so don't promise it took effect.
+  - A near-miss (`/model` with no argument, a bare `clear`, or prose mentioning one) is **not** intercepted — classify it under the categories below instead.
+
 - **Slash command** (message starts with `/`, e.g. `/claude-code-hermit:simplify`, `/plugin:command`)
   - Invoke the matching skill, slash command, or subagent via the appropriate tool. Pass any remaining text as arguments/prompt.
   - If nothing matches, say so briefly.

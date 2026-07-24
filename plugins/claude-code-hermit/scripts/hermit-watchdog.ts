@@ -29,18 +29,17 @@ import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
-import { tmuxSessionAlive, getSessionName as deriveSessionName } from './lib/tmux';
+import { tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { costLogPath } from './lib/cc-compat';
-import { flushResetBreadcrumb } from './lib/progress-log';
 import { wallMinutes } from './cron-tz-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
 import { runTelemetryExportIfDue } from './report-export';
-import { clearStatusCacheOnBoot as clearStatusCache } from './hermit-start';
+import { applyContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 
 type Json = any;
 
@@ -229,12 +228,8 @@ export function hasPendingQuestion(paneContent: string): boolean {
   return PENDING_OPTION_RE.test(tail) && PENDING_FOOTER_RE.test(tail);
 }
 
-/** Send text then Enter as two separate calls (avoids bracketed-paste submit bug). */
-function sendKeys(sessionName: string, text: string): void {
-  spawnSync('tmux', ['send-keys', '-t', sessionName, text], { stdio: 'ignore' });
-  Bun.sleepSync(500);
-  spawnSync('tmux', ['send-keys', '-t', sessionName, 'Enter'], { stdio: 'ignore' });
-}
+// sendKeys now lives in lib/tmux.ts so the harness-command drain shares one
+// implementation (and one bracketed-paste workaround) with the watchdog.
 
 // --- Lifecycle lock ---
 
@@ -647,10 +642,13 @@ function maybePostCloseClear(config: Json): void {
 
   if (!tryAcquireLifecycleLock()) return; // another lifecycle action in flight, retry next tick
   try {
+    // Deliberately NOT applyContextReset: this path has never written a SHELL.md
+    // breadcrumb (the close itself already left an archived report), and adding one
+    // here would change shipped behaviour. Only the stamp + cache clear are shared.
     runtime.context_cleared = true;
     writeRuntimeJson(runtime);
     sendKeys(sessionName, '/clear');
-    clearStatusCache();
+    clearStatusCacheAt(HERMIT_ROOT);
     try { fs.rmSync(CLEAR_REQUESTED_JSON); } catch {}
     appendEvent('post-close-clear', 'daily-auto-close context reset');
   } finally {
@@ -838,19 +836,18 @@ function maybeContextClear(config: Json): void {
     return;
   }
   try {
-    runtime.context_cleared = true;
-    writeRuntimeJson(runtime);
-    // Breadcrumb before the destructive keystroke — PreCompact never fires on /clear
-    // (see precompact-stamp.ts), so this is the only trace of the reset. flushResetBreadcrumb
-    // is fail-open internally; it must never delay or suppress the safety clear below.
-    flushResetBreadcrumb(path.join(HERMIT_ROOT, 'sessions', 'SHELL.md'), {
+    // Runtime stamp + breadcrumb + status-cache clear, shared with every other reset
+    // path (lib/context-reset.ts). Runs BEFORE the destructive keystroke: PreCompact
+    // never fires on /clear (see precompact-stamp.ts), so the breadcrumb is the only
+    // trace, and an interrupted reset must still leave it. Fail-open internally — it
+    // can never delay or suppress the safety clear below.
+    applyContextReset(HERMIT_ROOT, runtime, {
       kind: 'cleared',
       trigger: `watchdog-${Math.round(threshold / 1000)}k`,
       hhmm: nowHHMM(config.timezone ?? 'UTC'),
       tokens: prompt,
     });
     sendKeys(sessionName, '/clear');
-    clearStatusCache();
     watchdogState.last_cleared_cost_ts = lastEntry.timestamp;
     // Cross-stamp: runtime.session_id short-circuits resolveHygieneSessionId when an
     // arc is open, so cache deletion alone can't stop the compact tier from resolving

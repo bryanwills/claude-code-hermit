@@ -18,6 +18,7 @@ import { acquireLock, releaseLock } from './lib/lockfile';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
+import { clearStatusCache } from './lib/context-reset';
 import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-token';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 
@@ -39,6 +40,7 @@ const DEFAULT_CONFIG: Json = {
   channels: {},
   remote: true,
   model: 'sonnet',
+  effort: null,
   permission_mode: 'auto',
   tmux_session_name: 'hermit-{project_name}',
   auto_session: true,
@@ -383,7 +385,7 @@ function clearShutdownStampsOnBoot(existing: Json): void {
  * spurious /compact against the fresh context.
  */
 function clearStatusCacheOnBoot(): void {
-  try { fs.unlinkSync(path.join(STATE_DIR, '..', 'sessions', '.status.json')); } catch {}
+  clearStatusCache(path.join(STATE_DIR, '..'));
 }
 
 /**
@@ -612,6 +614,16 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
 
   if (pyTruthy(config.model)) {
     cmd.push('--model', config.model);
+  }
+
+  // Re-asserted on every boot for the same reason as --model: a runtime /effort writes
+  // through to the user-scope settings default ("saved as your default for new
+  // sessions"), and the boot flag outranks it — so a channel-requested effort change
+  // reverts on restart instead of silently becoming permanent. NOT the same lever as
+  // config.env.CLAUDE_CODE_EFFORT_LEVEL, which pins the session and would make a
+  // runtime /effort a no-op (see the how-to-use guide).
+  if (pyTruthy(config.effort)) {
+    cmd.push('--effort', config.effort);
   }
 
   const mode = 'permission_mode' in config ? config.permission_mode : 'auto';
@@ -924,6 +936,7 @@ async function main(): Promise<void> {
   }
   console.log(`[hermit] Project: ${path.basename(process.cwd())}`);
   console.log(`[hermit] Model: ${config.model || 'default'}`);
+  console.log(`[hermit] Effort: ${config.effort || 'default'}`);
   console.log(`[hermit] Channels: ${getEnabledChannels(config).join(', ') || 'none'}`);
   console.log(`[hermit] Remote: ${pyTruthy(config.remote) ? 'enabled' : 'disabled'}`);
   console.log(`[hermit] Chrome: ${pyTruthy(config.chrome) ? 'enabled' : 'disabled'}`);

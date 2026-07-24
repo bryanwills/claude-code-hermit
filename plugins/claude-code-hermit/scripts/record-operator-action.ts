@@ -92,10 +92,18 @@ function isRoutinePrompt(prompt: string): boolean {
   if (t.startsWith('HEARTBEAT_ERROR: ')) return true;
   if (t.startsWith('ROUTINE_DUE [hermit-routine:')) return true;
   if (t.startsWith('ROUTINE_MONITOR_ERROR: ')) return true;
-  // Watchdog hygiene injections (hermit-watchdog.ts:421,620,754). Native
+  // Watchdog hygiene injections (hermit-watchdog.ts:652,852,991). Native
   // commands may never reach this hook at all; dropping them is safe either
   // way — typing /clear or /compact ends a context, it doesn't signal presence.
   if (t === '/clear' || t.startsWith('/compact')) return true;
+  // Harness commands the Stop-hook drain injects on an operator's behalf
+  // (stop-pipeline.ts drainHarnessCommand). Prefix-matched, not listed in
+  // INJECTED_EXACT, because the argument is runtime-computed: the exact string is
+  // `/model <arg>` for whatever arg arrived over the channel. NOTE the drift guard in
+  // tests/auto-close.test.ts only scans *quoted* literals at sendKeys call sites, so a
+  // template-literal injection like this generates no automatic coverage — the
+  // regression test for these two prefixes is hand-written in auto-close.test.ts.
+  if (t.startsWith('/model ') || t.startsWith('/effort ')) return true;
   return false;
 }
 

@@ -6,6 +6,10 @@ import { run as costTracker } from './cost-tracker';
 import { run as sessionDiff } from './session-diff';
 import { run as evaluateSession } from './evaluate-session';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir } from './lib/cc-compat';
+import { readRuntimeJson } from './lib/runtime';
+import { tmuxSessionAlive, sendKeys } from './lib/tmux';
+import { applyContextReset } from './lib/context-reset';
+import { readPendingCommand, clearPendingCommand, renderCommand } from './lib/harness-command';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -15,6 +19,47 @@ const HERMIT_DIR = hermitDir();
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const SNAPSHOT_FILE = path.join(HERMIT_DIR, 'state', 'cc-stop-snapshot.json');
 const TURN_FILE = path.join(HERMIT_DIR, 'state', 'operator-turn-open.json');
+
+/**
+ * Deliver a pending channel-requested harness command into the pane.
+ *
+ * Guards, in order: marker present and within TTL; runtime readable; not interactive
+ * (those sessions have no tmux_session); tmux session alive. The marker is deleted ONLY
+ * on a confirmed send — sendKeys returning false means tmux never accepted the keys, so
+ * leaving the marker lets the next turn retry rather than silently dropping the request.
+ *
+ * A /clear or /compact additionally routes the hermit-owned bookkeeping through
+ * applyContextReset, so an operator-initiated reset leaves the same trace a
+ * watchdog-initiated one does — without it the status cache would survive and the
+ * watchdog could fire a spurious /compact against the freshly-cleared context.
+ */
+function drainHarnessCommand(): void {
+  const pending = readPendingCommand(HERMIT_DIR);
+  if (!pending) return;
+
+  const runtime = readRuntimeJson();
+  if (!runtime || runtime.runtime_mode === 'interactive') return;
+
+  const sessionName: string = runtime.tmux_session ?? '';
+  if (!sessionName || !tmuxSessionAlive(sessionName)) return;
+
+  const text = renderCommand(pending);
+
+  if (pending.command === '/clear' || pending.command === '/compact') {
+    applyContextReset(HERMIT_DIR, runtime, {
+      kind: pending.command === '/clear' ? 'cleared' : 'compacted',
+      trigger: 'channel',
+      hhmm: new Date().toISOString().slice(11, 16),
+    });
+  }
+
+  if (!sendKeys(sessionName, text)) {
+    console.error(`[stop-pipeline] harness-command: tmux refused "${text}" — marker kept for retry`);
+    return;
+  }
+  clearPendingCommand(HERMIT_DIR);
+  console.error(`[stop-pipeline] harness-command: delivered "${text}" (requested by ${pending.by})`);
+}
 
 async function main(): Promise<void> {
   // Read stdin once
@@ -65,6 +110,14 @@ async function main(): Promise<void> {
       if (out) console.error(out);
     } catch (e: any) { console.error(`[stop-pipeline] evaluate-session: ${e.message}`); }
   }
+
+  // Stage 4: drain a channel-requested harness command (/model, /effort, /compact, /clear).
+  // The turn it arrived on has just ended, so the pane is idle and safe to type into —
+  // the hook that recorded it deliberately did NOT type, because it runs at turn START.
+  // Runs before the heartbeat touch but after the accounting stages, so a /clear can
+  // never race cost-tracker still reading the outgoing transcript.
+  try { drainHarnessCommand(); }
+  catch (e: any) { console.error(`[stop-pipeline] harness-command: ${e.message}`); }
 
   // Guaranteed heartbeat touch — runs even if all stages fail
   try { fs.writeFileSync(HEARTBEAT_FILE, new Date().toISOString() + '\n'); } catch {}
