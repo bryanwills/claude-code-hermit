@@ -51,7 +51,7 @@ describe('hatch-config.ts', () => {
       ...template,
       tmux_session_name: 'hermit-my-project',
       agent_name: 'Aria', language: 'en', timezone: 'Europe/London', sign_off: 'Aria out.',
-      escalation: 'balanced', remote: true, idle_behavior: 'discover', permission_mode: 'auto',
+      escalation: 'balanced', operator_profile: 'technical', remote: true, idle_behavior: 'discover', permission_mode: 'auto',
       boot_skill: '/claude-code-dev-hermit:dev-boot',
       _hermit_versions: { 'claude-code-hermit': CORE_VERSION, 'claude-code-dev-hermit': '9.9.9' },
       routines: [

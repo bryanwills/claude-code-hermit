@@ -128,3 +128,91 @@ describe('cost-tracker: a repeat breach tick at the same boundary does not re-st
     expect(tsAfterSecond).toBe(tsAfterFirst);
   });
 });
+
+// PROP-059: localized + tiered budget pushes. Stock installs stay byte-identical
+// (covered above); these add pt-PT and the maintainer/client split.
+function setupCustom(config: object): { dir: string; cchDir: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cost-budget-tier-'));
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  const cchDir = path.join(dir, '.claude-code-hermit');
+  fs.mkdirSync(path.join(cchDir, 'state'), { recursive: true });
+  const stateDir = path.join(dir, '.claude.local', 'channels', 'telegram');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_' + 'TOKEN=test-token\n');
+  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+  fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify(config));
+  return { dir, cchDir };
+}
+
+const telegram = (extra: object = {}) => ({
+  telegram: { enabled: true, dm_channel_id: '12345', state_dir: '.claude.local/channels/telegram', ...extra },
+});
+
+describe('cost-tracker: pt-PT budget push (stock, single message)', () => {
+  let dir: string; let stub: Stub;
+  beforeAll(async () => {
+    stub = startHttpStub();
+    ({ dir } = setupCustom({
+      timezone: 'UTC', language: 'pt',
+      channels: telegram(),
+      budget: { daily_usd: 1.0, weekly_usd: null, monthly_usd: null, action: 'pause' },
+    }));
+    await runTurn(dir, stub.url, 100000, 50000); // 1.05 -> breach
+  });
+  afterAll(() => { stub.stop(); fs.rmSync(dir, { recursive: true }); });
+
+  test('one message, composed in Portuguese', () => {
+    expect(stub.requests.length).toBe(1);
+    expect(stub.requests[0].body.chat_id).toBe('12345');
+    expect(stub.requests[0].body.text).toContain('Limite de orçamento atingido');
+    expect(stub.requests[0].body.text).toContain('o gasto de hoje');
+  });
+});
+
+describe('cost-tracker: maintainer/client split when a maintainer channel is configured', () => {
+  let dir: string; let stub: Stub;
+  beforeAll(async () => {
+    stub = startHttpStub();
+    ({ dir } = setupCustom({
+      timezone: 'UTC',
+      channels: telegram({ maintainer_channel_id: '99999' }),
+      budget: { daily_usd: 1.0, weekly_usd: null, monthly_usd: null, action: 'pause' },
+    }));
+    await runTurn(dir, stub.url, 100000, 50000); // breach + pause
+  });
+  afterAll(() => { stub.stop(); fs.rmSync(dir, { recursive: true }); });
+
+  test('maintainer chat gets the full USD/cap detail', () => {
+    const m = stub.requests.find((r) => r.body.chat_id === '99999');
+    expect(m).toBeDefined();
+    expect(m!.body.text).toContain('Budget cap reached');
+    expect(m!.body.text).toContain('of your $1.00 cap');
+  });
+
+  test('client chat gets only the plain paused line (no USD figures)', () => {
+    const c = stub.requests.find((r) => r.body.chat_id === '12345');
+    expect(c).toBeDefined();
+    expect(c!.body.text).toContain("I've paused work until");
+    expect(c!.body.text).not.toContain('cap (');
+    expect(c!.body.text).not.toContain('$1.00');
+  });
+});
+
+describe('cost-tracker: warn-only with a maintainer channel sends the client nothing', () => {
+  let dir: string; let stub: Stub;
+  beforeAll(async () => {
+    stub = startHttpStub();
+    ({ dir } = setupCustom({
+      timezone: 'UTC',
+      channels: telegram({ maintainer_channel_id: '99999' }),
+      budget: { daily_usd: 1.0, weekly_usd: null, monthly_usd: null, action: 'alert' },
+    }));
+    await runTurn(dir, stub.url, 200000, 16000); // 0.84 -> warn, no pause
+  });
+  afterAll(() => { stub.stop(); fs.rmSync(dir, { recursive: true }); });
+
+  test('warn detail goes maintainer-only, primary chat is silent', () => {
+    expect(stub.requests.some((r) => r.body.chat_id === '99999')).toBe(true);
+    expect(stub.requests.some((r) => r.body.chat_id === '12345')).toBe(false);
+  });
+});
