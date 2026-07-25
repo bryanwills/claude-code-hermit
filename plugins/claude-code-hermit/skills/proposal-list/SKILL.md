@@ -18,7 +18,7 @@ Read `.claude-code-hermit/state/proposals-index.json` — a derived cache of eve
 
 Rebuild the index first, then read it:
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposals-index.ts .claude-code-hermit
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit
 ```
 The rebuild reads frontmatter off disk — idempotent, no LLM/token cost — so run it unconditionally rather than trusting an mtime heuristic: it also catches out-of-band proposal writes and **deletions** that the `generate-summary` hook (which fires only on `Edit`/`Write` tool payloads) never sees. The script prints `SKIP|no proposals dir` when there are no proposals — in that case respond "No proposals found." and stop. If the index's `count` is 0, also respond "No proposals found." and stop.
 

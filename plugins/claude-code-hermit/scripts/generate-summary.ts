@@ -4,7 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { rebuildIndex } from './proposals-index';
+import { rebuildIndex } from './lib/proposals/index-rebuild';
 import { readMergedAlerts } from './lib/alert-state';
 
 type Json = any;

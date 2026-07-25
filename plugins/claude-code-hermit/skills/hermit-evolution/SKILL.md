@@ -12,7 +12,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 ## Step 1 — Dispatch the eval runner
 
-Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/hermit-evolution/reference.md`. The runner reads the weekly review files, proposal metrics, config, session reports, and OPERATOR.md — and runs `proposal-metrics-report.ts` and `cost-reflect.ts` — in an isolated context, then returns the assembled evolution report. This keeps those heavy reads off this session's inherited context.
+Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/hermit-evolution/reference.md`. The runner reads the weekly review files, proposal metrics, config, session reports, and OPERATOR.md — and runs `proposal.ts metrics` and `cost-reflect.ts` — in an isolated context, then returns the assembled evolution report. This keeps those heavy reads off this session's inherited context.
 
 Pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` in the dispatch prompt — the runner reads `reference.md` as file content, where `${CLAUDE_PLUGIN_ROOT}` is never substituted, so it needs the resolved absolute path to run the scripts and read template/skill paths.
 

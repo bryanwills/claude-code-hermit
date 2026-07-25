@@ -119,8 +119,8 @@ describe('reflect: kill criteria', () => {
     expect(reflect).toContain('30%');
   });
 
-  test('reflect: kill criteria invokes proposal-metrics-report.ts for procedure-capture', () => {
-    expect(reflect).toContain('proposal-metrics-report.ts');
+  test('reflect: kill criteria invokes the metrics verb for procedure-capture', () => {
+    expect(reflect).toContain('proposal.ts metrics');
   });
 
   test('reflect: kill criteria passes --source=procedure-capture to report script', () => {
@@ -164,7 +164,7 @@ describe('proposal-create: ## Skill Draft variant', () => {
   });
 
   test('proposal-create: triage-verdict emission carries tags (segments triage-survival)', () => {
-    // Emitted by record-gate.ts (tests/scripts.test.ts describe('record-gate') guards
+    // Emitted by the gate verb (tests/scripts.test.ts describe('proposal gate') guards
     // the field lands in the actual event); this guards the call site passes `--tags`.
     expect(proposalCreate).toContain("--tags '[<caller-supplied tags>]'");
   });

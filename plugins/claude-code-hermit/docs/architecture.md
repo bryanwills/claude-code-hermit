@@ -187,7 +187,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/channel-log.sqlite`     | channel-reply-reminder stage + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
 | `state/session-diff.json`      | session-diff.ts only                                | session-close (display)                                       |
 | `state/observations.jsonl`     | reflect + reflect-precheck + session-close + channel-responder (append only; `source` values: `cost-spike`, `quick-deferral`, `reflect-noticed`, `startup-drift`, `skill-correction`) | reflect (step 3b graduation), reflection-judge (§1.4 ledger verification) |
-| `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal-metrics-report.ts (read-only)   |
+| `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal.ts metrics (read-only)   |
 | `state/usage-metrics.jsonl`    | usage-track.ts (Skill/Read PostToolUse) + record-operator-action.ts (operator-typed `/skill`, append only; compacted >180d by weekly-review) | weekly-review (untouched-knowledge/dormant-skill suggestions) |
 | `state/micro-proposals.json`   | reflect + channel-bridged skills (queue, schema owned by reflect § Queuing procedure) + channel-responder/brief (resolve) | brief, generate-summary.ts |
 | `state/state-summary.md`       | generate-summary.ts only                            | humans                                                        |

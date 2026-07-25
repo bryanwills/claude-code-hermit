@@ -1,12 +1,13 @@
-#!/usr/bin/env bun
 // Evaluate or validate a success_signal predicate for a hermit proposal.
 //
-// Validate mode (grammar check only — no state reads):
-//   bun eval-success-signal.ts --validate "<predicate>"
-//   Exits 0 + prints "OK" if valid. Exits 1 + prints a reason if invalid.
+// Validate mode (grammar check only — no state reads, so no state dir):
+//   proposal.ts success-signal --validate "<predicate>"
+//   Exits 0 + prints "OK" if valid. Exits 1 + prints a reason if invalid — callers
+//   (proposal-create, proposal-act) branch on that exit code, so it must stay
+//   non-zero even though every other proposal.ts verb exits 0.
 //
 // Evaluate mode (check predicate against session reports):
-//   bun eval-success-signal.ts <stateDir> "<accepted_date>" "<accepted_in_session|null>" "<predicate>"
+//   proposal.ts success-signal <stateDir> "<accepted_date>" "<accepted_in_session|null>" "<predicate>"
 //   Prints one JSON line:
 //     {"verdict":"MET|UNMET|INSUFFICIENT_DATA","metric":"...","op":"...","threshold":N,"window":N,"observed":N,"sessions_counted":N}
 //   Never throws — any failure emits INSUFFICIENT_DATA.
@@ -16,7 +17,7 @@
 //   OP in {<, <=, >, >=}; NUMBER positive float; N positive integer.
 
 import path from 'node:path';
-import { readFrontmatter, globDir } from './lib/frontmatter';
+import { readFrontmatter, globDir } from '../frontmatter';
 
 type Json = any;
 
@@ -174,18 +175,17 @@ function runEvaluate(stateDir: string, acceptedDateStr: string, acceptedInSessio
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-function main() {
-  const args = process.argv.slice(2);
+export function run(args: string[]): void {
   if (args[0] === '--validate') {
     if (args.length < 2) {
-      process.stdout.write('usage: eval-success-signal.ts --validate "<predicate>"\n');
+      process.stdout.write('usage: proposal.ts success-signal --validate "<predicate>"\n');
       process.exit(1);
     }
     runValidate(args.slice(1).join(' '));
   } else {
     if (args.length < 4) {
       process.stdout.write(
-        'usage: eval-success-signal.ts <stateDir> "<accepted_date>" "<accepted_in_session|null>" "<predicate>"\n'
+        'usage: proposal.ts success-signal <stateDir> "<accepted_date>" "<accepted_in_session|null>" "<predicate>"\n'
       );
       // Fail open — emit INSUFFICIENT_DATA so reflect doesn't crash.
       emitInsufficient(null);
@@ -194,8 +194,4 @@ function main() {
     const [stateDir, acceptedDate, acceptedInSession, ...rest] = args;
     runEvaluate(stateDir, acceptedDate, acceptedInSession, rest.join(' '));
   }
-}
-
-if (import.meta.main) {
-  main();
 }

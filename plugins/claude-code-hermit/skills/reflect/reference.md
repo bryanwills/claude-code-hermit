@@ -38,7 +38,7 @@ Run this step only if `resolution_check` is listed in `phases_json`.
 
    **If `success_signal` is non-null** — run the predicate:
    ```
-   bun <plugin_root>/scripts/eval-success-signal.ts .claude-code-hermit "<accepted_date>" "<accepted_in_session|null>" "<success_signal>"
+   bun <plugin_root>/scripts/proposal.ts success-signal .claude-code-hermit "<accepted_date>" "<accepted_in_session|null>" "<success_signal>"
    ```
    Parse the one JSON line on stdout. Branch on `verdict`:
    - `INSUFFICIENT_DATA` → skip; add nothing to `resolution_actions` for this proposal.

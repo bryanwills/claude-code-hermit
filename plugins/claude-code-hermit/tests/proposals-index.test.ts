@@ -1,4 +1,4 @@
-// proposals-index.ts — derived-cache correctness + hook-dispatch wiring.
+// proposal.ts index / lib/proposals/index-rebuild.ts — derived-cache correctness + hook-dispatch wiring.
 // The index replaces reading every PROP-*.md body (~22K tokens) with a single
 // frontmatter mirror, and becomes the single source of proposal counts.
 //
@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { rebuildIndex } from '../scripts/proposals-index';
+import { rebuildIndex } from '../scripts/lib/proposals/index-rebuild';
 import { runScript } from './helpers/run';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
@@ -93,14 +93,14 @@ describe('CLI verdict', () => {
   test('OK|<n> proposals with a proposals dir', async () => {
     const dir = makeDir();
     writeProposal(dir, 'PROP-001-a-120000.md', fm({ status: 'proposed' }) + '# Proposal: PROP-001 — A\n');
-    const r = await runScript('proposals-index.ts', { args: ['.claude-code-hermit'], cwd: dir });
+    const r = await runScript('proposal.ts', { args: ['index', '.claude-code-hermit'], cwd: dir });
     expect(r.stdout.trim()).toBe('OK|1 proposals');
   });
 
   test('SKIP|no proposals dir when absent', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-noprop-'));
     fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
-    const r = await runScript('proposals-index.ts', { args: ['.claude-code-hermit'], cwd: dir });
+    const r = await runScript('proposal.ts', { args: ['index', '.claude-code-hermit'], cwd: dir });
     expect(r.stdout.trim()).toBe('SKIP|no proposals dir');
   });
 });

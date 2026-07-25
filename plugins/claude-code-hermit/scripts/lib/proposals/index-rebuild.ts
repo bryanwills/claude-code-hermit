@@ -1,9 +1,7 @@
-// proposals-index.ts — derived cache of every proposal's frontmatter.
-// Usage: bun proposals-index.ts <hermit-state-dir>
-// Output (stdout, one line): OK|<n> proposals  |  SKIP|no proposals dir
-// Exit 0 always. Writes state/proposals-index.json (full rebuild — never
-// incremental, so it cannot drift). Also exported as rebuildIndex() for the
-// generate-summary PostToolUse hook to call on every proposal write.
+// Derived cache of every proposal's frontmatter. Writes state/proposals-index.json
+// (full rebuild — never incremental, so it cannot drift). Driven by `proposal.ts
+// index`, and imported directly by the generate-summary PostToolUse hook and
+// lib/dashboard.ts, which call rebuildIndex() on every proposal write.
 //
 // Why this exists: proposal-list otherwise reads every PROP-*.md body in full
 // (~22K tokens for a dozen proposals) just to render a table from frontmatter.
@@ -11,10 +9,14 @@
 // reflection-state.json still tally proposal events independently from
 // proposal-metrics.jsonl — those are event counters, a different quantity, and
 // were not migrated onto this index.)
+//
+// Named index-rebuild, not index: a bare `index.ts` here would make
+// `import … from './lib/proposals'` silently resolve to this module.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readFileWithFrontmatter, globDir } from './lib/frontmatter';
+import { readFileWithFrontmatter, globDir } from '../frontmatter';
+import { emit } from '../cli';
 
 type Json = any;
 
@@ -138,11 +140,8 @@ export function rebuildIndex(stateDir: string, bodyOut?: Map<string, string>): P
   return index;
 }
 
-// CLI mode
-if (import.meta.main) {
-  const stateDir = process.argv[2];
-  if (!stateDir) { process.stdout.write('SKIP|no state dir\n'); process.exit(0); }
+// `proposal.ts index <stateDir>` — full rebuild, one bounded verdict line.
+export function run(stateDir: string): never {
   const index = rebuildIndex(stateDir);
-  process.stdout.write(index ? `OK|${index.count} proposals\n` : 'SKIP|no proposals dir\n');
-  process.exit(0);
+  emit(index ? `OK|${index.count} proposals` : 'SKIP|no proposals dir');
 }

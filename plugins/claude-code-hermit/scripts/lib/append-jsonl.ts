@@ -1,6 +1,6 @@
 // Shared validated-append primitive for JSONL event ledgers (proposal-metrics.jsonl,
 // observations.jsonl, micro-proposals.json's metrics companion, etc). Extracted from
-// append-metrics.ts so record-gate.ts and queue-micro-proposal.ts can append
+// append-metrics.ts so proposal.ts's gate and queue-micro verbs can append
 // pre-built events through the same validate-then-append contract instead of
 // re-implementing it.
 

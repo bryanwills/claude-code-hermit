@@ -1,3 +1,7 @@
+// `proposal.ts metrics [<stateDir>] [--source=<key>]` — triage-survival and
+// acceptance rates per autonomous proposal source. The state dir is optional and
+// defaults to `.claude-code-hermit`, so a bare `proposal.ts metrics` still works.
+
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -40,8 +44,7 @@ const SEGMENTS: { key: string; triage: (e: Json) => boolean; accept: ((src: stri
   },
 ];
 
-function run() {
-  const rawArgs = process.argv.slice(2);
+function report(rawArgs: string[]) {
   const posArgs = rawArgs.filter(a => !a.startsWith('--'));
   const stateDir = posArgs[0] || '.claude-code-hermit';
   const sourceArg = (rawArgs.find(a => a.startsWith('--source=')) || '').slice('--source='.length) || null;
@@ -171,9 +174,11 @@ function run() {
   );
 }
 
-try {
-  run();
-} catch (err: any) {
-  process.stdout.write(`proposal-metrics-report: error — ${err.message}\n`);
-  process.exit(0);
+export function run(args: string[]): void {
+  try {
+    report(args);
+  } catch (err: any) {
+    process.stdout.write(`proposal metrics: error — ${err.message}\n`);
+    process.exit(0);
+  }
 }

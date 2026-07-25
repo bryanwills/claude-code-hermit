@@ -1,6 +1,6 @@
-// record-gate.ts — parses one proposal/reflect gate-agent verdict line, appends the
-// corresponding metric event, and returns a routing token.
-// Usage: bun record-gate.ts <hermit-state-dir> --gate <triage|judge> --caller <caller>
+// `proposal.ts gate <stateDir> …` — parses one proposal/reflect gate-agent verdict
+// line, appends the corresponding metric event, and returns a routing token.
+// Usage: proposal.ts gate <hermit-state-dir> --gate <triage|judge> --caller <caller>
 //        [--evidence-source <value>] [--tags <json-array>] <<'HERMIT_GATE'
 //        Title: <candidate title>
 //        Verdict: <the gate agent's verdict line, verbatim>
@@ -25,9 +25,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { appendJsonlLine } from './lib/append-jsonl';
-import { utcISOStamp } from './lib/time';
-import { emit, readStdin } from './lib/cli';
+import { appendJsonlLine } from '../append-jsonl';
+import { utcISOStamp } from '../time';
+import { emit, readStdin } from '../cli';
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -40,9 +40,8 @@ function parseArgs(argv: string[]): Record<string, string> {
   return out;
 }
 
-(async () => {
-  const stateDir = process.argv[2];
-  const flags = parseArgs(process.argv.slice(3));
+export async function run(stateDir: string, args: string[]): Promise<void> {
+  const flags = parseArgs(args);
   const gate = flags.gate; // 'triage' | 'judge'
   const caller = flags.caller ?? 'unknown';
   const evidenceSource = flags['evidence-source'] ?? 'archived-session';
@@ -59,21 +58,17 @@ function parseArgs(argv: string[]): Record<string, string> {
 
   const agent = gate === 'judge' ? 'reflection-judge' : 'proposal-triage';
 
-  if (stateDir) {
-    try { fs.mkdirSync(path.join(stateDir, 'state'), { recursive: true }); } catch { /* appendJsonlLine below reports the real failure */ }
-  }
+  try { fs.mkdirSync(path.join(stateDir, 'state'), { recursive: true }); } catch { /* appendJsonlLine below reports the real failure */ }
 
   function failClosed(): never {
-    if (stateDir) {
-      appendJsonlLine(
-        path.join(stateDir, 'state', 'proposal-metrics.jsonl'),
-        JSON.stringify({ ts: utcISOStamp(), type: 'gate-failed', agent, title }),
-      );
-    }
+    appendJsonlLine(
+      path.join(stateDir, 'state', 'proposal-metrics.jsonl'),
+      JSON.stringify({ ts: utcISOStamp(), type: 'gate-failed', agent, title }),
+    );
     emit('GATE_FAILED');
   }
 
-  if (!stateDir || (gate !== 'triage' && gate !== 'judge') || !verdictLine) failClosed();
+  if ((gate !== 'triage' && gate !== 'judge') || !verdictLine) failClosed();
 
   const ledger = path.join(stateDir, 'state', 'proposal-metrics.jsonl');
 
@@ -106,4 +101,4 @@ function parseArgs(argv: string[]): Record<string, string> {
   if (downgrade) emit(`PROCEED|DOWNGRADE:${downgrade[1]}`);
   if (suppress) emit(`DROP|SUPPRESS:${suppress[1]}`);
   failClosed();
-})();
+}

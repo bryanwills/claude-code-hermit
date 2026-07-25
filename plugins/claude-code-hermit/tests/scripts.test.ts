@@ -1326,58 +1326,58 @@ describe('append-metrics (dual-mode)', () => {
 });
 
 // -------------------------------------------------------
-// resolve-prop.ts (subprocess — PROP-id fuzzy resolution)
+// proposal.ts resolve-id (subprocess — PROP-id fuzzy resolution)
 // -------------------------------------------------------
 
-describe('resolve-prop', () => {
+describe('proposal resolve-id', () => {
   function seedProposal(dir: string, filename: string, title: string) {
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
     write(hermit(dir, 'proposals', filename), `---\ntitle: ${title}\n---\nbody\n`);
   }
   async function resolveProp(dir: string, input: string) {
-    const r = await runScript('resolve-prop.ts', { args: [hermit(dir), input] });
+    const r = await runScript('proposal.ts', { args: ['resolve-id', hermit(dir), input] });
     expect(r.exitCode).toBe(0);
     return r.stdout.trimEnd();
   }
 
-  test('resolve-prop (legacy exact match)', withDir(async (dir) => {
+  test('resolve-id (legacy exact match)', withDir(async (dir) => {
     seedProposal(dir, 'PROP-007.md', 'Legacy');
     expect(await resolveProp(dir, 'prop-7')).toBe('MATCH|PROP-007.md');
   }));
 
-  test('resolve-prop (new-format bare-id match)', withDir(async (dir) => {
+  test('resolve-id (new-format bare-id match)', withDir(async (dir) => {
     seedProposal(dir, 'PROP-006-capability-brainstorm-103612.md', 'Foo');
     expect(await resolveProp(dir, 'PROP-6')).toBe('MATCH|PROP-006-capability-brainstorm-103612.md');
   }));
 
-  test('resolve-prop (suffix match, lowercase input against lowercase slug)', withDir(async (dir) => {
+  test('resolve-id (suffix match, lowercase input against lowercase slug)', withDir(async (dir) => {
     seedProposal(dir, 'PROP-006-capability-brainstorm-103612.md', 'Foo');
     expect(await resolveProp(dir, 'prop-006-capability-brainstorm-103612'))
       .toBe('MATCH|PROP-006-capability-brainstorm-103612.md');
   }));
 
-  test('resolve-prop (suffix match, timestamp-only input)', withDir(async (dir) => {
+  test('resolve-id (suffix match, timestamp-only input)', withDir(async (dir) => {
     seedProposal(dir, 'PROP-006-capability-brainstorm-103612.md', 'Foo');
     expect(await resolveProp(dir, 'PROP-006-103612')).toBe('MATCH|PROP-006-capability-brainstorm-103612.md');
   }));
 
-  test('resolve-prop (4-digit NNN never collides with 3-digit bare id)', withDir(async (dir) => {
+  test('resolve-id (4-digit NNN never collides with 3-digit bare id)', withDir(async (dir) => {
     // PROP-006 must not match PROP-0061.md once proposal counts cross 1000.
     seedProposal(dir, 'PROP-0061.md', 'Collision');
     expect(await resolveProp(dir, 'PROP-6')).toBe('NONE|no-match');
   }));
 
-  test('resolve-prop (0 matches)', withDir(async (dir) => {
+  test('resolve-id (0 matches)', withDir(async (dir) => {
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
     expect(await resolveProp(dir, 'PROP-999')).toBe('NONE|no-match');
   }));
 
-  test('resolve-prop (not a PROP id)', withDir(async (dir) => {
+  test('resolve-id (not a PROP id)', withDir(async (dir) => {
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
     expect(await resolveProp(dir, 'hello')).toBe('NONE|not-a-prop-id');
   }));
 
-  test('resolve-prop (2+ matches — AMBIGUOUS carries file + title)', withDir(async (dir) => {
+  test('resolve-id (2+ matches — AMBIGUOUS carries file + title)', withDir(async (dir) => {
     seedProposal(dir, 'PROP-006-capability-brainstorm-103612.md', 'Foo');
     seedProposal(dir, 'PROP-006-something-else-110000.md', 'Bar');
     const out = await resolveProp(dir, 'PROP-6');
@@ -1391,15 +1391,15 @@ describe('resolve-prop', () => {
 });
 
 // -------------------------------------------------------
-// record-gate.ts (subprocess — gate-verdict parsing + metric append + routing)
+// proposal.ts gate (subprocess — gate-verdict parsing + metric append + routing)
 // -------------------------------------------------------
 
-describe('record-gate', () => {
+describe('proposal gate', () => {
   async function gate(dir: string, opts: { gate: 'triage' | 'judge'; caller?: string; evidenceSource?: string; tags?: string[] }, title: string, verdict: string) {
-    const args = [hermit(dir), '--gate', opts.gate, '--caller', opts.caller ?? 'reflect'];
+    const args = ['gate', hermit(dir), '--gate', opts.gate, '--caller', opts.caller ?? 'reflect'];
     if (opts.evidenceSource) args.push('--evidence-source', opts.evidenceSource);
     if (opts.tags) args.push('--tags', JSON.stringify(opts.tags));
-    const r = await runScript('record-gate.ts', { args, stdin: `Title: ${title}\nVerdict: ${verdict}\n` });
+    const r = await runScript('proposal.ts', { args, stdin: `Title: ${title}\nVerdict: ${verdict}\n` });
     expect(r.exitCode).toBe(0);
     return r.stdout.trim();
   }
@@ -1409,7 +1409,7 @@ describe('record-gate', () => {
     return fs.readFileSync(p, 'utf-8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
   }
 
-  test('record-gate (triage CREATE -> PROCEED + triage-verdict event)', withDir(async (dir) => {
+  test('gate (triage CREATE -> PROCEED + triage-verdict event)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'triage', caller: 'proposal-create', evidenceSource: 'capability-brainstorm', tags: ['capability-brainstorm'] }, 'Foo', 'CREATE: Foo');
     expect(out).toBe('PROCEED|CREATE');
     const lines = ledgerLines(dir);
@@ -1417,68 +1417,68 @@ describe('record-gate', () => {
     expect(lines[0]).toMatchObject({ type: 'triage-verdict', verdict: 'CREATE', caller: 'proposal-create', evidence_source: 'capability-brainstorm', tags: ['capability-brainstorm'] });
   }));
 
-  test('record-gate (triage SUPPRESS -> DROP with code)', withDir(async (dir) => {
+  test('gate (triage SUPPRESS -> DROP with code)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'triage' }, 'Foo', 'SUPPRESS: Foo — weak-recurrence: one-off ("excerpt")');
     expect(out).toBe('DROP|SUPPRESS:weak-recurrence');
     expect(ledgerLines(dir)[0]).toMatchObject({ type: 'triage-verdict', verdict: 'SUPPRESS' });
   }));
 
-  test('record-gate (triage DUPLICATE -> DROP with PROP-ID)', withDir(async (dir) => {
+  test('gate (triage DUPLICATE -> DROP with PROP-ID)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'triage' }, 'Foo', 'DUPLICATE: Foo — PROP-019: same problem');
     expect(out).toBe('DROP|DUPLICATE:PROP-019');
     expect(ledgerLines(dir)[0]).toMatchObject({ type: 'triage-verdict', verdict: 'DUPLICATE' });
   }));
 
-  test('record-gate (triage garbled verdict -> GATE_FAILED + gate-failed event)', withDir(async (dir) => {
+  test('gate (triage garbled verdict -> GATE_FAILED + gate-failed event)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'triage' }, 'Foo', 'garbled nonsense');
     expect(out).toBe('GATE_FAILED');
     expect(ledgerLines(dir)[0]).toMatchObject({ type: 'gate-failed', agent: 'proposal-triage', title: 'Foo' });
   }));
 
-  test('record-gate (judge ACCEPT -> PROCEED, no ledger event)', withDir(async (dir) => {
+  test('gate (judge ACCEPT -> PROCEED, no ledger event)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'judge' }, 'Bar', 'ACCEPT: Bar');
     expect(out).toBe('PROCEED|ACCEPT');
     expect(ledgerLines(dir)).toHaveLength(0);
   }));
 
-  test('record-gate (judge ACCEPT with source tag)', withDir(async (dir) => {
+  test('gate (judge ACCEPT with source tag)', withDir(async (dir) => {
     expect(await gate(dir, { gate: 'judge' }, 'Bar', 'ACCEPT (current-session): Bar')).toBe('PROCEED|ACCEPT');
   }));
 
-  test('record-gate (judge DOWNGRADE -> PROCEED with tier)', withDir(async (dir) => {
+  test('gate (judge DOWNGRADE -> PROCEED with tier)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'judge' }, 'Bar', 'DOWNGRADE:2: Bar — auto-closed-evidence');
     expect(out).toBe('PROCEED|DOWNGRADE:2');
   }));
 
-  test('record-gate (judge DOWNGRADE quarantine — tier passes through as-is)', withDir(async (dir) => {
+  test('gate (judge DOWNGRADE quarantine — tier passes through as-is)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'judge' }, 'Bar', 'DOWNGRADE:3 (current-session): Bar — quarantine: external origin');
     expect(out).toBe('PROCEED|DOWNGRADE:3');
   }));
 
-  test('record-gate (judge SUPPRESS -> DROP with code, no ledger event)', withDir(async (dir) => {
+  test('gate (judge SUPPRESS -> DROP with code, no ledger event)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'judge' }, 'Bar', 'SUPPRESS: Bar — no-sessions: no cross-session evidence cited');
     expect(out).toBe('DROP|SUPPRESS:no-sessions');
     expect(ledgerLines(dir)).toHaveLength(0);
   }));
 
-  test('record-gate (judge empty verdict -> GATE_FAILED + gate-failed event tagged reflection-judge)', withDir(async (dir) => {
+  test('gate (judge empty verdict -> GATE_FAILED + gate-failed event tagged reflection-judge)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'judge' }, 'Bar', '');
     expect(out).toBe('GATE_FAILED');
     expect(ledgerLines(dir)[0]).toMatchObject({ type: 'gate-failed', agent: 'reflection-judge', title: 'Bar' });
   }));
 
-  test('record-gate (invalid --gate value -> GATE_FAILED)', withDir(async (dir) => {
+  test('gate (invalid --gate value -> GATE_FAILED)', withDir(async (dir) => {
     const out = await gate(dir, { gate: 'bogus' as any }, 'Foo', 'CREATE: Foo');
     expect(out).toBe('GATE_FAILED');
   }));
 
-  test('record-gate (missing state/ subdir does not crash — creates it before appending)', async () => {
+  test('gate (missing state/ subdir does not crash — creates it before appending)', async () => {
     // Regression: appendJsonlLine's fs.appendFileSync throws ENOENT if state/ doesn't
     // exist yet, which would violate this script's own "Exit 0 always" contract.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'record-gate-nodir-'));
     try {
-      const r = await runScript('record-gate.ts', {
-        args: [dir, '--gate', 'triage', '--caller', 'test'],
+      const r = await runScript('proposal.ts', {
+        args: ['gate', dir, '--gate', 'triage', '--caller', 'test'],
         stdin: 'Title: Foo\nVerdict: CREATE: Foo\n',
       });
       expect(r.exitCode).toBe(0);
@@ -1492,16 +1492,16 @@ describe('record-gate', () => {
 });
 
 // -------------------------------------------------------
-// queue-micro-proposal.ts (subprocess — MP-id generation + dedup + queue write)
+// proposal.ts queue-micro (subprocess — MP-id generation + dedup + queue write)
 // -------------------------------------------------------
 
-describe('queue-micro-proposal', () => {
+describe('proposal queue-micro', () => {
   function seed(dir: string) {
     write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
   }
   async function queue(dir: string, payload: any) {
-    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: JSON.stringify(payload) });
+    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify(payload) });
     expect(r.exitCode).toBe(0);
     return r.stdout.trim();
   }
@@ -1509,7 +1509,7 @@ describe('queue-micro-proposal', () => {
     return readJson(hermit(dir, 'state', 'micro-proposals.json'));
   }
 
-  test('queue-micro-proposal (first entry of the day is N=0)', withDir(async (dir) => {
+  test('queue-micro (first entry of the day is N=0)', withDir(async (dir) => {
     seed(dir);
     const out = await queue(dir, { tier: 1, question: 'For 3 weeks I added the same hashtags. Automate it? Yes / No' });
     expect(out).toMatch(/^QUEUED\|MP-\d{8}-0$/);
@@ -1518,7 +1518,7 @@ describe('queue-micro-proposal', () => {
     expect(micro.pending[0]).toMatchObject({ tier: 1, status: 'pending', follow_up_count: 0 });
   }));
 
-  test('queue-micro-proposal (N increments within the same day)', withDir(async (dir) => {
+  test('queue-micro (N increments within the same day)', withDir(async (dir) => {
     seed(dir);
     const out1 = await queue(dir, { tier: 1, question: 'Question A' });
     const out2 = await queue(dir, { tier: 2, question: 'Question B' });
@@ -1527,7 +1527,7 @@ describe('queue-micro-proposal', () => {
     expect(n2).toBe(n1 + 1);
   }));
 
-  test('queue-micro-proposal (dedup by exact question match)', withDir(async (dir) => {
+  test('queue-micro (dedup by exact question match)', withDir(async (dir) => {
     seed(dir);
     const out1 = await queue(dir, { tier: 1, question: 'Same question here' });
     const id1 = out1.split('|')[1];
@@ -1536,7 +1536,7 @@ describe('queue-micro-proposal', () => {
     expect(microFile(dir).pending).toHaveLength(1);
   }));
 
-  test('queue-micro-proposal (on_resolve forces tier 1 and tags the event kind:ask)', withDir(async (dir) => {
+  test('queue-micro (on_resolve forces tier 1 and tags the event kind:ask)', withDir(async (dir) => {
     seed(dir);
     await queue(dir, { tier: 3, question: 'Bridged Q?', options: ['a', 'b'], on_resolve: '/skill accept {answer}' });
     const entry = microFile(dir).pending[0];
@@ -1547,7 +1547,7 @@ describe('queue-micro-proposal', () => {
     expect(ledger[0]).toMatchObject({ type: 'micro-queued', tier: 1, kind: 'ask' });
   }));
 
-  test('queue-micro-proposal (preserves existing pending entries on write)', withDir(async (dir) => {
+  test('queue-micro (preserves existing pending entries on write)', withDir(async (dir) => {
     seed(dir);
     write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [{ id: 'MP-20260101-0', tier: 1, status: 'pending', follow_up_count: 0, ts: '2026-01-01T00:00:00Z', question: 'Old question' }] }));
     await queue(dir, { tier: 1, question: 'New question' });
@@ -1556,31 +1556,31 @@ describe('queue-micro-proposal', () => {
     expect(pending[0].id).toBe('MP-20260101-0');
   }));
 
-  test('queue-micro-proposal (missing question -> exit 1, no write)', withDir(async (dir) => {
+  test('queue-micro (missing question -> exit 1, no write)', withDir(async (dir) => {
     seed(dir);
-    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: JSON.stringify({ tier: 1 }) });
+    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify({ tier: 1 }) });
     expect(r.exitCode).toBe(1);
   }));
 
-  test('queue-micro-proposal (invalid JSON -> exit 1, no write)', withDir(async (dir) => {
+  test('queue-micro (invalid JSON -> exit 1, no write)', withDir(async (dir) => {
     seed(dir);
-    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: 'not-json' });
+    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: 'not-json' });
     expect(r.exitCode).toBe(1);
   }));
 
-  test('queue-micro-proposal (corrupt existing file -> exit 1, refuses to overwrite)', withDir(async (dir) => {
+  test('queue-micro (corrupt existing file -> exit 1, refuses to overwrite)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
+    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
 
-  test('queue-micro-proposal (parseable file with no `pending` key -> heals, other keys preserved)', withDir(async (dir) => {
+  test('queue-micro (parseable file with no `pending` key -> heals, other keys preserved)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"active":null}');
-    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
+    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
     expect(r.exitCode).toBe(0);
     const micro = readJson(hermit(dir, 'state', 'micro-proposals.json'));
     expect(micro.pending).toHaveLength(1);
@@ -1589,10 +1589,10 @@ describe('queue-micro-proposal', () => {
 });
 
 // -------------------------------------------------------
-// micro-proposal.ts (subprocess — resolve/nudge, issue 649 regression)
+// proposal.ts micro (subprocess — resolve/nudge, issue 649 regression)
 // -------------------------------------------------------
 
-describe('micro-proposal', () => {
+describe('proposal micro', () => {
   function seed(dir: string, pending: any[]) {
     write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending }));
   }
@@ -1607,7 +1607,7 @@ describe('micro-proposal', () => {
 
   test('resolve (issue 649 regression: file stays parseable and holds the surviving entry after removal)', withDir(async (dir) => {
     seed(dir, [entryA, entryB]);
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id, '--action', 'approved'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id, '--action', 'approved'] });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe(`RESOLVED|${entryA.id}|approved`);
     const raw = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
@@ -1619,7 +1619,7 @@ describe('micro-proposal', () => {
 
   test('nudge (increments follow_up_count, leaves other fields intact)', withDir(async (dir) => {
     seed(dir, [entryA]);
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'nudge', entryA.id] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'nudge', entryA.id] });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe(`NUDGED|${entryA.id}|1`);
     const entry = microFile(dir).pending[0];
@@ -1630,7 +1630,7 @@ describe('micro-proposal', () => {
   test('resolve on a corrupt file -> exit 1, file byte-unchanged', withDir(async (dir) => {
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', 'MP-1', '--action', 'approved'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', 'MP-1', '--action', 'approved'] });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1638,7 +1638,7 @@ describe('micro-proposal', () => {
   test('resolve unknown id -> NONE|no-match, exit 0, no write', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', 'MP-does-not-exist', '--action', 'approved'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', 'MP-does-not-exist', '--action', 'approved'] });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('NONE|no-match');
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
@@ -1646,14 +1646,14 @@ describe('micro-proposal', () => {
 
   test('resolve --action answered --answer emits the ledger event shape', withDir(async (dir) => {
     seed(dir, [entryA]);
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id, '--action', 'answered', '--answer', 'session task'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id, '--action', 'answered', '--answer', 'session task'] });
     expect(r.exitCode).toBe(0);
     const events = ledger(dir);
     expect(events[0]).toMatchObject({ type: 'micro-resolved', micro_id: entryA.id, action: 'answered', answer: 'session task', question: entryA.question });
   }));
 
   test('resolve on absent file -> NONE|no-match, exit 0', withDir(async (dir) => {
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', 'MP-anything', '--action', 'approved'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', 'MP-anything', '--action', 'approved'] });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('NONE|no-match');
   }));
@@ -1661,7 +1661,7 @@ describe('micro-proposal', () => {
   test('resolve with missing --action -> exit 1, file unchanged', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id] });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1669,14 +1669,14 @@ describe('micro-proposal', () => {
   test('resolve with the <MP-id> omitted -> exit 1, never a silent NONE|no-match', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', '--action', 'approved'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', '--action', 'approved'] });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).not.toContain('NONE|no-match');
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
 
   test('unknown verb -> exit 1 even when the file is absent', withDir(async (dir) => {
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'expire', 'MP-20260101-0'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'expire', 'MP-20260101-0'] });
     expect(r.exitCode).toBe(1);
     expect(r.stdout).not.toContain('NONE|no-match');
   }));
@@ -1684,7 +1684,7 @@ describe('micro-proposal', () => {
   test('resolve with invalid --action -> exit 1, file unchanged', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id, '--action', 'bogus'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id, '--action', 'bogus'] });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1694,7 +1694,7 @@ describe('micro-proposal', () => {
     const c1 = { id: 'MP-c1', tier: 1, status: 'pending', follow_up_count: 1, question: 'q1' };
     const c2 = { id: 'MP-c2', tier: 1, status: 'pending', follow_up_count: 2, question: 'q2' };
     seed(dir, [c0, c1, c2]);
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
     expect(r.exitCode).toBe(0);
     const verdict = JSON.parse(r.stdout.trim());
     // `tier` is carried through — the brief renders "(tier N)" from the verdict alone.
@@ -1714,7 +1714,7 @@ describe('micro-proposal', () => {
   test('brief-cycle on an all-count-0 queue is a pure read (no write, no ledger)', withDir(async (dir) => {
     seed(dir, [entryA, entryB]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
     expect(r.exitCode).toBe(0);
     const verdict = JSON.parse(r.stdout.trim());
     expect(verdict.new).toHaveLength(2);
@@ -1725,7 +1725,7 @@ describe('micro-proposal', () => {
   }));
 
   test('brief-cycle on an absent file -> empty verdict, exit 0, no write', withDir(async (dir) => {
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
     expect(r.exitCode).toBe(0);
     expect(JSON.parse(r.stdout.trim())).toEqual({ new: [], renudged: [], expired: [] });
     expect(fs.existsSync(hermit(dir, 'state', 'micro-proposals.json'))).toBe(false);
@@ -1734,7 +1734,7 @@ describe('micro-proposal', () => {
   test('brief-cycle on a corrupt file -> exit 1, file byte-unchanged', withDir(async (dir) => {
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -3998,29 +3998,29 @@ describe('channel-log', () => {
 });
 
 // -------------------------------------------------------
-// proposal-metrics-report.ts (subprocess — argv/stdout CLI contract)
+// proposal.ts metrics (subprocess — argv/stdout CLI contract)
 // -------------------------------------------------------
 
-describe('proposal-metrics-report', () => {
+describe('proposal metrics', () => {
   const runReport = async (dir: string, ...extra: string[]) => {
-    const r = await runScript('proposal-metrics-report.ts', { args: [hermit(dir), ...extra] });
+    const r = await runScript('proposal.ts', { args: ['metrics', hermit(dir), ...extra] });
     expect(r.exitCode).toBe(0);
     return r.stdout + r.stderr;
   };
   const metricsFile = (dir: string) => hermit(dir, 'state', 'proposal-metrics.jsonl');
 
   // Missing / empty file — fails open
-  test('proposal-metrics-report (missing file exits 0)', withDir(async (dir) => {
+  test('metrics (missing file exits 0)', withDir(async (dir) => {
     expect(await runReport(dir)).toContain('No proposal metrics');
   }));
 
-  test('proposal-metrics-report (empty file exits 0)', withDir(async (dir) => {
+  test('metrics (empty file exits 0)', withDir(async (dir) => {
     write(metricsFile(dir), '');
     expect(await runReport(dir)).toContain('No proposal metrics');
   }));
 
   // Insufficient sample (<8) — INSUFFICIENT output
-  test('proposal-metrics-report --source (INSUFFICIENT, n<8)', withDir(async (dir) => {
+  test('metrics --source (INSUFFICIENT, n<8)', withDir(async (dir) => {
     // 3 triage-verdicts from brainstorm + 2 created tagged brainstorm, 1 accepted
     write(metricsFile(dir), [
       '{"ts":"2026-01-01T00:00:00Z","type":"triage-verdict","verdict":"CREATE","caller":"proposal-create","evidence_source":"capability-brainstorm","tags":["capability-brainstorm"]}',
@@ -4055,20 +4055,20 @@ describe('proposal-metrics-report', () => {
       }
       lines.push('{"ts":"2026-01-01T02:00:00Z","type":"responded","proposal_id":"PROP-001","action":"accept"}');
       write(metricsFile(wd.dir), lines.join('\n') + '\n');
-      const r = await runScript('proposal-metrics-report.ts', {
-        args: [hermit(wd.dir), '--source=capability-brainstorm'],
+      const r = await runScript('proposal.ts', {
+        args: ['metrics', hermit(wd.dir), '--source=capability-brainstorm'],
       });
       out = r.stdout + r.stderr;
     });
     afterAll(() => wd.cleanup());
 
-    test('proposal-metrics-report --source (survival 40%)', () => {
+    test('metrics --source (survival 40%)', () => {
       expect(out).toContain('triage-survival 40%');
     });
-    test('proposal-metrics-report --source (acceptance 25%)', () => {
+    test('metrics --source (acceptance 25%)', () => {
       expect(out).toContain('acceptance 25%');
     });
-    test('proposal-metrics-report --source (KILL verdict)', () => {
+    test('metrics --source (KILL verdict)', () => {
       expect(out).toContain('KILL');
     });
   });
@@ -4087,24 +4087,24 @@ describe('proposal-metrics-report', () => {
         '{"ts":"2026-01-01T02:00:00Z","type":"responded","proposal_id":"PROP-R1","action":"accept"}',
         '',
       ].join('\n'));
-      const r = await runScript('proposal-metrics-report.ts', { args: [hermit(wd.dir)] });
+      const r = await runScript('proposal.ts', { args: ['metrics', hermit(wd.dir)] });
       out = r.stdout + r.stderr;
     });
     afterAll(() => wd.cleanup());
 
-    test('proposal-metrics-report table (header present)', () => {
+    test('metrics table (header present)', () => {
       expect(out).toContain('Proposal acceptance by source');
     });
-    test('proposal-metrics-report table (reflect row present)', () => {
+    test('metrics table (reflect row present)', () => {
       expect(out).toContain('| reflect |');
     });
-    test('proposal-metrics-report table (capability-brainstorm row present)', () => {
+    test('metrics table (capability-brainstorm row present)', () => {
       expect(out).toContain('| capability-brainstorm |');
     });
   });
 
   // Malformed line is skipped; valid events still counted
-  test('proposal-metrics-report (malformed line skipped)', withDir(async (dir) => {
+  test('metrics (malformed line skipped)', withDir(async (dir) => {
     write(metricsFile(dir), [
       'this is not json at all',
       '{"ts":"2026-01-01T00:01:00Z","type":"triage-verdict","verdict":"CREATE","caller":"reflect"}',
@@ -4114,7 +4114,7 @@ describe('proposal-metrics-report', () => {
   }));
 
   // --source with unknown key reports error gracefully
-  test('proposal-metrics-report (unknown --source key)', withDir(async (dir) => {
+  test('metrics (unknown --source key)', withDir(async (dir) => {
     write(metricsFile(dir),
       '{"ts":"2026-01-01T00:01:00Z","type":"triage-verdict","verdict":"CREATE","caller":"reflect"}\n');
     expect(await runReport(dir, '--source=nonexistent')).toContain('Unknown source key');

@@ -1,6 +1,6 @@
-// queue-micro-proposal.ts — generates an MP-id, dedups, appends a pending entry to
-// state/micro-proposals.json, and logs the micro-queued metric event.
-// Usage: bun queue-micro-proposal.ts <hermit-state-dir> <<'HERMIT_MP'
+// `proposal.ts queue-micro <stateDir>` — generates an MP-id, dedups, appends a
+// pending entry to state/micro-proposals.json, and logs the micro-queued event.
+// Usage: proposal.ts queue-micro <hermit-state-dir> <<'HERMIT_MP'
 //        {"tier":1,"question":"<full question text>","options":["..."],"on_resolve":"..."}
 //        HERMIT_MP
 //   — stdin only (question is free text and may contain apostrophes/quotes; no argv mode).
@@ -17,21 +17,15 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { todayYMD, utcISOStamp } from './lib/time';
-import { appendJsonlLine } from './lib/append-jsonl';
-import { readStdin, readJson } from './lib/cli';
-import { writeFileAtomic } from './lib/md-write';
-import { readMicroProposals } from './lib/micro-proposals-io';
+import { todayYMD, utcISOStamp } from '../time';
+import { appendJsonlLine } from '../append-jsonl';
+import { readStdin, readJson } from '../cli';
+import { writeFileAtomic } from '../md-write';
+import { readMicroProposals } from '../micro-proposals-io';
 
 type Json = any;
 
-(async () => {
-  const stateDir = process.argv[2];
-  if (!stateDir) {
-    console.error("Usage: bun queue-micro-proposal.ts <hermit-state-dir> <<'HERMIT_MP' ... HERMIT_MP");
-    process.exit(1);
-  }
-
+export async function run(stateDir: string): Promise<void> {
   const raw = (await readStdin()).trim();
   let payload: Json;
   try {
@@ -108,4 +102,4 @@ type Json = any;
   }
 
   process.stdout.write(`QUEUED|${id}\n`);
-})();
+}

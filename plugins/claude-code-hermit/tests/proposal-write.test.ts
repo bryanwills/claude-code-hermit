@@ -470,3 +470,55 @@ describe('proposal.ts routine', () => {
     expect(fs.readFileSync(path.join(stateArg(dir), 'config.json'), 'utf-8')).toBe(before);
   }));
 });
+
+// -------------------------------------------------------
+// Dispatch gate — the two absorbed verbs that legitimately take no state dir
+// -------------------------------------------------------
+//
+// Every other verb is refused without one (`!verb || !stateDir` → exit 1), which
+// is what stops a mis-invocation from creating anything. These two are carved
+// out ahead of that guard: `success-signal --validate` is a pure grammar check
+// that reads no state, and `metrics` defaults the state dir. If the carve-out
+// regressed, both would exit 1 with a usage line and their callers — a
+// proposal-create predicate check, a domain brainstorm's kill-criteria check —
+// would read that as a failure verdict.
+
+describe('proposal.ts dispatch gate', () => {
+  test('success-signal --validate needs no state dir; exit code still carries the verdict', async () => {
+    const ok = await runScript('proposal.ts', {
+      args: ['success-signal', '--validate', 'avg_session_cost_usd < 1.5 over 5 sessions'],
+    });
+    expect(ok.exitCode).toBe(0);
+    expect(ok.stdout.trim()).toBe('OK');
+
+    // Non-zero on a bad predicate is load-bearing: proposal-create branches on it.
+    const bad = await runScript('proposal.ts', { args: ['success-signal', '--validate', 'nonsense'] });
+    expect(bad.exitCode).toBe(1);
+    expect(bad.stdout).toContain('invalid grammar');
+  });
+
+  test('metrics needs no state dir — it defaults to .claude-code-hermit', withDir(async (dir) => {
+    const r = await runScript('proposal.ts', { args: ['metrics'], cwd: dir });
+    expect(r.exitCode).toBe(0);
+    // No ledger under the default dir → the fail-open line, not a usage error.
+    expect(r.stdout).toContain('No proposal metrics yet.');
+    expect(r.stderr).not.toContain('Usage:');
+  }));
+
+  test('a verb that does need a state dir is still refused without one', async () => {
+    const r = await runScript('proposal.ts', { args: ['create'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('Usage: bun proposal.ts');
+  });
+});
+
+// `index` is the third carve-out: it was a fail-open derived-cache rebuild before
+// absorption (`SKIP|no state dir`, exit 0) and stays one. Falling through to the
+// generic exit-1 usage guard would read as a real failure to its callers.
+describe('proposal.ts index fail-open contract', () => {
+  test('index with no state dir → SKIP on stdout, exit 0', async () => {
+    const r = await runScript('proposal.ts', { args: ['index'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('SKIP|no state dir');
+  });
+});

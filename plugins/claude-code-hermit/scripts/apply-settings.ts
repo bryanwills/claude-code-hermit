@@ -52,13 +52,8 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/archive-shell.ts*)',
   'Bash(bun */scripts/evaluate-session.ts*)',
   'Bash(bun */scripts/append-metrics.ts*)',
-  'Bash(bun */scripts/resolve-prop.ts*)',
   'Bash(bun */scripts/proposal.ts*)',
-  'Bash(bun */scripts/record-gate.ts*)',
-  'Bash(bun */scripts/queue-micro-proposal.ts*)',
-  'Bash(bun */scripts/micro-proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',
-  'Bash(bun */scripts/proposals-index.ts*)',
   'Bash(bun */scripts/update-reflection-state.ts*)',
   'Bash(bun */scripts/apply-reflection-actions.ts*)',
   'Bash(bun */scripts/transcript-digest.ts*)',
@@ -75,10 +70,14 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/cron-registry.ts*)',
   // Domain plugins reach core's shared scripts through the project-resident
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
-  // cache dir). Space before * is a word boundary — `micro-proposal *` matches
-  // `micro-proposal brief-cycle` but not a `micro-proposal…`-prefixed name.
-  'Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)',
-  'Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)',
+  // cache dir). Pinned to the two verbs they actually need, not a bare
+  // `hermit-run proposal *` — that would also hand them create, patch,
+  // shell-append, next-task and routine, i.e. arbitrary state-dir writes. The
+  // space before * is a word boundary: `proposal micro *` matches
+  // `proposal micro .claude-code-hermit brief-cycle` but not a
+  // `micro…`-prefixed verb.
+  'Bash(.claude-code-hermit/bin/hermit-run proposal micro *)',
+  'Bash(.claude-code-hermit/bin/hermit-run proposal metrics *)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];
@@ -96,6 +95,16 @@ const HERMIT_OBSOLETE = [
   'Bash(bun */scripts/run-with-profile.ts*)',
   'Bash(bun */scripts/suggest-compact.ts*)',
   'Bash(bun */scripts/next-prop-id.ts*)',
+  // Proposal satellites absorbed into proposal.ts verbs — the scripts are gone,
+  // so these grants now name nothing.
+  'Bash(bun */scripts/resolve-prop.ts*)',
+  'Bash(bun */scripts/record-gate.ts*)',
+  'Bash(bun */scripts/queue-micro-proposal.ts*)',
+  'Bash(bun */scripts/micro-proposal.ts*)',
+  'Bash(bun */scripts/proposals-index.ts*)',
+  // …and the two hermit-run routes that pointed at the pre-absorption names.
+  'Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)',
+  'Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)',
 ];
 
 // Sealed autoMode entries — operator-owned policy seeded at attended hatch and

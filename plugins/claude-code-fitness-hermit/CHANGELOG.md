@@ -11,6 +11,7 @@
 - `hatch` no longer tells the operator to `cp .env.example .env`; a `.env.example` does not ship with the plugin.
 
 ### Changed
+- Requires core `>=1.2.34`. Core absorbed its proposal satellites into `proposal.ts` verbs, so the shared route this plugin calls through `bin/hermit-run` is now `proposal metrics …`. `bin/hermit-run` resolves a script by bare filesystem probe, so pairing this version with an older core fails with a misleading "plugin may predate this command" error.
 - `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 - `strava-sync` and `strava-health-check` routines removed — `fitness-brief` (morning + evening) now owns Strava connectivity, activity sync, RPE binding, and Run deep-dive as the plugin's two daily beats.
 - Activity notes carry `cardiac_drift_bpm` in frontmatter; `weekly-patterns` reads it there and falls back to the rendered line for older notes.
