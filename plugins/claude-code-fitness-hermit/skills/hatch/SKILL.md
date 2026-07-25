@@ -60,7 +60,7 @@ Tell the operator:
 
 > "This plugin needs four Strava OAuth credentials in `.env`. If you haven't done this yet:
 >
-> 1. `cp .env.example .env` (or copy the file manually)
+> 1. Create `.env` at the project root
 > 2. Open `.env` and fill in all four values from your Strava developer app:
 >    - `STRAVA_CLIENT_ID` — numeric app ID
 >    - `STRAVA_CLIENT_SECRET` — app secret

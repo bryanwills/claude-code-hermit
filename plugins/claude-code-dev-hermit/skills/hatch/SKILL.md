@@ -283,7 +283,7 @@ Available skills:
   /claude-code-dev-hermit:hatch    — re-run to update settings (idempotent)
   /claude-code-dev-hermit:dev-pr   — push the current branch and open a PR
   /claude-code-dev-hermit:dev-test — run the configured test suite and warm test cache
-  /claude-code-dev-hermit:dev-quality — pre-wrap quality gate (code-review + test re-run)
+  /claude-code-dev-hermit:dev-quality — pre-wrap quality gate (cleanup pass + test re-run)
 
 Conventions are in CLAUDE.md (§Git Safety, §Branch Discipline). [safety]
 Conventions are in CLAUDE.md (§Git Safety, §Branch Discipline,
