@@ -396,8 +396,10 @@ try {
 } catch { /* fail-open */ }
 
 // --- Freshness gate: flip EMPTY→RUN when ledger has rows newer than last_run_at ---
-// Only precheck-written (startup-drift) rows self-trigger because they are written above,
-// before this gate runs. Rows written *during* a run (reflect-noticed, cost-spike) have
+// Only precheck-written rows (startup-drift, cost-spike) self-trigger, because they are
+// written above, before this gate runs — each at most once per pattern, so a standing
+// drift or a spike day forces exactly one RUN, not one per tick. Rows written *during* a
+// run (reflect-noticed, quick-deferral, skill-correction, behavior-digest) have
 // ts ≤ last_run_at on the next tick and do NOT self-trigger — they surface opportunistically.
 if (wroteNewRows) {
   // Rows just appended carry ts = now > last_run_at by construction — skip the re-read.

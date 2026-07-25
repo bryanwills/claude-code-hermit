@@ -329,12 +329,19 @@ function main(argv: string[]): number {
 
   // Opt-in: the digest is a read by default, so an ad-hoc or debugging invocation
   // never leaves rows behind. reflect passes the flag on its scheduled run.
+  //
+  // Fail-open: the row is telemetry, the digest JSON below is the caller's actual
+  // payload. `hermitDir()` fail-opens to a `.claude-code-hermit` that may not exist,
+  // so the append can throw ENOENT — swallowing it keeps a missing state dir from
+  // costing reflect the whole anomaly checklist, not just one row.
   if (args.record) {
-    const pattern = deferLoopPattern(out);
-    if (pattern) {
-      const root = rootOnce();
-      appendObservation(root, { source: 'behavior-digest', pattern, sessionId: resolveSessionId(root) });
-    }
+    try {
+      const pattern = deferLoopPattern(out);
+      if (pattern) {
+        const root = rootOnce();
+        appendObservation(root, { source: 'behavior-digest', pattern, sessionId: resolveSessionId(root) });
+      }
+    } catch { /* fail-open */ }
   }
 
   process.stdout.write(JSON.stringify(out) + '\n');

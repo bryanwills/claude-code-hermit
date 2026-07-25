@@ -76,7 +76,7 @@ This path is intentionally silent: no operator notification on queue or drain �
      skill-correction:<canonical-name>
      HERMIT_OBSERVATION
      ```
-     The row is a bare recurrence counter; the Lessons line carries the reason content. Gated to operator-close — `--auto` skips step 1 and writes no correction rows. No `|| true` needed: the writer answers `ERROR|<reason>` on stdout and still exits 0, so a rejected row can never abort the close.
+     The row is a bare recurrence counter; the Lessons line carries the reason content. Gated to operator-close — `--auto` skips step 1 and writes no correction rows. No `|| true` needed: a *rejected* row answers `ERROR|<reason>` on stdout at exit 0. (A *mis-invocation* — wrong verb, or a missing state dir or source — exits 1 on purpose so a broken call site is loud; read the usage line, fix the call, and carry on. Neither outcome aborts the close.)
    - `Changed:` list of files modified
    - `Artifacts:` if this session produced a durable output, route it by shape:
      - **Evolving subject** the hermit will touch again (a monitored domain, a recurring decision area, accumulated know-how): **update or create** `compiled/topic-<slug>.md`. Merge new findings into the existing sections rather than appending a dated copy; bump `updated`, refresh the one-line `summary`, keep the page under 150 lines (compact older material when merging), and cross-link related pages with `[[wikilinks]]`.

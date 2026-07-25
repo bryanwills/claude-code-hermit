@@ -219,7 +219,7 @@ skill-correction:<canonical-name>
 HERMIT_OBSERVATION
 ```
 
-`<canonical-name>` = the corrected skill's bare `name:` frontmatter (strip any `claude-code-hermit:`/`<plugin>:` prefix, lowercase) — same resolution `session-close` uses. `origin` follows the same sender check as the `[origin: external]` marker above (`external-content` for a non-primary sender, else `own-work`). The writer answers `ERROR|<reason>` on stdout and still exits 0, so a rejected row can never block the reply — no `|| true` needed. At most one row per turn, same as the Findings cap.
+`<canonical-name>` = the corrected skill's bare `name:` frontmatter (strip any `claude-code-hermit:`/`<plugin>:` prefix, lowercase) — same resolution `session-close` uses. `origin` follows the same sender check as the `[origin: external]` marker above (`external-content` for a non-primary sender, else `own-work`). A *rejected* row answers `ERROR|<reason>` on stdout at exit 0, so it can never block the reply — no `|| true` needed. (A *mis-invocation* exits 1 by design; fix the call and continue, never retry blind.) At most one row per turn, same as the Findings cap.
 
 If the correction is a stated preference/recurrence with **no** clearly named skill, keep writing the `## Findings` line as before — do not guess a `<name>` and do not ask the operator to disambiguate mid-reply.
 

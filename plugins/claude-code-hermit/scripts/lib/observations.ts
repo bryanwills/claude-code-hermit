@@ -75,7 +75,13 @@ function observationRow(input: RowInput): { row: Record<string, unknown> } | { e
     source: input.source,
   };
   if (input.origin !== undefined) row.origin = input.origin;
-  if (input.extra) Object.assign(row, input.extra);
+  // `extra` may only widen a row, never rewrite its identity — an extra key named
+  // `source` or `session_id` would otherwise silently forge the very fields this
+  // module exists to own.
+  for (const [k, v] of Object.entries(input.extra ?? {})) {
+    if (k in row) return { error: `reserved-extra-key:${k}` };
+    row[k] = v;
+  }
   return { row };
 }
 
