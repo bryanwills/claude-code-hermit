@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { classifyUpdateEntity, collectPendingUpdates, formatUpdatesStdout } from '../src/update-check';
+import { classifyUpdateEntity, collectPendingUpdates, formatUpdatesStdout, formatUpdatesDigest } from '../src/update-check';
 
 function state(entityId: string, attrs: Record<string, any>, pending = true): Record<string, any> {
   return { entity_id: entityId, state: pending ? 'on' : 'off', attributes: attrs };
@@ -109,4 +109,44 @@ test('formatUpdatesStdout lists individual tiers and aggregates hacs', () => {
   expect(out).toContain('- [core] Home Assistant Core: 2026.6.3 → 2026.7.1 — https://example.com/core');
   expect(out).toContain('- [hacs] 2 HACS updates pending');
   expect(out).not.toContain('frigate');
+});
+
+test('formatUpdatesDigest empty case', () => {
+  expect(formatUpdatesDigest([])).toBe('');
+});
+
+test('formatUpdatesDigest sorts individual updates by tier, ignoring input order', () => {
+  const updates = collectPendingUpdates([
+    state('update.mosquitto_broker', { installed_version: '6.4', latest_version: '6.5', supported_features: 29 }),
+    state('update.home_assistant_supervisor_update', { installed_version: '2026.7.0', latest_version: '2026.7.1' }),
+    state('update.home_assistant_core_update', { installed_version: '2026.6.3', latest_version: '2026.7.1' }),
+    state('update.home_assistant_operating_system_update', { installed_version: '13.0', latest_version: '13.1' }),
+  ]);
+  const out = formatUpdatesDigest(updates);
+  const lines = out.split('\n');
+  expect(lines[0]).toStartWith('[core]');
+  expect(lines[1]).toStartWith('[os]');
+  expect(lines[2]).toStartWith('[supervisor]');
+  // 4th individual update collapses — top 3 shown, mosquitto (addon) is the 4th.
+  expect(lines[3]).toBe('+ 1 more updates pending');
+});
+
+test('formatUpdatesDigest with 3 or fewer individual updates emits no collapse line', () => {
+  const updates = collectPendingUpdates([
+    state('update.home_assistant_core_update', { installed_version: '2026.6.3', latest_version: '2026.7.1' }),
+    state('update.mosquitto_broker', { installed_version: '6.4', latest_version: '6.5', supported_features: 29 }),
+  ]);
+  const out = formatUpdatesDigest(updates);
+  expect(out).not.toContain('more updates pending');
+  expect(out.split('\n').length).toBe(2);
+});
+
+test('formatUpdatesDigest aggregates hacs with singular/plural and excludes it from the top-3 cap', () => {
+  const updates = collectPendingUpdates([
+    state('update.home_assistant_core_update', { installed_version: '2026.6.3', latest_version: '2026.7.1' }),
+    state('update.frigate', { installed_version: '1.0', latest_version: '1.1' }),
+  ]);
+  const out = formatUpdatesDigest(updates);
+  expect(out).toContain('[hacs] 1 HACS update pending');
+  expect(out).not.toContain('more updates pending');
 });

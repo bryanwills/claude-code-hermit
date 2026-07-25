@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `ha updates --digest` emits tier-sorted, top-3-collapsed lines; both briefs consume it instead of rendering the list themselves. Default output is unchanged.
+
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — core's triage gate already records every verdict. Proposals now carry `tags: [capability-brainstorm]` instead of `[domain-brainstorm, ideation]`, so they count toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
