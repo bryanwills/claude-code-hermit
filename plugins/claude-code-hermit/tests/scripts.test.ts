@@ -3259,6 +3259,25 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
     expect(resolved.inherited).toBe(true);
   });
 
+  // One agent can notify more than once, so the id appears on several earlier lines. The hop
+  // must land on the DISPATCH, not on the nearest line that merely contains the id — an earlier
+  // notification is itself a real user entry, so turnPromptText stops there and yields 'other'.
+  test('cost-tracker: a repeat completion notification does not shadow the dispatch', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-auto-close] Invoke /session-close.' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_abc', name: 'Agent', input: {} }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 'toolu_abc', type: 'tool_result', content: 'dispatched' }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> </task-notification>' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 40, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> </task-notification>' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    const resolved = resolveTurnSource(lines, 7);
+    expect(resolved.source).toBe('routine:daily-auto-close');
+    expect(resolved.inherited).toBe(true);
+  });
+
   // The hop must not invent attribution: an operator-dispatched agent's completion stays 'other'.
   test('cost-tracker: completion of an operator-dispatched agent stays other', () => {
     const lines = [

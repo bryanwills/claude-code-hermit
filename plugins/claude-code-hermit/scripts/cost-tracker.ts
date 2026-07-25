@@ -11,7 +11,7 @@ import path from 'node:path';
 import { calculateCost, PRICING } from './lib/pricing';
 import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
-import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, turnPromptText, costLogPath, hermitDir } from './lib/cc-compat';
+import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
@@ -112,6 +112,22 @@ function resolveTurnSource(lines: string[], billedIndex: number): { source: stri
   for (const id of ids) {
     for (let j = prompt.index - 1; j >= 0; j--) {
       if (!lines[j].includes(id)) continue;
+      let e: Json;
+      try { e = JSON.parse(lines[j]); } catch { continue; }
+      // Match the dispatch STRUCTURALLY, not on "this line contains the id". An agent's id
+      // appears on several earlier lines — CC can notify more than once for one task — and a
+      // first-substring-match returns the nearest of those, which is a real user entry, so
+      // turnPromptText stops on the notification itself and classifies 'other'.
+      if (e.type === 'assistant') {
+        // The dispatch site: the entry that emitted the tool_use block carrying this id.
+        // Walks from j exclusive; the fallback below passes j+1 because ITS j is a user entry
+        // that may itself be the dispatching turn's prompt (the Agent tool_result case).
+        if (!toolUseNames(e).some(t => t.id === id)) continue;
+        return { source: classifySource(turnPromptText(lines, j).text), boundaryFound: true, inherited: true };
+      }
+      // A sibling completion notification for the same agent is never the dispatch — keep
+      // walking. Narrow on purpose: every other non-classifying match still stops the scan.
+      if (RE_TASK_ID.test(entryText(e))) continue;
       return { source: classifySource(turnPromptText(lines, j + 1).text), boundaryFound: true, inherited: true };
     }
   }
