@@ -4,7 +4,6 @@
 
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — the call pointed at core's `append-metrics.ts`, unreachable from this plugin, so nothing was ever recorded. Proposals now carry `tags: [capability-brainstorm]` instead, counting toward the brainstorm kill-criteria segment rather than `reflect`'s.
-- `skill-structure` tests now fail on any `${CLAUDE_PLUGIN_ROOT}/scripts/…` reference that doesn't resolve to a shipped script.
 - The `hatch` summary described `/dev-quality` as running code-review; it runs a cleanup pass and only suggests code-review.
 
 ## [0.4.7] - 2026-07-03

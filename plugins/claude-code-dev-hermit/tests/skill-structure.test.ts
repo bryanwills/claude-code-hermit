@@ -80,7 +80,10 @@ for (const { name, gates } of SKILLS) {
 // the gate-shaped skills, while hatch/dev-test/dev-quality also carry refs.
 console.log('\nscript references:');
 const scriptsDir = path.join(import.meta.dir, '..', 'scripts');
-const scriptRefRe = /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([A-Za-z0-9._/-]+)/g;
+// Trailing `.`/`/` are excluded from the capture so a ref at the end of a prose
+// sentence ("… see ${CLAUDE_PLUGIN_ROOT}/scripts/render-append.ts.") doesn't
+// report a bogus dangling ref.
+const scriptRefRe = /\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([A-Za-z0-9._/-]*[A-Za-z0-9_-])/g;
 const danglingRefs: string[] = [];
 let refsChecked = 0;
 
