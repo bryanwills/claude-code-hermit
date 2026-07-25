@@ -63,7 +63,7 @@ When you set `ha_assist_control_enabled: true` in `.claude-code-hermit/config.js
 
 ## Policy Overrides
 
-Configured via environment variables in `.env` (see `.env.example`):
+Configured via environment variables in `.env`:
 
 | Variable                      | Effect                                                     |
 | ----------------------------- | ---------------------------------------------------------- |

@@ -6,6 +6,9 @@
 - `fitness-brief` skill — daily morning/evening brief (`--morning|--evening|--slot <name>`), composed in the operator's configured voice. Morning is forward-looking (readiness + today's plan); evening is backward-looking (today's training, or an earned-rest note, + tomorrow's setup) and takes over `strava-sync`'s activity sync, RPE binding, and Run deep-dive. Flagging is intent-driven prose, not `strava-sync`'s fixed anomaly/fatigue thresholds.
 - Two new routines, `morning-brief` and `evening-brief`, registered by `hatch`.
 
+### Fixed
+- `hatch` no longer tells the operator to `cp .env.example .env`; a `.env.example` does not ship with the plugin.
+
 ### Changed
 - `strava-sync` and `strava-health-check` routines removed — `fitness-brief` (morning + evening) now owns Strava connectivity, activity sync, RPE binding, and Run deep-dive as the plugin's two daily beats.
 

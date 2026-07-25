@@ -3,11 +3,35 @@
 // Claude Code sees (stdin in, exit code/stdout/stderr out, fail-open).
 // Do not convert callers to in-process imports.
 
+import fs from 'node:fs';
 import path from 'node:path';
 
 export const PLUGIN_ROOT = path.resolve(import.meta.dir, '../..');
 export const SCRIPTS_DIR = path.join(PLUGIN_ROOT, 'scripts');
 export const MONOREPO_ROOT = path.resolve(PLUGIN_ROOT, '../..');
+
+// Recursively collect file paths under `root` whose name satisfies `match`.
+// Entries (file or directory) named in `skipDirs` are pruned entirely.
+// Missing `root` returns [].
+export function walkFiles(
+  root: string,
+  match: (name: string) => boolean,
+  skipDirs: ReadonlySet<string> = new Set(),
+): string[] {
+  const out: string[] = [];
+  if (!fs.existsSync(root)) return out;
+  const stack = [root];
+  while (stack.length) {
+    const dir = stack.pop()!;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (skipDirs.has(entry.name)) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (match(entry.name)) out.push(full);
+    }
+  }
+  return out;
+}
 
 export interface RunResult {
   exitCode: number;

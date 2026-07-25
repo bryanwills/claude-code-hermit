@@ -16,7 +16,7 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { PLUGIN_ROOT, MONOREPO_ROOT } from './helpers/run';
+import { PLUGIN_ROOT, MONOREPO_ROOT, walkFiles } from './helpers/run';
 
 // A bare doc ref: `docs/<name>.md` NOT preceded by `/` (URL or ${...}/docs or
 // ../docs), `.` (relative), a word char, `:`, or `}`. The name class allows
@@ -35,17 +35,10 @@ function stateTemplateSurfaces(): string[] {
   const out: string[] = [];
   const pluginsDir = path.join(MONOREPO_ROOT, 'plugins');
   for (const plugin of fs.readdirSync(pluginsDir)) {
-    const root = path.join(pluginsDir, plugin, 'state-templates');
-    if (!fs.existsSync(root)) continue;
-    const stack = [root];
-    while (stack.length) {
-      const dir = stack.pop()!;
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) stack.push(full);
-        else if (entry.name.endsWith('.md') || entry.name.endsWith('.template')) out.push(full);
-      }
-    }
+    out.push(...walkFiles(
+      path.join(pluginsDir, plugin, 'state-templates'),
+      name => name.endsWith('.md') || name.endsWith('.template'),
+    ));
   }
   return out;
 }

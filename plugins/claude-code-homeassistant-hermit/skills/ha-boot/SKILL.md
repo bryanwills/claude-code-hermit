@@ -31,6 +31,6 @@ This skill is the single entry point for this project — it also initializes th
 
 ## If Something Is Missing
 
-- No `.env` or missing token: tell the operator to copy `.env.example` to `.env` and set `HOMEASSISTANT_TOKEN`.
+- No `.env` or missing token: tell the operator to create `.env` at the project root and set `HOMEASSISTANT_TOKEN`.
 - No endpoint: tell the operator to set `HOMEASSISTANT_URL` in `.env`.
 - No language in OPERATOR.md: ask the operator for their preferred locale.

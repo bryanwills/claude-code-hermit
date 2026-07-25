@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Fleet-wide test asserting no plugin's shipped prose references a `.env.example` — no plugin ships one.
+
 ### Fixed
 - Model-composed maintainer-tier notices were sent through the access-gated reply tool and blocked; they now go through the script path.
 
