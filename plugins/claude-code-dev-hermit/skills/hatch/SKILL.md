@@ -91,7 +91,7 @@ Read the plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
 
   This matches the canonical schema core hatch Step 9b writes, so when core hatch later runs its 1.1.1 preservation logic keeps `stamped_at`/`stamped_by` intact and adds `last_updated_at`/`last_updated_by`.
 
-Read `target_file` (treat a missing file as marker-absent — Edit will create the file in the append branch). Look for the marker `<!-- claude-code-dev-hermit: Development Workflow -->` and extract the stamped version from the existing block (if present).
+Read `target_file` (treat a missing file as marker-absent — Edit will create the file in the append branch). Look for the marker `<!-- claude-code-dev-hermit: Development Workflow -->`. Read the stamped version from `.claude-code-hermit/config.json` at `_hermit_versions["claude-code-dev-hermit"]` (treat absent as `null`) — Step 5 of this skill stamps that field at the end of every run, so on re-runs it reflects the version that last wrote the block.
 
 Compare against the run's chosen mode (from Step 2's answer this run) and `prior_hatch_mode` (captured in Step 1, before Step 5 overwrites `hatch_mode`):
 

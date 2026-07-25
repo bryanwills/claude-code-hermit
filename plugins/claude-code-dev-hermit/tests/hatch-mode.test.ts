@@ -130,6 +130,15 @@ if (fs.existsSync(HATCH_SKILL)) {
 
   ok('delegates stray-block migration to hermit-evolve Step 7',
     /hermit-evolve[\s\S]{0,20}Step 7/.test(text));
+
+  // Regression: the version gate used to say "extract the stamped version from
+  // the existing block", but no template or renderer ever wrote a version into
+  // the block, so the gate degenerated to marker-present-only. The stamp lives
+  // in config.json (Step 5 writes it every run) — the gate must read from there.
+  ok('no longer reads a phantom version stamp "from the existing block"',
+    !text.includes('extract the stamped version from the existing block'));
+  ok('reads the stamped version from _hermit_versions in config.json',
+    /_hermit_versions\["claude-code-dev-hermit"\]/.test(text));
 }
 
 process.exit(summary() === 0 ? 0 : 1);

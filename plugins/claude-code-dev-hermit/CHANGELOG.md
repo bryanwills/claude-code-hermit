@@ -5,6 +5,10 @@
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — the call pointed at core's `append-metrics.ts`, unreachable from this plugin, so nothing was ever recorded. Proposals now carry `tags: [capability-brainstorm]` instead, counting toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - The `hatch` summary described `/dev-quality` as running code-review; it runs a cleanup pass and only suggests code-review.
+- `hatch`'s CLAUDE-APPEND version gate said to "extract the stamped version from the existing block", but no template or renderer ever wrote a version into the block — the gate degenerated to marker-present-only, so a plugin version bump alone never refreshed an already-hatched install. It now reads the stamp from `_hermit_versions["claude-code-dev-hermit"]` in `config.json`, which `hatch` itself already writes on every run.
+
+### Changed
+- The CLAUDE-APPEND template gained a closing marker (`<!-- /claude-code-dev-hermit: Development Workflow -->`), placed outside both mode regions so it survives both renderings. Lets core's `hermit-evolve` bound the block exactly instead of a heuristic that used to mistake the template's own `<!-- mode:standard-only -->` annotation for the block marker.
 
 ## [0.4.7] - 2026-07-03
 

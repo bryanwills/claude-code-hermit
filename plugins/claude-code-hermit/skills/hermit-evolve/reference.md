@@ -181,9 +181,11 @@ The target file is determined by `hatch_target` (resolved in Step 1):
 - `hatch_target == "local"` → `CLAUDE.local.md`
 - `hatch_target == "committed"` → `CLAUDE.md`
 
+If `plan.claude_append_ambiguous` is `true`, report `claude-code-hermit block-ambiguous — the marker appears more than once in <target>, manual review needed` and apply no Edit.
+
 If the plan's `claude_append_changed` is `false`, skip this step. If `true`, read `<plugin_root>/state-templates/CLAUDE-APPEND.md` for the new content, then branch on the plan's `claude_append_old_block`:
 
-- **`claude_append_old_block` present** (marker found — replace case): the new content is the marker-onward portion of `CLAUDE-APPEND.md` (from the `<!-- claude-code-hermit: Session Discipline -->` marker to its end; the leading `---` already sits above the marker in the target). Apply a targeted `Edit` to the target file with `old_string` = `claude_append_old_block` (the exact current block) and `new_string` = that marker-onward content. **Do not read the whole target file** — the exact `old_string` is supplied by the plan, and the `---` must not be duplicated.
+- **`claude_append_old_block` present** (marker found — replace case): the new content is the marker-onward portion of `CLAUDE-APPEND.md` — from the `<!-- claude-code-hermit: Session Discipline -->` marker through its closing `<!-- /claude-code-hermit: Session Discipline -->` marker when the template carries one, else to the end of the block (the leading `---` already sits above the marker in the target). Apply a targeted `Edit` to the target file with `old_string` = `claude_append_old_block` (the exact current block) and `new_string` = that marker-onward content. **Do not read the whole target file** — the exact `old_string` is supplied by the plan, and the `---` must not be duplicated.
 - **`claude_append_old_block` absent** (marker not found — append case): append the **full `CLAUDE-APPEND.md` including its leading `---`** to the target file (same as init — the `---` separates the project's content from the block).
 - Report what changed.
 
@@ -196,7 +198,11 @@ For each entry in `plan.siblings`:
 - **Version gap (`up_to_date == false`):**
   - Present: "{name}: upgrading from v{from} to v{to}. Here's what changed:" followed by `changelog_slice` (already bounded to the gap range, oldest-first).
   - **Execute migrations** — within `changelog_slice`, find each version's `### Upgrade Instructions` section and execute every instruction in version order. Same rules as Step 2b: non-interactive default on ambiguous steps; defer if no safe default.
-  - **Sync CLAUDE-APPEND block** — same procedure as Step 6, using `sibling.marker` and `sibling.claude_append_old_block` (replace case) or append case when `old_block` is absent. Apply the Edit **only here, on a version gap**.
+  - **Sync CLAUDE-APPEND block** — apply the Edit **only here, on a version gap**, branching on the sibling's flags first:
+    - `sibling.claude_append_needs_render` → report `<name> block refresh deferred to /<name>:hatch (template requires rendering)`; apply no Edit. Core cannot render a template carrying `mode:` markers — that is the owning plugin's own hatch's job.
+    - `sibling.claude_append_block_missing` → report `<name> block-missing — run /<name>:hatch to install it`; apply no Edit. **Never append a sibling's block** — core has no way to guarantee an append would render it the way the sibling's own hatch does.
+    - `sibling.claude_append_ambiguous` → report `<name> block-ambiguous — the marker appears more than once, manual review needed`; apply no Edit.
+    - Otherwise: same replace procedure as Step 6, using `sibling.marker` and `sibling.claude_append_old_block`.
   - Collect the sibling name for the `--sibling=<name>=<to>` flag in Step 9.
 
 - **No version gap (`up_to_date == true`) + `claude_append_changed == true`:**

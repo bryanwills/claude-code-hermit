@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `hatch` wrote no `config.json` at all, so its CLAUDE-APPEND block was invisible to `hermit-evolve`'s registry-driven sync, and re-running `hatch` skipped unconditionally whenever the marker was already present — contradicting its own frontmatter promise ("re-run to refresh after an upgrade"). `hatch` now stamps `_hermit_versions["hermit-scribe"]` in `config.json` and version-gates the block refresh the same way the other domain hatches do.
+
+### Changed
+- The CLAUDE-APPEND template gained a closing marker (`<!-- /hermit-scribe: Issue Filing -->`), so `hermit-evolve`'s block bounds are exact instead of heuristic.
+
 ## [0.1.0] - 2026-07-06
 
 ### Added

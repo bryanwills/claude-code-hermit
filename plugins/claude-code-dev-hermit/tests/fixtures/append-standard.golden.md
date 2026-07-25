@@ -105,3 +105,4 @@ Tier mapping:
 - Parallel changes across many files: `/batch` (built-in)
 - Diagnostics: `/debug` (built-in)
 - High-stakes review: `/code-review` (built-in)
+<!-- /claude-code-dev-hermit: Development Workflow -->

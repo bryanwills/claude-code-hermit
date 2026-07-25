@@ -31,10 +31,12 @@ describe('CLAUDE-APPEND size budget', () => {
     // to 7,600 for the "Channel voice" rule (~7,532 B), then to 7,700 for the
     // `ROUTINE_DUE` notification-handler line (~7,638 B), then to 7,850 for the
     // unified `channel-send.ts --notice` proactive-notify mechanism replacing the
-    // model-side resolver + reply-tool instruction (~7,795 B) — all deliberate,
-    // reviewed additions, not creep. Keep a small margin above the current size
-    // without reopening the door to unbounded re-bloat.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(7850);
+    // model-side resolver + reply-tool instruction (~7,795 B), then to 7,900 for
+    // the closing `<!-- /claude-code-hermit: Session Discipline -->` marker
+    // (~7,877 B) that makes evolve-plan.ts's block bounds authoritative instead
+    // of heuristic — all deliberate, reviewed additions, not creep. Keep a small
+    // margin above the current size without reopening the door to unbounded re-bloat.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(7900);
   });
 });
 
@@ -44,6 +46,7 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
   // them breaks a cross-reference — the trim must preserve all of them.
   const anchors = [
     '<!-- claude-code-hermit: Session Discipline -->', // evolve marker (block replace)
+    '<!-- /claude-code-hermit: Session Discipline -->', // closing marker (evolve block bounds)
     '## Operator Notification',                        // referenced by reflect + hermit-evolve
     '## Watches',
     '## Knowledge Discipline',
