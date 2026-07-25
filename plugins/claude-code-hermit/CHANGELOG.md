@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Channel-originated harness commands: an exact `/model <arg>`, `/effort <arg>`, `/compact`, or `/clear` from a trusted channel sender is recorded by a new `UserPromptSubmit` hook and typed into the session's pane when the turn ends. Args are passed through to Claude Code rather than checked against a fixed list, so new models and effort levels work without a plugin change.
+- `config.effort` — passed as `--effort` on every `hermit-start`, mirroring `config.model`, so a channel effort change reverts on restart instead of persisting. Ships `null` (no flag, model default); set it to opt into the revert-on-restart guarantee. Not the same lever as `config.env.CLAUDE_CODE_EFFORT_LEVEL`, which pins the session and makes a runtime `/effort` a no-op.
+
 ### Fixed
+- A `/clear` reaching the pane outside the watchdog no longer skips the hermit's own reset bookkeeping. The runtime stamp, `SHELL.md` breadcrumb, and status-cache clear moved to `lib/context-reset.ts`; skipping the cache clear previously let the watchdog fire a spurious `/compact` against a freshly-cleared context.
 - Model-composed maintainer-tier notices were sent through the access-gated reply tool and blocked; they now go through the script path.
 
 ### Changed

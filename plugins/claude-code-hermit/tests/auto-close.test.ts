@@ -499,6 +499,23 @@ describe('record-operator-action: hermit-injected commands stay in sync', () => 
       expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(false);
     }));
   }
+
+  // HAND-WRITTEN on purpose. The sweep above only matches single/double-quoted literals
+  // on a sendKeys line; the harness-command drain injects a template literal
+  // (`/model ${arg}`), which that regex cannot see. Without these cases a dynamic
+  // injection would register as operator presence and suppress auto-close, with no
+  // failing test to warn anyone. Keep in sync with the prefix rules in
+  // record-operator-action.ts.
+  for (const literal of ['/model opus', '/model claude-opus-5[1m]', '/effort high']) {
+    test(`drained harness command "${literal}" is dropped by record-operator-action.ts`, withTmp(async (dir) => {
+      const r = await runScript('record-operator-action.ts', {
+        stdin: JSON.stringify({ prompt: literal }),
+        cwd: dir,
+      });
+      expect(r.exitCode).toBe(0);
+      expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(false);
+    }));
+  }
 });
 
 // -------------------------------------------------------

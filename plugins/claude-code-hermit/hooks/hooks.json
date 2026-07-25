@@ -180,6 +180,18 @@
           {
             "type": "command",
             "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/harness-command-keyword.ts"],
+            "timeout": 3
+          }
+        ],
+        "description": "Record an exact channel /model|/effort|/compact|/clear request to state/pending-harness-command.json, gated by isTrustedController; the Stop hook types it into the pane once the turn ends"
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/shutdown-gate.ts"],
             "timeout": 8
           }
