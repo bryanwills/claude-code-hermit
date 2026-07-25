@@ -28,7 +28,8 @@ import {
   sessionId as payloadSessionId,
 } from './lib/cc-compat';
 import { calculateCost } from './lib/pricing';
-import { classifySource, scanTriggerMarkers, detectModel } from './cost-tracker';
+import { resolveTurnSource, detectModel } from './cost-tracker';
+import { SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
 
 const HERMIT_DIR = hermitDir();
 const COST_LOG = costLogPath(HERMIT_DIR);
@@ -65,7 +66,7 @@ function sumSubagentTranscript(transcriptPath: string): {
 }
 
 // Locate this agent's ASYNC launch entry in the parent transcript. Returns the scanned
-// lines + the launch index (for scanTriggerMarkers source attribution), or null when no
+// lines + the launch index (for resolveTurnSource source attribution), or null when no
 // async-launch marker is present for this agentId → sync dispatch or untracked → don't log.
 //
 // Reads the whole parent (not a tail window): an async parent keeps working while the
@@ -120,7 +121,7 @@ process.stdin.on('end', () => {
     // boundary here just means the launch is in the genuine first turn — no truncation
     // guard needed like cost-tracker.ts's tail-windowed scan.
     let source = 'other';
-    try { source = classifySource(scanTriggerMarkers(launch.lines, launch.index).text); } catch {}
+    try { source = resolveTurnSource(launch.lines, launch.index).source; } catch {}
 
     const model = detectModel(rawModel);
     const estimatedCost = Math.round(
@@ -143,6 +144,7 @@ process.stdin.on('end', () => {
       model_resolved:     !!rawModel,   // subagent transcript always carries a model → effectively always true
       context_usage:      null,
       estimated_cost_usd: estimatedCost,
+      source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
     };
 
     try { fs.appendFileSync(COST_LOG, JSON.stringify(entry) + '\n', 'utf-8'); } catch {}

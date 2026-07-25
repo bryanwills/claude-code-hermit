@@ -3183,31 +3183,31 @@ describe('cost-reflect', () => {
 });
 
 // -------------------------------------------------------
-// cost-tracker: classifySource / scanTriggerMarkers unit tests (in-process)
+// cost-tracker: classifySource / resolveTurnSource unit tests (in-process)
 // -------------------------------------------------------
 
-describe('cost-tracker classifySource / scanTriggerMarkers', () => {
+describe('cost-tracker classifySource / resolveTurnSource', () => {
   // cost-tracker.ts freezes CWD-relative state paths at import time (see the
   // chdir-guarded import in hooks.contract.test.ts). classifySource and
-  // scanTriggerMarkers are pure and never touch those paths, but a plain
+  // resolveTurnSource are pure and never touch those paths, but a plain
   // import here would populate the shared module cache before
   // hooks.contract.test.ts's workdir-pinned import runs (bun executes this
   // file first in a combined run), breaking its getCumulativeCost tests. The
   // query-string specifier forces a separate module instance so the two test
   // files never share cost-tracker state.
   let classifySource: typeof import('../scripts/cost-tracker').classifySource;
-  let scanTriggerMarkers: typeof import('../scripts/cost-tracker').scanTriggerMarkers;
+  let resolveTurnSource: typeof import('../scripts/cost-tracker').resolveTurnSource;
 
   beforeAll(async () => {
     const mod = (await import(
       '../scripts/cost-tracker' + '?scripts-test-pure-fns' // concat keeps tsc from resolving the query path
     )) as typeof import('../scripts/cost-tracker');
-    ({ classifySource, scanTriggerMarkers } = mod);
+    ({ classifySource, resolveTurnSource } = mod);
   });
 
-  test('cost-tracker: exports classifySource and scanTriggerMarkers', () => {
+  test('cost-tracker: exports classifySource and resolveTurnSource', () => {
     expect(typeof classifySource).toBe('function');
-    expect(typeof scanTriggerMarkers).toBe('function');
+    expect(typeof resolveTurnSource).toBe('function');
   });
 
   // classifySource: heartbeat marker
@@ -3313,50 +3313,133 @@ describe('cost-tracker classifySource / scanTriggerMarkers', () => {
     expect(classifySource('<channel source="plugin:a:b:c" chat_id="1">hi</channel>')).toBe('other');
   });
 
-  // scanTriggerMarkers: backward scan finds routine marker past tool_result boundary
-  // Simulates: human([hermit-routine:daily]) → assistant(tool_use) → user(tool_result) → assistant(usage)
-  // The billed entry is the last assistant; scanTriggerMarkers should find the human entry's marker.
-  test('cost-tracker: scanTriggerMarkers finds routine past tool_result', () => {
+  // resolveTurnSource: backward scan finds the routine marker past a tool_result
+  // Simulates: user([hermit-routine:daily]) → assistant(tool_use) → user(tool_result) → assistant(usage)
+  test('cost-tracker: resolveTurnSource finds routine past tool_result', () => {
     const lines = [
       JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily] Read runtime.json. Invoke /reflect.' } }),
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'ok' }] } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    expect(scanTriggerMarkers(lines, 3).text).toContain('[hermit-routine:daily]');
+    expect(resolveTurnSource(lines, 3).source).toBe('routine:daily');
   });
 
-  // scanTriggerMarkers: turn-boundary stops at prior billed assistant
-  // Ensures a routine from a PREVIOUS turn can't bleed into the current turn's source
-  test('cost-tracker: scanTriggerMarkers respects turn boundary', () => {
+  // THE INCIDENT: a routine id appearing in this turn's own TOOL OUTPUT must not capture
+  // the turn. heartbeat-restart's re-arm lists crons, so its CronDelete/CronList output
+  // names concrete routine ids — that is how $3-7 heartbeat-restart turns were billed to
+  // routine:doctor on the live fleet. Classification reads the delivered prompt only.
+  test('cost-tracker: routine id in a tool_result does not capture the turn', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'What is the weather?' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'deleted cron [hermit-routine:doctor]' }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    expect(resolveTurnSource(lines, 3).source).toBe('other');
+  });
+
+  // A routine prompt shadowed by a skill-body injection. CC writes those as isMeta user
+  // entries with ARRAY content; real prompts (routine markers, channel envelopes) are
+  // isMeta too but carry STRING content, so only the array-content ones are skipped.
+  test('cost-tracker: resolveTurnSource sees past a skill-body injection to the routine prompt', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:weekly-review] Invoke /weekly-review.' } }),
+      JSON.stringify({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: 'Base directory for this skill: /plugins/claude-code-hermit/skills/weekly-review' }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    expect(resolveTurnSource(lines, 2).source).toBe('routine:weekly-review');
+  });
+
+  // An isMeta entry with STRING content IS a real delivered prompt — the live shape of a
+  // routine wake. Skipping it (as isTurnTrigger would) loses the attribution entirely.
+  test('cost-tracker: an isMeta string-content routine prompt still classifies', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', isMeta: true, message: { content: '[hermit-routine:morning] First run: log-routine-event.sh morning started' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    expect(resolveTurnSource(lines, 1).source).toBe('routine:morning');
+  });
+
+  // Dispatch hop: a subagent-completion notification carries no marker of its own, but the
+  // ingestion turn is cost caused by whatever dispatched the agent — resolve it through the
+  // tool-use/task id back to the dispatching turn's prompt.
+  test('cost-tracker: subagent-completion turn inherits the dispatching routine', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-auto-close] Invoke /session-close.' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_abc', name: 'Agent', input: {} }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 'toolu_abc', type: 'tool_result', content: 'dispatched' }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> <summary>Agent "daily-auto-close routine" came to rest</summary> </task-notification>' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    const resolved = resolveTurnSource(lines, 5);
+    expect(resolved.source).toBe('routine:daily-auto-close');
+    // Flagged as borrowed from the dispatch, not this turn's own prompt — the cost row
+    // carries source_inherited so $/run doesn't count this second turn as a second fire.
+    expect(resolved.inherited).toBe(true);
+  });
+
+  // One agent can notify more than once, so the id appears on several earlier lines. The hop
+  // must land on the DISPATCH, not on the nearest line that merely contains the id — an earlier
+  // notification is itself a real user entry, so turnPromptText stops there and yields 'other'.
+  test('cost-tracker: a repeat completion notification does not shadow the dispatch', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-auto-close] Invoke /session-close.' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_abc', name: 'Agent', input: {} }] } }),
+      JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 'toolu_abc', type: 'tool_result', content: 'dispatched' }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> </task-notification>' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 40, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> </task-notification>' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    const resolved = resolveTurnSource(lines, 7);
+    expect(resolved.source).toBe('routine:daily-auto-close');
+    expect(resolved.inherited).toBe(true);
+  });
+
+  // The hop must not invent attribution: an operator-dispatched agent's completion stays 'other'.
+  test('cost-tracker: completion of an operator-dispatched agent stays other', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'Please research this for me.' } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_xyz', name: 'Agent', input: {} }] } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>b99</task-id> <tool-use-id>toolu_xyz</tool-use-id> <status>completed</status> </task-notification>' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
+    ];
+    const resolved = resolveTurnSource(lines, 4);
+    expect(resolved.source).toBe('other');
+    expect(resolved.inherited).toBe(true); // hop fired, but it resolved to a real 'other' prompt
+  });
+
+  // Turn-boundary isolation: a routine from a PREVIOUS turn can't bleed into this one.
+  test('cost-tracker: resolveTurnSource respects turn boundary', () => {
     const lines = [
       JSON.stringify({ type: 'user', message: { content: '[hermit-routine:old-routine] prior turn' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 50, output_tokens: 20 } } }),
       JSON.stringify({ type: 'user', message: { content: 'operator message with no marker' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    expect(scanTriggerMarkers(lines, 3).text).not.toContain('[hermit-routine:old-routine]');
+    expect(resolveTurnSource(lines, 3).source).not.toBe('routine:old-routine');
   });
 
-  // scanTriggerMarkers: reaches the marker past an intermediate tool-calling assistant
-  // that ITSELF carries usage — the realistic transcript shape (every API round-trip is
-  // billed). The scan must skip it and stop at the triggering user prompt, not truncate early.
-  test('cost-tracker: scanTriggerMarkers passes intermediate billed assistant', () => {
+  // Reaches the prompt past an intermediate tool-calling assistant that ITSELF carries
+  // usage — the realistic transcript shape (every API round-trip is billed).
+  test('cost-tracker: resolveTurnSource passes intermediate billed assistant', () => {
     const lines = [
       JSON.stringify({ type: 'user', message: { content: '[hermit-routine:reflect] Invoke /reflect.' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 80, output_tokens: 30 }, content: [{ type: 'tool_use', id: 't1', name: 'Skill', input: {} }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'ok' }] } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 }, content: [{ type: 'text', text: 'done' }] } }),
     ];
-    const { text, boundaryFound } = scanTriggerMarkers(lines, 3);
-    expect(text).toContain('[hermit-routine:reflect]');
+    const { source, boundaryFound } = resolveTurnSource(lines, 3);
+    expect(source).toBe('routine:reflect');
     expect(boundaryFound).toBe(true);
-    expect(classifySource(text)).toBe('routine:reflect');
   });
 
-  // Integration: an inbound-channel turn (envelope as the triggering user prompt,
-  // matching the verbatim shape confirmed live on production transcripts) classifies
-  // as channel:discord end-to-end through scanTriggerMarkers + classifySource.
+  // Integration: an inbound-channel turn (envelope as the triggering prompt, matching the
+  // verbatim shape confirmed live on production transcripts) classifies as channel:discord.
   test('cost-tracker: channel-triggered turn classifies as channel:discord end-to-end', () => {
     const lines = [
       JSON.stringify({ type: 'user', message: { content: '<channel source="plugin:discord:discord" chat_id="123" message_id="456" user="op" ts="2026-07-09T10:00:00Z">hi</channel>' } }),
@@ -3364,14 +3447,13 @@ describe('cost-tracker classifySource / scanTriggerMarkers', () => {
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'ok' }] } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    const { text } = scanTriggerMarkers(lines, 3);
-    expect(classifySource(text)).toBe('channel:discord');
+    expect(resolveTurnSource(lines, 3).source).toBe('channel:discord');
   });
 
   // boundaryFound: false when the scan runs off the start of `lines` without hitting the
   // triggering user prompt — simulates a truncated tail window whose turn boundary lies
   // outside the buffer. This is the signal readLastTurnUsage() uses to force 'other'.
-  test('cost-tracker: scanTriggerMarkers boundaryFound is false when the prompt is missing from lines', () => {
+  test('cost-tracker: resolveTurnSource boundaryFound is false when the prompt is missing from lines', () => {
     const lines = [
       // No triggering user entry at all — everything here is tool-calling/billed assistant
       // steps, as if the window were truncated before the real turn start.
@@ -3379,17 +3461,15 @@ describe('cost-tracker classifySource / scanTriggerMarkers', () => {
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'ok' }] } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    const { boundaryFound } = scanTriggerMarkers(lines, 2);
-    expect(boundaryFound).toBe(false);
+    expect(resolveTurnSource(lines, 2).boundaryFound).toBe(false);
   });
 
-  test('cost-tracker: scanTriggerMarkers boundaryFound is true when the triggering prompt is present', () => {
+  test('cost-tracker: resolveTurnSource boundaryFound is true when the triggering prompt is present', () => {
     const lines = [
       JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily] fire' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    const { boundaryFound } = scanTriggerMarkers(lines, 1);
-    expect(boundaryFound).toBe(true);
+    expect(resolveTurnSource(lines, 1).boundaryFound).toBe(true);
   });
 });
 
