@@ -532,6 +532,16 @@ export function extractDrift(body: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+/**
+ * Frontmatter-first drift read. Falls back to the legacy rendered prose line
+ * for notes written before `cardiac_drift_bpm` was in the template.
+ */
+export function readDrift(fm: Record<string, string>, body: string): number | null {
+  const raw = fm.cardiac_drift_bpm?.trim();
+  if (raw !== undefined && /^[+-]?\d+$/.test(raw)) return parseInt(raw, 10);
+  return extractDrift(body);
+}
+
 /** Strict-monotonic increasing across all adjacent pairs. */
 export function isStrictlyIncreasing(values: number[]): boolean {
   for (let i = 1; i < values.length; i++) if (values[i] <= values[i - 1]) return false;
@@ -561,7 +571,7 @@ export function weeklyPatterns(projectRoot: string): {
     const fm = parseFrontmatter(text);
     if (!fm || fm.type !== 'activity-note' || fm.session_kind !== 'steady') continue;
     const body = text.slice(text.indexOf('\n---\n') + 5);
-    steady.push({ file: f, created: fm.created || '', drift: extractDrift(body) });
+    steady.push({ file: f, created: fm.created || '', drift: readDrift(fm, body) });
   }
   // Most-recent-first, take 4.
   steady.sort((a, b) => (a.created < b.created ? 1 : a.created > b.created ? -1 : 0));

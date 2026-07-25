@@ -108,8 +108,6 @@ Interval sessions get work-interval HR progression and between-bout recovery qua
    Coaching: <2–3 sentences>
    ```
 
-   **CRITICAL — the `Cardiac drift: +N bpm` line must render the signed integer with an explicit sign** (`+6`, `-5`). `weekly-coaching-patterns` parses this exact line format from pre-existing artifacts; changing the prefix or dropping the sign breaks the trend detector.
-
 6. Save compiled artifact to `.claude-code-hermit/compiled/activity-<id>-<YYYY-MM-DD>.md`:
 ```yaml
 ---
@@ -125,9 +123,13 @@ terrain: <road|trail>
 session_kind: <interval|steady>
 rpe: <int>                               # include only when RPE data exists from step 1
 subjective_notes: "<string>"             # include only when notes exist from step 1
+cardiac_drift_bpm: <int>                 # include only when drift was computed from step 3
+cardiac_drift_flagged: <bool>            # include only when drift was computed from step 3
 ---
 ```
 Body: the full output above.
+
+**CRITICAL — `cardiac_drift_bpm` must be a bare signed integer** (`6`, `-5`), not a formatted value like `+6 bpm`. `weekly-coaching-patterns` reads this field to build its trend series; renaming the key or writing a non-numeric value breaks the trend detector. It falls back to parsing the body's `Cardiac drift:` line only for notes written before this field existed.
 
 7. Write signal-only coaching observations to `.claude-code-hermit/sessions/SHELL.md` Findings.
 

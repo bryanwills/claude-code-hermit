@@ -12,6 +12,7 @@
 
 ### Changed
 - `strava-sync` and `strava-health-check` routines removed — `fitness-brief` (morning + evening) now owns Strava connectivity, activity sync, RPE binding, and Run deep-dive as the plugin's two daily beats.
+- Activity notes carry `cardiac_drift_bpm` in frontmatter; `weekly-patterns` reads it there and falls back to the rendered line for older notes.
 
 ### Upgrade Instructions
 For already-installed hermits, `hermit-evolve` should:

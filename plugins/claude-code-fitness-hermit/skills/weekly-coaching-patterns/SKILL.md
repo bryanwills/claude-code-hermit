@@ -19,7 +19,7 @@ Scheduled-check skill: reads the last 4 `compiled/activity-*.md` artifacts for s
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/fitness-lab.ts weekly-patterns
    ```
 
-   The script does the whole deterministic pass — filesystem only, no Strava token: globs `.claude-code-hermit/compiled/activity-*.md`, keeps entries whose frontmatter has `type: activity-note` AND `session_kind: steady`, takes the 4 most recent by `created`, extracts the **signed** integer from each body's `Cardiac drift:` line (missing line → excluded; a negative value compares as smaller than any positive — the sign is never stripped), and evaluates a strict oldest-to-newest monotonic rise across all 3 adjacent pairs. It emits:
+   The script does the whole deterministic pass — filesystem only, no Strava token: globs `.claude-code-hermit/compiled/activity-*.md`, keeps entries whose frontmatter has `type: activity-note` AND `session_kind: steady`, takes the 4 most recent by `created`, reads each note's **signed** drift from the `cardiac_drift_bpm` frontmatter field, falling back to the body's `Cardiac drift:` line for notes written before that field existed (neither present → excluded; a negative value compares as smaller than any positive — the sign is never stripped), and evaluates a strict oldest-to-newest monotonic rise across all 3 adjacent pairs. It emits:
 
    ```json
    {"steady_sessions_found": <int>, "series": [{"file": "…", "date": "…", "drift": <signed int>}], "trend": "upward" | "none" | "insufficient-data"}
