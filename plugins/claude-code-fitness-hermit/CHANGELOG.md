@@ -14,6 +14,7 @@
 - `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 - `strava-sync` and `strava-health-check` routines removed — `fitness-brief` (morning + evening) now owns Strava connectivity, activity sync, RPE binding, and Run deep-dive as the plugin's two daily beats.
 - Activity notes carry `cardiac_drift_bpm` in frontmatter; `weekly-patterns` reads it there and falls back to the rendered line for older notes.
+- The CLAUDE-APPEND block dropped the routine and scheduled-check tables (schedules and `enabled` state live in `config.json`) and the five-file state map, which now points at `docs/knowledge-schema.md`. ~3,852 B → ~2,881 B. Connection-first, the secrets rules, the settings-blocked write tools, the `fitness-lab.ts` mediation boundary, the zones rule, and the full-history grounding gotcha are unchanged.
 
 ### Upgrade Instructions
 For already-installed hermits, `hermit-evolve` should:

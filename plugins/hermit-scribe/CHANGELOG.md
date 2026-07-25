@@ -7,6 +7,7 @@
 
 ### Changed
 - The CLAUDE-APPEND template gained a closing marker (`<!-- /hermit-scribe: Issue Filing -->`), so `hermit-evolve`'s block bounds are exact instead of heuristic.
+- The block names "the configured target repo" instead of the `HERMIT_GH_REPO` env var, and states sanitization as a rule rather than naming the subagent that performs it. Filing-through-the-skill and the operator-confirmation rule are unchanged.
 
 ## [0.1.0] - 2026-07-06
 

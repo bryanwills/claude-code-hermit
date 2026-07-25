@@ -2,56 +2,28 @@
 
 ## Laravel Forge
 
-This project uses `laravel-forge-hermit` for Forge operations: deployments, server/site management, and estate health monitoring.
-
----
-
 ### Safety rule — surface-then-approve (read this first)
 
-**Every write operation goes through preview → relay → approve → confirm.** Never auto-confirm a deploy or reboot.
+**Every write operation goes through preview → relay → approve → confirm.** Never auto-confirm a deploy or reboot: run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php preview-deploy <server> <site>` (or `preview-reboot`), relay the canonical target to the operator, wait for explicit approval, then re-run with `--confirm`.
 
-1. Run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php preview-deploy <server> <site>` (or `preview-reboot`).
-2. Relay the **canonical target** (server name, IP, site name, IDs) to the operator.
-3. Wait for explicit approval.
-4. On approval: re-run with `--confirm`.
-
-A wrong reboot causes an outage. A wrong deploy targets the wrong site. The `write-confirm-gate.ts` hook and the in-PHP `--confirm` gate enforce this at two layers — neither can be bypassed.
-
----
+A wrong reboot causes an outage. A wrong deploy targets the wrong site. The `write-confirm-gate.ts` hook and the in-PHP `--confirm` gate enforce this at two layers, with the PHP gate authoritative.
 
 ### Tools
 
-Skills self-advertise through their own `SKILL.md` descriptions — they are not catalogued here. The curated `php forge.php` commands cover the hot paths. For any other SDK read — server events, firewall rules, databases, scheduled jobs, certificates, etc. — use read-only generic dispatch:
+Skills self-advertise through their own `SKILL.md` descriptions — they are not catalogued here. The curated `php forge.php` commands cover the hot paths; run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php --help` for the full catalog. Any other SDK read goes through read-only generic dispatch, which accepts only methods on a closed allowlist and cannot mutate anything. Args are a JSON array on stdin, with IDs as bare numbers (SDK params are typed ints; `strict_types` rejects `"123"`). Never pass the org slug — it is prepended automatically, except for global methods like `organizations`:
 
 ```bash
-# Args as JSON array on stdin — keep IDs as bare numbers, not quoted strings
-# (SDK params are typed ints; strict_types rejects "123"). The org slug is
-# prepended automatically (except global methods like `organizations`).
 echo '[123]' | php ${CLAUDE_PLUGIN_ROOT}/php/forge.php call databases
-echo '[123, 456]' | php ${CLAUDE_PLUGIN_ROOT}/php/forge.php call deployments
-echo '[123]' | php ${CLAUDE_PLUGIN_ROOT}/php/forge.php call backgroundProcesses
 ```
 
-Only read methods on the closed allowlist are accepted — this path cannot mutate anything.
-
----
-
-### Scheduled checks & notifications
-
-The `forge-failed-deploys` scheduled check is analysis-only: it surfaces sites whose latest deployment failed and routes findings through the normal proposal pipeline as `[reliability]` proposals. It sends no channel messages itself.
+### Notifications
 
 Anything operator-facing (deploy success/failure, escalations) is relayed via the **Operator Notification protocol in CLAUDE.md** — do not build a separate notification path.
 
----
-
 ### Credentials
 
-`FORGE_API_TOKEN` lives in the gitignored `.env` at the project root.
-
 - **Never `cat`, `echo`, `grep`, or Read `.env`** to check the token — run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php check` instead. It self-reports `missing`/`invalid`/`unreachable`/`ok` without revealing the value.
-- `TOKEN` appears in the key name: the base hermit's deny-pattern hook blocks any Bash arg containing the literal string `TOKEN`.
-
----
+- Any Bash arg containing the literal string `TOKEN` is blocked by the base hermit's deny-pattern hook.
 
 ### Secret hygiene
 
@@ -61,16 +33,8 @@ Deployment and server logs may contain env dumps, database credentials, and API 
 - Never write raw log content to `compiled/` or `raw/`.
 - Always scrub credential-pattern lines to `[REDACTED]` before sharing or persisting.
 
----
-
 ### Proposal categories
 
-| Prefix | Meaning |
-|---|---|
-| `[reliability]` | recurring failure pattern across the estate |
-| `[hygiene]` | estate drift detected from API signals |
-| `[deploy-safety]` | workflow risk on the deploy or reboot path |
-
----
+`[reliability]` — a recurring failure pattern across the estate.
 
 <!-- /laravel-forge-hermit: Forge Workflow -->

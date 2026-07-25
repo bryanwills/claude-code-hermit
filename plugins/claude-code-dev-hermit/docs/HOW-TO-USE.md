@@ -19,7 +19,7 @@ claude plugin install claude-code-dev-hermit@claude-code-hermit --scope local
 
 The wizard installs `git-push-guard` at strict profile (with an explicit opt-out) and offers companion plugins. It scans the project for existing `/commit`, `/create-pr`, or `/release` skills and chooses a mode:
 
-- **`safety` mode** (default when existing skills are detected) — injects only §Git Safety, §Branch Discipline, and supporting sections. Does not inject §Implementation Flow, §Tests Before PR, or `/dev-pr`/`/dev-quality`/`/dev-test` references. Use this when the project already has its own dev workflow.
+- **`safety` mode** (default when existing skills are detected) — injects only §Git Safety, §Branch Discipline, and supporting sections. Does not inject §Implementation Flow or `/dev-pr`/`/dev-quality`/`/dev-test` references. Use this when the project already has its own dev workflow.
 - **`standard` mode** (default for greenfield) — injects the full workflow and prompts for `commands.test`, lint, format, and PR template. Behavior unchanged from v0.3.1.
 
 **Already set up?** Re-run `/claude-code-dev-hermit:hatch` any time. Every key offers `Keep current (<value>)` as the recommended option, so you can sweep through with Enter-presses to fast-confirm — or change individual values.
@@ -28,7 +28,7 @@ The wizard installs `git-push-guard` at strict profile (with an explicit opt-out
 
 ## The Dev Cycle
 
-After `/hatch`, every code-writing agent in the project reads the rules in your CLAUDE.md (`§Git Safety`, `§Branch Discipline`, `§Implementation Flow`, `§Tests Before PR`). The cycle below is what those rules describe — there's no "dev-hermit workflow"; it's the working agreement every agent follows.
+After `/hatch`, every code-writing agent in the project reads the rules in your CLAUDE.md (`§Git Safety`, `§Branch Discipline`, `§Implementation Flow`). The cycle below is what those rules describe — there's no "dev-hermit workflow"; it's the working agreement every agent follows.
 
 ### 1. Plan
 
@@ -53,7 +53,7 @@ Per `§Implementation Flow`: run the configured test command (`claude-code-dev-h
 
 ### 4. Cleanup pass, then test again
 
-Per `§Tests Before PR`:
+Per `§Implementation Flow`:
 
 1. Run `/claude-code-dev-hermit:dev-quality` on the working tree. It wraps `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits) and re-runs the test command.
 2. If tests pass, proceed.

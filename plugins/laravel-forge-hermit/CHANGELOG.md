@@ -5,6 +5,10 @@
 ### Added
 - `forge.php deploy-watch <server-id> <site-id> <deploy-id>` replaces the hand-transcribed watch loop in `forge-deploy`; terminal statuses now come from the shared `STATUS_*` constants. `deploy` points at it in its `Watch with:` hint, and a failing poll now emits the exception class as a watch event instead of surfacing only as a `status=timeout` 15 minutes on.
 
+### Changed
+- The CLAUDE-APPEND block keeps the surface-then-approve rule and the outage warning but drops the restated 4-step walk (`forge-deploy` and `forge-servers` own it), two of three `call` examples, and the `forge-failed-deploys` contract. 2,993 B → ~2,265 B. Enforcement is now stated accurately: the hook and the in-PHP gate are two layers with the PHP gate authoritative, replacing "neither can be bypassed".
+- `[hygiene]` and `[deploy-safety]` proposal prefixes removed — no skill produces either, so both were vocabulary paid for in every session. `[reliability]` remains.
+
 ## [0.0.8] - 2026-07-21
 
 ### Fixed

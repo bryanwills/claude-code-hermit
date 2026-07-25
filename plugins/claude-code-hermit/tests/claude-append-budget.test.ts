@@ -21,6 +21,7 @@ const APPEND_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'CLAUDE-APPEND.md'
 const CHANNEL_RESPONDER = path.join(PLUGIN_ROOT, 'skills', 'channel-responder', 'SKILL.md');
 const WATCH_SKILL = path.join(PLUGIN_ROOT, 'skills', 'watch', 'SKILL.md');
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
+const AGENTS_DIR = path.join(PLUGIN_ROOT, 'agents');
 
 const append = fs.readFileSync(APPEND_PATH, 'utf8');
 
@@ -34,9 +35,12 @@ describe('CLAUDE-APPEND size budget', () => {
     // model-side resolver + reply-tool instruction (~7,795 B), then to 7,900 for
     // the closing `<!-- /claude-code-hermit: Session Discipline -->` marker
     // (~7,877 B) that makes evolve-plan.ts's block bounds authoritative instead
-    // of heuristic — all deliberate, reviewed additions, not creep. Keep a small
-    // margin above the current size without reopening the door to unbounded re-bloat.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(7900);
+    // of heuristic — all deliberate, reviewed additions, not creep. The
+    // context-engineering trim then removed the watch authoring-rules duplicate,
+    // the channel-send exit-code walkthrough, the delegation-economics tutorial,
+    // the suggestion-path enumeration, and the numeric micro-rules, landing at
+    // ~6,199 B. Keep a small margin without reopening the door to re-bloat.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(6500);
   });
 });
 
@@ -81,6 +85,48 @@ describe('relocation targets received the moved content', () => {
 
   test('APPEND points to channel-responder for the full protocol', () => {
     expect(append.includes('channel-responder')).toBe(true);
+  });
+
+  test('the two proposal gates own the covered-by-memory protocol', () => {
+    // The APPEND states the memory-first rule in one sentence and defers the
+    // protocol (paths, exemptions, quote-the-match) to the components that
+    // execute it. If either gate loses the code, the rule has no enforcer.
+    for (const agent of ['proposal-triage.md', 'reflection-judge.md']) {
+      const body = fs.readFileSync(path.join(AGENTS_DIR, agent), 'utf8');
+      expect(body.includes('covered-by-memory')).toBe(true);
+    }
+  });
+});
+
+describe('push-format constant has exactly one owner', () => {
+  // The ≤200-char push rule had 9 prose copies across 4 plugins and zero code
+  // backing (the code-enforced limits are Telegram 4096 / Discord 2000 in
+  // lib/channel-send.ts, a different path). The APPEND is the single owner —
+  // it is always loaded, so every skill's pointer resolves. Each domain plugin
+  // guards its own notification skills in its own suite, because CI is
+  // path-filtered per plugin and a cross-plugin assertion here would never run
+  // for the edits it exists to catch.
+  // Tolerant of respacing (`≤ 200 chars`): a near-miss restatement is still a
+  // restatement, and this guard exists to catch exactly that.
+  const CONSTANT = /≤\s*200\s*chars/;
+
+  test('core APPEND states the constant', () => {
+    expect(CONSTANT.test(append)).toBe(true);
+  });
+
+  for (const skill of ['brief', 'channel-responder']) {
+    test(`${skill} defers to the APPEND instead of restating it`, () => {
+      const body = fs.readFileSync(path.join(SKILLS_DIR, skill, 'SKILL.md'), 'utf8');
+      expect(CONSTANT.test(body)).toBe(false);
+      expect(body.includes('Operator Notification push format')).toBe(true);
+    });
+  }
+
+  test('brief keeps its own condensation priorities', () => {
+    // The pointer replaces the shared constant, never the producer-owned
+    // decision about which facts survive condensation.
+    const body = fs.readFileSync(path.join(SKILLS_DIR, 'brief', 'SKILL.md'), 'utf8');
+    expect(body.includes('open proposal count')).toBe(true);
   });
 });
 

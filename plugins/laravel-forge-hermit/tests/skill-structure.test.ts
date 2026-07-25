@@ -62,4 +62,32 @@ for (const { name, gates } of SKILLS) {
   ok(`internal links resolve (${linksChecked} checked)`, linksBad === 0, `${linksBad} bad`);
 }
 
+// CLAUDE-APPEND token-efficiency guard. The block is re-paid on every session
+// load and every subagent dispatch, so the trim that removed the restated 4-step
+// walk, the two extra dispatch examples, the scheduled-check contract, and the
+// two producerless proposal prefixes must not creep back — and the safety rules
+// it was not allowed to touch must stay.
+console.log('\nstate-templates/CLAUDE-APPEND.md:');
+const appendPath = path.join(import.meta.dir, '..', 'state-templates', 'CLAUDE-APPEND.md');
+ok('CLAUDE-APPEND exists', fs.existsSync(appendPath), appendPath);
+if (fs.existsSync(appendPath)) {
+  const append = fs.readFileSync(appendPath, 'utf-8');
+  // Pre-trim 2,993 B → ~2,265 B.
+  ok('under post-trim ceiling (~2265 B)', Buffer.byteLength(append, 'utf-8') <= 2600, `${Buffer.byteLength(append, 'utf-8')} B`);
+
+  ok('keeps surface-then-approve', append.includes('preview → relay → approve → confirm'));
+  ok('keeps the outage consequence', append.includes('A wrong reboot causes an outage'));
+  // The two gates are defence in depth, and the PHP gate is the authoritative
+  // one — the block must not claim blanket un-bypassable enforcement.
+  ok('states the real enforcement boundary', append.includes('PHP gate authoritative'));
+  ok('keeps the closed read-only allowlist fact', append.includes('closed allowlist'));
+  ok('keeps the typed-int ID gotcha', append.includes('strict_types'));
+  ok('keeps the credential-check command', append.includes('forge.php check'));
+  ok('keeps secret hygiene', append.includes('[REDACTED]'));
+
+  ok('keeps the one live proposal prefix', append.includes('[reliability]'));
+  ok('drops the producerless prefixes',
+    !append.includes('[hygiene]') && !append.includes('[deploy-safety]'));
+}
+
 process.exit(summary() === 0 ? 0 : 1);

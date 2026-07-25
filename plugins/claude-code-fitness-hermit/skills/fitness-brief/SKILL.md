@@ -85,8 +85,8 @@ orientation — a custom `--slot` follows whichever branch matches its resolved 
 4. **Deliver** per the Operator Notification protocol in CLAUDE.md (core resolves the
    channel and falls back to push / SHELL.md logging when no channel is reachable). Never
    gate delivery on `session_state` — routines can fire while the terminal is unmonitored.
-   Push-fallback: a single line, ≤200 chars, no markdown, leading with the thing most
-   worth knowing.
+   Push-fallback: a single line per § Operator Notification push format, leading with
+   the thing most worth knowing.
    - **Evening only, after a confirmed successful channel send** (not a push fallback, not
      a logged-only send): write `state/strava-pending-rpe.json` with the activity held
      from step 1:
