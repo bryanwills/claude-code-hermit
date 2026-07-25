@@ -29,7 +29,7 @@ For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at 
 
 **Boundary rule:** `sessions/SHELL.md` is the live session document — it stays in main, never goes to the runner. Archived `sessions/S-*-REPORT.md` bodies, `cost-summary.md`, `proposals/*.md` frontmatter, `OPERATOR.md`, and `NEXT-TASK.md` go to the runner.
 
-**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md, `today-cost.ts` output) and skip the runner-derived lines. Note nothing fatal to the operator.
+**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md, `cost-report.ts today` output) and skip the runner-derived lines. Note nothing fatal to the operator.
 
 **Eval runner return schema** — the runner returns a JSON object conforming to this block. The schema is byte-identical in `reference.md` (producer) and here (consumer); a contract test asserts this.
 

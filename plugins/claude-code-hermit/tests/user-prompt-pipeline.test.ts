@@ -139,11 +139,39 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
 });
 
 describe('user-prompt-pipeline: fail-open contract', () => {
-  test('malformed stdin exits 0 and emits nothing', async () => {
+  test('malformed stdin exits 0 and still runs the payload-independent stages', async () => {
+    // A prompt did arrive — MAX_STDIN_BYTES truncation is what cuts it mid-JSON —
+    // so the turn must still be recorded and timestamped.
     const wd = setupWorkdir();
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+
     const r = await runScript('user-prompt-pipeline.ts', { stdin: '{broken', cwd: wd.dir });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('[Now:');
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(true);
+  });
+
+  test('empty stdin exits 0 and emits nothing', async () => {
+    const wd = setupWorkdir();
+    const r = await runScript('user-prompt-pipeline.ts', { stdin: '', cwd: wd.dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
+  });
+
+  test('an over-cap prompt is truncated but still recorded', async () => {
+    const wd = setupWorkdir();
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: 'x'.repeat(1024 * 1024 + 512) }),
+      cwd: wd.dir,
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('[Now:');
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
   });
 
   test('an ordinary prompt still records the operator-action markers', async () => {

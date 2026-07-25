@@ -1534,7 +1534,7 @@ describe('channel-reply-reminder', () => {
   test('channel-reply-reminder (malformed JSON)', withDir(async (dir) => {
     const r = await runScript('user-prompt-pipeline.ts', { stdin: '{broken', cwd: dir });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain(NO_REMINDER);
   }));
 
   test('channel-reply-reminder (no envelope)', withDir(async (dir) => {

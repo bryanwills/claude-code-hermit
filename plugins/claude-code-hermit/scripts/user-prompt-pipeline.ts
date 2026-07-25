@@ -65,15 +65,22 @@ async function stage(name: string, fn: (ctx: StageContext) => any, ctx: StageCon
 async function main(raw: string): Promise<void> {
   // Defensive parse: stages that don't need the payload still run on bad input,
   // exactly as stop-pipeline.ts does.
-  let payload: any = {};
+  let prompt: string | null = null;
   try {
-    payload = JSON.parse(raw);
+    const payload = JSON.parse(raw);
+    prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : null;
   } catch {
-    process.stderr.write('[user-prompt-pipeline] malformed stdin — continuing with empty payload\n');
+    process.stderr.write('[user-prompt-pipeline] malformed stdin — continuing with an empty prompt\n');
+    // A parse failure on non-empty stdin means a prompt did arrive and was
+    // mangled — MAX_STDIN_BYTES truncation cuts mid-JSON. Carry on with an empty
+    // prompt rather than returning: the audit and timestamp stages don't need the
+    // text, and every prompt-matching stage below fails closed on ''. Returning
+    // here would leave the turn unrecorded and let heartbeat's AUTO_CLOSE gate
+    // read the operator as silent.
+    if (raw.length === 0) return;
+    prompt = '';
   }
-
-  const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : null;
-  if (prompt === null) return;
+  if (prompt === null) return; // parsed, but no prompt for the stages to act on
 
   const dir = hermitDir();
 

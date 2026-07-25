@@ -125,11 +125,15 @@ describe('shutdown-gate', () => {
     expect(r.stdout.toLowerCase()).toContain('shutdown is in progress');
   });
 
-  test('malformed stdin → exit 0, no output', async () => {
+  test('malformed stdin → exit 0, no relay and no block', async () => {
+    // The payload-independent stages still run (that is what emits `[Now:`), but
+    // with no parseable envelope the gate has no chat to answer on, so it stays
+    // silent rather than relaying into the void.
     const wd = setupChannelWorkdir();
     writeRuntime(wd, PENDING);
     const r = await runScript('user-prompt-pipeline.ts', { stdin: 'not json', cwd: wd.dir, env: {} });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('"decision":"block"');
+    expect(r.stdout.toLowerCase()).not.toContain('shutdown is in progress');
   });
 });
