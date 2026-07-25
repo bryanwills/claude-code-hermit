@@ -373,6 +373,19 @@ function markerOnward(text: string, marker?: string, foreignNames: string[] = []
   return lines.slice(start, end).join('\n');
 }
 
+// Ambiguity guard for a marker block: the marker line must appear at most once,
+// and the resolved block must occur exactly once in the target — otherwise a
+// replace Edit's old_string wouldn't be unique (could hit the wrong instance),
+// and the caller must NOT fall through to append, which would add a third copy.
+// Exported because domain-hatch's sync-block applies the same guard: two
+// writers touching one block have to agree on when it is safe to replace, or a
+// block gets rewritten by one and refused by the other.
+function isAmbiguousBlock(targetText: string, marker: string, targetBlock: string): boolean {
+  const markerLineCount = targetText.split('\n').filter(l => l.trim() === marker).length;
+  const occurrences = targetText.split(targetBlock).length - 1;
+  return markerLineCount > 1 || occurrences > 1;
+}
+
 // Find the plugin's own CLAUDE-APPEND opening marker: "<!-- <name>: <Title> -->".
 // Name-anchored so an unrelated leading comment (e.g. dev-hermit's
 // "<!-- mode:standard-only -->") can never be mistaken for the block marker.
@@ -459,13 +472,7 @@ function _diffClaudeAppendByText(
     return opts.sibling ? { changed: true, missing: true } : { changed: true };
   }
 
-  // Ambiguity guard: the marker line must appear at most once, and old_block
-  // must occur exactly once in the target — otherwise a replace Edit's
-  // old_string wouldn't be unique (could hit the wrong instance), and this
-  // must NOT fall through to append, which would add a third copy.
-  const markerLineCount = targetText!.split('\n').filter(l => l.trim() === marker).length;
-  const occurrences = targetText!.split(targetBlock).length - 1;
-  if (markerLineCount > 1 || occurrences > 1) {
+  if (isAmbiguousBlock(targetText!, marker, targetBlock)) {
     return { changed: true, ambiguous: true };
   }
 
@@ -852,7 +859,7 @@ function parseArgs(argv: string[]) {
   return { hermitDir: hermitDir || '.claude-code-hermit', hatchTarget, pluginListJsonPath };
 }
 
-export { buildPlan, cmpSemver, changelogSlice, newConfigKeys, markerOnward, extractSiblingMarker, closingMarkerFor, classifyFiles, classifyDockerEntrypoint, classifyDockerTemplates };
+export { buildPlan, cmpSemver, changelogSlice, newConfigKeys, markerOnward, extractSiblingMarker, closingMarkerFor, isAmbiguousBlock, requiresRendering, classifyFiles, classifyDockerEntrypoint, classifyDockerTemplates };
 export type { ClassifiedFile, FileClass };
 
 if (import.meta.main) {

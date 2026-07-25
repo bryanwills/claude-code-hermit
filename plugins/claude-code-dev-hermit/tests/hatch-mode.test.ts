@@ -111,33 +111,47 @@ if (fs.existsSync(HATCH_SKILL)) {
   ok('renders block via render-append.ts', text.includes('render-append.ts'));
   ok('references capability scan slugs', text.includes('create-pr') && text.includes('release'));
 
-  console.log('\nskills/hatch/SKILL.md target routing + schema stamping:');
+  console.log('\nskills/hatch/SKILL.md shared domain-hatch protocol:');
 
-  ok('references hatch-options.json', text.includes('hatch-options.json'));
-  ok('reads "target" field from hatch-options.json',
-    /hatch-options\.json[\s\S]{0,200}["`]target["`]/.test(text));
-  ok('local target routes to CLAUDE.local.md',
-    /["`]local["`][\s\S]{0,80}target_file = CLAUDE\.local\.md/.test(text));
-  ok('committed target routes to CLAUDE.md',
-    /["`]committed["`][\s\S]{0,120}target_file = CLAUDE\.md/.test(text));
+  // Target resolution, install-scope detection, and the hatch-options stamp
+  // schema all moved into core's `domain-hatch.ts`. What the dev hatch owes the
+  // protocol is: call the three verbs with its own plugin id, and restate none
+  // of the resolution rules it no longer owns.
 
-  ok('schema stamps "target" field', /"target":\s*"/.test(text));
-  ok('schema stamps "core_install_scope" field', /"core_install_scope":\s*"/.test(text));
-  ok('schema stamps "stamped_at" field', /"stamped_at":\s*"/.test(text));
-  ok('schema stamps "stamped_by" field', /"stamped_by":\s*"claude-code-dev-hermit:hatch"/.test(text));
-  ok('schema stamps "version" field', /"version":\s*"/.test(text));
+  ok('runs preflight through core, keyed to its own plugin id',
+    text.includes('domain-hatch preflight claude-code-dev-hermit'));
+  ok('reaches core via bin/hermit-run, not a relative path',
+    text.includes('.claude-code-hermit/bin/hermit-run domain-hatch')
+    && !text.includes('../claude-code-hermit/scripts'));
+  ok('consumes the preflight verdict fields instead of re-deriving them',
+    /`target`[\s\S]{0,60}`target_file`[\s\S]{0,60}`target_default`[\s\S]{0,60}`needs_target_question`/.test(text));
+  ok('branches on every preflight `action` value',
+    ['upgrade-core-package', 'upgrade-core-applied', '`verify`', '`full`'].every(a => text.includes(a)));
 
-  ok('detects core_install_scope from `claude plugin list --json`',
-    /core_install_scope[\s\S]{0,120}claude plugin list --json/.test(text));
-  ok('documents `project` → `committed` scope mapping',
-    /`project`[^\n]{0,20}`committed`/.test(text));
-  ok('documents `local`/`user`/`null` → `local` scope mapping',
-    /`local`\/`user`\/`null`[^\n]{0,40}`local`/.test(text));
+  ok('records the operator\'s choice via ensure-target',
+    text.includes('domain-hatch ensure-target claude-code-dev-hermit --target'));
+  ok('Visibility prompt still offers .local vs committed',
+    /Visibility[\s\S]{0,240}`\.local` files[\s\S]{0,120}Committed files/.test(text));
 
-  ok('Step 1 captures `prior_hatch_mode`',
-    /Capture `prior_hatch_mode`/.test(text));
-  ok('Step 3 compares against `prior_hatch_mode`',
-    /Step 2's mode equals `prior_hatch_mode`/.test(text));
+  // Regression: the dev block is mode-dependent, so it is the one hatch that
+  // must hand core the *rendered* bytes — otherwise core would sync the raw
+  // marker-annotated template and a mode flip would never take effect.
+  ok('pipes the rendered block into sync-block',
+    /render-append\.ts <mode>[\s\S]{0,200}sync-block claude-code-dev-hermit --rendered-stdin/.test(text));
+  ok('renders block via render-append.ts', text.includes('render-append.ts'));
+  ok('states that a differing rendering replaces the block (mode-change path)',
+    /replaces when the rendering differs/.test(text));
+
+  // These are the prose surfaces that drifted from the manifest and from core's
+  // resolver before the protocol was centralised. None of them may come back.
+  ok('does not restate install-scope detection', !text.includes('claude plugin list --json'));
+  ok('does not restate the hatch-options stamp schema',
+    !/"stamped_by":\s*"/.test(text) && !/"core_install_scope":\s*"/.test(text));
+  ok('does not read hatch-options.json directly', !text.includes('hatch-options.json'));
+  ok('states no hardcoded core version floor',
+    text.split('\n')
+      .filter(l => /(?:base hermit|core hermit|claude-code-hermit|_hermit_versions)/i.test(l))
+      .every(l => !/(?:requires|earlier than|less than|below)\s+`?≥?>?=?\s*\d+\.\d+\.\d+/i.test(l)));
 
   ok('delegates stray-block migration to hermit-evolve Step 7',
     /hermit-evolve[\s\S]{0,20}Step 7/.test(text));

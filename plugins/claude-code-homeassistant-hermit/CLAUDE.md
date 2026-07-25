@@ -16,7 +16,7 @@ A Home Assistant domain layer for `claude-code-hermit`: skills, subagents, a saf
 
 ## Hatch target routing
 
-`/hatch` Step 7 reads `.claude-code-hermit/state/hatch-options.json` (written by core hatch) to determine where to write the CLAUDE-APPEND block: `target = "local"` → `CLAUDE.local.md`; `target = "committed"` → `CLAUDE.md`. If core hatch hasn't run yet, the skill detects `core_install_scope` from `claude plugin list --json`, presents the scope-derived default at position 0 of the Visibility prompt, and stamps the full canonical schema (`target`, `core_install_scope`, `stamped_at`, `stamped_by`, `version`) into `hatch-options.json`.
+`/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-homeassistant-hermit`; core's `scripts/domain-hatch.ts` owns install-scope detection, target resolution, and stamping `hatch-options.json`. The preflight verdict hands back `target`, `target_file`, `target_default`, and `needs_target_question` — Step 6 only surfaces the Visibility prompt when asked to, records the answer with `domain-hatch ensure-target claude-code-homeassistant-hermit --target <choice>`, then writes the block with `domain-hatch sync-block claude-code-homeassistant-hermit`. Hatch appends when the marker is absent and skips otherwise; refreshing the block on a version bump is `hermit-evolve`'s job.
 
 **Migration on target change.** When the operator flips `hatch_target` (e.g. via core 1.1.1's `hermit-evolve` Upgrade Instructions), the HA block can end up stranded in the old file. The most recent CHANGELOG entry's `### Upgrade Instructions` run a one-shot migration via `hermit-evolve` Step 7's sibling upgrade flow to strip the stranded block.
 
@@ -42,7 +42,7 @@ A Home Assistant domain layer for `claude-code-hermit`: skills, subagents, a saf
 
 ## MCP vs CLI
 
-- **Home Assistant MCP Server** (`homeassistant`): read-only live ops by default — `GetLiveContext`, `GetDateTime`. `Hass*` intent tools (`HassTurnOn`, `HassLightSet`, `HassSetPosition`, `HassFanSetSpeed`, etc.) are hard-blocked unless `ha_assist_control_enabled: true` is set in `config.json` (set during hatch Step 7.55). When enabled, HA's own expose-to-Assist gate is the control boundary — the gate defers to it rather than blocking.
+- **Home Assistant MCP Server** (`homeassistant`): read-only live ops by default — `GetLiveContext`, `GetDateTime`. `Hass*` intent tools (`HassTurnOn`, `HassLightSet`, `HassSetPosition`, `HassFanSetSpeed`, etc.) are hard-blocked unless `ha_assist_control_enabled: true` is set in `config.json` (set during hatch Step 6.55). When enabled, HA's own expose-to-Assist gate is the control boundary — the gate defers to it rather than blocking.
 - **CLI** (`bin/ha-agent-lab`): build and analysis operations — context refresh, YAML simulation, policy checks, apply, audits, structural writes (helpers/areas/registries), and `ha trigger-automation`.
 
 MCP tool IDs follow the pattern `mcp__homeassistant__*`. The `homeassistant` name is required — the safety hook matches on it.

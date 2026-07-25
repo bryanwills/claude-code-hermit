@@ -13,7 +13,7 @@ The plugin's identity in v0.3.0+: a thin wrapper around (a) `git-push-guard` str
 
 ### 1. Check prerequisites
 
-Check if `.claude-code-hermit/` exists in the current project.
+Check if `.claude-code-hermit/config.json` exists in the current project.
 
 - Missing: ask the operator (`AskUserQuestion`) "Core hermit isn't set up yet. Run `/claude-code-hermit:hatch` now?" with options `Yes — run now` / `No — I'll do it later`.
   - If yes, follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
@@ -21,9 +21,11 @@ Check if `.claude-code-hermit/` exists in the current project.
     2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/claude-code-dev-hermit:hatch`.)"
     3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
   - If no, stop.
-- Present: read `.claude-code-hermit/config.json` and the plugin's `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/hermit-meta.json`. Verify `_hermit_versions["claude-code-hermit"]` from config satisfies `required_core_version` from hermit-meta (e.g. `">=1.0.22"`). If absent or below the floor, ask whether to run `/claude-code-hermit:hermit-evolve` first; allow opt-out with a warning. (Reading the floor from hermit-meta — never hardcoding it in skill prose — keeps this skill in sync with the plugin's declared requirement.)
-
-**Capture `prior_hatch_mode`.** While reading `config.json`, also record `claude-code-dev-hermit.hatch_mode` as `prior_hatch_mode` (or `null` if unset). Step 3's skip-vs-replace decision compares against this value, and Step 5 overwrites `hatch_mode` with Step 2's answer — capturing the prior value here keeps it intact across the wizard.
+- Present: run `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-dev-hermit` and parse the JSON verdict. Branch on `action`:
+  - `upgrade-core-package` / `upgrade-core-applied` → relay the `remedy` string verbatim to the operator and stop.
+  - `verify` → this version (`self_version`) is already stamped; continue through the wizard, Step 3's block sync is the idempotency guard.
+  - `full` → continue through the wizard.
+  - `ok: false` → relay `message` and stop.
 
 ### 2. Capability scan + choose mode
 
@@ -72,31 +74,21 @@ When building the options array at runtime:
 
 ### 3. Update CLAUDE.md / CLAUDE.local.md dev block
 
-Read the plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
+**Resolve target file:** Step 1's preflight already returned `target`, `target_file`, `target_default` and `needs_target_question`.
 
-**Resolve target file:** Read `.claude-code-hermit/state/hatch-options.json`. Use the `"target"` field:
-- `"local"` → `target_file = CLAUDE.local.md`
-- `"committed"` or absent → `target_file = CLAUDE.md`
-- If the file doesn't exist (no `hatch-options.json` yet — operator's core hermit predates 1.1.1): detect `core_install_scope` from `claude plugin list --json` using the same precedence core hatch resolves via `resolve-siblings.ts --role core-scope` (filter to entries where plugin name is `claude-code-hermit` and `enabled == true`; apply precedence `local` > `project` (both require `projectPath == project root`) > `user` (any `projectPath`) > `null`; map `project` → `committed`, `local`/`user`/`null` → `local` as the scope-derived default). Ask with `AskUserQuestion` (header: "Visibility") — present the scope-derived default at position 0 with `(recommended)` in the label: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Record the choice and write `.claude-code-hermit/state/hatch-options.json` with the full schema:
+If `needs_target_question` is true, ask with `AskUserQuestion` (header: "Visibility") — `target_default` at position 0 with `(recommended)` in the label: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Then record the choice:
 
-  ```json
-  {
-    "target": "<choice>",
-    "core_install_scope": "<project|local|user|null>",
-    "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
-    "stamped_by": "claude-code-dev-hermit:hatch",
-    "version": "<current dev-hermit plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
-  }
-  ```
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch ensure-target claude-code-dev-hermit --target <choice>
+```
 
-  This matches the canonical schema core hatch Step 9b writes, so when core hatch later runs its 1.1.1 preservation logic keeps `stamped_at`/`stamped_by` intact and adds `last_updated_at`/`last_updated_by`.
+**Write the block.** The dev block is rendered per mode, so pipe the rendering in — the rendered content is what `sync-block` compares against, which is how a mode change becomes a replacement:
 
-Read `target_file` (treat a missing file as marker-absent — Edit will create the file in the append branch). Look for the marker `<!-- claude-code-dev-hermit: Development Workflow -->`. Read the stamped version from `.claude-code-hermit/config.json` at `_hermit_versions["claude-code-dev-hermit"]` (treat absent as `null`) — Step 5 of this skill stamps that field at the end of every run, so on re-runs it reflects the version that last wrote the block.
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-append.ts <mode> | .claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-dev-hermit --rendered-stdin
+```
 
-Compare against the run's chosen mode (from Step 2's answer this run) and `prior_hatch_mode` (captured in Step 1, before Step 5 overwrites `hatch_mode`):
-
-- **Marker present, stamped version matches plugin version, AND Step 2's mode equals `prior_hatch_mode`**: skip — block is current. Do not read the template.
-- **All other cases** (marker absent, stamped version stale, OR mode changed): render the mode block from the single source — capture the stdout of `bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-append.ts <mode>` (`<mode>` is `safety` or `standard`), which emits the mode-specific rendering of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md`. Write that stdout into the target as either an append (marker absent) or a replacement of the marked block (marker present). The rendered output is the source of truth; no operator prompt is needed.
+`<mode>` is Step 2's answer (`safety` or `standard`). The script appends when the marker is absent, replaces when the rendering differs, and skips when it is already current. The rendered output is the source of truth; no operator prompt is needed.
 
 Stray-block migration (block stranded in the non-target file after a target flip) is handled one-shot by the Upgrade Instructions in this version's CHANGELOG entry, executed by `hermit-evolve` Step 7. Hatch itself stays focused on target-aware setup and steady-state refresh.
 
@@ -238,7 +230,7 @@ Single atomic config.json write:
   - If the operator accepted strict in Round 2 → write `"strict"`.
   - Else if the existing value is already `"strict"` → preserve it (never silently downgrade).
   - Else → write `"standard"` explicitly. Do not leave the key unset; an explicit value makes the operator's choice durable across `hermit-evolve` runs and prevents silent re-prompting.
-- `_hermit_versions["claude-code-dev-hermit"]` — set to the plugin version cached in step 3.
+- `_hermit_versions["claude-code-dev-hermit"]` — set to `self_version` from Step 1's preflight.
 
 In `standard` mode only, also write:
 - `claude-code-dev-hermit.commands.test` — required, from Round 1.
@@ -313,7 +305,7 @@ Read by `/claude-code-hermit:docker-security` when the operator enables LAN cont
 
 - **Strict-by-default.** The wizard defaults to installing `git-push-guard` at strict. Do not ask "which profile?" — ask "yes or opt out?".
 - **Idempotent.** Re-running detects existing `config.json` values and offers `Keep current (<value>)` as the first option per key, so operators can fast-confirm with Enter presses.
-- **Single source of truth.** `CLAUDE-APPEND.md` rendered for the chosen mode by `scripts/render-append.ts` is the source for the project's dev conventions. Step 3 always overwrites the marked block when versions differ or mode changes; do not preserve operator edits to that block (operators who want overrides put them elsewhere in their CLAUDE.md).
+- **Single source of truth.** `CLAUDE-APPEND.md` rendered for the chosen mode by `scripts/render-append.ts` is the source for the project's dev conventions. Step 3 pipes that rendering into `sync-block`, which overwrites the marked block whenever it differs; do not preserve operator edits to that block (operators who want overrides put them elsewhere in their CLAUDE.md).
 - **Never downgrade hook profile.** If the operator chooses "No — leave at standard" but `env.AGENT_HOOK_PROFILE` is already `strict`, preserve `strict`. The opt-out only applies on first install.
 - **No stack detection magic.** Detection seeds defaults for prompts; operators always confirm. Never write `commands.test` from detection alone — it must be operator-confirmed.
 - **Safety mode skips workflow prompts.** In `safety` mode, do not prompt for `commands.test`, `commands.lint`, `commands.format`, `commands.pr_create`, `pr_template_path`, or `pr_base_branch`. These keys feed workflow sections that safety mode does not inject.

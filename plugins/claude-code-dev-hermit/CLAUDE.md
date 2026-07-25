@@ -31,13 +31,13 @@ Language-agnostic safety layer for any agent doing dev work in a hermit project.
 
 ## Hatch target routing
 
-`/hatch` Step 3 reads `.claude-code-hermit/state/hatch-options.json` (written by core hatch) to determine where to write the CLAUDE-APPEND block: `target = "local"` → `CLAUDE.local.md`; `target = "committed"` → `CLAUDE.md`. If core hatch hasn't run yet, the skill detects `core_install_scope` from `claude plugin list --json`, presents the scope-derived default at position 0 of the Visibility prompt, and stamps the full canonical schema (`target`, `core_install_scope`, `stamped_at`, `stamped_by`, `version`) into `hatch-options.json`. Applies to both renderings of the single-source `CLAUDE-APPEND.md` (standard and safety, emitted by `scripts/render-append.ts`).
+`/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-dev-hermit`; core's `scripts/domain-hatch.ts` owns install-scope detection, target resolution, and stamping `hatch-options.json`. The preflight verdict hands back `target`, `target_file`, `target_default`, and `needs_target_question` — the skill only surfaces the Visibility prompt when asked to, records the answer with `domain-hatch ensure-target claude-code-dev-hermit --target <choice>`, and never reads or writes `hatch-options.json` itself. Step 3 pipes the mode-specific rendering into `domain-hatch sync-block claude-code-dev-hermit --rendered-stdin`, so both renderings of the single-source `CLAUDE-APPEND.md` (standard and safety, emitted by `scripts/render-append.ts`) land in the resolved file and a mode change becomes a block replacement.
 
 **Migration on target change.** When the operator flips `hatch_target` (e.g. via core 1.1.1's `hermit-evolve` Upgrade Instructions), the dev block can end up stranded in the old file. The most recent CHANGELOG entry's `### Upgrade Instructions` run a one-shot migration via `hermit-evolve` Step 7's sibling upgrade flow to strip the stranded block.
 
 ## Depends On
 
-- `claude-code-hermit` v1.1.2+ (core). Authoritative source: `.claude-plugin/hermit-meta.json` (`required_core_version` field).
+- `claude-code-hermit` (core). Authoritative source: `.claude-plugin/hermit-meta.json` (`required_core_version` field) — read at runtime by the `domain-hatch preflight` verb, never restated in skill prose.
 
 ## Core Contracts
 

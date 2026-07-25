@@ -4,11 +4,18 @@ name: Cross-Plugin Guards
 # files each guard covers — a core-only or single-plugin PR must not trigger it.
 # NOTE: the automode-env glob matches the three copies under scripts/ today;
 # a future copy placed elsewhere would need its path added here.
+# The hatch/hermit-meta/core-scripts globs cover the domain-hatch contract: a
+# hatch rewrite, a changed core floor declaration, and the shared script itself
+# all have to re-run that guard, and none of them would trigger any single
+# plugin's own workflow.
 on:
   push:
     branches: [main]
     paths:
       - 'plugins/*/scripts/automode-env.ts'
+      - 'plugins/*/skills/hatch/**'
+      - 'plugins/*/.claude-plugin/hermit-meta.json'
+      - 'plugins/claude-code-hermit/scripts/**'
       - 'tests/cross-plugin/**'
       - '.github/workflows/test-cross-plugin.yml'
       - 'package.json'
@@ -17,6 +24,9 @@ on:
   pull_request:
     paths:
       - 'plugins/*/scripts/automode-env.ts'
+      - 'plugins/*/skills/hatch/**'
+      - 'plugins/*/.claude-plugin/hermit-meta.json'
+      - 'plugins/claude-code-hermit/scripts/**'
       - 'tests/cross-plugin/**'
       - '.github/workflows/test-cross-plugin.yml'
       - 'package.json'

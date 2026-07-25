@@ -11,9 +11,9 @@ Idempotent setup wizard for the feed plugin. Run **after** `/claude-code-hermit:
 
 ## Step 1 — Prerequisite check
 
-Read `.claude-code-hermit/config.json`.
+Check whether `.claude-code-hermit/config.json` exists.
 
-If the file does not exist or `_hermit_versions["claude-code-hermit"]` is absent or empty:
+If it does not:
 
 > "The base hermit is not set up in this project yet. Run `/claude-code-hermit:hatch` first, then return here."
 
@@ -25,32 +25,20 @@ Use `AskUserQuestion`: "Would you like to run `/claude-code-hermit:hatch` now? (
   3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
 - **no** → stop.
 
-If `_hermit_versions["claude-code-hermit"]` is present but the version string is earlier than `1.2.22` (compare major.minor.patch numerically), warn:
+If it does exist, run `.claude-code-hermit/bin/hermit-run domain-hatch preflight feed-hermit` and parse the JSON verdict. Branch on `action`:
 
-> "Base hermit version is {version}; this plugin requires ≥1.2.22. Run `/claude-code-hermit:hermit-evolve` to upgrade, then re-run this hatch."
+- **`upgrade-core-package` / `upgrade-core-applied`** → relay the `remedy` string verbatim to the operator and stop.
+- **`verify`** → say:
 
-Stop.
+  > "feed-hermit {self_version} is already installed. Skip to Step 6 to re-verify, or reply 'full' to re-run the full wizard."
 
----
-
-## Step 2 — Idempotency check
-
-Read `_hermit_versions["feed-hermit"]` from `.claude-code-hermit/config.json`, and `version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
-
-If they match:
-
-> "feed-hermit {version} is already installed. Skip to Step 7 to re-verify, or reply 'full' to re-run the full wizard."
-
-Use `AskUserQuestion`: "(verify / full)"
-
-- **verify** → skip to Step 7.
-- **full** → continue from Step 3.
-
-If absent or stale: continue from Step 3.
+  Use `AskUserQuestion`: "(verify / full)" — **verify** → skip to Step 6; **full** → continue from Step 2.
+- **`full`** → continue from Step 2.
+- **`ok: false`** → relay `message` and stop.
 
 ---
 
-## Step 3 — Seed the registries and tone spec
+## Step 2 — Seed the registries and tone spec
 
 The operator owns three files at the **project root**: `feed-sources.md`, `feed-categories.md`, `FEEDS.md`. Seed each from the plugin template **only if it does not already exist** (never overwrite operator content).
 
@@ -67,7 +55,7 @@ Read the destination first: if it exists, skip (report `⊘ skipped <file> (alre
 
 ---
 
-## Step 4 — Brief configuration wizard
+## Step 3 — Brief configuration wizard
 
 Ask the operator (use `AskUserQuestion`, one prompt per decision or batched):
 
@@ -77,11 +65,11 @@ Ask the operator (use `AskUserQuestion`, one prompt per decision or batched):
 4. **Enrichments** — `story_arcs` (cross-reference developing stories into briefs) on/off; `follow_up_cta` (append a `/deep-dive` reply prompt to top-tier items) on/off. Defaults: both off.
 5. **Reaction feedback** — track 👍/👎 reactions on delivered briefs for the weekly source signal, on/off. Default off. (Note: the reaction→feedback-line producer is a channel-layer concern; enabling this only turns on the message-registry write and weekly aggregation — see `docs/schema.md`.)
 
-Convert each `HH:MM` to a cron expression for Step 7 (`M H * * *` for daily slots; `M H * * 0` for a Sunday weekly). Hold the answers in context.
+Convert each `HH:MM` to a cron expression for Step 6 (`M H * * *` for daily slots; `M H * * 0` for a Sunday weekly). Hold the answers in context.
 
 ---
 
-## Step 5 — Drop routine prompt files
+## Step 4 — Drop routine prompt files
 
 Copy the three routine prompt templates from `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/` into the consumer's `.claude-code-hermit/compiled/`:
 
@@ -93,39 +81,37 @@ For each: Read the source, check the destination (`.claude-code-hermit/compiled/
 
 ---
 
-## Step 6 — CLAUDE.md / CLAUDE.local.md inject
+## Step 5 — CLAUDE.md / CLAUDE.local.md inject
 
-**Resolve target file:** Read `.claude-code-hermit/state/hatch-options.json`. Use the `"target"` field: `"local"` → `CLAUDE.local.md`; `"committed"` or absent → `CLAUDE.md`. If `hatch-options.json` doesn't exist (operator's core hermit predates the field): detect `core_install_scope` from `claude plugin list --json` (filter entries where plugin name is `claude-code-hermit` and `enabled == true`; precedence `local` > `project` > `user` > `null`; map `project` → `committed`, else → `local`). Ask with `AskUserQuestion` (header: "Visibility") — scope-derived default at position 0 with `(recommended)`: **`.local` files** / **Committed files**. Write the canonical 5-field schema to `.claude-code-hermit/state/hatch-options.json`:
+**Resolve target file:** Step 1's preflight already returned `target`, `target_file`, `target_default` and `needs_target_question`.
 
-```json
-{
-  "target": "<choice>",
-  "core_install_scope": "<project|local|user|null>",
-  "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
-  "stamped_by": "feed-hermit:hatch",
-  "version": "<current feed-hermit plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
-}
+If `needs_target_question` is true, ask with `AskUserQuestion` (header: "Visibility") — `target_default` at position 0 with `(recommended)`: **`.local` files** (gitignored, operator-personal) / **Committed files** (shared with teammates). Then record it:
+
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch ensure-target feed-hermit --target <choice>
 ```
 
-Read `target_file`. Search for the opening marker `<!-- feed-hermit: Feed Workflow -->` (closing `<!-- /feed-hermit: Feed Workflow -->`).
+Then write the block:
 
-- **`target_file` does not exist** → treat as marker-absent; the append (via Edit) creates it.
-- **Marker absent** → append the full contents of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` to `target_file` using Edit.
-- **Marker present** → skip (`hermit-evolve` handles block replacement on upgrade).
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch sync-block feed-hermit
+```
+
+It appends the `<!-- feed-hermit: Feed Workflow -->` block when the marker is absent (creating `target_file` if needed) and skips when it is already present; `hermit-evolve` handles block replacement on upgrade.
 
 ---
 
-## Step 7 — Stamp and register in config.json
+## Step 6 — Stamp and register in config.json
 
-Use the `config.json` content already loaded in Step 1 (do not re-read).
+Re-read `.claude-code-hermit/config.json` now — the wizard has been running since Step 1 and the on-disk file may have changed. Apply the merges below to that fresh copy.
 
-### 7a — Stamp version
+### 6a — Stamp version
 
-Set `_hermit_versions["feed-hermit"]` to the plugin version from Step 2.
+Set `_hermit_versions["feed-hermit"]` to `self_version` from Step 1's preflight.
 
-### 7b — Write the feed config block
+### 6b — Write the feed config block
 
-Set `config.feed` from the Step 4 answers:
+Set `config.feed` from the Step 3 answers:
 
 ```json
 {
@@ -142,9 +128,9 @@ Set `config.feed` from the Step 4 answers:
 
 If `config.feed` already exists, merge (keep operator edits; only fill absent keys).
 
-### 7c — Merge routines
+### 6c — Merge routines
 
-In the `routines` array, for each of these IDs that is **absent** (by `id`), add it using the crons from Step 4; skip any already present. Set `enabled` from the slot/weekly enable answers.
+In the `routines` array, for each of these IDs that is **absent** (by `id`), add it using the crons from Step 3; skip any already present. Set `enabled` from the slot/weekly enable answers.
 
 ```json
 {
@@ -173,7 +159,7 @@ In the `routines` array, for each of these IDs that is **absent** (by `id`), add
 }
 ```
 
-### 7d — Merge scheduled_checks
+### 6d — Merge scheduled_checks
 
 In `config.scheduled_checks`, check for `id: "source-scout"`. If absent, append; if present, skip.
 
@@ -181,7 +167,7 @@ In `config.scheduled_checks`, check for `id: "source-scout"`. If absent, append;
 {"id": "source-scout", "plugin": "feed-hermit", "skill": "feed-hermit:source-scout", "enabled": true, "trigger": "interval", "interval_days": 30}
 ```
 
-### 7e — Register the brief archive
+### 6e — Register the brief archive
 
 Ensure `config.storage_drift` is an object and `config.storage_drift.ignore` is an array. If either is
 absent or malformed, normalize it while preserving any valid sibling keys and existing array entries.
@@ -193,7 +179,7 @@ Write the updated `config.json` using the Write tool (full-file replacement to k
 
 ---
 
-## Step 8 — Knowledge-schema extension
+## Step 7 — Knowledge-schema extension
 
 Read `.claude-code-hermit/knowledge-schema.md`. If the string `brief-summary:` is absent, append under `## Work Products` (create the header if only a stub exists):
 
@@ -215,7 +201,7 @@ If already present: skip. Use Edit.
 
 ---
 
-## Step 9 — Final report
+## Step 8 — Final report
 
 Print a structured summary:
 

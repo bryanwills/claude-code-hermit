@@ -51,7 +51,9 @@ When installed in a target project, state lives in `.claude-code-hermit/`:
 
 ## Hatch target routing
 
-`hatch` routes operator-personal outputs based on the plugin's install scope (read from `claude plugin list --json`): `scope=local` → `CLAUDE.local.md` + `.claude/settings.local.json`; `scope=project` → `CLAUDE.md` + `.claude/settings.json`; `scope=user` or no detectable scope → `.local` files (safer default). Advanced mode lets the operator override the scope-derived default via the Visibility prompt. The chosen target is persisted to `.claude-code-hermit/state/hatch-options.json` and read by `hermit-evolve`, `docker-setup`, and `claude-code-dev-hermit:hatch`. `hermit-evolve` Steps 6, 7, 8 are target-aware and will not re-add committed files after a `.local` migration.
+`scripts/domain-hatch.ts` owns target resolution and stamping for every consumer — core `hatch`, `hermit-evolve`, `docker-setup`, and all five domain hatches. Routing is derived from the plugin's install scope (read from `claude plugin list --json`): `scope=local` → `CLAUDE.local.md` + `.claude/settings.local.json`; `scope=project` → `CLAUDE.md` + `.claude/settings.json`; `scope=user` or no detectable scope → `.local` files (safer default). Advanced mode lets the operator override the scope-derived default via the Visibility prompt.
+
+The resolved target is stamped into `.claude-code-hermit/state/hatch-options.json` by `domain-hatch.ts` alone; no consumer re-derives it. Domain hatches reach it through `.claude-code-hermit/bin/hermit-run domain-hatch <preflight|ensure-target|sync-block> <plugin-id>` — `preflight` returns the resolved `target`/`target_file`/`target_default`/`needs_target_question` plus the version verdict, `ensure-target` records an operator override, and `sync-block` writes the CLAUDE-APPEND block into the resolved file. `hermit-evolve` Steps 6, 7, 8 are target-aware and will not re-add committed files after a `.local` migration.
 
 ## Migrations
 

@@ -278,7 +278,7 @@ injection. Body: <=250 chars, one line.
 - **All other compiled artifacts**: default 14-day retention (core `knowledge.raw_retention_days`
   in `config.json`). Living pages are exempt from rotation per core knowledge rules.
 - **`briefs/`**: never rotated. It is a plugin-owned archive registered in
-  `config.storage_drift.ignore` (by hatch step 7e), so core neither injects nor rotates it —
+  `config.storage_drift.ignore` (by hatch step 6e), so core neither injects nor rotates it —
   feed-hermit owns its retention, and the retention policy is "keep everything". Its
   session-facing projection is `compiled/brief-summary-last-*.md`; its readers are
   `weekly-digest`, `story-arcs`, and `source-health`.

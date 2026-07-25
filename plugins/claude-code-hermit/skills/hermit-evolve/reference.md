@@ -51,11 +51,9 @@ The dispatch prompt supplies the resolved absolute plugin root — substitute it
 
 First determine `hatch_target` (the pre-pass needs it, and so do Steps 6, 7, 8):
 
-1. Read `.claude-code-hermit/state/hatch-options.json` if it exists. Use the `"target"` field as `hatch_target`.
-2. If the file is absent or has no `"target"` field:
-   - Check if `CLAUDE.local.md` contains the marker `claude-code-hermit: Session Discipline` → `hatch_target = "local"`.
-   - Else if `CLAUDE.md` contains the marker → `hatch_target = "committed"`.
-   - Else → re-run scope detection: read `claude plugin list --json`. From the output, find all entries where plugin name (substring of `id` left of `@`) is `claude-code-hermit` and `enabled == true`. Apply precedence: if any has `scope == "local"` and `projectPath` equals current project root → `local`; else if any has `scope == "project"` and `projectPath` equals current project root → `project`; else if any has `scope == "user"` (any `projectPath`) → `user`; else → `null`. Map: `project` → `committed`; `local`/`user`/`null` → `local`.
+Run `bun <plugin_root>/scripts/domain-hatch.ts preflight claude-code-hermit` and take `target` as `hatch_target`. It owns the whole chain — the stamped file first, then core's own block in `CLAUDE.local.md` or `CLAUDE.md`, then install-scope detection — so hatch, evolve and every domain hatch resolve the target identically.
+
+If it returns `needs_target_question: true` the project has no stamped target. Use the returned `target_default` and stamp it with `bun <plugin_root>/scripts/domain-hatch.ts ensure-target claude-code-hermit --target <target_default>`, so the next run of anything reads an answered file instead of re-deriving.
 
 Then run the deterministic pre-pass — a single read-only analyzer that computes the version gap, the bounded CHANGELOG slice, new config keys, changed templates/bin, and the CLAUDE-APPEND block diff, so the steps below act on its output instead of reading and diffing whole files:
 
