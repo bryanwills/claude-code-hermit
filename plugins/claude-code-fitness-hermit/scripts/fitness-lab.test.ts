@@ -28,6 +28,7 @@ import {
   recoveryBand,
   recoveryWindow,
   extractDrift,
+  readDrift,
   isStrictlyIncreasing,
   weeklyPatterns,
   aggregateWeeklyLoad,
@@ -488,6 +489,64 @@ console.log('\nweekly-patterns unit (trail steady excluded → insufficient):');
   const r = weeklyPatterns(proj);
   eq('steady found 4 but drift series short → insufficient-data', r.trend, 'insufficient-data');
   eq('series only 3 (trail excluded at extraction)', r.series.length, 3);
+  fs.rmSync(proj, { recursive: true });
+}
+
+console.log('\nreadDrift unit:');
+{
+  eq('frontmatter value used', readDrift({ cardiac_drift_bpm: '6' }, 'Cardiac drift: +99 bpm'), 6);
+  eq('frontmatter zero honored (not falsy fallthrough)', readDrift({ cardiac_drift_bpm: '0' }, 'Cardiac drift: +99 bpm'), 0);
+  eq('frontmatter negative honored', readDrift({ cardiac_drift_bpm: '-5' }, ''), -5);
+  eq('missing field falls back to body', readDrift({}, 'Cardiac drift: +7 bpm'), 7);
+  eq('malformed field falls back to body', readDrift({ cardiac_drift_bpm: 'n/a' }, 'Cardiac drift: +7 bpm'), 7);
+  eq('malformed field, no body line, returns null', readDrift({ cardiac_drift_bpm: 'n/a' }, 'no drift here'), null);
+}
+
+console.log('\nweekly-patterns unit (frontmatter-first read):');
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'fitness-lab-wp3-'));
+  const compiled = path.join(proj, '.claude-code-hermit', 'compiled');
+  fs.mkdirSync(compiled, { recursive: true });
+  const mk = (id: number, created: string, drift: number) =>
+    fs.writeFileSync(
+      path.join(compiled, `activity-${id}-${created}.md`),
+      `---\ntype: activity-note\ncreated: ${created}T10:00:00Z\nsession_kind: steady\ncardiac_drift_bpm: ${drift}\n---\nActivity: x (no rendered drift line)\n`,
+    );
+  mk(1, '2026-05-04', 4);
+  mk(2, '2026-05-11', 7);
+  mk(3, '2026-05-18', 9);
+  mk(4, '2026-05-25', 13);
+  const r = weeklyPatterns(proj);
+  eq('steady_sessions_found', r.steady_sessions_found, 4);
+  eq('trend upward (frontmatter-only, no prose line)', r.trend, 'upward');
+  eq('series length', r.series.length, 4);
+  eq('series oldest first', r.series[0]?.drift, 4);
+  fs.rmSync(proj, { recursive: true });
+}
+
+console.log('\nweekly-patterns unit (mixed frontmatter + legacy prose notes):');
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'fitness-lab-wp4-'));
+  const compiled = path.join(proj, '.claude-code-hermit', 'compiled');
+  fs.mkdirSync(compiled, { recursive: true });
+  const mkFm = (id: number, created: string, drift: number) =>
+    fs.writeFileSync(
+      path.join(compiled, `activity-${id}-${created}.md`),
+      `---\ntype: activity-note\ncreated: ${created}T10:00:00Z\nsession_kind: steady\ncardiac_drift_bpm: ${drift}\n---\nActivity: x\n`,
+    );
+  const mkProse = (id: number, created: string, drift: number) =>
+    fs.writeFileSync(
+      path.join(compiled, `activity-${id}-${created}.md`),
+      `---\ntype: activity-note\ncreated: ${created}T10:00:00Z\nsession_kind: steady\n---\nActivity: x\nCardiac drift: ${drift >= 0 ? '+' : ''}${drift} bpm\n`,
+    );
+  mkProse(1, '2026-05-04', 4);
+  mkProse(2, '2026-05-11', 7);
+  mkFm(3, '2026-05-18', 9);
+  mkFm(4, '2026-05-25', 13);
+  const r = weeklyPatterns(proj);
+  eq('steady_sessions_found', r.steady_sessions_found, 4);
+  eq('trend upward across mixed readers', r.trend, 'upward');
+  eq('series length', r.series.length, 4);
   fs.rmSync(proj, { recursive: true });
 }
 
