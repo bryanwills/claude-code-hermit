@@ -1,10 +1,11 @@
-// Structural lint for the /domain-brainstorm skill — 1:1 port of
-// tests/test_domain_brainstorm_skill.py (16 cases).
+// Structural lint for the /domain-brainstorm skill (14 cases). Originally a
+// 1:1 port of tests/test_domain_brainstorm_skill.py; the two metrics-emit
+// cases were retired when the skill stopped writing its own `brainstorm-emit`
+// event and started riding core's triage ledger via proposal tags.
 // Grep-level checks against the skill markdown. No runtime skill execution.
 // Guards:
 //   - 5-gate structure (Gate 0..4)
-//   - contract references (Evidence Source, category, metrics emit with
-//     per-plugin skill name)
+//   - contract references (Evidence Source, category, proposal tags)
 //   - boundary: suppression artifacts appear under a suppression framing,
 //     not as idea sources
 
@@ -71,15 +72,10 @@ test('category improvement', () => {
   expect(skillBody).toContain('category: improvement');
 });
 
-test('metrics emit type', () => {
-  expect(skillBody).toContain('brainstorm-emit');
-});
-
-test('metrics emit skill value', () => {
-  // Must use the HA-specific skill name so brainstorm-emit rows stay
-  // attributable to this plugin if other brainstorm skills ever share
-  // proposal-metrics.jsonl.
-  expect(skillBody).toContain('ha-domain-brainstorm');
+test('proposal tags carry brainstorm provenance', () => {
+  // proposal-create writes these onto both the triage-verdict row and the
+  // proposal frontmatter; that is what the kill-criteria segment reads.
+  expect(skillBody).toContain('tags: [capability-brainstorm]');
 });
 
 test('prefix automation-gap', () => {
