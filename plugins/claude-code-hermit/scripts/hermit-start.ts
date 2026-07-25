@@ -390,7 +390,7 @@ function clearStatusCacheOnBoot(): void {
 
 /**
  * Stamps a fresh per-process nonce at state/.boot-id on every always-on boot.
- * cron-registry.ts (the hermit-routines diff planner) compares this against the
+ * `routines.ts cron-registry` (the hermit-routines diff planner) compares this against the
  * boot_id stored in its state/cron-registry.json mirror: a mismatch means the
  * mirror describes a prior process's CronCreates, which durable:false already
  * killed on exit, so the planner treats every enabled routine as CREATE with no

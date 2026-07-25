@@ -601,7 +601,7 @@ function markBudgetNotified(newPeriods: Json[], periodKey: Record<string, string
 // and, for `action:"pause"`, set the PROP-015 pause flag with an auto-resume boundary.
 // Newly-created entries also get a direct channel push; `notified` is only
 // flipped true on a confirmed send, so a failed send leaves the existing
-// heartbeat-precheck EVALUATE wake as the fallback announcement path.
+// `heartbeat.ts precheck` EVALUATE wake as the fallback announcement path.
 // Fail-open throughout — never throws, since run()'s caller must never be blocked by
 // this check.
 async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: Json, locale: Locale = 'en'): Promise<void> {
@@ -691,7 +691,7 @@ async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: J
 
     // Then push — bounded well under the Stop pipeline's 15s budget — and record
     // `notified` via a fresh read-modify-write. On failure, notified stays false so
-    // heartbeat-precheck's EVALUATE wake remains the fallback announcement path.
+    // `heartbeat.ts precheck`'s EVALUATE wake remains the fallback announcement path.
     if (newPeriods.length > 0) {
       // Full USD/cap/ratio detail is maintainer-tier; on a stock install (no
       // maintainer channel, technical profile) it falls back to the primary chat,
@@ -709,7 +709,7 @@ async function applyBudgetCheck(costIdx: Json, timezone: string, budgetConfig: J
       // the maintainer leg was delivered (a chat, or its intended Findings home),
       // OR the client "paused until X" line landed on the primary chat. A degraded
       // Findings fallback (configured maintainer channel unreachable) leaves
-      // notified:false so heartbeat-precheck's EVALUATE wake re-announces once the
+      // notified:false so `heartbeat.ts precheck`'s EVALUATE wake re-announces once the
       // channel recovers.
       if (res.maintainer?.delivered || res.client?.ok === true) markBudgetNotified(newPeriods, periodKey);
     }

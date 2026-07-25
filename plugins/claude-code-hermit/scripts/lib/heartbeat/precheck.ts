@@ -1,5 +1,5 @@
-// heartbeat-precheck.ts — fast-path verdict before the LLM evaluates HEARTBEAT.md.
-// Usage: bun heartbeat-precheck.ts [--peek] <hermit-state-dir>
+// `heartbeat.ts precheck` — fast-path verdict before the LLM evaluates HEARTBEAT.md.
+// Usage: bun heartbeat.ts precheck [--peek] <hermit-state-dir>
 // Output (stdout, one line): SKIP|<reason>  |  OK  |  AUTO_CLOSE  |  EVALUATE  |  ALERT|<detail>
 // Exit 0 always. Without --peek: writes updated alert-state.json (increments total_ticks).
 // With --peek: read-only — computes the same verdict without any state mutation.
@@ -10,14 +10,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { currentHHMM, todayYMD, parseDuration } from './lib/time';
-import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts } from './lib/alert-state';
-import { readFrontmatter, listProposalFiles } from './lib/frontmatter';
-import { isProposalScanItem } from './lib/heartbeat-items';
-import { isPaused } from './lib/pause';
-import { scanForInjection } from './lib/injection-scan';
-import { sha256 } from './lib/hash';
-import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
+import { currentHHMM, todayYMD, parseDuration } from '../time';
+import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts } from '../alert-state';
+import { readFrontmatter, listProposalFiles } from '../frontmatter';
+import { isProposalScanItem } from '../heartbeat-items';
+import { isPaused } from '../pause';
+import { scanForInjection } from '../injection-scan';
+import { sha256 } from '../hash';
+import { AUTO_CLOSE_LULL_MINUTES } from '../auto-close';
 
 type Json = any;
 

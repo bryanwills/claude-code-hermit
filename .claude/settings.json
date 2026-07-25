@@ -3,7 +3,7 @@
     "allow": [
       "Bash(gh issue:*)",
       "Bash(node */skills/hermit-scribe/file-issue.js*)",
-      "Bash(node */scripts/cron-tz-shift.js *)",
+      "Bash(bun */scripts/routines.ts tz-shift *)",
       "Bash(node */scripts/resolve-outbound-channel.js *)"
     ],
     "deny": []

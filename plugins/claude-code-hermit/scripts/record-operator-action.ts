@@ -1,10 +1,10 @@
 process.stdout.on('error', () => {});
 
 // UserPromptSubmit + SessionStart hook — records when an operator prompt is received.
-// Writes state/last-operator-action.json so heartbeat-precheck.ts can gate AUTO_CLOSE
+// Writes state/last-operator-action.json so `heartbeat.ts precheck` can gate AUTO_CLOSE
 // on genuine operator silence rather than SHELL.md mtime (which routine writes reset).
 // Also opens state/operator-turn-open.json on the same kept prompts (plus --force) so
-// routine-due.ts can defer monitor-mode routines only while a real operator turn is in
+// `routines.ts due` can defer monitor-mode routines only while a real operator turn is in
 // flight; stop-pipeline.ts clears it at Stop (issue #617 — session_state alone starved
 // routines indefinitely because it never resets on its own).
 //
@@ -21,7 +21,7 @@ process.stdout.on('error', () => {});
 //   <channel…           — unauthorized DMs arrive here before channel-responder's allowlist
 //                          check; recording them would let bot traffic suppress AUTO_CLOSE
 //   HEARTBEAT_EVALUATE/HEARTBEAT_ERROR/ROUTINE_DUE/ROUTINE_MONITOR_ERROR — Monitor-delivered
-//                          scheduler wake notifications (heartbeat-monitor.sh, routine-due.ts,
+//                          scheduler wake notifications (heartbeat-monitor.sh, routines.ts due,
 //                          routine-monitor.sh) — see isRoutinePrompt below
 //   hermit's own tmux-injected slash commands — see INJECTED_EXACT below. Every
 //   other bare `/…` prompt counts as operator activity (see isRoutinePrompt).
@@ -48,8 +48,8 @@ function write() {
   writeMarker(TMP_PATH, STATE_PATH);
 }
 
-// Marks "an operator turn is in flight" for routine-due.ts's defer gate. Cleared by
-// stop-pipeline.ts at Stop; routine-due.ts applies a 60-min TTL as an orphaned-marker
+// Marks "an operator turn is in flight" for `routines.ts due`'s defer gate. Cleared by
+// stop-pipeline.ts at Stop; `routines.ts due` applies a 60-min TTL as an orphaned-marker
 // backstop (a failed Stop must not starve routines forever).
 function openTurnMarker() {
   writeMarker(TURN_TMP, TURN_PATH);
@@ -84,7 +84,7 @@ function isRoutinePrompt(prompt: string): boolean {
   // UserPromptSubmit hook fired at all in scratch tmux sessions; revisit if a
   // future probe contradicts this):
   //   heartbeat-monitor.sh:26-34 → "HEARTBEAT_EVALUATE" (bare) | "HEARTBEAT_ERROR: <detail>"
-  //   routine-due.ts:219         → "ROUTINE_DUE [hermit-routine:<id>] ..."
+  //   lib/routines/due.ts             → "ROUTINE_DUE [hermit-routine:<id>] ..."
   //   routine-monitor.sh:26      → "ROUTINE_MONITOR_ERROR: <detail>"
   // tests/auto-close.test.ts monitor-emission drift guard re-derives this list
   // from the emitters' source — extend both together.

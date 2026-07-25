@@ -1,9 +1,9 @@
-// routine-due.ts — deterministic scheduler for monitor-mode routines. Polled every
+// `routines.ts due` — deterministic scheduler for monitor-mode routines. Polled every
 // interval by routine-monitor.sh. Owns all gating (pause/waiting/idle), all state writes
 // (state/routine-schedule.json cursors, state/routine-monitor-liveness.json), and emits
 // a single ROUTINE_DUE line only for routines that should actually wake the session.
 //
-// Usage: bun routine-due.ts <hermit-dir>
+// Usage: bun routines.ts due <hermit-dir>
 // Output (stdout): nothing, or exactly one line:
 //   ROUTINE_DUE [hermit-routine:<id1>] [hermit-routine:<id2>] ...
 // The bracketed markers are load-bearing — cost-tracker.ts classifySource reads this
@@ -24,11 +24,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { isPaused } from './lib/pause';
-import { validateCronSchedule, ROUTINE_ID_RE } from './validate-config';
-import { makeTzFormatter, partsFromFormatter, compileCron, cronMatchesCompiled } from './lib/cron-match';
-import { readJson as readJSON } from './lib/cli';
+import { isPaused } from '../pause';
+import { validateCronSchedule, ROUTINE_ID_RE } from '../../validate-config';
+import { makeTzFormatter, partsFromFormatter, compileCron, cronMatchesCompiled } from '../cron-match';
+import { readJson as readJSON } from '../cli';
+import { logRoutineEvent } from './event';
 
 type Json = any;
 
@@ -44,7 +44,6 @@ const stateDir = path.join(hermitDir, 'state');
 const projectRoot = path.dirname(hermitDir);
 const schedulePath = path.join(stateDir, 'routine-schedule.json');
 const livenessPath = path.join(stateDir, 'routine-monitor-liveness.json');
-const logScript = path.join(import.meta.dir, 'log-routine-event.sh');
 
 function now(): Date {
   if (process.env.HERMIT_NOW) {
@@ -80,7 +79,7 @@ function writeLiveness(): void {
 
 function stamp(id: string, event: string): void {
   try {
-    execFileSync(logScript, [id, event, 'monitor'], { cwd: projectRoot, stdio: ['ignore', 'ignore', 'ignore'] });
+    logRoutineEvent(id, event, 'monitor', projectRoot);
   } catch { /* fail-open — a stamp failure must not block the routine */ }
 }
 

@@ -46,7 +46,7 @@ to run at any time. Produces no side effects beyond writing
    Do not touch heartbeat-owned fields (`self_eval_updates`, `last_clean_eval_at`). If either
    `new_entries` or `resolved_keys` is non-empty, persist via the same stdin API heartbeat uses:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-alert-state.ts .claude-code-hermit/state/alert-state.json <<'HERMIT_ALERT_JSON'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts alert-state .claude-code-hermit/state/alert-state.json <<'HERMIT_ALERT_JSON'
    {"new_entries": {...}, "updated_entries": {}, "resolved_keys": [...]}
    HERMIT_ALERT_JSON
    ```

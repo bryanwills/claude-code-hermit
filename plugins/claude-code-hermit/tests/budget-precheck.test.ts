@@ -70,8 +70,8 @@ const budgetEntry = (notified: boolean) => ({
 });
 
 async function precheck(dir: string): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: ['.claude-code-hermit'],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', '.claude-code-hermit'],
     cwd: dir,
     env: { HERMIT_NOW: NOW },
   });

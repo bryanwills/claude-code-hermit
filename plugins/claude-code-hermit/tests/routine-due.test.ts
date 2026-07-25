@@ -53,7 +53,7 @@ function withDir(fn: (dir: string) => Promise<void> | void) {
 }
 
 const run = (dir: string, now: string) =>
-  runScript('routine-due.ts', { args: [hermit(dir)], env: { HERMIT_NOW: now } });
+  runScript('routines.ts', { args: ['due', hermit(dir)], env: { HERMIT_NOW: now } });
 
 describe('routine-due', () => {
   test('no schedule file + due-now mark → init-to-now, NO emission, entry created', withDir(async (dir) => {
@@ -218,8 +218,8 @@ describe('routine-due', () => {
 
     // Force the schedule persist to fail via the test seam — the deferred skip stamp must
     // not be written and the cursor must not advance (persist-before-stamp ordering).
-    const rFail = await runScript('routine-due.ts', {
-      args: [hermit(dir)],
+    const rFail = await runScript('routines.ts', {
+      args: ['due', hermit(dir)],
       env: { HERMIT_NOW: '2026-07-15T09:00:00Z', HERMIT_DUE_FORCE_PERSIST_FAIL: '1' },
     });
     expect(rFail.exitCode).toBe(0);
@@ -310,7 +310,7 @@ describe('routine-due', () => {
   }));
 
   test('missing hermit-dir arg → exit 0, no crash, no output', withDir(async (dir) => {
-    const r = await runScript('routine-due.ts', { args: [] });
+    const r = await runScript('routines.ts', { args: ['due', ] });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
   }));

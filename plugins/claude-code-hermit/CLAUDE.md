@@ -109,7 +109,7 @@ bun test
   (everything a hook prints on success is injected into context). Skills must not `Read`
   unbounded surfaces (`cost-log.jsonl`, `*.jsonl` event logs, the channel DB) directly —
   front them with a script that returns a bounded summary (the `cost-report.ts` /
-  `heartbeat-precheck.ts` / `lib/search.ts` pattern); a bounded slice (e.g. reflect's
+  `heartbeat.ts precheck` / `lib/search.ts` pattern); a bounded slice (e.g. reflect's
   tail-20 of cost-log) is the ceiling, not the norm. Session-start injection
   (`startup-context.ts`, `generate-summary.ts`) is the largest recurring cost — a new
   section there must justify its per-session tokens against how often it changes behavior.

@@ -1,4 +1,4 @@
-// Timezone-aware cron shifting — the pure logic behind scripts/cron-tz-shift.ts.
+// Timezone-aware cron shifting — the pure logic behind scripts/routines.ts tz-shift.
 //
 // Lives in lib/ so importers (cron-registry.ts, hermit-watchdog.ts, the
 // status-responder stage) don't pull in a top-level CLI script just to reach

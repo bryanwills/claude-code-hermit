@@ -1259,8 +1259,8 @@ describe('hermit-routines diff-registration contract', () => {
   const skillContent = read(path.join(SKILLS, 'hermit-routines', 'SKILL.md'));
 
   test('SKILL.md wires the diff planner into load\'s success path', () => {
-    expect(skillContent).toContain('cron-registry.ts plan');
-    expect(skillContent).toContain('cron-registry.ts commit');
+    expect(skillContent).toContain('routines.ts cron-registry plan');
+    expect(skillContent).toContain('routines.ts cron-registry commit');
   });
 
   test('load\'s default success path is no longer an unconditional CronList sweep', () => {

@@ -262,7 +262,7 @@ export function inActiveHours(activeHours: Json, timezone: string, ref?: Date): 
     if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return true; // fail-open on malformed window
     const now = currentHHMM(timezone, ref);
     if (now === null) return true; // fail-open on unparseable tz
-    return start <= now && now < end; // end-exclusive, matching heartbeat-precheck
+    return start <= now && now < end; // end-exclusive, matching heartbeat.ts precheck
   } catch {
     return true; // fail-open
   }

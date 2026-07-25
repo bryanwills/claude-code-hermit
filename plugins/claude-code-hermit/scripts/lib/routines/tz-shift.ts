@@ -1,24 +1,26 @@
-// Rewrite a 5-field cron expression from one IANA timezone to the machine's local timezone.
-// Usage: bun cron-tz-shift.ts "<cron-expr>" "<from-tz>"
-// Stdout: shifted cron (or original on unsupported/fail-open paths)
-// Stderr: WARN: <reason>  (when passing through unchanged due to unsupported pattern)
-// Exit 0 always except: malformed cron that fails validateCronSchedule, or unparseable HERMIT_CRON_TZ_SHIFT_NOW
+// `routines.ts tz-shift "<cron-expr>" "<from-tz>"` — rewrites a 5-field cron
+// expression from one IANA timezone to the machine's local timezone.
+// Stdout: shifted cron (or the original on unsupported/fail-open paths)
+// Stderr: WARN: <reason>  (when passing through unchanged)
+// Exit 0 always except: a malformed cron that fails validateCronSchedule, or an
+// unparseable HERMIT_CRON_TZ_SHIFT_NOW.
 //
-// The shift logic itself lives in lib/cron-shift.ts; this file is its CLI.
+// The shift arithmetic itself lives in lib/cron-shift.ts, shared with
+// lib/routines/registry.ts; this is only its CLI face.
 
-import { validateCronSchedule } from './validate-config';
-import { shiftCron, wallMinutes } from './lib/cron-shift';
+import { validateCronSchedule } from '../../validate-config';
+import { shiftCron } from '../cron-shift';
 
-function resolveMachineTz() {
+function resolveMachineTz(): string | null {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
   catch { return null; }
 }
 
-function main() {
-  const [,, cronExpr, fromTz] = process.argv;
+export function run(args: string[]): void {
+  const [cronExpr, fromTz] = args;
 
   if (!cronExpr) {
-    process.stderr.write('Usage: bun cron-tz-shift.ts "<cron-expr>" "<from-tz>"\n');
+    process.stderr.write('Usage: bun routines.ts tz-shift "<cron-expr>" "<from-tz>"\n');
     process.exit(1);
   }
 
@@ -49,8 +51,4 @@ function main() {
   const { result, warn } = shiftCron(cronExpr, fromTz || '', machineTz, ref);
   process.stdout.write(result + '\n');
   if (warn) process.stderr.write(`WARN: ${warn}\n`);
-}
-
-if (import.meta.main) {
-  main();
 }

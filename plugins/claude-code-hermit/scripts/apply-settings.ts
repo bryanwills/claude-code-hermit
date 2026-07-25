@@ -47,7 +47,7 @@ const HERMIT_ALLOW = [
   'Bash(git status:*)',
   'Bash(git log:*)',
   'Bash(bun */scripts/cost-tracker.ts*)',
-  'Bash(bun */scripts/heartbeat-precheck.ts*)',
+  'Bash(bun */scripts/heartbeat.ts precheck*)',
   'Bash(bun */scripts/reflect-precheck.ts*)',
   'Bash(bun */scripts/archive-shell.ts*)',
   'Bash(bun */scripts/evaluate-session.ts*)',
@@ -58,7 +58,7 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/apply-reflection-actions.ts*)',
   'Bash(bun */scripts/transcript-digest.ts*)',
   'Bash(bun */scripts/setup-token-mint.ts*)',
-  'Bash(bun */scripts/cron-tz-shift.ts*)',
+  'Bash(bun */scripts/routines.ts tz-shift*)',
   'Bash(bun */scripts/evolve-plan.ts*)',
   'Bash(bun */scripts/evolve-finalize.ts*)',
   'Bash(bun */scripts/manifest-seed.ts*)',
@@ -66,8 +66,8 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/channel-log.ts*)',
   'Bash(bun */scripts/channel-send.ts*)',
   'Bash(bun */scripts/session-archive.ts*)',
-  'Bash(bun */scripts/routine-precheck.ts*)',
-  'Bash(bun */scripts/cron-registry.ts*)',
+  'Bash(bun */scripts/routines.ts precheck*)',
+  'Bash(bun */scripts/routines.ts cron-registry*)',
   // Domain plugins reach core's shared scripts through the project-resident
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
   // cache dir). Pinned to the two verbs they actually need, not a bare
@@ -105,6 +105,11 @@ const HERMIT_OBSOLETE = [
   // …and the two hermit-run routes that pointed at the pre-absorption names.
   'Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)',
+  // Heartbeat/routine scripts absorbed into heartbeat.ts and routines.ts verbs.
+  'Bash(bun */scripts/heartbeat-precheck.ts*)',
+  'Bash(bun */scripts/routine-precheck.ts*)',
+  'Bash(bun */scripts/cron-registry.ts*)',
+  'Bash(bun */scripts/cron-tz-shift.ts*)',
 ];
 
 // Sealed autoMode entries — operator-owned policy seeded at attended hatch and

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Usage: routine-monitor.sh <interval_seconds> <hermit_state_dir>
 # Env: ROUTINE_MONITOR_ONCE=1    → run one iteration and exit (tests)
-#      ROUTINE_DUE_SCRIPT=<path> → override routine-due path (tests)
+#      ROUTINE_DUE_SCRIPT=<path> → override routine-due path (tests). Still a bare
+#                                  script path called with `<dir>`; the default
+#                                  now prepends routines.ts's verb.
 # Polls routine-due.ts, which owns all gating/state/liveness writes and prints a
 # ROUTINE_DUE line only when eligible routines are due. No first-iteration
 # suppression needed: routine-due initializes unseen routines to "now" and fires
@@ -14,13 +16,18 @@
 set -u
 INTERVAL="${1:?usage: routine-monitor.sh <interval_seconds> <hermit_state_dir>}"
 RT_DIR="${2:?usage: routine-monitor.sh <interval_seconds> <hermit_state_dir>}"
-DUE="${ROUTINE_DUE_SCRIPT:-$(dirname "$0")/routine-due.ts}"
+# Array, not a string — see heartbeat-monitor.sh for why.
+if [[ -n "${ROUTINE_DUE_SCRIPT:-}" ]]; then
+  DUE=("$ROUTINE_DUE_SCRIPT")
+else
+  DUE=("$(dirname "$0")/routines.ts" due)
+fi
 fail_count=0
 # Emission grammar (this line's "$out" and the ROUTINE_MONITOR_ERROR line below) is
 # load-bearing: record-operator-action.ts isRoutinePrompt() drops these lines;
 # tests/auto-close.test.ts drift guard syncs them.
 while true; do
-  if out="$(bun "$DUE" "$RT_DIR" 2>/dev/null)"; then
+  if out="$(bun "${DUE[@]}" "$RT_DIR" 2>/dev/null)"; then
     fail_count=0
     [[ -n "$out" ]] && echo "$out"
   else

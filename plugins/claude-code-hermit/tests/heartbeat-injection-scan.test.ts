@@ -74,8 +74,8 @@ function contentHash(text: string): string {
 }
 
 async function verdict(dir: string, peek = false, env?: Record<string, string>): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: [...(peek ? ['--peek'] : []), '.claude-code-hermit'],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', ...(peek ? ['--peek'] : []), '.claude-code-hermit'],
     cwd: dir,
     env,
   });

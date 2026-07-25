@@ -14,7 +14,7 @@
 // never silently ride a routine past CC's real 7-day auto-expiry cliff.
 
 import { describe, test, expect } from 'bun:test';
-import { planCron, commitCron, computeWakeSpread, promptHash, REREGISTER_AGE_MS, filterRoutinesByIds } from '../scripts/cron-registry';
+import { planCron, commitCron, computeWakeSpread, promptHash, REREGISTER_AGE_MS, filterRoutinesByIds } from '../scripts/lib/routines/registry';
 import { shiftCron } from '../scripts/lib/cron-shift';
 
 const PLUGIN_ROOT = '/plugin';

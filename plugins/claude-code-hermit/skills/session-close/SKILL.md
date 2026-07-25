@@ -54,7 +54,7 @@ Invoked by the `daily-auto-close` routine at `0 0 * * *` (local) — the midnigh
    The verb owns the whole branch table: it reads `session_state` and the operator-action clock, deletes a stale `pending-close.json` itself when there is nothing to close, writes a fresh queue flag itself when the operator is active, and fails open to close-now when the clock is missing or invalid (operator idle indefinitely). A corrupt or unreadable `runtime.json` maps to `noop`, not close-now — closing a session whose state is unknowable would be fail-destructive.
 2. Branch on the returned `decision`:
    - **`noop`** — stop: do not notify the operator, do not write to `routine-metrics.jsonl`.
-   - **`queued`** — stop. The heartbeat-precheck drain block emits `AUTO_CLOSE` on the next tick where the operator has been idle >10 minutes.
+   - **`queued`** — stop. The `heartbeat.ts precheck` drain block emits `AUTO_CLOSE` on the next tick where the operator has been idle >10 minutes.
    - **`close-now`** — close directly by proceeding through the Auto-close path (`--auto`) above (steps 6–8, `Closed Via: auto`). Stop.
    - **`ok === false`** — append the returned `reason` to SHELL.md `## Findings` and stop; the routine retries next midnight.
 

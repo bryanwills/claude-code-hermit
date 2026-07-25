@@ -684,7 +684,7 @@ describe('update-alert-state', () => {
 
   async function updateAlertState(dir: string, payload: string, env: Record<string, string> = { HERMIT_NOW: NOW }) {
     const stateFile = hermit(dir, 'state', 'alert-state.json');
-    const r = await runScript('update-alert-state.ts', { args: [stateFile], stdin: payload, env });
+    const r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: payload, env });
     expect(r.exitCode).toBe(0);
     return {
       state: fs.existsSync(stateFile) ? readJson(stateFile) : null,
@@ -784,8 +784,8 @@ describe('update-alert-state', () => {
 
   test('update-alert-state (missing state file — fail-open, seeds default, exits 0)', withDir(async (dir) => {
     const stateFile = hermit(dir, 'state', 'alert-state.json');
-    const r = await runScript('update-alert-state.ts', {
-      args: [stateFile], stdin: firingPayload([{ key: 'custom:x', text: 'k fired' }]), env: { HERMIT_NOW: NOW },
+    const r = await runScript('heartbeat.ts', {
+      args: ['alert-state', stateFile], stdin: firingPayload([{ key: 'custom:x', text: 'k fired' }]), env: { HERMIT_NOW: NOW },
     });
     expect(r.exitCode).toBe(0);
     const d = readJson(stateFile);
@@ -794,7 +794,7 @@ describe('update-alert-state', () => {
 
   test('update-alert-state (bad JSON payload — exits 1, no write)', withDir(async (dir) => {
     const stateFile = hermit(dir, 'state', 'alert-state.json');
-    const r = await runScript('update-alert-state.ts', { args: [stateFile], stdin: 'not-json' });
+    const r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: 'not-json' });
     expect(r.exitCode).toBe(1);
     expect(fs.existsSync(stateFile)).toBe(false);
   }));
@@ -804,13 +804,13 @@ describe('update-alert-state', () => {
     const stateFile = hermit(dir, 'state', 'alert-state.json');
 
     write(stateFile, before);
-    let r = await runScript('update-alert-state.ts', { args: [stateFile], stdin: JSON.stringify({ firing: 'not-an-array', self_eval_updates: {} }), env: { HERMIT_NOW: NOW } });
+    let r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: JSON.stringify({ firing: 'not-an-array', self_eval_updates: {} }), env: { HERMIT_NOW: NOW } });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
     expect(readJson(stateFile)).toEqual(JSON.parse(before)); // untouched — never coerced to empty and aged
 
     write(stateFile, before);
-    r = await runScript('update-alert-state.ts', { args: [stateFile], stdin: JSON.stringify({ firing: [{ key: 'checklist:x' }], self_eval_updates: {} }), env: { HERMIT_NOW: NOW } }); // missing text
+    r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: JSON.stringify({ firing: [{ key: 'checklist:x' }], self_eval_updates: {} }), env: { HERMIT_NOW: NOW } }); // missing text
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
     expect(readJson(stateFile)).toEqual(JSON.parse(before));
@@ -829,7 +829,7 @@ describe('update-alert-state', () => {
   test('update-alert-state (write failure — no stdout, no side effects)', withDir(async (dir) => {
     const stateFile = hermit(dir, 'state', 'alert-state.json');
     fs.mkdirSync(stateFile); // path is a directory → write throws EISDIR
-    const r = await runScript('update-alert-state.ts', { args: [stateFile], stdin: firingPayload([{ key: 'stale-session', text: 'x' }]), env: { HERMIT_NOW: NOW } });
+    const r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: firingPayload([{ key: 'stale-session', text: 'x' }]), env: { HERMIT_NOW: NOW } });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
     expect(fs.statSync(stateFile).isDirectory()).toBe(true); // untouched
@@ -1864,8 +1864,8 @@ function seedHeartbeat(dir: string, opts: {
 }
 
 async function precheckOut(dir: string, peek = false): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: peek ? ['--peek', hermit(dir)] : [hermit(dir)],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', ...(peek ? ['--peek', hermit(dir)] : [hermit(dir)])],
   });
   expect(r.exitCode).toBe(0);
   return r.stdout.trimEnd();
@@ -2072,8 +2072,8 @@ function seedDamper(dir: string, opts: {
 }
 
 async function precheckWithNow(dir: string, nowIso: string, peek = false): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: peek ? ['--peek', hermit(dir)] : [hermit(dir)],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', ...(peek ? ['--peek', hermit(dir)] : [hermit(dir)])],
     env: { HERMIT_NOW: nowIso },
   });
   expect(r.exitCode).toBe(0);
@@ -2612,11 +2612,10 @@ describe('reflect-precheck', () => {
 });
 
 // -------------------------------------------------------
-// log-routine-event.sh — resolves hermit root by walking up from CWD
+// routines.ts log-event — resolves hermit root by walking up from CWD
 // -------------------------------------------------------
 
-describe('log-routine-event', () => {
-  const SCRIPT = path.join(SCRIPTS_DIR, 'log-routine-event.sh');
+describe('routines.ts log-event', () => {
 
   // Empirically confirmed (bun 1.3.14): describe.serial does not reliably
   // force sequential execution of its own child tests under --concurrent —
@@ -2631,23 +2630,23 @@ describe('log-routine-event', () => {
     });
     afterAll(() => wd.cleanup());
 
-    test.serial('log-routine-event (subdir resolves to ancestor)', async () => {
+    test.serial('log-event (subdir resolves to ancestor)', async () => {
       // Fired from a subdirectory → appends to the ancestor's state file
-      await runBash(SCRIPT, { args: ['morning-brief', 'fired'], cwd: path.join(wd.dir, 'app', 'sub') });
+      await runScript('routines.ts', { args: ['log-event', 'morning-brief', 'fired'], cwd: path.join(wd.dir, 'app', 'sub') });
       const content = fs.readFileSync(metrics(), 'utf-8');
       expect(content).toContain('"routine_id":"morning-brief","event":"fired"');
     });
 
-    test.serial('log-routine-event (root resolves to state file)', async () => {
+    test.serial('log-event (root resolves to state file)', async () => {
       // Fired from the hermit root → unchanged behavior
-      await runBash(SCRIPT, { args: ['weekly-review', 'skipped-waiting'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'weekly-review', 'skipped-waiting'], cwd: wd.dir });
       const content = fs.readFileSync(metrics(), 'utf-8');
       expect(content).toContain('"routine_id":"weekly-review","event":"skipped-waiting"');
     });
 
-    test.serial('log-routine-event (started event serializes correctly)', async () => {
+    test.serial('log-event (started event serializes correctly)', async () => {
       // started marker emitted before skill invocation — must serialize like other events
-      await runBash(SCRIPT, { args: ['daily-brief', 'started'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'daily-brief', 'started'], cwd: wd.dir });
       const content = fs.readFileSync(metrics(), 'utf-8');
       expect(content).toContain('"routine_id":"daily-brief","event":"started"');
     });
@@ -2670,16 +2669,16 @@ describe('log-routine-event', () => {
     afterAll(() => wd.cleanup());
 
     test.serial('suppresses a fired that immediately follows another fired', async () => {
-      await runBash(SCRIPT, { args: ['heartbeat-restart', 'started'], cwd: wd.dir });
-      await runBash(SCRIPT, { args: ['heartbeat-restart', 'fired'], cwd: wd.dir });
-      await runBash(SCRIPT, { args: ['heartbeat-restart', 'fired'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'started'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'fired'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'fired'], cwd: wd.dir });
       expect(firedCount()).toBe(1);
     });
 
     test.serial('allows the next legitimate started→fired cycle', async () => {
       const before = firedCount();
-      await runBash(SCRIPT, { args: ['heartbeat-restart', 'started'], cwd: wd.dir });
-      await runBash(SCRIPT, { args: ['heartbeat-restart', 'fired'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'started'], cwd: wd.dir });
+      await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'fired'], cwd: wd.dir });
       expect(firedCount()).toBe(before + 1);
     });
   });
@@ -2692,7 +2691,7 @@ describe('log-routine-event', () => {
     beforeAll(async () => {
       const nohermit = fs.mkdtempSync(path.join(os.tmpdir(), 'no-hermit-'));
       try {
-        const r = await runBash(SCRIPT, { args: ['x', 'fired'], cwd: nohermit });
+        const r = await runScript('routines.ts', { args: ['log-event', 'x', 'fired'], cwd: nohermit });
         exitCode = r.exitCode;
         stderr = r.stderr;
       } finally {

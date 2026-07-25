@@ -58,7 +58,7 @@ produce a report.
    decision "is there anything to do here?" can be answered in bash — a file's mtime, a threshold
    comparison, a hash — write a precheck script that prints one token and exits 0, and only load
    the skill body on the branch that needs it. The shipped archetypes:
-   - `scripts/heartbeat-precheck.ts` — emits `SKIP|<reason>`, `OK`, `AUTO_CLOSE`, or `EVALUATE`.
+   - `scripts/heartbeat.ts precheck` — emits `SKIP|<reason>`, `OK`, `AUTO_CLOSE`, or `EVALUATE`.
      Only `EVALUATE` loads the heartbeat skill body.
    - `scripts/reflect-precheck.ts` — emits `EMPTY` or `RUN|<phases-json>`. On `EMPTY` the precheck itself
      owns the audit trail (updates `reflection-state.json`, appends the Progress Log line) so
@@ -114,5 +114,5 @@ narrow haiku subagent instead of a broad session-model skill.
   schema, cron rules, and the `model` field this pattern relies on.
 - `skills/hermit-routines/SKILL.md` — the registration mechanism (`load`/`list`/`status`/`stop`)
   and the model-override dispatch behavior cited above.
-- `scripts/heartbeat-precheck.ts`, `scripts/reflect-precheck.ts` — the shipped precheck
+- `scripts/heartbeat.ts precheck`, `scripts/reflect-precheck.ts` — the shipped precheck
   archetypes to copy the shape of, not reinvent.

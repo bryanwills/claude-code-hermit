@@ -1,8 +1,8 @@
-// cron-registry.ts — diff-based plan/commit for hermit-routines CronCreate registration.
+// `routines.ts cron-registry` — diff-based plan/commit for hermit-routines CronCreate registration.
 //
 // Usage:
-//   bun cron-registry.ts plan   <hermit-state-dir> <plugin-root> [--force]
-//   bun cron-registry.ts commit <hermit-state-dir> <plugin-root> <created-id-csv>
+//   bun routines.ts cron-registry plan   <hermit-state-dir> <plugin-root> [--force]
+//   bun routines.ts cron-registry commit <hermit-state-dir> <plugin-root> <created-id-csv>
 //
 // --force (used by `load --reset`) skips every mirror/hash/age comparison and
 // returns every enabled routine as CREATE with no DELETE lines — the caller is
@@ -34,9 +34,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { sha256 } from './lib/hash';
-import { shiftCron } from './lib/cron-shift';
-import { parseCronField } from './validate-config';
+import { sha256 } from '../hash';
+import { shiftCron } from '../cron-shift';
+import { parseCronField } from '../../validate-config';
 
 type Json = any;
 
@@ -289,13 +289,18 @@ export { planCron, commitCron, computeWakeSpread, readMirror, readBootId, prompt
 export type { Mirror, MirrorEntry, PlanResult, PlanCreate, ShiftedRoutine };
 
 // --- CLI ---
-if (import.meta.main) {
+// A named export, not an `import.meta.main` guard: this module is no longer an
+// entry point (routines.ts's cron-registry verb calls runCli()), and under that
+// dynamic import `import.meta.main` is false, so a guard would silently never
+// fire. tests/cron-registry.test.ts imports the pure helpers above, which is why
+// this cannot simply run at module scope.
+export function runCli(): void {
   const mode = process.argv[2];
   const hermitDir = process.argv[3];
   const pluginRoot = process.argv[4];
 
   if ((mode !== 'plan' && mode !== 'commit') || !hermitDir || !pluginRoot) {
-    process.stdout.write('SKIP|usage: cron-registry.ts <plan|commit> <hermit-dir> <plugin-root> [created-csv] [--force] [--ids <csv>]\n');
+    process.stdout.write('SKIP|usage: routines.ts cron-registry <plan|commit> <hermit-dir> <plugin-root> [created-csv] [--force] [--ids <csv>]\n');
     process.exit(0);
   }
 

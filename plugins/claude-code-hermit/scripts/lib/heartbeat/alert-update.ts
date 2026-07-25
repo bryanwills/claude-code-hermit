@@ -17,7 +17,7 @@
 //
 // The eval JSON is read from stdin (not argv) so free-text alert content can't
 // break shell quoting.
-// Usage: bun update-alert-state.ts <state-file-path>   # eval-json on stdin
+// Usage: bun heartbeat.ts alert-state <state-file-path>   # eval-json on stdin
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -25,15 +25,15 @@ import {
   readAlertState, defaultAlertState, quarantineAlertState, writeAlertState,
   classifyTick, deriveMicroPendingKeys, deriveProposalPendingKeys, deriveStaleSession, FiringItem,
   MICRO_PREFIX, PROPOSAL_PREFIX, STALE_KEY, isStructuredKey,
-} from './lib/alert-state';
-import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from './lib/time';
+} from '../alert-state';
+import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from '../time';
 
 type Json = any;
 
 const stateFile = process.argv[2];
 
 if (!stateFile) {
-  console.error('Usage: bun update-alert-state.ts <state-file-path>   # eval-json on stdin');
+  console.error('Usage: bun heartbeat.ts alert-state <state-file-path>   # eval-json on stdin');
   process.exit(1);
 }
 
