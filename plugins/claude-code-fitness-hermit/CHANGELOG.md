@@ -7,6 +7,7 @@
 - Two new routines, `morning-brief` and `evening-brief`, registered by `hatch`.
 
 ### Fixed
+- `domain-brainstorm` no longer writes its own `brainstorm-emit` event — core's triage gate already records every verdict. Proposals now carry `tags: [capability-brainstorm]` instead of `[domain-brainstorm, ideation]`, so they count toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - `hatch` no longer tells the operator to `cp .env.example .env`; a `.env.example` does not ship with the plugin.
 
 ### Changed

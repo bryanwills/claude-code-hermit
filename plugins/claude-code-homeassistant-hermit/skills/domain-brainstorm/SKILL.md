@@ -7,7 +7,7 @@ description: On-demand HA-voice brainstorm — reads entity inventory, automatio
 
 ## Kill criteria (read before running)
 
-After ≥8 invocations, read `state/proposal-metrics.jsonl` and filter events where `type:"brainstorm-emit"` and `skill:"ha-domain-brainstorm"`. Count CREATE vs total emits with ideas (triage-survival) and read `status:` of the resulting PROP files (PROP-acceptance). If triage-survival < 25% or PROP-acceptance < 30%, cut this skill rather than tune it — signal-to-noise isn't there.
+After ≥8 invocations, check the `capability-brainstorm` segment of core's proposal metrics report — run `bun scripts/proposal-metrics-report.ts .claude-code-hermit --source=capability-brainstorm` from the `claude-code-hermit` plugin root (not this plugin's; `${CLAUDE_PLUGIN_ROOT}` cannot reach it), or read the `capability-brainstorm` row of the table `/claude-code-hermit:hermit-evolution` prints. If triage-survival < 25% or PROP-acceptance < 30%, cut this skill rather than tune it — signal-to-noise isn't there. That segment is shared with core's `capability-brainstorm` and the other domain brainstorm skills, so a breach means brainstorm-generated proposals are noisy in general; it does not by itself say which skill to cut.
 
 ### Gate 0 — Gather inputs
 
@@ -59,20 +59,14 @@ Evidence Source: capability-brainstorm
 Evidence: <one paragraph: friction sentence + named grounding items>
 ```
 
-Set frontmatter: `source: auto-detected`, `category: improvement`, `tags: [domain-brainstorm, ideation]`.
+Set frontmatter: `source: auto-detected`, `category: improvement`, `tags: [capability-brainstorm]`.
+
+Provenance is carried by those `tags`, which `proposal-create` writes onto both the `triage-verdict` row and the proposal frontmatter. The cost: these proposals share core `capability-brainstorm`'s kill-criteria segment, so the numbers are combined rather than per-skill.
 
 Parse the verdict:
 - `CREATE` — note PROP-NNN.
 - `SUPPRESS — <code>` — record suppression code; don't retry.
 - `DUPLICATE:<PROP-ID>` — record existing ID; don't create.
-
-After each verdict, append a metrics event (Node stdlib, no deps). Tag `skill:'ha-domain-brainstorm'` to keep rows attributable to this plugin if other brainstorm skills ever share `proposal-metrics.jsonl`. Inlined here because `append-metrics.js` lives in the core plugin and is unreachable via `${CLAUDE_PLUGIN_ROOT}`; `JSON.stringify` guarantees a valid line:
-
-```bash
-node -e "const fs=require('fs'); fs.appendFileSync('.claude-code-hermit/state/proposal-metrics.jsonl', JSON.stringify({ts:new Date().toISOString(),type:'brainstorm-emit',skill:'ha-domain-brainstorm',verdict:'<CREATE|SUPPRESS|DUPLICATE>',proposal_id:'<PROP-NNN or null>'})+'\n','utf-8');"
-```
-
-This event is what the kill-criteria audit reads — `proposal-create`'s own `created` event does not carry per-skill provenance.
 
 Do NOT invoke `proposal-triage` directly — `/proposal-create` handles it.
 

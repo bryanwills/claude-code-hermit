@@ -7,7 +7,7 @@ description: On-demand dev-voice brainstorm — reads codebase friction signals 
 
 ## Kill criteria (read before running)
 
-After ≥8 invocations, read `.claude-code-hermit/state/proposal-metrics.jsonl` and filter events where `type:"brainstorm-emit"` and `skill:"domain-brainstorm"`. Count CREATE vs total emits with ideas (triage-survival) and read `status:` of the resulting PROP files (PROP-acceptance). If triage-survival < 25% or PROP-acceptance < 30%, cut this skill rather than tune it — signal-to-noise isn't there.
+After ≥8 invocations, check the `capability-brainstorm` segment of core's proposal metrics report — run `bun scripts/proposal-metrics-report.ts .claude-code-hermit --source=capability-brainstorm` from the `claude-code-hermit` plugin root (not this plugin's; `${CLAUDE_PLUGIN_ROOT}` cannot reach it), or read the `capability-brainstorm` row of the table `/claude-code-hermit:hermit-evolution` prints. If triage-survival < 25% or PROP-acceptance < 30%, cut this skill rather than tune it — signal-to-noise isn't there. That segment is shared with core's `capability-brainstorm` and the other domain brainstorm skills, so a breach means brainstorm-generated proposals are noisy in general; it does not by itself say which skill to cut.
 
 ### Gate 0 — Gather inputs
 
@@ -50,23 +50,14 @@ Evidence Source: capability-brainstorm
 Evidence: <one paragraph: friction sentence + named grounding items>
 ```
 
-Set frontmatter: `source: auto-detected`, `category: improvement`.
+Set frontmatter: `source: auto-detected`, `category: improvement`, `tags: [capability-brainstorm]`.
 
-> `Evidence Source: capability-brainstorm` is reused intentionally: it is the only source `proposal-triage` recognizes for the single-pass recurrence bypass, and adding a dedicated `domain-brainstorm` source is a core edit this skill deliberately avoids. The cost: domain-brainstorm proposals carry capability-brainstorm provenance to any consumer that buckets by evidence source. Per-skill kill metrics are unaffected (they read the `brainstorm-emit` events below, which are tagged `skill:"domain-brainstorm"`). If this skill graduates from pilot, promote it to a first-class triage bypass source.
+> `Evidence Source: capability-brainstorm` is reused intentionally: it is the only source `proposal-triage` recognizes for the single-pass recurrence bypass, and adding a dedicated `domain-brainstorm` source is a core edit this skill deliberately avoids. Provenance is carried by the `tags` above, which `proposal-create` writes onto both the `triage-verdict` row and the proposal frontmatter. The cost: these proposals share core `capability-brainstorm`'s kill-criteria segment, so the numbers are combined rather than per-skill.
 
 Parse the verdict:
 - `CREATE` — note PROP-NNN.
 - `SUPPRESS — <code>` — record suppression code; don't retry.
 - `DUPLICATE:<PROP-ID>` — record existing ID; don't create.
-
-After each verdict, append a metrics event via the shared helper:
-
-```bash
-bun "${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts" .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"brainstorm-emit","skill":"domain-brainstorm","verdict":"<CREATE|SUPPRESS|DUPLICATE>","proposal_id":null}'
-```
-Set `"proposal_id":"PROP-NNN"` for CREATE events; use JSON `null` for SUPPRESS/DUPLICATE events.
-
-This event is what the kill-criteria audit reads — `proposal-create`'s own `created` event does not carry per-skill provenance.
 
 Do NOT invoke `proposal-triage` directly — `/proposal-create` handles it.
 

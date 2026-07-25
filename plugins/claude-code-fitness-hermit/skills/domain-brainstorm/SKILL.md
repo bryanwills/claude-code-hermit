@@ -7,7 +7,7 @@ description: On-demand fitness-voice brainstorm — reads Strava history and tra
 
 ## Kill criteria (read before running)
 
-After ≥8 invocations, read `.claude-code-hermit/state/proposal-metrics.jsonl` and filter events where `type:"brainstorm-emit"` and `skill:"domain-brainstorm"`. Count CREATE vs total emits with ideas (triage-survival) and read `status:` of the resulting PROP files (PROP-acceptance). If triage-survival < 25% or PROP-acceptance < 30%, cut this skill rather than tune it — signal-to-noise isn't there.
+After ≥8 invocations, check the `capability-brainstorm` segment of core's proposal metrics report — run `bun scripts/proposal-metrics-report.ts .claude-code-hermit --source=capability-brainstorm` from the `claude-code-hermit` plugin root (not this plugin's; `${CLAUDE_PLUGIN_ROOT}` cannot reach it), or read the `capability-brainstorm` row of the table `/claude-code-hermit:hermit-evolution` prints. If triage-survival < 25% or PROP-acceptance < 30%, cut this skill rather than tune it — signal-to-noise isn't there. That segment is shared with core's `capability-brainstorm` and the other domain brainstorm skills, so a breach means brainstorm-generated proposals are noisy in general; it does not by itself say which skill to cut.
 
 ### Gate 0 — Gather inputs
 
@@ -57,22 +57,14 @@ Evidence Source: capability-brainstorm
 Evidence: <one paragraph: gap sentence + named grounding items>
 ```
 
-`Evidence Source: capability-brainstorm` is intentional, not a copy-paste: it is the recurrence-bypass token recognized by `proposal-create`'s three-condition rule (a brainstorm pass establishes the candidate, so condition 1 is waived). There is no separate `domain-brainstorm` token. Real provenance is carried by the `tags` below and the `brainstorm-emit` metrics event.
+`Evidence Source: capability-brainstorm` is intentional, not a copy-paste: it is the recurrence-bypass token recognized by `proposal-create`'s three-condition rule (a brainstorm pass establishes the candidate, so condition 1 is waived). There is no separate `domain-brainstorm` token. Provenance is carried by the `tags` below, which `proposal-create` writes onto both the `triage-verdict` row and the proposal frontmatter. The cost: these proposals share core `capability-brainstorm`'s kill-criteria segment, so the numbers are combined rather than per-skill.
 
-Set frontmatter: `source: auto-detected`, `category: improvement`, `tags: [domain-brainstorm, ideation]`.
+Set frontmatter: `source: auto-detected`, `category: improvement`, `tags: [capability-brainstorm]`.
 
 Parse the verdict:
 - `CREATE` — note PROP-NNN.
 - `SUPPRESS — <code>` — record suppression code; don't retry.
 - `DUPLICATE:<PROP-ID>` — record existing ID; don't create.
-
-After each verdict, append a metrics event (Node stdlib, no deps):
-
-```bash
-bun -e "const fs=require('fs'); fs.appendFileSync('.claude-code-hermit/state/proposal-metrics.jsonl', JSON.stringify({ts:'<now ISO>',type:'brainstorm-emit',skill:'domain-brainstorm',verdict:'<CREATE|SUPPRESS|DUPLICATE>',proposal_id:'<PROP-NNN or null>'})+'\n','utf-8');"
-```
-
-Use the `config.json` timezone for `<now ISO>` (matching `proposal-create`), so this file isn't a mix of UTC and local timestamps. This event is what the kill-criteria audit reads — `proposal-create`'s own `created` event does not carry per-skill provenance.
 
 Do NOT invoke `proposal-triage` directly — `/claude-code-hermit:proposal-create` handles it.
 

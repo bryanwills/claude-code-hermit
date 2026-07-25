@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- `domain-brainstorm` no longer writes its own `brainstorm-emit` event — core's triage gate already records every verdict. Proposals now carry `tags: [capability-brainstorm]` instead of `[domain-brainstorm, ideation]`, so they count toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
 
 ## [0.4.6] - 2026-07-21
