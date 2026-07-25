@@ -64,9 +64,7 @@ For each `SHIPPED-STRONG` verdict, resolve the ID to a filename, then close it t
 ```bash
 bun plugins/claude-code-hermit/scripts/proposal.ts resolve-id .claude-code-hermit "<PROP-ID>"
 
-bun plugins/claude-code-hermit/scripts/append-metrics.ts \
-    .claude-code-hermit/state/proposal-metrics.jsonl \
-    '{"ts":"<now ISO>","type":"resolved","proposal_id":"<PROP-ID>"}'
+bun plugins/claude-code-hermit/scripts/proposal.ts event .claude-code-hermit resolved --id="<PROP-ID>"
 
 bun plugins/claude-code-hermit/scripts/proposal.ts patch .claude-code-hermit <filename> \
     --set status=resolved --set resolved_date=@now --request-compact <<'HERMIT_PATCH'

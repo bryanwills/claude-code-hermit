@@ -79,6 +79,7 @@ import { run as runGate } from './lib/proposals/gate';
 import { run as runQueueMicro } from './lib/proposals/queue-micro';
 import { run as runMicro } from './lib/proposals/micro';
 import { run as runMetrics } from './lib/proposals/metrics';
+import { run as runEvent } from './lib/proposals/event';
 import { run as runSuccessSignal } from './lib/proposals/success-signal';
 import { run as runQualityGate } from './lib/proposals/quality-gate';
 
@@ -414,7 +415,7 @@ async function verbRoutine(stateDir: string): Promise<void> {
 
 // ------------------------------------------------------------------- main --
 
-const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|success-signal|quality-gate';
+const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|event|success-signal|quality-gate';
 
 async function main(): Promise<void> {
   const verb = process.argv[2];
@@ -454,6 +455,13 @@ async function main(): Promise<void> {
     case 'queue-micro': return runQueueMicro(stateDir);
     case 'micro': return runMicro(stateDir, rest);
     case 'index': return runIndex(stateDir);
+    // `event` is the writer; `metrics` above is the reader. Deliberately not named
+    // `metric` — one character from `metrics` in a dispatcher whose default branch
+    // exits 0 would make a typo a silent no-op in either direction.
+    case 'event': {
+      const verdict = runEvent(stateDir, rest);
+      return verdict === 'OK' ? ok('OK') : fail(verdict.replace(/^ERROR\|/, ''));
+    }
     case 'quality-gate': return runQualityGate(stateDir, rest);
     default:
       fail('unknown-verb');

@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { currentHHMM } from './lib/time';
+import { observationLine } from './lib/observations';
 import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
@@ -122,10 +123,15 @@ function daysSince(isoStr: string | null) {
 
 // Uses the full 20-entry tail for a stable median, but short-circuits if no entries
 // exist after lastRunAt (no recent spend → no spike to detect).
-function checkCostSpike(costLogPath: string, lastRunAt: string | null) {
+//
+// Returns the two figures rather than a boolean so this script can record the
+// observation itself. It previously computed them, discarded them, and set a phase
+// flag that asked the skill to re-read the same log and redo the same arithmetic —
+// a round trip through prose that, across the live fleet, never once produced a row.
+function checkCostSpike(costLogPath: string, lastRunAt: string | null): { todayTotal: number; median: number; date: string } | null {
   try {
     const content = fs.readFileSync(costLogPath, 'utf-8').trim();
-    if (!content) return false;
+    if (!content) return null;
 
     const lines = content.split('\n').slice(-20);
     const entries = lines
@@ -136,7 +142,7 @@ function checkCostSpike(costLogPath: string, lastRunAt: string | null) {
     const hasRecentEntries = cutoff
       ? entries.some(e => e.timestamp && new Date(e.timestamp) > cutoff)
       : entries.length > 0;
-    if (!hasRecentEntries) return false;
+    if (!hasRecentEntries) return null;
 
     const byDate: Record<string, number> = {};
     for (const e of entries) {
@@ -146,16 +152,20 @@ function checkCostSpike(costLogPath: string, lastRunAt: string | null) {
     }
 
     const values = Object.values(byDate);
-    if (values.length < 2) return false;
+    if (values.length < 2) return null;
 
     const sorted = [...values].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
     const today = new Date().toISOString().slice(0, 10);
     const todayTotal = byDate[today] || 0;
 
-    return median > 0 && todayTotal > 0 && todayTotal > 2 * median;
+    if (!(median > 0 && todayTotal > 0 && todayTotal > 2 * median)) return null;
+    // `today` is the same UTC key the cost buckets above are grouped by — the row's
+    // dedup label must name the bucket the spike was measured in, not a locally
+    // formatted date that could disagree with it either side of midnight.
+    return { todayTotal, median, date: today };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -244,7 +254,10 @@ if (hasAcceptedProposals(stateDir) && daysSince(lastResolutionCheck) > 7) {
 // `.claude-code-hermit`) would otherwise resolve against a drifted cwd and
 // silently suppress the cost-spike phase. Absolute (as tests pass) is verbatim.
 const costLogPath = resolveCostLog(path.isAbsolute(stateDir) ? stateDir : resolveHermitRoot());
-if (checkCostSpike(costLogPath, lastRunAt)) phases.cost_spike = true;
+const costSpike = checkCostSpike(costLogPath, lastRunAt);
+// The phase still flags the spike for the skill's narrative step; the row itself is
+// written below, from these figures, rather than re-derived from prose.
+if (costSpike) phases.cost_spike = true;
 
 // Behavioral-telemetry digest — weekly for every hermit (not age-gated like
 // `digest` below): reflect's evidence step reads ground-truth transcript counters
@@ -338,11 +351,20 @@ try {
   } catch {}
 
   const newRows: string[] = [];
-  const nowIso = new Date().toISOString();
-  const capture = (slug: string) => {
+  // Rows go through the shared constructor so this writer and observations.ts
+  // cannot drift apart on field order, timestamp format, or origin rules.
+  // `origin` belongs only to startup-drift here — cost-spike is a measurement, not
+  // something with a provenance, and the constructor rejects the key on sources that
+  // never carried it.
+  const capture = (slug: string, source: 'startup-drift' | 'cost-spike' = 'startup-drift', extra?: Record<string, unknown>) => {
     if (existingPatterns.has(slug)) return;
     existingPatterns.add(slug);
-    newRows.push(JSON.stringify({ ts: nowIso, pattern: slug, session_id: sessionId, source: 'startup-drift', origin: 'own-work' }));
+    const built = observationLine(
+      source === 'startup-drift'
+        ? { source, pattern: slug, sessionId, origin: 'own-work' }
+        : { source, pattern: slug, sessionId, extra },
+    );
+    if ('line' in built) newRows.push(built.line);
   };
 
   // Storage drift — capture the full subpath so raw/foo and raw/bar get distinct slugs
@@ -356,6 +378,17 @@ try {
     capture(`schema-drift:${type}`);
   }
 
+  // Cost spike — the label is date-scoped, never value-bearing. `todayTotal` climbs
+  // through the day, so embedding it (as the prose row used to) would defeat the
+  // dedup above and write a fresh row on every precheck run of a spike day. The
+  // figures ride as fields instead, where a reader can still get at them.
+  if (costSpike) {
+    capture(`cost-spike:${costSpike.date}`, 'cost-spike', {
+      today_total: Number(costSpike.todayTotal.toFixed(4)),
+      median_7d: Number(costSpike.median.toFixed(4)),
+    });
+  }
+
   if (newRows.length > 0) {
     fs.appendFileSync(ledgerPath, newRows.join('\n') + '\n', 'utf-8');
     wroteNewRows = true;
@@ -363,8 +396,10 @@ try {
 } catch { /* fail-open */ }
 
 // --- Freshness gate: flip EMPTY→RUN when ledger has rows newer than last_run_at ---
-// Only precheck-written (startup-drift) rows self-trigger because they are written above,
-// before this gate runs. Rows written *during* a run (reflect-noticed, cost-spike) have
+// Only precheck-written rows (startup-drift, cost-spike) self-trigger, because they are
+// written above, before this gate runs — each at most once per pattern, so a standing
+// drift or a spike day forces exactly one RUN, not one per tick. Rows written *during* a
+// run (reflect-noticed, quick-deferral, skill-correction, behavior-digest) have
 // ts ≤ last_run_at on the next tick and do NOT self-trigger — they surface opportunistically.
 if (wroteNewRows) {
   // Rows just appended carry ts = now > last_run_at by construction — skip the re-read.

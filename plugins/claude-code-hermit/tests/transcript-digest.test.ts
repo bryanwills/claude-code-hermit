@@ -442,9 +442,13 @@ describe('helpers', () => {
   });
 
   test('parseArgs: valid, defaults, and rejections', () => {
-    expect(parseArgs(['.cch'])).toEqual({ stateDir: '.cch', days: 7, sessions: 10, dir: undefined });
+    expect(parseArgs(['.cch'])).toEqual({ stateDir: '.cch', days: 7, sessions: 10, dir: undefined, record: false });
     expect(parseArgs(['.cch', '--days', '30', '--sessions', '40', '--dir', '/x']))
-      .toEqual({ stateDir: '.cch', days: 30, sessions: 40, dir: '/x' });
+      .toEqual({ stateDir: '.cch', days: 30, sessions: 40, dir: '/x', record: false });
+    // Recording is opt-in: the digest stays a pure read unless asked, so an ad-hoc
+    // or debugging invocation never leaves an observation row behind.
+    expect(parseArgs(['.cch', '--record-observation']))
+      .toEqual({ stateDir: '.cch', days: 7, sessions: 10, dir: undefined, record: true });
     expect(parseArgs([])).toBeNull();                       // no positional
     expect(parseArgs(['.cch', 'extra'])).toBeNull();        // two positionals
     expect(parseArgs(['.cch', '--days', 'x'])).toBeNull();  // non-numeric

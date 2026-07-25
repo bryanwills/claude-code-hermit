@@ -5,7 +5,8 @@
 //
 // Usage: bun apply-reflection-actions.ts <hermit-state-dir>   (stdin: JSON)
 // Stdin: {"resolution_actions":[{proposal_id, action, frontmatter_patch,
-//         metrics_event, shell_findings_line}, ...]}
+//         shell_findings_line}, ...]}   — a non-null `metrics_event` is rejected;
+//         the `resolved` row is derived here from proposal_id.
 // Output: one JSON line — {"ok":true,"applied":{...}} (+ "errors" when any
 // post-validation write failed) or {"ok":false,"reason":...} with zero writes.
 // Exit 0 always (lib/heartbeat/alert-update.ts pattern); only missing argv exits 1.
@@ -17,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listProposalFiles, readFileWithFrontmatter } from './lib/frontmatter';
-import { appendJsonlLine } from './lib/append-jsonl';
+import { appendEvent, resolvedEvent } from './lib/proposals/event';
 import { writeFileAtomic, patchFrontmatter, appendShellLine, PATCH_KEY_RE } from './lib/md-write';
 
 type Json = any;
@@ -44,13 +45,13 @@ function apply(stateDir: string, stdin: string): Json {
       return { ok: false, reason: `${label}: proposal_id must match PROP-<digits>` };
     }
     if (!ACTIONS.has(a.action)) return { ok: false, reason: `${label}: unknown action "${a.action}"` };
+    // `metrics_event` was a model-authored JSON string appended verbatim after only a
+    // JSON.parse check — the last unschema'd write into proposal-metrics.jsonl. It is
+    // gone: the row is always a `resolved` for a proposal_id this function already has,
+    // so it is now built from that id below. Reject it if a stale runner still sends one,
+    // rather than ignoring it and leaving the caller believing it was recorded.
     if (a.metrics_event != null) {
-      if (typeof a.metrics_event !== 'string') return { ok: false, reason: `${label}: metrics_event must be a JSON string` };
-      // Re-serialize rather than just validating: the ledger is line-delimited,
-      // and pretty-printed model output would otherwise be appended verbatim as
-      // several physical lines that every JSONL reader silently drops.
-      try { a.metrics_event = JSON.stringify(JSON.parse(a.metrics_event)); }
-      catch { return { ok: false, reason: `${label}: metrics_event is not valid JSON` }; }
+      return { ok: false, reason: `${label}: metrics_event is no longer accepted — the resolved row is derived from proposal_id` };
     }
     if (a.shell_findings_line != null && typeof a.shell_findings_line !== 'string') {
       return { ok: false, reason: `${label}: shell_findings_line must be a string or null` };
@@ -92,13 +93,11 @@ function apply(stateDir: string, stdin: string): Json {
         errors.push(`${a.proposal_id}: frontmatter patch failed: ${e.message}`);
         continue; // don't record metrics/findings for a proposal that wasn't patched
       }
-      if (a.metrics_event) {
-        try {
-          const err = appendJsonlLine(path.join(stateDir, 'state', 'proposal-metrics.jsonl'), a.metrics_event);
-          if (err) errors.push(`${a.proposal_id}: metrics append: ${err}`);
-        } catch (e: any) {
-          errors.push(`${a.proposal_id}: metrics append failed: ${e.message}`);
-        }
+      try {
+        const err = appendEvent(stateDir, resolvedEvent(a.proposal_id));
+        if (err) errors.push(`${a.proposal_id}: metrics append: ${err}`);
+      } catch (e: any) {
+        errors.push(`${a.proposal_id}: metrics append failed: ${e.message}`);
       }
       applied.auto_resolve++;
     } else {

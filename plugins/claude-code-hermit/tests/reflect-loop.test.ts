@@ -169,15 +169,18 @@ describe('observations ledger phrases', () => {
   });
 
   test('reflect: quick-mode deferrals append to ledger', () => {
-    expect(reflect).toContain('"source":"quick-deferral"');
+    expect(reflect).toContain('observations.ts observe .claude-code-hermit quick-deferral');
   });
 
   test('reflect: quick-mode Progress Log carries suppressed suffix for the weekly digest', () => {
     expect(reflect).toContain('so quick-run suppressions reach the weekly digest');
   });
 
-  test('reflect: cost spike recorded to ledger not memory', () => {
-    expect(reflect).toContain('"source":"cost-spike"');
+  // The row is written by reflect-precheck.ts, which computes the spike — the skill
+  // is pinned to NOT re-recording it, rather than to a JSON fragment it no longer emits.
+  test('reflect: cost spike recorded to ledger by the precheck, not restated here', () => {
+    expect(reflect).toContain('cost-spike:<YYYY-MM-DD>');
+    expect(reflect).toContain('the precheck already detected the spike and wrote the row');
   });
 
   test('reflect: sub-threshold outcomes append to ledger not memory', () => {

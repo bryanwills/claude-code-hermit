@@ -33,4 +33,12 @@ function flagValue(argv: string[], flag: string): string | undefined {
   return i === -1 ? undefined : argv[i + 1];
 }
 
-export { emit, readStdin, readJson, flagValue };
+// `--flag=value` (equals form), as distinct from flagValue's `--flag value`.
+// Both forms are in use: the equals form reads better in skill prose, where the
+// call is written by hand.
+function flagEq(argv: string[], name: string): string | undefined {
+  const hit = argv.find(a => a.startsWith(`--${name}=`));
+  return hit === undefined ? undefined : hit.slice(name.length + 3);
+}
+
+export { emit, readStdin, readJson, flagValue, flagEq };

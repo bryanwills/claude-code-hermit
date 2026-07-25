@@ -21,9 +21,9 @@ If `$ARGUMENTS` contains `--quick`:
 - **Skip** the cadence precheck (the hash-gate is separate and narrower), cost_spike read, proposal scan, Resolution Check, and Component Health. Bind `$PHASE = adult`. Only the live SHELL.md scan + judge + outcomes path runs.
 - Read SHELL.md `## Findings` and `## Blockers` for actionable patterns. **Only Tier-1 + `Evidence Source: current-session` candidates are eligible.** Candidates needing archived-session evidence or Tier 2/3 defer to the next scheduled reflect — append one ledger row each so the signal survives archival and can graduate:
   ```bash
-  bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl <<'HERMIT_METRICS_JSON'
-  {"ts":"<now ISO>","pattern":"<candidate-title-slug>","session_id":"<S-NNN>","source":"quick-deferral"}
-  HERMIT_METRICS_JSON
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit quick-deferral <<'HERMIT_OBSERVATION'
+  <candidate-title-slug>
+  HERMIT_OBSERVATION
   ```
   **Exception:** a `current-session` candidate with `Evidence Origin: external-content` is **not** deferred — send it to the judge; Tier-3 escalation routes it to `proposal-create`.
 - If any eligible candidate remains: Read branches.md § Candidate processing. Triage all candidates passing the evidence integrity rule in one `claude-code-hermit:proposal-triage` batch call, judge the CREATE survivors in one `claude-code-hermit:reflection-judge` call, route ACCEPT/DOWNGRADE through branches.md § Outcomes; unrecognized gate output fails closed per branches.md § Gate failure handling. **Track whether anything hit the gate-failed/SUPPRESS path** — it gates the cursor write.
@@ -48,10 +48,10 @@ If `$ARGUMENTS` contains `--scheduled-checks` (the `scheduled-checks` routine �
    - `EMPTY` → nothing due; the precheck already updated `reflection-state.json` and appended the Progress Log line. Emit `reflect: no candidates` and stop.
    - `RUN|<phases-json>` → continue. The JSON lists due phases (`cost_spike`, `behavior`, `resolution_check`, `compute`, `digest`, `newborn`, `observations_fresh`); skip sections for phases not listed. `observations_fresh` means the ledger has rows newer than `last_run_at` — run step 3b even if `compute` is absent.
 2. Read SHELL.md for current context **(fresh read — never reuse a pre-compaction cached value)**.
-3. If `cost_spike` is listed: read the last 20 lines of cost-log.jsonl; if today's total > 2× the 7-day median (both non-zero), record it: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl '{"ts":"<now ISO>","pattern":"cost_spike: $X.XX vs 7d median $Y.YY","session_id":"<S-NNN>","source":"cost-spike"}'` — it may graduate via step 3b. Otherwise skip this read.
+3. If `cost_spike` is listed: the precheck already detected the spike and wrote the row (`cost-spike:<YYYY-MM-DD>`, carrying `today_total` and `median_7d` as fields), so there is nothing to read or record here — it graduates via step 3b like any other observation. Do **not** re-read cost-log.jsonl to restate a number the precheck already computed.
 
-3a. **Behavioral digest** — if `behavior` is listed: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/transcript-digest.ts .claude-code-hermit` (bounded ~20-line JSON of ground-truth counters — tool failures, tool_rejections by kind, wakes vs productive_wakes, compaction_events, subagent_dispatches; never `Read` a transcript directly). Two uses of the counters:
-   - **Defer-loop auto-row**: if `wakes ≥ 20` **and** `productive_wakes / wakes < 0.25`, record `bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl '{"ts":"<now ISO>","pattern":"defer-loop: <productive_wakes>/<wakes> productive wakes, <window.from>→<window.to>","session_id":"<S-NNN>","source":"behavior-digest"}'` — graduates via step 3b. Cite the actual `window.from→to` span, **not** `window.days`: when `window.truncated > 0` the 2 MiB tail did not reach back a full `window.days`, so `wakes` is a floor over the shorter observed span.
+3a. **Behavioral digest** — if `behavior` is listed: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/transcript-digest.ts .claude-code-hermit --record-observation` (bounded ~20-line JSON of ground-truth counters — tool failures, tool_rejections by kind, wakes vs productive_wakes, compaction_events, subagent_dispatches; never `Read` a transcript directly). Two uses of the counters:
+   - **Defer-loop auto-row**: `--record-observation` makes the script write the `defer-loop` row itself when its own counters cross the threshold, citing the observed `window.from→to` span. Nothing to record here. (The flag is opt-in so an ad-hoc digest run stays a pure read.)
    - **Anomaly checklist** — carry the JSON as inherited context to the think-hard step and form one candidate per hit, citing the digest JSON (machine-written-state evidence class): any `tool_rejections.automode-blocked > 0`; any single tool with `tool_failures[tool] ≥ 5`; `compaction_events ≥ 3`. A hit is a **question for the gates** (triage → judge), never a verdict — a quiet week with mostly unproductive wakes is legitimate, so the gates own false-positive pruning.
 
 3b. **Observations ledger** — prune, then graduate recurring patterns.
@@ -73,7 +73,6 @@ If `$ARGUMENTS` contains `--scheduled-checks` (the `scheduled-checks` routine �
 {
   "resolution_actions": [ { "proposal_id": "PROP-NNN", "action": "auto-resolve|nudge|skip",
                             "frontmatter_patch": {"status":"resolved","resolved_date":"<ISO>"}|null,
-                            "metrics_event": "<JSON string for append-metrics>"|null,
                             "shell_findings_line": "<pre-rendered finding text>"|null } ],
   "routine_candidates": [ { "routine_id": "<id>", "action": "disable|retime|diagnostic",
                             "tier": 1, "schedule": "<new-cron>"|null,

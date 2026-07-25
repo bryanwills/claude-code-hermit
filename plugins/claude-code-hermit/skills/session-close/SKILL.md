@@ -72,10 +72,11 @@ This path is intentionally silent: no operator notification on queue or drain �
      One Lesson line per qualifying item, with quantified cost where known (e.g. `rebuilt wm pipeline in /tmp, 5 scripts, ~40 min/rerun`). Substantial re-derived knowledge goes to `compiled/` via the Artifacts bullet below instead of a Lesson line. If nothing qualifies, add nothing — no placeholder lines. These lines are the input procedure-capture recurs on (reflect reads `## Lessons` of archived reports).
      **For question 3** — on a positive answer, for each defective skill: (a) record the what/why as a `## Lessons` line above (the durable content channel reflect reads at graduation); (b) append one observations-ledger counter row using the **canonical bare skill name** (read the `name:` frontmatter from `.claude/skills/<name>/SKILL.md`; strip any `claude-code-hermit:`/`<plugin>:` prefix; lowercase) — fail-open so the close never aborts:
      ```
-     bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl \
-       '{"ts":"<now ISO>","pattern":"skill-correction:<canonical-name>","session_id":"<S-NNN>","source":"skill-correction","origin":"own-work"}' || true
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit skill-correction --origin=own-work <<'HERMIT_OBSERVATION'
+     skill-correction:<canonical-name>
+     HERMIT_OBSERVATION
      ```
-     The row is a bare recurrence counter; the Lessons line carries the reason content. Gated to operator-close — `--auto` skips step 1 and writes no correction rows.
+     The row is a bare recurrence counter; the Lessons line carries the reason content. Gated to operator-close — `--auto` skips step 1 and writes no correction rows. No `|| true` needed: a *rejected* row answers `ERROR|<reason>` on stdout at exit 0. (A *mis-invocation* — wrong verb, or a missing state dir or source — exits 1 on purpose so a broken call site is loud; read the usage line, fix the call, and carry on. Neither outcome aborts the close.)
    - `Changed:` list of files modified
    - `Artifacts:` if this session produced a durable output, route it by shape:
      - **Evolving subject** the hermit will touch again (a monitored domain, a recurring decision area, accumulated know-how): **update or create** `compiled/topic-<slug>.md`. Merge new findings into the existing sections rather than appending a dated copy; bump `updated`, refresh the one-line `summary`, keep the page under 150 lines (compact older material when merging), and cross-link related pages with `[[wikilinks]]`.

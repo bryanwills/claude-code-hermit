@@ -75,7 +75,7 @@ for (const { name, gates } of SKILLS) {
 // Every ${CLAUDE_PLUGIN_ROOT}/scripts/<file> reference must resolve to a script
 // this plugin actually ships. Installed plugins cannot reach outside their own
 // root, so a reference to a sibling plugin's script (e.g. core's
-// append-metrics.ts) fails silently at runtime — see #648.
+// observations.ts) fails silently at runtime — see #648.
 // Walks the skills dir rather than the SKILLS list above: that list covers only
 // the gate-shaped skills, while hatch/dev-test/dev-quality also carry refs.
 console.log('\nscript references:');

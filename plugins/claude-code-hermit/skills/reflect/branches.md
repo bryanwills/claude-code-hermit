@@ -173,13 +173,13 @@ After validating with `claude-code-hermit:reflection-judge`, choose exactly one 
 2. **Memory update** — for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked. Issue the standard "remember it" reflection — the trained auto-memory flow handles the write, with its own discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE). Save nothing if nothing rises above noise. Sub-threshold *patterns* do NOT go to memory — they go to the observations ledger; keeping the recurrence store separate from operator memory is what prevents the judge's `covered-by-memory` check from suppressing a pattern at the moment it graduates.
 3. **Proposal candidate** — classify tier (§ Proposal Tier Classification) for every candidate reaching this outcome, batch them all through the Proposal triage gate together, then per candidate on its own token: Tier 1/2 `PROCEED|CREATE` → queue micro-approval in `state/micro-proposals.json`; Tier 3 `PROCEED|CREATE` → call `/claude-code-hermit:proposal-create` (exception: procedure-capture candidates skip the separate pre-gate — see § Procedure capture).
 
-Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label via stdin heredoc (labels are free text and may contain apostrophes):
+Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label — the label goes on stdin, so apostrophes in it are safe:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl <<'HERMIT_METRICS_JSON'
-{"ts":"<now ISO>","pattern":"<short pattern label>","session_id":"<S-NNN>","source":"reflect-noticed","origin":"own-work"}
-HERMIT_METRICS_JSON
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit reflect-noticed --origin=own-work <<'HERMIT_OBSERVATION'
+<short pattern label>
+HERMIT_OBSERVATION
 ```
-They graduate via SKILL.md step 3b. Include `"origin":"external-content"` instead of `"own-work"` when the observation derives from a SHELL.md finding carrying an `[origin: external]` marker (copy the marker deterministically, don't infer from content). Reuse the exact label when re-observing a known pattern; grouping is by string equality. Only append when a genuine pattern is noticed.
+They graduate via SKILL.md step 3b. Pass `--origin=external-content` instead of `own-work` when the observation derives from a SHELL.md finding carrying an `[origin: external]` marker (copy the marker deterministically, don't infer from content). Reuse the exact label when re-observing a known pattern; grouping is by string equality. Only append when a genuine pattern is noticed.
 
 **Phase-aware surfacing exception:**
 - `newborn`: also log each sub-threshold observation inline to SHELL.md Findings as `Noticed: <pattern>` (single line, no ceremony).

@@ -51,7 +51,10 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/reflect-precheck.ts*)',
   'Bash(bun */scripts/archive-shell.ts*)',
   'Bash(bun */scripts/evaluate-session.ts*)',
-  'Bash(bun */scripts/append-metrics.ts*)',
+  // Verb-scoped: `observe` is the only thing this script does, and pinning it keeps
+  // the grant from widening if it ever grows a second verb. Replaces the old
+  // append-metrics.ts entry, which granted "write any JSON to any path".
+  'Bash(bun */scripts/observations.ts observe *)',
   'Bash(bun */scripts/proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',
   'Bash(bun */scripts/update-reflection-state.ts*)',
@@ -102,6 +105,10 @@ const HERMIT_OBSOLETE = [
   'Bash(bun */scripts/run-with-profile.ts*)',
   'Bash(bun */scripts/suggest-compact.ts*)',
   'Bash(bun */scripts/next-prop-id.ts*)',
+  // Retired with the script: an arbitrary-path, arbitrary-JSON writer is a wider
+  // grant than any caller needed. Replaced by `observations.ts observe *` above and
+  // by proposal.ts's existing grant, which now covers the `event` verb.
+  'Bash(bun */scripts/append-metrics.ts*)',
   // Proposal satellites absorbed into proposal.ts verbs — the scripts are gone,
   // so these grants now name nothing.
   'Bash(bun */scripts/resolve-prop.ts*)',

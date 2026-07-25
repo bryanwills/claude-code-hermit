@@ -204,6 +204,63 @@ describe('proposal.ts dispatcher', () => {
   });
 });
 
+// The two proposal-lifecycle rows that skill prose used to hand-assemble as JSON.
+// `ts` is stamped by the script, so rows are asserted by field, never against a
+// fixture string.
+describe('proposal.ts event', () => {
+  function event(dir: string, ...args: string[]) {
+    return runScript('proposal.ts', { args: ['event', stateArg(dir), ...args] });
+  }
+
+  for (const action of ['accept', 'defer', 'dismiss']) {
+    test(`responded --action=${action} writes one row`, withDir(async (dir) => {
+      seedState(dir);
+      const r = await event(dir, 'responded', '--id=PROP-042', `--action=${action}`);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe('OK');
+      const lines = metricsLines(dir);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatchObject({ type: 'responded', proposal_id: 'PROP-042', action });
+      expect(lines[0].ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    }));
+  }
+
+  test('resolved writes {ts,type,proposal_id} and nothing else', withDir(async (dir) => {
+    seedState(dir);
+    const r = await event(dir, 'resolved', '--id=PROP-007');
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('OK');
+    const lines = metricsLines(dir);
+    expect(lines).toHaveLength(1);
+    expect(Object.keys(lines[0])).toEqual(['ts', 'type', 'proposal_id']);
+    expect(lines[0]).toMatchObject({ type: 'resolved', proposal_id: 'PROP-007' });
+  }));
+
+  test('the ledger is created lazily on first write', withDir(async (dir) => {
+    seedState(dir);
+    const ledger = path.join(stateArg(dir), 'state', 'proposal-metrics.jsonl');
+    expect(fs.existsSync(ledger)).toBe(false);
+    await event(dir, 'resolved', '--id=PROP-001');
+    expect(fs.existsSync(ledger)).toBe(true);
+  }));
+
+  const errorCases: Array<[string, string[], string]> = [
+    ['missing --id', ['responded', '--action=accept'], 'ERROR|missing-id'],
+    ['bad --action', ['responded', '--id=PROP-042', '--action=maybe'], 'ERROR|invalid-action:maybe'],
+    ['--action on resolved', ['resolved', '--id=PROP-042', '--action=accept'], 'ERROR|action-not-allowed:resolved'],
+    ['unknown event type', ['archived', '--id=PROP-042'], 'ERROR|unknown-event-type:archived'],
+  ];
+  for (const [label, args, expected] of errorCases) {
+    test(`${label} -> ${expected}, exit 0, zero writes`, withDir(async (dir) => {
+      seedState(dir);
+      const r = await event(dir, ...args);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe(expected);
+      expect(metricsLines(dir)).toHaveLength(0);
+    }));
+  }
+});
+
 describe('proposal.ts patch', () => {
   function createProposal(dir: string, extra: Record<string, string> = {}): Promise<string> {
     const stdin = heredoc({ Title: 'Patch target', ...extra }, MIN_BODY);
