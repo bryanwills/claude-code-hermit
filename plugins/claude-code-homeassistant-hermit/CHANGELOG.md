@@ -17,7 +17,6 @@
 - Requires core `>=1.2.34`. Core absorbed its proposal satellites into `proposal.ts` verbs, so the shared route this plugin calls through `bin/hermit-run` is now `proposal micro …` / `proposal metrics …`. `bin/hermit-run` resolves a script by bare filesystem probe, so pairing this version with an older core fails with a misleading "plugin may predate this command" error.
 - `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 
-### Changed
 - The CLAUDE-APPEND block dropped §Environment (hatch owns `.env` setup and validates it via `boot status`), §Entry Flow, the channel-routing utterance examples, and the unified-vs-legacy routine narrative — per-install config state that drifts the moment an operator edits `config.json`. 9,565 B originally, 5,076 B after the first trim, now ~2,814 B.
 - The actuation, structural-write, and safety-mode statements merged into one rule that states the real boundary: unresolvable or malformed targets hard-block in **both** modes, and `ask` prompts only for a concrete sensitive target. Uncertain-entities-default-sensitive and explicit approval before applying automations or changing safety policy are unchanged.
 

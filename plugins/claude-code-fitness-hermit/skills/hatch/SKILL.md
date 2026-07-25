@@ -263,10 +263,10 @@ Installation summary:
   ✓ .env: all four Strava credentials present
   ✓ .mcp.json: strava server entry written (or was already present)
   ✓ .gitignore: .mcp.json and .env covered
-  ✓ Routine prompts: {N}/6 dropped, {M}/6 already present
+  ✓ Routine prompts: {N}/4 dropped, {M}/4 already present
   ✓ CLAUDE.md: Fitness Workflow block injected (or was already present)
   ✓ knowledge-schema.md: fitness types added (or were already present)
-  ✓ config.json: _hermit_versions stamped, {K}/6 routines added, weekly-coaching-patterns check registered
+  ✓ config.json: _hermit_versions stamped, {K}/4 routines added, weekly-coaching-patterns check registered
 
 Manual steps remaining:
   - Restart Claude Code so the `strava` MCP server loads from .mcp.json

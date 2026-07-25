@@ -23,7 +23,7 @@
 ### Upgrade Instructions
 For already-installed hermits, `hermit-evolve` should:
 1. Copy `state-templates/compiled/routine-fitness-brief-morning.md` and `routine-fitness-brief-evening.md` into `.claude-code-hermit/compiled/` (skip if already present).
-2. Add `morning-brief` and `evening-brief` to `config.json routines[]` (same entries as hatch Step 8b), `enabled: true`.
+2. Add `morning-brief` and `evening-brief` to `config.json routines[]` (same entries as hatch Step 7b), `enabled: true`.
 3. Remove the `strava-sync` and `strava-health-check` entries from `config.json routines[]`, and delete `.claude-code-hermit/compiled/routine-strava-sync.md` and `routine-strava-health-check.md` — `fitness-brief` replaces both. This is the one non-additive step; it consolidates the daily channel sends into the two briefs and avoids a double notification.
 
 ## [0.0.15] - 2026-07-21
