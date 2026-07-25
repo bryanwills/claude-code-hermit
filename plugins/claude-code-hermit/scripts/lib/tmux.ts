@@ -25,8 +25,9 @@ export function getSessionName(config: Json): string {
  * Last-resort barrier before text reaches a pane. A newline is the dangerous one:
  * send-keys would submit early and the remainder would land as its own prompt.
  * Deliberately a deny-list of control characters rather than an allow-list of
- * punctuation — existing callers send prose /compact steering messages (commas and
- * hyphens, no control chars) and an allow-list would silently break them. Callers
+ * punctuation — existing callers send prose (the watchdog's `/compact` steering
+ * messages, and localized operator-facing restart/wedge/pause text: commas, hyphens,
+ * accents, no control chars) and an allow-list would silently break them. Callers
  * handling UNTRUSTED input apply their own strict grammar on top (see
  * lib/prompt-stages/harness-command.ts).
  */

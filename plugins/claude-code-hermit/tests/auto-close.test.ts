@@ -302,10 +302,8 @@ describe('last-operator-action.json signal', () => {
   // Both watchdog-fired steering flavors (mid-arc, boundary) must be filtered — the
   // real filter is a startsWith('/compact') prefix match, so this is a regression
   // guard against either literal drifting off that prefix.
-  for (const [flavor, compactMessage] of [
-    ['mid-arc', composeCompactSteeringMessage('in_progress')],
-    ['boundary', composeCompactSteeringMessage('idle')],
-  ] as const) {
+  for (const flavor of ['mid-arc', 'boundary'] as const) {
+    const compactMessage = composeCompactSteeringMessage(flavor);
     test(`hook smoke: bare /compact ... (${flavor}) (watchdog hygiene) → file NOT written`, withTmp(async (dir) => {
       await recordHook(dir, JSON.stringify({ prompt: compactMessage }));
       expect(fs.existsSync(lastOp(dir))).toBe(false);
