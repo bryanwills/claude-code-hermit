@@ -164,6 +164,17 @@ export function composeOrphanMessage(timezone: string, locale: Locale = OPERATOR
   return WATCHDOG[locale].orphan(nowHHMM(timezone));
 }
 
+/**
+ * Steering text for the watchdog-fired `/compact`. Never operator-facing (it's typed
+ * into the pane for Claude, not shown in a channel), so no locale — unlike the
+ * compose*Message functions above.
+ */
+export function composeCompactSteeringMessage(sessionState: unknown): string {
+  return sessionState === 'idle'
+    ? '/compact the previous work arc is complete and archived, summarize it in one or two lines, keep pending operator items, open questions, and standing commitments, drop completed-work detail'
+    : '/compact focus on unfinished work, pending operator items, and in-flight decisions';
+}
+
 /** Operator-language message for a forced pause enforcement (any reason). */
 export function composePauseMessage(reason: string, until: string | null, timezone: string, locale: Locale = OPERATOR_LOCALE): string {
   const label = pauseReasonLabel(reason, locale);
@@ -985,7 +996,10 @@ function maybeContextCompact(config: Json): void {
     return;
   }
   try {
-    sendKeys(sessionName, '/compact focus on unfinished work, pending operator items, and in-flight decisions');
+    // session_state is read at fire time — the compact-requested marker can be up to
+    // 1h stale, so the flavor must never key off it.
+    const boundary = runtime.session_state === 'idle';
+    sendKeys(sessionName, composeCompactSteeringMessage(runtime.session_state));
     watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
     watchdogState.last_compacted_at = utcStamp();
     watchdogState.last_pane_hash_compact = null; // reset so next bloat cycle re-arms
@@ -994,7 +1008,7 @@ function maybeContextCompact(config: Json): void {
     try { fs.rmSync(COMPACT_REQUESTED_JSON); } catch {} // consume the boundary waiver now that it fired
     // Prompt-token count travels in the event so the next cost-log entry gives a
     // before/after for free — feeds /hermit-evolution and threshold calibration.
-    appendEvent('context-compact', `prompt tokens ${prompt} over threshold ${threshold}`);
+    appendEvent('context-compact', `prompt tokens ${prompt} over threshold ${threshold}, flavor ${boundary ? 'boundary' : 'mid-arc'}`);
   } finally {
     releaseLock(LIFECYCLE_LOCK);
   }

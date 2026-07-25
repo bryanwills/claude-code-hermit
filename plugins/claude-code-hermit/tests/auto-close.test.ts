@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
+import { composeCompactSteeringMessage } from '../scripts/hermit-watchdog';
 
 // ---------- fixture scaffolding ----------
 
@@ -298,12 +299,18 @@ describe('last-operator-action.json signal', () => {
     expect(fs.existsSync(lastOp(dir))).toBe(false);
   }));
 
-  test('hook smoke: bare /compact ... (watchdog hygiene) → file NOT written', withTmp(async (dir) => {
-    await recordHook(dir, JSON.stringify({
-      prompt: '/compact focus on unfinished work, pending operator items, and in-flight decisions',
+  // Both watchdog-fired steering flavors (mid-arc, boundary) must be filtered — the
+  // real filter is a startsWith('/compact') prefix match, so this is a regression
+  // guard against either literal drifting off that prefix.
+  for (const [flavor, compactMessage] of [
+    ['mid-arc', composeCompactSteeringMessage('in_progress')],
+    ['boundary', composeCompactSteeringMessage('idle')],
+  ] as const) {
+    test(`hook smoke: bare /compact ... (${flavor}) (watchdog hygiene) → file NOT written`, withTmp(async (dir) => {
+      await recordHook(dir, JSON.stringify({ prompt: compactMessage }));
+      expect(fs.existsSync(lastOp(dir))).toBe(false);
     }));
-    expect(fs.existsSync(lastOp(dir))).toBe(false);
-  }));
+  }
 
   // g5. hook smoke: Monitor-delivered scheduler notifications → file NOT written
   for (const notification of [

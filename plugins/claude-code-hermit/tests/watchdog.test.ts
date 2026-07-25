@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
-import { inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composePauseMessage, hasPendingQuestion } from '../scripts/hermit-watchdog';
+import { inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composePauseMessage, hasPendingQuestion, composeCompactSteeringMessage } from '../scripts/hermit-watchdog';
 import { startHttpStub, type Stub } from './helpers/http-stub';
 
 // The one line to flip when hermit-watchdog is ported to TypeScript.
@@ -1694,11 +1694,45 @@ test('context_compact: bloated idle + quiescent + operator silent → /compact s
     const r2 = await watchdog(h, 'run'); // tick 2: same hash → /compact fires
     expect(r2.exitCode).toBe(0);
     const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/compact');
+    // session_state is 'idle' at fire time (writeAlwaysOnRuntime default) → boundary flavor.
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('idle'));
     expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-compact');
     // context_cleared is context_clear's marker only — compact must never touch it.
     const runtimeAtCompact = readJson(snapshotPath);
     expect(runtimeAtCompact.context_cleared).not.toBe(true);
+  }));
+
+test('context_compact: mid-arc (session_state in_progress) → keep-unfinished-work message',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'in_progress');
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run'); // tick 1: hash recorded
+    const r2 = await watchdog(h, 'run'); // tick 2: same hash → /compact fires
+    expect(r2.exitCode).toBe(0);
+    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('in_progress'));
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('flavor mid-arc');
+  }));
+
+test('context_compact: absent session_state defaults to the conservative mid-arc flavor',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    patchRuntime(h, { session_state: undefined, runtime_mode: 'tmux', session_id: SESSION_ID });
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run'); // tick 1: hash recorded
+    const r2 = await watchdog(h, 'run'); // tick 2: same hash → /compact fires
+    expect(r2.exitCode).toBe(0);
+    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
+    expect(tmuxLog).toContain(composeCompactSteeringMessage(undefined));
   }));
 
 test('context_compact: under threshold → no compact', withHermit(async (h) => {
