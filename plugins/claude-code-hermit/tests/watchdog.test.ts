@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
-import { inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composePauseMessage, hasPendingQuestion } from '../scripts/hermit-watchdog';
+import { inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composePauseMessage, hasPendingQuestion, composeCompactSteeringMessage } from '../scripts/hermit-watchdog';
 import { startHttpStub, type Stub } from './helpers/http-stub';
 
 // The one line to flip when hermit-watchdog is ported to TypeScript.
@@ -1694,11 +1694,87 @@ test('context_compact: bloated idle + quiescent + operator silent → /compact s
     const r2 = await watchdog(h, 'run'); // tick 2: same hash → /compact fires
     expect(r2.exitCode).toBe(0);
     const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/compact');
+    // 'idle' with no boundary marker is only half the conjunction → mid-arc. An
+    // always-on hermit sits at 'idle' indefinitely, so idle alone never licenses the
+    // "complete and archived" claim.
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('mid-arc'));
     expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-compact');
     // context_cleared is context_clear's marker only — compact must never touch it.
     const runtimeAtCompact = readJson(snapshotPath);
     expect(runtimeAtCompact.context_cleared).not.toBe(true);
+  }));
+
+/**
+ * Shared tail for the flavor-conjunction cases below: bloat the context, go
+ * operator-silent, hold the pane still, then tick twice so quiescence clears and the
+ * compact fires. Each caller sets only the two predicate inputs (session_state and the
+ * marker) above this, so the row under test is the visible difference.
+ */
+async function fireCompactFlavorCase(h: Hermit): Promise<{ tmuxLog: string; events: string }> {
+  writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
+  fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+  writeFakeTmux(h, 0, 'static pane content');
+  writeFakePgrep(h, 1);
+
+  await watchdog(h, 'run'); // tick 1: hash recorded
+  const r2 = await watchdog(h, 'run'); // tick 2: same hash → /compact fires
+  expect(r2.exitCode).toBe(0);
+  return {
+    tmuxLog: fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8'),
+    events: fs.readFileSync(eventsFile(h), 'utf-8'),
+  };
+}
+
+/**
+ * Flavor is a conjunction: session_state === 'idle' AND a fresh compact-requested
+ * marker. Each case below breaks exactly one half (or neither) so a regression that
+ * drops either condition from the predicate turns a row red.
+ */
+test('context_compact: idle + fresh boundary marker → drop-completed-arc message',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    writeCompactMarker(h); // both halves satisfied — the only boundary-flavor case
+
+    const { tmuxLog, events } = await fireCompactFlavorCase(h);
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('boundary'));
+    expect(events).toContain('flavor boundary');
+  }));
+
+test('context_compact: idle + stale boundary marker → demoted to mid-arc',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    writeCompactMarker(h, 2 * 3600); // past COMPACT_MARKER_TTL_SECS — consumed on read, no waiver
+
+    const { tmuxLog, events } = await fireCompactFlavorCase(h);
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('mid-arc'));
+    expect(events).toContain('flavor mid-arc');
+  }));
+
+test('context_compact: in_progress + fresh boundary marker → still mid-arc',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'in_progress');
+    writeCompactMarker(h); // marker fresh, but a session is open — arc is not done
+
+    const { tmuxLog, events } = await fireCompactFlavorCase(h);
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('mid-arc'));
+    expect(events).toContain('flavor mid-arc');
+  }));
+
+test('context_compact: absent session_state + fresh marker → conservative mid-arc',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    // Seed 'idle' then remove the key: with the marker fresh, a failed key removal
+    // would satisfy both halves and produce the boundary literal, so this assertion
+    // genuinely exercises the absent-state path rather than passing by fixture luck.
+    writeAlwaysOnRuntime(h, 'idle');
+    patchRuntime(h, { session_state: undefined });
+    writeCompactMarker(h);
+
+    const { tmuxLog } = await fireCompactFlavorCase(h);
+    expect(tmuxLog).toContain(composeCompactSteeringMessage('mid-arc'));
   }));
 
 test('context_compact: under threshold → no compact', withHermit(async (h) => {

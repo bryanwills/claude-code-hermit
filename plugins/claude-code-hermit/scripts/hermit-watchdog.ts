@@ -164,6 +164,41 @@ export function composeOrphanMessage(timezone: string, locale: Locale = OPERATOR
   return WATCHDOG[locale].orphan(nowHHMM(timezone));
 }
 
+export type CompactFlavor = 'boundary' | 'mid-arc';
+
+/**
+ * Which steering flavor a compact fires with. Sole owner of the predicate — the fire
+ * site logs this same value to the event log, so message and forensics label can never
+ * disagree.
+ *
+ * Both conditions are required, because neither alone bounds the claim the boundary
+ * message makes ("the previous work arc is complete and archived"):
+ *   - `session_state === 'idle'` is unbounded in time. Only `/session-start` writes
+ *     `in_progress` (session-archive.ts verbOpen) — routines, heartbeats, and channel
+ *     replies never flip it — so an always-on hermit sits at 'idle' for hours while
+ *     still doing real, unarchived work.
+ *   - A fresh `compact-requested.json` marks a genuine work-done boundary, but only
+ *     bounds it to COMPACT_MARKER_TTL_SECS; on its own it can't tell that a new
+ *     session opened inside that window.
+ * Together they confine the boundary flavor to the ≤1h window after a work-done
+ * archive with no session open — the only window where the claim is true. Everything
+ * else falls to 'mid-arc', the conservative keep-everything flavor.
+ */
+function compactFlavor(sessionState: unknown, markerFresh: boolean): CompactFlavor {
+  return sessionState === 'idle' && markerFresh ? 'boundary' : 'mid-arc';
+}
+
+/**
+ * Steering text for the watchdog-fired `/compact`. Never operator-facing (it's typed
+ * into the pane for Claude, not shown in a channel), so no locale — unlike the
+ * compose*Message functions above.
+ */
+export function composeCompactSteeringMessage(flavor: CompactFlavor): string {
+  return flavor === 'boundary'
+    ? '/compact the previous work arc is complete and archived, summarize it in one or two lines, keep pending operator items, open questions, and standing commitments, drop completed-work detail'
+    : '/compact focus on unfinished work, pending operator items, and in-flight decisions';
+}
+
 /** Operator-language message for a forced pause enforcement (any reason). */
 export function composePauseMessage(reason: string, until: string | null, timezone: string, locale: Locale = OPERATOR_LOCALE): string {
   const label = pauseReasonLabel(reason, locale);
@@ -985,7 +1020,12 @@ function maybeContextCompact(config: Json): void {
     return;
   }
   try {
-    sendKeys(sessionName, '/compact focus on unfinished work, pending operator items, and in-flight decisions');
+    // session_state is read at fire time; boundaryWaive was resolved at the top of this
+    // same tick and the marker is still on disk, so both halves describe this instant.
+    // A marker that went stale between the two quiescence ticks was consumed on the
+    // second read, which correctly demotes the flavor to mid-arc.
+    const flavor = compactFlavor(runtime.session_state, boundaryWaive);
+    sendKeys(sessionName, composeCompactSteeringMessage(flavor));
     watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
     watchdogState.last_compacted_at = utcStamp();
     watchdogState.last_pane_hash_compact = null; // reset so next bloat cycle re-arms
@@ -994,7 +1034,7 @@ function maybeContextCompact(config: Json): void {
     try { fs.rmSync(COMPACT_REQUESTED_JSON); } catch {} // consume the boundary waiver now that it fired
     // Prompt-token count travels in the event so the next cost-log entry gives a
     // before/after for free — feeds /hermit-evolution and threshold calibration.
-    appendEvent('context-compact', `prompt tokens ${prompt} over threshold ${threshold}`);
+    appendEvent('context-compact', `prompt tokens ${prompt} over threshold ${threshold}, flavor ${flavor}`);
   } finally {
     releaseLock(LIFECYCLE_LOCK);
   }
