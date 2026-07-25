@@ -2297,24 +2297,23 @@ describe('doctor model-pricing-known check', () => {
 describe('doctor routine-cost check', () => {
   const routineCostCheck = (report: any) => (report.checks ?? []).find((c: any) => c.id === 'routine-cost');
   const routine = (id: string) => ({ id, schedule: '0 9 * * *', skill: 'x:y', enabled: true });
-  // A fire-turn stamps exactly one of started|skipped-* via routine-precheck.ts; both accrue
-  // cost to the routine bucket, so both count toward the run denominator. `fired` is a later
-  // duplicate of `started` and is deliberately NOT counted.
-  const runs = (id: string, n: number, event = 'started') => Array.from({ length: n }, () => ({ routine_id: id, event }));
 
-  function writeCostIndex(dir: string, bySource: Record<string, { cost: number; tokens: number }>) {
-    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'cost-index.json'), JSON.stringify({
-      version: 3, byte_offset: 0, total_cost_usd: 0, total_tokens: 0, total_sessions: 0,
-      last_session_id: null, by_source: bySource, by_date: {}, by_week: {}, by_month: {},
-      skipped_corrupt_lines: 0, updated_at: new Date().toISOString(),
-    }));
-  }
+  // Both $/run inputs now come from one population: cost rows stamped
+  // source_attribution_version 2. One main row per model wake = one run; subagent rows add
+  // cost to the same source without adding a run.
+  type Row = { source: string; cost: number; subagent?: boolean; version?: number };
+  const wakes = (id: string, n: number, cost: number): Row[] =>
+    Array.from({ length: n }, () => ({ source: `routine:${id}`, cost }));
 
-  function writeRoutineMetrics(dir: string, rows: Array<{ routine_id: string; event: string }>) {
-    const lines = rows.map(r => JSON.stringify({
-      ts: new Date().toISOString(), routine_id: r.routine_id, event: r.event, delivery: 'cron-create',
+  function writeCostLog(dir: string, rows: Row[]) {
+    const lines = rows.map((r, i) => JSON.stringify({
+      timestamp: new Date(Date.UTC(2026, 6, 1, 0, i)).toISOString(),
+      session_id: 'S-001', source: r.source, model: 'sonnet',
+      total_tokens: 1000, estimated_cost_usd: r.cost,
+      ...(r.subagent ? { subagent: true } : {}),
+      ...(r.version === undefined ? { source_attribution_version: 2 } : r.version === 0 ? {} : { source_attribution_version: r.version }),
     })).join('\n') + '\n';
-    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-metrics.jsonl'), lines);
+    fs.writeFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), lines);
   }
 
   test('no enabled routines → ok', withTmpdir(async (dir) => {
@@ -2323,7 +2322,7 @@ describe('doctor routine-cost check', () => {
     expect(routineCostCheck(report).status).toBe('ok');
   }), 20000);
 
-  test('cost-index.json absent → ok', withTmpdir(async (dir) => {
+  test('cost log absent → ok', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a')] });
     const report = await runDoctorCheck(dir);
     expect(routineCostCheck(report).status).toBe('ok');
@@ -2331,20 +2330,18 @@ describe('doctor routine-cost check', () => {
 
   test('fewer than 3 runs → ok (no divide-by-small-N false positive)', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a')] });
-    writeCostIndex(dir, { 'routine:a': { cost: 100, tokens: 1000 } });
-    writeRoutineMetrics(dir, runs('a', 2));
+    writeCostLog(dir, wakes('a', 2, 50));
     const report = await runDoctorCheck(dir);
     expect(routineCostCheck(report).status).toBe('ok');
   }), 20000);
 
   test('outlier routine exceeding 3x peer median and floor → warn naming it', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('cheap'), routine('cheap2'), routine('expensive')] });
-    writeCostIndex(dir, {
-      'routine:cheap': { cost: 1.2, tokens: 1000 },        // $0.40/run
-      'routine:cheap2': { cost: 1.35, tokens: 1000 },      // $0.45/run
-      'routine:expensive': { cost: 45, tokens: 100000 },   // $15/run — peer median ≈$0.42, threshold $2
-    });
-    writeRoutineMetrics(dir, [...runs('cheap', 3), ...runs('cheap2', 3), ...runs('expensive', 3)]);
+    writeCostLog(dir, [
+      ...wakes('cheap', 3, 0.40),
+      ...wakes('cheap2', 3, 0.45),
+      ...wakes('expensive', 3, 15),   // peer median ≈$0.42, threshold $2
+    ]);
     const report = await runDoctorCheck(dir);
     const c = routineCostCheck(report);
     expect(c.status).toBe('warn');
@@ -2354,103 +2351,77 @@ describe('doctor routine-cost check', () => {
 
   test('all routines under the floor → ok', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a'), routine('b')] });
-    writeCostIndex(dir, {
-      'routine:a': { cost: 3, tokens: 1000 },   // $1.00/run
-      'routine:b': { cost: 3.3, tokens: 1000 }, // $1.10/run
-    });
-    writeRoutineMetrics(dir, [...runs('a', 3), ...runs('b', 3)]);
+    writeCostLog(dir, [...wakes('a', 3, 1.00), ...wakes('b', 3, 1.10)]);
     const report = await runDoctorCheck(dir);
     expect(routineCostCheck(report).status).toBe('ok');
   }), 20000);
 
-  test('polluted routine:<artifact> key with no matching routine id is ignored', withTmpdir(async (dir) => {
-    // cost-tracker's classifySource() can mint keys like "routine:fired" from the
-    // log-routine-event.sh fallback matcher — must not be treated as a real routine.
+  test('polluted routine:<artifact> source with no matching routine id is ignored', withTmpdir(async (dir) => {
+    // classifySource's log-routine-event.sh fallback matcher can mint sources like
+    // "routine:fired" — must not be treated as a real routine.
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a')] });
-    writeCostIndex(dir, {
-      'routine:a': { cost: 3, tokens: 1000 },     // $1.00/run, under floor
-      'routine:fired': { cost: 999, tokens: 1 },  // classifier artifact
-    });
-    writeRoutineMetrics(dir, runs('a', 3));
+    writeCostLog(dir, [
+      ...wakes('a', 3, 1.00),
+      ...wakes('fired', 3, 333),  // classifier artifact
+    ]);
     const report = await runDoctorCheck(dir);
     const c = routineCostCheck(report);
     expect(c.status).toBe('ok');
-    expect(c.detail).not.toContain('999');
+    expect(c.detail).not.toContain('333');
   }), 20000);
 
-  test('skipped fires count toward the run denominator (cheap-but-skipped routine not flagged)', withTmpdir(async (dir) => {
-    // skippy proceeded 3x (started+fired) but was idle-gated 20x (skipped-waiting). cost-tracker
-    // buckets all 23 fire-turns' cost to routine:skippy, so dividing by only the 3 `fired`
-    // events would report ~$7.67/run and warn; dividing by all 23 fire-turns reports $1/run.
-    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('skippy'), routine('normal')] });
-    writeCostIndex(dir, {
-      'routine:skippy': { cost: 23, tokens: 23000 },  // 23 fire-turns → $1.00/run
-      'routine:normal': { cost: 3, tokens: 3000 },    // 3 fire-turns → $1.00/run
-    });
-    writeRoutineMetrics(dir, [
-      ...runs('skippy', 3, 'started'), ...runs('skippy', 3, 'fired'), ...runs('skippy', 20, 'skipped-waiting'),
-      ...runs('normal', 3, 'started'), ...runs('normal', 3, 'fired'),
+  test('legacy pre-attribution-fix rows cannot produce a warn (the incident shape)', withTmpdir(async (dir) => {
+    // jpereira's monthly-revenue read $37.96/run off a $121 lifetime bucket built from daily
+    // turns misattributed by tool-output marker capture. Those rows carry no v2 stamp, so they
+    // are not a measurement — the check reports insufficient history instead of warning.
+    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('monthly-revenue'), routine('peer')] });
+    writeCostLog(dir, [
+      ...Array.from({ length: 9 }, () => ({ source: 'routine:monthly-revenue', cost: 12.6, version: 0 })),
+      ...wakes('monthly-revenue', 3, 1.11),  // the real, post-fix cost
+      ...wakes('peer', 3, 0.90),
     ]);
     const c = routineCostCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('ok');
-    expect(c.detail).not.toContain('skippy');
+    expect(c.detail).not.toContain('monthly-revenue');
   }), 20000);
 
-  test('monitor-delivered skips are excluded from the run denominator (unlike CronCreate skips)', withTmpdir(async (dir) => {
-    // 'monitored' has 3 real (cost-generating) started fires totaling $30 — true cost is
-    // $10/run. It's also skipped 20x via the routine-monitor subprocess, which costs zero
-    // model tokens. If those 20 monitor-delivered skips were (wrongly) counted in the
-    // denominator like CronCreate skips are, $30/23 ≈ $1.30/run would slip under the
-    // threshold and hide a genuinely expensive routine — the opposite of the "skipped fires
-    // count toward the run denominator" case above, which is the CronCreate-delivery path.
-    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('monitored'), routine('peer')] });
-    writeCostIndex(dir, {
-      'routine:monitored': { cost: 30, tokens: 30000 }, // 3 real fires → $10/run if counted correctly
-      'routine:peer': { cost: 3, tokens: 3000 },         // $1.00/run
-    });
-    const rows = [
-      ...runs('monitored', 3, 'started'),
-      ...runs('monitored', 20, 'skipped-waiting'),
-      ...runs('peer', 3, 'started'),
-    ];
-    const lines = rows.map((r, i) => JSON.stringify({
-      ts: new Date().toISOString(), routine_id: r.routine_id, event: r.event,
-      delivery: r.event === 'skipped-waiting' && r.routine_id === 'monitored' ? 'monitor' : 'cron-create',
-    })).join('\n') + '\n';
-    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-metrics.jsonl'), lines);
+  test('subagent rows add cost to their source without adding a run', withTmpdir(async (dir) => {
+    // A routine that delegates: 3 wakes, each dispatching a subagent. $/run must fold the
+    // subagent cost into the dispatching source (3 runs at $4, not 6 runs at $2).
+    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('delegator'), routine('peer')] });
+    writeCostLog(dir, [
+      ...wakes('delegator', 3, 1),
+      ...Array.from({ length: 3 }, () => ({ source: 'routine:delegator', cost: 3, subagent: true })),
+      ...wakes('peer', 3, 0.50),
+    ]);
     const c = routineCostCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('warn');
-    expect(c.detail).toContain('monitored');
-    expect(c.detail).toContain('10.00'); // $30/3 real fires, not $30/23
+    expect(c.detail).toContain('delegator');
+    expect(c.detail).toContain('4.00'); // ($1+$3)×3 / 3 runs
   }), 20000);
 
   test('co-fire cost bucketed to routine:multi is excluded from the per-routine comparison', withTmpdir(async (dir) => {
     // 'a' and 'b' only ever co-fire; classifySource attributes their shared wake turn to the
-    // synthetic routine:multi bucket (not the first id). Since the check iterates only
-    // configured ids, routine:multi is ignored — neither routine shows an inflated $/run.
-    // Without the bucket the whole $900 would land on routine:a → $300/run → a false warn.
+    // synthetic routine:multi source (not the first id). Since the check iterates only
+    // configured ids, routine:multi is ignored — neither routine shows an inflated $/run, and
+    // neither appears as a zero-cost peer dragging the median down.
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a'), routine('b'), routine('x'), routine('y')] });
-    writeCostIndex(dir, {
-      'routine:multi': { cost: 900, tokens: 900000 }, // co-fire cost — not a configured id, excluded
-      'routine:x': { cost: 3, tokens: 3000 },          // $1.00/run
-      'routine:y': { cost: 3.3, tokens: 3000 },        // $1.10/run
-    });
-    writeRoutineMetrics(dir, [...runs('a', 3), ...runs('b', 3), ...runs('x', 3), ...runs('y', 3)]);
+    writeCostLog(dir, [
+      ...wakes('multi', 3, 300),   // co-fire cost — not a configured id, excluded
+      ...wakes('x', 3, 1.00),
+      ...wakes('y', 3, 1.10),
+    ]);
     const c = routineCostCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('ok');
     expect(c.detail).not.toContain('multi');
-    expect(c.detail).not.toContain('900');
+    expect(c.detail).toContain('2 routine(s)'); // a and b contribute no zero-cost peers
   }), 20000);
 
   test('expensive routine in a two-routine fleet is flagged (peer median, not self-inclusive)', withTmpdir(async (dir) => {
     // With a self-inclusive median, 3×median is unreachable at n=2 and the outlier escapes;
     // comparing against the peer median (self excluded) catches it.
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('cheap'), routine('pricey')] });
-    writeCostIndex(dir, {
-      'routine:cheap': { cost: 3, tokens: 1000 },    // $1.00/run
-      'routine:pricey': { cost: 30, tokens: 10000 }, // $10.00/run — peer median $1, threshold $3
-    });
-    writeRoutineMetrics(dir, [...runs('cheap', 3), ...runs('pricey', 3)]);
+    writeCostLog(dir, [...wakes('cheap', 3, 1.00), ...wakes('pricey', 3, 10.00)]);
     const c = routineCostCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('pricey');
@@ -2458,12 +2429,10 @@ describe('doctor routine-cost check', () => {
 
   test('default floor absorbs a low-absolute-cost outlier that is many times the median', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a'), routine('b'), routine('lonewolf')] });
-    writeCostIndex(dir, {
-      'routine:a': { cost: 0.03, tokens: 100 },  // $0.01/run
-      'routine:b': { cost: 0.036, tokens: 100 }, // $0.012/run (median)
-      'routine:lonewolf': { cost: 0.15, tokens: 100 },  // $0.05/run — >3x median, under the $2 floor
-    });
-    writeRoutineMetrics(dir, [...runs('a', 3), ...runs('b', 3), ...runs('lonewolf', 3)]);
+    writeCostLog(dir, [
+      ...wakes('a', 3, 0.01), ...wakes('b', 3, 0.012),
+      ...wakes('lonewolf', 3, 0.05),  // >3x median, under the $2 floor
+    ]);
     const report = await runDoctorCheck(dir);
     expect(routineCostCheck(report).status).toBe('ok');
   }), 20000);
@@ -2473,56 +2442,30 @@ describe('doctor routine-cost check', () => {
       ...BASE_CONFIG, routines: [routine('a'), routine('b'), routine('lonewolf')],
       doctor: { routine_cost_floor_usd: 0.02 },
     });
-    writeCostIndex(dir, {
-      'routine:a': { cost: 0.03, tokens: 100 },
-      'routine:b': { cost: 0.036, tokens: 100 },
-      'routine:lonewolf': { cost: 0.15, tokens: 100 },
-    });
-    writeRoutineMetrics(dir, [...runs('a', 3), ...runs('b', 3), ...runs('lonewolf', 3)]);
+    writeCostLog(dir, [
+      ...wakes('a', 3, 0.01), ...wakes('b', 3, 0.012), ...wakes('lonewolf', 3, 0.05),
+    ]);
     const report = await runDoctorCheck(dir);
     const c = routineCostCheck(report);
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('lonewolf');
   }), 20000);
 
-  test('#573: lifetime cost predating fire tracking is windowed out, not flagged', withTmpdir(async (dir) => {
-    // routine-metrics.jsonl tracking (added #378) can postdate part of a routine's lifetime
-    // cost-index accumulation. `weekly` accrued $97 before tracking existed, plus $3 across its
-    // 3 tracked fires ($1/run) — lifetime cost-index cost is $100, so dividing by only the 3
-    // tracked runs (the old bug) gives ~$33.33/run and falsely flags it. Windowing the numerator
-    // to [earliest tracked fire, now] should exclude the pre-tracking $97 and correctly compute
-    // $1/run, matching peer `other` and producing no warning.
+  test('#573 successor: a routine still compared on its clean rows despite huge legacy cost', withTmpdir(async (dir) => {
+    // #573 windowed the numerator to each routine's earliest tracked fire so pre-tracking
+    // lifetime cost wasn't divided across only the tracked runs. The v2 epoch subsumes that
+    // window: legacy rows are dropped by stamp, not by timestamp. `weekly` carries $97 of
+    // pre-fix cost plus 3 clean $1 wakes — it must be judged at $1/run (and still take part
+    // in the comparison, not be dropped from it).
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('weekly'), routine('other')] });
-    writeCostIndex(dir, {
-      'routine:weekly': { cost: 100, tokens: 100000 }, // $97 pre-tracking + $3 tracked = $100 lifetime
-      'routine:other': { cost: 3, tokens: 3000 },       // $1.00/run, no pre-tracking history
-    });
-
-    const earliest = new Date(Date.now() - 3600_000).toISOString(); // 1h ago
-    const mid = new Date(Date.now() - 2400_000).toISOString();
-    const late = new Date(Date.now() - 1200_000).toISOString();
-    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-metrics.jsonl'), [
-      { ts: earliest, routine_id: 'weekly', event: 'started', delivery: 'cron-create' },
-      { ts: mid, routine_id: 'weekly', event: 'started', delivery: 'cron-create' },
-      { ts: late, routine_id: 'weekly', event: 'started', delivery: 'cron-create' },
-      { ts: new Date().toISOString(), routine_id: 'other', event: 'started', delivery: 'cron-create' },
-      { ts: new Date().toISOString(), routine_id: 'other', event: 'started', delivery: 'cron-create' },
-      { ts: new Date().toISOString(), routine_id: 'other', event: 'started', delivery: 'cron-create' },
-    ].map(e => JSON.stringify(e)).join('\n') + '\n');
-
-    const preTracking = new Date(Date.now() - 7200_000).toISOString(); // 2h ago, before `earliest`
-    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), [
-      { timestamp: preTracking, source: 'routine:weekly', estimated_cost_usd: 97 },
-      { timestamp: earliest, source: 'routine:weekly', estimated_cost_usd: 1 },
-      { timestamp: mid, source: 'routine:weekly', estimated_cost_usd: 1 },
-      { timestamp: late, source: 'routine:weekly', estimated_cost_usd: 1 },
-    ].map(e => JSON.stringify(e)).join('\n') + '\n');
-
-    const report = await runDoctorCheck(dir);
-    const c = routineCostCheck(report);
+    writeCostLog(dir, [
+      { source: 'routine:weekly', cost: 97, version: 0 },  // pre-fix, unstamped
+      ...wakes('weekly', 3, 1.00),
+      ...wakes('other', 3, 1.00),
+    ]);
+    const c = routineCostCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('ok');
-    expect(c.detail).not.toContain('weekly');
+    expect(c.detail).toContain('2 routine(s)');  // both compared — legacy cost dropped, not the routine
   }), 20000);
 });
 

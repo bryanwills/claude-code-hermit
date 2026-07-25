@@ -7,7 +7,9 @@
 - `config.effort` — passed as `--effort` on every `hermit-start`, mirroring `config.model`, so a channel effort change reverts on restart instead of persisting. Ships `null` (no flag, model default); set it to opt into the revert-on-restart guarantee. Not the same lever as `config.env.CLAUDE_CODE_EFFORT_LEVEL`, which pins the session and makes a runtime `/effort` a no-op.
 
 ### Fixed
-- A `/clear` reaching the pane outside the watchdog no longer skips the hermit's own reset bookkeeping. The runtime stamp, `SHELL.md` breadcrumb, and status-cache clear moved to `lib/context-reset.ts`; skipping the cache clear previously let the watchdog fire a spurious `/compact` against a freshly-cleared context.
+- Turn cost is attributed from the delivered prompt alone, not the whole turn's text. A routine id appearing in a turn's own tool output no longer captures that turn's cost — `heartbeat-restart`'s re-arm, whose `CronList`/`CronDelete` output names concrete routine ids, was billing $3-7 turns to unrelated routines. Corrects `cost-reflect` and cost exports too, not just `hermit-doctor`.
+- Subagent-completion turns are attributed to the routine that dispatched the agent, resolved through the notification's task/tool-use id, instead of falling to `other`.
+- The `routine-cost` doctor check derives both `$/run` inputs from cost rows stamped `source_attribution_version: 2`, replacing the join between lifetime `cost-index.json` buckets and `routine-metrics.jsonl` fire counts. Rows written before the attribution fix are excluded, so historical misattribution can no longer produce a permanent false warn; a routine reports insufficient history until it has 3 clean wakes. The runtime stamp, `SHELL.md` breadcrumb, and status-cache clear moved to `lib/context-reset.ts`; skipping the cache clear previously let the watchdog fire a spurious `/compact` against a freshly-cleared context.
 - Model-composed maintainer-tier notices were sent through the access-gated reply tool and blocked; they now go through the script path.
 
 ### Changed

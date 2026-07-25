@@ -213,6 +213,54 @@ function isTurnTrigger(entry: Json): boolean {
 }
 
 /**
+ * A structured mid-turn injection — CC writes skill bodies and similar scaffolding
+ * as `isMeta:true` user entries carrying ARRAY content. `isMeta` alone cannot
+ * discriminate these from real prompts: routine wakes (`[hermit-routine:<id>] …`)
+ * and inbound channel envelopes (`<channel source="…">`) are ALSO `isMeta:true`,
+ * but carry STRING content. The content shape is the discriminator, which is why
+ * `isTurnTrigger` (whose `isMeta` guard is correct for *usage* segmentation) must
+ * not be used to find the prompt that classifies a turn's cost — it would skip the
+ * marker-bearing entries themselves. Measured on live hermit transcripts: skipping
+ * only the array-content injections recovers 77 real routine/channel prompts that
+ * the injection would otherwise shadow.
+ * @param {object} entry
+ * @returns {boolean}
+ */
+function isSkillInjection(entry: Json): boolean {
+  return entry.isMeta === true && Array.isArray(entry.message?.content);
+}
+
+/**
+ * The delivered prompt that opened this turn: walk back from `billedIndex` to the
+ * first user entry that is neither a tool_result carrier nor a structured injection,
+ * and return THAT entry's text alone.
+ *
+ * Returning only the boundary entry — never the intervening tool_results — is the
+ * point: `classifySource` matches its markers anywhere in the text it is given, so
+ * concatenating the walked entries lets any tool output that merely *mentions* a
+ * routine id capture the whole turn's cost.
+ *
+ * `boundaryFound` is false when the walk ran off the start of `lines` without
+ * finding a prompt — the caller uses that to detect a truncated tail window that
+ * doesn't cover the real turn start. `index` is the boundary entry's position, so a
+ * caller can resume the walk from an earlier turn (see cost-tracker's dispatch hop).
+ * @param {string[]} lines
+ * @param {number} billedIndex
+ * @returns {{ text: string, boundaryFound: boolean, index: number }}
+ */
+function turnPromptText(lines: string[], billedIndex: number): { text: string; boundaryFound: boolean; index: number } {
+  for (let j = billedIndex - 1; j >= 0; j--) {
+    try {
+      const prev = JSON.parse(lines[j]);
+      if (prev.type === 'user' && !isToolResult(prev) && !isSkillInjection(prev)) {
+        return { text: entryText(prev), boundaryFound: true, index: j };
+      }
+    } catch {}
+  }
+  return { text: '', boundaryFound: false, index: -1 };
+}
+
+/**
  * A compact_boundary marker — CC writes one `type:'system'` entry per context
  * compaction (auto or manual). `compactMetadata.trigger` distinguishes them but
  * callers that only count compactions need the type/subtype discriminator.
@@ -372,6 +420,8 @@ export {
   isToolResult,
   extractUsage,
   isTurnTrigger,
+  isSkillInjection,
+  turnPromptText,
   isCompactBoundary,
   toolUseNames,
   classifyToolResults,

@@ -35,6 +35,13 @@ type Json = any;
 
 const INDEX_VERSION = 3;
 
+// Stamped on every cost row cost-tracker.ts and subagent-cost.ts write. Rows written before
+// the prompt-only attribution fix carry no such field, and consumers that need trustworthy
+// per-source numbers (doctor's routine-cost) count only v2 rows — an explicit epoch rather
+// than a date cutoff, which would drift with each hermit's upgrade time. Lives here with the
+// log's other schema versions; the writers import it so the stamp and the filter can't drift.
+const SOURCE_ATTRIBUTION_VERSION = 2;
+
 // writeCostSummary reads today + the trailing 7 days; keep one extra day of buffer.
 const BY_DATE_RETENTION_DAYS = 8;
 const BY_WEEK_RETENTION_WEEKS = 14;
@@ -293,36 +300,38 @@ function scanAutomatedOpus(costLogFile: string, sinceDateInclusive: string, time
   return { count, cost };
 }
 
-// Per-source windowed cost sum, used by doctor-check.ts's routine-cost check to align the
-// cost numerator to the same window as its fire-count denominator (routine-metrics.jsonl
-// tracking can postdate part of a routine's lifetime cost-index accumulation — see #573).
-// `cutoffBySource` maps a by_source key (e.g. "routine:weekly-review") to an ISO-8601 UTC
-// timestamp string ("...Z"); only lines with a matching source AND timestamp >= that cutoff
-// are summed. Compared on epoch-ms via Date.parse, NOT lexicographically: the two writers use
-// different sub-second precision (routine-metrics.jsonl cutoffs are whole-second
-// `...T%H:%M:%SZ` from `date -u`, cost-log.jsonl timestamps are millisecond `...SS.mmmZ` from
-// `toISOString()`), and `...SS.mmmZ` sorts lexicographically *before* `...SSZ` because '.'
-// (0x2E) < 'Z' (0x5A) — so a same-second cost entry at the window boundary would be wrongly
-// excluded under string comparison. Epoch-ms comparison keeps both sides on the true instant.
-function scanRoutineCostWindowed(costLogFile: string, cutoffBySource: Map<string, string>): Map<string, number> {
-  const totals = new Map<string, number>();
-  if (!fs.existsSync(costLogFile) || cutoffBySource.size === 0) return totals;
-  const cutoffMsBySource = new Map<string, number>();
-  for (const [src, cutoff] of cutoffBySource) {
-    const ms = Date.parse(cutoff);
-    if (!Number.isNaN(ms)) cutoffMsBySource.set(src, ms);
-  }
+// Per-source cost AND run count from the cost log alone, used by doctor-check.ts's
+// routine-cost check.
+//
+// Both quantities come from one population — rows stamped
+// `source_attribution_version: 2`, i.e. written after the prompt-only attribution fix.
+// Earlier rows are skipped entirely: their `source` could be captured by any tool output
+// that merely named a routine id, so a lifetime numerator built from them is not a
+// measurement of anything. That replaces the previous two-mechanism join (transcript-
+// classified cost over shell-stamped fire counts from routine-metrics.jsonl), whose two
+// sides could cover different windows and inflate $/run into false warns (#573).
+//
+//   cost — every v2 row for the source, subagent rows included. Async subagent rows are
+//          stamped at SubagentStop and can land hours after the launch turn while
+//          inheriting its source; they are real cost of that source, so no time window
+//          is applied.
+//   runs — v2 rows where `subagent !== true`: exactly one main row per model wake. A
+//          CronCreate-delivered skip still woke the model and so counts; a routine-monitor
+//          skip never woke it and writes no row, so it cannot dilute $/run.
+function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; runs: number }> {
+  const totals = new Map<string, { cost: number; runs: number }>();
+  if (!fs.existsSync(costLogFile)) return totals;
   for (const line of fs.readFileSync(costLogFile, 'utf8').split('\n')) {
     if (!line.trim()) continue;
     try {
       const e = JSON.parse(line);
+      if (e.source_attribution_version !== SOURCE_ATTRIBUTION_VERSION) continue;
       const src = e.source;
       if (typeof src !== 'string') continue;
-      const cutoffMs = cutoffMsBySource.get(src);
-      if (cutoffMs === undefined || typeof e.timestamp !== 'string') continue;
-      const ts = Date.parse(e.timestamp);
-      if (Number.isNaN(ts) || ts < cutoffMs) continue;
-      totals.set(src, (totals.get(src) || 0) + (e.estimated_cost_usd || 0));
+      const acc = totals.get(src) || { cost: 0, runs: 0 };
+      acc.cost += e.estimated_cost_usd || 0;
+      if (e.subagent !== true) acc.runs += 1;
+      totals.set(src, acc);
     } catch { /* skip corrupt lines — checkCost already surfaces corruption */ }
   }
   return totals;
@@ -386,4 +395,4 @@ function scanCostLogWarnings(costLogFile: string, sinceDateInclusive: string, ti
   return { opusWake, unpriced };
 }
 
-export { costIndexPath, readCostIndex, computeIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanCostLogWarnings, scanRoutineCostWindowed };
+export { costIndexPath, readCostIndex, computeIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanCostLogWarnings, scanRoutineLedger, SOURCE_ATTRIBUTION_VERSION };

@@ -9,7 +9,7 @@ import { parseDuration } from './lib/time';
 import { globDir, readFrontmatter } from './lib/frontmatter';
 import { validate } from './validate-config';
 import { kStr } from './lib/format';
-import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineCostWindowed } from './lib/cost-log';
+import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } from './lib/cost-log';
 import { costLogPath } from './lib/cc-compat';
 import { PRICING } from './lib/pricing';
 import { getEnabledChannels } from './hermit-start';
@@ -1514,75 +1514,26 @@ function checkRoutineCost() {
       return { id: 'routine-cost', status: 'ok', detail: 'no enabled routines configured' };
     }
 
-    const index = readCostIndex(costIndexPath(hermitDir));
-    if (!index) {
-      return { id: 'routine-cost', status: 'ok', detail: 'cost-index.json absent — no routine cost data yet' };
-    }
-    const bySource = index.by_source || {};
-
-    // Denominator = every fire-TURN that could have generated model cost, not just
-    // proceeded fires. cost-tracker attributes a whole session turn to `routine:<id>`
-    // off the `[hermit-routine:<id>]` prompt marker whether the fire runs the skill
-    // or is idle-gated, so a CronCreate-delivered skip still adds cost to the bucket —
-    // routine-precheck.ts stamps exactly one of started|skipped-waiting|skipped-paused
-    // per fire (the model-issued `fired` stamp is a later, droppable duplicate of
-    // `started`), so counting those three is the true population that generated the
-    // cost UNDER CRONCREATE. Monitor-mode skips are different: routine-due.ts stamps
-    // skipped-waiting/skipped-paused itself, subprocess-side, with zero model wake and
-    // zero cost — counting them in the denominator would dilute $/run below what a
-    // genuinely expensive routine actually costs per real invocation, masking it.
-    // `started` always counts (a model turn ran either way); monitor-delivered skips
-    // are excluded. Counting only `fired` would drop skipped/errored fires from the
-    // denominator while their cost stays in the numerator, inflating $/run into false
-    // warns. Joining strictly against configured routine ids also filters classifier
-    // artifacts (e.g. a stray "routine:fired" by_source key) out.
-    const FIRE_EVENTS = new Set(['started', 'skipped-waiting', 'skipped-paused']);
-    const fireCounts = new Map<string, number>();
-    // Earliest tracked fire `ts` per routine, keyed by cost-index by_source id — routine-metrics.jsonl
-    // tracking (added #378) can postdate part of a routine's lifetime cost-index accumulation, so the
-    // cost-index numerator (all-time cumulative) and this fire-count denominator (tracked-window only)
-    // can silently cover different windows, inflating $/run on hermits that predate the tracking
-    // feature (#573). Windowing the numerator to [earliest tracked fire, now] via
-    // scanRoutineCostWindowed below keeps both sides on the same window.
-    const cutoffBySource = new Map<string, string>();
-    try {
-      const lines = fs.readFileSync(path.join(stateDir, 'routine-metrics.jsonl'), 'utf-8').split('\n');
-      for (const raw of lines) {
-        const line = raw.trim();
-        if (!line) continue;
-        try {
-          const e = JSON.parse(line);
-          if (!e || typeof e.routine_id !== 'string' || !FIRE_EVENTS.has(e.event)) continue;
-          if (e.event !== 'started' && e.delivery === 'monitor') continue; // zero-cost skip — excluded
-          fireCounts.set(e.routine_id, (fireCounts.get(e.routine_id) || 0) + 1);
-          if (typeof e.ts === 'string' && e.ts) {
-            const source = `routine:${e.routine_id}`;
-            const prev = cutoffBySource.get(source);
-            if (!prev || e.ts < prev) cutoffBySource.set(source, e.ts);
-          }
-        } catch {}
-      }
-    } catch {
-      // routine-metrics.jsonl absent — fireCounts stays empty, handled as insufficient data below.
+    const ledger = scanRoutineLedger(costLog);
+    if (ledger.size === 0) {
+      return { id: 'routine-cost', status: 'ok', detail: 'no attribution-v2 cost rows yet — insufficient history' };
     }
 
-    const windowedCost = scanRoutineCostWindowed(costLog, cutoffBySource);
-
+    // Both cost and runs come from scanRoutineLedger's single v2 population — see the
+    // contract there. Iterating configured routine ids also filters classifier artifacts
+    // (e.g. a stray "routine:fired" source) and keeps the co-fire `routine:multi` bucket
+    // out of the per-routine comparison, so a shared wake turn can neither be charged to
+    // one participant nor appear as a zero-cost peer.
     const MIN_RUNS = 3; // avoid divide-by-small-N false positives
     const perRun: Array<{ id: string; costPerRun: number }> = [];
     for (const r of routines) {
-      const runs = fireCounts.get(r.id) || 0;
-      if (runs < MIN_RUNS) continue;
-      // Prefer the windowed cost (same window as `runs`); fall back to the lifetime cost-index
-      // bucket when windowing isn't available (no valid fire ts, or cost-log.jsonl absent) —
-      // that preserves today's behavior wherever the new data source can't be used.
-      const cost = windowedCost.get(`routine:${r.id}`) ?? bySource[`routine:${r.id}`]?.cost;
-      if (typeof cost !== 'number') continue;
-      perRun.push({ id: r.id, costPerRun: cost / runs });
+      const entry = ledger.get(`routine:${r.id}`);
+      if (!entry || entry.runs < MIN_RUNS) continue;
+      perRun.push({ id: r.id, costPerRun: entry.cost / entry.runs });
     }
 
     if (perRun.length < 2) {
-      return { id: 'routine-cost', status: 'ok', detail: `only ${perRun.length} routine(s) with enough run history — need ≥2 to compare` };
+      return { id: 'routine-cost', status: 'ok', detail: `only ${perRun.length} routine(s) with ≥${MIN_RUNS} attribution-v2 runs — need ≥2 to compare` };
     }
 
     const floor = typeof config.doctor?.routine_cost_floor_usd === 'number' ? config.doctor.routine_cost_floor_usd : 2;

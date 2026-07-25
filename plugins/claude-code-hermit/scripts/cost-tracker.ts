@@ -11,8 +11,8 @@ import path from 'node:path';
 import { calculateCost, PRICING } from './lib/pricing';
 import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
-import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, costLogPath, hermitDir } from './lib/cc-compat';
-import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings } from './lib/cost-log';
+import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, turnPromptText, costLogPath, hermitDir } from './lib/cc-compat';
+import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
 import { setPause, isPaused } from './lib/pause';
@@ -70,27 +70,45 @@ function detectModel(modelStr: string | undefined): string {
   return 'sonnet';
 }
 
-// Scan backward from billedIndex through the current turn and return concatenated
-// entry text. The turn boundary is the triggering user prompt (the first non-tool_result
-// user entry) — we include it and stop. This passes over intermediate tool-calling
-// assistant steps (which each carry their own usage) so a multi-step heartbeat/routine
-// turn still reaches its marker, while stopping before the prior turn's prompt so an
-// earlier routine's marker can't bleed into a later turn's source.
-// `boundaryFound` is true only when the loop actually hit that triggering prompt; false
-// means the walk ran off the start of `lines` without finding it — the caller uses this
-// to detect when `lines` (e.g. a truncated tail window) doesn't cover the real turn start.
-function scanTriggerMarkers(lines: string[], billedIndex: number): { text: string; boundaryFound: boolean } {
-  const parts: string[] = [];
-  let boundaryFound = false;
-  for (let j = billedIndex - 1; j >= 0; j--) {
-    try {
-      const prev = JSON.parse(lines[j]);
-      parts.push(entryText(prev));
-      // Reached this turn's triggering prompt — include it, then stop.
-      if (prev.type === 'user' && !isToolResult(prev)) { boundaryFound = true; break; }
-    } catch {}
+// A subagent-completion notification: CC opens a turn with this when a dispatched
+// agent comes to rest, and that ingestion turn is real cost caused by whatever
+// dispatched the agent. The prompt itself carries no routine/heartbeat marker, so
+// prompt-only classification would bucket it as 'other' — resolveTurnSource hops
+// from these ids back to the dispatching turn instead. Measured on live hermit
+// transcripts: every such notification carried a <task-id>, and the dispatch was
+// locatable in-transcript for 264 of 265 of them.
+const RE_TASK_ID = /<task-id>([A-Za-z0-9_-]+)<\/task-id>/;
+const RE_TOOL_USE_ID = /<tool-use-id>([A-Za-z0-9_-]+)<\/tool-use-id>/;
+
+// Classify a turn by its delivered prompt, hopping once through a subagent-completion
+// notification to the turn that dispatched it.
+//
+// The prompt-only rule (turnPromptText) is what stops a turn's own tool output from
+// capturing it: classifySource matches `[hermit-routine:<id>]` anywhere in the text it
+// is handed, so scanning the whole turn billed any turn whose tool output merely named
+// a routine — e.g. heartbeat-restart's re-arm, whose CronDelete/CronList output lists
+// concrete routine ids, was billed to whichever routine it happened to print first.
+//
+// `boundaryFound` is false when the walk ran off the start of a truncated tail window;
+// the caller downgrades to 'other' rather than trust a prompt that may belong to an
+// earlier turn.
+function resolveTurnSource(lines: string[], billedIndex: number): { source: string; boundaryFound: boolean } {
+  const prompt = turnPromptText(lines, billedIndex);
+  const direct = classifySource(prompt.text);
+  if (direct !== 'other' || !prompt.boundaryFound) {
+    return { source: direct, boundaryFound: prompt.boundaryFound };
   }
-  return { text: parts.join(' '), boundaryFound };
+  // Unclassified: if this turn opened on a subagent-completion notification, attribute it
+  // to the dispatching turn. Prefer the tool-use id (present on tool-dispatched agents),
+  // falling back to the task id. One hop only — a dispatch turn is itself a real prompt.
+  const ids = [RE_TOOL_USE_ID.exec(prompt.text)?.[1], RE_TASK_ID.exec(prompt.text)?.[1]].filter(Boolean) as string[];
+  for (const id of ids) {
+    for (let j = prompt.index - 1; j >= 0; j--) {
+      if (!lines[j].includes(id)) continue;
+      return { source: classifySource(turnPromptText(lines, j + 1).text), boundaryFound: true };
+    }
+  }
+  return { source: 'other', boundaryFound: true };
 }
 
 // classifySource moved to lib/trigger-source.ts (imported above, re-exported below)
@@ -129,6 +147,10 @@ function collectSubagentUsage(lines: string[], billedIndex: number): Array<{
         });
       }
       // Same turn boundary as sumTurnUsage: the first non-tool_result user entry.
+      // Deliberately looser than resolveTurnSource's boundary, which additionally skips
+      // structured injections (isSkillInjection). This one decides which tokens are
+      // summed, so tightening it would move billed amounts, not just labels — don't
+      // "align" the two without re-measuring cost totals.
       if (e.type === 'user' && !isToolResult(e)) break;
     } catch {}
   }
@@ -167,7 +189,8 @@ function sumTurnUsage(lines: string[], billedIndex: number): {
         const callPrompt = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
         if (callPrompt > maxPromptTokens) maxPromptTokens = callPrompt;
       }
-      // Turn boundary: the first non-tool_result user entry (same rule as scanTriggerMarkers).
+      // Turn boundary: the first non-tool_result user entry. Intentionally looser than
+      // resolveTurnSource's — see the note in collectSubagentUsage above.
       if (entry.type === 'user' && !isToolResult(entry)) break;
     } catch {}
   }
@@ -209,13 +232,12 @@ function readLastTurnUsage(transcriptPath: string): Json {
           } catch {}
         }
 
-        const { text: triggerText, boundaryFound } = scanTriggerMarkers(lines, i);
+        const resolved = resolveTurnSource(lines, i);
         // A truncated tail (readFrom > 0) whose turn boundary fell outside the window
-        // can't be trusted — the scan may have picked up a stale marker from an earlier,
-        // unrelated turn still in the window, or one echoed in this turn's own tool
-        // output. Attribute to 'other' rather than risk misattributing a large turn
-        // (e.g. a plugin upgrade run) to an unrelated routine/heartbeat/channel source.
-        const source = (!boundaryFound && readFrom > 0) ? 'other' : classifySource(triggerText);
+        // can't be trusted — the prompt found may belong to an earlier, unrelated turn
+        // still in the window. Attribute to 'other' rather than risk misattributing a
+        // large turn (e.g. a plugin upgrade run) to an unrelated source.
+        const source = (!resolved.boundaryFound && readFrom > 0) ? 'other' : resolved.source;
         const subagents = collectSubagentUsage(lines, i);
         return { ...summed, hadHumanTurn, source, subagents };
       } catch {}
@@ -733,6 +755,7 @@ async function run(data: Json): Promise<string | null> {
       context_usage: data.context_usage ?? data.contextUsage ?? null,
       estimated_cost_usd: roundedCost,
       model_unpriced: modelUnpriced,
+      source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
     };
 
     fs.appendFileSync(COST_LOG, JSON.stringify(logEntry) + '\n', 'utf-8');
@@ -764,6 +787,7 @@ async function run(data: Json): Promise<string | null> {
         model_resolved: !!sa.model,   // false → resolvedModel was absent; model is a sonnet-default guess
         context_usage: null,
         estimated_cost_usd: saCost,
+        source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
       }) + '\n', 'utf-8');
       subTokens += saTotal;
       subCost += saCost;
@@ -800,7 +824,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, scanTriggerMarkers, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
+export { run, getCumulativeCost, classifySource, resolveTurnSource, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
 
 if (import.meta.main) {
   // Mark-only entrypoint (synchronous, no stdin): the heartbeat SKILL calls this
