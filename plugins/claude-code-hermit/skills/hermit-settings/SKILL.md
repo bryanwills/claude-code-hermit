@@ -54,6 +54,7 @@ Read `.claude-code-hermit/config.json`. If it doesn't exist, inform the operator
 Scalar and enum edits below are written through `scripts/settings-edit.ts`, which read-modify-writes the whole config (preserving every sibling key) and refuses a malformed file. Shorthand used in this skill:
 
 ```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json show                    # operator-facing summary of live values
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json get [dotted.path]      # dump whole config, or one value
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json set <dotted.path> <value>   # 'none'/'clear' → null; value is JSON-parsed then falls back to raw string
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json toggle <dotted.path>       # boolean flip (absent → true)
@@ -62,58 +63,47 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.js
 ### 2. Show or modify
 
 **If no argument** (or argument is "all"):
-Dump the current config with `settings-edit ... get` (no path), then display all current settings in a readable format:
 
-```
-Hermit Settings (.claude-code-hermit/config.json)
-
-Identity:
-  Agent name:      Atlas          → any string | 'none' to clear
-  Language:        pt             → any locale code (e.g. en, pt, es, fr)
-  Timezone:        Europe/Lisbon  → any tz (e.g. UTC, America/New_York)
-  Escalation:      balanced       → balanced | conservative | autonomous
-  Sign-off:        Atlas out.     → any string | 'none' to clear
-
-Operational:
-  Channels:        none           → run: /claude-code-hermit:hermit-settings channels
-  Remote control:  disabled       → yes | no
-  Model:           default        → opus | sonnet | haiku | none (for default)
-  Morning brief:   disabled       → run: /claude-code-hermit:hermit-settings brief
-  Idle behavior:   discover       → discover | wait
-  Heartbeat:       disabled       → yes | no  (interval, active hours, stale threshold)
-  Watchdog:        disabled       → yes | no  (stale_factor, escalate_after, operator_grace)
-  Routines:        2 configured   → run: /claude-code-hermit:hermit-settings routines
-  Quality gate:    budget         → budget | balanced | quality
-  Permission mode: auto           → default | acceptEdits | auto | plan | dontAsk | bypassPermissions
-  Push notif:      disabled       → on | off
-  Auto session:    enabled        → read-only
-  Boot skill:      /claude-code-hermit:session  → any namespaced skill | 'none' to reset to default
-  tmux name:       hermit-myproject → read-only
-
-Compaction:
-  Monitoring:      compact at 30 lines, keep 20
-  Session Summary: compact at 30 lines, keep 15
-  → run: /claude-code-hermit:hermit-settings compact
-
-Environment (env):
-  AGENT_HOOK_PROFILE              standard
-  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 65
-  MAX_THINKING_TOKENS             10000
-  → run: /claude-code-hermit:hermit-settings env
-
-Scheduled Checks:
-  automation-recommender  claude-code-setup     interval  7 days   2026-04-01  enabled
-  md-audit                claude-md-management  interval  7 days   (never)     enabled
-  md-revise               claude-md-management  session   —        2026-04-06  enabled
-  → run: /claude-code-hermit:hermit-settings scheduled-checks
-
-Docker:
-  Packages: build-essential, ffmpeg  → run: /claude-code-hermit:hermit-settings docker
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json show
 ```
 
-**If argument is "name":**
-Ask: "Agent name? (e.g., Atlas, Hermit, Scout, or 'none' to clear) [current value or skip]"
-Run `settings-edit ... set agent_name <value>` ("none"/"clear" → null).
+Print its output. It renders the operator's live values grouped by area, with the argument that changes each one and when the change takes effect. Do not hand-render a settings summary — the script reads the same registry the table below is built from, so anything you compose by hand drifts from what the config actually holds.
+
+**Scalar and enum arguments — one table, one shape.**
+
+Each row is the same shape: ask the operator for a value, then write it with
+
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json apply-known <argument> <value>
+```
+
+Pass the **argument name**, not the dotted path — the script looks the path up, coerces the value by kind, and refuses an out-of-enum value or an unknown argument with exit 1 (this matters: `settings-edit` writes through `fs`, so the `validate-config.ts` PostToolUse hook never sees the write and a bad value would otherwise land silently). On success it prints the confirmation line, including when the change applies; relay that. `none`/`clear` maps to null wherever a row is marked nullable. Compose the prompt itself from the hint and the enum values.
+
+| Argument | Config path | Type | Values | Applies |
+|---|---|---|---|---|
+| `name` | `agent_name` | string, nullable | any | immediately |
+| `timezone` | `timezone` | string, nullable | IANA tz | immediately |
+| `escalation` | `escalation` | enum | `conservative` / `balanced` / `autonomous` | immediately |
+| `sign-off` | `sign_off` | string, nullable | any | immediately |
+| `remote` | `remote` | boolean | yes / no | next `hermit-start` |
+| `model` | `model` | string, nullable | passed straight to `--model` | next `hermit-start` |
+| `boot-skill` | `boot_skill` | string, nullable | namespaced skill | next `hermit-start` |
+| `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` |
+| `idle` | `idle_behavior` | enum | `discover` / `wait` | immediately |
+| `push-notifications` | `push_notifications` | boolean | on / off | immediately |
+| `reflection` | `reflection.graduation_min_sessions` | integer ≥1 | 1 = surface after one session; 2 = require recurrence | next reflect run |
+| `artifact-dashboard` | `artifacts.dashboard` | boolean | on / off | next refresh |
+| `artifact-proposals` | `artifacts.proposals` | boolean | on / off | next refresh |
+| `artifact-weekly-review` | `artifacts.weekly_review` | boolean | on / off | next refresh |
+
+The enum values, dotted paths, and "applies" notes come from `scripts/lib/settings/registry.ts` — the same module `show` renders from and `validate-config.ts` shares its enums with. When a setting is added, add the row there; this table mirrors it.
+
+**`model` takes whatever Claude Code takes.** There is deliberately no list of model IDs here: the stored value is passed verbatim to `--model` by `hermit-start.ts`, so a hardcoded mapping in this skill would be decorative and would go stale the moment Anthropic ships a new model (it already had — it offered `claude-opus-4-6` well into the Claude 5 generation). Offer the operator the aliases Claude Code itself accepts (`opus`, `sonnet`, `haiku`) or a full model ID, and pass it through.
+
+**Permission-mode note (surface when the operator picks one):** `auto` is classifier-reviewed autonomy and the default; `acceptEdits` auto-approves file edits but prompts for shell; `default` prompts on first use of each tool; `plan` is read-only; `dontAsk` denies anything not in `permissions.allow`; `bypassPermissions` is for isolated containers only. `auto` may report unavailable depending on plan/model/provider — see [Permission Modes](https://code.claude.com/docs/en/permission-modes).
+
+The remaining arguments each do more than write one leaf, so they keep their own procedure below.
 
 **If argument is "language":**
 Auto-detect the system locale via Bash as a default suggestion.
@@ -122,24 +112,6 @@ Run `settings-edit ... set language <value>`.
 Then re-sync the artifact-chrome translation table (the dashboard/proposals pages overlay `.claude-code-hermit/state/artifact-strings.json` per key over the English defaults):
 - New value is **not** `en`: emit `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <value> <current-ISO-timestamp>`, translate every `strings` value into that language (keep keys and `{placeholder}` tokens verbatim), and write `.claude-code-hermit/state/artifact-strings.json`.
 - New value is `en`: delete `.claude-code-hermit/state/artifact-strings.json` if it exists (absent file ⇒ English chrome).
-
-**If argument is "timezone":**
-Auto-detect the system timezone via Bash as a default suggestion.
-Ask: "Timezone? (e.g., Europe/Lisbon, America/New_York, UTC) [current value or auto-detected]"
-Run `settings-edit ... set timezone <value>`.
-
-**If argument is "escalation":**
-Ask: "How autonomous should your assistant be?
-  1. Balanced — act on routine tasks, ask for significant changes (default)
-  2. Conservative — ask before most non-trivial actions
-  3. Autonomous — proceed unless blocked, minimize interruptions
-
-Choose 1-3: [current value]"
-Run `settings-edit ... set escalation <conservative|balanced|autonomous>`.
-
-**If argument is "sign-off":**
-Ask: "Sign-off line for channel messages and briefs? (e.g., 'Atlas out.', '— A.', or 'none' to clear) [current value or skip]"
-Run `settings-edit ... set sign_off <value>` ("none"/"clear" → null).
 
 **If argument is "channels":**
 Show current channel configuration from `config.json` → `channels` object. The `channels.primary` key (if set) is a magic pointer to the preferred outbound channel, not a channel itself — display it on its own line above the channel list:
@@ -161,24 +133,6 @@ Loop until operator says "done":
 - **primary clear:** Delete `channels.primary`. Outbound sends will fall back to the default `discord` → `telegram` → `imessage` order.
 Note: "Channel changes take effect on next `hermit-start` run. `channels.primary` is consulted live by `scripts/resolve-outbound-channel.ts` on every proactive send — no restart needed for that key alone."
 
-**If argument is "remote":**
-Ask: "Enable remote control? Connect from a browser or phone via claude.ai/code.
-  yes — enable remote control
-  no  — disable remote control
-[current: <value>]"
-Run `settings-edit ... set remote <true|false>` (or `toggle remote` if the operator just wants to flip it).
-Note: "Remote control changes take effect on next `hermit-start` run."
-
-**If argument is "model":**
-Ask: "Claude model to use?
-  opus   → claude-opus-4-6
-  sonnet → claude-sonnet-4-6
-  haiku  → claude-haiku-4-5-20251001
-  none   → use Claude Code default (inherit from user config)
-[current: <value or 'default'>]"
-Run `settings-edit ... set model <value>`. To clear (operator says "none", "default", or "clear" → inherit Claude Code default), pass the `none` sentinel: `settings-edit ... set model none` (the script maps `none`/`clear` → null; do NOT pass the literal word `default`, which would be stored as a string).
-Note: "Model changes take effect on next `hermit-start` run."
-
 **If argument is "brief":**
 - If no channels configured: "Morning brief requires channels. Configure channels first with `/claude-code-hermit:hermit-settings channels`."
 - If channels configured:
@@ -186,25 +140,6 @@ Note: "Model changes take effect on next `hermit-start` run."
   - Ask: "Enable morning brief delivery? (yes / no) [current value]"
   - If yes: Ask "What time? (e.g., 07:00) [current or 07:00]" and "Which channel? [current or first enabled channel]"
   - Update `channels.<selected-channel>.morning_brief: { "enabled": true, "time": "<HH:MM>" }` in config.json. If no, set to `null`.
-
-**If argument is "boot-skill":**
-Ask: "Boot skill to invoke on always-on launch? This runs after heartbeat/routines when the tmux session starts. Domain hermits (e.g. `claude-code-homeassistant-hermit`) declare their own — `/claude-code-homeassistant-hermit:ha-boot`. Leave as `none` to use the default (`/claude-code-hermit:session`).
-  <skill>  — any namespaced skill (e.g. `/claude-code-foo-hermit:foo-boot`)
-  none     — clear (falls back to `/claude-code-hermit:session`)
-[current: <value or 'default'>]"
-Run `settings-edit ... set boot_skill <value>`. To clear (operator says "none", "default", or "clear" → fall back to `/claude-code-hermit:session`), pass the `none` sentinel: `settings-edit ... set boot_skill none` (the script maps `none`/`clear` → null; do NOT pass the literal word `default`, which would be stored as a string). The domain boot skill is responsible for calling `/claude-code-hermit:session-start` itself — this setting just controls the single bootstrap command `hermit-start.ts` fires into the REPL.
-Note: "Boot skill changes take effect on next `hermit-start` run."
-
-**If argument is "permissions":**
-Ask: "Permission mode for Claude Code? (auto / acceptEdits / default / plan / dontAsk / bypassPermissions) [current value]"
-- `auto` — autonomous mode; a classifier reviews each action before it runs. Generally available to all users across subscription plans and API usage; supported models and provider configuration can vary. If Claude reports it unavailable for the current selection, choose a supported model or another permission mode. **(default)**
-- `acceptEdits` — auto-approves file edits, prompts for shell commands
-- `default` — prompts for permission on first use of each tool
-- `plan` — read-only exploration, no file modifications or shell commands
-- `dontAsk` — denies all tools not in `permissions.allow`; requires a curated allowlist in `settings.json`
-- `bypassPermissions` — no checks; isolated containers/VMs only
-- Note: `auto` may report "unavailable" at launch if your plan/model/provider doesn't qualify — see [Permission Modes](https://code.claude.com/docs/en/permission-modes)
-Run `settings-edit ... set permission_mode <value>`.
 
 **If argument is "heartbeat":**
 - Show current heartbeat config (including `stale_threshold`)
@@ -292,14 +227,6 @@ Run `settings-edit ... set permission_mode <value>`.
 - **After all edits are written**, invoke `/claude-code-hermit:hermit-routines load` via the Skill tool to apply the new schedule live (no restart). Surface the result inline:
   - Success: "Routines reloaded: <id1>, <id2> (<N> total). Active immediately."
   - Failure: "Settings saved to config.json, but `/claude-code-hermit:hermit-routines load` failed: <reason>. Run `/claude-code-hermit:hermit-routines load` manually to apply."
-
-**If argument is "idle":**
-- Show current `idle_behavior` value
-- Ask: "What should the hermit do when idle between tasks?
-    1. Discover — run reflection and priority alignment (default)
-    2. Wait — only check for new tasks and channel messages
-  Choose 1-2: [current value]"
-- Run `settings-edit ... set idle_behavior <wait|discover>`.
 
 **If argument is "env":**
 - Show current `env` values from config.json in a table:
@@ -410,46 +337,6 @@ Run `settings-edit ... set quality_gate.tier <chosen>` (creates the `quality_gat
 **Channel-tagged turn:** send the same prompt via the channel reply tool with the three tiers numbered (Budget/Balanced/Quality, same descriptions as above), AND queue a pending micro-proposal entry per `reflect` § Queuing procedure: `options: ["budget", "balanced", "quality"]`, `tier: 1`, `on_resolve: "/claude-code-hermit:hermit-settings quality-gate --answer {answer}"`. If invoked as `quality-gate --answer <tier>` (channel-responder resolving that entry), skip the ask and run `settings-edit ... set quality_gate.tier <tier>` directly, then confirm via channel.
 
 Note: if you have `claude-code-dev-hermit:dev-quality` installed and you commit autonomous-implementation diffs through it, consider **Budget** — `/dev-quality` already runs `/claude-code-hermit:simplify` before commit, and any non-Budget tier here would double-fire the cleanup pass (~$0.40-$0.70 of duplicated spend per committed implementation).
-
-**If argument is "reflection":**
-- Show current value from config.json:
-  ```
-  Reflection (config.json reflection)
-
-    graduation_min_sessions   1   (minimum distinct sessions before a ledger pattern graduates to a proposal candidate)
-  ```
-  (substitute the actual value; show 1 if absent)
-- Ask: "Minimum distinct sessions before a pattern graduates? 1 = surfaces after first session (default, ships enabled); 2 = requires recurrence across two sessions (pre-v1.2.6 behavior). [current: <value>]"
-- Accept a positive integer (≥1) as input. Run `settings-edit ... set reflection.graduation_min_sessions <int>` (creates the `reflection` object if missing).
-- Note: "Takes effect on the next reflect run. Set to 1 for fast feedback on fresh hermits; dial to 2 if the operator channel gets noisy."
-
-**If argument is "push-notifications":**
-Ask: "Send a PushNotification (desktop notification in your terminal app, plus mobile push if Remote Control is connected) on proactive alerts? Fires when no channel is enabled OR a configured channel is unreachable (missing pairing, empty allowed_users, all-disabled). In always-on Docker or headless tmux only the Remote Control mobile push will be visible. Note: push is one-way; operator-→hermit replies (micro-proposals, session recovery) require a channel.
-  on  — enable push notifications
-  off — disable push notifications
-[current: <value>]"
-Run `settings-edit ... set push_notifications <true|false>` ("on" → true, "off" → false; or `toggle push_notifications` to flip).
-
-**If argument is "artifact-dashboard":**
-Ask: "Publish a Hermit Dashboard artifact (status, proposal queue, weekly evolution) to a private claude.ai URL? Refreshed by `/brief`, `/weekly-review`, `/proposal-create`, and `/proposal-act` — no extra cost beyond those turns. Requires a `/login`-authenticated session with Artifacts entitled (Pro/Max/Team/Enterprise); on any other surface or without entitlement it silently falls back to the existing markdown-only delivery. Private to your account unless your org has Team/Enterprise Share.
-  on  — enable the dashboard artifact (default)
-  off — disable
-[current: <value>]"
-Run `settings-edit ... set artifacts.dashboard <true|false>` (creates the `artifacts` object if missing; "on" → true, "off" → false; or `toggle artifacts.dashboard` to flip).
-
-**If argument is "artifact-proposals":**
-Ask: "Publish a Proposals-page artifact (full text of open proposals, deep-linked from new-proposal announcements) to a private claude.ai URL? Refreshed by `/proposal-create` and `/proposal-act` — no extra cost beyond those turns. Same entitlement/fallback/privacy notes as the dashboard artifact above.
-  on  — enable the proposals-page artifact (default)
-  off — disable
-[current: <value>]"
-Run `settings-edit ... set artifacts.proposals <true|false>` (creates the `artifacts` object if missing; "on" → true, "off" → false; or `toggle artifacts.proposals` to flip).
-
-**If argument is "artifact-weekly-review":**
-Ask: "Publish a Weekly-review artifact (the compiled weekly report as a stable-URL page) to a private claude.ai URL? Refreshed by `/weekly-review` — no extra cost beyond that turn. Same entitlement/fallback/privacy notes as the dashboard artifact above.
-  on  — enable the weekly-review artifact (default)
-  off — disable
-[current: <value>]"
-Run `settings-edit ... set artifacts.weekly_review <true|false>` (creates the `artifacts` object if missing; "on" → true, "off" → false; or `toggle artifacts.weekly_review` to flip).
 
 **If argument is "artifact-authorization":**
 This records a decision only — it never runs `apply-settings.ts` and never touches a settings file from this session. A channel reply may only flip hermit config, never permissions (auto-mode classifier invariant); the actual grant is applied by `hermit-start`'s boot-time `applyArtifactGrant`, outside any session.

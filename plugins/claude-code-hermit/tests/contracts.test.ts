@@ -1798,10 +1798,11 @@ describe('proposal-act dispatch contract', () => {
   test('subagent owns the quality gate and verification (design b)', () => {
     // missing → e.5/e.6 bounce back to main, splitting execution across two contexts
     expect(skill).toContain('then run its quality gate and verification');
-    expect(skill).toContain('quality_gate.tier');
     expect(skill).toContain('/claude-code-hermit:simplify');
-    // balanced tier is decided inline (no quality-gate-judge subagent)
-    expect(skill).toContain('decide RUN vs SKIP yourself');
+    // The subagent asks the gate rather than judging the tier itself — the two
+    // prose copies of that rubric had already diverged on the bookkeeping filter.
+    expect(skill).toContain('proposal.ts quality-gate');
+    expect(skill).not.toContain('decide RUN vs SKIP yourself');
   });
 
   test('verification failure is handled inside the subagent with a bounded retry', () => {

@@ -1,0 +1,219 @@
+// `proposal.ts quality-gate <stateDir> <proposal-file> [--files-json <json>]` —
+// the single decider for whether an accepted-proposal implementation gets a
+// `/claude-code-hermit:simplify` cleanup pass.
+//
+// This module exists because the rubric used to live as prose in two places
+// (proposal-act/SKILL.md's dispatched-subagent prompt and its in-main step e.5)
+// and the two copies had already diverged: the dispatched copy carried no
+// bookkeeping-path filter, so an implementation whose only diff was
+// `sessions/SHELL.md` ran /simplify (~$0.25) on one path and skipped on the
+// other. Both paths now call this, so they cannot disagree.
+//
+// Authoritative inputs are read here, never accepted from the caller — a caller
+// that supplies the tier is a caller that can supply the wrong tier:
+//   tier     ← <stateDir>/config.json  quality_gate.tier
+//   category ← the proposal file's own frontmatter
+// `--files-json` is the one caller-supplied input, and only because the touched
+// set is knowledge the caller has and the filesystem doesn't (an in-main
+// implementation knows what it wrote). Absent it, the working-tree diff decides.
+//
+// Output: one JSON line, always exit 0 —
+//   {"tier":"...","action":"RUN"|"SKIP","reason":"...","focus_files":[...]}
+// Fail-safe by design: an unreadable config, a missing proposal, a broken git
+// invocation, or an empty candidate set all resolve to a bounded SKIP with the
+// reason naming what was missing. The gate is cleanup, not correctness — the
+// `## Verification` gate is what blocks resolution — so a gate failure must
+// never block an implementation.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { readFrontmatter } from '../frontmatter';
+import { readJson, flagValue } from '../cli';
+import { QUALITY_GATE_TIER } from '../settings/enums';
+
+type Json = any;
+
+export type Action = 'RUN' | 'SKIP';
+export interface Verdict {
+  tier: string;
+  action: Action;
+  reason: string;
+  focus_files: string[];
+}
+
+// Session bookkeeping the hermit rewrites on its own schedule. A diff made
+// entirely of these is not an implementation, so it is never worth a cleanup
+// pass. Mirrors proposal-act/SKILL.md § balanced Scope — keep the two in sync;
+// tests/proposal-quality-gate.test.ts asserts each entry individually.
+const BOOKKEEPING: RegExp[] = [
+  /(^|\/)sessions\/SHELL\.md$/,
+  /(^|\/)state\/runtime\.json$/,
+  /(^|\/)state\/monitors\.runtime\.json$/,
+  /(^|\/)state\/state-summary\.md$/,
+  /(^|\/)state\/[^/]+\.jsonl$/,
+  /(^|\/)HEARTBEAT\.md$/,
+  /(^|\/)tasks-snapshot\.md$/,
+  /(^|\/)proposals\/PROP-[^/]*\.md$/,
+];
+
+const CODE_EXT = ['.ts', '.js', '.sh', '.py', '.go', '.rs'];
+const STRUCT_EXT = ['.json', '.yml', '.yaml'];
+
+function isBookkeeping(p: string): boolean {
+  return BOOKKEEPING.some(re => re.test(p));
+}
+
+function isCode(p: string): boolean {
+  return CODE_EXT.includes(path.extname(p));
+}
+
+/** SKILL.md and agents/*.md carry instruction text the model executes — code by any useful definition. */
+function isInstruction(p: string): boolean {
+  return path.basename(p) === 'SKILL.md' || /(^|\/)agents\/[^/]+\.md$/.test(p);
+}
+
+function isStructured(p: string): boolean {
+  return STRUCT_EXT.includes(path.extname(p));
+}
+
+function git(args: string[], cwd: string): { ok: boolean; out: string } {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.error || r.status !== 0) return { ok: false, out: '' };
+  return { ok: true, out: r.stdout ?? '' };
+}
+
+/**
+ * True when a structured file's diff only changed values, leaving the key set
+ * intact — a version bump or a threshold tweak, nothing for a reviewer to clean.
+ *
+ * Deliberately conservative: anything this cannot prove is value-only (a changed
+ * array element, an unparseable hunk, no git at all) reports false and the file
+ * counts as structural. A false RUN costs ~$0.25; a false SKIP silently drops
+ * the cleanup, so the bias goes to RUN.
+ */
+function isValueOnlyChange(file: string, cwd: string): boolean {
+  const { ok, out } = git(['diff', '-U0', '--no-color', 'HEAD', '--', file], cwd);
+  if (!ok || !out.trim()) return false;
+
+  const keyOf = (line: string): string | null => {
+    const body = line.slice(1);
+    const json = body.match(/^\s*"([^"]+)"\s*:/);
+    if (json) return json[1];
+    const yaml = body.match(/^\s*([A-Za-z0-9_.-]+)\s*:/);
+    if (yaml) return yaml[1];
+    return null;
+  };
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  for (const line of out.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) continue;
+    if (!line.startsWith('+') && !line.startsWith('-')) continue;
+    const k = keyOf(line);
+    if (k === null) return false; // array element or free text — cannot prove value-only
+    (line.startsWith('+') ? added : removed).push(k);
+  }
+  if (!added.length || added.length !== removed.length) return false;
+  return added.slice().sort().join('\0') === removed.slice().sort().join('\0');
+}
+
+function resolveTier(stateDir: string): string {
+  const cfg = readJson(path.join(stateDir, 'config.json'));
+  const tier = cfg?.quality_gate?.tier;
+  return typeof tier === 'string' && (QUALITY_GATE_TIER as readonly string[]).includes(tier) ? tier : 'budget';
+}
+
+function resolveCategory(proposalFile: string | undefined): string | null {
+  if (!proposalFile) return null;
+  const fm = readFrontmatter(proposalFile);
+  const c = fm?.category;
+  return typeof c === 'string' && c ? c : null;
+}
+
+/** Working-tree diff against HEAD plus untracked files; null when git can't answer. */
+function worktreeFiles(cwd: string): string[] | null {
+  const tracked = git(['diff', '--name-only', 'HEAD'], cwd);
+  if (!tracked.ok) return null;
+  const untracked = git(['ls-files', '--others', '--exclude-standard'], cwd);
+  const lines = (tracked.out + '\n' + (untracked.ok ? untracked.out : ''))
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+  return Array.from(new Set(lines));
+}
+
+export function decide(
+  stateDir: string,
+  proposalFile: string | undefined,
+  suppliedFiles: string[] | null,
+  cwd: string,
+): Verdict {
+  const tier = resolveTier(stateDir);
+  if (tier === 'budget') {
+    return { tier, action: 'SKIP', reason: 'budget tier — cleanup never runs', focus_files: [] };
+  }
+
+  const inGit = suppliedFiles ? null : worktreeFiles(cwd);
+  const raw = suppliedFiles ?? inGit;
+  if (raw === null) {
+    return { tier, action: 'SKIP', reason: 'no file evidence — not a git worktree and no --files-json', focus_files: [] };
+  }
+
+  const candidates = raw.filter(p => !isBookkeeping(p));
+  if (!candidates.length) {
+    const dropped = raw.length;
+    return {
+      tier,
+      action: 'SKIP',
+      reason: dropped ? `only session bookkeeping changed (${dropped} path${dropped === 1 ? '' : 's'})` : 'no files changed',
+      focus_files: [],
+    };
+  }
+
+  if (tier === 'quality') {
+    return { tier, action: 'RUN', reason: 'quality tier — cleanup always runs', focus_files: candidates };
+  }
+
+  // balanced — decide on the observed change, never on the proposal's prose.
+  const category = resolveCategory(proposalFile);
+  const reasons: string[] = [];
+  for (const f of candidates) {
+    if (isCode(f)) { reasons.push(`code changed (${f})`); break; }
+    if (isInstruction(f)) { reasons.push(`instruction text changed (${f})`); break; }
+    if (isStructured(f) && !isValueOnlyChange(f, cwd)) { reasons.push(`structural config changed (${f})`); break; }
+  }
+
+  if (reasons.length) {
+    const suffix = category ? ` [category: ${category}]` : '';
+    return { tier, action: 'RUN', reason: reasons[0] + suffix, focus_files: candidates };
+  }
+
+  const suffix = category ? ` [category: ${category}]` : '';
+  return {
+    tier,
+    action: 'SKIP',
+    reason: `no code, instruction, or structural change among ${candidates.length} touched file${candidates.length === 1 ? '' : 's'}` + suffix,
+    focus_files: [],
+  };
+}
+
+export function run(stateDir: string, args: string[]): void {
+  const proposalFile = args.find(a => !a.startsWith('--'));
+
+  let supplied: string[] | null = null;
+  const filesJson = flagValue(args, '--files-json');
+  if (filesJson) {
+    try {
+      const parsed = JSON.parse(filesJson);
+      if (Array.isArray(parsed)) supplied = parsed.map(String).filter(Boolean);
+    } catch {
+      // Malformed payload falls through to the working-tree diff rather than
+      // failing the call — the gate never blocks an implementation.
+    }
+  }
+
+  const cwd = fs.existsSync(stateDir) ? path.dirname(path.resolve(stateDir)) : process.cwd();
+  const verdict = decide(stateDir, proposalFile, supplied, cwd);
+  process.stdout.write(JSON.stringify(verdict) + '\n');
+}

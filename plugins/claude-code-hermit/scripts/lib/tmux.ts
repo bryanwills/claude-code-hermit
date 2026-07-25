@@ -1,6 +1,14 @@
 /**
  * Shared tmux helpers for the lifecycle scripts
- * (hermit-start, hermit-stop, hermit-watchdog) and the harness-command drain.
+ * (hermit-start, hermit-stop, hermit-watchdog), the harness-command drain, and
+ * `channel-pair.ts`, which drives the REPL inside the hermit container.
+ *
+ * Two transports, one implementation. `docker` prefixes the same tmux argv with
+ * `docker compose … exec -T <service>`; nothing else differs, because tmux
+ * send-keys talks to the tmux server socket rather than the exec's TTY, so
+ * `-T` (no TTY allocation) is irrelevant to delivery. Every call builds an argv
+ * array — never a shell string — so a session name or message body can't be
+ * read as shell syntax.
  */
 
 import path from 'node:path';
@@ -8,9 +16,30 @@ import { spawnSync } from 'node:child_process';
 
 type Json = any;
 
+export type Transport =
+  | { kind: 'host' }
+  | { kind: 'docker'; composeFile: string; service: string };
+
+export const HOST: Transport = { kind: 'host' };
+
+/** Build the full argv for a tmux invocation under the given transport. */
+export function tmuxArgv(transport: Transport, args: string[]): { cmd: string; argv: string[] } {
+  if (transport.kind === 'host') return { cmd: 'tmux', argv: args };
+  return {
+    cmd: 'docker',
+    argv: ['compose', '-f', transport.composeFile, 'exec', '-T', transport.service, 'tmux', ...args],
+  };
+}
+
+function runTmux(transport: Transport, args: string[]): { status: number | null; error: unknown } {
+  const { cmd, argv } = tmuxArgv(transport, args);
+  const r = spawnSync(cmd, argv, { stdio: 'ignore' });
+  return { status: r.status, error: r.error };
+}
+
 /** Return true when the named tmux session exists. */
-export function tmuxSessionAlive(name: string): boolean {
-  return spawnSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' }).status === 0;
+export function tmuxSessionAlive(name: string, transport: Transport = HOST): boolean {
+  return runTmux(transport, ['has-session', '-t', name]).status === 0;
 }
 
 /** Derive the tmux session name from config (CWD-relative project name). */
@@ -51,11 +80,11 @@ function hasControlChars(text: string): boolean {
  * Callers keeping retry state must read false as "not delivered" and true as
  * "delivered, outcome unknown".
  */
-export function sendKeys(sessionName: string, text: string): boolean {
+export function sendKeys(sessionName: string, text: string, transport: Transport = HOST): boolean {
   if (!sessionName || !text || hasControlChars(text)) return false;
-  const typed = spawnSync('tmux', ['send-keys', '-t', sessionName, '-l', '--', text], { stdio: 'ignore' });
+  const typed = runTmux(transport, ['send-keys', '-t', sessionName, '-l', '--', text]);
   if (typed.error || typed.status !== 0) return false;
   Bun.sleepSync(500);
-  const submitted = spawnSync('tmux', ['send-keys', '-t', sessionName, 'Enter'], { stdio: 'ignore' });
+  const submitted = runTmux(transport, ['send-keys', '-t', sessionName, 'Enter']);
   return !submitted.error && submitted.status === 0;
 }

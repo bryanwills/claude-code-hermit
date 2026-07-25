@@ -385,16 +385,13 @@ Manual deployment guide
      - auto: "Enable auto mode?" → press 1 then Enter (persists in the named volume).
 
 4. (Channels only) Pair each bot — DM it to get a 6-char code, then run
-   (send text and Enter as two separate calls with a 0.5s pause — one-shot
-   text+Enter is swallowed as bracketed paste):
-   docker exec <container> tmux send-keys -t <session> \
-     '/<plugin>:access pair <code> — save access.json to <project_path>/.claude.local/channels/<plugin>/ not ~/.claude'
-   sleep 0.5
-   docker exec <container> tmux send-keys -t <session> Enter
-   docker exec <container> tmux send-keys -t <session> \
-     '/<plugin>:access policy allowlist'
-   sleep 0.5
-   docker exec <container> tmux send-keys -t <session> Enter
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts pair <code> \
+     --channel <plugin> --session <session> \
+     --compose-file docker-compose.hermit.yml --service hermit \
+     --state-dir <project_path>/.claude.local/channels/<plugin>/
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts policy \
+     --channel <plugin> --session <session> \
+     --compose-file docker-compose.hermit.yml --service hermit
    Verify access.json landed at: .claude.local/channels/<plugin>/access.json
 
 5. Verify everything is healthy:
@@ -465,7 +462,7 @@ Wait for the operator to confirm they have detached before continuing.
 
 **Channel pairing** (skip if no channels or no tokens configured):
 
-Before pairing, confirm the operator has completed the first-run acceptance step above — if they haven't, `tmux send-keys` commands will be swallowed by the consent screen and appear to do nothing.
+Before pairing, confirm the operator has completed the first-run acceptance step above — if they haven't, the pair commands are swallowed by the consent screen and appear to do nothing (`channel-pair.ts` reports `OK`, because tmux accepted the keys; the REPL never saw them).
 
 Confirm the tmux session still exists (reuse the `has-session` check from the acceptance step). If it's gone, surface container logs and stop.
 
@@ -473,19 +470,19 @@ For each channel, **first verify the token is configured** — check that `.clau
 
 If the token is present, ask if already paired. If not:
 1. Ask with `AskUserQuestion` (header: `"<channel> pairing"`) — `"I have the code"` / `"Skip this channel"`. On `"I have the code"`: ask for the 6-char code via `Other` (header: `"Bot code"`).
-2. Send pair command into tmux — append the local state dir so the LLM writes there instead of the default user path. Send text and `Enter` as **two separate `send-keys` calls** with a `sleep 0.5` between them — Claude Code's TUI treats text+Enter in one burst as bracketed paste and turns `Enter` into a literal newline instead of submit (same fix as `scripts/hermit-start.ts:611-617`):
+2. Send the pair command:
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts pair <code> \
+     --channel <plugin> --session <session> \
+     --compose-file docker-compose.hermit.yml --service hermit \
+     --state-dir <project_path>/.claude.local/channels/<plugin>/
    ```
-   docker compose -f docker-compose.hermit.yml exec -T hermit \
-     tmux send-keys -t <session> '/<plugin>:access pair <code> — save access.json to <project_path>/.claude.local/channels/<plugin>/ not ~/.claude'
-   sleep 0.5
-   docker compose -f docker-compose.hermit.yml exec -T hermit \
-     tmux send-keys -t <session> Enter
-   ```
-3. Set policy (same two-call pattern):
-   ```
-   docker compose -f docker-compose.hermit.yml exec -T hermit tmux send-keys -t <session> '/<plugin>:access policy allowlist'
-   sleep 0.5
-   docker compose -f docker-compose.hermit.yml exec -T hermit tmux send-keys -t <session> Enter
+   The script owns the delivery mechanics (the text/Enter split that keeps the TUI from reading the pair command as a bracketed paste), the `--state-dir` hint that stops the plugin writing to `~/.claude`, and the code/slug grammar. `OK|<text>` means tmux accepted the keystrokes, not that the plugin acted on them — sub-step 5 is what verifies it landed. `ERROR|<reason>` names what was rejected; a missing session usually means the container is still installing plugins or the first-run prompts were never accepted.
+3. Set policy:
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts policy \
+     --channel <plugin> --session <session> \
+     --compose-file docker-compose.hermit.yml --service hermit
    ```
 4. Ask with `AskUserQuestion` (header: `"Pair result"`) — `"Bot confirmed paired"` / `"No response"`. On `"No response"`: run `docker compose exec -T hermit tmux capture-pane -t <session> -p`, show output, and skip `access.json` verification for this channel — don't fail the whole setup.
 5. **Verify `access.json` landed in the right place** (only on `"Bot confirmed paired"`): Check `.claude.local/channels/<plugin>/access.json`. If absent, run `docker compose exec -T hermit tmux capture-pane -t <session> -p` and show output. If it landed in `~/.claude/channels/<plugin>/` instead, move it:
@@ -506,16 +503,15 @@ If the token is present, ask if already paired. If not:
       a. Ask with `AskUserQuestion` (header: `"Mention required"`) for this ID:
          - `"Yes — require @mention"` (default — safer for noisy channels)
          - `"No — respond to all messages"`
-      b. Send `group add` into tmux using the **same two-call send-keys pattern** as sub-step 2 (text, `sleep 0.5`, `Enter`):
-         - With `"Yes — require @mention"`:
-           ```
-           docker compose -f docker-compose.hermit.yml exec -T hermit \
-             tmux send-keys -t <session> '/<plugin>:access group add <channelId> — save access.json to <project_path>/.claude.local/channels/<plugin>/ not ~/.claude'
-           sleep 0.5
-           docker compose -f docker-compose.hermit.yml exec -T hermit \
-             tmux send-keys -t <session> Enter
-           ```
-         - With `"No — respond to all messages"`: same but with `--no-mention` appended before the ` —` hint.
+      b. Send `group add`:
+         ```bash
+         bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts group-add <channelId> \
+           --channel <plugin> --session <session> \
+           --compose-file docker-compose.hermit.yml --service hermit \
+           --state-dir <project_path>/.claude.local/channels/<plugin>/ \
+           [--no-mention]
+         ```
+         Pass `--no-mention` only for `"No — respond to all messages"`; omit it to require an @mention.
       c. Confirm (text only): "Sent `group add` for `<channelId>`. Will verify after all channels are added."
       d. Ask with `AskUserQuestion` (header: `"Add another?"`) — `"Yes — add another"` with the next ID via `Other`; `"Done — continue"`. On `"Done — continue"`: exit the loop.
    4. **Verify all added channels** (one `Read` after the loop): open `<project_path>/.claude.local/channels/<plugin>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: run `docker compose exec -T hermit tmux capture-pane -t <session> -p`, surface the output, and warn — do not fail the whole setup. Then proceed to sub-step 8.
@@ -580,16 +576,14 @@ If something looks wrong, help diagnose — suggest concrete next steps.
 
 **Why `.hermit` suffix?** The project may already have its own `Dockerfile` / `docker-compose.yml`. Hermit-namespaced files avoid conflicts.
 
-**Why `*_STATE_DIR` as OS env vars?** MCP servers (channel plugins) are separate processes that inherit OS env — they don't read `settings.local.json`. Without these env vars, the MCP server defaults to `~/.claude/channels/<plugin>/` which inside the container resolves to `/home/claude/.claude/channels/` — not bind-mounted and lost on restart.
+**Channel state: `*_STATE_DIR` env vars and bind-mounts.** Why MCP servers need OS env rather than `settings.local.json`, and why the channel state dir is bind-mounted rather than symlinked, are in [Always-On — channel state](../../docs/always-on.md). The one thing to carry while running this skill: pre-create each `.claude.local/channels/<plugin>/` on the host **before** `docker compose up`, or Docker creates it root-owned and the `claude` user can't write to it.
 
-**Why bind-mounts for channel state?** Channel plugins hardcode writes to `~/.claude/channels/<plugin>/`. In Docker, that path is on the named config volume — outside the project tree. Even with `bypassPermissions`, Claude Code's path boundary check triggers a permission prompt for writes outside the project dir. Bind-mounting the project-local state dir into `~/.claude/channels/<plugin>/` makes the kernel present both paths as the same filesystem, avoiding symlink resolution issues and keeping writes inside the project boundary.
-
-**Why a named volume for config?** The container gets its own Claude Code config (`/home/claude/.claude`) via a Docker named volume instead of sharing the host's `~/.claude`. This prevents container state (onboarding, auto-memory, plugin cache) from leaking into host interactive sessions. The volume persists across restarts — onboarding bypass and channel plugins survive `docker compose restart`. First run is slower while the volume is populated.
+**Why a named volume for config?** The container gets its own `/home/claude/.claude` instead of sharing the host's, so container state (onboarding, auto-memory, plugin cache) never leaks into host interactive sessions. It persists across restarts; first run is slower while it populates.
 
 **Want shared config instead?** Replace the `claude-config` named volume with a bind-mount in `docker-compose.hermit.yml`: `- ${HOME}/.claude:${HOME}/.claude` and set `CLAUDE_CONFIG_DIR=${HOME}/.claude`. Not recommended — changes in either direction leak.
 
 **Domain-plugin apt dependencies.** Declare system packages your plugin needs in a `## Docker apt dependencies` section in the plugin's hatch SKILL.md or a `DOCKER.md` at the plugin root. See step 7b.packages and [Creating Your Own Hermit — Docker dependencies](../../docs/creating-your-own-hermit.md#docker-dependencies).
 
-**Why the three hardening stanzas (`no-new-privileges`, `cap_drop`, `pids_limit`)?** The container may run with `bypassPermissions` (or the default `auto` mode), and the recommended-plugins flow accepts third-party marketplaces — defense in depth matters here. The load-bearing one is `no-new-privileges:true` — it blocks setuid escalation at the kernel level, which is a real vector against future supply-chain compromise of any installed plugin. `cap_drop: ALL` is incremental: the container already runs as non-root `claude` so most caps were already unreachable, but dropping them explicitly closes the kernel-enforced ceiling. `pids_limit: 2048` is a resource bound, not a security primitive — it caps fork-bomb-style payloads with comfortable headroom over hermit's ~80 PID steady state. Hermit's runtime needs none of what's removed (verified across tmux, claude CLI, bun, jq, npm, git+HTTPS plugin installs). Operators extending the container with services on privileged ports (<1024), setuid helpers, or high-PID workloads must relax the relevant stanza explicitly. See [Security — Container Hardening](../../docs/security.md#container-hardening) for the full rationale.
+**Why the three hardening stanzas (`no-new-privileges`, `cap_drop`, `pids_limit`)?** Full per-stanza weighting is in [Security — Container Hardening](../../docs/security.md#container-hardening). The only operational consequence while running this skill: an operator extending the container with services on privileged ports (<1024), setuid helpers, or high-PID workloads has to relax the relevant stanza explicitly.
 
 **Want stronger isolation?** v1.0.26 ships an opt-in advanced wizard, `/claude-code-hermit:docker-security`, that adds LAN containment with DNS policy (firewall + DNS sidecar with port-53 redirect for actual enforcement), read-only root filesystem with smoke test, resource bounds with kernel hygiene sysctls, and a boot-time plugin-install audit log. Each toggle is opt-in with honest cost/benefit framing, runs verification against the live container, and is fully reversible. **Note:** the LAN containment toggle is hard-skipped when `docker.network_mode: "host"` is in use — bridge networking required. See [Docker Security](../../docs/docker-security.md).

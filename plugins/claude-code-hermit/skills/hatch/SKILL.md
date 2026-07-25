@@ -66,40 +66,9 @@ Both branches share Steps 2 (file writes) and 5-9 (config write, CLAUDE.md/.giti
 
 ### 2. Create state directory structure
 
-Create the following directories and files:
+Run the scaffold script once — it builds the whole tree and seeds every static file. The directory layout is `state-templates/` plus `hatch-scaffold.ts`'s own enumeration; it is not restated here, because a second copy in prose is a second thing to keep in sync.
 
-```
-.claude-code-hermit/
-├── sessions/
-├── proposals/
-├── templates/
-│   ├── SHELL.md.template
-│   ├── SESSION-REPORT.md.template
-│   └── PROPOSAL.md.template
-├── state/
-│   ├── alert-state.json
-│   ├── reflection-state.json
-│   ├── routine-metrics.jsonl
-│   ├── proposal-metrics.jsonl
-│   ├── observations.jsonl
-│   ├── update-history.jsonl
-│   ├── channel-replies.jsonl
-│   └── micro-proposals.json
-├── raw/
-│   └── .archive/
-├── compiled/
-├── bin/
-│   ├── hermit-attach
-│   ├── hermit-docker
-│   ├── hermit-run
-│   ├── hermit-start
-│   ├── hermit-stop
-│   └── hermit-status
-├── OPERATOR.md
-└── knowledge-schema.md
-```
-
-Run the scaffold script once — it builds the directory tree above and seeds every static file deterministically (this is pure mechanical I/O; the *reasoned* artifacts are written by their own steps):
+Run the scaffold script once:
 
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-scaffold.ts <PROJECT_ROOT> --reinit=<is_reinit>
@@ -324,13 +293,13 @@ For routines — if Yes: use the config defaults (`active_hours.start = 08:00`, 
 
 **Source of truth: `${CLAUDE_SKILL_DIR}/../../state-templates/config.json.template`.** `hatch-config.ts` reads it as the base — it encodes every default field shipped by the current plugin version (including `model`, `always_on`, `chrome`, `monitors`, `compact`, `knowledge`, etc.). Do NOT maintain a parallel inline default object here — anything written inline in this skill drifts the moment a field is added to the template.
 
-**config.json assembly is a single deterministic script call — do not hand-assemble the merge.** Build an **answers payload** from the wizard's collected answers, then run:
+Build an **answers payload** from the wizard's collected answers, then run:
 
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts <PROJECT_ROOT> [--reinit]
 ```
 
-with the answers payload as JSON on stdin. The script reads the template (or, on `--reinit`, the existing `.claude-code-hermit/config.json`), overlays the answers, validates the result, and writes `.claude-code-hermit/config.json` — the model never hand-transcribes the merge, cron strings, `scheduled_checks` entries, or channel objects.
+with the answers payload as JSON on stdin. The script reads the template (or, on `--reinit`, the existing `.claude-code-hermit/config.json`), overlays the answers, validates the result, and writes `.claude-code-hermit/config.json`.
 
 **Answers payload** — include a key only when the wizard actually collected that answer (the script overlays by presence, so an omitted key leaves the existing/template value untouched):
 
@@ -568,7 +537,7 @@ entries the target lacks, and any entries from retired plugin versions it still 
    Then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json automode-seed` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: the auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`, so seeding anywhere else would be a silent no-op. Tell the operator in one line: "Also recorded an auto-mode exception and environment context in `.claude/settings.local.json` so unattended upgrade migrations can run the plugin's sealed settings ops."
 5. If the operator declines: skip (including the auto-mode seed above — an operator who wants prompts should not get a standing classifier exception), and note: "You may be prompted to approve hook commands during sessions. Run `/claude-code-hermit:hermit-settings permissions` to add them later."
 
-**Seed `state/template-manifest.json`** (deferred from Step 2 — now that the `bun */scripts/manifest-seed.ts*` permission is in place). It records the sha256 pristine-baseline that the `hermit-evolve` drift signals depend on. **Do not hand-compute the hashes** (an LLM cannot sha256 reliably; the script makes them correct by construction). Read the current plugin version from `${CLAUDE_SKILL_DIR}/../../.claude-plugin/plugin.json`, then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts .claude-code-hermit` with this JSON on stdin:
+**Seed `state/template-manifest.json`** (deferred from Step 2 — now that the `bun */scripts/manifest-seed.ts*` permission is in place). It records the sha256 pristine-baseline that the `hermit-evolve` drift signals depend on. The script computes the hashes (an LLM cannot sha256 reliably). Read the current plugin version from `${CLAUDE_SKILL_DIR}/../../.claude-plugin/plugin.json`, then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts .claude-code-hermit` with this JSON on stdin:
 
 ```json
 {
@@ -778,29 +747,15 @@ Run the existing "5a. OPERATOR.md onboarding" step verbatim — same scan, same 
 
 ### Quick Turn 5 — Confirm bundle
 
-Print the resolved configuration so the operator sees what's about to be written, before any config writes happen:
+Render the preview with the script, so what the operator approves is derived from the answers rather than re-typed:
 
-Print a labeled summary in this shape:
-
-```
-Quick setup will apply:
-  Identity:    {agent_name}, {language}, {timezone}, sign-off={sign_off}
-  Behavior:    escalation=balanced, idle={idle_behavior}, remote=on
-  Deployment:  {deployment}, permission={derived}, deny={derived hardened|minimal}
-  Plugins:     all 4 installed
-  Routines:    morning 08:30, evening 22:30, heartbeat 04:00
-  Channel:     {channel or None} (allow-everyone; token + pairing later)
-  Push notifications: enabled
-  Hermit ext:  {activated or none}
-  Visibility:  {.local — plugin installed at <scope> scope | committed — plugin installed at project scope}
-  Git:         {initialize local repo (tracks build output; hermit internals gitignored) | not applicable}
-  Files:       {CLAUDE.local.md | CLAUDE.md}, .gitignore, .worktreeinclude, {.claude/settings.local.json | .claude/settings.json}
-  OPERATOR.md: drafted from scan + your answers (written below)
-
-Customize restarts the wizard from scratch; your Quick answers won't carry over.
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-report.ts confirm <PROJECT_ROOT> <<'HERMIT_ANSWERS'
+{ ...the same answers payload Step 5 will send to hatch-config.ts, plus "deployment", "channel", "plugins", "hatch_target", "git_init" }
+HERMIT_ANSWERS
 ```
 
-The `Visibility:` and `Files:` lines are dynamic based on `hatch_target`. The `Push notifications:` line is always shown as `enabled` (template default; push acts as fallback when a channel is unreachable — the runtime guard in CLAUDE-APPEND.md prevents double-notification).
+Print its output verbatim. Nothing has been written at this point — the preview says so.
 
 Ask:
 
@@ -864,69 +819,13 @@ The `quick` positional arg passed to `docker-setup` tells it to skip its setup-m
 
 ### 10. Report results
 
-Print a summary:
-
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-report.ts final <PROJECT_ROOT> --deployment <docker|tmux|interactive>
 ```
-Autonomous agent initialized!
 
-Created:
-  .claude-code-hermit/sessions/
-  .claude-code-hermit/proposals/
-  .claude-code-hermit/templates/ (3 templates)
-  .claude-code-hermit/OPERATOR.md (onboarded)
-  .claude-code-hermit/HEARTBEAT.md
-  .claude-code-hermit/bin/ (hermit-attach, hermit-docker, hermit-pause, hermit-run, hermit-start, hermit-status, hermit-stop, hermit-update, hermit-watchdog)
-  .claude-code-hermit/config.json
+Print its output verbatim. It reads the written `config.json`, the stamped `hatch-options.json`, and the filesystem — it takes no file list from this session, because a model-composed report can claim a file was written that the operator declined. Anything it could not observe is reported as absent, and a run that never wrote `config.json` is reported as an incomplete hatch rather than a success.
 
-Identity:
-  Agent name:      Atlas
-  Language:        pt (auto-detected)
-  Timezone:        Europe/Lisbon (auto-detected)
-  Escalation:      balanced
-  Sign-off:        Atlas out.
-
-Config:
-  Plugins:         claude-code-setup, claude-md-management, skill-creator, feature-dev
-  Channels:        none
-  Push notifications: {enabled | disabled}
-  Morning brief:   disabled
-  Heartbeat:       disabled
-  Unattended mode: off
-
-Hermits: (none activated)
-
-Visibility:
-  Target: {.local (plugin installed at <scope> scope) | committed (plugin installed at project scope)}
-
-Updated:
-  {CLAUDE.local.md | CLAUDE.md} — session discipline block appended
-  .gitignore — hermit entries added
-  .worktreeinclude — git worktree include entries added   ← omit if skipped
-  {.claude/settings.local.json | .claude/settings.json} — plugin permissions added
-  .claude-code-hermit/state/hatch-options.json — target stamped
-  .git/ — initialized (tracks build output; hermit internals gitignored)   ← omit if git init was skipped or declined
-
-  Flip target by re-running /hatch (Advanced) and choosing the other Visibility option.
-
-Next steps:
-
-  Pick how you'll run hermit:
-    A. Docker always-on (recommended)   /claude-code-hermit:docker-setup
-    B. tmux always-on (host)            .claude-code-hermit/bin/hermit-start
-    C. Interactive — try it now         /claude-code-hermit:session
-
-  After picking:
-    - /reload-plugins                       load newly installed plugins in this session
-    - /claude-code-hermit:channel-setup     if a channel was configured AND you chose B or C
-                                              (A handles channels inside docker-setup)
-
-  Anytime:
-    - /claude-code-hermit:hermit-settings   change settings
-    - /claude-code-hermit:hermit-evolve     after plugin updates
-    - /claude-code-hermit:smoke-test        troubleshoot setup
-    - Refine OPERATOR.md — just tell me what changed
-
-```
+`--deployment` is the one thing it cannot read: Quick Turn 3 asks for it and nothing persists it. On the Advanced branch, pass the deployment the operator described, or `interactive` if they didn't say.
 
 **Quick-mode report adjustment**: collapse "Pick how you'll run hermit" to one line confirming Turn 3's deployment + channel, then emit the auto-chain slash command(s) per the mapping in "Quick — auto-chain at end of Step 10". Keep the "Anytime:" block unchanged.
 
