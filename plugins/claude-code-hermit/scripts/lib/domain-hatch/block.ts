@@ -19,10 +19,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { markerOnward, extractSiblingMarker, isAmbiguousBlock } from '../../evolve-plan';
+import { markerOnward, extractSiblingMarker, isAmbiguousBlock, requiresRendering } from '../../evolve-plan';
 import { writeFileAtomic } from '../md-write';
 
-export type BlockAction = 'append' | 'replace' | 'skip' | 'ambiguous' | 'no-template' | 'no-marker';
+export type BlockAction = 'append' | 'replace' | 'skip' | 'ambiguous' | 'no-template' | 'no-marker' | 'needs-rendering';
 
 export interface BlockPlan {
   action: BlockAction;
@@ -59,6 +59,16 @@ export function planBlock(
   const marker = extractSiblingMarker(tmplText, pluginName);
   if (marker === null) {
     return { action: 'no-marker', marker: null, targetFile: targetPath };
+  }
+
+  // A template carrying `mode:` markers is rendered by its own plugin before
+  // install (dev-hermit's render-append.ts). Core cannot render it, so the raw
+  // text is neither a valid comparison base nor a valid payload — the same
+  // refusal evolve-plan makes. Without this, `sync-block <dev> ` with no
+  // --rendered-stdin appends both mode regions and their fence comments
+  // verbatim into the operator's CLAUDE.md.
+  if (rendered === undefined && requiresRendering(tmplText)) {
+    return { action: 'needs-rendering', marker, targetFile: targetPath };
   }
 
   const targetText = read(targetPath);
@@ -111,6 +121,9 @@ export function applyBlock(plan: BlockPlan): BlockResult {
   if (plan.action === 'no-marker') {
     return { ...plan, ok: false, written: false, message: 'template carries no opening marker for this plugin' };
   }
+  if (plan.action === 'needs-rendering') {
+    return { ...plan, ok: false, written: false, message: 'template carries mode: markers and must be rendered by its own plugin; pipe the rendering in with --rendered-stdin' };
+  }
   if (plan.action === 'skip') {
     return { ...plan, ok: true, written: false };
   }
@@ -121,7 +134,9 @@ export function applyBlock(plan: BlockPlan): BlockResult {
     const sep = existing === '' || existing.endsWith('\n') ? '' : '\n';
     next = existing + sep + plan.new_block;
   } else {
-    next = existing.replace(plan.old_block!, plan.new_block!);
+    // Function replacement: a plain string would let `$&`, `` $` ``, `$'` and
+    // `$$` inside the block be expanded as substitution patterns.
+    next = existing.replace(plan.old_block!, () => plan.new_block!);
   }
   writeFileAtomic(plan.targetFile, next.endsWith('\n') ? next : next + '\n');
   return { ...plan, ok: true, written: true };

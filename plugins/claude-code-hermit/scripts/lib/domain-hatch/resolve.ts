@@ -47,20 +47,26 @@ function splitId(id: string): string {
 }
 
 // Resolve one plugin ID to the install that would actually load in this
-// project. Precedence mirrors resolve-siblings' dedupe rule (local over
-// project) so hatch and the sibling probe never disagree about which copy is
-// live. Ambiguity across marketplaces is an error, not a silent first-match:
+// project. Precedence mirrors coreScope()'s: `local` > `project` (both require
+// `projectPath == project root`) > `user` (any `projectPath` — a user-scope
+// install is live in every project, which is why coreScope's user branch
+// ignores projectPath too). Dropping the user tier here would make every
+// user-scope install unresolvable, and `core_install_scope: "user"` is a value
+// hatch-options.json is explicitly allowed to carry.
+// Ambiguity across marketplaces is an error, not a silent first-match:
 // picking wrong here writes a hermit block sourced from the wrong template.
 export function resolvePlugin(
   list: Json[],
   pluginId: string,
   projectRoot: string,
 ): ResolvedPlugin | ResolveError {
-  const here = list.filter(
-    (e) => splitId(e?.id ?? '') === pluginId && e?.enabled === true && e?.projectPath === projectRoot,
-  );
-  const byScope = (s: string) => here.filter((e) => e?.scope === s);
-  const candidates = byScope('local').length ? byScope('local') : byScope('project');
+  const enabled = list.filter((e) => splitId(e?.id ?? '') === pluginId && e?.enabled === true);
+  const here = enabled.filter((e) => e?.projectPath === projectRoot);
+  const byScope = (pool: Json[], s: string) => pool.filter((e) => e?.scope === s);
+  const local = byScope(here, 'local');
+  const project = byScope(here, 'project');
+  const user = byScope(enabled, 'user');
+  const candidates = local.length ? local : project.length ? project : user;
 
   if (!candidates.length) {
     return list.length

@@ -859,7 +859,7 @@ function parseArgs(argv: string[]) {
   return { hermitDir: hermitDir || '.claude-code-hermit', hatchTarget, pluginListJsonPath };
 }
 
-export { buildPlan, cmpSemver, changelogSlice, newConfigKeys, markerOnward, extractSiblingMarker, closingMarkerFor, isAmbiguousBlock, classifyFiles, classifyDockerEntrypoint, classifyDockerTemplates };
+export { buildPlan, cmpSemver, changelogSlice, newConfigKeys, markerOnward, extractSiblingMarker, closingMarkerFor, isAmbiguousBlock, requiresRendering, classifyFiles, classifyDockerEntrypoint, classifyDockerTemplates };
 export type { ClassifiedFile, FileClass };
 
 if (import.meta.main) {

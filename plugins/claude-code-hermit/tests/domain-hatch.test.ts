@@ -149,6 +149,47 @@ describe('preflight', () => {
     expect(r.error).toBe('plugin_not_installed');
   });
 
+  // coreScope() resolves a user-scope core (its user branch ignores
+  // projectPath on purpose), and hatch-options.json is allowed to record
+  // core_install_scope: "user" — so resolution must reach that tier too.
+  test('a user-scope install still resolves', () => {
+    const s = scaffold();
+    const list = [
+      { id: `${PLUGIN}@mp`, scope: 'user', enabled: true, projectPath: '/elsewhere', installPath: s.install },
+      { id: 'claude-code-hermit@mp', scope: 'user', enabled: true, projectPath: '/elsewhere', installPath: s.coreRoot },
+    ];
+    const r = preflight({
+      pluginId: PLUGIN,
+      hermitDir: s.hermit,
+      projectRoot: s.root,
+      corePluginRoot: s.coreRoot,
+      stdinJson: JSON.stringify(list),
+    });
+    expect(r.ok).toBe(true);
+    expect(r.action).toBe('full');
+  });
+
+  // hermit-evolve takes hatch_target from this verb and has no fallback of its
+  // own; the stamped file and the marker probe need no plugin list, so an
+  // unreadable list must not strand it without a target.
+  test('an unresolvable plugin still reports the target', () => {
+    const s = scaffold({
+      hatchOptions: { target: 'local', core_install_scope: 'local', stamped_at: 'x', stamped_by: 'y', version: '1.0.0' },
+    });
+    const r = preflight({
+      pluginId: PLUGIN,
+      hermitDir: s.hermit,
+      projectRoot: s.root,
+      corePluginRoot: s.coreRoot,
+      stdinJson: '[]',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('plugin_list_unavailable');
+    expect(r.target).toBe('local');
+    expect(r.target_file).toBe('CLAUDE.local.md');
+    expect(r.needs_target_question).toBe(false);
+  });
+
   test('reports the target and the block action once a target exists', () => {
     const s = scaffold({
       hatchOptions: { target: 'committed', core_install_scope: 'project', stamped_at: 'x', stamped_by: 'y', version: '1.0.0' },
@@ -251,6 +292,37 @@ describe('sync-block', () => {
     const text = fs.readFileSync(target, 'utf8');
     expect(text).toContain('Different rules.');
     expect(text.split(MARKER).length - 1).toBe(1);
+  });
+
+  // A mode-annotated template is rendered by its own plugin; appending the raw
+  // text would drop both mode regions and their fence comments into CLAUDE.md.
+  test('refuses a template that must be rendered when nothing is piped in', () => {
+    const s = scaffold();
+    const modeTemplate = `${MARKER}\n\n<!-- mode:standard-only -->\nstandard\n<!-- /mode:standard-only -->\n\n${CLOSING}\n`;
+    fs.writeFileSync(path.join(s.install, 'state-templates', 'CLAUDE-APPEND.md'), modeTemplate);
+    const target = path.join(s.root, 'CLAUDE.md');
+
+    const raw = applyBlock(planBlock(s.install, PLUGIN, target, []));
+    expect(raw.action).toBe('needs-rendering');
+    expect(raw.ok).toBe(false);
+    expect(fs.existsSync(target)).toBe(false);
+
+    const rendered = applyBlock(planBlock(s.install, PLUGIN, target, [], `${MARKER}\n\nstandard\n\n${CLOSING}\n`));
+    expect(rendered.action).toBe('append');
+    expect(rendered.written).toBe(true);
+  });
+
+  // `$&` in a replacement string is a substitution pattern, not a literal.
+  test('a replacement block containing $-patterns is written verbatim', () => {
+    const s = scaffold();
+    const target = path.join(s.root, 'CLAUDE.md');
+    fs.writeFileSync(target, '# Project\n');
+    applyBlock(planBlock(s.install, PLUGIN, target, []));
+
+    const line = "Use `sed 's/x/$&/'` and `$'y'`.";
+    const dollar = TEMPLATE.replace('Some rules.', () => line);
+    expect(applyBlock(planBlock(s.install, PLUGIN, target, [], dollar)).action).toBe('replace');
+    expect(fs.readFileSync(target, 'utf8')).toContain(line);
   });
 
   // Never add a third copy: with the marker duplicated, a replace could hit the

@@ -102,16 +102,22 @@ if (verb === 'ensure-target') {
   ]);
   const stdinJson = await readPluginListFile();
   const list = pluginList(stdinJson);
+  // The only thing this verb takes from the resolution is a version string for
+  // the stamp, and that already has a fallback. Failing the whole write when
+  // `claude plugin list` cannot be read would leave hatch-options.json
+  // unwritten and every later consumer re-asking the Visibility question — a
+  // far worse outcome than a `0.0.0` stamp. The plugin id is regex-validated
+  // above and only ever lands in core's own state dir as a string field.
   const resolved = resolvePlugin(list, pluginId, projectRoot);
-  if (isResolveError(resolved)) die(resolved.error, resolved.message);
+  const unresolved = isResolveError(resolved);
   const scope = coreScope(list as any, projectRoot);
   const res = ensureHatchTarget(stateDir, {
     target,
     core_scope: scope.core_scope,
     stampedBy: `${pluginId}:hatch`,
-    version: resolved.version ?? '0.0.0',
+    version: unresolved ? '0.0.0' : (resolved.version ?? '0.0.0'),
   });
-  out(res);
+  out(unresolved ? { ...res, resolve_warning: resolved.message } : res);
   process.exit(res.ok ? 0 : 1);
 }
 

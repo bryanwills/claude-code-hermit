@@ -204,7 +204,7 @@ Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/automode-env.ts .claude/settings.local.js
 
 ### 7. Stamp version and register routines
 
-Write `_hermit_versions["claude-code-homeassistant-hermit"]` into `.claude-code-hermit/config.json` with the current plugin version.
+Write `_hermit_versions["claude-code-homeassistant-hermit"]` into `.claude-code-hermit/config.json`, set to `self_version` from Step 1's preflight.
 
 **Compiled templates**: Copy `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/acknowledged-violations.md` to `.claude-code-hermit/compiled/acknowledged-violations.md` if that file does not already exist. Set `created` in the frontmatter to today's ISO date. This gives the operator a ready-to-use suppression list for the safety audit.
 

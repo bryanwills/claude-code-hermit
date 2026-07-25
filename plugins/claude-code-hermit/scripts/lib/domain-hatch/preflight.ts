@@ -93,9 +93,25 @@ export function preflight(input: PreflightInput): Preflight {
   }
 
   const list = pluginList(input.stdinJson);
+
+  // Target resolution is computed first and reported unconditionally: none of
+  // it depends on resolving the plugin (the stamped file and the CLAUDE-marker
+  // probe are pure filesystem reads). hermit-evolve takes hatch_target from
+  // this verb and has no fallback of its own, so returning early on a plugin
+  // list that could not be read would strand it with no target at all.
+  const scope = coreScope(list as any, projectRoot);
+  const state = readTargetState(hermitDir, scope, projectRoot);
+  const targetFields = {
+    target: state.target,
+    target_default: state.target_default,
+    ...(state.target ? { target_file: targetFile(state.target) } : {}),
+    core_scope: state.core_scope,
+    needs_target_question: state.needs_target_question,
+  };
+
   const resolved = resolvePlugin(list, pluginId, projectRoot);
   if (isResolveError(resolved)) {
-    return { ok: false, error: resolved.error, message: resolved.message, plugin: pluginId };
+    return { ok: false, error: resolved.error, message: resolved.message, plugin: pluginId, ...targetFields };
   }
   const self: ResolvedPlugin = resolved;
 
@@ -125,9 +141,6 @@ export function preflight(input: PreflightInput): Preflight {
     action = stamped !== null && self.version !== null && stamped === self.version ? 'verify' : 'full';
   }
 
-  const scope = coreScope(list as any, projectRoot);
-  const state = readTargetState(hermitDir, scope, projectRoot);
-
   let marker: string | null = null;
   let appendAction: string | undefined;
   if (state.target) {
@@ -156,11 +169,7 @@ export function preflight(input: PreflightInput): Preflight {
     core_applied: coreApplied,
     action,
     ...(remedy ? { remedy } : {}),
-    target: state.target,
-    target_default: state.target_default,
-    ...(state.target ? { target_file: targetFile(state.target) } : {}),
-    core_scope: state.core_scope,
-    needs_target_question: state.needs_target_question,
+    ...targetFields,
     marker,
     ...(appendAction ? { append_action: appendAction } : {}),
   };
