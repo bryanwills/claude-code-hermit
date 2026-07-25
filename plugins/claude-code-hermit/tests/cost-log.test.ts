@@ -208,6 +208,19 @@ describe('scanRoutineLedger — single-population cost and runs', () => {
     expect(result.get('routine:doctor')).toEqual({ cost: 1.6, runs: 1 });
   }));
 
+  test('a dispatch-hop-attributed completion turn adds cost but not a run', withTmpdir((dir) => {
+    // An async-dispatching routine bills TWO main turns per fire: the wake, and the turn that
+    // ingests the subagent-completion notification (which cost-tracker's dispatch hop
+    // attributes back to the routine, stamping source_inherited). Counting the second as a
+    // run would report $2/run for a routine that actually costs $4 per fire, letting a genuinely
+    // expensive delegating routine slip under the doctor's 3×-median / floor gate.
+    const logPath = writeLog(dir, [
+      { timestamp: '2026-07-01T03:30:00Z', source: 'routine:daily-auto-close', estimated_cost_usd: 1, source_attribution_version: 2 },
+      { timestamp: '2026-07-01T03:34:00Z', source: 'routine:daily-auto-close', estimated_cost_usd: 3, source_inherited: true, source_attribution_version: 2 },
+    ]);
+    expect(scanRoutineLedger(logPath).get('routine:daily-auto-close')).toEqual({ cost: 4, runs: 1 });
+  }));
+
   test('rows written before the attribution fix are excluded entirely', withTmpdir((dir) => {
     // The historical poison: pre-v2 `source` could be captured by any tool output naming a
     // routine id, so those rows are not a measurement and must not reach $/run.

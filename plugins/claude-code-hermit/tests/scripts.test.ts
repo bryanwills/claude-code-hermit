@@ -3252,7 +3252,11 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
       JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> <summary>Agent "daily-auto-close routine" came to rest</summary> </task-notification>' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    expect(resolveTurnSource(lines, 5).source).toBe('routine:daily-auto-close');
+    const resolved = resolveTurnSource(lines, 5);
+    expect(resolved.source).toBe('routine:daily-auto-close');
+    // Flagged as borrowed from the dispatch, not this turn's own prompt — the cost row
+    // carries source_inherited so $/run doesn't count this second turn as a second fire.
+    expect(resolved.inherited).toBe(true);
   });
 
   // The hop must not invent attribution: an operator-dispatched agent's completion stays 'other'.
@@ -3264,7 +3268,9 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
       JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>b99</task-id> <tool-use-id>toolu_xyz</tool-use-id> <status>completed</status> </task-notification>' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
-    expect(resolveTurnSource(lines, 4).source).toBe('other');
+    const resolved = resolveTurnSource(lines, 4);
+    expect(resolved.source).toBe('other');
+    expect(resolved.inherited).toBe(true); // hop fired, but it resolved to a real 'other' prompt
   });
 
   // Turn-boundary isolation: a routine from a PREVIOUS turn can't bleed into this one.

@@ -315,9 +315,13 @@ function scanAutomatedOpus(costLogFile: string, sinceDateInclusive: string, time
 //          stamped at SubagentStop and can land hours after the launch turn while
 //          inheriting its source; they are real cost of that source, so no time window
 //          is applied.
-//   runs — v2 rows where `subagent !== true`: exactly one main row per model wake. A
-//          CronCreate-delivered skip still woke the model and so counts; a routine-monitor
-//          skip never woke it and writes no row, so it cannot dilute $/run.
+//   runs — v2 rows where `subagent !== true` AND `source_inherited !== true`: exactly one
+//          per invocation of the source. A CronCreate-delivered skip still woke the model
+//          and so counts; a routine-monitor skip never woke it and writes no row, so it
+//          cannot dilute $/run. `source_inherited` rows are subagent-completion ingestion
+//          turns that cost-tracker's dispatch hop attributed back to the dispatching
+//          source — real cost of that source, but a second billed turn for the SAME fire,
+//          so counting them would halve the reported $/run of any delegating routine.
 function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; runs: number }> {
   const totals = new Map<string, { cost: number; runs: number }>();
   if (!fs.existsSync(costLogFile)) return totals;
@@ -330,7 +334,7 @@ function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; run
       if (typeof src !== 'string') continue;
       const acc = totals.get(src) || { cost: 0, runs: 0 };
       acc.cost += e.estimated_cost_usd || 0;
-      if (e.subagent !== true) acc.runs += 1;
+      if (e.subagent !== true && e.source_inherited !== true) acc.runs += 1;
       totals.set(src, acc);
     } catch { /* skip corrupt lines — checkCost already surfaces corruption */ }
   }

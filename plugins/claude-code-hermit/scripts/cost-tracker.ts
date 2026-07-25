@@ -92,11 +92,18 @@ const RE_TOOL_USE_ID = /<tool-use-id>([A-Za-z0-9_-]+)<\/tool-use-id>/;
 // `boundaryFound` is false when the walk ran off the start of a truncated tail window;
 // the caller downgrades to 'other' rather than trust a prompt that may belong to an
 // earlier turn.
-function resolveTurnSource(lines: string[], billedIndex: number): { source: string; boundaryFound: boolean } {
+//
+// `inherited` is true only when the source came from the dispatch hop rather than this
+// turn's own prompt. Such a turn is real cost of the dispatching source but it is NOT an
+// independent invocation of it — a routine that dispatches an async agent produces two
+// billed main turns (the wake and the completion ingestion) for one fire. Consumers that
+// divide cost by invocations (doctor's routine-cost $/run) must not count the second, so
+// the flag is persisted on the cost row; see lib/cost-log.ts scanRoutineLedger.
+function resolveTurnSource(lines: string[], billedIndex: number): { source: string; boundaryFound: boolean; inherited: boolean } {
   const prompt = turnPromptText(lines, billedIndex);
   const direct = classifySource(prompt.text);
   if (direct !== 'other' || !prompt.boundaryFound) {
-    return { source: direct, boundaryFound: prompt.boundaryFound };
+    return { source: direct, boundaryFound: prompt.boundaryFound, inherited: false };
   }
   // Unclassified: if this turn opened on a subagent-completion notification, attribute it
   // to the dispatching turn. Prefer the tool-use id (present on tool-dispatched agents),
@@ -105,10 +112,10 @@ function resolveTurnSource(lines: string[], billedIndex: number): { source: stri
   for (const id of ids) {
     for (let j = prompt.index - 1; j >= 0; j--) {
       if (!lines[j].includes(id)) continue;
-      return { source: classifySource(turnPromptText(lines, j + 1).text), boundaryFound: true };
+      return { source: classifySource(turnPromptText(lines, j + 1).text), boundaryFound: true, inherited: true };
     }
   }
-  return { source: 'other', boundaryFound: true };
+  return { source: 'other', boundaryFound: true, inherited: false };
 }
 
 // classifySource moved to lib/trigger-source.ts (imported above, re-exported below)
@@ -237,9 +244,11 @@ function readLastTurnUsage(transcriptPath: string): Json {
         // can't be trusted — the prompt found may belong to an earlier, unrelated turn
         // still in the window. Attribute to 'other' rather than risk misattributing a
         // large turn (e.g. a plugin upgrade run) to an unrelated source.
-        const source = (!resolved.boundaryFound && readFrom > 0) ? 'other' : resolved.source;
+        const trusted = resolved.boundaryFound || readFrom <= 0;
+        const source = trusted ? resolved.source : 'other';
+        const sourceInherited = trusted && resolved.inherited;
         const subagents = collectSubagentUsage(lines, i);
-        return { ...summed, hadHumanTurn, source, subagents };
+        return { ...summed, hadHumanTurn, source, sourceInherited, subagents };
       } catch {}
     }
   } catch {}
@@ -710,7 +719,7 @@ async function run(data: Json): Promise<string | null> {
       return null;
     }
 
-    const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model: rawModel, hadHumanTurn, source, apiCalls, maxPromptTokens, subagents } = turn;
+    const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model: rawModel, hadHumanTurn, source, sourceInherited, apiCalls, maxPromptTokens, subagents } = turn;
     const model = detectModel(rawModel);
 
     const totalTokens = inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens;
@@ -756,6 +765,9 @@ async function run(data: Json): Promise<string | null> {
       estimated_cost_usd: roundedCost,
       model_unpriced: modelUnpriced,
       source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
+      // Source came from the dispatch hop (a subagent-completion ingestion turn), not this
+      // turn's own prompt — real cost of that source, but not a separate invocation of it.
+      ...(sourceInherited ? { source_inherited: true } : {}),
     };
 
     fs.appendFileSync(COST_LOG, JSON.stringify(logEntry) + '\n', 'utf-8');

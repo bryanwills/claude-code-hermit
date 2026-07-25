@@ -2301,7 +2301,7 @@ describe('doctor routine-cost check', () => {
   // Both $/run inputs now come from one population: cost rows stamped
   // source_attribution_version 2. One main row per model wake = one run; subagent rows add
   // cost to the same source without adding a run.
-  type Row = { source: string; cost: number; subagent?: boolean; version?: number };
+  type Row = { source: string; cost: number; subagent?: boolean; inherited?: boolean; version?: number };
   const wakes = (id: string, n: number, cost: number): Row[] =>
     Array.from({ length: n }, () => ({ source: `routine:${id}`, cost }));
 
@@ -2311,6 +2311,7 @@ describe('doctor routine-cost check', () => {
       session_id: 'S-001', source: r.source, model: 'sonnet',
       total_tokens: 1000, estimated_cost_usd: r.cost,
       ...(r.subagent ? { subagent: true } : {}),
+      ...(r.inherited ? { source_inherited: true } : {}),
       ...(r.version === undefined ? { source_attribution_version: 2 } : r.version === 0 ? {} : { source_attribution_version: r.version }),
     })).join('\n') + '\n';
     fs.writeFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), lines);
@@ -2398,6 +2399,23 @@ describe('doctor routine-cost check', () => {
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('delegator');
     expect(c.detail).toContain('4.00'); // ($1+$3)×3 / 3 runs
+  }), 20000);
+
+  test('an async-dispatching routine is judged per fire, not per billed turn', withTmpdir(async (dir) => {
+    // Each fire of 'delegator' bills two main turns: the wake ($1) and the turn that ingests
+    // the subagent-completion notification ($3), which the dispatch hop attributes back to the
+    // routine. Counting that second turn as a run reports $2/run (under the $2 floor → silent);
+    // counting one run per fire reports $4/run and warns, which is the truth.
+    writeConfig(dir, { ...BASE_CONFIG, routines: [routine('delegator'), routine('peer')] });
+    writeCostLog(dir, [
+      ...wakes('delegator', 3, 1),
+      ...Array.from({ length: 3 }, () => ({ source: 'routine:delegator', cost: 3, inherited: true })),
+      ...wakes('peer', 3, 0.50),
+    ]);
+    const c = routineCostCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('delegator');
+    expect(c.detail).toContain('4.00');
   }), 20000);
 
   test('co-fire cost bucketed to routine:multi is excluded from the per-routine comparison', withTmpdir(async (dir) => {

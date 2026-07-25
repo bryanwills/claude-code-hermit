@@ -20,8 +20,10 @@ A routine has a cost signature worth fixing when it:
   median and `doctor.routine_cost_floor_usd`), or scan `.claude/cost-log.jsonl` /
   `/claude-code-hermit:cost-reflect` by hand. Both sides of \$/run come from cost rows stamped
   `source_attribution_version: 2`; rows written before the attribution fix are ignored, so a
-  freshly-upgraded hermit reports "insufficient history" until a routine has 3 clean wakes
-  (about 3 days for a daily routine, ~3 months for a monthly one).
+  freshly-upgraded hermit reports "insufficient history" until a routine has 3 clean fires
+  (about 3 days for a daily routine, ~3 months for a monthly one). Subagent rows and the turn
+  that ingests a subagent-completion notification add cost to the routine without adding a
+  fire, so a delegating routine's \$/run reflects its whole delegated cost.
 - Invokes a broad, `/session-start`-style skill that loads a lot of context (recovery matrices,
   full state reads, conversational framing) to answer one narrow question ("is there anything to
   do?", "did this threshold cross?", "is this file stale?").

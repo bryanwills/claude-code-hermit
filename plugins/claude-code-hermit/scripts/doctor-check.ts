@@ -1494,7 +1494,7 @@ function checkContextScan() {
 // ----------------- Routine cost -----------------
 // Flags expensive-outlier routines (e.g. a "light" haiku routine that turns out to read
 // broad state and costs $15/run) so they surface without manually cross-referencing
-// cost-index.json and routine-metrics.jsonl. See docs/routine-authoring.md.
+// cost-log.jsonl by hand. See docs/routine-authoring.md.
 
 function medianOf(nums: number[]): number {
   const s = [...nums].sort((a, b) => a - b);
