@@ -42,7 +42,7 @@ function baseEnv(projectDir: string) {
 
 const today = new Date().toISOString().slice(0, 10);
 
-describe('today-cost.ts', () => {
+describe('cost-report.ts today', () => {
   test('drift regression: reports the real total when cwd has drifted into a subdir', withTmpdir(async (dir) => {
     seedCostLog(dir, [
       { timestamp: `${today}T10:00:00Z`, session_id: 'S-001', estimated_cost_usd: 14.91, total_tokens: 28500000, source: 'other' },
@@ -51,7 +51,7 @@ describe('today-cost.ts', () => {
     const drifted = path.join(dir, '.claude-code-hermit', 'proposals');
     fs.mkdirSync(drifted, { recursive: true });
 
-    const r = await runScript('today-cost.ts', { cwd: drifted, env: baseEnv(dir) });
+    const r = await runScript('cost-report.ts', { args: ['today'], cwd: drifted, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('$14.91 (28.5M tokens) across 1 session(s)');
   }));
@@ -64,7 +64,7 @@ describe('today-cost.ts', () => {
     const drifted = path.join(dir, '.claude-code-hermit', 'proposals');
     fs.mkdirSync(drifted, { recursive: true });
 
-    const r = await runScript('today-cost.ts', {
+    const r = await runScript('cost-report.ts', { args: ['today'],
       cwd: drifted,
       env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_PROJECT_DIR: '', AGENT_DIR: '' },
     });
@@ -74,7 +74,7 @@ describe('today-cost.ts', () => {
 
   test('unavailable: cost log absent', withTmpdir(async (dir) => {
     seedHermitRoot(dir);
-    const r = await runScript('today-cost.ts', { cwd: dir, env: baseEnv(dir) });
+    const r = await runScript('cost-report.ts', { args: ['today'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('cost data unavailable');
   }));
@@ -82,7 +82,7 @@ describe('today-cost.ts', () => {
   test('unavailable: cost log path is a directory (non-ENOENT read failure)', withTmpdir(async (dir) => {
     seedHermitRoot(dir);
     fs.mkdirSync(path.join(dir, '.claude', 'cost-log.jsonl'), { recursive: true });
-    const r = await runScript('today-cost.ts', { cwd: dir, env: baseEnv(dir) });
+    const r = await runScript('cost-report.ts', { args: ['today'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('cost data unavailable');
   }));
@@ -92,7 +92,7 @@ describe('today-cost.ts', () => {
       { timestamp: '2020-01-01T10:00:00Z', session_id: 'S-001', estimated_cost_usd: 5, total_tokens: 5000, source: 'other' },
     ]);
     seedHermitRoot(dir);
-    const r = await runScript('today-cost.ts', { cwd: dir, env: baseEnv(dir) });
+    const r = await runScript('cost-report.ts', { args: ['today'], cwd: dir, env: baseEnv(dir) });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('$0.00 (0 tokens) across 0 session(s)');
   }));

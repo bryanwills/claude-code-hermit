@@ -22,7 +22,7 @@ Steps are independent — read files and run scripts concurrently where possible
    at entries older than 30 days. Use `resolved_at` and `created_at` to compute resolution days.
 4. Run `bun <plugin_root>/scripts/proposal.ts metrics .claude-code-hermit` and
    capture stdout. Skip gracefully if unavailable. (Steps 4 and 5 may run concurrently.)
-5. Run `bun <plugin_root>/scripts/cost-reflect.ts .claude-code-hermit 30` and capture
+5. Run `bun <plugin_root>/scripts/cost-report.ts reflect .claude-code-hermit 30` and capture
    stdout. This produces a 30-day cost breakdown including a `### Cost by source` section. Skip
    gracefully if unavailable.
 6. `.claude-code-hermit/config.json` — read `routines[]` (id, schedule, enabled), `monitors[]`

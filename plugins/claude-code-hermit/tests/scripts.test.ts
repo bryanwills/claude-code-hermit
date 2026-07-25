@@ -3036,7 +3036,7 @@ describe('pricing', () => {
 // -------------------------------------------------------
 
 async function runCostReflect(dir: string): Promise<string> {
-  const r = await runScript('cost-reflect.ts', { args: ['.claude-code-hermit'], cwd: dir });
+  const r = await runScript('cost-report.ts', { args: ['reflect', '.claude-code-hermit'], cwd: dir });
   return r.stdout + r.stderr;
 }
 
@@ -3148,7 +3148,7 @@ describe('cost-reflect', () => {
 
   // Missing log: .claude/cost-log.jsonl does not exist
   test("cost-reflect: missing log → 'No cost data' (exit 0)", withDir(async (dir) => {
-    const r = await runScript('cost-reflect.ts', { args: ['.claude-code-hermit'], cwd: dir });
+    const r = await runScript('cost-report.ts', { args: ['reflect', '.claude-code-hermit'], cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout + r.stderr).toMatch(/no cost data/i);
   }));

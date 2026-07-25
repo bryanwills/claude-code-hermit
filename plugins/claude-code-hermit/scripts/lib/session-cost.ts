@@ -1,7 +1,7 @@
-// Shared window-cost algorithm used by scripts/session-cost.ts (CLI) and
+// Shared window-cost algorithm used by cost-report.ts's session verb and
 // scripts/session-archive.ts (report frontmatter). Pure: caller supplies the
-// [openedAt, closedAt] arc bounds (from state/runtime.json — see session-cost.ts's
-// header for the arc-window rationale) and the cost-log path; no env/argv reads here.
+// [openedAt, closedAt] arc bounds (from state/runtime.json — see cost-report.ts's
+// session verb header for the arc-window rationale) and the cost-log path; no env/argv reads here.
 //
 // `available` is the contract callers branch on, not `cost_usd === 0` — a session
 // with a real opened_at but zero matching cost-log rows is a MEASURED zero and must

@@ -1,11 +1,16 @@
+// `cost-report.ts reflect [<stateDir>] [<days>] [--plain]` — the "why is my bill
+// like this" report. Table mode is the full per-model/per-source breakdown;
+// --plain is the channel-safe prose answer. Fail-open: any throw becomes a
+// one-line error on stdout at exit 0, never a blocked caller.
+
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { costByType } from './lib/pricing';
-import { loadConfig } from './lib/channel-auth';
-import { money, resolveTimezone, budgetLine } from './lib/spend-status';
-import { todayYMD } from './lib/time';
-import { costLogPath, hermitDir } from './lib/cc-compat';
+import { costByType } from '../pricing';
+import { loadConfig } from '../channel-auth';
+import { money, resolveTimezone, budgetLine } from '../spend-status';
+import { todayYMD } from '../time';
+import { costLogPath, hermitDir } from '../cc-compat';
 
 type Json = any;
 
@@ -134,8 +139,7 @@ function buildPlainStatement(stateDir: string, costLog: string): string {
   return lines.join('\n') + '\n';
 }
 
-function run() {
-  const rawArgs = process.argv.slice(2);
+function report(rawArgs: string[]) {
   const plainMode = rawArgs.includes('--plain');
   const positional = rawArgs.filter(a => a !== '--plain');
   // An absolute arg (as tests pass) is used verbatim; a relative/absent arg is
@@ -316,10 +320,12 @@ function run() {
   }
 }
 
-try {
-  run();
-} catch (err: any) {
-  // Fail-open: never block on a cost-reflect failure
-  process.stdout.write(`cost-reflect: error — ${err.message}\n`);
-  process.exit(0);
+export function run(args: string[]): void {
+  try {
+    report(args);
+  } catch (err: any) {
+    // Fail-open: never block on a cost-reflect failure
+    process.stdout.write(`cost-reflect: error — ${err.message}\n`);
+    process.exit(0);
+  }
 }

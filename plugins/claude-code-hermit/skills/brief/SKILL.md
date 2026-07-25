@@ -79,7 +79,7 @@ After composing the morning brief, age the micro-proposal queue in one pass: run
 
 Emphasize backward-looking content. Compose from runner JSON (see Dispatch above) and live main-session data:
 - **Sessions today:** use `runner.sessions_today`; also note any progress in the current SHELL.md progress log (read SHELL.md in main **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**).
-- **Today's cost:** run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/today-cost.ts"` (live, in main) — do not use `cost-summary.md` for today's figure; it is only updated once per day and will be stale in always-on deployments.
+- **Today's cost:** run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts today"` (live, in main) — do not use `cost-summary.md` for today's figure; it is only updated once per day and will be stale in always-on deployments.
 - **Key findings:** use `runner.findings`
 - **Tomorrow:** use `runner.tomorrow`
 - After generating summary: if `runtime.json session_state` is `in_progress` or SHELL.md has progress entries since last report, note it in the brief (e.g., "Session still open — run /session-close to archive.") and let the operator close explicitly. Exception: if `config.always_on` is `true` AND `config.routines` contains an enabled entry with `id` `daily-auto-close` (the midnight routine, which invokes `/claude-code-hermit:session-close --scheduled`), suppress the note — the auto-close routine archives it at midnight. Idle transitions are owned by the `session` skill and `scripts/session-archive.ts`; brief does not trigger them.
@@ -130,4 +130,4 @@ Next: description of next action (or "Session complete" if all done)
 
 When invoked with "brief today", "daily summary", or "what happened today":
 
-Compose from runner JSON (mode: `daily`). For today's cost and token total, run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/today-cost.ts"` (live, in main). Use `runner.cost_context.week` and `runner.cost_context.all_time` for aggregates from `cost-summary.md`. Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done, cost, and proposals created/resolved.
+Compose from runner JSON (mode: `daily`). For today's cost and token total, run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts today"` (live, in main). Use `runner.cost_context.week` and `runner.cost_context.all_time` for aggregates from `cost-summary.md`. Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done, cost, and proposals created/resolved.

@@ -1,19 +1,19 @@
-// Prints today's spend: "$X.XX (<tokens>) across N session(s)".
+// `cost-report.ts today` — prints today's spend as
+// "$X.XX (<tokens>) across N session(s)".
 // Log resolved against the anchored hermit root (survives cwd drift), not cwd.
 // Unreadable log -> "cost data unavailable" (not a misleading $0.00); a readable
 // log with no rows today -> honest $0.00.
 
 import fs from 'node:fs';
-import { formatTokens } from './lib/format';
-import { costLogPath, hermitDir } from './lib/cc-compat';
+import { formatTokens } from '../format';
+import { costLogPath, hermitDir } from '../cc-compat';
 
-const COST_LOG = costLogPath(hermitDir());
 const UNAVAILABLE = 'cost data unavailable';
 
-function render(): string {
+function render(costLog: string): string {
   let raw: string;
   try {
-    raw = fs.readFileSync(COST_LOG, 'utf8');
+    raw = fs.readFileSync(costLog, 'utf8');
   } catch {
     return UNAVAILABLE;
   }
@@ -39,4 +39,9 @@ function render(): string {
   }
 }
 
-process.stdout.write(render() + '\n');
+// Resolved here rather than at module scope — see the note in session.ts: every
+// verb module is imported unconditionally, so a module-scope hermitDir() walk
+// would run even for the verbs that never read it.
+export function run(): void {
+  process.stdout.write(render(costLogPath(hermitDir())) + '\n');
+}

@@ -66,7 +66,7 @@ function setup(budget: object | null, entries: LogEntry[]): { dir: string; cchDi
 }
 
 async function runPlain(cchDir: string): Promise<string> {
-  const result = await runScript('cost-reflect.ts', { args: [cchDir, '--plain'] });
+  const result = await runScript('cost-report.ts', { args: ['reflect', cchDir, '--plain'] });
   expect(result.exitCode).toBe(0);
   return result.stdout;
 }
@@ -172,7 +172,7 @@ describe('cost-reflect --plain: no-jargon invariant', () => {
 describe('cost-reflect table mode: unaffected by --plain', () => {
   test('default invocation still returns the raw breakdown', async () => {
     const { cchDir } = setup(null, [{ daysAgo: 0, source: 'other' }]);
-    const result = await runScript('cost-reflect.ts', { args: [cchDir, '7'] });
+    const result = await runScript('cost-report.ts', { args: ['reflect', cchDir, '7'] });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('### Cost by token type');
     expect(result.stdout).toContain('cache_read');

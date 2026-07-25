@@ -15,13 +15,13 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 On a channel-tagged turn (Step 0 detected a `<channel source="...">` tag), run the plain-language mode instead of the full breakdown — a channel operator asking "why is my bill high" shouldn't get raw token-category jargon:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-reflect.ts .claude-code-hermit --plain
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts reflect .claude-code-hermit --plain
 ```
 
 Otherwise (terminal/dev use), run the full breakdown:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-reflect.ts .claude-code-hermit
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts reflect .claude-code-hermit
 ```
 
 Capture stdout. If the output starts with "No cost data" or "No spend recorded yet", report that message and stop — there's nothing to send.
