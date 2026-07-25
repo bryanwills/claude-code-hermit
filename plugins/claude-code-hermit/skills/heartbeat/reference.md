@@ -4,7 +4,7 @@ This file is the instruction spec for the isolated-context subagent dispatched b
 The subagent reads only files (no inherited session context) and returns **judgment only** — which items
 are currently firing, and a human-readable label for each. All bookkeeping (dedup, suppression,
 resolution, the daily digest, monitoring lines, operator notifications, `last_clean_eval_at`, and
-`heartbeat_result`) is derived deterministically by `update-alert-state.ts` from the returned firing set —
+`heartbeat_result`) is derived deterministically by `heartbeat.ts alert-state` from the returned firing set —
 the subagent never authors any of it. This split exists because a small model (`heartbeat.model`,
 haiku by default) intermittently fabricated that bookkeeping when it was asked to author it directly
 (issue #594): inventing schema fields, garbling keys, and marking a still-pending micro-proposal
@@ -20,7 +20,7 @@ This file is read only on the EVALUATE path, once the precheck determines a full
 
 **2. Per-item evaluation.** For each item in HEARTBEAT.md:
 - **Default proposals item** (text references `proposals/` and `status: proposed`): skip it entirely.
-  `update-alert-state.ts` derives its live state directly from `proposals/` frontmatter every tick,
+  `heartbeat.ts alert-state` derives its live state directly from `proposals/` frontmatter every tick,
   independent of anything returned here — there is nothing for you to evaluate or report.
 - **Custom items** (disk thresholds, SQL checks, file patterns, etc.): apply LLM judgment using
   available project files and context needed to evaluate the condition. Produce a semantic key per
@@ -45,7 +45,7 @@ Produce one semantic key per firing item:
 Normalise: lowercase, remove non-alphanumeric characters, truncate at the listed limit.
 
 **Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key, or the `stale-session` key.
-Those are derived and owned entirely by `update-alert-state.ts` — the two prefixes from
+Those are derived and owned entirely by `heartbeat.ts alert-state` — the two prefixes from
 `state/micro-proposals.json` and `proposals/*.md` frontmatter, `stale-session` from `runtime.json` +
 the bottom-most SHELL.md Progress Log timestamp — an entry you emit under any of them is dropped as
 a phantom and has no effect.

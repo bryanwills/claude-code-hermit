@@ -1,4 +1,4 @@
-// Contract tests for scripts/routine-precheck.ts — consolidates a routine fire's
+// Contract tests for `routines.ts precheck` — consolidates a routine fire's
 // pre-dispatch gate (waiting-check + pause-check) and the `started` stamp into one
 // script call. Exercised as a subprocess (argv/stdout/exit-code/file writes), the same
 // way tests/hermit-pause.test.ts exercises hermit-pause.ts (both resolve the hermit
@@ -35,7 +35,7 @@ function withDir(fn: (dir: string) => Promise<void> | void) {
 }
 
 const run = (id: string, rdw: 'true' | 'false', dir: string) =>
-  runScript('routine-precheck.ts', { args: [id, rdw], cwd: dir });
+  runScript('routines.ts', { args: ['precheck', id, rdw], cwd: dir });
 
 describe('routine-precheck', () => {
   test('idle, unpaused, rdw=false → PROCEED + one started row', withDir(async (dir) => {
@@ -98,7 +98,7 @@ describe('routine-precheck', () => {
   }));
 
   test('missing routine id → fail-open PROCEED, no metrics row written', withDir(async (dir) => {
-    const r = await runScript('routine-precheck.ts', { args: [], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', ], cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('PROCEED');
     expect(readMetricsRows(dir)).toHaveLength(0);
@@ -110,8 +110,8 @@ describe('routine-precheck', () => {
     // the root-cwd cases above rely on the fail-open branch instead — see file header).
     fs.writeFileSync(hermit(dir, 'config.json'), '{}');
     fs.mkdirSync(path.join(dir, 'app', 'sub'), { recursive: true });
-    const r = await runScript('routine-precheck.ts', {
-      args: ['nested-routine', 'false'],
+    const r = await runScript('routines.ts', {
+      args: ['precheck', 'nested-routine', 'false'],
       cwd: path.join(dir, 'app', 'sub'),
     });
     expect(r.exitCode).toBe(0);
@@ -128,7 +128,7 @@ describe('routine-precheck', () => {
   }));
 
   test('explicit delivery arg "monitor" serializes delivery: monitor', withDir(async (dir) => {
-    const r = await runScript('routine-precheck.ts', { args: ['test-routine', 'false', 'monitor'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', 'test-routine', 'false', 'monitor'], cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('PROCEED');
     const rows = readMetricsRows(dir);

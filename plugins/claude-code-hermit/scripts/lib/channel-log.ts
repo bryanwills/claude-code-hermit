@@ -63,7 +63,8 @@ function dbExists(hermitDir: string): boolean {
 }
 
 // Busy-wait budgets. Capture runs inside hooks with their own enforced timeouts
-// (channel-reply-reminder.ts: 3s, channel-hook.ts: 5s in hooks.json), and
+// (user-prompt-pipeline.ts: 15s shared across all its stages, channel-hook.ts:
+// 5s in hooks.json), and
 // bun:sqlite blocks synchronously — so the hook path must fail fast rather than
 // stall past its budget and get killed. The weekly-review CLI writers aren't
 // timeout-bound, so they can wait out real contention.
@@ -84,7 +85,7 @@ function openDb(hermitDir: string, opts?: { readonly?: boolean; busyTimeoutMs?: 
 
 /**
  * Default-on gate for episodic capture: config.knowledge.channel_log_enabled.
- * Shared by channel-hook.ts (outbound) and channel-reply-reminder.ts (inbound)
+ * Shared by channel-hook.ts (outbound) and the channel-reply-reminder stage (inbound)
  * so the "only an explicit false disables capture" rule lives in one place.
  */
 function isLoggingEnabled(config: Json): boolean {

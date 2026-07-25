@@ -1,6 +1,12 @@
-// Contract tests for scripts/shutdown-gate.ts — the deterministic shutdown gate.
-// Exercised as a subprocess against a local HTTP stub (HERMIT_TELEGRAM_API_URL)
-// standing in for the platform, mirroring the channel-status-responder tests.
+// Contract tests for the deterministic shutdown gate —
+// scripts/lib/prompt-stages/shutdown-gate.ts, driven through the single
+// UserPromptSubmit process, scripts/user-prompt-pipeline.ts. Exercised as a
+// subprocess against a local HTTP stub (HERMIT_TELEGRAM_API_URL) standing in
+// for the platform, mirroring the channel-status-responder tests.
+//
+// Pipeline note: a block prints the decision JSON alone; a pass-through still
+// carries the earlier stages' context (`[Now: …]`, the reply reminder), so
+// "pass through" is asserted as the absence of the `[shutdown]` marker.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
@@ -36,7 +42,7 @@ function writeRuntime(wd: Workdir, patch: Record<string, unknown>): void {
 const PENDING = { shutdown_requested_at: '2026-07-24T09:00:00+0000', shutdown_completed_at: null };
 
 async function run(wd: Workdir, prompt: string, stubUrl: string) {
-  return runScript('shutdown-gate.ts', {
+  return runScript('user-prompt-pipeline.ts', {
     stdin: JSON.stringify({ prompt }),
     cwd: wd.dir,
     env: { HERMIT_TELEGRAM_API_URL: stubUrl },
@@ -64,7 +70,7 @@ describe('shutdown-gate', () => {
       const wd = setupChannelWorkdir();
       writeRuntime(wd, { shutdown_requested_at: null, shutdown_completed_at: null });
       const r = await run(wd, envelope('do something'), stub.url);
-      expect(r.stdout.trim()).toBe('');
+      expect(r.stdout).not.toContain('[shutdown]');
       expect(stub.requests.length).toBe(0);
     } finally {
       stub.stop();
@@ -77,7 +83,7 @@ describe('shutdown-gate', () => {
       const wd = setupChannelWorkdir();
       writeRuntime(wd, { shutdown_requested_at: '2026-07-24T09:00:00+0000', shutdown_completed_at: '2026-07-24T09:01:00+0000' });
       const r = await run(wd, envelope('do something'), stub.url);
-      expect(r.stdout.trim()).toBe('');
+      expect(r.stdout).not.toContain('[shutdown]');
       expect(stub.requests.length).toBe(0);
     } finally {
       stub.stop();
@@ -90,7 +96,7 @@ describe('shutdown-gate', () => {
       const wd = setupChannelWorkdir();
       writeRuntime(wd, PENDING);
       const r = await run(wd, 'just a normal operator prompt', stub.url);
-      expect(r.stdout.trim()).toBe('');
+      expect(r.stdout).not.toContain('[shutdown]');
       expect(stub.requests.length).toBe(0);
     } finally {
       stub.stop();
@@ -103,7 +109,7 @@ describe('shutdown-gate', () => {
       const wd = setupChannelWorkdir();
       writeRuntime(wd, PENDING);
       const r = await run(wd, envelope('do something', 'intruder'), stub.url);
-      expect(r.stdout.trim()).toBe('');
+      expect(r.stdout).not.toContain('[shutdown]');
       expect(stub.requests.length).toBe(0);
     } finally {
       stub.stop();
@@ -119,11 +125,15 @@ describe('shutdown-gate', () => {
     expect(r.stdout.toLowerCase()).toContain('shutdown is in progress');
   });
 
-  test('malformed stdin → exit 0, no output', async () => {
+  test('malformed stdin → exit 0, no relay and no block', async () => {
+    // The payload-independent stages still run (that is what emits `[Now:`), but
+    // with no parseable envelope the gate has no chat to answer on, so it stays
+    // silent rather than relaying into the void.
     const wd = setupChannelWorkdir();
     writeRuntime(wd, PENDING);
-    const r = await runScript('shutdown-gate.ts', { stdin: 'not json', cwd: wd.dir, env: {} });
+    const r = await runScript('user-prompt-pipeline.ts', { stdin: 'not json', cwd: wd.dir, env: {} });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('"decision":"block"');
+    expect(r.stdout.toLowerCase()).not.toContain('shutdown is in progress');
   });
 });

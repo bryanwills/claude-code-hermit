@@ -71,7 +71,7 @@ The calling skill passes the following scalars in the dispatch prompt (do not re
    Sessions values and the already magnitude-suffixed Tokens figure from the `## This Week` and
    `## All Time` sections **verbatim** (e.g. `"$1189.14 (532M tokens) across 44 sessions"`) — do
    not reformat or rescale the token count. Set `cost_context.yesterday` to `null` (today's live
-   cost runs in the calling main session via `today-cost.ts`).
+   cost runs in the calling main session via `cost-report.ts today`).
 3. Set `report_summary: null`, `pending_proposals: []`, `operator_priorities: []`, `queued_work: []`.
 
 ### default-no-session

@@ -39,8 +39,10 @@ function classifySource(triggerText: string): string {
   const routineMatch = triggerText.match(/\[hermit-routine:([A-Za-z0-9._-]+)\]/);
   // Length-cap to 64 chars so ids can't overflow markdown table cells
   if (routineMatch) return `routine:${routineMatch[1].slice(0, 64)}`;
-  // log-routine-event.sh fallback: present in tool_result when the skill fires the marker
-  const logMatch = triggerText.match(/log-routine-event\.sh\s+([A-Za-z0-9._-]+)/);
+  // log-event fallback: present in tool_result when the skill fires the marker.
+  // Both spellings are matched — the old `log-routine-event.sh <id>` form still
+  // appears in historic transcripts that cost attribution replays.
+  const logMatch = triggerText.match(/(?:log-routine-event\.sh|routines\.ts log-event)\s+([A-Za-z0-9._-]+)/);
   if (logMatch) return `routine:${logMatch[1].slice(0, 64)}`;
   // Inbound-channel envelope (see lib/channel-envelope.ts): source is plugin-qualified
   // on the wire (e.g. `plugin:discord:discord`, `plugin:voice:voice`). Bucket by the

@@ -10,7 +10,7 @@ description: On-demand hermit-voice brainstorm — synthesizes memory, capabilit
 After ≥8 invocations, run:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal-metrics-report.ts .claude-code-hermit --source=capability-brainstorm
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts metrics .claude-code-hermit --source=capability-brainstorm
 ```
 
 Triage-survival < 25% or acceptance < 30% → cut this skill rather than tune it — the signal-to-noise ratio isn't there. `INSUFFICIENT` output means the ≥8-verdict sample hasn't been reached yet; wait and re-check.

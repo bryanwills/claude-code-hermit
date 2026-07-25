@@ -20,7 +20,7 @@ Invoked from SKILL.md § Scheduled-checks mode. Run at most one due check, then 
      Evidence: <one-paragraph summary>
      Sessions: none
      ```
-     Pass it to § Candidate processing → Evidence Validation (`claude-code-hermit:reflection-judge`). On a `PROCEED` token, gate with the Proposal triage gate (`claude-code-hermit:proposal-triage`, a batch of one here — single candidate; pass `--caller scheduled-checks` to `record-gate.ts`). On triage `PROCEED|CREATE`: Tier 1/2 → Micro-approval queuing; Tier 3 → `/claude-code-hermit:proposal-create`. A `DROP|...` token from either gate → drop silently (note in the Progress Log). `GATE_FAILED` from either gate → fail closed per § Gate failure handling; the candidate re-surfaces on the next scheduled-checks run.
+     Pass it to § Candidate processing → Evidence Validation (`claude-code-hermit:reflection-judge`). On a `PROCEED` token, gate with the Proposal triage gate (`claude-code-hermit:proposal-triage`, a batch of one here — single candidate; pass `--caller scheduled-checks` to the `gate` verb). On triage `PROCEED|CREATE`: Tier 1/2 → Micro-approval queuing; Tier 3 → `/claude-code-hermit:proposal-create`. A `DROP|...` token from either gate → drop silently (note in the Progress Log). `GATE_FAILED` from either gate → fail closed per § Gate failure handling; the candidate re-surfaces on the next scheduled-checks run.
    - **`empty`:** no candidate. `consecutive_empty += 1` (persisted in step 7). Check the interval-adjustment rule below.
    - **`unavailable`:** note in SHELL.md `## Findings`: `Scheduled check skipped: <id> — skill unavailable (cooldown 4h)`. No candidate.
    - **`error`:** note in SHELL.md `## Findings`: `Scheduled check error: <id> — retrying after interval_days`. No candidate.
@@ -114,7 +114,7 @@ Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 
 The judge returns one verdict line per candidate, matched by `<title>`. For each candidate, record its line:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/record-gate.ts .claude-code-hermit --gate judge --caller reflect <<'HERMIT_GATE'
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts gate .claude-code-hermit --gate judge --caller reflect <<'HERMIT_GATE'
 Title: <title>
 Verdict: <the judge's line for this candidate, verbatim>
 HERMIT_GATE
@@ -126,7 +126,7 @@ HERMIT_GATE
 
 ### Gate failure handling
 
-`record-gate.ts` fails closed by construction: an unrecognized, malformed, or empty verdict line always returns `GATE_FAILED` and appends the `gate-failed` metric itself (agent tagged via `--gate triage|judge`) — no separate append needed at the call site. On `GATE_FAILED`: do not create or queue the candidate. Note `gate-failed: <agent> — <title>` in the SHELL.md Progress Log. The candidate re-surfaces on the next reflect cycle.
+The `gate` verb fails closed by construction: an unrecognized, malformed, or empty verdict line always returns `GATE_FAILED` and appends the `gate-failed` metric itself (agent tagged via `--gate triage|judge`) — no separate append needed at the call site. On `GATE_FAILED`: do not create or queue the candidate. Note `gate-failed: <agent> — <title>` in the SHELL.md Progress Log. The candidate re-surfaces on the next reflect cycle.
 
 ### Component Health signal ladder
 
@@ -155,7 +155,7 @@ Evidence: <one-paragraph evidence summary>
 
 The gate returns one verdict block per candidate, matched by `<title>`. Line 1 of each block is that candidate's verdict; lines 2+ are additive metadata (`closest_prop`, `aligned`, `operator_excerpt`, `overlap_compiled`, `prior_discussion`, `failed_condition`) — read for context if useful, but do not treat as part of the verdict for branching. For each candidate, record its verdict line (use `"caller":"reflect"` on a normal reflect run, or `"caller":"scheduled-checks"` when invoked via § Scheduled checks):
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/record-gate.ts .claude-code-hermit --gate triage --caller reflect <<'HERMIT_GATE'
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts gate .claude-code-hermit --gate triage --caller reflect <<'HERMIT_GATE'
 Title: <title>
 Verdict: <that candidate's line 1, verbatim>
 HERMIT_GATE
@@ -195,7 +195,7 @@ Every micro-proposal question must include: **[observed pattern + duration] + [c
 Queuing procedure:
 
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/queue-micro-proposal.ts .claude-code-hermit <<'HERMIT_MP'
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
 {"tier":<1|2>,"question":"<full question text>","options":["<label>", ...],"on_resolve":"<full skill invocation with an {answer} placeholder>"}
 HERMIT_MP
 ```
@@ -215,7 +215,7 @@ Component Health improves existing components. This subsection is the symmetric 
 After ≥8 procedure-capture candidates surfaced, run:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal-metrics-report.ts .claude-code-hermit --source=procedure-capture
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts metrics .claude-code-hermit --source=procedure-capture
 ```
 
 Triage-survival < 25% or acceptance < 30% → disable procedure capture rather than tune it. `INSUFFICIENT` output means the ≥8-verdict sample hasn't been reached yet; do not read thresholds until it does.

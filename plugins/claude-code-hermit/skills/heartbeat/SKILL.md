@@ -28,7 +28,7 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
 
 1. Run the precheck:
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-precheck.ts .claude-code-hermit
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts precheck .claude-code-hermit
    ```
 2. Read the verdict (first line of output):
    - Starts with `SKIP|` → emit `HEARTBEAT_SKIP (<reason>)`. No channel notification. No SHELL.md write. Stop.
@@ -61,7 +61,7 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
 5. **Apply writes** in the main session (to preserve cost attribution and channel/file access). First, validate the subagent return: if it cannot be parsed as JSON, or is missing either required **key** (`firing`, `self_eval_updates`), **skip all writes and emit `HEARTBEAT_OK`** — fail-open, never corrupt persistent state. Otherwise:
    - Pass the subagent return to the dedicated script on **stdin** via a quoted heredoc so free-text `text` / `self_eval` values (which may contain apostrophes) can't break the command:
      ```
-     bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-alert-state.ts .claude-code-hermit/state/alert-state.json <<'HERMIT_ALERT_JSON'
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts alert-state .claude-code-hermit/state/alert-state.json <<'HERMIT_ALERT_JSON'
      <subagent-return-json>
      HERMIT_ALERT_JSON
      ```

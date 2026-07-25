@@ -8,9 +8,10 @@
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — core's triage gate already records every verdict. Proposals now carry `tags: [capability-brainstorm]` instead of `[domain-brainstorm, ideation]`, so they count toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
-- `ha-morning-brief`'s micro-proposal lifecycle now runs in one `.claude-code-hermit/bin/hermit-run micro-proposal .claude-code-hermit brief-cycle` call through core's writer (one atomic round-trip that re-nudges, expires, and records expiries), instead of two inline `bun -e` re-implementations of that writer — so a nudge, an expiry, or a crash mid-write can no longer corrupt the queue.
+- `ha-morning-brief`'s micro-proposal lifecycle now runs in one `.claude-code-hermit/bin/hermit-run proposal micro .claude-code-hermit brief-cycle` call through core's writer (one atomic round-trip that re-nudges, expires, and records expiries), instead of two inline `bun -e` re-implementations of that writer — so a nudge, an expiry, or a crash mid-write can no longer corrupt the queue.
 
 ### Changed
+- Requires core `>=1.2.34`. Core absorbed its proposal satellites into `proposal.ts` verbs, so the shared route this plugin calls through `bin/hermit-run` is now `proposal micro …` / `proposal metrics …`. `bin/hermit-run` resolves a script by bare filesystem probe, so pairing this version with an older core fails with a misleading "plugin may predate this command" error.
 - `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 
 ### Changed

@@ -1,4 +1,4 @@
-// Unit tests for scripts/eval-success-signal.ts (bun test port of test-eval-success-signal.sh).
+// Unit tests for proposal.ts's success-signal verb (bun test port of test-eval-success-signal.sh).
 // Validate mode (grammar) and evaluate mode (MET / UNMET / INSUFFICIENT_DATA).
 //
 // The script is a CLI contract (argv in, process.exit + one-line JSON on stdout,
@@ -17,7 +17,7 @@ import { runScript } from './helpers/run';
 // ---------- helpers ----------
 
 const validate = (predicate: string) =>
-  runScript('eval-success-signal.ts', { args: ['--validate', predicate] });
+  runScript('proposal.ts', { args: ['success-signal', '--validate', predicate] });
 
 /** Run a test body with a throwaway .claude-code-hermit state dir (sessions/ pre-made). */
 function withStateDir(fn: (sdir: string) => Promise<void> | void, subdir = 'sessions') {
@@ -56,8 +56,8 @@ Test.
 
 /** Evaluate-mode run; asserts exit 0 and returns the parsed JSON verdict line. */
 async function evaluate(sdir: string, acceptedDate: string, acceptedInSession: string, predicate: string) {
-  const r = await runScript('eval-success-signal.ts', {
-    args: [sdir, acceptedDate, acceptedInSession, predicate],
+  const r = await runScript('proposal.ts', {
+    args: ['success-signal', sdir, acceptedDate, acceptedInSession, predicate],
   });
   expect(r.exitCode).toBe(0);
   return JSON.parse(r.stdout);

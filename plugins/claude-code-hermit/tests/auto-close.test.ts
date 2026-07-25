@@ -57,8 +57,8 @@ function touchAgo(p: string, hours: number): void {
 
 /** Run heartbeat-precheck from inside the workdir and return its verdict. */
 async function precheck(dir: string, opts: { now?: string; peek?: boolean } = {}): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: [...(opts.peek ? ['--peek'] : []), '.claude-code-hermit'],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', ...(opts.peek ? ['--peek'] : []), '.claude-code-hermit'],
     cwd: dir,
     env: opts.now ? { HERMIT_NOW: opts.now } : {},
   });
@@ -547,7 +547,7 @@ describe('record-operator-action: monitor emission strings stay in sync', () => 
   // routine-due.ts builds its line from a template literal rather than a bare echo —
   // assert the grammar anchor is still present in source.
   test('routine-due.ts still emits the ROUTINE_DUE [hermit-routine: grammar', () => {
-    const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'routine-due.ts'), 'utf-8');
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib', 'routines', 'due.ts'), 'utf-8');
     expect(src).toContain('ROUTINE_DUE ');
     expect(src).toContain('[hermit-routine:');
   });
@@ -1149,9 +1149,12 @@ describe('auto-close-decision verb', () => {
   // constant — both the precheck drain and the decision verb import it from
   // lib/auto-close, so they can never disagree on the boundary.
   test('heartbeat-precheck and session-archive both import the lull from lib/auto-close', () => {
-    const precheckSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'heartbeat-precheck.ts'), 'utf-8');
+    const precheckSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib', 'heartbeat', 'precheck.ts'), 'utf-8');
     const archiveSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'session-archive.ts'), 'utf-8');
-    expect(precheckSrc).toContain('lib/auto-close');
-    expect(archiveSrc).toContain('lib/auto-close');
+    // Assert the imported symbol, not the import path: precheck.ts now lives in
+    // lib/heartbeat/ and reaches the same module as '../auto-close'. The
+    // invariant is that neither hardcodes the lull.
+    expect(precheckSrc).toContain('AUTO_CLOSE_LULL_MINUTES');
+    expect(archiveSrc).toContain('AUTO_CLOSE_LULL_MINUTES');
   });
 });

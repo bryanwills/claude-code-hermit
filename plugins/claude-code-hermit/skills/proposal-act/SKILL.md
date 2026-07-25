@@ -8,7 +8,7 @@ Take action on a proposal: accept, defer, dismiss, or resolve.
 
 ## Step 0 — Channel reply
 
-If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool. Otherwise emit to conversation. On a channel-tagged turn, step 4's bounded ask (below) also queues a durable micro-proposal entry via `queue-micro-proposal.ts` — see `channel-responder` § Channel-safe ask bridge — so it survives compaction or a session restart.
+If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool. Otherwise emit to conversation. On a channel-tagged turn, step 4's bounded ask (below) also queues a durable micro-proposal entry via `proposal.ts queue-micro` — see `channel-responder` § Channel-safe ask bridge — so it survives compaction or a session restart.
 
 ## Usage
 
@@ -28,7 +28,7 @@ If no action or ID is provided, ask the operator which proposal and action.
 
 Before reading any proposal file, resolve the operator's input to a filename:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-prop.ts .claude-code-hermit "<operator input>"
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts resolve-id .claude-code-hermit "<operator input>"
 ```
 - `MATCH|<filename>` — proceed with that file.
 - `NONE|not-a-prop-id` — error "Not a PROP id."
@@ -65,7 +65,7 @@ When the operator accepts a proposal:
    - `accepted_in_session`: if `session_id` is non-null, plan `--set accepted_in_session=<session_id>`. If no session is active (`session_id` is null), leave it unset (frontmatter default `null` stays).
    - `success_signal` (optional): check whether the body has a `## Success Signal` section with a non-empty predicate line (ignore comment lines starting with `<!--`). If found, validate it:
      ```
-     bun ${CLAUDE_PLUGIN_ROOT}/scripts/eval-success-signal.ts --validate "<predicate line>"
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts success-signal --validate "<predicate line>"
      ```
      Exit 0 → plan a stdin `Set: success_signal=<predicate line>` line for the patch call (free text — never argv `--set`). Exit non-zero → plan a `proposal.ts shell-append` warning: `PROP-NNN success_signal ignored: <reason printed by the script>`. No section, or empty/comment-only → leave `success_signal` unset. Never block accept regardless of outcome.
 
@@ -95,7 +95,7 @@ When the operator accepts a proposal:
 
    **Channel-tagged turn:** do not wait interactively for a reply in this turn. Send the question via the channel reply tool in plain voice with the three options numbered — "Suggestion #N — start now, queue it as a task, or leave it to you?" (derive `#N` per `proposal-list` §4a; never surface `PROP-NNN` or the title's bracket prefix to the channel). AND queue a pending micro-proposal entry:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/queue-micro-proposal.ts .claude-code-hermit <<'HERMIT_MP'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
    {"tier":1,"question":"Suggestion #N accepted — how should it be implemented?","options":["implement now","session task","manual"],"on_resolve":"/claude-code-hermit:proposal-act accept PROP-NNN --answer {answer}"}
    HERMIT_MP
    ```

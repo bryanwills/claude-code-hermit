@@ -206,7 +206,7 @@ function elapsedSinceHHMM(nowHHMM: string, stampHHMM: string): number {
 
 // Parse the minute/hour fields of a simple numeric 5-field cron schedule
 // (e.g. "0 0 * * *"). Shared by hermit-watchdog.ts (daily-auto-close proximity)
-// and channel-status-responder.ts (next-routine line) — both only need the
+// and the channel-status-responder stage (next-routine line) — both only need the
 // fixed-time case, not full cron range/step/list support.
 function parseSimpleCronTime(schedule: string): { hour: number; minute: number } | null {
   const parts = String(schedule).trim().split(/\s+/);
@@ -230,7 +230,7 @@ function friendlyBoundary(iso: string, timezone: string): string {
 
 // Resolves "now" as epoch ms: real wall-clock, overridable by HERMIT_NOW for
 // deterministic tests. Same override convention as archive-shell.ts/
-// session-archive.ts/routine-due.ts (which return Date) — centralized here so
+// session-archive.ts/lib/routines/due.ts (which return Date) — centralized here so
 // a caller wanting an epoch number doesn't need its own inline copy.
 function resolveHermitNowMs(): number {
   if (process.env.HERMIT_NOW) {

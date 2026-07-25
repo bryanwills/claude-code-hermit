@@ -62,7 +62,7 @@ Skip this entire step under `--no-apply`.
 For each `SHIPPED-STRONG` verdict, resolve the ID to a filename, then close it the same way `/claude-code-hermit:proposal-act` does — the metrics event goes first so the summary regen reflects it:
 
 ```bash
-bun plugins/claude-code-hermit/scripts/resolve-prop.ts .claude-code-hermit "<PROP-ID>"
+bun plugins/claude-code-hermit/scripts/proposal.ts resolve-id .claude-code-hermit "<PROP-ID>"
 
 bun plugins/claude-code-hermit/scripts/append-metrics.ts \
     .claude-code-hermit/state/proposal-metrics.jsonl \
@@ -76,7 +76,7 @@ HERMIT_PATCH
 
 Writing the evidence into the Decision line is what makes an automatic flip auditable: the operator can later see exactly which bullet closed the proposal and reopen it if the match was wrong.
 
-`resolve-prop.ts` returning `AMBIGUOUS` or `NONE` means don't guess — move that proposal into the Step 4 list instead. `proposal.ts` returning `ERROR|<reason>` means nothing was patched; report it and continue with the rest.
+`proposal.ts resolve-id` returning `AMBIGUOUS` or `NONE` means don't guess — move that proposal into the Step 4 list instead. `proposal.ts` returning `ERROR|<reason>` means nothing was patched; report it and continue with the rest.
 
 ## Step 4 — Ask about the rest
 

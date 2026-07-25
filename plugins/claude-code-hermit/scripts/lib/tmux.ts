@@ -28,7 +28,7 @@ export function getSessionName(config: Json): string {
  * punctuation — existing callers send prose ("/compact focus on unfinished work,
  * pending operator items, and in-flight decisions") and an allow-list would silently
  * break them. Callers handling UNTRUSTED input apply their own strict grammar on top
- * (see harness-command-keyword.ts).
+ * (see lib/prompt-stages/harness-command.ts).
  */
 function hasControlChars(text: string): boolean {
   for (let i = 0; i < text.length; i++) {

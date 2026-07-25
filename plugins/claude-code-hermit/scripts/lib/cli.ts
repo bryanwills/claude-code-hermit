@@ -3,7 +3,7 @@
 // and exits 0; readStdin() reads a heredoc payload to completion untrimmed
 // (callers trim where the original per-script behavior trimmed); readJson()
 // is a tolerant JSON-file reader for optional state files (null if missing
-// or invalid).
+// or invalid); flagValue() reads one `--flag value` pair out of an argv slice.
 
 import fs from 'node:fs';
 
@@ -28,4 +28,9 @@ function readJson(p: string): Json {
   try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return null; }
 }
 
-export { emit, readStdin, readJson };
+function flagValue(argv: string[], flag: string): string | undefined {
+  const i = argv.indexOf(flag);
+  return i === -1 ? undefined : argv[i + 1];
+}
+
+export { emit, readStdin, readJson, flagValue };

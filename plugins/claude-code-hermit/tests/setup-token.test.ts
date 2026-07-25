@@ -172,7 +172,7 @@ describe('auth-mode detection', () => {
 
 describe('doctor expiry probe', () => {
   const probe = async (hermitDir: string) =>
-    (await runScript('setup-token-probe.ts', { args: [hermitDir] })).stdout.trim();
+    (await runScript('setup-token-mint.ts', { args: ['probe', hermitDir] })).stdout.trim();
 
   test('no record → OK (not token mode is not a problem)', async () => {
     const root = tmpdir();
@@ -205,7 +205,7 @@ describe('doctor expiry probe', () => {
       fs.mkdirSync(hermitDir, { recursive: true });
       fs.mkdirSync(configDir, { recursive: true });
       installToken(hermitDir, configDir, VALID);
-      const out = (await runScript('setup-token-probe.ts', { args: [hermitDir] })).stdout;
+      const out = (await runScript('setup-token-mint.ts', { args: ['probe', hermitDir] })).stdout;
       expect(out.trim().split('\n')).toHaveLength(1);
       expect(out).not.toContain(VALID);
     } finally {

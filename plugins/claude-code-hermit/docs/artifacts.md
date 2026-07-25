@@ -36,7 +36,7 @@ Every script-rendered artifact type (dashboard, proposals page, weekly review) f
 the same five steps; only the render script, `<title>`, and `state/artifacts.json` key
 differ per type (called out in each subsection below):
 
-1. Run the type's render script (e.g. `bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-dashboard.ts .claude-code-hermit`)
+1. Run the type's render script (e.g. `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render dashboard .claude-code-hermit`)
    and parse stdout JSON (`path`, `bytes`, `hash`).
 2. Read `.claude-code-hermit/state/artifacts.json` (if present) and compare `hash` to
    `<key>.hash`. **Unchanged → stop here**, no publish (avoids minting a no-op
@@ -126,7 +126,7 @@ is not localized — format, not language.
 `.md` natively — confirmed empirically) with its YAML frontmatter stripped (raw
 frontmatter renders as an ugly literal block; every field is already legible in the
 report body's evolution block and the dashboard's weekly section). Rendered by
-`scripts/render-weekly-artifact.ts` — no HTML step, so no CSS/fragment/`<title>`
+`artifact.ts render weekly` — no HTML step, so no CSS/fragment/`<title>`
 wrapping to build; the same five-step hash-gate/publish/state-write procedure still
 applies (hash is `sha256` of the frontmatter-stripped body). `<title>` for the
 `Artifact` call is the report's own top heading (e.g. `Weekly Review — 2026-W27`).

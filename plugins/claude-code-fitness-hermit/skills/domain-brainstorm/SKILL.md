@@ -7,7 +7,7 @@ description: On-demand fitness-voice brainstorm — reads Strava history and tra
 
 ## Kill criteria (read before running)
 
-After ≥8 invocations, check the `capability-brainstorm` segment of core's proposal metrics report — run `.claude-code-hermit/bin/hermit-run proposal-metrics-report .claude-code-hermit --source=capability-brainstorm` (the project-resident `bin/hermit-run` resolves core's plugin root, which a path relative to this plugin can't reach), or read the `capability-brainstorm` row of the table `/claude-code-hermit:hermit-evolution` prints. If triage-survival < 25% or PROP-acceptance < 30%, treat it as a class-level signal that brainstorm output is noisy and raise it with the operator — the segment is shared with core's `capability-brainstorm` and the other domain brainstorm skills, so it cannot by itself say which skill to cut.
+After ≥8 invocations, check the `capability-brainstorm` segment of core's proposal metrics report — run `.claude-code-hermit/bin/hermit-run proposal metrics .claude-code-hermit --source=capability-brainstorm` (the project-resident `bin/hermit-run` resolves core's plugin root, which a path relative to this plugin can't reach), or read the `capability-brainstorm` row of the table `/claude-code-hermit:hermit-evolution` prints. If triage-survival < 25% or PROP-acceptance < 30%, treat it as a class-level signal that brainstorm output is noisy and raise it with the operator — the segment is shared with core's `capability-brainstorm` and the other domain brainstorm skills, so it cannot by itself say which skill to cut.
 
 ### Gate 0 — Gather inputs
 

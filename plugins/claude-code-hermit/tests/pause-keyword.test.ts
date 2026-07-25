@@ -1,8 +1,13 @@
-// Contract tests for scripts/pause-keyword.ts — the deterministic
-// pause/resume/snooze keyword writer (PROP-015). A UserPromptSubmit hook:
-// writes state/pause.json directly from an inbound <channel> envelope,
-// before any model turn. Exercised as a subprocess (stdin in, exit code/
-// stdout out), the boundary Claude Code sees.
+// Contract tests for the pause/resume/snooze keyword writer (PROP-015) —
+// scripts/lib/prompt-stages/pause-keyword.ts, driven through the single
+// UserPromptSubmit process, scripts/user-prompt-pipeline.ts. Writes
+// state/pause.json directly from an inbound <channel> envelope, before any
+// model turn. Exercised as a subprocess (stdin in, exit code/stdout out),
+// the boundary Claude Code sees.
+//
+// Pipeline note: prompt-context runs on every prompt, so stdout always carries
+// a `[Now: …]` line. A "silent no-op" is therefore asserted as the absence of
+// the `[pause]` marker, not as empty stdout.
 //
 // Usage: bun test tests/pause-keyword.test.ts   (from the plugin root)
 
@@ -29,7 +34,7 @@ function withDir(fn: (dir: string) => Promise<void> | void) {
 }
 
 const run = (prompt: string, dir: string) =>
-  runScript('pause-keyword.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
+  runScript('user-prompt-pipeline.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
 
 describe('pause-keyword', () => {
   test('"pause" from the operator DM (no allowlist, chat_id matches dm_channel_id) — sets flag, exit 0', withDir(async (dir) => {
@@ -47,7 +52,7 @@ describe('pause-keyword', () => {
   test('no allowlist, message from a non-DM chat — silent no-op (cannot freeze)', withDir(async (dir) => {
     const r = await run('<channel source="discord" chat_id="99" user="STRANGER">stop</channel>', dir);
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[pause]');
     expect(isPaused(hermit(dir)).paused).toBe(false);
   }));
 
@@ -85,7 +90,7 @@ describe('pause-keyword', () => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
     const r = await run('<channel source="discord" chat_id="1" user="INTRUDER">pause</channel>', dir);
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[pause]');
     expect(isPaused(hermit(dir)).paused).toBe(false);
   }));
 
@@ -99,37 +104,37 @@ describe('pause-keyword', () => {
   test('allowed_users=[] lockdown — silent no-op even with a user id', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":[]}}}');
     const r = await run('<channel source="discord" chat_id="1" user="ANYONE">pause</channel>', dir);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[pause]');
     expect(isPaused(hermit(dir)).paused).toBe(false);
   }));
 
   test('no user attribute, allowlist configured — rejected (unverifiable identity)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
     const r = await run('<channel source="discord" chat_id="1">pause</channel>', dir);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[pause]');
     expect(isPaused(hermit(dir)).paused).toBe(false);
   }));
 
   test('ordinary conversational text — no accidental trigger', withDir(async (dir) => {
     const r = await run('<channel source="discord" chat_id="1" user="U1">please pause and think about this</channel>', dir);
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[pause]');
     expect(isPaused(hermit(dir)).paused).toBe(false);
   }));
 
   test('no envelope — no-op', withDir(async (dir) => {
     const r = await run('hello world', dir);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[pause]');
     expect(isPaused(hermit(dir)).paused).toBe(false);
   }));
 
   test('empty stdin — fail-open, exit 0', withDir(async (dir) => {
-    const r = await runScript('pause-keyword.ts', { stdin: '', cwd: dir });
+    const r = await runScript('user-prompt-pipeline.ts', { stdin: '', cwd: dir });
     expect(r.exitCode).toBe(0);
   }));
 
   test('malformed JSON stdin — fail-open, exit 0', withDir(async (dir) => {
-    const r = await runScript('pause-keyword.ts', { stdin: '{broken', cwd: dir });
+    const r = await runScript('user-prompt-pipeline.ts', { stdin: '{broken', cwd: dir });
     expect(r.exitCode).toBe(0);
   }));
 
@@ -160,7 +165,7 @@ describe('pause-keyword', () => {
       write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
       const r = await run('<channel source="plugin:discord:discord" chat_id="1" user="INTRUDER">pause</channel>', dir);
       expect(r.exitCode).toBe(0);
-      expect(r.stdout.trim()).toBe('');
+      expect(r.stdout).not.toContain('[pause]');
       expect(isPaused(hermit(dir)).paused).toBe(false);
     }));
 

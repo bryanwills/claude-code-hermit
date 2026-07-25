@@ -85,8 +85,8 @@ function build(fix: Fixture): string {
 }
 
 async function verdict(dir: string, peek = false): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: [...(peek ? ['--peek'] : []), '.claude-code-hermit'],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', ...(peek ? ['--peek'] : []), '.claude-code-hermit'],
     cwd: dir,
     env: { HERMIT_NOW: NOW },
   });

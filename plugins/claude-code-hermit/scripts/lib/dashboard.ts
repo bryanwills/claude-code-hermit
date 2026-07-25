@@ -18,7 +18,7 @@ import { sha256 } from './hash';
 import { readMergedAlerts } from './alert-state';
 import { todayYMD } from './time';
 import { costIndexPath, readCostIndex } from './cost-log';
-import { rebuildIndex, type ProposalsIndex } from '../proposals-index';
+import { rebuildIndex, type ProposalsIndex } from './proposals/index-rebuild';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
 
 type Json = any;

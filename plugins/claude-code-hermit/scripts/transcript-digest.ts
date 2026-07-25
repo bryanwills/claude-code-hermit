@@ -54,7 +54,7 @@ const DEFAULT_SESSIONS = 10;
 const DAY_MS = 86_400_000;
 
 // v1 excludes Bash from productive-wake detection deliberately: every heartbeat
-// wake runs heartbeat-precheck.ts via Bash by construction, so counting any Bash
+// wake runs `heartbeat.ts precheck` via Bash by construction, so counting any Bash
 // call would peg productive_wakes/wakes at 100% and kill the defer-loop signal.
 // Undercount (a wake that only mutates state through a hermit script reads as
 // unproductive) is accepted for v1; a hermit-script allowlist is a v1.1 option.

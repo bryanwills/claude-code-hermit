@@ -1,5 +1,5 @@
 // Pending harness-command marker — written by the UserPromptSubmit hook
-// (harness-command-keyword.ts), consumed by the Stop hook (stop-pipeline.ts).
+// (lib/prompt-stages/harness-command.ts), consumed by the Stop hook (stop-pipeline.ts).
 //
 // Singleton by design, matching the existing marker files in state/. Two commands
 // arriving inside one turn therefore collapse to the last one; that is accepted rather

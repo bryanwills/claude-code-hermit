@@ -8,7 +8,7 @@
 //         metrics_event, shell_findings_line}, ...]}
 // Output: one JSON line — {"ok":true,"applied":{...}} (+ "errors" when any
 // post-validation write failed) or {"ok":false,"reason":...} with zero writes.
-// Exit 0 always (update-alert-state.ts pattern); only missing argv exits 1.
+// Exit 0 always (lib/heartbeat/alert-update.ts pattern); only missing argv exits 1.
 //
 // Durability split: proposal frontmatter patches and metrics appends are the
 // all-or-nothing core; SHELL.md `## Findings` appends are best-effort session

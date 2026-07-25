@@ -376,7 +376,7 @@ describe('cost-tracker: max_prompt_tokens (real context size vs per-turn sum)', 
 
 // ---------------------------------------------------------------------------
 // Subprocess: cost-tracker stamps/clears runtime.json's opened_at (PR-6 part b —
-// session-cost.ts's window-delta mode reads this field). See maintainOpenedAt in
+// cost-report.ts session's window-delta mode reads this field). See maintainOpenedAt in
 // cost-tracker.ts.
 // ---------------------------------------------------------------------------
 

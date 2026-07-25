@@ -156,7 +156,7 @@ your-project/
 │   │   ├── micro-proposals.json      # Pending micro-approvals list (reflect + channel-bridged asks + channel-responder)
 │   │   ├── state-summary.md          # Auto-generated health snapshot (generate-summary.ts)
 │   │   ├── monitors.runtime.json     # Active watch registry, cleared on session start (watch-owned)
-│   │   ├── operator-pause.json       # Operator/watchdog pause (pause-keyword.ts/watchdog-owned)
+│   │   ├── operator-pause.json       # Operator/watchdog pause (pause stage/watchdog-owned)
 │   │   ├── auto-pause.json           # Budget-breach auto-pause (cost-tracker-owned)
 │   │   ├── budget-alerts.json        # Budget alert dedup (cost-tracker-owned)
 │   │   ├── telemetry-alert.json      # Telemetry export-failure alert dedup (telemetry-export-owned)
@@ -184,10 +184,10 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (scheduled-checks display) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |
 | `state/channel-replies.jsonl`  | channel-hook.ts (append only)                       | reflect (routine-ROI engagement join)                         |
-| `state/channel-log.sqlite`     | channel-reply-reminder.ts + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
+| `state/channel-log.sqlite`     | channel-reply-reminder stage + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
 | `state/session-diff.json`      | session-diff.ts only                                | session-close (display)                                       |
 | `state/observations.jsonl`     | reflect + reflect-precheck + session-close + channel-responder (append only; `source` values: `cost-spike`, `quick-deferral`, `reflect-noticed`, `startup-drift`, `skill-correction`) | reflect (step 3b graduation), reflection-judge (§1.4 ledger verification) |
-| `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal-metrics-report.ts (read-only)   |
+| `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal.ts metrics (read-only)   |
 | `state/usage-metrics.jsonl`    | usage-track.ts (Skill/Read PostToolUse) + record-operator-action.ts (operator-typed `/skill`, append only; compacted >180d by weekly-review) | weekly-review (untouched-knowledge/dormant-skill suggestions) |
 | `state/micro-proposals.json`   | reflect + channel-bridged skills (queue, schema owned by reflect § Queuing procedure) + channel-responder/brief (resolve) | brief, generate-summary.ts |
 | `state/state-summary.md`       | generate-summary.ts only                            | humans                                                        |
@@ -195,7 +195,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/heartbeat-monitor.runtime.json` | heartbeat skill only                        | heartbeat-start (write), heartbeat-stop (clear), heartbeat-restart (rewrite) |
 | `state/heartbeat-liveness.json` | heartbeat-monitor.sh (every poll iteration)         | doctor-check.ts (heartbeat liveness check), heartbeat status  |
 | `state/cc-stop-snapshot.json`  | stop-pipeline.ts only                               | doctor-check.ts (scheduler/background-task health check)      |
-| `state/operator-turn-open.json` | record-operator-action.ts (opens, on kept operator prompts + `--force`); stop-pipeline.ts (clears at Stop — the only deleter) | routine-due.ts (defer gate, 60-min TTL backstop against a marker orphaned by a failed Stop) |
+| `state/operator-turn-open.json` | record-operator-action.ts (opens, on kept operator prompts + `--force`); stop-pipeline.ts (clears at Stop — the only deleter) | routines.ts due (defer gate, 60-min TTL backstop against a marker orphaned by a failed Stop) |
 | `state/.heartbeat`             | heartbeat-touch.ts only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.ts only                                | hermit-stop.ts (cleanup)                                      |
 | `state/cost-index.json`        | cost-tracker.ts only                                | cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts |

@@ -1,4 +1,4 @@
-// Tests for scripts/cron-registry.ts — the diff-based plan/commit planner behind
+// Tests for `routines.ts cron-registry` — the diff-based plan/commit planner behind
 // hermit-routines `load`. planCron/commitCron are pure (no fs, no Date.now()), so
 // these are in-process unit tests, not subprocess runs — the real boundary
 // (reading config.json/the mirror file, writing the mirror) is exercised by the
@@ -14,8 +14,8 @@
 // never silently ride a routine past CC's real 7-day auto-expiry cliff.
 
 import { describe, test, expect } from 'bun:test';
-import { planCron, commitCron, computeWakeSpread, promptHash, REREGISTER_AGE_MS, filterRoutinesByIds } from '../scripts/cron-registry';
-import { shiftCron } from '../scripts/cron-tz-shift';
+import { planCron, commitCron, computeWakeSpread, promptHash, REREGISTER_AGE_MS, filterRoutinesByIds } from '../scripts/lib/routines/registry';
+import { shiftCron } from '../scripts/lib/cron-shift';
 
 const PLUGIN_ROOT = '/plugin';
 const BOOT_A = 'boot-aaa';

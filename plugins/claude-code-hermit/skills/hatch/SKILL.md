@@ -378,7 +378,7 @@ The script-rendered Artifact pages (dashboard, proposals) read their fixed UI ch
 
 Run **only** when the chosen `language` is set and is not `en`:
 
-1. Emit the English scaffold: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact-strings-scaffold.ts <language> <current-ISO-timestamp>`.
+1. Emit the English scaffold: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <language> <current-ISO-timestamp>`.
 2. Translate every value inside the `strings` object into the operator's language. Leave the keys and any `{placeholder}` tokens **verbatim** (word order may move around a token, but the token text must not change or be translated). Leave the `language` and `generated` fields as emitted.
 3. Write the result to `.claude-code-hermit/state/artifact-strings.json`.
 
@@ -539,72 +539,33 @@ The plugin's hooks and boot scripts require specific Bash permissions to run wit
 - `hatch_target == "local"` → merge into `.claude/settings.local.json` (gitignored)
 - `hatch_target == "committed"` → merge into `.claude/settings.json` (committed, current behavior)
 
-Merge these into the target file:
+**Do not restate the permission list here or anywhere else.** `apply-settings.ts` holds the
+only copy (its sealed `HERMIT_ALLOW`); ask it what the target file is missing:
 
-**Required permissions:**
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(git diff:*)",
-      "Bash(git status:*)",
-      "Bash(git log:*)",
-      "Bash(bun */scripts/cost-tracker.ts*)",
-      "Bash(bun */scripts/heartbeat-precheck.ts*)",
-      "Bash(bun */scripts/reflect-precheck.ts*)",
-      "Bash(bun */scripts/archive-shell.ts*)",
-      "Bash(bun */scripts/evaluate-session.ts*)",
-      "Bash(bun */scripts/append-metrics.ts*)",
-      "Bash(bun */scripts/resolve-prop.ts*)",
-      "Bash(bun */scripts/next-prop-id.ts*)",
-      "Bash(bun */scripts/proposal.ts*)",
-      "Bash(bun */scripts/record-gate.ts*)",
-      "Bash(bun */scripts/queue-micro-proposal.ts*)",
-      "Bash(bun */scripts/micro-proposal.ts*)",
-      "Bash(bun */scripts/generate-summary.ts*)",
-      "Bash(bun */scripts/proposals-index.ts*)",
-      "Bash(bun */scripts/update-reflection-state.ts*)",
-      "Bash(bun */scripts/apply-reflection-actions.ts*)",
-      "Bash(bun */scripts/transcript-digest.ts*)",
-      "Bash(bun */scripts/setup-token-mint.ts*)",
-      "Bash(bun */scripts/cron-tz-shift.ts*)",
-      "Bash(bun */scripts/evolve-plan.ts*)",
-      "Bash(bun */scripts/evolve-finalize.ts*)",
-      "Bash(bun */scripts/manifest-seed.ts*)",
-      "Bash(bun */scripts/apply-settings.ts*)",
-      "Bash(bun */scripts/channel-log.ts*)",
-      "Bash(bun */scripts/channel-send.ts*)",
-      "Bash(bun */scripts/session-archive.ts*)",
-      "Bash(bun */scripts/routine-precheck.ts*)",
-      "Bash(bun */scripts/cron-registry.ts*)",
-      "Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)",
-      "Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)",
-      "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
-      "Edit(.claude-code-hermit/**)"
-    ]
-  }
-}
+```
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> permissions-plan
 ```
 
-**Why each one:**
+It writes nothing and prints one JSON line: `{"missing":[...],"obsolete":[...]}` — the sealed
+entries the target lacks, and any entries from retired plugin versions it still carries.
+
+**What the permissions buy:**
 
 - `git diff`, `git status`, `git log` — session-diff.ts hook auto-populates `## Changed` in SHELL.md
-- `bun */scripts/<name>.ts` — Stop hooks (cost-tracker, session-diff, evaluate-session) and precheck scripts (heartbeat-precheck, reflect-precheck), scoped to plugin scripts only. Includes `manifest-seed.ts`, which the seeding sub-step below runs to write the template-manifest baseline (deferred from Step 2 so the permission is in place first). Includes `channel-log.ts`, which weekly-review's consolidation step runs unattended to list/mark/prune the episodic channel log (PROP-010). Includes `session-archive.ts`, the deterministic session-lifecycle writer (idle/close/auto-close/open/recover) that replaced the session-mgr subagent — without this permission a hatched hermit would be asked (functionally denied headlessly) on its first idle transition. Includes `resolve-prop.ts`, `next-prop-id.ts`, `record-gate.ts`, `queue-micro-proposal.ts`, `micro-proposal.ts` — the proposal-act/proposal-create/reflect mechanics wrappers; without these, ID resolution, ID generation, gate-verdict routing, and micro-approval queuing (including HA's `ha-morning-brief`, which reaches `micro-proposal.ts` via `.claude-code-hermit/bin/hermit-run`) would all be functionally denied headlessly. Includes `proposal.ts` — the single CLI (create/patch/shell-append/next-task/routine verbs) that proposal-create/proposal-act use for every `.claude-code-hermit/` state-dir write; without it, proposal creation and every accept/defer/dismiss/resolve mutation would be functionally denied in background/worktree sessions (the harness's isolation guard blocks the Write/Edit tools there, not Bash). Includes `apply-reflection-actions.ts` and `transcript-digest.ts` — reflect's transactional resolution-action apply and its behavioral-telemetry digest; without these a scheduled reflect silently degrades to introspection-only and never resolves a proposal. Includes `setup-token-mint.ts` — the login-token renewal driver `/relogin` runs; that skill exists to be driven from chat when the hermit's login is about to lapse, so a permission prompt there is an outright denial and the renewal it was meant to perform never happens
-- `.claude-code-hermit/bin/hermit-run micro-proposal *` / `proposal-metrics-report *` — domain plugins (HA's `ha-morning-brief`, the `domain-brainstorm` skills) reach core's shared scripts through the project-resident `bin/hermit-run`, since their own `${CLAUDE_PLUGIN_ROOT}` can't resolve core's versioned cache dir. The space before `*` is a word boundary — matches `micro-proposal brief-cycle`, not a `micro-proposal…`-prefixed name — and `hermit-exec.sh` additionally rejects `/`/`..` in the script name, so the route can't reach a script outside core's `scripts/`. Without these, headless domain briefs and brainstorm metrics checks are functionally denied
+- `bun */scripts/<name>.ts` — Stop hooks (cost-tracker, session-diff, evaluate-session) and precheck scripts (`heartbeat.ts precheck`, reflect-precheck), scoped to plugin scripts only. Includes `manifest-seed.ts`, which the seeding sub-step below runs to write the template-manifest baseline (deferred from Step 2 so the permission is in place first). Includes `channel-log.ts`, which weekly-review's consolidation step runs unattended to list/mark/prune the episodic channel log (PROP-010). Includes `session-archive.ts`, the deterministic session-lifecycle writer (idle/close/auto-close/open/recover) that replaced the session-mgr subagent — without this permission a hatched hermit would be asked (functionally denied headlessly) on its first idle transition. Includes `proposal.ts` — the single proposal CLI. Its create/patch/shell-append/next-task/routine verbs perform every `.claude-code-hermit/` state-dir write proposal-create and proposal-act make; without it, proposal creation and every accept/defer/dismiss/resolve mutation would be functionally denied in background/worktree sessions (the harness's isolation guard blocks the Write/Edit tools there, not Bash). Its resolve-id/gate/queue-micro/micro/index/metrics/success-signal verbs are the proposal-act/proposal-create/reflect mechanics; without them, ID resolution, gate-verdict routing, and micro-approval queuing would all be functionally denied headlessly. Includes `apply-reflection-actions.ts` and `transcript-digest.ts` — reflect's transactional resolution-action apply and its behavioral-telemetry digest; without these a scheduled reflect silently degrades to introspection-only and never resolves a proposal. Includes `setup-token-mint.ts` — the login-token renewal driver `/relogin` runs; that skill exists to be driven from chat when the hermit's login is about to lapse, so a permission prompt there is an outright denial and the renewal it was meant to perform never happens
+- `.claude-code-hermit/bin/hermit-run proposal micro *` / `proposal metrics *` — domain plugins (HA's `ha-morning-brief`, the `domain-brainstorm` skills) reach core's shared scripts through the project-resident `bin/hermit-run`, since their own `${CLAUDE_PLUGIN_ROOT}` can't resolve core's versioned cache dir. Each grant is pinned to the one verb that plugin needs, never a bare `hermit-run proposal *` — that would also expose `create`, `patch`, `shell-append`, `next-task` and `routine`, i.e. arbitrary state-dir writes. The space before `*` is a word boundary — matches `proposal micro .claude-code-hermit brief-cycle`, not a `micro…`-prefixed verb — and `hermit-exec.sh` additionally rejects `/`/`..` in the script name, so the route can't reach a script outside core's `scripts/`. Without these, headless domain briefs and brainstorm metrics checks are functionally denied
 - `bash -c 'AGENT_DIR=...` — SessionStart hook that loads session context on every startup
 - `Edit` on `.claude-code-hermit/**` — heartbeat appends to SHELL.md, increments config.json tick counter, and skills update session state without prompting (Edit rules cover all file-editing tools, including Write)
 
 **Steps:**
 
-1. If the target settings file exists: read it and identify which required permissions are missing from `permissions.allow`
-2. If the target settings file does not exist: all permissions are missing
-3. If no permissions are missing: skip silently
-4. If permissions need to be added: show the operator the list of permissions to add and ask with `AskUserQuestion` (header: "Hook perms") — options: **Yes — add** (merge so hooks run without prompting, default) / **No — skip** (you'll be prompted during sessions).
-5. If the operator confirms: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> allow`
-   (Merges the full allow-list additively; never removes existing entries.)
+1. Run `permissions-plan` (command above) against the resolved settings file and parse the JSON line.
+2. If both `missing` and `obsolete` are empty: skip silently.
+3. Otherwise show the operator the entries — what will be added, and what retired entries will be removed — and ask with `AskUserQuestion` (header: "Hook perms") — options: **Yes — add** (merge so hooks run without prompting, default) / **No — skip** (you'll be prompted during sessions).
+4. If the operator confirms: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> permissions-sync`
+   (Adds every missing sealed entry and removes only entries from retired plugin versions. Operator-authored rules are never touched.)
    Then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json automode-seed` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: the auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`, so seeding anywhere else would be a silent no-op. Tell the operator in one line: "Also recorded an auto-mode exception and environment context in `.claude/settings.local.json` so unattended upgrade migrations can run the plugin's sealed settings ops."
-6. If the operator declines: skip (including the auto-mode seed above — an operator who wants prompts should not get a standing classifier exception), and note: "You may be prompted to approve hook commands during sessions. Run `/claude-code-hermit:hermit-settings permissions` to add them later."
+5. If the operator declines: skip (including the auto-mode seed above — an operator who wants prompts should not get a standing classifier exception), and note: "You may be prompted to approve hook commands during sessions. Run `/claude-code-hermit:hermit-settings permissions` to add them later."
 
 **Seed `state/template-manifest.json`** (deferred from Step 2 — now that the `bun */scripts/manifest-seed.ts*` permission is in place). It records the sha256 pristine-baseline that the `hermit-evolve` drift signals depend on. **Do not hand-compute the hashes** (an LLM cannot sha256 reliably; the script makes them correct by construction). Read the current plugin version from `${CLAUDE_SKILL_DIR}/../../.claude-plugin/plugin.json`, then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts .claude-code-hermit` with this JSON on stdin:
 

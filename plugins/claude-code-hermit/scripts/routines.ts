@@ -1,0 +1,70 @@
+// routines.ts — single CLI for the routine mechanics, over lib/routines/.
+//
+// Usage:
+//   bun routines.ts due <hermit-state-dir>
+//     The monitor's poll. Owns all gating/state/liveness writes and prints a
+//     `ROUTINE_DUE [hermit-routine:<id>] …` line only when routines are due.
+//     That line is load-bearing: record-operator-action.ts's isRoutinePrompt()
+//     matches it, and tests/auto-close.test.ts guards it against drift.
+//
+//   bun routines.ts precheck <id> <rdw> [delivery]
+//     Per-routine gate at fire time. Prints PROCEED or a SKIP verdict.
+//
+//   bun routines.ts cron-registry <mode> <hermit-state-dir> [plugin-root] [--ids …]
+//     Reconciles the CronCreate registry against config.json.
+//
+//   bun routines.ts tz-shift "<cron-expr>" "<from-tz>"
+//     Rewrites a cron expression into the machine's local timezone.
+//
+//   bun routines.ts log-event <routine-id> <event> [delivery]
+//     Appends one line to state/routine-metrics.jsonl.
+//
+// Verb dispatch is lazy, and for the first three the verb is spliced out of
+// process.argv so each module keeps the argv indices it used as a standalone
+// script — ~650 lines of scheduling, cron matching and registry reconciliation
+// stay byte-for-byte unchanged rather than being rethreaded through a
+// parameter. `due` runs on every monitor interval, so it has no business
+// loading the registry or tz-shift graphs to do it.
+
+export {}; // module scope: every import here is dynamic, and top-level await needs it
+
+const USAGE = 'Usage: bun routines.ts <due|precheck|cron-registry|tz-shift|log-event> [args...]';
+
+const verb = process.argv[2];
+const rest = process.argv.slice(3);
+
+switch (verb) {
+  // argv-index-preserving verbs: drop the verb, then let the module run.
+  case 'due':
+    process.argv.splice(2, 1);
+    await import('./lib/routines/due');
+    break;
+  case 'precheck':
+    process.argv.splice(2, 1);
+    await import('./lib/routines/precheck');
+    break;
+  // registry.ts exports pure helpers that tests import, so its CLI cannot run at
+  // module scope; it is a named export instead.
+  case 'cron-registry': {
+    process.argv.splice(2, 1);
+    const { runCli } = await import('./lib/routines/registry');
+    runCli();
+    break;
+  }
+
+  // Already parameterized — pass the tail directly.
+  case 'tz-shift': {
+    const { run } = await import('./lib/routines/tz-shift');
+    run(rest);
+    break;
+  }
+  case 'log-event': {
+    const { run } = await import('./lib/routines/event');
+    run(rest);
+    break;
+  }
+
+  default:
+    console.error(USAGE);
+    process.exit(1);
+}

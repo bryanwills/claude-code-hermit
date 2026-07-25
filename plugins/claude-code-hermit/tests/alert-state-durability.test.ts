@@ -1,5 +1,5 @@
 // Durability of alert-state.json against interrupted/concurrent writes (issue #463).
-// Both writers (heartbeat-precheck.ts, update-alert-state.ts) must (a) write atomically
+// Both writers (lib/heartbeat/precheck.ts, lib/heartbeat/alert-update.ts) must (a) write atomically
 // via temp+rename so a killed write never leaves a truncated file, and (b) never reinit
 // the skill-owned alerts{}/self_eval{} over a file that exists — a present-but-unparseable
 // file is quarantined to alert-state.json.corrupt-<ts>, not silently overwritten.
@@ -41,8 +41,8 @@ function withTmp(fn: (dir: string) => Promise<void> | void) {
 
 /** Run heartbeat-precheck from inside the workdir, return verdict. */
 async function precheck(dir: string, peek = false): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: [...(peek ? ['--peek'] : []), '.claude-code-hermit'],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', ...(peek ? ['--peek'] : []), '.claude-code-hermit'],
     cwd: dir,
     env: { HERMIT_NOW: NOW },
   });
@@ -51,8 +51,8 @@ async function precheck(dir: string, peek = false): Promise<string> {
 
 /** Run update-alert-state against the workdir's alert-state.json with a stdin payload. */
 async function updateAlertState(dir: string, payload: object): Promise<void> {
-  await runScript('update-alert-state.ts', {
-    args: [alertPath(dir)],
+  await runScript('heartbeat.ts', {
+    args: ['alert-state', alertPath(dir)],
     stdin: JSON.stringify(payload),
   });
 }

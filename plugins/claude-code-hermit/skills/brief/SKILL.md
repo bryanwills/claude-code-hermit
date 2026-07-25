@@ -29,7 +29,7 @@ For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at 
 
 **Boundary rule:** `sessions/SHELL.md` is the live session document — it stays in main, never goes to the runner. Archived `sessions/S-*-REPORT.md` bodies, `cost-summary.md`, `proposals/*.md` frontmatter, `OPERATOR.md`, and `NEXT-TASK.md` go to the runner.
 
-**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md, `today-cost.ts` output) and skip the runner-derived lines. Note nothing fatal to the operator.
+**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md, `cost-report.ts today` output) and skip the runner-derived lines. Note nothing fatal to the operator.
 
 **Eval runner return schema** — the runner returns a JSON object conforming to this block. The schema is byte-identical in `reference.md` (producer) and here (consumer); a contract test asserts this.
 
@@ -67,7 +67,7 @@ Emphasize forward-looking content. Compose from runner JSON (see Dispatch above)
 - If `config.always_on` is `true`: run `bash "${CLAUDE_PLUGIN_ROOT}/scripts/check-upgrade.sh" "${CLAUDE_PLUGIN_ROOT}"` from the project root. If it emits an `---Upgrade Available---` section, append a final line to the brief: `⚠ Plugin update available: <the version line>` (pass the directive verbatim). Output nothing if the script is silent. (Interactive operators already see this notice at session-start step 2; the gate avoids double-notification.)
 
 <!-- keep in sync with plugins/claude-code-homeassistant-hermit/skills/ha-morning-brief/SKILL.md step 9a — same MP lifecycle protocol -->
-After composing the morning brief, age the micro-proposal queue in one pass: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/micro-proposal.ts .claude-code-hermit brief-cycle`. It reads `state/micro-proposals.json`, runs the whole lifecycle atomically (re-nudges `follow_up_count` 1 entries, expires `follow_up_count` ≥2 entries and records each expiry), and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…]}` — never hand-edit the file or read it separately. Render straight from that verdict:
+After composing the morning brief, age the micro-proposal queue in one pass: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts micro .claude-code-hermit brief-cycle`. It reads `state/micro-proposals.json`, runs the whole lifecycle atomically (re-nudges `follow_up_count` 1 entries, expires `follow_up_count` ≥2 entries and records each expiry), and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…]}` — never hand-edit the file or read it separately. Render straight from that verdict:
 - Each `new` entry (first display): append as a final line. Without `options`: `MP-YYYYMMDD-N (tier N): [question]` — Reply `"MP-YYYYMMDD-N yes"` or `"MP-YYYYMMDD-N no"`. (Bare `yes`/`no` accepted when only one pending.) With `options`: render them numbered under the question and reply hint `Reply "MP-YYYYMMDD-N <number or label>"` (bare accepted when only one pending).
 - Each `renudged` entry: append with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] — ignore again to drop it" (if it carries `options`, re-render them numbered beneath it so the choices aren't lost on the re-nudge).
 - `expired` entries were dropped this cycle — do not surface them, and do not resurrect unless fresh evidence accumulates from scratch.
@@ -79,7 +79,7 @@ After composing the morning brief, age the micro-proposal queue in one pass: run
 
 Emphasize backward-looking content. Compose from runner JSON (see Dispatch above) and live main-session data:
 - **Sessions today:** use `runner.sessions_today`; also note any progress in the current SHELL.md progress log (read SHELL.md in main **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**).
-- **Today's cost:** run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/today-cost.ts"` (live, in main) — do not use `cost-summary.md` for today's figure; it is only updated once per day and will be stale in always-on deployments.
+- **Today's cost:** run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts today"` (live, in main) — do not use `cost-summary.md` for today's figure; it is only updated once per day and will be stale in always-on deployments.
 - **Key findings:** use `runner.findings`
 - **Tomorrow:** use `runner.tomorrow`
 - After generating summary: if `runtime.json session_state` is `in_progress` or SHELL.md has progress entries since last report, note it in the brief (e.g., "Session still open — run /session-close to archive.") and let the operator close explicitly. Exception: if `config.always_on` is `true` AND `config.routines` contains an enabled entry with `id` `daily-auto-close` (the midnight routine, which invokes `/claude-code-hermit:session-close --scheduled`), suppress the note — the auto-close routine archives it at midnight. Idle transitions are owned by the `session` skill and `scripts/session-archive.ts`; brief does not trigger them.
@@ -130,4 +130,4 @@ Next: description of next action (or "Session complete" if all done)
 
 When invoked with "brief today", "daily summary", or "what happened today":
 
-Compose from runner JSON (mode: `daily`). For today's cost and token total, run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/today-cost.ts"` (live, in main). Use `runner.cost_context.week` and `runner.cost_context.all_time` for aggregates from `cost-summary.md`. Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done, cost, and proposals created/resolved.
+Compose from runner JSON (mode: `daily`). For today's cost and token total, run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts today"` (live, in main). Use `runner.cost_context.week` and `runner.cost_context.all_time` for aggregates from `cost-summary.md`. Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done, cost, and proposals created/resolved.

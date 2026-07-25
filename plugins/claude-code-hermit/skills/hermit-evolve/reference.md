@@ -226,18 +226,17 @@ Same logic as init step 8, but target the file determined by `hatch_target` (res
 - `hatch_target == "local"` → `.claude/settings.local.json`
 - `hatch_target == "committed"` → `.claude/settings.json`
 
-Delegate the additive permission merge to core's sealed writer rather than hand-enumerating the list here — `apply-settings.ts` holds the canonical `HERMIT_ALLOW` (so it can't drift from what `hatch` installs), writes via `fs` (so it works even under the strict hook profile, where an `Edit`/`Write` to `.claude/settings*.json` is denied), and is idempotent:
+Run the sync verb — it is the single owner of this list, so do not restate the entries here or diff them by hand. It holds the canonical `HERMIT_ALLOW` (so it can't drift from what `hatch` installs), writes via `fs` (so it works even under the strict hook profile, where an `Edit`/`Write` to `.claude/settings*.json` is denied), and is idempotent:
 
-```bash
-bun ${plugin_root}/scripts/apply-settings.ts <resolved-settings-file> allow
+```
+bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> permissions-sync
 ```
 
-where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.claude/settings.json` (committed) per `hatch_target`, and `${plugin_root}` is the baked absolute plugin root. It prints one `allow: <entry>` line per newly-added permission (silent when everything is already present) — collect those for the step-10 report; if it prints nothing, the report notes no permission changes. **Delegated mode: run it without asking** (a missing `bun` permission breaks hooks, so this is non-optional); it only ever adds, never removes. (On a hermit whose allow-list predates `apply-settings.ts` itself, this command may hit a permission gate inside this subagent, which can't prompt — relay that to the step-10 report so the operator can add `Bash(bun */scripts/apply-settings.ts*)` and re-run, rather than wedging.) Separately, remove stale permissions from previous versions if found in the target file:
+where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.claude/settings.json` (committed) per `hatch_target`, and `<plugin_root>` is the baked absolute plugin root.
 
-- `Bash(python3:*)`, `Bash(node:*)` — replaced by scoped bun entries
-- `Edit(.claude/.claude-code-hermit/**)`, `Write(.claude/.claude-code-hermit/**)` — replaced by `.claude-code-hermit/**` (v0.0.6 path change)
-- `Bash(bun */scripts/run-with-profile.ts*)` — the run-with-profile wrapper was removed; profile-gated hooks now self-gate on `AGENT_HOOK_PROFILE`
-- `Bash(bun */scripts/suggest-compact.ts*)` — the suggest-compact Stop-hook stage was removed; compaction is owned by native autocompact, the watchdog backstop, and emergency clear
+**Delegated mode: run it without asking** (a missing `bun` permission breaks hooks, so this is non-optional). It adds every sealed entry the target lacks and removes only entries this plugin shipped in a previous version and has since retired — an operator's own rules are never touched, and a target that is already current is not rewritten at all. Parse its one JSON line, `{"missing":[...],"obsolete":[...]}`, and report the two counts in the step-10 report. Both empty means the target was already current; say nothing.
+
+(On a hermit whose allow-list predates `apply-settings.ts` itself, this command may hit a permission gate inside this subagent, which can't prompt — relay that to the step-10 report so the operator can add `Bash(bun */scripts/apply-settings.ts*)` and re-run, rather than wedging.)
 
 ### 9. Write updated config
 

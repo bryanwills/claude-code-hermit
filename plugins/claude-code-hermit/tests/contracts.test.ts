@@ -951,7 +951,7 @@ describe('kill metrics contract', () => {
   const proposalTemplate = read(path.join(TEMPLATES, 'PROPOSAL.md.template'));
   const proposalCreate = read(path.join(SKILLS, 'proposal-create', 'SKILL.md'));
   const capabilityBrainstorm = read(path.join(SKILLS, 'capability-brainstorm', 'SKILL.md'));
-  const reportScriptPath = path.join(SCRIPTS, 'proposal-metrics-report.ts');
+  const reportScriptPath = path.join(SCRIPTS, 'lib', 'proposals', 'metrics.ts');
   const reportScript = fs.existsSync(reportScriptPath) ? read(reportScriptPath) : '';
 
   test('PROPOSAL.md.template must declare a tags field so proposal-create can write it', () => {
@@ -971,7 +971,7 @@ describe('kill metrics contract', () => {
 
   test('proposal-create triage-verdict event must include evidence_source', () => {
     // missing → triage-survival rate cannot be segmented by brainstorm origin.
-    // record-gate.ts (tests/scripts.test.ts describe('record-gate')) guards that the
+    // the gate verb (tests/scripts.test.ts describe('proposal gate')) guards that the
     // flag actually lands in the appended event; this guards the call site passes it.
     expect(proposalCreate).toContain('--evidence-source "<evidence source>"');
   });
@@ -990,14 +990,14 @@ describe('kill metrics contract', () => {
     expect(proposalScript).toMatch(/type:\s*'created'[\s\S]{0,80}\btags\b/);
   });
 
-  test('capability-brainstorm kill criteria must invoke proposal-metrics-report.ts', () => {
+  test('capability-brainstorm kill criteria must invoke the metrics verb', () => {
     const parts = capabilityBrainstorm.split('## Kill criteria');
     expect(parts.length).toBeGreaterThan(1); // Kill criteria section missing
     const killSection = parts[1].split('## ')[0];
-    expect(killSection).toContain('proposal-metrics-report.ts');
+    expect(killSection).toContain('proposal.ts metrics');
   });
 
-  test('proposal-metrics-report.ts segment registry must discriminate capability-brainstorm', () => {
+  test('proposal.ts metrics segment registry must discriminate capability-brainstorm', () => {
     // The contract between the emitter (proposal-create) and the consumer
     // (brainstorm kill criteria) holds via evidence_source (triage) and tags (acceptance).
     expect(fs.existsSync(reportScriptPath)).toBe(true);
@@ -1032,8 +1032,8 @@ describe('procedure capture contract', () => {
     return killParts[1].split('**Detection')[0];
   }
 
-  test('reflect procedure-capture kill criteria must invoke proposal-metrics-report.ts', () => {
-    expect(procedureCaptureKillSection()).toContain('proposal-metrics-report.ts');
+  test('reflect procedure-capture kill criteria must invoke the metrics verb', () => {
+    expect(procedureCaptureKillSection()).toContain('proposal.ts metrics');
   });
 
   test('reflect kill criteria must document the 25%/30% kill thresholds', () => {
@@ -1259,8 +1259,8 @@ describe('hermit-routines diff-registration contract', () => {
   const skillContent = read(path.join(SKILLS, 'hermit-routines', 'SKILL.md'));
 
   test('SKILL.md wires the diff planner into load\'s success path', () => {
-    expect(skillContent).toContain('cron-registry.ts plan');
-    expect(skillContent).toContain('cron-registry.ts commit');
+    expect(skillContent).toContain('routines.ts cron-registry plan');
+    expect(skillContent).toContain('routines.ts cron-registry commit');
   });
 
   test('load\'s default success path is no longer an unconditional CronList sweep', () => {
@@ -2626,9 +2626,9 @@ describe('proposal-triage batch contract', () => {
   });
 
   test('reflect/branches.md parses the title-tagged triage verdict grammar', () => {
-    // Routed via record-gate.ts's PROCEED/DROP tokens rather than the raw agent
+    // Routed via the gate verb's PROCEED/DROP tokens rather than the raw agent
     // grammar directly — the raw `CREATE: <title>` line still flows into the
-    // script's stdin (see the record-gate.ts invocation just above these lines).
+    // script's stdin (see the gate-verb invocation just above these lines).
     expect(branches).toContain('PROCEED|CREATE');
     expect(branches).toContain('DROP|DUPLICATE:<PROP-ID>');
     expect(branches).toContain('DROP|SUPPRESS:<code>');
@@ -2823,25 +2823,42 @@ describe('proposal lifecycle: no tool-mediated state writes', () => {
   });
 });
 
-// hermit-evolve Step 8 must delegate the permission merge to apply-settings.ts
-// rather than re-enumerate the allow-list in prose — the hand-maintained list had
-// already drifted (15 of 28 entries) and instructed a Write rule the writer strips.
+// hermit-evolve Step 8 must delegate the whole permission reconciliation to
+// apply-settings.ts rather than restate it in prose — both halves. The additive
+// list had already drifted (15 of the canonical entries) and instructed a Write
+// rule the writer strips; the removal half was a hand-grown bullet list that only
+// ever got a new line when someone remembered, which is why it now lives in the
+// script's sealed HERMIT_OBSOLETE registry instead.
 describe('hermit-evolve permission delegation contract', () => {
   const evolveRef = fs.readFileSync(path.join(SKILLS, 'hermit-evolve', 'reference.md'), 'utf-8');
+  const step8 = evolveRef.slice(
+    evolveRef.indexOf('### 8. Ensure plugin permissions'),
+    evolveRef.indexOf('### 9. Write updated config'),
+  );
 
-  test('Step 8 delegates to apply-settings.ts allow', () => {
-    expect(evolveRef).toMatch(/apply-settings\.ts <resolved-settings-file> allow/);
+  test('Step 8 delegates to apply-settings.ts permissions-sync', () => {
+    expect(evolveRef).toMatch(/apply-settings\.ts <resolved-settings-file> permissions-sync/);
   });
 
   test('Step 8 no longer hand-enumerates the per-script allow-list', () => {
     // The removed prose opened with this phrase before listing scripts by name.
     expect(evolveRef).not.toContain('The required entries are:');
-    // A couple of the previously-enumerated script names must not reappear as an
-    // inline permission list (they may still appear elsewhere in the file).
-    const step8 = evolveRef.slice(
-      evolveRef.indexOf('### 8. Ensure plugin permissions'),
-      evolveRef.indexOf('### 9. Write updated config'),
-    );
-    expect(step8).not.toContain('`queue-micro-proposal.ts`, `micro-proposal.ts`');
+    // Structural, not name-based: an enumeration is *many* `Bash(bun */scripts/…)`
+    // patterns written out in Step 8. Exactly one is expected and allowed — the
+    // bootstrap caveat naming apply-settings.ts's own grant, for a hermit whose
+    // allow-list predates the script that would add it. Naming two example scripts
+    // here (the previous form) went stale the moment those scripts were absorbed
+    // into proposal.ts verbs: the assertion still passed, but against nothing.
+    const inlineGrants = step8.match(/Bash\(bun \*\/scripts\//g) ?? [];
+    expect(inlineGrants.length).toBe(1);
+    expect(step8).toContain('Bash(bun */scripts/apply-settings.ts*)');
+  });
+
+  test('Step 8 no longer hand-maintains the stale-entry removal list', () => {
+    // These were bullets the model was told to scrub by hand; HERMIT_OBSOLETE owns
+    // them now, so a new script deletion reaches operators without editing prose.
+    for (const stale of ['run-with-profile.ts', 'suggest-compact.ts', 'Bash(python3:*)']) {
+      expect(step8).not.toContain(stale);
+    }
   });
 });

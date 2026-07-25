@@ -1,0 +1,161 @@
+// Suppress EPIPE errors (e.g. when stdout pipe closes early in tests)
+process.stdout.on('error', () => {});
+
+// UserPromptSubmit hook — the single process for the whole prompt path.
+//
+// Replaces seven separately-registered hooks. Each of those re-read stdin,
+// re-parsed the channel envelope, and re-read config; the operator paid all
+// seven process launches on every message they sent. This reads stdin once,
+// parses once, and runs the stages in an order that is now explicit in code
+// rather than implied by their order in hooks.json.
+//
+// Two behaviors that the multi-process shape could not express:
+//
+//   1. Shutdown is terminal. While a shutdown is pending, the audit/context
+//      stages still run, then the shutdown stage answers and the pipeline
+//      ends — whether or not its send succeeded. Previously a failed shutdown
+//      send fell through, and an exact `status` message could then send and
+//      block on its own, discarding the shutdown-relay instruction the model
+//      was supposed to act on. Pause/resume and harness commands are skipped
+//      for the same reason: mutating session state mid-shutdown answers a
+//      message the shutdown reply has already answered.
+//
+//   2. One disposition per prompt. Output is buffered and emitted once at the
+//      end: a confirmed block prints the decision JSON *alone*, because mixed
+//      plain text and JSON on stdout does not parse as a decision and the
+//      block would be silently lost.
+//
+// Contract preserved from the scripts this replaces: always exit 0, never
+// block on a failed send, and per-stage errors are isolated — a throwing stage
+// is logged to stderr and the rest still run (the stop-pipeline.ts pattern).
+
+import { hermitDir } from './lib/cc-compat';
+import { parseChannelEnvelope } from './lib/channel-envelope';
+import { loadConfig } from './lib/channel-auth';
+import { readRuntimeJson } from './lib/runtime';
+import type { StageContext, StageResult } from './lib/prompt-stages/types';
+
+import { run as recordOperatorAction } from './record-operator-action';
+import { run as promptContext } from './lib/prompt-stages/prompt-context';
+import { run as channelReplyReminder } from './lib/prompt-stages/channel-reply-reminder';
+import { run as pauseKeyword } from './lib/prompt-stages/pause-keyword';
+import { run as harnessCommand } from './lib/prompt-stages/harness-command';
+import { run as shutdownGate } from './lib/prompt-stages/shutdown-gate';
+import { run as channelStatusResponder } from './lib/prompt-stages/channel-status-responder';
+
+// Matches stop-pipeline.ts — a prompt payload far past this is not something a
+// stage can act on, and reading it unbounded is the only way this hook can hang.
+const MAX_STDIN_BYTES = 1024 * 1024;
+
+const out: string[] = [];
+let blockReason: string | null = null;
+
+async function stage(name: string, fn: (ctx: StageContext) => any, ctx: StageContext): Promise<void> {
+  if (blockReason) return; // a disposition is already settled
+  try {
+    const result: StageResult | void = await fn(ctx);
+    if (!result) return;
+    if (result.context) out.push(result.context);
+    if (result.block) blockReason = result.block;
+  } catch (e: any) {
+    process.stderr.write(`[user-prompt-pipeline] ${name}: ${e?.message || e}\n`);
+  }
+}
+
+async function main(raw: string): Promise<void> {
+  // Defensive parse: stages that don't need the payload still run on bad input,
+  // exactly as stop-pipeline.ts does.
+  let prompt: string | null = null;
+  try {
+    const payload = JSON.parse(raw);
+    prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : null;
+  } catch {
+    process.stderr.write('[user-prompt-pipeline] malformed stdin — continuing with an empty prompt\n');
+    // A parse failure on non-empty stdin means a prompt did arrive and was
+    // mangled — MAX_STDIN_BYTES truncation cuts mid-JSON. Carry on with an empty
+    // prompt rather than returning: the audit and timestamp stages don't need the
+    // text, and every prompt-matching stage below fails closed on ''. Returning
+    // here would leave the turn unrecorded and let heartbeat's AUTO_CLOSE gate
+    // read the operator as silent.
+    if (raw.length === 0) return;
+    prompt = '';
+  }
+  if (prompt === null) return; // parsed, but no prompt for the stages to act on
+
+  const dir = hermitDir();
+
+  let configCache: any;
+  let configRead = false;
+  let runtimeCache: any;
+  let runtimeRead = false;
+
+  const ctx: StageContext = {
+    dir,
+    prompt,
+    envelope: parseChannelEnvelope(prompt),
+    config() {
+      if (!configRead) { configRead = true; try { configCache = loadConfig(dir); } catch { configCache = null; } }
+      return configCache;
+    },
+    runtime() {
+      if (!runtimeRead) { runtimeRead = true; try { runtimeCache = readRuntimeJson(); } catch { runtimeCache = null; } }
+      return runtimeCache;
+    },
+  };
+
+  // 1-3. Audit and context. These run on every prompt, including during a
+  // shutdown — the operator's message is still recorded and the reply reminder
+  // still names the chat to answer on.
+  await stage('record-operator-action', () => { recordOperatorAction(prompt); }, ctx);
+  await stage('prompt-context', promptContext, ctx);
+  await stage('channel-reply-reminder', channelReplyReminder, ctx);
+
+  const rt = ctx.runtime();
+  const shutdownPending = !!rt && !!rt.shutdown_requested_at && !rt.shutdown_completed_at;
+
+  if (shutdownPending) {
+    // Terminal: answer the shutdown and stop. Nothing below runs — not pause,
+    // not a harness command, not status.
+    await stage('shutdown-gate', shutdownGate, ctx);
+    return;
+  }
+
+  // 4-5. State writers. Both land before any network send, so an outer-timeout
+  // kill can lose a send but never a state write.
+  await stage('pause-keyword', pauseKeyword, ctx);
+  await stage('harness-command', harnessCommand, ctx);
+
+  // 6. Deterministic status.
+  await stage('channel-status-responder', channelStatusResponder, ctx);
+}
+
+function emit(): void {
+  // A block must be the only thing on stdout: Claude Code parses stdout as a
+  // decision object, and any leading context text makes that parse fail, which
+  // would drop the block and deliver the prompt anyway. The accumulated context
+  // is moot on a blocked prompt — the model never sees that turn.
+  if (blockReason) {
+    console.log(JSON.stringify({ decision: 'block', reason: blockReason }));
+    return;
+  }
+  for (const chunk of out) process.stdout.write(chunk.endsWith('\n') ? chunk : `${chunk}\n`);
+}
+
+try {
+  let buf = '';
+  let truncated = false;
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    if (truncated) return;
+    buf += chunk;
+    if (buf.length > MAX_STDIN_BYTES) { buf = buf.slice(0, MAX_STDIN_BYTES); truncated = true; }
+  });
+  process.stdin.on('error', () => {});
+  process.stdin.on('end', () => {
+    main(buf)
+      .catch((e: any) => process.stderr.write(`[user-prompt-pipeline] ${e?.message || e}\n`))
+      .finally(() => { try { emit(); } catch { /* fail open */ } process.exit(0); });
+  });
+} catch {
+  process.exit(0);
+}

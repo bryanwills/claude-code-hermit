@@ -33,7 +33,7 @@ const VALID_BUDGET_ACTION = ['alert', 'pause'];
 const VALID_TELEMETRY_DEST = ['webhook'];
 const TIME_RE = /^\d{2}:\d{2}$/;
 const ENV_VAR_RE = /^[A-Z_][A-Z0-9_]*$/;
-// Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with routine-due.ts.
+// Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with lib/routines/due.ts.
 const ROUTINE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** True for loopback hosts (localhost/127.0.0.1/::1) where a plaintext bearer token stays on-box. */

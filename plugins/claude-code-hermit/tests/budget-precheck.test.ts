@@ -1,4 +1,4 @@
-// PROP-016 budget-gate contract for heartbeat-precheck.ts.
+// PROP-016 budget-gate contract for `heartbeat.ts precheck`.
 //
 // Two mechanisms under test:
 //  1. The pause-escape gate: a budget-reason pause (action:"pause") would normally
@@ -70,8 +70,8 @@ const budgetEntry = (notified: boolean) => ({
 });
 
 async function precheck(dir: string): Promise<string> {
-  const r = await runScript('heartbeat-precheck.ts', {
-    args: ['.claude-code-hermit'],
+  const r = await runScript('heartbeat.ts', {
+    args: ['precheck', '.claude-code-hermit'],
     cwd: dir,
     env: { HERMIT_NOW: NOW },
   });

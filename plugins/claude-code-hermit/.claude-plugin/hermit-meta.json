@@ -4,7 +4,7 @@
   "credentials": [
     {
       "name": "setup-token",
-      "expiry_probe": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/setup-token-probe.ts",
+      "expiry_probe": "bun ${CLAUDE_PLUGIN_ROOT}/scripts/setup-token-mint.ts probe",
       "warn_days": 14,
       "reauth_skill": "/claude-code-hermit:relogin"
     }

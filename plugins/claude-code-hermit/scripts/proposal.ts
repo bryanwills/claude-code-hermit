@@ -44,19 +44,41 @@
 //     Upserts by `id` into config.json's routines array. Output:
 //     `OK|added` / `OK|updated` or `ERROR|<reason>`.
 //
-// Exit 0 always; only a missing verb/state-dir argv exits 1 (creation should
-// never proceed on a mis-invocation, but a resolved, validated failure is
-// always a verdict line, not a crash).
+// The verbs below are the proposal-lifecycle *readers and satellites*, absorbed
+// from what used to be one top-level script each. They keep their own stdout
+// grammars and exit codes rather than being forced into `ok()`/`fail()` —
+// callers branch on those, and rewriting them would be a behavior change:
+//
+//   resolve-id <stateDir> <operator-input>       MATCH|… AMBIGUOUS|… NONE|…
+//   gate <stateDir> --gate … --caller …          PROCEED|… DROP|… GATE_FAILED
+//   queue-micro <stateDir>                       QUEUED|<MP-id> / DUPLICATE|<id>
+//   micro <stateDir> resolve|nudge|brief-cycle   RESOLVED|… NUDGED|… NONE|… / JSON
+//   index <stateDir>                             OK|<n> proposals / SKIP|…
+//   metrics [<stateDir>] [--source=<key>]        markdown table / one-line verdict
+//   success-signal --validate "<predicate>"      OK (exit 0) / reason (exit 1)
+//   success-signal <stateDir> <date> <sess> <p>  one JSON verdict line
+//
+// Exit 0 always, EXCEPT: a missing verb/state-dir argv exits 1 (creation should
+// never proceed on a mis-invocation, but a resolved, validated failure is always
+// a verdict line, not a crash), and `queue-micro` / `micro` / `success-signal
+// --validate` exit 1 on malformed input — a silent queue-drop or a silently
+// accepted bad predicate is the failure mode those three exist to remove.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readStdin, readJson } from './lib/cli';
+import { readStdin, readJson, flagValue } from './lib/cli';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, PATCH_KEY_RE } from './lib/md-write';
 import { computeBase, readTimezone, SUFFIX_LETTERS } from './lib/prop-id';
 import { zonedISOStamp, utcISOStamp } from './lib/time';
-import { rebuildIndex } from './proposals-index';
+import { rebuildIndex, run as runIndex } from './lib/proposals/index-rebuild';
 import { run as regenerateSummary } from './generate-summary';
+import { run as runResolveId } from './lib/proposals/resolve';
+import { run as runGate } from './lib/proposals/gate';
+import { run as runQueueMicro } from './lib/proposals/queue-micro';
+import { run as runMicro } from './lib/proposals/micro';
+import { run as runMetrics } from './lib/proposals/metrics';
+import { run as runSuccessSignal } from './lib/proposals/success-signal';
 
 type Json = any;
 
@@ -79,11 +101,6 @@ function warn(msg: string): void {
 function regenTail(stateDir: string): void {
   try { rebuildIndex(stateDir); } catch (e: any) { warn(`index rebuild failed: ${e.message}`); }
   try { regenerateSummary(path.join(stateDir, 'state')); } catch (e: any) { warn(`summary regen failed: ${e.message}`); }
-}
-
-function flagValue(argv: string[], flag: string): string | undefined {
-  const i = argv.indexOf(flag);
-  return i === -1 ? undefined : argv[i + 1];
 }
 
 // ---------------------------------------------------------------- create ---
@@ -395,12 +412,31 @@ async function verbRoutine(stateDir: string): Promise<void> {
 
 // ------------------------------------------------------------------- main --
 
+const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|success-signal';
+
 async function main(): Promise<void> {
   const verb = process.argv[2];
   const stateDir = process.argv[3];
 
+  // `metrics` defaults its state dir, and `success-signal --validate` is a pure
+  // grammar check that reads no state at all — for those two, argv[3] is not a
+  // state dir and the guard below must not demand one. Both take the whole tail
+  // (argv[3] onward) so their own arg parsing is unchanged from when they were
+  // standalone scripts.
+  const tail = process.argv.slice(3);
+  if (verb === 'metrics') return runMetrics(tail);
+  if (verb === 'success-signal') return runSuccessSignal(tail);
+  // `index` was fail-open before it was absorbed: a missing state dir answered
+  // `SKIP|no state dir` on stdout at exit 0, never a usage error. Preserve that —
+  // it is a derived-cache rebuild, and its callers treat a non-zero exit as a
+  // real failure rather than "nothing to do".
+  if (verb === 'index' && !stateDir) {
+    process.stdout.write('SKIP|no state dir\n');
+    process.exit(0);
+  }
+
   if (!verb || !stateDir) {
-    console.error('Usage: bun proposal.ts <create|patch|shell-append|next-task|routine> <hermit-state-dir> [args...]');
+    console.error(`Usage: bun proposal.ts <${VERBS}> <hermit-state-dir> [args...]`);
     process.exit(1);
   }
 
@@ -411,6 +447,11 @@ async function main(): Promise<void> {
     case 'shell-append': return verbShellAppend(stateDir, rest);
     case 'next-task': return verbNextTask(stateDir);
     case 'routine': return verbRoutine(stateDir);
+    case 'resolve-id': return runResolveId(stateDir, rest[0]);
+    case 'gate': return runGate(stateDir, rest);
+    case 'queue-micro': return runQueueMicro(stateDir);
+    case 'micro': return runMicro(stateDir, rest);
+    case 'index': return runIndex(stateDir);
     default:
       fail('unknown-verb');
   }

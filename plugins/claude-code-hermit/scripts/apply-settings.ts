@@ -6,6 +6,14 @@
  * Operations:
  *   task-id <id>             Merge env.CLAUDE_CODE_TASK_LIST_ID
  *   allow                    Merge hermit's fixed permissions.allow list
+ *   permissions-plan         Print {"missing":[],"obsolete":[]} for the target — read-only,
+ *                            writes nothing. `missing` is the sealed HERMIT_ALLOW entries the
+ *                            target lacks; `obsolete` is the sealed HERMIT_OBSOLETE entries it
+ *                            still carries. Callers (hatch, hermit-evolve) show this diff.
+ *   permissions-sync         Apply that plan: add every missing HERMIT_ALLOW entry and remove
+ *                            only entries listed in HERMIT_OBSOLETE. Prints the applied plan.
+ *                            Operator-authored entries are structurally untouchable — removal
+ *                            is filtered by the sealed registry, never by shape or heuristic.
  *   artifact-allow           Merge just ["Artifact"] into permissions.allow — kept as its
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
@@ -19,7 +27,9 @@
  *
  * Rules:
  * - Never removes existing keys or array entries — except channel-env, which strips
- *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings).
+ *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings),
+ *   and permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
+ *   registry below (scripts this plugin itself shipped and has since deleted).
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
  */
@@ -29,31 +39,26 @@ import path from 'node:path';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
-// Fixed allow-list — sealed here; cannot be extended by callers.
-// Keep in sync with the "Required permissions" list in skills/hatch/SKILL.md Step 8.
+// Fixed allow-list — sealed here; cannot be extended by callers. This array is the
+// single source of truth: hatch and hermit-evolve reach it through permissions-plan /
+// permissions-sync rather than restating it, so there is nothing to keep in sync.
 const HERMIT_ALLOW = [
   'Bash(git diff:*)',
   'Bash(git status:*)',
   'Bash(git log:*)',
   'Bash(bun */scripts/cost-tracker.ts*)',
-  'Bash(bun */scripts/heartbeat-precheck.ts*)',
+  'Bash(bun */scripts/heartbeat.ts precheck*)',
   'Bash(bun */scripts/reflect-precheck.ts*)',
   'Bash(bun */scripts/archive-shell.ts*)',
   'Bash(bun */scripts/evaluate-session.ts*)',
   'Bash(bun */scripts/append-metrics.ts*)',
-  'Bash(bun */scripts/resolve-prop.ts*)',
-  'Bash(bun */scripts/next-prop-id.ts*)',
   'Bash(bun */scripts/proposal.ts*)',
-  'Bash(bun */scripts/record-gate.ts*)',
-  'Bash(bun */scripts/queue-micro-proposal.ts*)',
-  'Bash(bun */scripts/micro-proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',
-  'Bash(bun */scripts/proposals-index.ts*)',
   'Bash(bun */scripts/update-reflection-state.ts*)',
   'Bash(bun */scripts/apply-reflection-actions.ts*)',
   'Bash(bun */scripts/transcript-digest.ts*)',
   'Bash(bun */scripts/setup-token-mint.ts*)',
-  'Bash(bun */scripts/cron-tz-shift.ts*)',
+  'Bash(bun */scripts/routines.ts tz-shift*)',
   'Bash(bun */scripts/evolve-plan.ts*)',
   'Bash(bun */scripts/evolve-finalize.ts*)',
   'Bash(bun */scripts/manifest-seed.ts*)',
@@ -61,16 +66,50 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/channel-log.ts*)',
   'Bash(bun */scripts/channel-send.ts*)',
   'Bash(bun */scripts/session-archive.ts*)',
-  'Bash(bun */scripts/routine-precheck.ts*)',
-  'Bash(bun */scripts/cron-registry.ts*)',
+  'Bash(bun */scripts/routines.ts precheck*)',
+  'Bash(bun */scripts/routines.ts cron-registry*)',
   // Domain plugins reach core's shared scripts through the project-resident
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
-  // cache dir). Space before * is a word boundary — `micro-proposal *` matches
-  // `micro-proposal brief-cycle` but not a `micro-proposal…`-prefixed name.
-  'Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)',
-  'Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)',
+  // cache dir). Pinned to the two verbs they actually need, not a bare
+  // `hermit-run proposal *` — that would also hand them create, patch,
+  // shell-append, next-task and routine, i.e. arbitrary state-dir writes. The
+  // space before * is a word boundary: `proposal micro *` matches
+  // `proposal micro .claude-code-hermit brief-cycle` but not a
+  // `micro…`-prefixed verb.
+  'Bash(.claude-code-hermit/bin/hermit-run proposal micro *)',
+  'Bash(.claude-code-hermit/bin/hermit-run proposal metrics *)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
+];
+
+// Entries this plugin itself shipped in an earlier version and has since retired.
+// permissions-sync removes these from an operator's settings; nothing else is ever
+// removed, so an operator's own rules cannot be caught by a shape or prefix match.
+// Append here in the same change that deletes a permissioned script — this registry
+// is what makes a deletion reach already-hatched hermits.
+const HERMIT_OBSOLETE = [
+  'Bash(python3:*)',
+  'Bash(node:*)',
+  'Edit(.claude/.claude-code-hermit/**)',
+  'Write(.claude/.claude-code-hermit/**)',
+  'Bash(bun */scripts/run-with-profile.ts*)',
+  'Bash(bun */scripts/suggest-compact.ts*)',
+  'Bash(bun */scripts/next-prop-id.ts*)',
+  // Proposal satellites absorbed into proposal.ts verbs — the scripts are gone,
+  // so these grants now name nothing.
+  'Bash(bun */scripts/resolve-prop.ts*)',
+  'Bash(bun */scripts/record-gate.ts*)',
+  'Bash(bun */scripts/queue-micro-proposal.ts*)',
+  'Bash(bun */scripts/micro-proposal.ts*)',
+  'Bash(bun */scripts/proposals-index.ts*)',
+  // …and the two hermit-run routes that pointed at the pre-absorption names.
+  'Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)',
+  'Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)',
+  // Heartbeat/routine scripts absorbed into heartbeat.ts and routines.ts verbs.
+  'Bash(bun */scripts/heartbeat-precheck.ts*)',
+  'Bash(bun */scripts/routine-precheck.ts*)',
+  'Bash(bun */scripts/cron-registry.ts*)',
+  'Bash(bun */scripts/cron-tz-shift.ts*)',
 ];
 
 // Sealed autoMode entries — operator-owned policy seeded at attended hatch and
@@ -157,6 +196,28 @@ function mergeAllow(settings: Json, entries: string[]): string[] {
   return added;
 }
 
+interface PermissionsPlan {
+  missing: string[];
+  obsolete: string[];
+}
+
+// Read-only diff of the target against the two sealed registries above.
+function planPermissions(settings: Json): PermissionsPlan {
+  const allow: string[] = Array.isArray(settings?.permissions?.allow) ? settings.permissions.allow : [];
+  const existing = new Set<string>(allow);
+  return {
+    missing: HERMIT_ALLOW.filter((e) => !existing.has(e)),
+    obsolete: HERMIT_OBSOLETE.filter((e) => existing.has(e)),
+  };
+}
+
+// Removes exactly the entries handed in — always a subset of HERMIT_OBSOLETE.
+function removeAllow(settings: Json, entries: string[]): void {
+  if (entries.length === 0 || !Array.isArray(settings?.permissions?.allow)) return;
+  const drop = new Set(entries);
+  settings.permissions.allow = settings.permissions.allow.filter((e: string) => !drop.has(e));
+}
+
 function mergeAutoModeList(settings: Json, key: 'allow' | 'environment', entries: string[]): void {
   settings.autoMode ??= {};
   const block = settings.autoMode as Record<string, unknown>;
@@ -203,7 +264,10 @@ if (!targetFile || !op) {
 }
 
 const settings = readTargetJson(targetFile);
-let addedAllow: string[] = [];
+
+// permissions-plan reports without touching the file; every other op falls through
+// to the write below.
+let readOnly = false;
 
 switch (op) {
   case 'task-id': {
@@ -214,8 +278,33 @@ switch (op) {
     break;
   }
 
+  // Legacy alias for permissions-sync's additive half. No in-repo caller since
+  // hatch and hermit-evolve moved to the verbs — kept for already-hatched hermits
+  // still running older skill text.
   case 'allow': {
-    addedAllow = mergeAllow(settings, HERMIT_ALLOW);
+    mergeAllow(settings, HERMIT_ALLOW);
+    break;
+  }
+
+  case 'permissions-plan': {
+    console.log(JSON.stringify(planPermissions(settings)));
+    readOnly = true;
+    break;
+  }
+
+  case 'permissions-sync': {
+    // Plan first: the diff is computed against the pre-merge state, so the printed
+    // result is exactly what this run changed.
+    const plan = planPermissions(settings);
+    // Nothing to do — don't rewrite the file. hermit-evolve runs this on every
+    // upgrade, and a target that is already current must not come back reformatted
+    // (or with a fresh mtime) just for having been checked.
+    if (plan.missing.length === 0 && plan.obsolete.length === 0) readOnly = true;
+    else {
+      mergeAllow(settings, HERMIT_ALLOW);
+      removeAllow(settings, plan.obsolete);
+    }
+    console.log(JSON.stringify(plan));
     break;
   }
 
@@ -269,14 +358,9 @@ switch (op) {
   }
 
   default: {
-    console.error(`Unknown operation: ${op}. Valid ops: task-id, allow, artifact-allow, automode-seed, deny, channel-env`);
+    console.error(`Unknown operation: ${op}. Valid ops: task-id, allow, permissions-plan, permissions-sync, artifact-allow, automode-seed, deny, channel-env`);
     process.exit(1);
   }
 }
 
-writeJson(targetFile, settings);
-
-// After the write lands, report each newly-granted allow entry (one per line) so
-// hermit-evolve's Step 8 can list what it added in its run report. Silent when
-// nothing was added.
-for (const e of addedAllow) console.log(`allow: ${e}`);
+if (!readOnly) writeJson(targetFile, settings);

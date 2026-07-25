@@ -1,4 +1,4 @@
-// Tests for scripts/cron-tz-shift.ts — timezone-aware cron shifting
+// Tests for `routines.ts tz-shift` — timezone-aware cron shifting
 // (bun test port of cron-tz-shift.test.sh).
 //
 // Exercised as a subprocess (runScript): the machine timezone (TZ env, resolved
@@ -17,8 +17,8 @@ const W = '2026-01-15T12:00:00Z'; // winter reference (Lisbon=UTC+0)
 const S = '2026-07-15T12:00:00Z'; // summer reference (Lisbon=UTC+1)
 
 const shift = (tz: string, now: string, cron: string, fromTz: string) =>
-  runScript('cron-tz-shift.ts', {
-    args: [cron, fromTz],
+  runScript('routines.ts', {
+    args: ['tz-shift', cron, fromTz],
     env: { TZ: tz, HERMIT_CRON_TZ_SHIFT_NOW: now },
   });
 

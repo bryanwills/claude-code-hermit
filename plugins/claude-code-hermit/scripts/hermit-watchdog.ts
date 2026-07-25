@@ -33,7 +33,7 @@ import { tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from 
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { costLogPath } from './lib/cc-compat';
-import { wallMinutes } from './cron-tz-shift';
+import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';
@@ -262,7 +262,7 @@ export function inActiveHours(activeHours: Json, timezone: string, ref?: Date): 
     if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) return true; // fail-open on malformed window
     const now = currentHHMM(timezone, ref);
     if (now === null) return true; // fail-open on unparseable tz
-    return start <= now && now < end; // end-exclusive, matching heartbeat-precheck
+    return start <= now && now < end; // end-exclusive, matching heartbeat.ts precheck
   } catch {
     return true; // fail-open
   }

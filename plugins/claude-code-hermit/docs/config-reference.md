@@ -256,7 +256,7 @@ Publishing of hermit-generated pages to Claude Code's [Artifacts](https://code.c
 
 **Disabling artifacts at the Claude Code level** (independent of these flags) — any of: `"disableArtifact": true` in `settings.json`, `CLAUDE_CODE_DISABLE_ARTIFACT=1`, or adding `Artifact` to `permissions.deny`. With any of these set, publish attempts fail and the hermit falls back the same way as a missing entitlement. If you run the hermit in tmux/headless (the norm for `hermit-start`), also set `CLAUDE_CODE_ARTIFACT_AUTO_OPEN=0` in `config.env` — otherwise a successful publish tries to open a browser with nothing to receive it.
 
-Modify with `/hermit-settings artifact-dashboard`, `artifact-proposals`, `artifact-weekly-review`, or `artifact-authorization`. Validated by `validate-config.ts`. Renderers: `scripts/lib/dashboard.ts`, `scripts/lib/proposals-page.ts`, `scripts/render-weekly-artifact.ts` (all deterministic — no model authorship except the dashboard's embedded brief text — so a refresh costs a render, not a generation).
+Modify with `/hermit-settings artifact-dashboard`, `artifact-proposals`, `artifact-weekly-review`, or `artifact-authorization`. Validated by `validate-config.ts`. Renderers: `scripts/lib/dashboard.ts`, `scripts/lib/proposals-page.ts`, `scripts/lib/weekly-artifact.ts` (via `scripts/artifact.ts render weekly`) (all deterministic — no model authorship except the dashboard's embedded brief text — so a refresh costs a render, not a generation).
 
 ---
 

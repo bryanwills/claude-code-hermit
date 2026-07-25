@@ -131,32 +131,30 @@ describe('.worktreeinclude template', () => {
 });
 
 // -------------------------------------------------------
-// apply-settings.ts HERMIT_ALLOW <-> hatch/SKILL.md Step 8 allow-list
+// hatch no longer restates the allow-list — apply-settings.ts owns it, and hatch
+// reaches it through permissions-plan / permissions-sync. There is no second copy
+// to keep in sync; tests/apply-settings-permissions.test.ts covers the behavior.
 // -------------------------------------------------------
-describe('hatch allow-list sync', () => {
-  const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'apply-settings.ts');
-
-  function extractHermitAllow(): string[] {
-    const src = fs.readFileSync(SCRIPT_PATH, 'utf-8');
-    const m = src.match(/const HERMIT_ALLOW\s*=\s*(\[[\s\S]*?\]);/);
-    if (!m) throw new Error('HERMIT_ALLOW not found in apply-settings.ts');
-    return eval(m[1]) as string[];
-  }
-
-  function extractSkillAllow(): string[] {
+describe('hatch permission delegation', () => {
+  test('hatch/SKILL.md carries no copied allow-list JSON block', () => {
+    const allowBlocks: unknown[] = [];
     for (const block of skillContent.matchAll(/```json\n([\s\S]*?)```/g)) {
+      let parsed: any;
       try {
-        const parsed = JSON.parse(block[1]);
-        if (parsed?.permissions?.allow) return parsed.permissions.allow as string[];
+        parsed = JSON.parse(block[1]);
       } catch {
-        // non-JSON or unrelated JSON block — keep scanning
+        continue; // non-JSON or unrelated block — keep scanning
       }
+      // Collect, never assert inside the loop: an expect() thrown here would be
+      // caught by the parse guard above and silently pass the test.
+      if (parsed?.permissions?.allow) allowBlocks.push(parsed.permissions.allow);
     }
-    throw new Error('Step 8 allow-list JSON block not found in hatch/SKILL.md');
-  }
+    expect(allowBlocks).toEqual([]);
+  });
 
-  test('HERMIT_ALLOW matches hatch/SKILL.md Step 8 allow-list', () => {
-    expect(extractHermitAllow()).toEqual(extractSkillAllow());
+  test('hatch/SKILL.md Step 8 delegates to the permissions verbs', () => {
+    expect(skillContent).toContain('permissions-plan');
+    expect(skillContent).toContain('permissions-sync');
   });
 });
 
