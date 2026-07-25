@@ -27,7 +27,7 @@ The vendor tree is **not committed to this repo** — hatch installs `laravel/fo
 
 ## Hatch target routing
 
-`/hatch` Step 6 reads `.claude-code-hermit/state/hatch-options.json` (`target` field) to route the CLAUDE-APPEND block: `"local"` → `CLAUDE.local.md`, `"committed"` → `CLAUDE.md`.
+`/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight laravel-forge-hermit`; core's `scripts/domain-hatch.ts` resolves the target and stamps `hatch-options.json`. Step 5 records any operator override with `domain-hatch ensure-target laravel-forge-hermit --target <choice>` and writes the block with `domain-hatch sync-block laravel-forge-hermit`.
 
 ## Core Rules
 

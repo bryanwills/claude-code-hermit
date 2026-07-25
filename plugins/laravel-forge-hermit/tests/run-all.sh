@@ -17,8 +17,20 @@ if ! php php/tests/run.php; then
 fi
 
 echo ""
-echo "--- bun tests (hook + skill-structure) ---"
-if ! bun test tests/hook.test.ts tests/skill-structure.test.ts; then
+# The structural lints call process.exit(), which tears down a shared `bun test`
+# runner before the remaining files load. Run each of those directly and keep
+# `bun test` for the bun:test-based hook suite.
+echo "--- bun tests (hook) ---"
+if ! bun test tests/hook.test.ts; then
+  EXIT=1
+fi
+
+echo ""
+echo "--- structural lints (skill-structure + hatch-skill) ---"
+if ! bun tests/skill-structure.test.ts; then
+  EXIT=1
+fi
+if ! bun tests/hatch-skill.test.ts; then
   EXIT=1
 fi
 

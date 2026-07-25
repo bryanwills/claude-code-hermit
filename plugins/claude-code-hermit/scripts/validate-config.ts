@@ -192,6 +192,57 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     });
   }
 
+  // scheduled_checks are written by domain hatches, which until now had no
+  // validation at all here — a typo'd skill name (issue #651's failure, one
+  // array over) produced a structurally valid config with a dead entry that
+  // nothing caught. Same id grammar as routines: ids travel in the same
+  // markers and JSONL.
+  if (config.scheduled_checks !== undefined && !Array.isArray(config.scheduled_checks)) {
+    errors.push(`scheduled_checks: expected array, got ${config.scheduled_checks === null ? 'null' : typeof config.scheduled_checks}`);
+  } else if (Array.isArray(config.scheduled_checks)) {
+    const checkIds = new Set();
+    config.scheduled_checks.forEach((c: Json, i: number) => {
+      if (!c || typeof c !== 'object' || Array.isArray(c)) {
+        errors.push(`scheduled_checks[${i}]: must be an object`);
+        return;
+      }
+      if (!c.id) errors.push(`scheduled_checks[${i}]: missing id`);
+      else if (typeof c.id !== 'string' || !ROUTINE_ID_RE.test(c.id)) {
+        errors.push(`scheduled_checks[${i}]: id "${c.id}" must match ^[A-Za-z0-9._-]{1,64}$`);
+      }
+      if (!c.skill) errors.push(`scheduled_checks[${i}]: missing skill`);
+      else if (typeof c.skill !== 'string') {
+        errors.push(`scheduled_checks[${i}]: skill must be a string, got ${typeof c.skill}`);
+      }
+      if (c.plugin !== undefined && typeof c.plugin !== 'string') {
+        errors.push(`scheduled_checks[${i}]: plugin must be a string, got ${typeof c.plugin}`);
+      }
+      if (c.enabled !== undefined && typeof c.enabled !== 'boolean') {
+        warnings.push(`scheduled_checks[${i}]: "enabled" should be boolean`);
+      }
+      if (c.id && checkIds.has(c.id)) {
+        warnings.push(`scheduled_checks[${i}]: duplicate id "${c.id}"`);
+      }
+      if (c.id) checkIds.add(c.id);
+    });
+  }
+
+  // _hermit_versions is the applied-migration record hermit-evolve reads to
+  // compute the upgrade gap. A non-string value there makes that comparison
+  // meaningless, and the failure would only surface at upgrade time.
+  if (config._hermit_versions !== undefined) {
+    const hv = config._hermit_versions;
+    if (!hv || typeof hv !== 'object' || Array.isArray(hv)) {
+      errors.push(`_hermit_versions: expected object, got ${hv === null ? 'null' : Array.isArray(hv) ? 'array' : typeof hv}`);
+    } else {
+      for (const [plugin, v] of Object.entries(hv)) {
+        if (typeof v !== 'string') {
+          errors.push(`_hermit_versions.${plugin}: expected string version, got ${v === null ? 'null' : typeof v}`);
+        }
+      }
+    }
+  }
+
   if (config.channels && typeof config.channels === 'object') {
     for (const [name, ch] of Object.entries<Json>(config.channels)) {
       // channels.primary is a magic string key (preferred-channel pointer), not a

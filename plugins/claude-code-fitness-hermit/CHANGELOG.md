@@ -11,6 +11,9 @@
 - `hatch` no longer tells the operator to `cp .env.example .env`; a `.env.example` does not ship with the plugin.
 
 ### Changed
+- `hatch` reads the required core version from `.claude-plugin/hermit-meta.json` at runtime via `domain-hatch preflight`, instead of the hardcoded `1.0.26` floor its prose carried. That floor sat many minor versions below what the manifest declared, so the wizard proceeded against a core too old for it.
+- Target resolution and CLAUDE-APPEND writing are delegated to core: `domain-hatch preflight claude-code-fitness-hermit` resolves the target, `ensure-target` records an operator override, `sync-block` writes the block. The skill no longer detects install scope from `claude plugin list --json` or stamps `hatch-options.json`.
+- `hatch` re-reads `config.json` immediately before merging its routines, scheduled checks and version stamp, instead of reusing the copy it loaded before the wizard ran. Anything written to the file during the wizard is no longer clobbered.
 - Requires core `>=1.2.34`. Core absorbed its proposal satellites into `proposal.ts` verbs, so the shared route this plugin calls through `bin/hermit-run` is now `proposal metrics …`. `bin/hermit-run` resolves a script by bare filesystem probe, so pairing this version with an older core fails with a misleading "plugin may predate this command" error.
 - `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 - `strava-sync` and `strava-health-check` routines removed — `fitness-brief` (morning + evening) now owns Strava connectivity, activity sync, RPE binding, and Run deep-dive as the plugin's two daily beats.

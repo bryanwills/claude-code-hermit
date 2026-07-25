@@ -28,26 +28,27 @@ const SKILL_KEY = '"skill"';
 
 const CORE_HATCH = path.join(PLUGIN_ROOT, 'skills', 'hatch', 'SKILL.md');
 
-const DOMAIN_SLUGS = [
-  'claude-code-dev-hermit',
-  'claude-code-fitness-hermit',
-  'claude-code-homeassistant-hermit',
-  'laravel-forge-hermit',
-];
+// Derived, never enumerated. The hardcoded list this replaced named four slugs
+// and silently omitted feed-hermit, which implements the protocol — the guard
+// against "a change will miss a copy" had itself missed a copy. A plugin joins
+// the set the moment it ships a hatch that writes the resume marker.
+const PLUGINS_DIR = path.join(PLUGIN_ROOT, '..');
 
-function domainHatch(slug: string): string {
-  return path.join(PLUGIN_ROOT, '..', slug, 'skills', 'hatch', 'SKILL.md');
-}
+const DOMAIN_HATCHES = fs
+  .readdirSync(PLUGINS_DIR, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && d.name !== 'claude-code-hermit')
+  .map((d) => d.name)
+  .map((slug) => ({ slug, file: path.join(PLUGINS_DIR, slug, 'skills', 'hatch', 'SKILL.md') }))
+  .filter((p) => fs.existsSync(p.file))
+  .map((p) => ({ ...p, text: fs.readFileSync(p.file, 'utf-8') }))
+  .filter((p) => p.text.includes('hatch-resume.json'))
+  .sort((a, b) => a.slug.localeCompare(b.slug));
 
-for (const slug of DOMAIN_SLUGS) {
+for (const { slug, file, text: content } of DOMAIN_HATCHES) {
   describe(`${slug}:hatch (writer)`, () => {
-    const file = domainHatch(slug);
-
     test(`${slug}:hatch skill exists`, () => {
       expect(fs.existsSync(file)).toBe(true);
     });
-
-    const content = fs.readFileSync(file, 'utf-8');
 
     test(`references ${CANONICAL_PATH}`, () => {
       expect(content).toContain(CANONICAL_PATH);

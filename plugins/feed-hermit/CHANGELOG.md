@@ -6,6 +6,10 @@
 - No-op `Write(path)` settings rules no longer trigger a boot warning; `Write(tmp/**)` is now `Edit(tmp/**)` so tmp fetch-scratch writes are auto-approved.
 
 ### Changed
+- `hatch` reads the required core version from `.claude-plugin/hermit-meta.json` at runtime via `domain-hatch preflight`, instead of the hardcoded `1.2.22` floor its prose carried. That floor sat below what the manifest declared, so the wizard proceeded against a core too old for it.
+- Target resolution and CLAUDE-APPEND writing are delegated to core: `domain-hatch preflight feed-hermit` resolves the target, `ensure-target` records an operator override, `sync-block` writes the block. The skill no longer detects install scope from `claude plugin list --json` or stamps `hatch-options.json`.
+- `hatch` re-reads `config.json` immediately before writing the feed block, routines, scheduled check and archive registration, instead of reusing the copy it loaded before the wizard ran. Anything written to the file during the wizard is no longer clobbered.
+- Requires core `>=1.2.34` for the shared `domain-hatch` protocol. `bin/hermit-run` resolves a script by bare filesystem probe, so pairing this version with an older core fails with a misleading "plugin may predate this command" error.
 - The CLAUDE-APPEND block dropped the per-type fetch dispatch detail and the routine/scheduled-check tables, and no longer carries fetch-cost numbers — `docs/schema.md` owns them as the `tokens_approx` defaults, so the two copies can no longer drift. 3,203 B → ~2,384 B. The untrusted-content rule stays verbatim; the allowlist line now states that `fetch-guard` fails open when `feed-sources.md` is unreadable.
 - `feed-brief` § Security points at the CLAUDE-APPEND rule instead of restating it in different words.
 

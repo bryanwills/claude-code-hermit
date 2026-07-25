@@ -78,6 +78,13 @@ const HERMIT_ALLOW = [
   // `micro…`-prefixed verb.
   'Bash(.claude-code-hermit/bin/hermit-run proposal micro *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal metrics *)',
+  // The shared domain-hatch protocol, pinned per verb for the same reason:
+  // `domain-hatch *` would hand every caller `ensure-target` and `sync-block`
+  // — writes to core state and to the operator's CLAUDE.md — when most of a
+  // hatch run only needs to read `preflight`.
+  'Bash(.claude-code-hermit/bin/hermit-run domain-hatch preflight *)',
+  'Bash(.claude-code-hermit/bin/hermit-run domain-hatch ensure-target *)',
+  'Bash(.claude-code-hermit/bin/hermit-run domain-hatch sync-block *)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];

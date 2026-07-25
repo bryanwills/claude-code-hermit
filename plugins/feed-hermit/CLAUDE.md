@@ -11,7 +11,7 @@ claude plugin marketplace add gtapps/claude-code-hermit
 claude plugin install feed-hermit@claude-code-hermit --scope local
 ```
 
-After install, run `/feed-hermit:hatch` in the target project. The core hermit (`claude-code-hermit` ≥1.2.30) must be installed and hatched first — `hatch` will prompt if it isn't.
+After install, run `/feed-hermit:hatch` in the target project. The core hermit (`claude-code-hermit` ≥1.2.34) must be installed and hatched first — `hatch` will prompt if it isn't.
 
 ## Plugin Structure
 
@@ -33,7 +33,7 @@ After install, run `/feed-hermit:hatch` in the target project. The core hermit (
 
 ## Hatch target routing
 
-`/hatch` reads `.claude-code-hermit/state/hatch-options.json` (written by core hatch) to determine where to append the CLAUDE-APPEND block: `target = "local"` → `CLAUDE.local.md`; `target = "committed"`/absent → `CLAUDE.md`. If core hatch hasn't run, the skill offers to run it first via the domain-hatch continuation protocol (writes `state/hatch-resume.json`, invokes `/claude-code-hermit:hatch`, which returns here).
+`/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight feed-hermit`; core's `scripts/domain-hatch.ts` resolves the target and stamps `hatch-options.json`. Step 5 records any operator override with `domain-hatch ensure-target feed-hermit --target <choice>` and appends the block with `domain-hatch sync-block feed-hermit`. If core hatch hasn't run, the skill offers to run it first via the domain-hatch continuation protocol (writes `state/hatch-resume.json`, invokes `/claude-code-hermit:hatch`, which returns here).
 
 ## Data ownership
 

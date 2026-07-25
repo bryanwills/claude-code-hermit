@@ -6,6 +6,10 @@
 - `forge.php deploy-watch <server-id> <site-id> <deploy-id>` replaces the hand-transcribed watch loop in `forge-deploy`; terminal statuses now come from the shared `STATUS_*` constants. `deploy` points at it in its `Watch with:` hint, and a failing poll now emits the exception class as a watch event instead of surfacing only as a `status=timeout` 15 minutes on.
 
 ### Changed
+- `hatch` reads the required core version from `.claude-plugin/hermit-meta.json` at runtime via `domain-hatch preflight`, instead of the hardcoded `1.1.1` floor its prose carried. That floor sat many minor versions below what the manifest declared, so the wizard proceeded against a core too old for it. The PHP 8.5 floor is unaffected and still checked in Step 2.
+- Target resolution and CLAUDE-APPEND writing are delegated to core: `domain-hatch preflight laravel-forge-hermit` resolves the target, `ensure-target` records an operator override, `sync-block` writes the block. The skill no longer detects install scope from `claude plugin list --json` or stamps `hatch-options.json`.
+- `hatch` re-reads `config.json` immediately before merging its scheduled check, runtime-dir registration and version stamp, instead of reusing the copy it loaded before the wizard ran. Anything written to the file during the wizard is no longer clobbered.
+- Requires core `>=1.2.34` for the shared `domain-hatch` protocol. `bin/hermit-run` resolves a script by bare filesystem probe, so pairing this version with an older core fails with a misleading "plugin may predate this command" error.
 - The CLAUDE-APPEND block keeps the surface-then-approve rule and the outage warning but drops the restated 4-step walk (`forge-deploy` and `forge-servers` own it), two of three `call` examples, and the `forge-failed-deploys` contract. 2,993 B → ~2,265 B. Enforcement is now stated accurately: the hook and the in-PHP gate are two layers with the PHP gate authoritative, replacing "neither can be bypassed".
 - `[hygiene]` and `[deploy-safety]` proposal prefixes removed — no skill produces either, so both were vocabulary paid for in every session. `[reliability]` remains.
 

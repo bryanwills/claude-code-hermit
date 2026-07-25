@@ -554,6 +554,7 @@ entries the target lacks, and any entries from retired plugin versions it still 
 - `git diff`, `git status`, `git log` — session-diff.ts hook auto-populates `## Changed` in SHELL.md
 - `bun */scripts/<name>.ts` — Stop hooks (cost-tracker, session-diff, evaluate-session) and precheck scripts (`heartbeat.ts precheck`, reflect-precheck), scoped to plugin scripts only. Includes `manifest-seed.ts`, which the seeding sub-step below runs to write the template-manifest baseline (deferred from Step 2 so the permission is in place first). Includes `channel-log.ts`, which weekly-review's consolidation step runs unattended to list/mark/prune the episodic channel log (PROP-010). Includes `session-archive.ts`, the deterministic session-lifecycle writer (idle/close/auto-close/open/recover) that replaced the session-mgr subagent — without this permission a hatched hermit would be asked (functionally denied headlessly) on its first idle transition. Includes `proposal.ts` — the single proposal CLI. Its create/patch/shell-append/next-task/routine verbs perform every `.claude-code-hermit/` state-dir write proposal-create and proposal-act make; without it, proposal creation and every accept/defer/dismiss/resolve mutation would be functionally denied in background/worktree sessions (the harness's isolation guard blocks the Write/Edit tools there, not Bash). Its resolve-id/gate/queue-micro/micro/index/metrics/success-signal verbs are the proposal-act/proposal-create/reflect mechanics; without them, ID resolution, gate-verdict routing, and micro-approval queuing would all be functionally denied headlessly. Includes `apply-reflection-actions.ts` and `transcript-digest.ts` — reflect's transactional resolution-action apply and its behavioral-telemetry digest; without these a scheduled reflect silently degrades to introspection-only and never resolves a proposal. Includes `setup-token-mint.ts` — the login-token renewal driver `/relogin` runs; that skill exists to be driven from chat when the hermit's login is about to lapse, so a permission prompt there is an outright denial and the renewal it was meant to perform never happens
 - `.claude-code-hermit/bin/hermit-run proposal micro *` / `proposal metrics *` — domain plugins (HA's `ha-morning-brief`, the `domain-brainstorm` skills) reach core's shared scripts through the project-resident `bin/hermit-run`, since their own `${CLAUDE_PLUGIN_ROOT}` can't resolve core's versioned cache dir. Each grant is pinned to the one verb that plugin needs, never a bare `hermit-run proposal *` — that would also expose `create`, `patch`, `shell-append`, `next-task` and `routine`, i.e. arbitrary state-dir writes. The space before `*` is a word boundary — matches `proposal micro .claude-code-hermit brief-cycle`, not a `micro…`-prefixed verb — and `hermit-exec.sh` additionally rejects `/`/`..` in the script name, so the route can't reach a script outside core's `scripts/`. Without these, headless domain briefs and brainstorm metrics checks are functionally denied
+- `.claude-code-hermit/bin/hermit-run domain-hatch preflight *` / `ensure-target *` / `sync-block *` — the shared domain-hatch protocol every domain plugin's `/hatch` runs: the core-version floor check, the CLAUDE target resolution, and the CLAUDE-APPEND block write. Pinned per verb for the same reason as above — a bare `domain-hatch *` would hand every caller `ensure-target` and `sync-block`, which write core state and the operator's `CLAUDE.md`, when most of a hatch run only reads `preflight`. Without these, a domain hatch cannot check whether core is new enough for it and would proceed against a core it declares it cannot run on
 - `bash -c 'AGENT_DIR=...` — SessionStart hook that loads session context on every startup
 - `Edit` on `.claude-code-hermit/**` — heartbeat appends to SHELL.md, increments config.json tick counter, and skills update session state without prompting (Edit rules cover all file-editing tools, including Write)
 
@@ -631,35 +632,15 @@ No `AskUserQuestion` — enabling or disabling `sandbox.*` is entirely the opera
 
 ### 9b. Persist hatch options
 
-After Steps 6–9 complete, write `.claude-code-hermit/state/hatch-options.json`.
+After Steps 6–9 complete, run:
 
-**If the file does not exist**, write:
-
-```json
-{
-  "target": "<local|committed>",
-  "core_install_scope": "<project|local|user|null>",
-  "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
-  "stamped_by": "claude-code-hermit:hatch",
-  "version": "<current plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
-}
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts ensure-target claude-code-hermit --target <local|committed>
 ```
 
-**If the file already exists** (e.g. `claude-code-dev-hermit:hatch` stamped it first), preserve the original `stamped_by` and `stamped_at` and update the rest:
+with the target chosen in Step 6. The script owns the whole schema: it stamps the five canonical fields on a fresh file, and on an existing one (a domain hatch may have stamped it first) it preserves the original `stamped_at`/`stamped_by` and records this run in `last_updated_at`/`last_updated_by`. It also repairs a file that exists without a usable `target`, which the previous file-existence gate left unfixable. Exits non-zero on a failed write; it prints `{ok, action, target, path}` where `action` is `created`, `repaired`, `updated` or `unchanged`.
 
-```json
-{
-  "target": "<local|committed>",
-  "core_install_scope": "<project|local|user|null>",
-  "stamped_at": "<original value — do not overwrite>",
-  "stamped_by": "<original value — do not overwrite>",
-  "last_updated_at": "<current ISO 8601 timestamp with timezone offset>",
-  "last_updated_by": "claude-code-hermit:hatch",
-  "version": "<current plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
-}
-```
-
-This file is read by `hermit-evolve`, `docker-setup`, and `claude-code-dev-hermit:hatch` to inherit the operator's target choice without re-running scope detection.
+This file is read by `hermit-evolve`, `docker-setup`, and every domain hatch to inherit the operator's target choice without re-running scope detection.
 
 ### 9c. Artifact publish permission
 

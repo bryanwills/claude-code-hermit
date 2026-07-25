@@ -11,9 +11,9 @@ Idempotent setup wizard for the fitness plugin. Run **after** `/claude-code-herm
 
 ## Step 1 — Prerequisite check
 
-Read `.claude-code-hermit/config.json`.
+Check whether `.claude-code-hermit/config.json` exists.
 
-If the file does not exist or `_hermit_versions["claude-code-hermit"]` is absent or empty:
+If it does not:
 
 > "The base hermit is not set up in this project yet. Run `/claude-code-hermit:hatch` first, then return here."
 
@@ -25,34 +25,20 @@ Use `AskUserQuestion`: "Would you like to run `/claude-code-hermit:hatch` now? (
   3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
 - **no** → stop.
 
-If `_hermit_versions["claude-code-hermit"]` is present but the version string is earlier than `1.0.26` (compare major.minor.patch numerically), warn:
+If it does exist, run `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-fitness-hermit` and parse the JSON verdict. Branch on `action`:
 
-> "Base hermit version is {version}; this plugin requires ≥1.0.26. Run `/claude-code-hermit:hermit-evolve` to upgrade, then re-run this hatch."
+- **`upgrade-core-package` / `upgrade-core-applied`** → relay the `remedy` string verbatim to the operator and stop.
+- **`verify`** → say:
 
-Stop.
+  > "claude-code-fitness-hermit {self_version} is already installed. Skip to Step 7 to re-verify the installation, or reply 'full' to re-run the full wizard."
 
----
-
-## Step 2 — Idempotency check
-
-Read `_hermit_versions["claude-code-fitness-hermit"]` from `.claude-code-hermit/config.json`.
-
-Read `version` from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
-
-If the versions match, say:
-
-> "claude-code-fitness-hermit {version} is already installed. Skip to Step 8 to re-verify the installation, or reply 'full' to re-run the full wizard."
-
-Use `AskUserQuestion`: "(verify / full)"
-
-- **verify** → skip to Step 8.
-- **full** → continue from Step 3.
-
-If absent or stale: continue from Step 3.
+  Use `AskUserQuestion`: "(verify / full)" — **verify** → skip to Step 7; **full** → continue from Step 2.
+- **`full`** → continue from Step 2.
+- **`ok: false`** → relay `message` and stop.
 
 ---
 
-## Step 3 — .env verification
+## Step 2 — .env verification
 
 **IMPORTANT: Do NOT use `grep`, `cat`, `echo`, or any Bash command to read `.env`. Three of the four required variables contain the literal string `TOKEN` in their name, which triggers the base hermit's deny-patterns hook on any Bash command argument. Use the `Read` tool only.**
 
@@ -86,18 +72,18 @@ If any value is missing or still set to `replace_me`, report which ones and loop
 
 ---
 
-## Step 4 — MCP registration
+## Step 3 — MCP registration
 
-**Step 4.0 — Detect an ambient Strava MCP server.** The operator may already run a Strava MCP server (user-scoped, or configured by another tool). Run `claude mcp list` (Bash) and scan for a server that talks to Strava — a name containing `strava`, or an entry whose command/args reference a Strava MCP package (e.g. `strava-mcp-server`). 
+**Step 3.0 — Detect an ambient Strava MCP server.** The operator may already run a Strava MCP server (user-scoped, or configured by another tool). Run `claude mcp list` (Bash) and scan for a server that talks to Strava — a name containing `strava`, or an entry whose command/args reference a Strava MCP package (e.g. `strava-mcp-server`). 
 
 - **None found** → proceed to install the bundled server below (the default path).
 - **One found** → ask with `AskUserQuestion` (header: "Strava MCP"): **Reuse the existing `<name>` server** (recommended — no duplicate) / **Install the bundled `@r-huijts/strava-mcp-server`**. 
-  - **Reuse** → skip the `.mcp.json` write entirely. Record which server key the skills should target (if it is not `strava`, note in the final report that skill/settings matchers assume the key `strava`, so the operator should either rename their server to `strava` or accept that the fitness skills call `mcp__strava__*`). Continue to Step 5.
+  - **Reuse** → skip the `.mcp.json` write entirely. Record which server key the skills should target (if it is not `strava`, note in the final report that skill/settings matchers assume the key `strava`, so the operator should either rename their server to `strava` or accept that the fitness skills call `mcp__strava__*`). Continue to Step 4.
   - **Install bundled** → proceed below.
 
 This is a local reuse-vs-install choice only — do not attempt to reconcile or edit the operator's other MCP configs.
 
-Using the four values you parsed from `.env` in Step 3 (held in working context — do not re-read .env), write the Strava MCP server entry into the project's `.mcp.json`.
+Using the four values you parsed from `.env` in Step 2 (held in working context — do not re-read .env), write the Strava MCP server entry into the project's `.mcp.json`.
 
 **Do not embed `${VAR}` placeholders — substitute literal values.** Claude Code passes MCP `env` blocks as literal environment variables to the child process; it does not expand shell variable syntax.
 
@@ -131,7 +117,7 @@ Write the updated `.mcp.json` using the Write tool.
 
 ---
 
-## Step 5 — Drop routine prompt files
+## Step 4 — Drop routine prompt files
 
 Copy the four routine prompt templates from the plugin's `state-templates/compiled/` into the consumer's `.claude-code-hermit/compiled/`.
 
@@ -147,34 +133,29 @@ Read the source file (using Read tool), then check if the destination exists (`.
 
 ---
 
-## Step 6 — CLAUDE.md / CLAUDE.local.md inject
+## Step 5 — CLAUDE.md / CLAUDE.local.md inject
 
-**Resolve target file:** Read `.claude-code-hermit/state/hatch-options.json`. Use the `"target"` field:
-- `"local"` → `target_file = CLAUDE.local.md`
-- `"committed"` or absent → `target_file = CLAUDE.md`
-- If the file doesn't exist (no `hatch-options.json` yet — operator's core hermit predates 1.1.1): detect `core_install_scope` from `claude plugin list --json` using the same precedence core hatch resolves via `resolve-siblings.ts --role core-scope` (filter entries where plugin name is `claude-code-hermit` and `enabled == true`; precedence `local` > `project` (both require `projectPath == project root`) > `user` (any `projectPath`) > `null`; map `project` → `committed`, `local`/`user`/`null` → `local`). Ask with `AskUserQuestion` (header: "Visibility") — scope-derived default at position 0 with `(recommended)`: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Write the canonical 5-field schema to `.claude-code-hermit/state/hatch-options.json`:
+**Resolve target file:** Step 1's preflight already returned `target`, `target_file`, `target_default` and `needs_target_question`.
 
-  ```json
-  {
-    "target": "<choice>",
-    "core_install_scope": "<project|local|user|null>",
-    "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
-    "stamped_by": "claude-code-fitness-hermit:hatch",
-    "version": "<current fitness-hermit plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
-  }
-  ```
+If `needs_target_question` is true, ask with `AskUserQuestion` (header: "Visibility") — `target_default` at position 0 with `(recommended)`: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Then record it:
 
-Read `target_file`. Search for the opening marker `<!-- claude-code-fitness-hermit: Fitness Workflow -->`. The matching closing marker is `<!-- /claude-code-fitness-hermit: Fitness Workflow -->`.
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch ensure-target claude-code-fitness-hermit --target <choice>
+```
 
-- **`target_file` does not exist** (greenfield `CLAUDE.local.md` is common) → treat as marker-absent and proceed to the append branch; Edit will create the file.
-- **Marker absent** → append the full contents of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` to `target_file` using Edit.
-- **Marker present** → skip (up-to-date; `hermit-evolve` handles block replacement on upgrade).
+Then write the block:
+
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-fitness-hermit
+```
+
+It appends the `<!-- claude-code-fitness-hermit: Fitness Workflow -->` block when the marker is absent (creating `target_file` if needed) and skips when it is already present; `hermit-evolve` handles block replacement on upgrade.
 
 Stray-block migration (block stranded in the non-target file after a target flip) is handled one-shot by the Upgrade Instructions in this version's CHANGELOG entry, executed by `hermit-evolve` Step 7. Hatch itself stays focused on target-aware setup.
 
 ---
 
-## Step 7 — Knowledge-schema extension
+## Step 6 — Knowledge-schema extension
 
 Read `.claude-code-hermit/knowledge-schema.md`.
 
@@ -203,17 +184,17 @@ Use Edit to make the changes.
 
 ---
 
-## Step 8 — Stamp and register in config.json
+## Step 7 — Stamp and register in config.json
 
-Use the `config.json` content already loaded in Step 1. (Do not re-read the file.)
+Re-read `.claude-code-hermit/config.json` now — the wizard has been running since Step 1 and the on-disk file may have changed. Apply the merges below to that fresh copy.
 
-### 8a — Stamp version
+### 7a — Stamp version
 
-Set `_hermit_versions["claude-code-fitness-hermit"]` to the plugin version retrieved in Step 2.
+Set `_hermit_versions["claude-code-fitness-hermit"]` to `self_version` from Step 1's preflight.
 
 If the key already exists: update the value. If absent: add it alongside the existing `_hermit_versions["claude-code-hermit"]` entry.
 
-### 8b — Merge routines
+### 7b — Merge routines
 
 In the `routines` array, check for each of these four IDs. For any that are **absent**, add the entry. For any that are **present** (by `id`), skip (do not clobber existing operator edits).
 
@@ -252,7 +233,7 @@ In the `routines` array, check for each of these four IDs. For any that are **ab
 }
 ```
 
-### 8c — Merge scheduled_checks
+### 7c — Merge scheduled_checks
 
 In `config.scheduled_checks`, check for an entry with `id: "weekly-coaching-patterns"`. If absent, append it. If present (by `id`), skip — do not clobber existing operator edits.
 
@@ -264,13 +245,13 @@ No prompt needed — this is a read-only analysis. The core daily `scheduled-che
 
 Write the updated `config.json` using Write tool (full file replacement to ensure valid JSON).
 
-### 8d — Auto-mode environment seed
+### 7d — Auto-mode environment seed
 
 Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/automode-env.ts .claude/settings.local.json` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: Claude Code's auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`. This names `www.strava.com` as a trusted external service, so the classifier stops treating the nightly `evening-brief` routine's read-only fetches as unrecognized outbound calls. Additive and idempotent; safe to re-run on every hatch. No prompt needed.
 
 ---
 
-## Step 9 — Final report
+## Step 8 — Final report
 
 Print a structured summary:
 

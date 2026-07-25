@@ -1,0 +1,305 @@
+// Behavioural coverage for the shared domain-hatch protocol.
+//
+// Everything the five domain hatches used to do in prose is asserted here
+// against real files: the version floor read from the manifest (four hatches
+// hardcoded a stale one), the two distinct stale-core remedies, the
+// missing-`target`-key repair, and the marker rules delegated to evolve-plan.
+
+import { describe, test, expect, afterAll } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { freshDirFactory } from './helpers/workdir';
+import { runScript, SCRIPTS_DIR } from './helpers/run';
+import { satisfiesFloor, preflight } from '../scripts/lib/domain-hatch/preflight';
+import { ensureHatchTarget, readTargetState, optionsPath } from '../scripts/lib/domain-hatch/target';
+import { planBlock, applyBlock } from '../scripts/lib/domain-hatch/block';
+
+const { freshDir, cleanup } = freshDirFactory('hermit-domain-hatch-');
+afterAll(cleanup);
+
+const PLUGIN = 'feed-hermit';
+const MARKER = '<!-- feed-hermit: Feed Workflow -->';
+const CLOSING = '<!-- /feed-hermit: Feed Workflow -->';
+const TEMPLATE = `---\n\n${MARKER}\n\n## Feed\n\nSome rules.\n\n${CLOSING}\n`;
+
+// A project with core hatched plus a fake installed domain plugin, wired the
+// way `claude plugin list --json` would report it.
+function scaffold(opts: {
+  coreApplied?: string | null;
+  selfStamped?: string | null;
+  selfVersion?: string;
+  floor?: string;
+  coreInstalled?: string;
+  hatchOptions?: unknown;
+} = {}) {
+  const root = freshDir();
+  const hermit = path.join(root, '.claude-code-hermit');
+  fs.mkdirSync(path.join(hermit, 'state'), { recursive: true });
+
+  const versions: Record<string, string> = {};
+  if (opts.coreApplied !== null) versions['claude-code-hermit'] = opts.coreApplied ?? '1.2.30';
+  if (opts.selfStamped) versions[PLUGIN] = opts.selfStamped;
+  fs.writeFileSync(path.join(hermit, 'config.json'), JSON.stringify({ _hermit_versions: versions }, null, 2));
+
+  if (opts.hatchOptions !== undefined) {
+    fs.writeFileSync(optionsPath(hermit), JSON.stringify(opts.hatchOptions, null, 2));
+  }
+
+  // The domain plugin's install tree.
+  const install = path.join(root, 'installed', PLUGIN);
+  fs.mkdirSync(path.join(install, '.claude-plugin'), { recursive: true });
+  fs.mkdirSync(path.join(install, 'state-templates'), { recursive: true });
+  fs.writeFileSync(
+    path.join(install, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: PLUGIN, version: opts.selfVersion ?? '1.0.4' }),
+  );
+  fs.writeFileSync(
+    path.join(install, '.claude-plugin', 'hermit-meta.json'),
+    JSON.stringify({ required_core_version: opts.floor ?? '>=1.2.30' }),
+  );
+  fs.writeFileSync(path.join(install, 'state-templates', 'CLAUDE-APPEND.md'), TEMPLATE);
+
+  // A fake core plugin root, so core's own installed version is controllable.
+  const coreRoot = path.join(root, 'installed', 'claude-code-hermit');
+  fs.mkdirSync(path.join(coreRoot, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(
+    path.join(coreRoot, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'claude-code-hermit', version: opts.coreInstalled ?? '1.2.33' }),
+  );
+
+  const list = [
+    { id: `${PLUGIN}@mp`, scope: 'local', enabled: true, projectPath: root, installPath: install },
+    { id: 'claude-code-hermit@mp', scope: 'local', enabled: true, projectPath: root, installPath: coreRoot },
+  ];
+
+  return { root, hermit, install, coreRoot, stdinJson: JSON.stringify(list) };
+}
+
+function run(s: ReturnType<typeof scaffold>) {
+  return preflight({
+    pluginId: PLUGIN,
+    hermitDir: s.hermit,
+    projectRoot: s.root,
+    corePluginRoot: s.coreRoot,
+    stdinJson: s.stdinJson,
+  });
+}
+
+describe('satisfiesFloor', () => {
+  test('accepts an equal and a higher version', () => {
+    expect(satisfiesFloor('1.2.30', '>=1.2.30')).toBe(true);
+    expect(satisfiesFloor('1.3.0', '>=1.2.30')).toBe(true);
+    expect(satisfiesFloor('2.0.0', '>=1.2.30')).toBe(true);
+  });
+
+  test('rejects a lower version, including a higher patch on a lower minor', () => {
+    expect(satisfiesFloor('1.2.29', '>=1.2.30')).toBe(false);
+    expect(satisfiesFloor('1.1.99', '>=1.2.30')).toBe(false);
+    expect(satisfiesFloor('1.0.16', '>=1.2.30')).toBe(false);
+  });
+
+  test('an undeclared floor enforces nothing; an unknown version fails a declared one', () => {
+    expect(satisfiesFloor('1.0.0', null)).toBe(true);
+    expect(satisfiesFloor(null, '>=1.2.30')).toBe(false);
+  });
+});
+
+describe('preflight', () => {
+  test('no config.json means core was never hatched', () => {
+    const s = scaffold();
+    fs.rmSync(path.join(s.hermit, 'config.json'));
+    expect(run(s).action).toBe('bootstrap-core');
+  });
+
+  // The bug the five hatches shipped: HA checked 1.0.16, fitness 1.0.26, feed
+  // 1.2.22, forge 1.1.1, while every manifest declared >=1.2.30.
+  test('a stale installed package is reported as a package problem', () => {
+    const r = run(scaffold({ coreInstalled: '1.2.28', coreApplied: '1.2.28' }));
+    expect(r.action).toBe('upgrade-core-package');
+    expect(r.core_floor).toBe('>=1.2.30');
+    expect(r.remedy).toContain('claude plugin update');
+    expect(r.remedy).not.toContain('Run /claude-code-hermit:hermit-evolve, then re-run');
+  });
+
+  // The distinction that matters: hermit-evolve advances applied state and can
+  // never advance installed code, so the two cases need different advice.
+  test('current package with stale applied state is an evolve problem', () => {
+    const r = run(scaffold({ coreInstalled: '1.2.33', coreApplied: '1.2.28' }));
+    expect(r.action).toBe('upgrade-core-applied');
+    expect(r.remedy).toContain('hermit-evolve');
+    expect(r.remedy).not.toContain('claude plugin update');
+  });
+
+  test('full on a first run, verify when the stamped version already matches', () => {
+    expect(run(scaffold({ selfVersion: '1.0.4' })).action).toBe('full');
+    expect(run(scaffold({ selfVersion: '1.0.4', selfStamped: '1.0.3' })).action).toBe('full');
+    expect(run(scaffold({ selfVersion: '1.0.4', selfStamped: '1.0.4' })).action).toBe('verify');
+  });
+
+  test('an uninstalled plugin fails loud rather than resolving to a path', () => {
+    const s = scaffold();
+    const r = preflight({
+      pluginId: 'not-a-plugin',
+      hermitDir: s.hermit,
+      projectRoot: s.root,
+      corePluginRoot: s.coreRoot,
+      stdinJson: s.stdinJson,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('plugin_not_installed');
+  });
+
+  test('reports the target and the block action once a target exists', () => {
+    const s = scaffold({
+      hatchOptions: { target: 'committed', core_install_scope: 'project', stamped_at: 'x', stamped_by: 'y', version: '1.0.0' },
+    });
+    const r = run(s);
+    expect(r.target).toBe('committed');
+    expect(r.target_file).toBe('CLAUDE.md');
+    expect(r.needs_target_question).toBe(false);
+    expect(r.marker).toBe(MARKER);
+    expect(r.append_action).toBe('append'); // no CLAUDE.md in the scratch project yet
+  });
+});
+
+describe('ensureHatchTarget', () => {
+  test('creates the file with a first stamp', () => {
+    const s = scaffold();
+    const res = ensureHatchTarget(s.hermit, { target: 'local', core_scope: 'local', stampedBy: `${PLUGIN}:hatch`, version: '1.0.4' });
+    expect(res.action).toBe('created');
+    const written = JSON.parse(fs.readFileSync(optionsPath(s.hermit), 'utf8'));
+    expect(written.target).toBe('local');
+    expect(written.stamped_by).toBe(`${PLUGIN}:hatch`);
+    expect(written.last_updated_by).toBeUndefined();
+  });
+
+  test('a later writer preserves the first stamp and records itself separately', () => {
+    const s = scaffold();
+    ensureHatchTarget(s.hermit, { target: 'local', core_scope: 'local', stampedBy: 'first:hatch', version: '1.0.0' });
+    const before = JSON.parse(fs.readFileSync(optionsPath(s.hermit), 'utf8'));
+    const res = ensureHatchTarget(s.hermit, { target: 'committed', core_scope: 'project', stampedBy: 'second:hatch', version: '2.0.0' });
+    expect(res.action).toBe('updated');
+    const after = JSON.parse(fs.readFileSync(optionsPath(s.hermit), 'utf8'));
+    expect(after.stamped_by).toBe('first:hatch');
+    expect(after.stamped_at).toBe(before.stamped_at);
+    expect(after.last_updated_by).toBe('second:hatch');
+    expect(after.target).toBe('committed');
+  });
+
+  // The hole the prose had: the write was gated on the FILE being absent while
+  // the read fell back on the KEY being absent, so a file without `target`
+  // silently resolved to committed CLAUDE.md forever.
+  test('a file present without a usable target is a repair, and is asked about first', () => {
+    const s = scaffold({ hatchOptions: { core_install_scope: 'user', version: '1.0.0' } });
+    const state = readTargetState(s.hermit, { core_scope: 'user', target: 'local' });
+    expect(state.target).toBeNull();
+    expect(state.needs_target_question).toBe(true);
+
+    const res = ensureHatchTarget(s.hermit, { target: 'local', core_scope: 'user', stampedBy: `${PLUGIN}:hatch`, version: '1.0.4' });
+    expect(res.action).toBe('repaired');
+    expect(JSON.parse(fs.readFileSync(optionsPath(s.hermit), 'utf8')).target).toBe('local');
+  });
+
+  // hermit-evolve's fallback chain checked both CLAUDE files before falling
+  // back to scope detection. Losing that would flip the offered default for
+  // any project whose block is already placed.
+  test('an existing core block outranks the scope-derived default', () => {
+    const s = scaffold();
+    const scope = { core_scope: 'project' as const, target: 'committed' as const };
+    expect(readTargetState(s.hermit, scope, s.root).target_default).toBe('committed');
+
+    fs.writeFileSync(path.join(s.root, 'CLAUDE.local.md'), '<!-- claude-code-hermit: Session Discipline -->\n');
+    expect(readTargetState(s.hermit, scope, s.root).target_default).toBe('local');
+  });
+
+  test('rewriting identical content is a no-op', () => {
+    const s = scaffold();
+    const args = { target: 'local' as const, core_scope: 'local' as const, stampedBy: `${PLUGIN}:hatch`, version: '1.0.4' };
+    ensureHatchTarget(s.hermit, args);
+    expect(ensureHatchTarget(s.hermit, args).action).toBe('unchanged');
+  });
+});
+
+describe('sync-block', () => {
+  test('appends when the marker is absent, then skips once present', () => {
+    const s = scaffold();
+    const target = path.join(s.root, 'CLAUDE.md');
+    fs.writeFileSync(target, '# Project\n');
+
+    const first = applyBlock(planBlock(s.install, PLUGIN, target, []));
+    expect(first.action).toBe('append');
+    expect(first.written).toBe(true);
+    expect(fs.readFileSync(target, 'utf8')).toContain(MARKER);
+
+    const second = applyBlock(planBlock(s.install, PLUGIN, target, []));
+    expect(second.action).toBe('skip');
+    expect(second.written).toBe(false);
+  });
+
+  test('replaces only when rendered content is piped in and differs', () => {
+    const s = scaffold();
+    const target = path.join(s.root, 'CLAUDE.md');
+    fs.writeFileSync(target, '# Project\n');
+    applyBlock(planBlock(s.install, PLUGIN, target, []));
+
+    const same = planBlock(s.install, PLUGIN, target, [], TEMPLATE);
+    expect(same.action).toBe('skip');
+
+    const changed = TEMPLATE.replace('Some rules.', 'Different rules.');
+    const res = applyBlock(planBlock(s.install, PLUGIN, target, [], changed));
+    expect(res.action).toBe('replace');
+    const text = fs.readFileSync(target, 'utf8');
+    expect(text).toContain('Different rules.');
+    expect(text.split(MARKER).length - 1).toBe(1);
+  });
+
+  // Never add a third copy: with the marker duplicated, a replace could hit the
+  // wrong instance and an append would compound it.
+  test('refuses a duplicated marker instead of appending again', () => {
+    const s = scaffold();
+    const target = path.join(s.root, 'CLAUDE.md');
+    fs.writeFileSync(target, `# Project\n\n${MARKER}\na\n${CLOSING}\n\n${MARKER}\nb\n${CLOSING}\n`);
+    const res = applyBlock(planBlock(s.install, PLUGIN, target, []));
+    expect(res.action).toBe('ambiguous');
+    expect(res.ok).toBe(false);
+    expect(res.written).toBe(false);
+  });
+});
+
+describe('CLI contract', () => {
+  test('preflight prints JSON and exits 0 even when resolution fails', async () => {
+    const s = scaffold();
+    const listFile = path.join(s.root, 'list.json');
+    fs.writeFileSync(listFile, s.stdinJson);
+    const r = await runScript('domain-hatch.ts', {
+      args: ['preflight', 'not-a-plugin', '--state-dir', s.hermit, '--project-root', s.root, '--plugin-list-file', listFile],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).error).toBe('plugin_not_installed');
+  });
+
+  test('a plugin id that looks like a path is rejected', async () => {
+    const s = scaffold();
+    const r = await runScript('domain-hatch.ts', {
+      args: ['preflight', '../../etc/passwd', '--state-dir', s.hermit, '--project-root', s.root],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(JSON.parse(r.stdout).error).toBe('invalid_plugin_id');
+  });
+
+  test('a mutating verb exits non-zero on failure', async () => {
+    const s = scaffold();
+    const r = await runScript('domain-hatch.ts', {
+      args: ['ensure-target', PLUGIN, '--target', 'sideways', '--state-dir', s.hermit, '--project-root', s.root],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(JSON.parse(r.stdout).error).toBe('bad_target');
+  });
+
+  test('the script is on disk where hermit-exec.sh would dispatch it', () => {
+    expect(fs.existsSync(path.join(SCRIPTS_DIR, 'domain-hatch.ts'))).toBe(true);
+  });
+});

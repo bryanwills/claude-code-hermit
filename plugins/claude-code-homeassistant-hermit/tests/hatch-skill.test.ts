@@ -1,5 +1,5 @@
-// Structural lint for the /hatch skill (target-aware routing + schema
-// stamping) — 1:1 port of tests/test_hatch_skill.py (27 cases).
+// Structural lint for the /hatch skill: that it runs the shared domain-hatch
+// protocol rather than carrying its own copy of target resolution and stamping.
 // Grep-level checks against the skill markdown. No runtime skill execution.
 
 import { expect, test } from 'bun:test';
@@ -8,53 +8,84 @@ import { join, resolve } from 'node:path';
 
 const PLUGIN_ROOT = resolve(import.meta.dir, '..');
 const skillText = readFileSync(join(PLUGIN_ROOT, 'skills', 'hatch', 'SKILL.md'), 'utf8');
+const templateText = readFileSync(
+  join(PLUGIN_ROOT, 'state-templates', 'CLAUDE-APPEND.md'),
+  'utf8',
+);
 
-test('references hatch-options.json', () => {
-  expect(skillText).toContain('hatch-options.json');
+// --- Shared domain-hatch protocol ---
+// Target resolution, install-scope detection, and the hatch-options stamp
+// schema live in core's `domain-hatch.ts`. This hatch's obligation is to call
+// the verbs with its own plugin id and restate none of those rules.
+
+test('runs preflight through core, keyed to its own plugin id', () => {
+  expect(skillText).toContain('domain-hatch preflight claude-code-homeassistant-hermit');
 });
 
-test('reads target field from hatch-options.json', () => {
-  expect(/hatch-options\.json[\s\S]{0,80}["`]target["`]/.test(skillText)).toBe(true);
+test('reaches core via bin/hermit-run, not a relative path', () => {
+  expect(skillText).toContain('.claude-code-hermit/bin/hermit-run domain-hatch');
+  expect(skillText).not.toContain('../claude-code-hermit/scripts');
 });
 
-test('local target routes to CLAUDE.local.md', () => {
-  expect(/["`]local["`][\s\S]{0,80}target_file = CLAUDE\.local\.md/.test(skillText)).toBe(true);
+test('branches on every preflight action value', () => {
+  for (const action of ['upgrade-core-package', 'upgrade-core-applied', '`verify`', '`full`']) {
+    expect(skillText).toContain(action);
+  }
 });
 
-test('committed target routes to CLAUDE.md', () => {
-  expect(/["`]committed["`][\s\S]{0,120}target_file = CLAUDE\.md/.test(skillText)).toBe(true);
+test('consumes the preflight verdict fields instead of re-deriving them', () => {
+  expect(
+    /`target`[\s\S]{0,60}`target_file`[\s\S]{0,60}`target_default`[\s\S]{0,60}`needs_target_question`/.test(
+      skillText,
+    ),
+  ).toBe(true);
 });
 
-test('schema stamps target field', () => {
-  expect(/"target":\s*"/.test(skillText)).toBe(true);
+test('records the operator choice via ensure-target', () => {
+  expect(skillText).toContain(
+    'domain-hatch ensure-target claude-code-homeassistant-hermit --target',
+  );
 });
 
-test('schema stamps core_install_scope field', () => {
-  expect(/"core_install_scope":\s*"/.test(skillText)).toBe(true);
+test('Visibility prompt still offers .local vs committed', () => {
+  expect(/Visibility[\s\S]{0,240}`\.local` files[\s\S]{0,120}Committed files/.test(skillText)).toBe(
+    true,
+  );
 });
 
-test('schema stamps stamped_at field', () => {
-  expect(/"stamped_at":\s*"/.test(skillText)).toBe(true);
+test('writes the block via sync-block', () => {
+  expect(skillText).toContain('domain-hatch sync-block claude-code-homeassistant-hermit');
 });
 
-test('schema stamps stamped_by field', () => {
-  expect(/"stamped_by":\s*"claude-code-homeassistant-hermit:hatch"/.test(skillText)).toBe(true);
+test('defers version-driven block refresh to hermit-evolve', () => {
+  // The old hatch re-rendered the block whenever the stamped version differed.
+  // hermit-evolve owns that now; hatch appends when absent and skips otherwise.
+  expect(/Refreshing an existing block on a version bump is `hermit-evolve`'s job/.test(skillText)).toBe(
+    true,
+  );
 });
 
-test('schema stamps version field', () => {
-  expect(/"version":\s*"/.test(skillText)).toBe(true);
+test('does not read hatch-options.json directly', () => {
+  expect(skillText).not.toContain('hatch-options.json');
 });
 
-test('detects core_install_scope from plugin list', () => {
-  expect(/core_install_scope[\s\S]{0,120}claude plugin list --json/.test(skillText)).toBe(true);
+test('does not restate install-scope detection', () => {
+  expect(skillText).not.toContain('claude plugin list --json');
 });
 
-test('documents project-to-committed scope mapping', () => {
-  expect(/`project`[^\n]{0,20}`committed`/.test(skillText)).toBe(true);
+test('does not restate the hatch-options stamp schema', () => {
+  expect(/"stamped_by":\s*"/.test(skillText)).toBe(false);
+  expect(/"core_install_scope":\s*"/.test(skillText)).toBe(false);
 });
 
-test('documents local/user/null-to-local scope mapping', () => {
-  expect(/`local`\/`user`\/`null`[^\n]{0,40}`local`/.test(skillText)).toBe(true);
+test('states no hardcoded core version floor', () => {
+  // The floor lives in .claude-plugin/hermit-meta.json; prose copies drifted.
+  const lines = skillText
+    .split('\n')
+    .filter((l) => /(?:base hermit|core hermit|claude-code-hermit|_hermit_versions)/i.test(l));
+  for (const line of lines) {
+    expect(line).not.toMatch(/(?:requires|earlier than|less than|below)\s+`?≥?>?=?\s*\d+\.\d+\.\d+/i);
+  }
 });
 
 test('stamped version source is _hermit_versions', () => {
@@ -63,28 +94,19 @@ test('stamped version source is _hermit_versions', () => {
   expect(skillText).toContain('_hermit_versions["claude-code-homeassistant-hermit"]');
 });
 
-test('skips on stamped version match', () => {
-  expect(/stamped version equals plugin version[\s\S]{0,40}skip/.test(skillText)).toBe(true);
-});
-
-test('handles absent stamped version', () => {
-  // Realistic upgrade case: block exists but was appended before stamping
-  // was reliable. Must NOT fall into an undefined branch.
-  expect(
-    /stamped version null[\s\S]{0,80}stale/.test(skillText) ||
-      /stamped version (absent|null)/.test(skillText),
-  ).toBe(true);
-});
-
-test('marker replacement specifies closing marker', () => {
-  expect(skillText).toContain('<!-- /claude-code-homeassistant-hermit: Home Assistant Workflow -->');
+test('the synced block is marker-delimited on both ends', () => {
+  // sync-block replaces between the markers, so the template must carry both.
+  // The opening marker is named in the skill; the closing one is the template's.
+  expect(skillText).toContain('<!-- claude-code-homeassistant-hermit: Home Assistant Workflow -->');
+  expect(templateText).toContain('<!-- claude-code-homeassistant-hermit: Home Assistant Workflow -->');
+  expect(templateText).toContain('<!-- /claude-code-homeassistant-hermit: Home Assistant Workflow -->');
 });
 
 test('delegates stray-block migration to hermit-evolve', () => {
   expect(/hermit-evolve[\s\S]{0,20}Step 7/.test(skillText)).toBe(true);
 });
 
-// --- Knowledge-schema extension (Step 7.6) ---
+// --- Knowledge-schema extension (Step 6.6) ---
 
 test('has knowledge-schema extension step', () => {
   expect(skillText).toContain('Knowledge-schema extension');

@@ -11,24 +11,22 @@ Set up the Home Assistant layer for this project. Idempotent — safe to re-run;
 
 ### 1. Prereq check
 
-Read `.claude-code-hermit/config.json`.
+Check whether `.claude-code-hermit/config.json` exists.
 
-- If the file is missing or `_hermit_versions["claude-code-hermit"]` is absent or less than `1.0.16`:
+- If it is missing:
   - `AskUserQuestion`: "Core hermit is not initialized. Run `/claude-code-hermit:hatch` now?"
   - Yes → Follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
     1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "claude-code-homeassistant-hermit:hatch" }`.
     2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/claude-code-homeassistant-hermit:hatch`.)"
     3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
   - No → stop and explain what is required.
+- If it is present: run `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-homeassistant-hermit` and parse the JSON verdict. Branch on `action`:
+  - `upgrade-core-package` / `upgrade-core-applied` → relay the `remedy` string verbatim to the operator and stop.
+  - `verify` → `AskUserQuestion`: "Already set up. Re-verify HA access only (skip setup wizard)?". Yes → skip to §5. No → continue.
+  - `full` → continue with setup.
+  - `ok: false` → relay `message` and stop.
 
-### 2. Idempotency check
-
-Read `_hermit_versions["claude-code-homeassistant-hermit"]` from `config.json`. Read the `version` field from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`.
-
-- If versions match → `AskUserQuestion`: "Already set up. Re-verify HA access only (skip setup wizard)?". Yes → skip to §6. No → continue.
-- If stale or absent → continue with setup.
-
-### 3. Verify .env
+### 2. Verify .env
 
 Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status` and inspect the JSON output.
 
@@ -57,13 +55,13 @@ Also check locale:
 
 Do not collect or store the token — it stays in `.env` only.
 
-### 4. CLI check
+### 3. CLI check
 
 The CLI runs on bun, which the core hermit requirement guarantees — no runtime deps to install.
 
 Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status` (read-only, no `--probe`) to confirm the launcher resolves correctly. If it fails with "bun not found", stop and tell the user to install bun (https://bun.sh) — it is required by `claude-code-hermit` core.
 
-### 5. Home Assistant MCP Server setup
+### 4. Home Assistant MCP Server setup
 
 **Step A — Enable the integration in Home Assistant**
 
@@ -73,7 +71,7 @@ Reference: https://www.home-assistant.io/integrations/mcp_server/
 
 **Step B — Write `.mcp.json`**
 
-Read the HA URL from the `boot status` JSON (`active_url` field, already fetched in §3). Read the token from `.env` using:
+Read the HA URL from the `boot status` JSON (`active_url` field, already fetched in §2). Read the token from `.env` using:
 
 ```bash
 ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status
@@ -114,7 +112,7 @@ After writing `.mcp.json`, check the project's `.gitignore`:
 
 Tell the user: **restart Claude Code** in this project directory. On first use, Claude Code will prompt you to trust the `homeassistant` server — approve it. Then run `/mcp` to confirm `homeassistant` appears as connected. The next `ha-boot` will verify live HA connectivity.
 
-### 6. Verify CLI (full probe)
+### 5. Verify CLI (full probe)
 
 Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status --probe` and present the result. If it fails:
 
@@ -122,31 +120,27 @@ Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status --probe` and present the
 - Connection refused → check `HOMEASSISTANT_LOCAL_URL` in `.env`.
 - Auth error → check `HOMEASSISTANT_TOKEN`.
 
-### 7. Append to CLAUDE.md / CLAUDE.local.md
+### 6. Append to CLAUDE.md / CLAUDE.local.md
 
-**Resolve target file:** Read `.claude-code-hermit/state/hatch-options.json`. Use the `"target"` field:
-- `"local"` → `target_file = CLAUDE.local.md`
-- `"committed"` or absent → `target_file = CLAUDE.md`
-- If the file doesn't exist (no `hatch-options.json` yet — operator's core hermit predates 1.1.1): detect `core_install_scope` from `claude plugin list --json` using the same precedence rules as core hatch Step 1.5 item 2 (filter entries where plugin name is `claude-code-hermit` and `enabled == true`; precedence `local` > `project` (both require `projectPath == project root`) > `user` (any `projectPath`) > `null`; map `project` → `committed`, `local`/`user`/`null` → `local`). Ask with `AskUserQuestion` (header: "Visibility") — scope-derived default at position 0 with `(recommended)`: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Write the canonical 5-field schema to `.claude-code-hermit/state/hatch-options.json`:
+**Resolve target file:** Step 1's preflight already returned `target`, `target_file`, `target_default` and `needs_target_question`.
 
-  ```json
-  {
-    "target": "<choice>",
-    "core_install_scope": "<project|local|user|null>",
-    "stamped_at": "<current ISO 8601 timestamp with timezone offset>",
-    "stamped_by": "claude-code-homeassistant-hermit:hatch",
-    "version": "<current ha-hermit plugin version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>"
-  }
-  ```
+If `needs_target_question` is true, ask with `AskUserQuestion` (header: "Visibility") — `target_default` at position 0 with `(recommended)`: **`.local` files** (gitignored — operator-personal) / **Committed files** (shared with teammates). Then record it:
 
-Read the plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and the stamped version from `.claude-code-hermit/config.json` at `_hermit_versions["claude-code-homeassistant-hermit"]` (treat absent as `null`). Step 8 of this skill stamps that field at the end of every run, so on re-runs it reflects the version that last wrote the block. Look for the marker `<!-- claude-code-homeassistant-hermit: Home Assistant Workflow -->` in `target_file`:
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch ensure-target claude-code-homeassistant-hermit --target <choice>
+```
 
-- **Marker present AND stamped version equals plugin version:** skip — block is current. Do not read the template.
-- **All other cases** (marker absent, stamped version null, OR stamped version stale): read `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` and either append it to `target_file` (marker absent — the Edit tool creates `target_file` if missing) or replace the marked block (marker present) — everything from the opening `<!-- claude-code-homeassistant-hermit: Home Assistant Workflow -->` through the matching closing `<!-- /claude-code-homeassistant-hermit: Home Assistant Workflow -->`, inclusive. The template is the source of truth; no operator prompt is needed.
+Then write the block:
+
+```bash
+.claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-homeassistant-hermit
+```
+
+It appends the `<!-- claude-code-homeassistant-hermit: Home Assistant Workflow -->` block when the marker is absent and skips when it is already present. Refreshing an existing block on a version bump is `hermit-evolve`'s job, not hatch's.
 
 Stray-block migration (block stranded in the non-target file after a target flip) is handled one-shot by the Upgrade Instructions in this version's CHANGELOG entry, executed by `hermit-evolve` Step 7. Hatch itself stays focused on target-aware setup and steady-state refresh.
 
-### 7.5 Safety mode
+### 6.5 Safety mode
 
 Read `ha_safety_mode` from `.claude-code-hermit/config.json`.
 
@@ -157,7 +151,7 @@ Read `ha_safety_mode` from `.claude-code-hermit/config.json`.
 
 Write the chosen value to `config.json` as `ha_safety_mode`. Default to `strict` if the operator skips or is unsure.
 
-### 7.55 HA Assist control (optional)
+### 6.55 HA Assist control (optional)
 
 Read `ha_assist_control_enabled` from `.claude-code-hermit/config.json`.
 
@@ -166,7 +160,7 @@ Read `ha_assist_control_enabled` from `.claude-code-hermit/config.json`.
   - **Yes** → write `ha_assist_control_enabled: true` to `config.json`.
   - **No / skip** → leave the key absent (fail-closed default; CLI remains available for automation triggering).
 
-### 7.56 HA update one-tap apply (optional)
+### 6.56 HA update one-tap apply (optional)
 
 Read `ha_update_auto_apply` from `.claude-code-hermit/config.json`.
 
@@ -175,7 +169,7 @@ Read `ha_update_auto_apply` from `.claude-code-hermit/config.json`.
   - **Yes** → write `ha_update_auto_apply: true` to `config.json`.
   - **No / skip** → leave the key absent (fail-closed default; every pending update stays a proposal you apply yourself in the HA UI).
 
-### 7.6 Knowledge-schema extension
+### 6.6 Knowledge-schema extension
 
 Read `.claude-code-hermit/knowledge-schema.md`.
 
@@ -202,13 +196,13 @@ If already present: skip (idempotent).
 
 Use Edit to make the changes.
 
-### 7.7 Auto-mode environment seed
+### 6.7 Auto-mode environment seed
 
-Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/automode-env.ts .claude/settings.local.json` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: Claude Code's auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`. This names the operator's Home Assistant instance (read from `.env`'s `HOMEASSISTANT_URL`/`HOMEASSISTANT_LOCAL_URL`/`HOMEASSISTANT_REMOTE_URL` — the same set `curl-host-gate.ts` already trusts) as a trusted internal domain, so the classifier stops treating the hermit's nightly unattended reads (briefs, audits, context refresh) as unrecognized outbound calls. If the script prints `SKIP|...` (no HA URL configured yet), note it and move on — Step 3 already required a working `.env` before reaching here, so this should only skip on an unusual re-run. Additive and idempotent; safe to re-run on every hatch.
+Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/automode-env.ts .claude/settings.local.json` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: Claude Code's auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`. This names the operator's Home Assistant instance (read from `.env`'s `HOMEASSISTANT_URL`/`HOMEASSISTANT_LOCAL_URL`/`HOMEASSISTANT_REMOTE_URL` — the same set `curl-host-gate.ts` already trusts) as a trusted internal domain, so the classifier stops treating the hermit's nightly unattended reads (briefs, audits, context refresh) as unrecognized outbound calls. If the script prints `SKIP|...` (no HA URL configured yet), note it and move on — Step 2 already required a working `.env` before reaching here, so this should only skip on an unusual re-run. Additive and idempotent; safe to re-run on every hatch.
 
 ---
 
-### 8. Stamp version and register routines
+### 7. Stamp version and register routines
 
 Write `_hermit_versions["claude-code-homeassistant-hermit"]` into `.claude-code-hermit/config.json` with the current plugin version.
 
@@ -262,7 +256,7 @@ After adding or updating any entries, remind the operator: "Run `/claude-code-he
 
 These replace any need for CronCreate routines around analysis/observability — the `scheduled-checks` routine picks up whichever check is due, runs it, and any findings surface as proposals automatically.
 
-### 9. Final report
+### 8. Final report
 
 Summarize:
 
