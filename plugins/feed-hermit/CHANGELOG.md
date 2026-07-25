@@ -5,6 +5,10 @@
 ### Fixed
 - No-op `Write(path)` settings rules no longer trigger a boot warning; `Write(tmp/**)` is now `Edit(tmp/**)` so tmp fetch-scratch writes are auto-approved.
 
+### Changed
+- The CLAUDE-APPEND block dropped the per-type fetch dispatch detail and the routine/scheduled-check tables, and no longer carries fetch-cost numbers — `docs/schema.md` owns them as the `tokens_approx` defaults, so the two copies can no longer drift. 3,203 B → ~2,384 B. The untrusted-content rule stays verbatim; the allowlist line now states that `fetch-guard` fails open when `feed-sources.md` is unreadable.
+- `feed-brief` § Security points at the CLAUDE-APPEND rule instead of restating it in different words.
+
 ## [0.1.1] - 2026-07-21
 
 ### Fixed

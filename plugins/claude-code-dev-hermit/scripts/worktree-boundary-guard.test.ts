@@ -25,17 +25,35 @@ function assert(description: string, actual: number | null, expected: number) {
   }
 }
 
-function runRaw(rawInput: string, cwd: string, env: Json = {}) {
+function spawnGuard(rawInput: string, cwd: string, env: Json = {}) {
   return spawnSync(process.execPath, [GUARD], {
     input: rawInput,
     env: { ...process.env, ...env },
     encoding: 'utf-8',
     cwd,
-  }).status;
+  });
+}
+
+function runRaw(rawInput: string, cwd: string, env: Json = {}) {
+  return spawnGuard(rawInput, cwd, env).status;
 }
 
 function runEdit(filePath: string, cwd: string, env: Json = {}) {
   return runRaw(JSON.stringify({ tool_input: { file_path: filePath } }), cwd, env);
+}
+
+function blockReason(filePath: string, cwd: string): string {
+  return spawnGuard(JSON.stringify({ tool_input: { file_path: filePath } }), cwd).stderr || '';
+}
+
+function assertIncludes(description: string, haystack: string, needle: string) {
+  if (haystack.includes(needle)) {
+    console.log(`  ✓ ${description}`);
+    passed++;
+  } else {
+    console.error(`  ✗ ${description} — missing ${JSON.stringify(needle)} in ${JSON.stringify(haystack)}`);
+    failed++;
+  }
 }
 
 // --- Fixture: main repo + nested linked worktree ---
@@ -66,6 +84,10 @@ try {
   assert('relative path inside the worktree is allowed', runEdit('src/a.js', wt), 0);
   assert('edit into main source is blocked', runEdit(path.join(mainRepo, 'plugins', 'x.js'), wt), 2);
   assert('relative path escaping into main is blocked', runEdit('../../../README.md', wt), 2);
+  // The background-session recovery coaching lives here, not in the always-loaded
+  // CLAUDE-APPEND: it is only actionable at the moment this block fires.
+  assertIncludes('block reason carries background-session retry coaching',
+    blockReason(path.join(mainRepo, 'plugins', 'x.js'), wt), 're-attempt the edit');
   assert('write to main .claude-code-hermit/ is allowed (carve-out)', runEdit(path.join(mainRepo, '.claude-code-hermit', 'sessions', 'SHELL.md'), wt), 0);
   assert('edit to an unrelated path outside the repo is allowed', runEdit(path.join(tmp, 'elsewhere', 'note.txt'), wt), 0);
   assert('WORKTREE_GUARD=off disables the guard', runEdit(path.join(mainRepo, 'plugins', 'x.js'), wt, { WORKTREE_GUARD: 'off' }), 0);

@@ -36,6 +36,41 @@ test('HA APPEND points to the resolvable CLI reference, and the doc exists', () 
 });
 
 test('HA APPEND stays under the post-trim ceiling', () => {
-  // Pre-trim was 9,565 B; trimmed to ~5,076 B.
-  expect(Buffer.byteLength(APPEND, 'utf8')).toBeLessThanOrEqual(5500);
+  // Pre-trim was 9,565 B; trimmed to ~5,076 B; the context-engineering pass then
+  // removed §Environment, §Entry Flow, the channel-routing examples, and the
+  // per-install routine-mode narrative, landing at ~2,814 B.
+  expect(Buffer.byteLength(APPEND, 'utf8')).toBeLessThanOrEqual(3200);
+});
+
+test('HA APPEND keeps every safety rule the trim was not allowed to touch', () => {
+  expect(APPEND.includes('Never commit real HA URLs, tokens, or device inventories.')).toBe(true);
+  expect(/[Uu]ncertain entities default to sensitive/.test(APPEND)).toBe(true);
+  // Explicit approval before applying automations / changing safety policy is a
+  // rule of its own — it must survive the merge of the actuation statements.
+  expect(/approval[\s\S]{0,80}modifying safety policy/.test(APPEND)).toBe(true);
+});
+
+test('HA APPEND states the real enforcement boundary, not blanket determinism', () => {
+  // `ask` softens the gate only for concrete sensitive targets; unresolvable or
+  // malformed targets hard-block in BOTH modes (SAFETY.md § Safety Mode).
+  expect(APPEND.includes('ha_safety_mode')).toBe(true);
+  expect(/hard-block in \*\*both\*\* modes/.test(APPEND)).toBe(true);
+});
+
+test('HA APPEND carries no per-install config state or env setup', () => {
+  // Routine schedules, mode-conditional enabled flags, and .env var docs drift
+  // the moment an operator edits config; hatch and config.json own them.
+  expect(APPEND.includes('HOMEASSISTANT_URL')).toBe(false);
+  expect(APPEND.includes('unified mode')).toBe(false);
+  expect(APPEND.includes('legacy mode')).toBe(false);
+});
+
+test('HA notification skills defer to the core push-format owner', () => {
+  // Distributed half of the single-owner guard: core's APPEND states ≤200 chars,
+  // and this assertion runs whenever HA's own files change under path-filtered CI.
+  for (const skill of ['ha-morning-brief', 'ha-evening-brief']) {
+    const body = readFileSync(join(PLUGIN_ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
+    expect(/≤\s*200\s*chars/.test(body)).toBe(false);
+    expect(body.includes('Operator Notification push format')).toBe(true);
+  }
 });
