@@ -16,6 +16,9 @@
 // `--files-json` is the one caller-supplied input, and only because the touched
 // set is knowledge the caller has and the filesystem doesn't (an in-main
 // implementation knows what it wrote). Absent it, the working-tree diff decides.
+// Its paths are repo-root-relative — the same frame `git diff --name-only` emits
+// and the frame a hermit session naturally writes, since sessions launch from the
+// project root. Every path this module hands to git is resolved in that one frame.
 //
 // Output: one JSON line, always exit 0 —
 //   {"tier":"...","action":"RUN"|"SKIP","reason":"...","focus_files":[...]}
@@ -44,8 +47,8 @@ export interface Verdict {
 
 // Session bookkeeping the hermit rewrites on its own schedule. A diff made
 // entirely of these is not an implementation, so it is never worth a cleanup
-// pass. Mirrors proposal-act/SKILL.md § balanced Scope — keep the two in sync;
-// tests/proposal-quality-gate.test.ts asserts each entry individually.
+// pass. This list is the only copy — proposal-act/SKILL.md deliberately does not
+// restate it; tests/proposal-quality-gate.test.ts asserts each entry individually.
 const BOOKKEEPING: RegExp[] = [
   /(^|\/)sessions\/SHELL\.md$/,
   /(^|\/)state\/runtime\.json$/,
@@ -83,17 +86,29 @@ function git(args: string[], cwd: string): { ok: boolean; out: string } {
   return { ok: true, out: r.stdout ?? '' };
 }
 
+/** Repo root, so a repo-root-relative path can be used as a pathspec; null outside git. */
+function gitRoot(cwd: string): string | null {
+  const { ok, out } = git(['rev-parse', '--show-toplevel'], cwd);
+  const root = out.trim();
+  return ok && root ? root : null;
+}
+
 /**
  * True when a structured file's diff only changed values, leaving the key set
  * intact — a version bump or a threshold tweak, nothing for a reviewer to clean.
+ *
+ * `file` is repo-root-relative and `root` is the repo root, because git reads a
+ * command-line pathspec relative to the process cwd: run from a hermit dir below
+ * the root, `-- <file>` would match nothing and every structured file would come
+ * back structural.
  *
  * Deliberately conservative: anything this cannot prove is value-only (a changed
  * array element, an unparseable hunk, no git at all) reports false and the file
  * counts as structural. A false RUN costs ~$0.25; a false SKIP silently drops
  * the cleanup, so the bias goes to RUN.
  */
-function isValueOnlyChange(file: string, cwd: string): boolean {
-  const { ok, out } = git(['diff', '-U0', '--no-color', 'HEAD', '--', file], cwd);
+function isValueOnlyChange(file: string, root: string): boolean {
+  const { ok, out } = git(['diff', '-U0', '--no-color', 'HEAD', '--', file], root);
   if (!ok || !out.trim()) return false;
 
   const keyOf = (line: string): string | null => {
@@ -177,11 +192,15 @@ export function decide(
 
   // balanced — decide on the observed change, never on the proposal's prose.
   const category = resolveCategory(proposalFile);
+  // Only structured candidates consult the root, and the loop usually breaks on a
+  // code or instruction file first — so don't spawn `git rev-parse` for nothing.
+  const root = candidates.some(isStructured) ? gitRoot(cwd) : null;
   const reasons: string[] = [];
   for (const f of candidates) {
     if (isCode(f)) { reasons.push(`code changed (${f})`); break; }
     if (isInstruction(f)) { reasons.push(`instruction text changed (${f})`); break; }
-    if (isStructured(f) && !isValueOnlyChange(f, cwd)) { reasons.push(`structural config changed (${f})`); break; }
+    // No repo root means no diff to inspect, so the file cannot be proven value-only.
+    if (isStructured(f) && (!root || !isValueOnlyChange(f, root))) { reasons.push(`structural config changed (${f})`); break; }
   }
 
   if (reasons.length) {
@@ -198,8 +217,21 @@ export function decide(
   };
 }
 
+/**
+ * The first bare token, skipping any `--flag`'s value. Without the skip, a call
+ * that omits the proposal file (`quality-gate <dir> --files-json '["a.ts"]'`)
+ * would take the JSON payload as the proposal path.
+ */
+function firstPositional(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) { i++; continue; }
+    return args[i];
+  }
+  return undefined;
+}
+
 export function run(stateDir: string, args: string[]): void {
-  const proposalFile = args.find(a => !a.startsWith('--'));
+  const proposalFile = firstPositional(args);
 
   let supplied: string[] | null = null;
   const filesJson = flagValue(args, '--files-json');

@@ -128,9 +128,17 @@ function statefulRows(config: Json): Array<[string, string, string]> {
   const hb = config.heartbeat ?? {};
   const wd = config.watchdog ?? {};
   const compact = config.compact ?? {};
+  // The brief lives per-channel (`channels.<name>.morning_brief`), so it has no
+  // registry row — but `/hermit-settings brief` is a real argument and the view
+  // it replaced showed the brief's state, so it belongs here.
+  const briefOn = channelNames.filter(n => channels[n]?.morning_brief?.enabled);
+  const brief = briefOn.length
+    ? briefOn.map(n => `${n} ${channels[n].morning_brief.time ?? '?'}`).join(', ')
+    : 'disabled';
 
   return [
     ['Channels', enabled.length ? `${enabled.join(', ')} enabled` : channelNames.length ? 'configured, none enabled' : 'none', 'channels'],
+    ['Morning brief', brief, 'brief'],
     ['Heartbeat', hb.enabled ? `every ${hb.every ?? '?'}` : 'disabled', 'heartbeat'],
     ['Watchdog', wd.enabled ? 'enabled' : 'disabled', 'watchdog'],
     ['Routines', routines.length ? `${routines.filter((r: Json) => r?.enabled).length} of ${routines.length} enabled` : 'none', 'routines'],
@@ -192,6 +200,10 @@ export function coerce(setting: Setting, raw: string): { ok: true; value: Json }
     if (!setting.nullable) return { ok: false, message: `${setting.arg} cannot be cleared` };
     return { ok: true, value: null };
   }
+  // On a nullable row, "default" means "inherit Claude Code's default", not a
+  // value: storing the literal string would send `--model default` on the next
+  // `hermit-start`. Only nullable rows — `permission_mode` has a real `default`.
+  if (setting.nullable && raw === 'default') return { ok: true, value: null };
   switch (setting.kind) {
     case 'boolean': {
       const truthy = ['true', 'yes', 'on', 'enable', 'enabled'];

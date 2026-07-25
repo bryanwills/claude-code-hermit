@@ -212,6 +212,24 @@ describe('structured config changes (needs a real diff)', () => {
     expect(decide(stateDir, undefined, ['conf.json'], root).action).toBe('RUN');
   });
 
+  test('a project below the git root still resolves the repo-root-relative pathspec', () => {
+    const repo = freshDir();
+    git(repo, 'init', '-q');
+    const project = path.join(repo, 'sub');
+    const stateDir = path.join(project, '.claude-code-hermit');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify({ quality_gate: { tier: 'balanced' } }));
+    fs.writeFileSync(path.join(project, 'conf.json'), JSON.stringify({ version: '1.0.0' }, null, 2) + '\n');
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-q', '-m', 'init');
+
+    fs.writeFileSync(path.join(project, 'conf.json'), JSON.stringify({ version: '1.0.1' }, null, 2) + '\n');
+    // `sub/conf.json` is the frame git emits. Read as a pathspec relative to
+    // `project` it would match nothing, the diff would come back empty, and a
+    // plain version bump would be misclassified as structural.
+    expect(decide(stateDir, undefined, ['sub/conf.json'], project).action).toBe('SKIP');
+  });
+
   test('the working-tree diff is used when no files are supplied', () => {
     const { root, stateDir } = gitProjectAt('balanced');
     fs.writeFileSync(path.join(root, 'app.ts'), 'export const x = 1;\n');

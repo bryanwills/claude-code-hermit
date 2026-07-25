@@ -134,7 +134,7 @@ When the operator accepts a proposal:
         > 2. Do the edits and any test/fix loops yourself. You may spawn a nested Explore subagent if the proposal warrants a search.
         > 3. **Quality gate.** Ask the gate; do not judge the tier or the files yourself:
         >    ```bash
-        >    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <absolute path to the PROP file> --files-json '<JSON array of the files you touched>'
+        >    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <absolute path to the PROP file> --files-json '<JSON array of the files you touched, repo-root-relative>'
         >    ```
         >    One JSON line back: `{"tier","action","reason","focus_files"}`. `SKIP` → no cleanup. `RUN` → invoke `/claude-code-hermit:simplify` focused on `focus_files`, and capture its totals line (`applied N · deduped M · principle-rejected K · …`). Best-effort: if the gate or `/simplify` errors, note it and continue — never block on this step.
         > 4. **Verification.** Read the proposal's `## Verification` section. If it has real steps (more than the HTML-comment placeholder), perform them. If a step fails, attempt **one** fix and re-verify; if it still fails, set `Verification: failed` with the output and stop (do not loop further). If the section is empty or placeholder-only, set `Verification: none defined`.
@@ -170,7 +170,7 @@ When the operator accepts a proposal:
      **Verification for procedure-capture proposals (e.6 note):** the `## Verification` section of a procedure-capture PROP should instruct reading the installed file's frontmatter (`name`/`description` parse) rather than checking the live available-skills list — the harness only picks up new skills on the next session reload, so the live list is unreliable here. A missing or malformed installed file blocks resolution per the normal e.6 contract.
      e.5. **Quality gate.** Applies to **in-main** implementations only (the `## Skill Improvement` → skill-creator and `## Skill Draft` → procedure-capture branches). Dispatched implementations ran the same gate inside the subagent (step (e)) and are resolved there.
 
-         Build a touched-files list from the writes made during the in-main implementation. If you can't reliably enumerate it (multi-turn work), omit `--files-json` and the gate falls back to the working-tree diff.
+         Build a touched-files list from the writes made during the in-main implementation, written repo-root-relative (the frame `git diff --name-only` uses). If you can't reliably enumerate it (multi-turn work), omit `--files-json` and the gate falls back to the working-tree diff.
 
          ```bash
          bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <path to the PROP file> [--files-json '["path/a","path/b"]']

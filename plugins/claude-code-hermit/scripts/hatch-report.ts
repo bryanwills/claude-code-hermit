@@ -151,6 +151,10 @@ export function renderFinal(o: Observed, deployment: string): string {
   out.push('');
 
   out.push('Next steps:');
+  // Hatch installs the recommended plugins mid-run, and Claude Code only exposes
+  // them to the *current* session after a reload — so this line goes first, ahead
+  // of anything that would use them.
+  out.push('  /reload-plugins                      load newly installed plugins in this session');
   if (deployment === 'docker') {
     out.push('  /claude-code-hermit:docker-setup      build and start the container');
   } else if (deployment === 'tmux') {

@@ -35,8 +35,10 @@ const CODE_RE = /^[A-Za-z0-9]{6}$/;
 const GROUP_ID_RE = /^-?\d{1,20}$/;
 const SESSION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 // The state dir is interpolated into the message body, so it must not be able to
-// introduce a newline (which would submit early) or quote characters.
-const STATE_DIR_RE = /^[A-Za-z0-9_./-]{1,256}$/;
+// introduce a newline (which would submit early) or quote characters. Spaces are
+// allowed: the message travels as one argv element, never as shell text, and a
+// project under `/Users/x/My Projects/…` must still be pairable.
+const STATE_DIR_RE = /^[A-Za-z0-9_./ -]{1,256}$/;
 
 function fail(reason: string): never {
   process.stdout.write(`ERROR|${reason}\n`);
