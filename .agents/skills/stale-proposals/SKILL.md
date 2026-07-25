@@ -66,15 +66,13 @@ Skip this step in report-only mode.
 For each `SHIPPED-STRONG` verdict, resolve the proposal ID to a filename. The filename lookup happens before mutation; an ambiguous or missing ID moves into Step 4.
 
 ```bash
-bun plugins/claude-code-hermit/scripts/resolve-prop.ts .claude-code-hermit "<PROP-ID>"
+bun plugins/claude-code-hermit/scripts/proposal.ts resolve-id .claude-code-hermit "<PROP-ID>"
 ```
 
 For an unambiguous filename, append the metrics event before patching so regenerated summaries include it:
 
 ```bash
-bun plugins/claude-code-hermit/scripts/append-metrics.ts \
-  .claude-code-hermit/state/proposal-metrics.jsonl \
-  '{"ts":"<now ISO>","type":"resolved","proposal_id":"<PROP-ID>"}'
+bun plugins/claude-code-hermit/scripts/proposal.ts event .claude-code-hermit resolved --id="<PROP-ID>"
 
 bun plugins/claude-code-hermit/scripts/proposal.ts patch .claude-code-hermit <filename> \
   --set status=resolved --set resolved_date=@now --request-compact <<'HERMIT_PATCH'
@@ -84,7 +82,7 @@ HERMIT_PATCH
 
 The evidence in the Decision line makes the automatic resolution auditable.
 
-- `resolve-prop.ts` returning `AMBIGUOUS` or `NONE`: do not guess; move the item to Step 4.
+- `proposal.ts resolve-id` returning `AMBIGUOUS` or `NONE`: do not guess; move the item to Step 4.
 - `proposal.ts` returning `ERROR|<reason>`: nothing was patched; report the failure and continue.
 
 ## Step 4 — Ask about weak and aged proposals

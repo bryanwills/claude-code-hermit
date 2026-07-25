@@ -75,16 +75,20 @@ async function apply(dir: string, input: unknown) {
   return JSON.parse(r.stdout.trim());
 }
 
-const METRICS_EVENT = JSON.stringify({ event: 'auto_resolved', proposal_id: 'PROP-042' });
 const FINDINGS_LINE = '- [reflect] PROP-042 auto-resolved (shipped in #612)';
 
 const AUTO_RESOLVE = {
   proposal_id: 'PROP-042',
   action: 'auto-resolve',
   frontmatter_patch: { status: 'resolved', resolved_date: '2026-07-20' },
-  metrics_event: METRICS_EVENT,
   shell_findings_line: FINDINGS_LINE,
 };
+
+// The `resolved` row is built by the script from proposal_id, so there is no
+// fixture string to compare against — assert the parsed fields instead.
+function metricsRows(dir: string): any[] {
+  return fs.readFileSync(metricsPath(dir), 'utf-8').trimEnd().split('\n').map(l => JSON.parse(l));
+}
 
 // Everything from the closing --- onward — the byte-identical region of a patch.
 const bodyOf = (content: string) => content.slice(content.indexOf('\n---', 3));
@@ -108,8 +112,9 @@ describe('apply-reflection-actions: happy paths', () => {
     expect(fmBlock).toContain('created: 2026-07-18T10:10:10+0000');
     expect(bodyOf(after)).toBe(bodyOf(PROPOSAL_MD));
 
-    const metrics = fs.readFileSync(metricsPath(dir), 'utf-8');
-    expect(metrics).toBe(METRICS_EVENT + '\n');
+    const rows = metricsRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ type: 'resolved', proposal_id: 'PROP-042' });
 
     // Findings line lands inside ## Findings, before the next heading.
     const shell = fs.readFileSync(shellPath(dir), 'utf-8');
@@ -183,13 +188,24 @@ describe('apply-reflection-actions: transactionality (invalid batch = zero write
     expect(fs.existsSync(metricsPath(dir))).toBe(false);
   }));
 
-  test('metrics_event that is not valid JSON → ok:false', withTmp(async (dir) => {
+  // Stale-runner guard: a runner still emitting the removed field is rejected
+  // outright rather than having its row silently dropped.
+  test('a non-null metrics_event is rejected → ok:false, nothing written', withTmp(async (dir) => {
     const result = await apply(dir, {
-      resolution_actions: [{ ...AUTO_RESOLVE, metrics_event: 'not json' }],
+      resolution_actions: [{ ...AUTO_RESOLVE, metrics_event: '{"type":"resolved"}' }],
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('metrics_event');
     expect(fs.readFileSync(proposalPath(dir), 'utf-8')).toBe(PROPOSAL_MD);
+    expect(fs.existsSync(metricsPath(dir))).toBe(false);
+  }));
+
+  test('metrics_event: null is still accepted (field simply absent)', withTmp(async (dir) => {
+    const result = await apply(dir, {
+      resolution_actions: [{ ...AUTO_RESOLVE, metrics_event: null }],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.applied).toEqual({ auto_resolve: 1, nudge: 0, skip: 0 });
   }));
 
   test('proposal_id with no matching file (PROP-999) → ok:false', withTmp(async (dir) => {
@@ -242,22 +258,26 @@ describe('apply-reflection-actions: edges', () => {
     expect(result.errors.join(' ')).toContain('Findings');
     // Durable core still landed: proposal patched, metrics appended.
     expect(fs.readFileSync(proposalPath(dir), 'utf-8')).toMatch(/^status: resolved$/m);
-    expect(fs.readFileSync(metricsPath(dir), 'utf-8')).toBe(METRICS_EVENT + '\n');
+    expect(metricsRows(dir)[0]).toMatchObject({ type: 'resolved', proposal_id: 'PROP-042' });
   }));
 
   // The ledger is line-delimited and every reader parses it line by line inside a
-  // bare catch, so a pretty-printed metrics_event appended verbatim would be
-  // dropped silently rather than erroring. Canonicalize to one physical line.
-  test('pretty-printed metrics_event is re-serialized to a single JSONL line', withTmp(async (dir) => {
-    const pretty = '{\n  "event": "auto_resolved",\n  "proposal_id": "PROP-042"\n}';
-    const result = await apply(dir, {
-      resolution_actions: [{ ...AUTO_RESOLVE, metrics_event: pretty }],
-    });
+  // bare catch, so a row spilling over more than one physical line would be dropped
+  // silently rather than erroring.
+  test('auto-resolve writes exactly one well-formed resolved line', withTmp(async (dir) => {
+    const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
     expect(result.ok).toBe(true);
     expect(result.errors).toBeUndefined();
+
     const written = fs.readFileSync(metricsPath(dir), 'utf-8');
+    expect(written.endsWith('\n')).toBe(true);
     expect(written.trimEnd().split('\n')).toHaveLength(1);
-    expect(JSON.parse(written)).toEqual({ event: 'auto_resolved', proposal_id: 'PROP-042' });
+
+    const row = JSON.parse(written);
+    expect(Object.keys(row)).toEqual(['ts', 'type', 'proposal_id']);
+    expect(row.type).toBe('resolved');
+    expect(row.proposal_id).toBe('PROP-042');
+    expect(row.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   }));
 
   // Normalizing the tail to a single newline used to swallow the blank line that

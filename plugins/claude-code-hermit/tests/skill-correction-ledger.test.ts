@@ -16,12 +16,6 @@ import { runScript, PLUGIN_ROOT } from './helpers/run';
 
 const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), 'utf-8');
 
-// Ledger rows must be dated relative to now, not pinned to a literal date:
-// prune-observations.ts enforces a 30-day retention window, so a hardcoded
-// timestamp silently flips the "both rows are fresh" prune assertion from pass
-// to fail once the wall clock passes it.
-const hoursAgoISO = (h: number) => new Date(Date.now() - h * 3600000).toISOString();
-
 const sessionClose = read('skills', 'session-close', 'SKILL.md');
 // reflect's skill-correction routing detail lives in branches.md (the
 // rare-branch procedures file); assert against the combined surface.
@@ -40,16 +34,16 @@ describe('session-close: skill-correction capture', () => {
     expect(sessionClose).toContain('Exclude preference, scope, or context changes');
   });
 
-  test('session-close: uses skill-correction source value in the append row', () => {
-    expect(sessionClose).toContain('"source":"skill-correction"');
+  test('session-close: appends through observations.ts with the skill-correction source', () => {
+    expect(sessionClose).toContain('observations.ts observe .claude-code-hermit skill-correction');
   });
 
-  test('session-close: pattern is skill-correction:<canonical-name>', () => {
-    expect(sessionClose).toContain('"pattern":"skill-correction:<canonical-name>"');
+  test('session-close: label is skill-correction:<canonical-name> on its own heredoc line', () => {
+    expect(sessionClose).toMatch(/^\s*skill-correction:<canonical-name>$/m);
   });
 
-  test('session-close: append command tolerates failure with || true', () => {
-    expect(sessionClose).toContain('|| true');
+  test('session-close: append carries the own-work origin flag', () => {
+    expect(sessionClose).toContain('--origin=own-work');
   });
 
   test('session-close: canonical name reads name: frontmatter, strips plugin prefix', () => {
@@ -65,35 +59,43 @@ describe('session-close: skill-correction capture', () => {
   });
 });
 
-// ── 2. observations ledger: append-metrics behavioral test ──────────────────
+// ── 2. observations ledger: observations.ts behavioral test ─────────────────
 
 // Empirically confirmed (bun 1.3.14): describe.serial does not reliably force
 // sequential execution of its own child tests under --concurrent — only
 // per-test .serial marking does. So each test below is marked individually.
-describe('append-metrics: skill-correction row round-trip', () => {
+describe('observations.ts: skill-correction row round-trip', () => {
   let workdir: string;
+  let stateDir: string;
   let ledger: string;
+
+  // session_id is resolved by the script from runtime.json, not passed in — so a
+  // second "session" is simulated by rewriting that file between appends.
+  const setSession = (id: string) =>
+    fs.writeFileSync(path.join(stateDir, 'state', 'runtime.json'), JSON.stringify({ session_id: id }));
+
+  const observe = () =>
+    runScript('observations.ts', {
+      args: ['observe', stateDir, 'skill-correction', '--origin=own-work'],
+      stdin: 'skill-correction:my-skill',
+    });
 
   beforeAll(() => {
     workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-skill-corr-'));
-    fs.mkdirSync(path.join(workdir, '.claude-code-hermit', 'state'), { recursive: true });
-    ledger = path.join(workdir, '.claude-code-hermit', 'state', 'observations.jsonl');
+    stateDir = path.join(workdir, '.claude-code-hermit');
+    fs.mkdirSync(path.join(stateDir, 'state'), { recursive: true });
+    ledger = path.join(stateDir, 'state', 'observations.jsonl');
   });
 
   afterAll(() => {
     try { fs.rmSync(workdir, { recursive: true, force: true }); } catch {}
   });
 
-  test.serial('append-metrics: skill-correction row appended and parseable', async () => {
-    const row = JSON.stringify({
-      ts: hoursAgoISO(2),
-      pattern: 'skill-correction:my-skill',
-      session_id: 'S-001',
-      source: 'skill-correction',
-      origin: 'own-work',
-    });
-    const r = await runScript('append-metrics.ts', { args: [ledger, row] });
+  test.serial('observations.ts: skill-correction row appended and parseable', async () => {
+    setSession('S-001');
+    const r = await observe();
     expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('OK');
 
     const lines = fs.readFileSync(ledger, 'utf-8').trim().split('\n');
     expect(lines).toHaveLength(1);
@@ -104,16 +106,10 @@ describe('append-metrics: skill-correction row round-trip', () => {
     expect(parsed.session_id).toBe('S-001');
   });
 
-  test.serial('append-metrics: two distinct-session rows group by pattern in prune', async () => {
-    // append a second session row for the same pattern
-    const row2 = JSON.stringify({
-      ts: hoursAgoISO(1),
-      pattern: 'skill-correction:my-skill',
-      session_id: 'S-002',
-      source: 'skill-correction',
-      origin: 'own-work',
-    });
-    await runScript('append-metrics.ts', { args: [ledger, row2] });
+  test.serial('observations.ts: two distinct-session rows group by pattern in prune', async () => {
+    // append a second row for the same pattern under a different session
+    setSession('S-002');
+    await observe();
 
     const lines = fs.readFileSync(ledger, 'utf-8').trim().split('\n');
     expect(lines).toHaveLength(2);
@@ -126,9 +122,7 @@ describe('append-metrics: skill-correction row round-trip', () => {
 
   // Depends on both prior append tests having run (shared workdir ledger has 2 rows).
   test.serial('prune-observations: skill-correction rows survive (both sessions fresh)', async () => {
-    const r = await runScript('prune-observations.ts', {
-      args: [path.join(workdir, '.claude-code-hermit')],
-    });
+    const r = await runScript('prune-observations.ts', { args: [stateDir] });
     expect(r.exitCode).toBe(0);
     // both rows are fresh — neither should be pruned
     expect(r.stdout).toContain('pruned 0, kept 2');
@@ -189,16 +183,16 @@ describe('channel-responder: resolved correction routes to ledger row', () => {
     expect(channelResponder).toContain('Resolved corrections → observations ledger, not Findings');
   });
 
-  test('channel-responder: uses skill-correction source value in the append row', () => {
-    expect(channelResponder).toContain('"source":"skill-correction"');
+  test('channel-responder: appends through observations.ts with the skill-correction source', () => {
+    expect(channelResponder).toContain('observations.ts observe .claude-code-hermit skill-correction');
   });
 
-  test('channel-responder: pattern is skill-correction:<canonical-name>', () => {
-    expect(channelResponder).toContain('"pattern":"skill-correction:<canonical-name>"');
+  test('channel-responder: label is skill-correction:<canonical-name> on its own heredoc line', () => {
+    expect(channelResponder).toMatch(/^\s*skill-correction:<canonical-name>$/m);
   });
 
-  test('channel-responder: append command tolerates failure with || true', () => {
-    expect(channelResponder).toContain('|| true');
+  test('channel-responder: origin flag is sender-derived', () => {
+    expect(channelResponder).toContain('--origin=<own-work|external-content>');
   });
 
   test('channel-responder: unresolved corrections fall back to the Findings line', () => {

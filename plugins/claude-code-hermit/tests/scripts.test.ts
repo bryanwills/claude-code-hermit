@@ -1161,168 +1161,104 @@ describe('deriveStaleSession', () => {
 });
 
 // -------------------------------------------------------
-// append-metrics.ts (subprocess — dual-mode stdin/argv contract)
-// Regression: #442 — free-text pattern/question values with apostrophes
-// must survive shell delivery. Dual-mode: argv for enum/slug/numeric,
-// stdin heredoc for any free-text payload.
+// observations.ts (subprocess — stdin-only typed writer)
+// Replaces append-metrics.ts, whose <arbitrary-path> <arbitrary-json> signature
+// granted more authority than any caller needed. Regression #442 (free-text
+// values with apostrophes must survive shell delivery) is now structural rather
+// than conventional: the label only ever arrives on stdin, so there is no argv
+// mode left to get wrong.
 // -------------------------------------------------------
 
-describe('append-metrics (dual-mode)', () => {
-  async function appendMetricsArgv(ledger: string, event: string) {
-    return runScript('append-metrics.ts', { args: [ledger, event] });
+describe('observations.ts observe', () => {
+  async function observe(stateDir: string, source: string, label: string, ...flags: string[]) {
+    return runScript('observations.ts', { args: ['observe', stateDir, source, ...flags], stdin: label });
   }
-  async function appendMetricsStdin(ledger: string, event: string) {
-    return runScript('append-metrics.ts', { args: [ledger], stdin: event });
-  }
+  const ledgerOf = (dir: string) => hermit(dir, 'state', 'observations.jsonl');
 
-  test('append-metrics (stdin: apostrophe in pattern survives)', withDir(async (dir) => {
-    // Regression: apostrophes broke single-quoted argv passing (issue #442).
-    // Stdin heredoc form must deliver the value verbatim.
-    const ledger = hermit(dir, 'state', 'observations.jsonl');
-    const event = JSON.stringify({ ts: '2026-06-22T00:00:00Z', pattern: "bob's pattern", session_id: 'S-1', source: 'reflect-noticed', origin: 'own-work' });
-    const r = await appendMetricsStdin(ledger, event);
+  test('observations (apostrophe in label survives)', withDir(async (dir) => {
+    const r = await observe(hermit(dir), 'reflect-noticed', "bob's pattern", '--origin=own-work');
     expect(r.exitCode).toBe(0);
-    const line = JSON.parse(fs.readFileSync(ledger, 'utf-8').trim());
+    expect(r.stdout.trim()).toBe('OK');
+    const line = JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim());
     expect(line.pattern).toBe("bob's pattern");
+    expect(line.source).toBe('reflect-noticed');
+    expect(line.origin).toBe('own-work');
   }));
 
-  test('append-metrics (stdin: apostrophe in question survives)', withDir(async (dir) => {
-    const ledger = hermit(dir, 'state', 'proposal-metrics.jsonl');
-    const event = JSON.stringify({ ts: '2026-06-22T00:00:00Z', type: 'micro-queued', micro_id: 'MP-20260622-0', tier: 1, question: "what's the plan?" });
-    const r = await appendMetricsStdin(ledger, event);
+  test('observations (double-quote and dollar sign survive)', withDir(async (dir) => {
+    // Dollar signs must not expand. Under the old argv mode this was a live hazard;
+    // stdin delivery makes it structurally impossible.
+    const label = 'spend spiked: $5.00 vs "median" $3.50';
+    const r = await observe(hermit(dir), 'quick-deferral', label);
     expect(r.exitCode).toBe(0);
-    const line = JSON.parse(fs.readFileSync(ledger, 'utf-8').trim());
-    expect(line.question).toBe("what's the plan?");
+    expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).pattern).toBe(label);
   }));
 
-  test('append-metrics (stdin: embedded double-quote and dollar sign survive)', withDir(async (dir) => {
-    // Dollar signs in pattern must not expand (no $X -> empty) under stdin delivery.
-    const ledger = hermit(dir, 'state', 'observations.jsonl');
-    const event = JSON.stringify({ ts: '2026-06-22T00:00:00Z', pattern: 'cost_spike: $5.00 vs 7d median $3.50', session_id: 'S-1', source: 'cost-spike' });
-    const r = await appendMetricsStdin(ledger, event);
+  test('observations (ts is stamped, session_id resolved from runtime.json)', withDir(async (dir) => {
+    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'S-042' }));
+    await observe(hermit(dir), 'quick-deferral', 'a label');
+    const line = JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim());
+    expect(line.session_id).toBe('S-042');
+    expect(line.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  }));
+
+  test('observations (missing runtime.json → session_id "unknown")', withDir(async (dir) => {
+    await observe(hermit(dir), 'quick-deferral', 'a label');
+    expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).session_id).toBe('unknown');
+  }));
+
+  test('observations (deterministic sources are not invocable from the CLI)', withDir(async (dir) => {
+    // cost-spike/behavior-digest/startup-drift are derived from data the model does
+    // not hold; only the scripts that compute them may write them.
+    for (const source of ['cost-spike', 'behavior-digest', 'startup-drift']) {
+      const r = await observe(hermit(dir), source, 'forged');
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe(`ERROR|invalid-source:${source}`);
+    }
+    expect(fs.existsSync(ledgerOf(dir))).toBe(false);
+  }));
+
+  test('observations (origin rejected on a source that never carries it)', withDir(async (dir) => {
+    const r = await observe(hermit(dir), 'quick-deferral', 'a label', '--origin=own-work');
+    expect(r.stdout.trim()).toBe('ERROR|origin-not-allowed:quick-deferral');
+    expect(fs.existsSync(ledgerOf(dir))).toBe(false);
+  }));
+
+  test('observations (invalid origin value rejected)', withDir(async (dir) => {
+    const r = await observe(hermit(dir), 'skill-correction', 'skill-correction:reflect', '--origin=elsewhere');
+    expect(r.stdout.trim()).toBe('ERROR|invalid-origin:elsewhere');
+    expect(fs.existsSync(ledgerOf(dir))).toBe(false);
+  }));
+
+  test('observations (empty and multiline labels write nothing)', withDir(async (dir) => {
+    expect((await observe(hermit(dir), 'quick-deferral', '   ')).stdout.trim()).toBe('ERROR|empty-pattern');
+    expect((await observe(hermit(dir), 'quick-deferral', 'a\nb')).stdout.trim()).toBe('ERROR|multiline-pattern');
+    expect(fs.existsSync(ledgerOf(dir))).toBe(false);
+  }));
+
+  test('observations (over-long label rejected, ledger untouched)', withDir(async (dir) => {
+    const r = await observe(hermit(dir), 'quick-deferral', 'x'.repeat(201));
+    expect(r.stdout.trim()).toBe('ERROR|pattern-too-long:201');
+    expect(fs.existsSync(ledgerOf(dir))).toBe(false);
+  }));
+
+  test('observations (a rejected row never exits non-zero — telemetry must not abort a skill)', withDir(async (dir) => {
+    const r = await observe(hermit(dir), 'bogus-source', 'label');
     expect(r.exitCode).toBe(0);
-    const line = JSON.parse(fs.readFileSync(ledger, 'utf-8').trim());
-    expect(line.pattern).toBe('cost_spike: $5.00 vs 7d median $3.50');
+    expect(r.stdout.trim()).toBe('ERROR|invalid-source:bogus-source');
   }));
 
-  test('append-metrics (argv and stdin produce identical ledger lines)', withDir(async (dir) => {
-    // Dual-mode parity: the two delivery paths must write the same bytes.
-    const ledgerA = hermit(dir, 'state', 'a.jsonl');
-    const ledgerB = hermit(dir, 'state', 'b.jsonl');
-    const event = JSON.stringify({ ts: '2026-06-22T00:00:00Z', type: 'resolved', proposal_id: 'PROP-001' });
-    await appendMetricsArgv(ledgerA, event);
-    await appendMetricsStdin(ledgerB, event);
-    expect(fs.readFileSync(ledgerA, 'utf-8')).toBe(fs.readFileSync(ledgerB, 'utf-8'));
-  }));
-
-  test('append-metrics (argv mode still works — back-compat)', withDir(async (dir) => {
-    const ledger = hermit(dir, 'state', 'proposal-metrics.jsonl');
-    const event = JSON.stringify({ ts: '2026-06-22T00:00:00Z', type: 'resolved', proposal_id: 'PROP-001' });
-    const r = await appendMetricsArgv(ledger, event);
-    expect(r.exitCode).toBe(0);
-    const line = JSON.parse(fs.readFileSync(ledger, 'utf-8').trim());
-    expect(line.proposal_id).toBe('PROP-001');
-  }));
-
-  test('append-metrics (stdin: bad JSON — exits 1, no write)', withDir(async (dir) => {
-    const ledger = hermit(dir, 'state', 'observations.jsonl');
-    const r = await appendMetricsStdin(ledger, 'not-json');
+  test('observations (mis-invocation exits 1 so a broken call site is loud)', withDir(async (dir) => {
+    const r = await runScript('observations.ts', { args: ['observe', hermit(dir)], stdin: 'label' });
     expect(r.exitCode).toBe(1);
-    expect(fs.existsSync(ledger)).toBe(false);
   }));
 
-  // Lint guard: no single-quoted argv append-metrics call may carry a free-text
-  // field (question/note/message/text). Those must use stdin heredoc.
-  // Enum/id/count/slug/numeric fields (type, proposal_id, source, pattern) remain
-  // on argv and are intentionally excluded from this check.
-  //
-  // Multi-line aware: bash backslash-continuation (the only multi-line argv form
-  // used in skills) is merged into one logical line before matching, so a free-text
-  // field split across `append-metrics.ts \` + path + `'{...}'` lines is still caught.
-  // Heredoc calls never match — their single-quoted token is the `'HERMIT_METRICS_JSON'`
-  // delimiter, not a `'{...}'` payload.
-  const FREE_TEXT_KEYS = ['question', 'note', 'message', 'text'];
-
-  function scanArgvFreeText(content: string, label = 'inline'): string[] {
-    const physical = content.split('\n');
-    // Merge trailing-backslash continuations into logical lines, keeping each
-    // logical line's first physical line number so violations stay locatable.
-    const logical: { text: string; line: number }[] = [];
-    for (let i = 0; i < physical.length; i++) {
-      let text = physical[i];
-      const start = i;
-      while (text.endsWith('\\') && i + 1 < physical.length) {
-        text = text.slice(0, -1) + ' ' + physical[++i].trimStart();
-      }
-      logical.push({ text, line: start + 1 });
-    }
-
-    const violations: string[] = [];
-    for (const { text, line } of logical) {
-      if (!text.includes('append-metrics.ts')) continue;
-      // Match: append-metrics.ts <path> '<json-containing-free-text-key>'
-      const single = text.match(/append-metrics\.ts\s+\S+\s+'(\{[^']+\})'/);
-      if (!single) continue;
-      const payload = single[1];
-      for (const key of FREE_TEXT_KEYS) {
-        if (payload.includes(`"${key}"`)) {
-          violations.push(`${label}:${line} — "${key}" in single-quoted argv (use stdin heredoc)`);
-        }
-      }
-    }
-    return violations;
-  }
-
-  test('append-metrics (lint: no single-quoted argv call with free-text field)', () => {
-    const skillsRoot = path.join(PLUGIN_ROOT, 'skills');
-    const devSkillsRoot = path.join(MONOREPO_ROOT, 'plugins', 'claude-code-dev-hermit', 'skills');
-    const roots = [skillsRoot, ...(fs.existsSync(devSkillsRoot) ? [devSkillsRoot] : [])];
-
-    const violations: string[] = [];
-    for (const root of roots) {
-      if (!fs.existsSync(root)) continue;
-      const skillFiles = fs.readdirSync(root)
-        .map(s => path.join(root, s, 'SKILL.md'))
-        .filter(f => fs.existsSync(f));
-
-      for (const file of skillFiles) {
-        violations.push(...scanArgvFreeText(fs.readFileSync(file, 'utf-8'), file));
-      }
-    }
-
-    if (violations.length > 0) {
-      throw new Error(`append-metrics free-text-in-argv violations:\n${violations.join('\n')}`);
-    }
-  });
-
-  test('append-metrics (lint: scan catches multi-line argv, ignores heredoc)', () => {
-    // Payloads use apostrophe-free placeholders, mirroring real skill templates —
-    // a literal apostrophe inside single-quoted argv is itself broken bash (the very
-    // bug this guard prevents), so the guard keys off the field name, not the value.
-    // Positive: a 3-line backslash-continuation call carrying "question" is caught.
-    const multiLineArgv = [
-      "bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts \\",
-      "  .claude-code-hermit/state/proposal-metrics.jsonl \\",
-      `  '{"ts":"<now ISO>","type":"micro-queued","question":"<full question text>"}'`,
-    ].join('\n');
-    expect(scanArgvFreeText(multiLineArgv)).toHaveLength(1);
-
-    // Negative: the same free-text payload delivered via heredoc is not a violation.
-    const heredoc = [
-      "bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl <<'HERMIT_METRICS_JSON'",
-      `{"ts":"<now ISO>","type":"micro-queued","question":"<full question text>"}`,
-      "HERMIT_METRICS_JSON",
-    ].join('\n');
-    expect(scanArgvFreeText(heredoc)).toHaveLength(0);
-
-    // Negative: a multi-line argv call with only enum/slug fields is fine.
-    const enumArgv = [
-      "bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts \\",
-      "  .claude-code-hermit/state/proposal-metrics.jsonl \\",
-      `  '{"ts":"<now ISO>","type":"triage-verdict","verdict":"CREATE"}'`,
-    ].join('\n');
-    expect(scanArgvFreeText(enumArgv)).toHaveLength(0);
-  });
+  // The `scanArgvFreeText` lint that used to live here is deliberately gone, not
+  // retargeted. It existed to police free-text fields passed through single-quoted
+  // argv — a hazard that only exists because an argv mode existed. observations.ts
+  // takes the label on stdin and nothing else, so there is no shape left to lint;
+  // a guard here would assert against a code path the interface cannot express.
+  // The remaining structural guarantees are covered by the cases above.
 });
 
 // -------------------------------------------------------

@@ -1,0 +1,58 @@
+// observations.ts — the one model-facing writer for state/observations.jsonl.
+//
+// Usage: bun observations.ts observe <hermit-state-dir> <source> [--origin=<own-work|external-content>]
+//        <free-text label on stdin, via a quoted heredoc>
+//
+// Replaces append-metrics.ts, which took an arbitrary path and arbitrary JSON and
+// so granted every holder of its unattended permission strictly more authority
+// than any caller needed.
+//
+// Stdin-only by design. The label is the only free-text field, and a free-text
+// value in single-quoted argv breaks the moment it contains an apostrophe — the
+// hazard the old script's dual argv/stdin mode existed to work around. Once the
+// computed sources moved to the scripts that compute them (reflect-precheck,
+// transcript-digest), every remaining caller passes model-authored prose, so
+// there is no argv case left to serve and no quoting rule to document.
+//
+// Exit 0 always; the verdict is the stdout line (OK | ERROR|<token>), matching
+// proposal.ts. A metrics row is telemetry — it must never abort a skill step.
+
+import { emit, flagEq as flag, readStdin } from './lib/cli';
+import { CLI_SOURCES, appendObservation, resolveSessionId, type CliSource, type Origin } from './lib/observations';
+
+const USAGE = `Usage: bun observations.ts observe <hermit-state-dir> <${CLI_SOURCES.join('|')}> [--origin=own-work|external-content]
+       <label on stdin>`;
+
+async function main(): Promise<void> {
+  const [verb, stateDir, source, ...rest] = process.argv.slice(2);
+
+  // A mis-invocation is not a resolved verdict — exit 1 so a broken call site is
+  // loud in tests and CI rather than silently recording nothing.
+  if (verb !== 'observe' || !stateDir || !source) {
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  // Rejecting the computed sources here is what keeps ownership honest: cost-spike,
+  // behavior-digest and startup-drift are derived from data the model does not hold,
+  // so a prose-authored row for one of them would be a guess wearing a fact's label.
+  if (!(CLI_SOURCES as readonly string[]).includes(source)) {
+    emit(`ERROR|invalid-source:${source}`);
+  }
+
+  const origin = flag(rest, 'origin') as Origin | undefined;
+  const pattern = (await readStdin()).trim();
+
+  const err = appendObservation(stateDir, {
+    source: source as CliSource,
+    pattern,
+    sessionId: resolveSessionId(stateDir),
+    origin,
+  });
+  emit(err ? `ERROR|${err}` : 'OK');
+}
+
+main().catch((e: any) => {
+  process.stdout.write(`ERROR|unexpected:${e?.message ?? 'unknown'}\n`);
+  process.exit(0);
+});

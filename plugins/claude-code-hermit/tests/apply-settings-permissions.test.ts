@@ -141,4 +141,12 @@ describe('sealed registries', () => {
     const canonical = new Set(HERMIT_ALLOW);
     for (const stale of HERMIT_OBSOLETE) expect(canonical.has(stale)).toBe(false);
   });
+
+  // The narrowed metrics-writer grant. The old entry allowed writing arbitrary
+  // JSON to an arbitrary path, so it has to be actively retired from existing
+  // installs, not merely dropped from the canonical list.
+  test('the observations writer is granted and its arbitrary-path predecessor retired', () => {
+    expect(HERMIT_ALLOW).toContain('Bash(bun */scripts/observations.ts observe *)');
+    expect(HERMIT_OBSOLETE).toContain('Bash(bun */scripts/append-metrics.ts*)');
+  });
 });

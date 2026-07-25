@@ -47,7 +47,6 @@ Run this step only if `resolution_check` is listed in `phases_json`.
      { "proposal_id": "PROP-NNN",
        "action": "auto-resolve",
        "frontmatter_patch": { "status": "resolved", "resolved_date": "<now ISO>" },
-       "metrics_event": "{\"ts\":\"<now ISO>\",\"type\":\"resolved\",\"proposal_id\":\"PROP-NNN\"}",
        "shell_findings_line": "PROP-NNN resolved — success signal met: avg session cost $<observed> over <sessions_counted> sessions (target <op> $<threshold>)." }
      ```
    - `UNMET` → nudge if debounce allows. Check `last_sparse_nudge.<PROP-NNN>` (from dispatch prompt or
@@ -57,7 +56,6 @@ Run this step only if `resolution_check` is listed in `phases_json`.
      { "proposal_id": "PROP-NNN",
        "action": "nudge",
        "frontmatter_patch": null,
-       "metrics_event": null,
        "shell_findings_line": "PROP-NNN success signal NOT met: avg session cost $<observed> over <sessions_counted> sessions (target <op> $<threshold>). Run /claude-code-hermit:proposal-act resolve|dismiss PROP-NNN, or revise." }
      ```
 
@@ -85,7 +83,8 @@ Run this step only if `resolution_check` is listed in `phases_json`.
 
    If the pattern is **absent** from all 3:
    - **Frequent** (`original_cadence_days ≤ 14`) and ≥ 14 days elapsed since `accepted_date`:
-     → auto-resolve (same entry shape as `MET` branch above, `metrics_event` type: `"resolved"`).
+     → auto-resolve (same entry shape as the `MET` branch above). Do not emit a metrics row —
+     `apply-reflection-actions.ts` derives the `resolved` row from `proposal_id`.
    - **Sparse** (`original_cadence_days > 14`) and elapsed ≥ `2 × original_cadence_days` since
      `accepted_date` and debounce allows (same `last_sparse_nudge` check as UNMET branch):
      → nudge (populate `shell_findings_line`:
@@ -211,7 +210,6 @@ Return a single JSON object — no prose, no markdown wrapping. Every field is r
 {
   "resolution_actions": [ { "proposal_id": "PROP-NNN", "action": "auto-resolve|nudge|skip",
                             "frontmatter_patch": {"status":"resolved","resolved_date":"<ISO>"}|null,
-                            "metrics_event": "<JSON string for append-metrics>"|null,
                             "shell_findings_line": "<pre-rendered finding text>"|null } ],
   "routine_candidates": [ { "routine_id": "<id>", "action": "disable|retime|diagnostic",
                             "tier": 1, "schedule": "<new-cron>"|null,

@@ -497,3 +497,87 @@ describe('reflect-precheck: behavior phase', () => {
     }
   });
 });
+
+// ── cost-spike rows are written by the precheck, and deduped by day ──────────
+//
+// The row used to be formatted in reflect's prose from a number the precheck had
+// already computed and thrown away — a round trip that, across the live fleet,
+// never once produced a row. It is now written here.
+//
+// The dedup label is the load-bearing detail. `todayTotal` climbs through the day,
+// so a label carrying the amount would be a new string on every run and would slip
+// past the exact-pattern dedup, writing a fresh row per precheck invocation on a
+// spike day. The label is date-scoped and the figures ride as fields instead.
+
+describe('reflect-precheck: cost-spike observation', () => {
+  // The cost log resolves as a sibling of `.claude-code-hermit`, so the hermit dir
+  // must be named that for the walk-up to land inside this test's own tmp tree.
+  function makeSpikeProject(todayTotals: number[]): string {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-spike-'));
+    const hermitDir = path.join(project, '.claude-code-hermit');
+    const stateDir = path.join(hermitDir, 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.mkdirSync(path.join(hermitDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
+
+    fs.writeFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), '## Progress Log\n', 'utf-8');
+    fs.writeFileSync(path.join(stateDir, 'reflection-state.json'),
+      JSON.stringify({ counters: {}, last_behavior_digest_at: new Date().toISOString() }), 'utf-8');
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'),
+      JSON.stringify({ session_state: 'idle', session_id: 'S-900' }), 'utf-8');
+    fs.writeFileSync(path.join(hermitDir, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
+    fs.writeFileSync(path.join(stateDir, 'observations.jsonl'), '', 'utf-8');
+
+    writeCostLog(project, todayTotals);
+    return hermitDir;
+  }
+
+  // Two quiet prior days at $1 give a median of $1; today's total is the spike.
+  function writeCostLog(project: string, todayTotals: number[]): void {
+    const today = new Date().toISOString().slice(0, 10);
+    const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+    const rows = [
+      { timestamp: `${day(2)}T10:00:00Z`, estimated_cost_usd: 1 },
+      { timestamp: `${day(1)}T10:00:00Z`, estimated_cost_usd: 1 },
+      ...todayTotals.map((amt, i) => ({ timestamp: `${today}T1${i}:00:00Z`, estimated_cost_usd: amt })),
+    ];
+    fs.writeFileSync(path.join(project, '.claude', 'cost-log.jsonl'),
+      rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+  }
+
+  test('writes one date-scoped row carrying the figures as fields', async () => {
+    const hermitDir = makeSpikeProject([10]);
+    const r = await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+    expect(r.exitCode).toBe(0);
+
+    const spikes = readObservations(hermitDir).filter(o => o.source === 'cost-spike');
+    expect(spikes).toHaveLength(1);
+    expect(spikes[0].pattern).toBe(`cost-spike:${new Date().toISOString().slice(0, 10)}`);
+    expect(spikes[0].today_total).toBe(10);
+    expect(spikes[0].median_7d).toBe(1);
+    expect(spikes[0].session_id).toBe('S-900');
+    // A measurement has no provenance — the constructor rejects `origin` on this source.
+    expect(spikes[0].origin).toBeUndefined();
+  });
+
+  test('a second run the same day with a higher running total still writes only one row', async () => {
+    const hermitDir = makeSpikeProject([10]);
+    await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+
+    // Spend continues: today's total moves 10 → 25. Under a value-bearing label this
+    // would be a brand-new pattern and a second row; under the date-scoped label the
+    // dedup holds.
+    writeCostLog(path.dirname(hermitDir), [10, 15]);
+    await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+
+    const spikes = readObservations(hermitDir).filter(o => o.source === 'cost-spike');
+    expect(spikes).toHaveLength(1);
+    expect(spikes[0].today_total).toBe(10); // the first run's figures, not re-stamped
+  });
+
+  test('no row when today is not a spike', async () => {
+    const hermitDir = makeSpikeProject([1]);
+    await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+    expect(readObservations(hermitDir).filter(o => o.source === 'cost-spike')).toHaveLength(0);
+  });
+});

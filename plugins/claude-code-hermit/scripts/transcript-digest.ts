@@ -45,6 +45,7 @@ import {
 } from './lib/cc-compat';
 import { classifySource } from './lib/trigger-source';
 import { resolveHermitNowMs } from './lib/time';
+import { appendObservation, resolveSessionId } from './lib/observations';
 
 type Json = any;
 
@@ -244,14 +245,17 @@ function mergeDigests(
   };
 }
 
-function parseArgs(argv: string[]): { stateDir: string; days: number; sessions: number; dir?: string } | null {
+function parseArgs(argv: string[]): { stateDir: string; days: number; sessions: number; dir?: string; record: boolean } | null {
   const positionals: string[] = [];
   let days = DEFAULT_DAYS;
   let sessions = DEFAULT_SESSIONS;
   let dir: string | undefined;
+  let record = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--days') {
+    if (a === '--record-observation') {
+      record = true;
+    } else if (a === '--days') {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v <= 0) return null;
       days = v;
@@ -269,7 +273,23 @@ function parseArgs(argv: string[]): { stateDir: string; days: number; sessions: 
     }
   }
   if (positionals.length !== 1) return null;
-  return { stateDir: positionals[0], days, sessions, dir };
+  return { stateDir: positionals[0], days, sessions, dir, record };
+}
+
+// The defer-loop threshold. Lived in reflect's skill prose, which asked the model to
+// compare counters this script had already produced and hand-write the resulting row —
+// so the rule was unenforceable and the row, across the live fleet, never appeared.
+const DEFER_LOOP_MIN_WAKES = 20;
+const DEFER_LOOP_MAX_PRODUCTIVE_RATIO = 0.25;
+
+function deferLoopPattern(out: any): string | null {
+  const wakes = out?.counters?.wakes ?? 0;
+  const productive = out?.counters?.productive_wakes ?? 0;
+  if (wakes < DEFER_LOOP_MIN_WAKES) return null;
+  if (productive / wakes >= DEFER_LOOP_MAX_PRODUCTIVE_RATIO) return null;
+  const from = out?.window?.from ?? 'unknown';
+  const to = out?.window?.to ?? 'unknown';
+  return `defer-loop: ${productive}/${wakes} productive wakes, ${from}→${to}`;
 }
 
 function main(argv: string[]): number {
@@ -288,11 +308,13 @@ function main(argv: string[]): number {
   // the arg's absolute-ness matters — a relative stateDir's value is intentionally
   // ignored in favor of the resolved root. Resolve lazily: an explicit --dir
   // supersedes this, so don't pay the walk-up when the caller already named the dir.
+  // Resolved eagerly when recording, since the ledger lives under it; otherwise
+  // lazily, so a caller who named --dir doesn't pay for the walk-up.
+  let hermitRoot: string | null = null;
+  const rootOnce = () => (hermitRoot ??= path.isAbsolute(args.stateDir) ? args.stateDir : resolveHermitRoot());
+
   let dir = args.dir;
-  if (!dir) {
-    const hermitRoot = path.isAbsolute(args.stateDir) ? args.stateDir : resolveHermitRoot();
-    dir = transcriptDirFor(path.dirname(hermitRoot));
-  }
+  if (!dir) dir = transcriptDirFor(path.dirname(rootOnce()));
 
   const perFile: FileDigest[] = [];
   let truncated = 0;
@@ -304,6 +326,17 @@ function main(argv: string[]): number {
     perFile.push(digestLines(win.lines, cutoffMs));
   }
   const out = mergeDigests(perFile, { days: args.days, files: perFile.length, truncated, skipped });
+
+  // Opt-in: the digest is a read by default, so an ad-hoc or debugging invocation
+  // never leaves rows behind. reflect passes the flag on its scheduled run.
+  if (args.record) {
+    const pattern = deferLoopPattern(out);
+    if (pattern) {
+      const root = rootOnce();
+      appendObservation(root, { source: 'behavior-digest', pattern, sessionId: resolveSessionId(root) });
+    }
+  }
+
   process.stdout.write(JSON.stringify(out) + '\n');
   return 0;
 }

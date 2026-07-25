@@ -59,7 +59,7 @@ When the operator accepts a proposal:
 2. **Determine what to set.** Read `state/runtime.json` for `session_id` and `session_state` (both used below — `session_state` drives step 4's branch). From the file already read in step 1:
    - `responded`: if currently `false`, plan `--set responded=true` for the patch call below and fire the first-response event now, **before** that patch call, so its summary regen already reflects it:
      ```
-     bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"responded","proposal_id":"PROP-NNN","action":"accept"}'
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts event .claude-code-hermit responded --id=PROP-NNN --action=accept
      ```
      If `responded` is already `true`, skip both (prevents double-counting).
    - `accepted_in_session`: if `session_id` is non-null, plan `--set accepted_in_session=<session_id>`. If no session is active (`session_id` is null), leave it unset (frontmatter default `null` stays).
@@ -249,7 +249,7 @@ When invoked as `accept PROP-NNN --answer "<label>"` (channel-responder resolvin
 1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. **First-response tracking:** check the `responded` field. If `false`, fire the event now — before the patch call below, so its summary regen reflects it:
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"responded","proposal_id":"PROP-NNN","action":"defer"}'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts event .claude-code-hermit responded --id=PROP-NNN --action=defer
    ```
    Skip if already `true`.
 3. Ask: "Any note on why it's deferred or when to revisit?" (optional — operator can skip)
@@ -270,7 +270,7 @@ Deferred proposals still appear in `/proposal-list` but are sorted below open pr
 1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. **First-response tracking:** check the `responded` field. If `false`, fire the event now — before the patch call below, so its summary regen reflects it:
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"responded","proposal_id":"PROP-NNN","action":"dismiss"}'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts event .claude-code-hermit responded --id=PROP-NNN --action=dismiss
    ```
    Skip if already `true`.
 3. Ask: "Reason for dismissal?" (optional — operator can skip)
@@ -294,7 +294,7 @@ Used when reflect has surfaced a sparse-cadence proposal as a resolution candida
 1. Resolve the proposal file using the resolution algorithm above, then read it.
 2. Append a `resolved` event to proposal-metrics.jsonl — before the patch call below, so its summary regen reflects it:
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl '{"ts":"<now ISO>","type":"resolved","proposal_id":"PROP-NNN"}'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts event .claude-code-hermit resolved --id=PROP-NNN
    ```
 3. Patch — frontmatter flip, Operator Decision timestamp, and the compaction-boundary marker in one call:
    ```bash

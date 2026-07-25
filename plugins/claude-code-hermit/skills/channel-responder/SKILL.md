@@ -214,11 +214,12 @@ Do not classify tier, tag Evidence Source, or decide memory-vs-proposal. Reflect
 **Resolved corrections → observations ledger, not Findings.** If the turn matched the "Correction or emergency implying a durable preference" condition above AND the correction clearly names a specific installed skill/component (e.g. "the brief is too verbose", "reflect keeps missing X" — an explicit skill or its behavior, not a vague "you"), append a ledger row **instead of** the `## Findings` line above:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/observations.jsonl \
-  '{"ts":"<now ISO>","pattern":"skill-correction:<canonical-name>","session_id":"<S-NNN>","source":"skill-correction","origin":"<own-work|external-content>"}' || true
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit skill-correction --origin=<own-work|external-content> <<'HERMIT_OBSERVATION'
+skill-correction:<canonical-name>
+HERMIT_OBSERVATION
 ```
 
-`<canonical-name>` = the corrected skill's bare `name:` frontmatter (strip any `claude-code-hermit:`/`<plugin>:` prefix, lowercase) — same resolution `session-close` uses. `origin` follows the same sender check as the `[origin: external]` marker above (`external-content` for a non-primary sender, else `own-work`). Fail-open (`|| true`) so a bad append never blocks the reply. At most one row per turn, same as the Findings cap.
+`<canonical-name>` = the corrected skill's bare `name:` frontmatter (strip any `claude-code-hermit:`/`<plugin>:` prefix, lowercase) — same resolution `session-close` uses. `origin` follows the same sender check as the `[origin: external]` marker above (`external-content` for a non-primary sender, else `own-work`). The writer answers `ERROR|<reason>` on stdout and still exits 0, so a rejected row can never block the reply — no `|| true` needed. At most one row per turn, same as the Findings cap.
 
 If the correction is a stated preference/recurrence with **no** clearly named skill, keep writing the `## Findings` line as before — do not guess a `<name>` and do not ask the operator to disambiguate mid-reply.
 
