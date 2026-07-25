@@ -1766,6 +1766,55 @@ describe('micro-proposal', () => {
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
+
+  test('brief-cycle buckets 0/1/2+ in one pass: verdict + single write + one expiry ledger line', withDir(async (dir) => {
+    const c0 = { id: 'MP-c0', tier: 1, status: 'pending', follow_up_count: 0, question: 'q0', options: ['a', 'b'] };
+    const c1 = { id: 'MP-c1', tier: 1, status: 'pending', follow_up_count: 1, question: 'q1' };
+    const c2 = { id: 'MP-c2', tier: 1, status: 'pending', follow_up_count: 2, question: 'q2' };
+    seed(dir, [c0, c1, c2]);
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    expect(r.exitCode).toBe(0);
+    const verdict = JSON.parse(r.stdout.trim());
+    expect(verdict.new).toEqual([{ id: 'MP-c0', question: 'q0', options: ['a', 'b'] }]);
+    expect(verdict.renudged).toEqual([{ id: 'MP-c1', question: 'q1', follow_up_count: 2 }]);
+    expect(verdict.expired).toEqual([{ id: 'MP-c2', question: 'q2' }]);
+    // Queue: c0 untouched at 0, c1 bumped to 2, c2 removed.
+    const pending = microFile(dir).pending;
+    expect(pending.map((e: any) => e.id)).toEqual(['MP-c0', 'MP-c1']);
+    expect(pending.find((e: any) => e.id === 'MP-c0').follow_up_count).toBe(0);
+    expect(pending.find((e: any) => e.id === 'MP-c1').follow_up_count).toBe(2);
+    const events = ledger(dir);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'micro-resolved', micro_id: 'MP-c2', action: 'expired', question: 'q2' });
+  }));
+
+  test('brief-cycle on an all-count-0 queue is a pure read (no write, no ledger)', withDir(async (dir) => {
+    seed(dir, [entryA, entryB]);
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    expect(r.exitCode).toBe(0);
+    const verdict = JSON.parse(r.stdout.trim());
+    expect(verdict.new).toHaveLength(2);
+    expect(verdict.renudged).toEqual([]);
+    expect(verdict.expired).toEqual([]);
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+    expect(fs.existsSync(hermit(dir, 'state', 'proposal-metrics.jsonl'))).toBe(false);
+  }));
+
+  test('brief-cycle on an absent file -> empty verdict, exit 0, no write', withDir(async (dir) => {
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout.trim())).toEqual({ new: [], renudged: [], expired: [] });
+    expect(fs.existsSync(hermit(dir, 'state', 'micro-proposals.json'))).toBe(false);
+  }));
+
+  test('brief-cycle on a corrupt file -> exit 1, file byte-unchanged', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
+    expect(r.exitCode).toBe(1);
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
 });
 
 // -------------------------------------------------------

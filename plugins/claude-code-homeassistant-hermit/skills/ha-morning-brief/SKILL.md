@@ -55,19 +55,11 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
    - Read `.claude-code-hermit/cost-summary.md` if it exists — include yesterday's cost
 
 <!-- keep in sync with plugins/claude-code-hermit/skills/brief/SKILL.md — same MP lifecycle protocol -->
-9a. **Micro-proposals lifecycle** — Read `.claude-code-hermit/state/micro-proposals.json`. If the `pending` array is non-empty:
-   - Each entry with `follow_up_count` of 0: include in `Awaiting decision:` output (see Output Format). Do not mutate.
-   Never hand-edit `state/micro-proposals.json` — mutate it only with the commands below, which round-trip the whole file through `JSON.parse`/`JSON.stringify` and replace it atomically via a temp file + rename, matching core's writer (issue 649: a hand-edited removal left a trailing comma, corrupting the queue; a truncating in-place write would reopen the same hole on a mid-write crash). Both exit 1 without writing if the id doesn't match, so a silent no-op can't leave an entry stranded.
-   - Each entry with `follow_up_count` of 1: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)", then bump the counter:
-     ```bash
-     bun -e 'const fs=require("fs"),p=".claude-code-hermit/state/micro-proposals.json",d=JSON.parse(fs.readFileSync(p,"utf8")),e=(d.pending||[]).find(x=>x.id===process.argv[1]);if(!e){console.error("no-match: "+process.argv[1]);process.exit(1)}e.follow_up_count=(e.follow_up_count||0)+1;const t=p+"."+process.pid+".tmp";fs.writeFileSync(t,JSON.stringify(d,null,2)+"\n");fs.renameSync(t,p)' -- "<id>"
-     ```
-   - Each entry with `follow_up_count` >= 2: drop it and record the expiry. The ledger line is appended only after the queue write lands, and the question text is passed as an argument so it can't inject into the JSON:
-     ```bash
-     bun -e 'const fs=require("fs"),p=".claude-code-hermit/state/micro-proposals.json",d=JSON.parse(fs.readFileSync(p,"utf8")),i=(d.pending||[]).findIndex(x=>x.id===process.argv[1]);if(i<0){console.error("no-match: "+process.argv[1]);process.exit(1)}const q=d.pending[i].question;d.pending.splice(i,1);const t=p+"."+process.pid+".tmp";fs.writeFileSync(t,JSON.stringify(d,null,2)+"\n");fs.renameSync(t,p);fs.appendFileSync(".claude-code-hermit/state/proposal-metrics.jsonl",JSON.stringify({ts:new Date().toISOString().slice(0,19)+"Z",type:"micro-resolved",micro_id:process.argv[1],action:"expired",question:q})+"\n")' -- "<id>"
-     ```
-     Core's `scripts/micro-proposal.ts` is deliberately not invoked here. HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/`, so no static `../claude-code-hermit/…` path reaches core's plugin root — the version segment is not knowable from skill text.
-   - If `pending` is empty: skip this step entirely.
+9a. **Micro-proposals lifecycle** — age the queue in one call: `.claude-code-hermit/bin/hermit-run micro-proposal .claude-code-hermit brief-cycle`. This runs core's writer through the project-resident `bin/hermit-run`, which resolves core's plugin root (a static `../claude-code-hermit/…` path can't — HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/` and the version segment isn't knowable from skill text). It performs the whole `follow_up_count` 0/1/2+ lifecycle atomically (re-nudges count-1 entries, expires count-2+ entries, records each expiry) and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…]}`. Never hand-edit `state/micro-proposals.json`. Render from that verdict:
+   - Each `new` entry: include in `Awaiting decision:` output (see Output Format).
+   - Each `renudged` entry: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)".
+   - `expired` entries were dropped this cycle — do not surface them.
+   - If `new` and `renudged` are both empty: skip this step entirely.
 
 10. **Compose brief** — Write a concise morning brief in the operator's language (from OPERATOR.md preferences). Use the format below.
 

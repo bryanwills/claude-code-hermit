@@ -5,6 +5,8 @@
 ### Added
 - Channel-originated harness commands: an exact `/model <arg>`, `/effort <arg>`, `/compact`, or `/clear` from a trusted channel sender is recorded by a new `UserPromptSubmit` hook and typed into the session's pane when the turn ends. Args are passed through to Claude Code rather than checked against a fixed list, so new models and effort levels work without a plugin change.
 - `config.effort` — passed as `--effort` on every `hermit-start`, mirroring `config.model`, so a channel effort change reverts on restart instead of persisting. Ships `null` (no flag, model default); set it to opt into the revert-on-restart guarantee. Not the same lever as `config.env.CLAUDE_CODE_EFFORT_LEVEL`, which pins the session and makes a runtime `/effort` a no-op.
+- `micro-proposal.ts brief-cycle` — ages the whole micro-approval queue in one call (re-nudges `follow_up_count` 1 entries, expires 2+ entries, records each expiry) and returns a JSON verdict, replacing the per-entry `nudge`/`resolve` calls both briefs used to issue one at a time.
+- Two `Bash(.claude-code-hermit/bin/hermit-run <script> *)` allow entries so domain plugins can reach core's shared scripts through the project-resident `bin/hermit-run` (their own `${CLAUDE_PLUGIN_ROOT}` can't resolve core's versioned cache dir). The word-boundary space and `hermit-exec.sh`'s new `/`/`..` rejection keep the route from reaching a script outside core's `scripts/`.
 
 ### Fixed
 - A `/clear` reaching the pane outside the watchdog no longer skips the hermit's own reset bookkeeping. The runtime stamp, `SHELL.md` breadcrumb, and status-cache clear moved to `lib/context-reset.ts`; skipping the cache clear previously let the watchdog fire a spurious `/compact` against a freshly-cleared context.
@@ -17,10 +19,14 @@
 - A CLAUDE-APPEND marker that appears more than once in the target file is now refused (reported `block-ambiguous`, no Edit applied) instead of risking a replace that hits the wrong instance.
 - Micro-approval resolve/expire/nudge now go through the new `scripts/micro-proposal.ts` instead of hand-edited JSON, which could leave `state/micro-proposals.json` unparseable.
 - `queue-micro-proposal.ts` refuses to write over an unparseable `micro-proposals.json` instead of resetting it and silently dropping the pending backlog.
+- `hermit-evolve`'s sibling upgrade now applies `local > project` scope precedence when the same sibling is installed at both scopes in one project, matching `resolve-siblings.ts` and Claude Code's own settings layering — it previously read the project-scope install's version and changelog while the session was running the local-scope one.
+- `hatch` Step 8's rationale no longer claims HA's `ha-morning-brief` reaches `micro-proposal.ts` via a `../claude-code-hermit/scripts/` sibling path (that path never resolved from an installed domain plugin); it reaches it via `bin/hermit-run`.
 
 ### Changed
 - Proactive operator notifications unified onto `channel-send.ts --notice`; `weekly-review`, `cost-reflect`, and (via § Operator Notification) `heartbeat`/`brief`/`capability-brainstorm` are tier-aware, so spend and technical detail no longer reach the client chat. On a `non-technical` install with no `maintainer_channel_id`, routine spend reports now land in `SHELL.md` Findings instead of the primary chat.
 - The core CLAUDE-APPEND template gained a closing marker (`<!-- /claude-code-hermit: Session Discipline -->`), matching `claude-code-homeassistant-hermit`/`claude-code-fitness-hermit`/`feed-hermit`/`laravel-forge-hermit`. Bounds detection still falls back correctly for already-installed blocks that predate the marker.
+- `hermit-evolve` Step 8 now delegates the permission merge to `bun scripts/apply-settings.ts <settings-file> allow` instead of maintaining a hand-enumerated script list in prose. The prose list had drifted to 15 of the canonical 28 entries and told the model to add a `Write` rule the writer deliberately strips; the delegated writer holds the single canonical list and writes via `fs`, so it also works under the strict hook profile where an `Edit`/`Write` to `.claude/settings*.json` is blocked.
+- `bin/hermit-run` validates `HERMIT_PLUGIN_ROOT` by manifest name and fails loud when two marketplaces provide `claude-code-hermit` (instead of silently taking glob order); `hermit-exec.sh` rejects a script name containing `/` or `..`.
 
 ### Upgrade Instructions
 1. The CLAUDE-APPEND change reaches installed hermits through the standard `<!-- claude-code-hermit: Session Discipline -->` marker-block resync `hermit-evolve` already performs. Skills and scripts ship in the plugin, so no per-operator migration is needed for those.

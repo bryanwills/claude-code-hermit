@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { findHermitDir } from './lib/find-hermit-dir';
 
 type Json = any;
 
@@ -100,19 +101,6 @@ function git(args: string): string {
   try {
     return execSync(`git ${args}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch (_) { return ''; }
-}
-
-function findHermitDir(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 8; i++) {
-    if (fs.existsSync(path.join(dir, '.claude-code-hermit', 'config.json'))) {
-      return path.join(dir, '.claude-code-hermit');
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
 }
 
 function loadBinding(branch: string): { id?: string; title?: string } | null {

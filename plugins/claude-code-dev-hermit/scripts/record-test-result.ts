@@ -13,21 +13,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync, spawnSync } from 'node:child_process';
+import { findHermitDir } from './lib/find-hermit-dir';
 
 type Json = any;
 
 const MAX_STDIN = 1024 * 1024;
-
-function findHermitDir(startDir: string): string | null {
-  let dir = startDir;
-  for (let i = 0; i < 8; i++) {
-    if (fs.existsSync(path.join(dir, '.claude-code-hermit', 'config.json'))) return path.join(dir, '.claude-code-hermit');
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
-}
 
 function loadTestCommand(hermitDir: string): string | null {
   try {

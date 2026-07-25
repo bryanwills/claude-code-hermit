@@ -226,7 +226,13 @@ Same logic as init step 8, but target the file determined by `hatch_target` (res
 - `hatch_target == "local"` → `.claude/settings.local.json`
 - `hatch_target == "committed"` → `.claude/settings.json`
 
-Check the target settings file for the plugin's required permissions (`git diff/status/log`, per-script `bun` entries, the SessionStart `bash -c` hook, and `Edit`/`Write` on `.claude-code-hermit/**`). The required entries are: `cost-tracker.ts`, `evaluate-session.ts`, `append-metrics.ts`, `resolve-prop.ts`, `next-prop-id.ts`, `record-gate.ts`, `queue-micro-proposal.ts`, `micro-proposal.ts`, `generate-summary.ts`, `proposals-index.ts`, `cron-tz-shift.ts`, `archive-shell.ts`, `evolve-plan.ts`, `evolve-finalize.ts`, `manifest-seed.ts`. **Delegated mode: add any missing entries without asking** (a missing `bun` permission breaks hooks, so this is non-optional), and collect them for the step-10 report. Only add missing entries — never remove existing ones. If all are already present, skip silently. Also remove stale permissions from previous versions if found in the target file:
+Delegate the additive permission merge to core's sealed writer rather than hand-enumerating the list here — `apply-settings.ts` holds the canonical `HERMIT_ALLOW` (so it can't drift from what `hatch` installs), writes via `fs` (so it works even under the strict hook profile, where an `Edit`/`Write` to `.claude/settings*.json` is denied), and is idempotent:
+
+```bash
+bun ${plugin_root}/scripts/apply-settings.ts <resolved-settings-file> allow
+```
+
+where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.claude/settings.json` (committed) per `hatch_target`, and `${plugin_root}` is the baked absolute plugin root. It prints one `allow: <entry>` line per newly-added permission (silent when everything is already present) — collect those for the step-10 report; if it prints nothing, the report notes no permission changes. **Delegated mode: run it without asking** (a missing `bun` permission breaks hooks, so this is non-optional); it only ever adds, never removes. (On a hermit whose allow-list predates `apply-settings.ts` itself, this command may hit a permission gate inside this subagent, which can't prompt — relay that to the step-10 report so the operator can add `Bash(bun */scripts/apply-settings.ts*)` and re-run, rather than wedging.) Separately, remove stale permissions from previous versions if found in the target file:
 
 - `Bash(python3:*)`, `Bash(node:*)` — replaced by scoped bun entries
 - `Edit(.claude/.claude-code-hermit/**)`, `Write(.claude/.claude-code-hermit/**)` — replaced by `.claude-code-hermit/**` (v0.0.6 path change)

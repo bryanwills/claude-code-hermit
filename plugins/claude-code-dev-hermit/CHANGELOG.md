@@ -9,6 +9,7 @@
 
 ### Changed
 - The CLAUDE-APPEND template gained a closing marker (`<!-- /claude-code-dev-hermit: Development Workflow -->`), placed outside both mode regions so it survives both renderings. Lets core's `hermit-evolve` bound the block exactly instead of a heuristic that used to mistake the template's own `<!-- mode:standard-only -->` annotation for the block marker.
+- `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 
 ## [0.4.7] - 2026-07-03
 
