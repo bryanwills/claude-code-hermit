@@ -16,7 +16,11 @@ import { PLUGIN_ROOT } from './helpers/run';
 
 const SKILL_PATH = path.join(PLUGIN_ROOT, 'skills', 'channel-responder', 'SKILL.md');
 const HOOKS_PATH = path.join(PLUGIN_ROOT, 'hooks', 'hooks.json');
-const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'channel-reply-reminder.ts');
+// The reminder is now a stage of scripts/user-prompt-pipeline.ts, not a
+// separately-registered hook script — the file moved, the registration is the
+// pipeline's. Test names below still say "channel-reply-reminder" because the
+// guarantee they pin is unchanged.
+const SCRIPT_PATH = path.join(PLUGIN_ROOT, 'scripts', 'lib', 'prompt-stages', 'channel-reply-reminder.ts');
 
 const skill = fs.readFileSync(SKILL_PATH, 'utf-8');
 
@@ -37,7 +41,7 @@ test('skill §0 names generic reply tool pattern', () => {
 });
 
 test('hooks.json has channel-reply-reminder entry', () => {
-  expect(fs.readFileSync(HOOKS_PATH, 'utf-8')).toContain('channel-reply-reminder.ts');
+  expect(fs.readFileSync(HOOKS_PATH, 'utf-8')).toContain('user-prompt-pipeline.ts');
 });
 
 test('channel-reply-reminder.ts exists and is non-empty', () => {

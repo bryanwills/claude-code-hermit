@@ -1,4 +1,4 @@
-// Operator-language cap-status composition, shared by channel-status-responder.ts
+// Operator-language cap-status composition, shared by lib/prompt-stages/channel-status-responder.ts
 // (the deterministic `status` hook) and cost-reflect.ts (the --plain channel mode)
 // so the two surfaces can't drift on how a spend cap is phrased. Lives here rather
 // than in lib/budget.ts (which is pure evaluation, no I/O) because budgetLine reads

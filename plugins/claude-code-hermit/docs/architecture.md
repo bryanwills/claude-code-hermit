@@ -156,7 +156,7 @@ your-project/
 │   │   ├── micro-proposals.json      # Pending micro-approvals list (reflect + channel-bridged asks + channel-responder)
 │   │   ├── state-summary.md          # Auto-generated health snapshot (generate-summary.ts)
 │   │   ├── monitors.runtime.json     # Active watch registry, cleared on session start (watch-owned)
-│   │   ├── operator-pause.json       # Operator/watchdog pause (pause-keyword.ts/watchdog-owned)
+│   │   ├── operator-pause.json       # Operator/watchdog pause (pause stage/watchdog-owned)
 │   │   ├── auto-pause.json           # Budget-breach auto-pause (cost-tracker-owned)
 │   │   ├── budget-alerts.json        # Budget alert dedup (cost-tracker-owned)
 │   │   ├── telemetry-alert.json      # Telemetry export-failure alert dedup (telemetry-export-owned)
@@ -184,7 +184,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (scheduled-checks display) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |
 | `state/channel-replies.jsonl`  | channel-hook.ts (append only)                       | reflect (routine-ROI engagement join)                         |
-| `state/channel-log.sqlite`     | channel-reply-reminder.ts + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
+| `state/channel-log.sqlite`     | channel-reply-reminder stage + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
 | `state/session-diff.json`      | session-diff.ts only                                | session-close (display)                                       |
 | `state/observations.jsonl`     | reflect + reflect-precheck + session-close + channel-responder (append only; `source` values: `cost-spike`, `quick-deferral`, `reflect-noticed`, `startup-drift`, `skill-correction`) | reflect (step 3b graduation), reflection-judge (§1.4 ledger verification) |
 | `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal-metrics-report.ts (read-only)   |

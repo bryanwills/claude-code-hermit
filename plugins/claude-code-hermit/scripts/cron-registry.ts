@@ -35,7 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { sha256 } from './lib/hash';
-import { shiftCron } from './cron-tz-shift';
+import { shiftCron } from './lib/cron-shift';
 import { parseCronField } from './validate-config';
 
 type Json = any;

@@ -3,7 +3,7 @@
 // seam synchronous callers (hermit-watchdog.ts, single-shot, no async conversion)
 // reach the deterministic channel send through via spawnSync, instead of
 // importing the lib directly the way async callers (cost-tracker.ts,
-// channel-status-responder.ts) do.
+// lib/prompt-stages/channel-status-responder.ts) do.
 //
 // Usage: bun channel-send.ts <hermit-dir> [--tier client|maintainer] <text|- >
 //   --tier     client (default) sends to the primary chat as today; maintainer

@@ -1,4 +1,4 @@
-// UserPromptSubmit hook — deterministic status responder.
+// UserPromptSubmit stage — deterministic status responder.
 //
 // When the inbound prompt is a <channel> envelope whose body is exactly
 // "status" (trimmed, case-insensitive) and the sender passes the channel's
@@ -19,15 +19,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { hermitDir } from './lib/cc-compat';
-import { parseChannelEnvelope } from './lib/channel-envelope';
-import { loadConfig, isAllowedSender, isTrustedController } from './lib/channel-auth';
-import { isPaused, pauseReasonLabel } from './lib/pause';
-import { resolveTimezone, budgetLine } from './lib/spend-status';
-import { friendlyBoundary, parseSimpleCronTime } from './lib/time';
-import { wallMinutes } from './cron-tz-shift';
-import { sendToChannel } from './lib/channel-send';
-import { STATUS, resolveLocale, type Locale } from './lib/messages';
+import { isAllowedSender, isTrustedController } from '../channel-auth';
+import { isPaused, pauseReasonLabel } from '../pause';
+import { resolveTimezone, budgetLine } from '../spend-status';
+import { friendlyBoundary, parseSimpleCronTime } from '../time';
+import { wallMinutes } from '../cron-shift';
+import { sendToChannel } from '../channel-send';
+import { STATUS, resolveLocale, type Locale } from '../messages';
+import type { StageContext, StageResult } from './types';
 
 type Json = any;
 
@@ -167,25 +166,15 @@ export function composeStatusReply(dir: string, config: Json, opts: { redact?: b
   return lines.join(' ');
 }
 
-async function main(raw: string): Promise<void> {
-  let payload: Json;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return;
-  }
-
-  const prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : null;
-  if (!prompt) return;
-
-  const envelope = parseChannelEnvelope(prompt);
+export async function run(ctx: StageContext): Promise<StageResult | void> {
+  const envelope = ctx.envelope;
   if (!envelope) return;
 
   // Exact-match only — near-misses fall through to the model (probe-verified).
   if (envelope.body.trim().toLowerCase() !== 'status') return;
 
-  const dir = hermitDir();
-  const config = loadConfig(dir);
+  const dir = ctx.dir;
+  const config = ctx.config();
   if (!config) return;
 
   if (!isAllowedSender(config, envelope.source, envelope.userId)) return;
@@ -201,10 +190,10 @@ async function main(raw: string): Promise<void> {
   const result = await sendToChannel(dir, reply, {
     target: { id: envelope.sourceKey, chat_id: envelope.chatId },
     timeoutMs: 6000,
+    config, // already loaded by the pipeline — don't make the sender re-read it
   });
   if (result.ok) {
-    console.log(JSON.stringify({ decision: 'block', reason: 'status answered deterministically' }));
-    return;
+    return { block: 'status answered deterministically' };
   }
 
   // Deterministic delivery failed — an unsupported platform (iMessage/webhook aren't
@@ -216,23 +205,10 @@ async function main(raw: string): Promise<void> {
   // UserPromptSubmit hook's stdout reaches the model on the same turn
   // (compiled/spike-userprompt-additionalcontext-probe-2026-07-05.md) — the same
   // mechanism channel-reply-reminder.ts relies on.
-  process.stdout.write(
-    `[status] Deterministic status delivery is unavailable on this channel. Relay the ` +
-    `following status to the operator verbatim via the channel reply tool (to the chat ` +
-    `this message arrived on), then stop — add no commentary:\n${reply}\n`
-  );
-}
-
-try {
-  let buf = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (chunk) => { buf += chunk; });
-  process.stdin.on('error', () => {});
-  process.stdin.on('end', () => {
-    main(buf)
-      .catch(() => {})
-      .finally(() => process.exit(0));
-  });
-} catch {
-  process.exit(0);
+  return {
+    context:
+      `[status] Deterministic status delivery is unavailable on this channel. Relay the ` +
+      `following status to the operator verbatim via the channel reply tool (to the chat ` +
+      `this message arrived on), then stop — add no commentary:\n${reply}\n`,
+  };
 }

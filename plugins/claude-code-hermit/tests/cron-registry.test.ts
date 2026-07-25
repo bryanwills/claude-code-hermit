@@ -15,7 +15,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { planCron, commitCron, computeWakeSpread, promptHash, REREGISTER_AGE_MS, filterRoutinesByIds } from '../scripts/cron-registry';
-import { shiftCron } from '../scripts/cron-tz-shift';
+import { shiftCron } from '../scripts/lib/cron-shift';
 
 const PLUGIN_ROOT = '/plugin';
 const BOOT_A = 'boot-aaa';

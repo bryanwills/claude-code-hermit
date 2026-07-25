@@ -33,7 +33,7 @@ import { tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from 
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { costLogPath } from './lib/cc-compat';
-import { wallMinutes } from './cron-tz-shift';
+import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';

@@ -206,7 +206,7 @@ function elapsedSinceHHMM(nowHHMM: string, stampHHMM: string): number {
 
 // Parse the minute/hour fields of a simple numeric 5-field cron schedule
 // (e.g. "0 0 * * *"). Shared by hermit-watchdog.ts (daily-auto-close proximity)
-// and channel-status-responder.ts (next-routine line) — both only need the
+// and the channel-status-responder stage (next-routine line) — both only need the
 // fixed-time case, not full cron range/step/list support.
 function parseSimpleCronTime(schedule: string): { hour: number; minute: number } | null {
   const parts = String(schedule).trim().split(/\s+/);

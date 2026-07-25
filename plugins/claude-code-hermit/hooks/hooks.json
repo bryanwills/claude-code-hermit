@@ -133,82 +133,11 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/prompt-context.ts"]
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt-pipeline.ts"],
+            "timeout": 15
           }
         ],
-        "description": "Inject current local time before every prompt so the model never anchors to a stale 'now'"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-reply-reminder.ts"],
-            "timeout": 3
-          }
-        ],
-        "description": "Inject reply-tool reminder when inbound prompt starts with a <channel source=...> envelope"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts"],
-            "timeout": 3
-          }
-        ],
-        "description": "Record last operator-action timestamp; skips routine/loop/channel prompts"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/pause-keyword.ts"],
-            "timeout": 3
-          }
-        ],
-        "description": "Deterministic pause/resume/snooze keyword writer — writes state/pause.json before any model turn, gated by the channel's allowed_users"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/harness-command-keyword.ts"],
-            "timeout": 3
-          }
-        ],
-        "description": "Record an exact channel /model|/effort|/compact|/clear request to state/pending-harness-command.json, gated by isTrustedController; the Stop hook types it into the pane once the turn ends"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/shutdown-gate.ts"],
-            "timeout": 8
-          }
-        ],
-        "description": "Deterministic shutdown gate — while a shutdown is pending, send-then-block channel messages from allowed senders so the hermit takes no new work"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-status-responder.ts"],
-            "timeout": 12
-          }
-        ],
-        "description": "Deterministic status responder — send-then-block reply to an exact idle 'status' message, gated by the channel's allowed_users; never fires on a near-miss or mid-turn arrival"
+        "description": "Single prompt pipeline: records operator action, injects time + channel reply reminder, then applies pause / harness-command / shutdown / status in explicit precedence (shutdown is terminal)"
       }
     ],
     "SessionStart": [

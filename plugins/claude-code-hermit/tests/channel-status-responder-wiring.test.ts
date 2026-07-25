@@ -9,7 +9,7 @@ import path from 'node:path';
 import { PLUGIN_ROOT } from './helpers/run';
 
 const HOOKS_PATH = path.join(PLUGIN_ROOT, 'hooks', 'hooks.json');
-const RESPONDER_SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'channel-status-responder.ts');
+const RESPONDER_SCRIPT = path.join(PLUGIN_ROOT, 'scripts', 'lib', 'prompt-stages', 'channel-status-responder.ts');
 const SEND_LIB = path.join(PLUGIN_ROOT, 'scripts', 'lib', 'channel-send.ts');
 const SEND_CLI = path.join(PLUGIN_ROOT, 'scripts', 'channel-send.ts');
 
@@ -32,7 +32,7 @@ test('hooks.json registers channel-status-responder.ts on UserPromptSubmit', () 
   const hooks = JSON.parse(fs.readFileSync(HOOKS_PATH, 'utf-8'));
   const entries = hooks.hooks.UserPromptSubmit ?? [];
   const registered = entries.some((e: any) =>
-    (e.hooks ?? []).some((h: any) => (h.args ?? []).some((a: string) => a.includes('channel-status-responder.ts')))
+    (e.hooks ?? []).some((h: any) => (h.args ?? []).some((a: string) => a.includes('user-prompt-pipeline.ts')))
   );
   expect(registered).toBe(true);
 });

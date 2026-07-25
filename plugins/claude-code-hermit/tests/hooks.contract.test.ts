@@ -1358,13 +1358,20 @@ describe('generate-summary', () => {
 });
 
 // -------------------------------------------------------
-// prompt-context (UserPromptSubmit hook)
+// prompt-context (a stage of the UserPromptSubmit pipeline)
+//
+// The stage lives in scripts/lib/prompt-stages/prompt-context.ts and is driven
+// through scripts/user-prompt-pipeline.ts. The pipeline only runs stages for a
+// payload that actually carries a prompt, so these pass a minimal one where the
+// old standalone script emitted on any stdin.
 // -------------------------------------------------------
+
+const PROMPT_CONTEXT_STDIN = JSON.stringify({ prompt: 'hello' });
 
 describe('prompt-context', () => {
   test('prompt-context (UTC fallback)', withDir(async (dir) => {
-    const r = await runScript('prompt-context.ts', {
-      stdin: '', cwd: dir, env: { AGENT_DIR: hermit(dir) },
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: PROMPT_CONTEXT_STDIN, cwd: dir, env: { AGENT_DIR: hermit(dir) },
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toMatch(/^\[Now: .+ UTC\]/m);
@@ -1372,8 +1379,8 @@ describe('prompt-context', () => {
 
   test('prompt-context (configured TZ)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"timezone":"America/New_York"}');
-    const r = await runScript('prompt-context.ts', {
-      stdin: '', cwd: dir, env: { AGENT_DIR: hermit(dir) },
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: PROMPT_CONTEXT_STDIN, cwd: dir, env: { AGENT_DIR: hermit(dir) },
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toMatch(/^\[Now: .+ (EST|EDT)\]/m);
@@ -1381,24 +1388,24 @@ describe('prompt-context', () => {
 
   test('prompt-context (invalid TZ, exits 0)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"timezone":"Bogus/Zone"}');
-    const r = await runScript('prompt-context.ts', {
-      stdin: '', cwd: dir, env: { AGENT_DIR: hermit(dir) },
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: PROMPT_CONTEXT_STDIN, cwd: dir, env: { AGENT_DIR: hermit(dir) },
     });
     expect(r.exitCode).toBe(0);
   }));
 
   test('prompt-context (invalid TZ, no [Now:] line)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"timezone":"Bogus/Zone"}');
-    const r = await runScript('prompt-context.ts', {
-      stdin: '', cwd: dir, env: { AGENT_DIR: hermit(dir) },
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: PROMPT_CONTEXT_STDIN, cwd: dir, env: { AGENT_DIR: hermit(dir) },
     });
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain('[Now:');
   }));
 
   test('prompt-context (malformed config, exits 0)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), 'not json');
-    const r = await runScript('prompt-context.ts', {
-      stdin: '', cwd: dir, env: { AGENT_DIR: hermit(dir) },
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: PROMPT_CONTEXT_STDIN, cwd: dir, env: { AGENT_DIR: hermit(dir) },
     });
     expect(r.exitCode).toBe(0);
   }));
@@ -1476,12 +1483,20 @@ describe('record-operator-action (usage capture)', () => {
 });
 
 // -------------------------------------------------------
-// channel-reply-reminder (UserPromptSubmit hook)
+// channel-reply-reminder (a stage of the UserPromptSubmit pipeline)
+//
+// The stage lives in scripts/lib/prompt-stages/channel-reply-reminder.ts and is
+// driven through scripts/user-prompt-pipeline.ts. prompt-context also runs on
+// every prompt, so "no reminder" is the absence of the reminder marker, not
+// empty stdout (empty stdout only survives where the payload carries no prompt
+// at all).
 // -------------------------------------------------------
+
+const NO_REMINDER = '[channel reply reminder]';
 
 describe('channel-reply-reminder', () => {
   const run = (prompt: string, dir: string) =>
-    runScript('channel-reply-reminder.ts', {
+    runScript('user-prompt-pipeline.ts', {
       stdin: JSON.stringify({ prompt }), cwd: dir,
     });
 
@@ -1511,25 +1526,25 @@ describe('channel-reply-reminder', () => {
   }));
 
   test('channel-reply-reminder (empty stdin)', withDir(async (dir) => {
-    const r = await runScript('channel-reply-reminder.ts', { stdin: '', cwd: dir });
+    const r = await runScript('user-prompt-pipeline.ts', { stdin: '', cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
   }));
 
   test('channel-reply-reminder (malformed JSON)', withDir(async (dir) => {
-    const r = await runScript('channel-reply-reminder.ts', { stdin: '{broken', cwd: dir });
+    const r = await runScript('user-prompt-pipeline.ts', { stdin: '{broken', cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
   }));
 
   test('channel-reply-reminder (no envelope)', withDir(async (dir) => {
     const r = await run('hello world', dir);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain(NO_REMINDER);
   }));
 
   test('channel-reply-reminder (envelope mid-prompt, no output)', withDir(async (dir) => {
     const r = await run('see <channel source="discord" chat_id="x">...', dir);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain(NO_REMINDER);
   }));
 
   test('channel-reply-reminder (adversarial control char in chat_id)', withDir(async (dir) => {
@@ -1585,11 +1600,11 @@ describe('channel-reply-reminder', () => {
   }));
 
   test('channel-reply-reminder (capture: malformed envelope -> reminder skipped, exit 0, no throw)', withDir(async (dir) => {
-    const r = await runScript('channel-reply-reminder.ts', {
+    const r = await runScript('user-prompt-pipeline.ts', {
       stdin: JSON.stringify({ prompt: 'not a channel envelope at all' }), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
+    expect(r.stdout).not.toContain(NO_REMINDER);
   }));
 });
 

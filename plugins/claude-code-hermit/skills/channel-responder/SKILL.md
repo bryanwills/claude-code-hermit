@@ -103,7 +103,7 @@ This is how the agent learns the DM channel ID for proactive outbound notificati
 Before running any heavy sub-step — an archive traversal, a multi-file search, or a delegated execution step — apply the **Context-hygiene & delegation** rule: delegate when its criteria hold and keep only the verdict.
 
 - **Harness command** (exactly `/compact`, `/clear`, `/model <arg>`, or `/effort <arg>`)
-  - Intercepted by the `harness-command-keyword.ts` `UserPromptSubmit` hook **before this skill runs** — the request is already recorded, and the `Stop` hook types it into the session when this turn ends. There is nothing for you to do; acknowledge briefly via the channel if you like.
+  - Intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's harness-command stage **before this skill runs** — the request is already recorded, and the `Stop` hook types it into the session when this turn ends. There is nothing for you to do; acknowledge briefly via the channel if you like.
   - Do **not** try to run it yourself, and do not treat it as a skill invocation.
   - It applies to *this* session only: the next `hermit-start` re-asserts `config.model` / `config.effort`. If Claude Code rejects the argument, that shows in the terminal, not in chat — so don't promise it took effect.
   - A near-miss (`/model` with no argument, a bare `clear`, or prose mentioning one) is **not** intercepted — classify it under the categories below instead.
@@ -169,7 +169,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - Reference specific files or decisions from SHELL.md when relevant
 
 - **Pause / resume / snooze** (bare, exact-match "pause", "stop", "resume", or "snooze <duration>")
-  - These exact messages are intercepted by the `pause-keyword.ts` `UserPromptSubmit` hook (PROP-015) **before this skill ever runs** — `state/pause.json` is already set or cleared by the time you see the prompt. There is nothing left for you to do for the state change itself; if you want to acknowledge it, reply via the channel.
+  - These exact messages are intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's pause stage (PROP-015) **before this skill ever runs** — `state/pause.json` is already set or cleared by the time you see the prompt. There is nothing left for you to do for the state change itself; if you want to acknowledge it, reply via the channel.
   - A sentence that merely mentions "pause" or "stop" (not an exact match) is not intercepted — classify it under Emergency below instead.
   - **Never attempt to resume yourself while paused.** The PreToolUse gate (`pause-gate.ts`) denies every tool call except the channel reply tool while paused — including a Bash call running `hermit-pause.ts off` — and returns the pause reason in the denial. Resume can only come from an exact "resume" message (the deterministic hook above) or the operator's own `.claude-code-hermit/bin/hermit-pause off`.
 

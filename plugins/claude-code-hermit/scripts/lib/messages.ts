@@ -267,7 +267,7 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
   },
 };
 
-// ---------- deterministic shutdown gate (shutdown-gate.ts) ----------
+// ---------- deterministic shutdown gate (lib/prompt-stages/shutdown-gate.ts) ----------
 
 export interface ShutdownMessages {
   inProgress(): string;

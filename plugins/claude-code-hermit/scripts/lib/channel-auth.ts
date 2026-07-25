@@ -1,6 +1,7 @@
 // Shared channel `allowed_users` allowlist gating — used by every
 // UserPromptSubmit hook that reacts to an inbound <channel> envelope
-// (channel-reply-reminder.ts, pause-keyword.ts, channel-status-responder.ts).
+// (the channel-reply-reminder, pause-keyword and channel-status-responder
+// stages in lib/prompt-stages/).
 // A single copy so the allowlist rule can't drift out of sync between callers.
 
 import fs from 'node:fs';

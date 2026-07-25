@@ -1,6 +1,7 @@
 // Shared <channel ...>body</channel> envelope parser — used by every
 // UserPromptSubmit hook that reacts to an inbound channel message
-// (channel-reply-reminder.ts, channel-status-responder.ts, pause-keyword.ts).
+// (the channel-reply-reminder, channel-status-responder and pause-keyword
+// stages in lib/prompt-stages/).
 // A single copy so the attribute regex and body-extraction rule can't drift
 // out of sync between callers.
 //

@@ -1,7 +1,9 @@
-// Behavioral tests for scripts/channel-reply-reminder.ts — the UserPromptSubmit
-// hook that reminds the model which reply tool to use, and captures inbound
-// messages into the episodic channel log. Exercised as a subprocess (stdin in,
-// stdout out), the boundary Claude Code sees — mirrors tests/pause-keyword.test.ts.
+// Behavioral tests for scripts/lib/prompt-stages/channel-reply-reminder.ts —
+// the stage that reminds the model which reply tool to use, and captures
+// inbound messages into the episodic channel log. Driven through the single
+// UserPromptSubmit process, scripts/user-prompt-pipeline.ts, as a subprocess
+// (stdin in, stdout out) — the boundary Claude Code sees. Mirrors
+// tests/pause-keyword.test.ts.
 //
 // tests/channel-responder-reply-rule.test.ts is a separate, static wiring
 // check (skill text / hooks.json / script presence) — it does not run this
@@ -29,7 +31,7 @@ function withDir(fn: (dir: string) => Promise<void> | void) {
 }
 
 const run = (prompt: string, dir: string) =>
-  runScript('channel-reply-reminder.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
+  runScript('user-prompt-pipeline.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
 
 describe('channel-reply-reminder', () => {
   test('bare source — names the exact reply tool', withDir(async (dir) => {

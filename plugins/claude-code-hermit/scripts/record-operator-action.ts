@@ -139,18 +139,8 @@ function appendSkillUsage(name: string): void {
   } catch { /* fail-open */ }
 }
 
-function main(raw: string): void {
-  let prompt: string | null = null;
-  try {
-    const payload = JSON.parse(raw);
-    if (payload && typeof payload.prompt === 'string') prompt = payload.prompt;
-  } catch { /* not JSON or empty — SessionStart path */ }
-
-  if (prompt === null) {
-    if (!fs.existsSync(STATE_PATH)) write();
-    return;
-  }
-
+// The UserPromptSubmit half, callable in-process by user-prompt-pipeline.ts.
+export function run(prompt: string): void {
   if (!isRoutinePrompt(prompt)) {
     // Skill-usage capture is operator-activity only — hermit's own injected
     // slash commands (INJECTED_EXACT) are routine prompts, so gating on the
@@ -163,21 +153,40 @@ function main(raw: string): void {
   }
 }
 
-if (process.argv.includes('--force')) {
-  write();
-  openTurnMarker();
-  process.exit(0);
+function main(raw: string): void {
+  let prompt: string | null = null;
+  try {
+    const payload = JSON.parse(raw);
+    if (payload && typeof payload.prompt === 'string') prompt = payload.prompt;
+  } catch { /* not JSON or empty — SessionStart path */ }
+
+  if (prompt === null) {
+    if (!fs.existsSync(STATE_PATH)) write();
+    return;
+  }
+
+  run(prompt);
 }
 
-try {
-  let buf = '';
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', chunk => { buf += chunk; });
-  process.stdin.on('error', () => {});
-  process.stdin.on('end', () => {
-    try { main(buf); } catch { /* fail-open */ }
+// Entry shell only when executed directly — importing this module (the pipeline
+// does, for run()) must not consume stdin or act on the caller's argv.
+if (import.meta.main) {
+  if (process.argv.includes('--force')) {
+    write();
+    openTurnMarker();
     process.exit(0);
-  });
-} catch {
-  process.exit(0);
+  }
+
+  try {
+    let buf = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => { buf += chunk; });
+    process.stdin.on('error', () => {});
+    process.stdin.on('end', () => {
+      try { main(buf); } catch { /* fail-open */ }
+      process.exit(0);
+    });
+  } catch {
+    process.exit(0);
+  }
 }
