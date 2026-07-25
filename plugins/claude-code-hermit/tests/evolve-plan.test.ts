@@ -843,13 +843,19 @@ test('REGRESSION defect C: template requiring rendering is never synced, never l
   }
 }));
 
-test('REGRESSION defect C: needs_render alone (no version gap) still keeps work_pending=true', withProj(async (proj) => {
+// needs_render must still surface on the plan (Step 7 defers the sync on a version
+// gap) but must not by itself pin work_pending. Rationale: see the siblingWorkNeeded
+// comment in buildPlan() in evolve-plan.ts.
+test('needs_render alone (no version gap) is surfaced but does not pin work_pending', withProj(async (proj) => {
   const devLikeRoot = writeDevLikeSibling();
   try {
     // Registered version matches installed -> no gap. needs_render must still surface.
     writeConfig(proj, JSON.stringify({
       _hermit_versions: { 'claude-code-hermit': '1.1.7', 'claude-code-dev-hermit': '0.4.3' },
     }));
+    // Core's own block drift-free, so work_pending reflects only the sibling.
+    fs.writeFileSync(path.join(proj, 'CLAUDE.local.md'),
+      `# Project\n\n---\n\n${MARKER}\n## Session Discipline\n\nbody line\n`);
     const pl = writePluginList([{
       id: 'claude-code-dev-hermit@claude-code-hermit', version: '0.4.3', scope: 'local',
       enabled: true, installPath: devLikeRoot, projectPath: proj,
@@ -858,7 +864,8 @@ test('REGRESSION defect C: needs_render alone (no version gap) still keeps work_
     const s = d.siblings.find((x: any) => x.name === 'claude-code-dev-hermit');
     expect(s.up_to_date).toBe(true);
     expect(s.claude_append_needs_render).toBe(true);
-    expect(d.work_pending).toBe(true);
+    expect(s.claude_append_changed).toBe(false);
+    expect(d.work_pending).toBe(false);
   } finally {
     try { fs.rmSync(devLikeRoot, { recursive: true, force: true }); } catch {}
   }

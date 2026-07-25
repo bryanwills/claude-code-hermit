@@ -816,9 +816,15 @@ function buildPlan({ hermitDir, pluginRoot, hatchTarget, pluginListJsonPath }: {
   // Siblings we could not fully assess (path-unresolved, or a plugin-list/CHANGELOG
   // warning) also keep work_pending true so the skill runs Step 7 and surfaces them
   // instead of silently reporting "up to date".
+  // `claude_append_needs_render` is deliberately NOT part of this test: it is a
+  // static property of the sibling's template (dev-hermit's always carries mode:
+  // markers), not evidence of pending work. Including it would pin work_pending
+  // true forever for every project with dev-hermit registered, so hermit-evolve
+  // could never report "up to date" again. On a real version gap `!s.up_to_date`
+  // already fires — the only case where Step 7 acts on the flag.
   const siblingWorkNeeded = plan.siblings.some(
     (s: SiblingPlanEntry) =>
-      !s.up_to_date || s.claude_append_changed || s.claude_append_needs_render || s.claude_append_ambiguous
+      !s.up_to_date || s.claude_append_changed || s.claude_append_ambiguous
   );
   const siblingsUnassessed =
     plan.siblings_path_unresolved.length > 0 || (plan.siblings_warnings?.length ?? 0) > 0;

@@ -207,9 +207,12 @@ For each entry in `plan.siblings`:
 
 - **No version gap (`up_to_date == true`) + `claude_append_changed == true`:**
   - **Do NOT apply a CLAUDE-APPEND Edit.** We cannot distinguish a deliberate operator edit from a missed sync at this diff level; auto-writing would clobber operator changes.
-  - Report as `<name> block-drifted` — advisory note for the operator to review manually.
+  - Report by cause, checking the specific flags before falling back to the generic label:
+    - `sibling.claude_append_block_missing` → `<name> block-missing — run /<name>:hatch to install it`.
+    - `sibling.claude_append_ambiguous` → `<name> block-ambiguous — the marker appears more than once, manual review needed`.
+    - Otherwise → `<name> block-drifted` — advisory note for the operator to review manually.
 
-- **No version gap + `claude_append_changed == false` (or absent):** report `<name> current`, skip.
+- **No version gap + `claude_append_changed == false` (or absent):** report `<name> current`, skip. (`claude_append_needs_render` may also be set here — it is a static property of the sibling's template, not pending work; core only acts on it inside the version-gap branch above.)
 
 If `plan.siblings_path_unresolved` is non-empty, report each as `<name> path-unresolved` (registered in `_hermit_versions` but not found in the project-effective plugin list).
 
