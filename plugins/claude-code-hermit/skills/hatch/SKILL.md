@@ -378,7 +378,7 @@ The script-rendered Artifact pages (dashboard, proposals) read their fixed UI ch
 
 Run **only** when the chosen `language` is set and is not `en`:
 
-1. Emit the English scaffold: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact-strings-scaffold.ts <language> <current-ISO-timestamp>`.
+1. Emit the English scaffold: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <language> <current-ISO-timestamp>`.
 2. Translate every value inside the `strings` object into the operator's language. Leave the keys and any `{placeholder}` tokens **verbatim** (word order may move around a token, but the token text must not change or be translated). Leave the `language` and `generated` fields as emitted.
 3. Write the result to `.claude-code-hermit/state/artifact-strings.json`.
 
