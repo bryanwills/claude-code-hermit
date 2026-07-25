@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- `forge.php deploy-watch <server-id> <site-id> <deploy-id>` replaces the hand-transcribed watch loop in `forge-deploy`; terminal statuses now come from the shared `STATUS_*` constants.
+- `forge.php deploy-watch <server-id> <site-id> <deploy-id>` replaces the hand-transcribed watch loop in `forge-deploy`; terminal statuses now come from the shared `STATUS_*` constants. `deploy` points at it in its `Watch with:` hint, and a failing poll now emits the exception class as a watch event instead of surfacing only as a `status=timeout` 15 minutes on.
 
 ## [0.0.8] - 2026-07-21
 

@@ -45,7 +45,7 @@ This triggers the deployment and returns immediately (no blocking wait):
 
 ```
 Deployment started: deploy-id=991 server-id=12345 site-id=67890 status=queued
-Watch with: forge.php deploy-status 12345 67890 991
+Watch with: forge.php deploy-watch 12345 67890 991
 ```
 
 Capture the canonical `deploy-id`, `server-id`, and `site-id` — Step 4 needs them.
