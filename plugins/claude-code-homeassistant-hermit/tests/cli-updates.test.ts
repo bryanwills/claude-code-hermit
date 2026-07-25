@@ -57,11 +57,6 @@ test('cli updates skips cleanly when HA is unreachable', async () => {
 
 // Regression gate: --digest wiring must never change default stdout — pinned
 // as the output contract for ha-update-check's `reflect --scheduled-checks`.
-function todayIsoLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 test('cli updates default output is byte-identical with and without the digest flag defaulting off', async () => {
   const deps = {
     createClient: async () =>
@@ -80,12 +75,16 @@ test('cli updates default output is byte-identical with and without the digest f
         ],
       }),
   };
-  const today = todayIsoLocal();
-  const expected = `ha-update-check findings — ${today}\nUpdates pending: 1\n- [core] Home Assistant Core: 2026.6.3 → 2026.7.1 — https://example.com/core\n`;
   const withoutFlag = await captureOutput(() => handleUpdates(dummyConfig, deps));
   const withFlagFalse = await captureOutput(() => handleUpdates(dummyConfig, deps, false));
-  expect(withoutFlag.out).toBe(expected);
-  expect(withFlagFalse.out).toBe(expected);
+  // The header carries today's date; pin everything below it byte-for-byte and
+  // require the two invocations to agree, so the date can't make this flake.
+  const body = (out: string) => out.split('\n').slice(1).join('\n');
+  expect(withFlagFalse.out).toBe(withoutFlag.out);
+  expect(withoutFlag.out.split('\n')[0]).toStartWith('ha-update-check findings — ');
+  expect(body(withoutFlag.out)).toBe(
+    'Updates pending: 1\n- [core] Home Assistant Core: 2026.6.3 → 2026.7.1 — https://example.com/core\n',
+  );
 });
 
 test('cli updates --digest emits tier-sorted digest lines instead of the default shape', async () => {

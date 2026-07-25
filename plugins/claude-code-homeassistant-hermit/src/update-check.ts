@@ -109,7 +109,7 @@ export function formatUpdatesDigest(updates: PendingUpdate[]): string {
     lines.push(`[${u.tier}] ${u.title}: ${u.installed_version ?? '?'} → ${u.latest_version ?? '?'}`);
   }
   const rest = individual.length - top.length;
-  if (rest > 0) lines.push(`+ ${rest} more updates pending`);
+  if (rest > 0) lines.push(`+ ${rest} more update${rest === 1 ? '' : 's'} pending`);
   if (hacs.length > 0) {
     lines.push(`[hacs] ${hacs.length} HACS update${hacs.length === 1 ? '' : 's'} pending`);
   }

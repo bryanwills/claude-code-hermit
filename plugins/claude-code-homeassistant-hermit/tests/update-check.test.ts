@@ -128,7 +128,7 @@ test('formatUpdatesDigest sorts individual updates by tier, ignoring input order
   expect(lines[1]).toStartWith('[os]');
   expect(lines[2]).toStartWith('[supervisor]');
   // 4th individual update collapses — top 3 shown, mosquitto (addon) is the 4th.
-  expect(lines[3]).toBe('+ 1 more updates pending');
+  expect(lines[3]).toBe('+ 1 more update pending');
 });
 
 test('formatUpdatesDigest with 3 or fewer individual updates emits no collapse line', () => {
@@ -137,7 +137,7 @@ test('formatUpdatesDigest with 3 or fewer individual updates emits no collapse l
     state('update.mosquitto_broker', { installed_version: '6.4', latest_version: '6.5', supported_features: 29 }),
   ]);
   const out = formatUpdatesDigest(updates);
-  expect(out).not.toContain('more updates pending');
+  expect(out).not.toContain('more update');
   expect(out.split('\n').length).toBe(2);
 });
 
@@ -148,5 +148,5 @@ test('formatUpdatesDigest aggregates hacs with singular/plural and excludes it f
   ]);
   const out = formatUpdatesDigest(updates);
   expect(out).toContain('[hacs] 1 HACS update pending');
-  expect(out).not.toContain('more updates pending');
+  expect(out).not.toContain('more update');
 });
