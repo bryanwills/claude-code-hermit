@@ -1645,6 +1645,102 @@ describe('queue-micro-proposal', () => {
     const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: 'not-json' });
     expect(r.exitCode).toBe(1);
   }));
+
+  test('queue-micro-proposal (corrupt existing file -> exit 1, refuses to overwrite)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
+    expect(r.exitCode).toBe(1);
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
+});
+
+// -------------------------------------------------------
+// micro-proposal.ts (subprocess — resolve/nudge, issue 649 regression)
+// -------------------------------------------------------
+
+describe('micro-proposal', () => {
+  function seed(dir: string, pending: any[]) {
+    write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending }));
+  }
+  function microFile(dir: string): any {
+    return readJson(hermit(dir, 'state', 'micro-proposals.json'));
+  }
+  function ledger(dir: string): any[] {
+    return fs.readFileSync(hermit(dir, 'state', 'proposal-metrics.jsonl'), 'utf-8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+  }
+  const entryA = { id: 'MP-20260101-0', tier: 1, status: 'pending', follow_up_count: 0, ts: '2026-01-01T00:00:00Z', question: 'Question A?' };
+  const entryB = { id: 'MP-20260101-1', tier: 1, status: 'pending', follow_up_count: 0, ts: '2026-01-01T00:00:01Z', question: 'Question B?' };
+
+  test('resolve (issue 649 regression: file stays parseable and holds the surviving entry after removal)', withDir(async (dir) => {
+    seed(dir, [entryA, entryB]);
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id, '--action', 'approved'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe(`RESOLVED|${entryA.id}|approved`);
+    const raw = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    expect(() => JSON.parse(raw)).not.toThrow();
+    const micro = JSON.parse(raw);
+    expect(micro.pending).toHaveLength(1);
+    expect(micro.pending[0].id).toBe(entryB.id);
+  }));
+
+  test('nudge (increments follow_up_count, leaves other fields intact)', withDir(async (dir) => {
+    seed(dir, [entryA]);
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'nudge', entryA.id] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe(`NUDGED|${entryA.id}|1`);
+    const entry = microFile(dir).pending[0];
+    expect(entry.follow_up_count).toBe(1);
+    expect(entry.question).toBe(entryA.question);
+  }));
+
+  test('resolve on a corrupt file -> exit 1, file byte-unchanged', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', 'MP-1', '--action', 'approved'] });
+    expect(r.exitCode).toBe(1);
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
+
+  test('resolve unknown id -> NONE|no-match, exit 0, no write', withDir(async (dir) => {
+    seed(dir, [entryA]);
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', 'MP-does-not-exist', '--action', 'approved'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('NONE|no-match');
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
+
+  test('resolve --action answered --answer emits the ledger event shape', withDir(async (dir) => {
+    seed(dir, [entryA]);
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id, '--action', 'answered', '--answer', 'session task'] });
+    expect(r.exitCode).toBe(0);
+    const events = ledger(dir);
+    expect(events[0]).toMatchObject({ type: 'micro-resolved', micro_id: entryA.id, action: 'answered', answer: 'session task', question: entryA.question });
+  }));
+
+  test('resolve on absent file -> NONE|no-match, exit 0', withDir(async (dir) => {
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', 'MP-anything', '--action', 'approved'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('NONE|no-match');
+  }));
+
+  test('resolve with missing --action -> exit 1, file unchanged', withDir(async (dir) => {
+    seed(dir, [entryA]);
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id] });
+    expect(r.exitCode).toBe(1);
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
+
+  test('resolve with invalid --action -> exit 1, file unchanged', withDir(async (dir) => {
+    seed(dir, [entryA]);
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id, '--action', 'bogus'] });
+    expect(r.exitCode).toBe(1);
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
 });
 
 // -------------------------------------------------------

@@ -57,12 +57,8 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 <!-- keep in sync with plugins/claude-code-hermit/skills/brief/SKILL.md — same MP lifecycle protocol -->
 9a. **Micro-proposals lifecycle** — Read `.claude-code-hermit/state/micro-proposals.json`. If the `pending` array is non-empty:
    - Each entry with `follow_up_count` of 0: include in `Awaiting decision:` output (see Output Format). Do not mutate.
-   - Each entry with `follow_up_count` of 1: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)". Increment `follow_up_count` to 2.
-   - Each entry with `follow_up_count` >= 2: capture `id` and `question` first, set `status: "expired"`, remove from `pending`. Append to `.claude-code-hermit/state/proposal-metrics.jsonl` using bun (avoids JSON injection from question text). Schema matches core's `append-metrics.js`: `ts`, `type`, `micro_id`, `action`, `question`:
-     ```bash
-     bun -e 'console.log(JSON.stringify({ts: process.argv[1], type: "micro-resolved", micro_id: process.argv[2], action: "expired", question: process.argv[3]}))' -- "<ISO8601>" "<id>" "<question>" >> .claude-code-hermit/state/proposal-metrics.jsonl
-     ```
-     (Core's `append-metrics.js` is unreachable from HA's `${CLAUDE_PLUGIN_ROOT}` — write directly.)
+   - Each entry with `follow_up_count` of 1: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)". Run `bun ${CLAUDE_PLUGIN_ROOT}/../claude-code-hermit/scripts/micro-proposal.ts .claude-code-hermit nudge <id>`.
+   - Each entry with `follow_up_count` >= 2: run `bun ${CLAUDE_PLUGIN_ROOT}/../claude-code-hermit/scripts/micro-proposal.ts .claude-code-hermit resolve <id> --action expired` — removes the entry and appends the `micro-resolved` event to `state/proposal-metrics.jsonl` in one call. Never hand-edit `state/micro-proposals.json` (issue 649: a hand-edited removal left a trailing comma, corrupting the file). Core scripts are reached from HA via the `../claude-code-hermit/scripts/` sibling path — both plugins are installed as siblings under the same marketplace directory.
    - If `pending` is empty: skip this step entirely.
 
 10. **Compose brief** — Write a concise morning brief in the operator's language (from OPERATOR.md preferences). Use the format below.
