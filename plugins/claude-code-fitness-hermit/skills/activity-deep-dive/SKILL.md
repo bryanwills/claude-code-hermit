@@ -129,6 +129,8 @@ cardiac_drift_flagged: <bool>            # include only when drift was computed 
 ```
 Body: the full output above.
 
+**CRITICAL — `cardiac_drift_bpm` must be a bare signed integer** (`6`, `-5`), not a formatted value like `+6 bpm`. `weekly-coaching-patterns` reads this field to build its trend series; renaming the key or writing a non-numeric value breaks the trend detector. It falls back to parsing the body's `Cardiac drift:` line only for notes written before this field existed.
+
 7. Write signal-only coaching observations to `.claude-code-hermit/sessions/SHELL.md` Findings.
 
    From the computed metrics and coaching note, derive 0–N observations that carry a coaching signal worth tracking across sessions: a flagged cardiac drift, a zone-distribution anomaly, a recovery estimate that conflicts with subjective RPE, an efficiency regression vs the prior mean, a flagged cadence (low average or high within-run variability), a notable VAM value, or a trail recovery extension. Do NOT write routine confirmations ("session completed normally") unless they represent a pattern break. If nothing clears the signal bar, skip this step.

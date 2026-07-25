@@ -537,8 +537,8 @@ export function extractDrift(body: string): number | null {
  * for notes written before `cardiac_drift_bpm` was in the template.
  */
 export function readDrift(fm: Record<string, string>, body: string): number | null {
-  const raw = fm.cardiac_drift_bpm;
-  if (raw !== undefined && /^[+-]?\d+$/.test(raw.trim())) return parseInt(raw, 10);
+  const raw = fm.cardiac_drift_bpm?.trim();
+  if (raw !== undefined && /^[+-]?\d+$/.test(raw)) return parseInt(raw, 10);
   return extractDrift(body);
 }
 
