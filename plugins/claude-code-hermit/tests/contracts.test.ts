@@ -2822,3 +2822,26 @@ describe('proposal lifecycle: no tool-mediated state writes', () => {
     expect(proposalAct).not.toMatch(/Write tool|Edit the/);
   });
 });
+
+// hermit-evolve Step 8 must delegate the permission merge to apply-settings.ts
+// rather than re-enumerate the allow-list in prose — the hand-maintained list had
+// already drifted (15 of 28 entries) and instructed a Write rule the writer strips.
+describe('hermit-evolve permission delegation contract', () => {
+  const evolveRef = fs.readFileSync(path.join(SKILLS, 'hermit-evolve', 'reference.md'), 'utf-8');
+
+  test('Step 8 delegates to apply-settings.ts allow', () => {
+    expect(evolveRef).toMatch(/apply-settings\.ts <resolved-settings-file> allow/);
+  });
+
+  test('Step 8 no longer hand-enumerates the per-script allow-list', () => {
+    // The removed prose opened with this phrase before listing scripts by name.
+    expect(evolveRef).not.toContain('The required entries are:');
+    // A couple of the previously-enumerated script names must not reappear as an
+    // inline permission list (they may still appear elsewhere in the file).
+    const step8 = evolveRef.slice(
+      evolveRef.indexOf('### 8. Ensure plugin permissions'),
+      evolveRef.indexOf('### 9. Write updated config'),
+    );
+    expect(step8).not.toContain('`queue-micro-proposal.ts`, `micro-proposal.ts`');
+  });
+});

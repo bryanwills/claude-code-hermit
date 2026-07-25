@@ -682,12 +682,13 @@ test('leak guard: duplicate hermit names in plugin list — only project-effecti
   }
 }));
 
-test('leak guard: scope precedence — project scope wins over local when both match', withProj(async (proj) => {
+test('leak guard: scope precedence — local scope wins over project when both match', withProj(async (proj) => {
   writeConfig(proj, JSON.stringify({
     _hermit_versions: { 'claude-code-hermit': '1.1.7', 'claude-code-dev-hermit': '0.4.1' },
   }));
   // Two entries for same sibling at same projectPath: one local, one project scope.
-  // Project scope should win (and SP is at 0.4.3).
+  // Local scope should win (local overrides project, matching resolve-siblings.ts);
+  // localSP is at 0.4.2.
   const localSP = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-local-sp-'));
   try {
     fs.mkdirSync(path.join(localSP, '.claude-plugin'), { recursive: true });
@@ -697,8 +698,8 @@ test('leak guard: scope precedence — project scope wins over local when both m
       { id: 'claude-code-dev-hermit@claude-code-hermit', version: '0.4.3', scope: 'project', enabled: true, installPath: SP, projectPath: proj },
     ]);
     const d = await runPlan(proj, 'local', pl);
-    expect(d.siblings[0].install_path).toBe(SP);
-    expect(d.siblings[0].to).toBe('0.4.3');
+    expect(d.siblings[0].install_path).toBe(localSP);
+    expect(d.siblings[0].to).toBe('0.4.2');
   } finally {
     try { fs.rmSync(localSP, { recursive: true, force: true }); } catch {}
   }

@@ -8,7 +8,10 @@
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — core's triage gate already records every verdict. Proposals now carry `tags: [capability-brainstorm]` instead of `[domain-brainstorm, ideation]`, so they count toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
-- `ha-morning-brief`'s micro-proposal lifecycle now mutates `state/micro-proposals.json` through a `JSON.parse`/`JSON.stringify` round-trip and an atomic temp-file rename instead of editing it by hand, so neither a nudge, an expiry, nor a crash mid-write can corrupt the queue. A non-matching id exits non-zero instead of silently doing nothing.
+- `ha-morning-brief`'s micro-proposal lifecycle now runs in one `.claude-code-hermit/bin/hermit-run micro-proposal .claude-code-hermit brief-cycle` call through core's writer (one atomic round-trip that re-nudges, expires, and records expiries), instead of two inline `bun -e` re-implementations of that writer — so a nudge, an expiry, or a crash mid-write can no longer corrupt the queue.
+
+### Changed
+- `domain-brainstorm` reads core's proposal-metrics report via `.claude-code-hermit/bin/hermit-run` (a path relative to this plugin can't reach core's install), and a kill-criteria breach now escalates to the operator as a class-level signal instead of instructing the skill to self-retire (the shared segment can't attribute noise to one skill).
 
 ### Changed
 - The CLAUDE-APPEND block dropped §Environment (hatch owns `.env` setup and validates it via `boot status`), §Entry Flow, the channel-routing utterance examples, and the unified-vs-legacy routine narrative — per-install config state that drifts the moment an operator edits `config.json`. 9,565 B originally, 5,076 B after the first trim, now ~2,814 B.

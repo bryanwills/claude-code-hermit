@@ -63,6 +63,12 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/session-archive.ts*)',
   'Bash(bun */scripts/routine-precheck.ts*)',
   'Bash(bun */scripts/cron-registry.ts*)',
+  // Domain plugins reach core's shared scripts through the project-resident
+  // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
+  // cache dir). Space before * is a word boundary — `micro-proposal *` matches
+  // `micro-proposal brief-cycle` but not a `micro-proposal…`-prefixed name.
+  'Bash(.claude-code-hermit/bin/hermit-run micro-proposal *)',
+  'Bash(.claude-code-hermit/bin/hermit-run proposal-metrics-report *)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];
@@ -138,13 +144,17 @@ function writeJson(filePath: string, data: Json): void {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
 }
 
-function mergeAllow(settings: Json, entries: string[]): void {
+// Returns the entries that were newly added (absent before) — the `allow` op
+// prints these so hermit-evolve's Step 8 report can list what it granted.
+function mergeAllow(settings: Json, entries: string[]): string[] {
   settings.permissions ??= {};
   settings.permissions.allow ??= [];
   const existing = new Set<string>(settings.permissions.allow);
+  const added: string[] = [];
   for (const e of entries) {
-    if (!existing.has(e)) settings.permissions.allow.push(e);
+    if (!existing.has(e)) { settings.permissions.allow.push(e); added.push(e); }
   }
+  return added;
 }
 
 function mergeAutoModeList(settings: Json, key: 'allow' | 'environment', entries: string[]): void {
@@ -193,6 +203,7 @@ if (!targetFile || !op) {
 }
 
 const settings = readTargetJson(targetFile);
+let addedAllow: string[] = [];
 
 switch (op) {
   case 'task-id': {
@@ -204,7 +215,7 @@ switch (op) {
   }
 
   case 'allow': {
-    mergeAllow(settings, HERMIT_ALLOW);
+    addedAllow = mergeAllow(settings, HERMIT_ALLOW);
     break;
   }
 
@@ -264,3 +275,8 @@ switch (op) {
 }
 
 writeJson(targetFile, settings);
+
+// After the write lands, report each newly-granted allow entry (one per line) so
+// hermit-evolve's Step 8 can list what it added in its run report. Silent when
+// nothing was added.
+for (const e of addedAllow) console.log(`allow: ${e}`);

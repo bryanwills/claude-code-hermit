@@ -31,9 +31,9 @@ type TriState = { state: string; count: number; entries: Json[] };
 
 /**
  * Fleet resolver — one of three; same walk-up logic, different return and fallback:
- *   core hermitDir    (scripts/lib/cc-compat.ts)              → the .cch dir (this file)
- *   HA   projectRoot  (homeassistant-hermit/src/config.ts)    → the project root (parent)
- *   dev  findHermitDir(dev-hermit/scripts/git-push-guard.ts)  → the .cch dir or null
+ *   core hermitDir    (scripts/lib/cc-compat.ts)                    → the .cch dir (this file)
+ *   HA   projectRoot  (homeassistant-hermit/src/config.ts)          → the project root (parent)
+ *   dev  findHermitDir(dev-hermit/scripts/lib/find-hermit-dir.ts)   → the .cch dir or null
  * INVARIANT: hermitDir() === path.join(projectRoot(), '.claude-code-hermit').
  * Fix one (env-var precedence, iteration cap) → check the other two.
  *

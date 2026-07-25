@@ -1,0 +1,35 @@
+name: Cross-Plugin Guards
+# Runs repo-root behavior guards that span more than one plugin, so they can't
+# live in any single plugin's release-blocking suite. Scoped tightly to the
+# files each guard covers — a core-only or single-plugin PR must not trigger it.
+# NOTE: the automode-env glob matches the three copies under scripts/ today;
+# a future copy placed elsewhere would need its path added here.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/*/scripts/automode-env.ts'
+      - 'tests/cross-plugin/**'
+      - '.github/workflows/test-cross-plugin.yml'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig.json'
+  pull_request:
+    paths:
+      - 'plugins/*/scripts/automode-env.ts'
+      - 'tests/cross-plugin/**'
+      - '.github/workflows/test-cross-plugin.yml'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig.json'
+
+jobs:
+  cross-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+      - run: bun install --frozen-lockfile
+      - run: bun test tests/cross-plugin/

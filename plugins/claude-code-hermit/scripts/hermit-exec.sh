@@ -14,6 +14,15 @@ shift
 # Tolerate legacy callers that pass filenames instead of logical names.
 NAME="${NAME%.ts}"
 
+# NAME must be a bare script basename — reject path separators and traversal so a
+# permission glob that spans '/' can't drive this into an arbitrary .ts outside scripts/.
+case "$NAME" in
+  ""|*/*|*..*)
+    echo "[hermit] Invalid script name: '$NAME'" >&2
+    exit 1
+    ;;
+esac
+
 if [ -f "$SCRIPT_DIR/$NAME.ts" ]; then
   exec bun "$SCRIPT_DIR/$NAME.ts" "$@"
 fi

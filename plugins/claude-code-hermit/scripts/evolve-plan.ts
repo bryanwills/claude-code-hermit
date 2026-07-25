@@ -543,11 +543,13 @@ function _pluginName(id: string): string {
 }
 
 // Find the project-effective entry for `name` in a pre-filtered plugin slice.
-// Scope precedence: project > local.
+// Scope precedence: local > project — the same order resolve-siblings.ts applies
+// (its header, "local overrides project"), matching Claude Code's own settings
+// layering where .local sits on top of the committed layer.
 function resolveProjectEffectivePlugin(projectEffective: any[], name: string): any | null {
   const candidates = projectEffective.filter(e => _pluginName(String(e.id || '')) === name);
   const byScope = (scope: string) => candidates.find(e => e.scope === scope);
-  return byScope('project') ?? byScope('local') ?? null;
+  return byScope('local') ?? byScope('project') ?? null;
 }
 
 // Compute per-sibling plan entries from _hermit_versions and the plugin list.
