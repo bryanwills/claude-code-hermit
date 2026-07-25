@@ -1654,6 +1654,16 @@ describe('queue-micro-proposal', () => {
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
+
+  test('queue-micro-proposal (parseable file with no `pending` key -> heals, other keys preserved)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{"active":null}');
+    const r = await runScript('queue-micro-proposal.ts', { args: [hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
+    expect(r.exitCode).toBe(0);
+    const micro = readJson(hermit(dir, 'state', 'micro-proposals.json'));
+    expect(micro.pending).toHaveLength(1);
+    expect(micro).toHaveProperty('active', null);
+  }));
 });
 
 // -------------------------------------------------------
@@ -1732,6 +1742,21 @@ describe('micro-proposal', () => {
     const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', entryA.id] });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
+
+  test('resolve with the <MP-id> omitted -> exit 1, never a silent NONE|no-match', withDir(async (dir) => {
+    seed(dir, [entryA]);
+    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'resolve', '--action', 'approved'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).not.toContain('NONE|no-match');
+    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+  }));
+
+  test('unknown verb -> exit 1 even when the file is absent', withDir(async (dir) => {
+    const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'expire', 'MP-20260101-0'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).not.toContain('NONE|no-match');
   }));
 
   test('resolve with invalid --action -> exit 1, file unchanged', withDir(async (dir) => {

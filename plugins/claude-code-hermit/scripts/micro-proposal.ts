@@ -10,8 +10,10 @@
 //   NUDGED|<id>|<follow_up_count>
 //   NONE|no-match
 // Exit 1 (+ stderr) on: unparseable micro-proposals.json (never overwritten),
-// unknown verb/action, missing --action, or a ledger-append failure — a silent
-// half-resolve would strand the entry as permanently pending.
+// unknown verb/action, a missing/flag-shaped <MP-id>, missing --action, or a
+// ledger-append failure. Every malformed invocation fails loud rather than
+// exiting 0 on `NONE|no-match` — a silent no-op is the failure mode this script
+// exists to remove.
 // Implements channel-responder/SKILL.md § Micro-approval response and
 // brief/SKILL.md's MP lifecycle step.
 
@@ -24,6 +26,7 @@ import { readMicroProposals } from './lib/micro-proposals-io';
 
 type Json = any;
 
+const VERBS = ['resolve', 'nudge'];
 const ACTIONS = ['approved', 'rejected', 'answered', 'expired'];
 
 const stateDir = process.argv[2];
@@ -43,6 +46,18 @@ function flag(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i === -1 ? undefined : process.argv[i + 1];
 }
+
+// Validate the whole invocation before touching disk. Otherwise a dropped id
+// (`resolve --action approved`) makes `--action` the id, misses, and exits 0 on
+// NONE|no-match — the entry stays pending and the caller believes it resolved.
+if (!VERBS.includes(verb)) fail(`Unknown verb: ${verb} (expected ${VERBS.join('|')})`);
+if (id.startsWith('-')) fail(`Missing <MP-id> — got the flag "${id}" in its place.`);
+
+const action = verb === 'resolve' ? flag('--action') : undefined;
+if (verb === 'resolve' && (!action || !ACTIONS.includes(action))) {
+  fail(`--action must be one of: ${ACTIONS.join(', ')}`);
+}
+const answer = flag('--answer');
 
 const microPath = path.join(stateDir, 'state', 'micro-proposals.json');
 
@@ -64,14 +79,6 @@ if (verb === 'nudge') {
   emit(`NUDGED|${id}|${next}`);
 }
 
-if (verb !== 'resolve') fail(`Unknown verb: ${verb}`);
-
-const action = flag('--action');
-if (!action || !ACTIONS.includes(action)) {
-  fail(`--action must be one of: ${ACTIONS.join(', ')}`);
-}
-const answer = flag('--answer');
-
 // Capture the question before removal — the ledger event carries it.
 const question = entry.question;
 micro.pending.splice(idx, 1);
@@ -80,6 +87,8 @@ writeFileAtomic(microPath, JSON.stringify(micro, null, 2) + '\n');
 const event: Json = { ts: utcISOStamp(), type: 'micro-resolved', micro_id: id, action, question };
 if (answer !== undefined) event.answer = answer;
 const err = appendJsonlLine(path.join(stateDir, 'state', 'proposal-metrics.jsonl'), JSON.stringify(event));
-if (err) fail(err);
+// The queue write already landed, so re-running this command would only report
+// NONE|no-match — say so, or the caller retries and loses the event for good.
+if (err) fail(`${err} — ${id} was already removed from pending; the micro-resolved event was NOT recorded. Do not re-run; append it by hand.`);
 
 emit(`RESOLVED|${id}|${action}`);
