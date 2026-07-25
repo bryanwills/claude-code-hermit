@@ -10,8 +10,8 @@
 //   RESOLVED|<id>|<action>
 //   NUDGED|<id>|<follow_up_count>
 //   NONE|no-match
-//   brief-cycle: JSON {"new":[{id,question,options}],
-//                      "renudged":[{id,question,options,follow_up_count}],
+//   brief-cycle: JSON {"new":[{id,tier,question,options}],
+//                      "renudged":[{id,tier,question,options,follow_up_count}],
 //                      "expired":[{id,question}]}
 // brief-cycle ages the whole queue in one pass so the brief skills drive the
 // count-0/1/2+ lifecycle through one call instead of one per entry: count-0
@@ -89,11 +89,13 @@ function briefCycle(dir: string): never {
       expired.push({ id: e.id, question: e.question });
       continue; // dropped from the queue
     }
+    // `tier` rides along: the brief skills render "MP-… (tier N): <question>" and
+    // are told not to re-read the queue file, so the verdict is their only source.
     if (c === 1) {
       e.follow_up_count = 2;
-      renudged.push({ id: e.id, question: e.question, options: e.options, follow_up_count: 2 });
+      renudged.push({ id: e.id, tier: e.tier, question: e.question, options: e.options, follow_up_count: 2 });
     } else {
-      fresh.push({ id: e.id, question: e.question, options: e.options });
+      fresh.push({ id: e.id, tier: e.tier, question: e.question, options: e.options });
     }
     kept.push(e);
   }

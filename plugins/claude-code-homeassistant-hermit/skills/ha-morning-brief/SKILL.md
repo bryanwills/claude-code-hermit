@@ -103,9 +103,9 @@ Pending:
 - [proposals, queued tasks, or "Nothing pending"]
 
 Awaiting decision:
-- [follow_up_count 0: "MP-YYYYMMDD-N (tier N): [question] — Reply `MP-YYYYMMDD-N yes` or `MP-YYYYMMDD-N no`"]
-- [follow_up_count 1: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)"]
-- [Omit section entirely when no pending entries (count 0 or 1).]
+- [`new` entry: "MP-YYYYMMDD-N (tier N): [question] — Reply `MP-YYYYMMDD-N yes` or `MP-YYYYMMDD-N no`"]
+- [`renudged` entry: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)"]
+- [Omit section entirely when the step-9a verdict's `new` and `renudged` are both empty.]
 
 Cost:
 - [yesterday's cost if available; cost-spike alert if flagged by reflect]

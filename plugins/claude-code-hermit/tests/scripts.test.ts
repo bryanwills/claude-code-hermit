@@ -1775,8 +1775,9 @@ describe('micro-proposal', () => {
     const r = await runScript('micro-proposal.ts', { args: [hermit(dir), 'brief-cycle'] });
     expect(r.exitCode).toBe(0);
     const verdict = JSON.parse(r.stdout.trim());
-    expect(verdict.new).toEqual([{ id: 'MP-c0', question: 'q0', options: ['a', 'b'] }]);
-    expect(verdict.renudged).toEqual([{ id: 'MP-c1', question: 'q1', follow_up_count: 2 }]);
+    // `tier` is carried through — the brief renders "(tier N)" from the verdict alone.
+    expect(verdict.new).toEqual([{ id: 'MP-c0', tier: 1, question: 'q0', options: ['a', 'b'] }]);
+    expect(verdict.renudged).toEqual([{ id: 'MP-c1', tier: 1, question: 'q1', follow_up_count: 2 }]);
     expect(verdict.expired).toEqual([{ id: 'MP-c2', question: 'q2' }]);
     // Queue: c0 untouched at 0, c1 bumped to 2, c2 removed.
     const pending = microFile(dir).pending;
