@@ -495,7 +495,7 @@ Perform the idempotency check across both files first: if the marker `claude-cod
 For the target file (the block is static — **copy it with `cat`, never regenerate it by hand**):
 - If it exists: check if it already contains `claude-code-hermit: Session Discipline`
   - If yes: ask with `AskUserQuestion` (header: "CLAUDE block") — options: **Yes — replace** (update to latest) / **No — keep** (preserve current, default)
-    - If "Yes — replace": remove the existing hermit block (from its `<!-- claude-code-hermit: Session Discipline -->` marker — and any blank line / `---` separator immediately above it — through the end of that block; the template carries no closing marker, so identify the block end by content), then re-append the fresh template: `cat "${CLAUDE_SKILL_DIR}/../../state-templates/CLAUDE-APPEND.md" >> <target>`
+    - If "Yes — replace": remove the existing hermit block (from its `<!-- claude-code-hermit: Session Discipline -->` marker — and any blank line / `---` separator immediately above it — through its closing `<!-- /claude-code-hermit: Session Discipline -->` marker; if the target's block predates the closing marker, fall back to the first standalone `---` line after the opening marker, or end of file), then re-append the fresh template: `cat "${CLAUDE_SKILL_DIR}/../../state-templates/CLAUDE-APPEND.md" >> <target>`
     - If "No — keep": skip
   - If no: `cat "${CLAUDE_SKILL_DIR}/../../state-templates/CLAUDE-APPEND.md" >> <target>`
 - If the target file doesn't exist: `cat "${CLAUDE_SKILL_DIR}/../../state-templates/CLAUDE-APPEND.md" > <target>`

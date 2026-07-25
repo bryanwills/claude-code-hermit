@@ -20,15 +20,21 @@ Check if `.claude-code-hermit/` exists in the current project.
 
 **Resolve target file:** read `.claude-code-hermit/state/hatch-options.json`. `"target": "local"` → `CLAUDE.local.md`; `"target": "committed"` or the file absent → `CLAUDE.md`.
 
-Read `target_file` (a missing file is marker-absent — the append below will create it). Look for the marker `<!-- hermit-scribe: Issue Filing -->`.
+Read the plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and the stamped version from `.claude-code-hermit/config.json` at `_hermit_versions["hermit-scribe"]` (treat absent as `null`). Step 4 of this skill stamps that field at the end of every run, so on re-runs it reflects the version that last wrote the block. Read `target_file` (a missing file is marker-absent — the append below will create it). Look for the marker `<!-- hermit-scribe: Issue Filing -->`.
 
-- **Marker present:** skip — block is current. Do not re-read the template.
-- **Marker absent:** append the full contents of `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md` to `target_file` (create the file if it doesn't exist).
+- **Marker present AND stamped version equals plugin version:** skip — block is current. Do not re-read the template.
+- **All other cases** (marker absent, stamped version null, OR stamped version stale): read `${CLAUDE_PLUGIN_ROOT}/state-templates/CLAUDE-APPEND.md`. The template is the source of truth; no operator prompt is needed.
+  - **Marker absent** — append the **full** template, including its leading `---` separator, to `target_file` (the Edit tool creates `target_file` if missing).
+  - **Marker present** — replace only the marked block with the template's **marker-onward portion** (from `<!-- hermit-scribe: Issue Filing -->` to the end of the file, i.e. *excluding* the leading `---`, which already sits above the marker in the target — appending the whole file here would duplicate the separator). The block to replace runs from the opening `<!-- hermit-scribe: Issue Filing -->` through the matching closing `<!-- /hermit-scribe: Issue Filing -->`, inclusive; **if the target's block predates the closing marker** (every install hatched before the marker shipped), fall back to the first standalone `---` line after the opening marker, or end of file.
 
 ### 3. Auto-mode environment seed
 
 Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/automode-env.ts .claude/settings.local.json` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: Claude Code's auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`. This names `api.github.com` (scoped to the configured `HERMIT_GH_REPO`, or the default `gtapps/claude-code-hermit`) as a service the hermit posts to only with the operator's in-session confirmation — context for the classifier, not a standing permission grant (filing still goes through the skill's own preview/confirm gate every time). Additive and idempotent; safe to re-run. No prompt needed.
 
-### 4. Final report
+### 4. Stamp version
+
+Write `_hermit_versions["hermit-scribe"]` into `.claude-code-hermit/config.json` with the current plugin version. Registering here also makes `hermit-scribe` a resolvable Conventional-Commits scope for `file-issue.ts classify` (which reads `_hermit_versions`) and puts the block within reach of `hermit-evolve`'s automatic refresh on future upgrades.
+
+### 5. Final report
 
 Print: "hermit-scribe active. Issue filing goes through `/hermit-scribe:hermit-scribe`, always with an in-session preview before posting."
