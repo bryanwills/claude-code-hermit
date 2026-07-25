@@ -7,54 +7,71 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { computeBase, resolveSuffix, slugify, SUFFIX_LETTERS } from '../scripts/lib/prop-id';
+import { computeBase, nextNumber, slugify } from '../scripts/lib/prop-id';
 import { zonedISOStamp } from '../scripts/lib/time';
 import { serializeValue, appendToSection, patchFrontmatter } from '../scripts/lib/md-write';
 
-describe('lib/prop-id: collision suffix', () => {
-  // resolveSuffix takes a FIXED base (num/slug/hhmmss already computed) so the
-  // suffix walk is tested in isolation from nextNumber's own NNN scan — any
-  // pre-seeded collision file also matches that scan and would otherwise shift
-  // `num` before the walk ever runs (nextPropId's own num recomputation).
-  test('walks a -> b when both the unsuffixed and -a candidates already exist', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prop-id-'));
-    const proposalsDir = path.join(dir, 'proposals');
-    fs.mkdirSync(proposalsDir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
-    const now = new Date('2026-07-20T22:00:00Z');
-
-    const base = computeBase(dir, 'Collision test', now);
-    fs.writeFileSync(path.join(proposalsDir, `PROP-${base.num}-${base.slug}-${base.hhmmss}.md`), 'x');
-    fs.writeFileSync(path.join(proposalsDir, `PROP-${base.num}-${base.slug}-${base.hhmmss}a.md`), 'x');
-
-    const result = resolveSuffix(proposalsDir, base);
-    expect(result?.suffix).toBe('b');
-    expect(result?.id).toBe(`PROP-${base.num}-${base.slug}-${base.hhmmss}b`);
-
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  test('exhausts the a-z suffix range and returns null', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prop-id-'));
-    const proposalsDir = path.join(dir, 'proposals');
-    fs.mkdirSync(proposalsDir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
-    const now = new Date('2026-07-20T22:00:00Z');
-
-    const base = computeBase(dir, 'Exhaust test', now);
-    fs.writeFileSync(path.join(proposalsDir, `PROP-${base.num}-${base.slug}-${base.hhmmss}.md`), 'x');
-    for (const letter of SUFFIX_LETTERS) {
-      fs.writeFileSync(path.join(proposalsDir, `PROP-${base.num}-${base.slug}-${base.hhmmss}${letter}.md`), 'x');
-    }
-
-    expect(resolveSuffix(proposalsDir, base)).toBeNull();
-
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  test('slugify drops stopwords and truncates at a word boundary', () => {
+// Slug and number behavior formerly exercised through the next-prop-id.ts CLI.
+// That wrapper is gone; proposal.ts's create verb reaches the same code through
+// computeBase, so the cases live here as direct unit tests.
+describe('lib/prop-id: slugify', () => {
+  test('drops stopwords and truncates at a word boundary', () => {
     expect(slugify('Fix the thing for real')).toBe('fix-thing-real');
     expect(slugify('   ')).toBe('proposal');
+  });
+
+  test('a stopword-only title falls back to the pre-filter tokens', () => {
+    expect(slugify('the a of and')).toBe('the-a-of-and');
+  });
+
+  test('an all-punctuation title falls back to the literal "proposal"', () => {
+    expect(slugify('!!!???...')).toBe('proposal');
+  });
+
+  test('a single token longer than 40 chars is hard-cut to 40', () => {
+    const slug = slugify('supercalifragilisticexpialidocioussupercalifragilisticexpialidocious');
+    expect(slug.length).toBe(40);
+  });
+
+  test('an apostrophe becomes a separator, never a double dash', () => {
+    expect(slugify("bob's widget")).toBe('bob-s-widget');
+  });
+});
+
+describe('lib/prop-id: nextNumber', () => {
+  function withProposals(files: string[], fn: (proposalsDir: string) => void) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prop-id-'));
+    const proposalsDir = path.join(dir, 'proposals');
+    fs.mkdirSync(proposalsDir, { recursive: true });
+    for (const f of files) fs.writeFileSync(path.join(proposalsDir, f), 'x');
+    try { fn(proposalsDir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+
+  test('starts at 001 on an empty proposals dir', () => {
+    withProposals([], (d) => expect(nextNumber(d)).toBe('001'));
+  });
+
+  test('is max + 1, zero-padded', () => {
+    withProposals(['PROP-005-foo-100000.md', 'PROP-006-bar-110000.md'], (d) => {
+      expect(nextNumber(d)).toBe('007');
+    });
+  });
+
+  test('a missing proposals dir reads as empty', () => {
+    expect(nextNumber(path.join(os.tmpdir(), 'prop-id-does-not-exist'))).toBe('001');
+  });
+});
+
+describe('lib/prop-id: computeBase', () => {
+  test('combines number, slug, and zoned HHMMSS from one instant', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prop-id-'));
+    fs.mkdirSync(path.join(dir, 'proposals'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+
+    const base = computeBase(dir, 'First Proposal Ever', new Date('2026-07-20T22:00:00Z'));
+    expect(base).toEqual({ num: '001', slug: 'first-proposal-ever', hhmmss: '220000' });
+
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 

@@ -1,7 +1,7 @@
-// lib/prop-id.ts — proposal ID assignment (number + slug + timestamp + collision
-// suffix). Extracted from next-prop-id.ts so proposal.ts's create verb can claim
-// an ID and write the file as one atomic operation (next-prop-id.ts's separate
-// assign-then-write flow allows a half-created state: a burned ID with no file).
+// lib/prop-id.ts — proposal ID assignment (number + slug + timestamp). The pieces
+// here are un-claimed: proposal.ts's create verb combines them and then claims the
+// ID atomically with the file write (exclusive create, looping SUFFIX_LETTERS on
+// EEXIST), so no caller can burn an ID without producing the file it names.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -42,14 +42,6 @@ export function slugify(title: string): string {
   return slug || 'proposal';
 }
 
-export interface PropIdParts {
-  id: string;
-  num: string;
-  slug: string;
-  hhmmss: string;
-  suffix: string;
-}
-
 export const SUFFIX_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 export function readTimezone(stateDir: string): string {
@@ -81,32 +73,3 @@ export function computeBase(
   };
 }
 
-// existsSync suffix walk over a FIXED base — separated from computeBase so
-// the collision-suffix branch is unit-testable without the num recomputation
-// that a fresh computeBase call would trigger (any pre-seeded collision file
-// also matches computeBase's own NNN scan, which would shift `num` before
-// the walk ever runs). Returns null once the a-z suffix range is exhausted.
-export function resolveSuffix(proposalsDir: string, base: BaseId): PropIdParts | null {
-  let suffix = '';
-  let i = -1;
-  while (true) {
-    const candidateId = `PROP-${base.num}-${base.slug}-${base.hhmmss}${suffix}`;
-    if (!fs.existsSync(path.join(proposalsDir, `${candidateId}.md`))) {
-      return { id: candidateId, num: base.num, slug: base.slug, hhmmss: base.hhmmss, suffix };
-    }
-    i++;
-    if (i >= SUFFIX_LETTERS.length) return null;
-    suffix = SUFFIX_LETTERS[i];
-  }
-}
-
-// Predicts the next canonical ID — used only by next-prop-id.ts, which hands
-// the ID to a separate caller that writes the file later (a TOCTOU gap this
-// script's own callers no longer have). The create verb in proposal.ts does
-// NOT use this: it claims the ID atomically via exclusive file create (see
-// proposal.ts), looping the same suffix alphabet against write failures
-// (EEXIST) rather than a pre-check.
-export function nextPropId(stateDir: string, title: string, now: Date = new Date()): PropIdParts | null {
-  const proposalsDir = path.join(stateDir, 'proposals');
-  return resolveSuffix(proposalsDir, computeBase(stateDir, title, now));
-}

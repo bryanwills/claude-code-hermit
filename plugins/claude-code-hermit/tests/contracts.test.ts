@@ -2823,14 +2823,21 @@ describe('proposal lifecycle: no tool-mediated state writes', () => {
   });
 });
 
-// hermit-evolve Step 8 must delegate the permission merge to apply-settings.ts
-// rather than re-enumerate the allow-list in prose — the hand-maintained list had
-// already drifted (15 of 28 entries) and instructed a Write rule the writer strips.
+// hermit-evolve Step 8 must delegate the whole permission reconciliation to
+// apply-settings.ts rather than restate it in prose — both halves. The additive
+// list had already drifted (15 of the canonical entries) and instructed a Write
+// rule the writer strips; the removal half was a hand-grown bullet list that only
+// ever got a new line when someone remembered, which is why it now lives in the
+// script's sealed HERMIT_OBSOLETE registry instead.
 describe('hermit-evolve permission delegation contract', () => {
   const evolveRef = fs.readFileSync(path.join(SKILLS, 'hermit-evolve', 'reference.md'), 'utf-8');
+  const step8 = evolveRef.slice(
+    evolveRef.indexOf('### 8. Ensure plugin permissions'),
+    evolveRef.indexOf('### 9. Write updated config'),
+  );
 
-  test('Step 8 delegates to apply-settings.ts allow', () => {
-    expect(evolveRef).toMatch(/apply-settings\.ts <resolved-settings-file> allow/);
+  test('Step 8 delegates to apply-settings.ts permissions-sync', () => {
+    expect(evolveRef).toMatch(/apply-settings\.ts <resolved-settings-file> permissions-sync/);
   });
 
   test('Step 8 no longer hand-enumerates the per-script allow-list', () => {
@@ -2838,10 +2845,14 @@ describe('hermit-evolve permission delegation contract', () => {
     expect(evolveRef).not.toContain('The required entries are:');
     // A couple of the previously-enumerated script names must not reappear as an
     // inline permission list (they may still appear elsewhere in the file).
-    const step8 = evolveRef.slice(
-      evolveRef.indexOf('### 8. Ensure plugin permissions'),
-      evolveRef.indexOf('### 9. Write updated config'),
-    );
     expect(step8).not.toContain('`queue-micro-proposal.ts`, `micro-proposal.ts`');
+  });
+
+  test('Step 8 no longer hand-maintains the stale-entry removal list', () => {
+    // These were bullets the model was told to scrub by hand; HERMIT_OBSOLETE owns
+    // them now, so a new script deletion reaches operators without editing prose.
+    for (const stale of ['run-with-profile.ts', 'suggest-compact.ts', 'Bash(python3:*)']) {
+      expect(step8).not.toContain(stale);
+    }
   });
 });
