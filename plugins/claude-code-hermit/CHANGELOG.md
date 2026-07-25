@@ -12,6 +12,8 @@
 - `hermit-evolve`'s CLAUDE-APPEND sync used to pick a sibling's *first* HTML comment as its block marker; for a template with a leading unrelated comment (e.g. `claude-code-dev-hermit`'s render-mode annotation) that mismatched the real block marker, so on a version gap the whole raw template got appended to the operator's `CLAUDE.md`. Marker discovery is now name-anchored, and a template still carrying unrendered annotations is skipped and reported instead of synced.
 - Block bounds used to stop at the first standalone `---` line after the marker, silently truncating any template with an internal `---` (e.g. `laravel-forge-hermit`'s, to 6 of 77 lines) and leaving drift past that point undetected. Bounds now prefer a template's closing marker when present, falling back to the `---` heuristic only for legacy blocks that predate it.
 - A CLAUDE-APPEND marker that appears more than once in the target file is now refused (reported `block-ambiguous`, no Edit applied) instead of risking a replace that hits the wrong instance.
+- Micro-approval resolve/expire/nudge now go through the new `scripts/micro-proposal.ts` instead of hand-edited JSON, which could leave `state/micro-proposals.json` unparseable.
+- `queue-micro-proposal.ts` refuses to write over an unparseable `micro-proposals.json` instead of resetting it and silently dropping the pending backlog.
 
 ### Changed
 - Proactive operator notifications unified onto `channel-send.ts --notice`; `weekly-review`, `cost-reflect`, and (via § Operator Notification) `heartbeat`/`brief`/`capability-brainstorm` are tier-aware, so spend and technical detail no longer reach the client chat. On a `non-technical` install with no `maintainer_channel_id`, routine spend reports now land in `SHELL.md` Findings instead of the primary chat.
@@ -22,6 +24,7 @@
 2. Re-run `/claude-code-hermit:hatch` (or the settings refresh) on existing installs so `Bash(bun */scripts/channel-send.ts*)` lands in the operator's settings allow-list — without it, the proactive notify path prompts/denies in unattended sessions.
 3. If `claude-code-dev-hermit` is installed and its CLAUDE.md/CLAUDE.local.md contains the literal string `<!-- mode:standard-only -->`, a prior version of `hermit-evolve` hit the marker-discovery bug above and appended the raw, un-rendered dev-hermit template. Remove the entire stray block (from the first `<!-- mode:standard-only -->` or `<!-- mode:safety-only -->` line it introduced through the end of that appended region) — the correctly-rendered `<!-- claude-code-dev-hermit: Development Workflow -->` block elsewhere in the file is unaffected and should be left in place.
 4. If an operator customized their CLAUDE-APPEND block in place (core, `hermit-scribe`, or `claude-code-dev-hermit`), note that the next version-gap sync for that plugin will replace it with the shipped template now that closing markers make the block bounds authoritative — re-apply any customization after that sync.
+3. Re-run `/claude-code-hermit:hatch` (or the settings refresh) on existing installs so `Bash(bun */scripts/micro-proposal.ts*)` lands in the operator's settings allow-list — without it, micro-approval resolve/expire/nudge is functionally denied in unattended sessions.
 
 ## [1.2.33] - 2026-07-24
 

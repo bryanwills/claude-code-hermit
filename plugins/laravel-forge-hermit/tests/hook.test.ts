@@ -62,6 +62,11 @@ describe('write-confirm-gate: pass-through cases', () => {
     expect(r.exitCode).toBe(0);
   });
 
+  test('deploy-watch passes (read-only poll loop, not a write)', () => {
+    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy-watch 12 34 8821' } });
+    expect(r.exitCode).toBe(0);
+  });
+
   test('call method passes', () => {
     const r = runHook({ tool_name: 'Bash', tool_input: { command: 'echo \'["s1"]\' | php /plugin/php/forge.php call servers' } });
     expect(r.exitCode).toBe(0);

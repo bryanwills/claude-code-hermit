@@ -90,3 +90,28 @@ export function formatUpdatesStdout(updates: PendingUpdate[], dateStr: string): 
   }
   return lines.join('\n');
 }
+
+const TIER_RANK: Record<UpdateTier, number> = { core: 0, os: 1, supervisor: 2, addon: 3, hacs: 4 };
+const DIGEST_TOP_N = 3;
+
+/**
+ * Brief-ready digest: tier-sorted, top 3 individual updates, remainder collapsed.
+ * The tier ordering the briefs used to state in prose lives here.
+ */
+export function formatUpdatesDigest(updates: PendingUpdate[]): string {
+  const individual = updates
+    .filter((u) => u.tier !== 'hacs')
+    .sort((a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier]);
+  const hacs = updates.filter((u) => u.tier === 'hacs');
+  const top = individual.slice(0, DIGEST_TOP_N);
+  const lines: string[] = [];
+  for (const u of top) {
+    lines.push(`[${u.tier}] ${u.title}: ${u.installed_version ?? '?'} → ${u.latest_version ?? '?'}`);
+  }
+  const rest = individual.length - top.length;
+  if (rest > 0) lines.push(`+ ${rest} more update${rest === 1 ? '' : 's'} pending`);
+  if (hacs.length > 0) {
+    lines.push(`[hacs] ${hacs.length} HACS update${hacs.length === 1 ? '' : 's'} pending`);
+  }
+  return lines.join('\n');
+}

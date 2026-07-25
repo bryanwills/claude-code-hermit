@@ -95,6 +95,21 @@ check(phpLogKey('nonsense') === null, "non-matching input returns null");
 check(phpLogKey('') === null, "empty input returns null");
 
 // ---------------------------------------------------------------------------
+// Tests: isTerminalStatus (the binding deploy-watch relies on)
+// ---------------------------------------------------------------------------
+echo "\nisTerminalStatus:\n";
+foreach (STATUS_SUCCESS as $s) {
+    check(isTerminalStatus($s) === true, "success status '$s' is terminal");
+}
+foreach (STATUS_FAILURE as $s) {
+    check(isTerminalStatus($s) === true, "failure status '$s' is terminal");
+}
+foreach (STATUS_IN_PROGRESS as $s) {
+    check(isTerminalStatus($s) === false, "in-progress status '$s' is not terminal");
+}
+check(isTerminalStatus('unknown') === false, "unrecognized status 'unknown' is not terminal");
+
+// ---------------------------------------------------------------------------
 // Tests: matchSite
 // ---------------------------------------------------------------------------
 echo "\nmatchSite:\n";

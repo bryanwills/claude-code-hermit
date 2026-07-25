@@ -136,25 +136,21 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
     - Entry has no `options` (plain yes/no entry): the answer must be `yes` or `no` (case-insensitive). Anything else on this entry → ambiguous, ask for clarification once, do not resolve.
     - Entry has `options` (2-4 labels): a bare number `k` within range (1 through the option count) selects `options[k-1]`; a number outside that range is ambiguous. Otherwise, case-insensitive prefix match the answer against the labels; a unique match resolves, no match or a multi-label prefix match is ambiguous. A bare `yes`/`no` against an options entry is ambiguous — reply with the numbered options and ask once, do not resolve.
   - **Suggestion escape hatch:** when a bare `yes`/`no`/`later` can't be cleanly resolved here (ambiguous against an options entry, or multiple pending entries), run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposals-index.ts .claude-code-hermit` (validates the index against disk — one bounded output line) and check the refreshed `state/proposals-index.json`. If it has a `status: "proposed"` proposal, append to the clarification reply: "…or reply 'YES #N' to act on an open suggestion instead." Precedence is unchanged — this only hands a bare reply meant for a Suggestion card a way out of the micro-proposal loop.
-  - **On resolved entry:**
-    - Read `question` from the entry before modifying.
-    - **Entry has `on_resolve`** → **resolve the entry on disk FIRST, then invoke.** Set `status: "approved"`, remove the entry from `pending`, write the file, and append the `micro-resolved` event below — all *before* invoking the command. The `on_resolve` command can run a long implementation (e.g. `proposal-act … --answer "implement now"` runs the falsification gate + full implementation); if the durable-queue removal were left until after that, a crash or compaction mid-implementation would leave the entry `status: "pending"` and heartbeat would keep re-nudging a question already acted on. Append `micro-resolved` event via stdin heredoc (question/answer are operator text and may contain apostrophes):
+  - **On resolved entry:** every branch below resolves the entry via one script call — never hand-edit `state/micro-proposals.json` (issue 649: a stray trailing comma from a hand-edit removal corrupted the file and every reader silently treated it as an empty queue).
+    - **Entry has `on_resolve`** → **resolve on disk FIRST, then invoke.** Run:
       ```bash
-      bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl <<'HERMIT_METRICS_JSON'
-      {"ts":"<now ISO>","type":"micro-resolved","micro_id":"<id>","action":"answered","answer":"<selected label>","question":"<question>"}
-      HERMIT_METRICS_JSON
+      bun ${CLAUDE_PLUGIN_ROOT}/scripts/micro-proposal.ts .claude-code-hermit resolve <id> --action answered --answer "<selected label>"
       ```
-      Then substitute the selected label into the `on_resolve` `{answer}` placeholder — **wrap it in double quotes** so a multi-word label (e.g. `session task`) stays a single `--answer` argument — and invoke the resulting skill command. This is how a channel-bridged ask (e.g. a 3-option proposal-act entry) re-enters the asking skill at the right branch — the invoked command itself detects it's a re-entry and skips straight to acting on the answer. The `answered` event is audit-only (neither an approval nor a rejection, so it's outside the micro approval-rate metrics). See § Channel-safe ask bridge below. Because this branch already removed the entry and wrote the file, skip the shared "Remove the resolved entry" step below.
-    - **No `on_resolve`, "yes" on tier 1** → execute the change at next idle, log outcome in SHELL.md, set `status: "approved"`. Append `micro-resolved` event via stdin heredoc (question is operator text and may contain apostrophes):
+      This removes the entry from `pending`, writes the file, and appends the `micro-resolved` event (`"action":"answered"`) in one atomic call — *before* invoking the command. The `on_resolve` command can run a long implementation (e.g. `proposal-act … --answer "implement now"` runs the falsification gate + full implementation); if the durable-queue removal were left until after that, a crash or compaction mid-implementation would leave the entry pending and heartbeat would keep re-nudging a question already acted on. Then substitute the selected label into the `on_resolve` `{answer}` placeholder — **wrap it in double quotes** so a multi-word label (e.g. `session task`) stays a single `--answer` argument — and invoke the resulting skill command. This is how a channel-bridged ask (e.g. a 3-option proposal-act entry) re-enters the asking skill at the right branch — the invoked command itself detects it's a re-entry and skips straight to acting on the answer. The `answered` event is audit-only (neither an approval nor a rejection, so it's outside the micro approval-rate metrics). See § Channel-safe ask bridge below.
+    - **No `on_resolve`, "yes" on tier 1** → execute the change at next idle, log outcome in SHELL.md, then:
       ```bash
-      bun ${CLAUDE_PLUGIN_ROOT}/scripts/append-metrics.ts .claude-code-hermit/state/proposal-metrics.jsonl <<'HERMIT_METRICS_JSON'
-      {"ts":"<now ISO>","type":"micro-resolved","micro_id":"<id>","action":"approved","question":"<question>"}
-      HERMIT_METRICS_JSON
+      bun ${CLAUDE_PLUGIN_ROOT}/scripts/micro-proposal.ts .claude-code-hermit resolve <id> --action approved
       ```
-    - **No `on_resolve`, "yes" on tier 2** → create PROP-NNN via `/claude-code-hermit:proposal-create`, queue for next idle, set `status: "approved"`. Append `micro-resolved` event (same stdin heredoc form, `"action":"approved"`).
-    - **No `on_resolve`, "no"** → set `status: "rejected"`. Append `micro-resolved` event (stdin heredoc, `"action":"rejected","question":"<question>"`).
-
-    - **(yes/no branches only)** Remove the resolved entry from `pending`. Write the file. (The `on_resolve` branch already did this above, before invoking the command.)
+    - **No `on_resolve`, "yes" on tier 2** → create PROP-NNN via `/claude-code-hermit:proposal-create`, queue for next idle, then run the same `resolve <id> --action approved` call.
+    - **No `on_resolve`, "no"** → run:
+      ```bash
+      bun ${CLAUDE_PLUGIN_ROOT}/scripts/micro-proposal.ts .claude-code-hermit resolve <id> --action rejected
+      ```
   - If no pending micro-proposals: classify as normal message (fall through to categories below).
 
 - **Proposal approval** ("accept PROP-", "go ahead with PROP-", "approve PROP-", referencing proposal numbers, `#N`, or a bare/`#N`-qualified `YES`/`LATER`/`NO` reply to a Suggestion card — only when no pending micro-proposal claimed the reply first, per Micro-approval response above)

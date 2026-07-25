@@ -43,7 +43,7 @@ import type { MutationGate } from './policy';
 import { evaluateYamlPolicy, simulateArtifact } from './simulate';
 import { computeSilenceSummary } from './silence';
 import { captureStates, restoreStates, DEFAULT_DOMAINS } from './snapshot-restore';
-import { collectPendingUpdates, formatUpdatesStdout } from './update-check';
+import { collectPendingUpdates, formatUpdatesStdout, formatUpdatesDigest } from './update-check';
 import {
   HELPER_TYPES,
   type WsCommandClient,
@@ -564,9 +564,9 @@ const LEAF_SPECS: Record<string, LeafSpec> = {
   },
   'ha updates': {
     prog: 'ha_agent_lab ha updates',
-    usage: 'usage: ha_agent_lab ha updates [-h]',
+    usage: 'usage: ha_agent_lab ha updates [-h] [--digest]',
     positionals: [],
-    flags: {},
+    flags: { '--digest': { kind: 'store_true' } },
   },
   'ha fetch-history': {
     prog: 'ha_agent_lab ha fetch-history',
@@ -1104,7 +1104,7 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
   }
 
   if (args.command === 'ha' && args.sub === 'updates') {
-    return handleUpdates(config, deps);
+    return handleUpdates(config, deps, Boolean(args.flags['--digest']));
   }
 
   if (args.command === 'ha' && args.sub === 'refresh-context') {
@@ -2029,7 +2029,11 @@ export async function handleIntegrationHealth(
   return 0;
 }
 
-export async function handleUpdates(config: AppConfig, overrides: Partial<CliDeps> = {}): Promise<number> {
+export async function handleUpdates(
+  config: AppConfig,
+  overrides: Partial<CliDeps> = {},
+  digest = false,
+): Promise<number> {
   const deps = resolveDeps(overrides);
   const today = todayIso();
   const header = `ha-update-check findings — ${today}`;
@@ -2042,7 +2046,13 @@ export async function handleUpdates(config: AppConfig, overrides: Partial<CliDep
     return 0;
   }
   const updates = collectPendingUpdates(states);
-  console.log(formatUpdatesStdout(updates, today));
+  // formatUpdatesDigest has no "no updates" message of its own; fall back to
+  // formatUpdatesStdout so both modes surface the same (no updates pending) text.
+  if (digest && updates.length > 0) {
+    console.log(formatUpdatesDigest(updates));
+  } else {
+    console.log(formatUpdatesStdout(updates, today));
+  }
   return 0;
 }
 

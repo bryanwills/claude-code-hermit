@@ -60,7 +60,7 @@ function main(): void {
   const SAFE_SUBCOMMANDS = [
     'check', 'servers', 'server', 'sites', 'site', 'logs',
     'server-log', 'site-log', 'background-process-log',
-    'deploy-history', 'deploy-log', 'deploy-status',
+    'deploy-history', 'deploy-log', 'deploy-status', 'deploy-watch',
     'preview-deploy', 'preview-reboot',
     'failed-deploys', 'call',
     'help', '--help',

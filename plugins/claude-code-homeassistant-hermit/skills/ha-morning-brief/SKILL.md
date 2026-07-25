@@ -44,10 +44,10 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 
 8. **Cost-spike check** — Read `.claude-code-hermit/state/reflection-state.json` if it exists. Look for any `cost_spike` entry with a timestamp within the last 24 hours. If found, include a "Cost alert" bullet in the brief with the flagged amount.
 
-8a. **Pending updates**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha updates` and capture stdout. Branch on its content (the command always exits 0 — never branch on exit code):
+8a. **Pending updates**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha updates --digest` and capture stdout. Branch on its content (the command always exits 0 — never branch on exit code):
    - Contains `(skipped:` — log a single line to SHELL.md `## Monitoring` (`updates fetch failed: <detail after "skipped:">`) and omit the `Updates:` section entirely.
    - Contains `(no updates pending)` — omit the `Updates:` section entirely.
-   - Otherwise — render one line per listed Core/OS/Supervisor/add-on update (`[tier] Title: installed → latest`) plus the HACS count line, translating tier labels into the operator's language. If more than 3 individual (non-HACS) updates are pending, list the 3 highest-tier (Core, then OS, then Supervisor, then add-ons) and collapse the rest into `+ N more updates pending`, matching the evening brief. For each rendered individual (non-HACS) update, `Glob` `.claude-code-hermit/proposals/PROP-*.md` for a `[ha-update]` proposal whose title carries the same tier and target version (e.g. `[ha-update] HA Core → 2026.7.1`) and append `(PROP-NNN)`; if none matches yet, render the line without an id. Step 9 reuses this glob result when this branch ran it.
+   - Otherwise — render the digest lines as the `Updates:` section, translating tier labels into the operator's language. For each `[tier] Title: installed → latest` line (skip the `+ N more …` collapse line and the `[hacs]` aggregate line), `Glob` `.claude-code-hermit/proposals/PROP-*.md` for a `[ha-update]` proposal whose title carries the same tier and target version (e.g. `[ha-update] HA Core → 2026.7.1`) and append `(PROP-NNN)`; if none matches yet, render the line without an id. Step 9 reuses this glob result when this branch ran it.
 
 9. **Pending work** — Scan for:
    - `Glob` `.claude-code-hermit/proposals/PROP-*.md` (reuse step 8a's glob result if its `Otherwise` branch already ran it; otherwise run the `Glob` here) — read status from each, list any `pending` proposals. Exclude a `pending` proposal whose title starts with `[ha-update]` **only when the `Updates:` section is present** (it surfaces there instead); when step 8a omitted the `Updates:` section (skipped fetch or no updates pending), keep `[ha-update]` proposals in this list so they are not lost
@@ -57,12 +57,16 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 <!-- keep in sync with plugins/claude-code-hermit/skills/brief/SKILL.md — same MP lifecycle protocol -->
 9a. **Micro-proposals lifecycle** — Read `.claude-code-hermit/state/micro-proposals.json`. If the `pending` array is non-empty:
    - Each entry with `follow_up_count` of 0: include in `Awaiting decision:` output (see Output Format). Do not mutate.
-   - Each entry with `follow_up_count` of 1: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)". Increment `follow_up_count` to 2.
-   - Each entry with `follow_up_count` >= 2: capture `id` and `question` first, set `status: "expired"`, remove from `pending`. Append to `.claude-code-hermit/state/proposal-metrics.jsonl` using bun (avoids JSON injection from question text). Schema matches core's `append-metrics.js`: `ts`, `type`, `micro_id`, `action`, `question`:
+   Never hand-edit `state/micro-proposals.json` — mutate it only with the commands below, which round-trip the whole file through `JSON.parse`/`JSON.stringify` and replace it atomically via a temp file + rename, matching core's writer (issue 649: a hand-edited removal left a trailing comma, corrupting the queue; a truncating in-place write would reopen the same hole on a mid-write crash). Both exit 1 without writing if the id doesn't match, so a silent no-op can't leave an entry stranded.
+   - Each entry with `follow_up_count` of 1: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)", then bump the counter:
      ```bash
-     bun -e 'console.log(JSON.stringify({ts: process.argv[1], type: "micro-resolved", micro_id: process.argv[2], action: "expired", question: process.argv[3]}))' -- "<ISO8601>" "<id>" "<question>" >> .claude-code-hermit/state/proposal-metrics.jsonl
+     bun -e 'const fs=require("fs"),p=".claude-code-hermit/state/micro-proposals.json",d=JSON.parse(fs.readFileSync(p,"utf8")),e=(d.pending||[]).find(x=>x.id===process.argv[1]);if(!e){console.error("no-match: "+process.argv[1]);process.exit(1)}e.follow_up_count=(e.follow_up_count||0)+1;const t=p+"."+process.pid+".tmp";fs.writeFileSync(t,JSON.stringify(d,null,2)+"\n");fs.renameSync(t,p)' -- "<id>"
      ```
-     (Core's `append-metrics.js` is unreachable from HA's `${CLAUDE_PLUGIN_ROOT}` — write directly.)
+   - Each entry with `follow_up_count` >= 2: drop it and record the expiry. The ledger line is appended only after the queue write lands, and the question text is passed as an argument so it can't inject into the JSON:
+     ```bash
+     bun -e 'const fs=require("fs"),p=".claude-code-hermit/state/micro-proposals.json",d=JSON.parse(fs.readFileSync(p,"utf8")),i=(d.pending||[]).findIndex(x=>x.id===process.argv[1]);if(i<0){console.error("no-match: "+process.argv[1]);process.exit(1)}const q=d.pending[i].question;d.pending.splice(i,1);const t=p+"."+process.pid+".tmp";fs.writeFileSync(t,JSON.stringify(d,null,2)+"\n");fs.renameSync(t,p);fs.appendFileSync(".claude-code-hermit/state/proposal-metrics.jsonl",JSON.stringify({ts:new Date().toISOString().slice(0,19)+"Z",type:"micro-resolved",micro_id:process.argv[1],action:"expired",question:q})+"\n")' -- "<id>"
+     ```
+     Core's `scripts/micro-proposal.ts` is deliberately not invoked here. HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/`, so no static `../claude-code-hermit/…` path reaches core's plugin root — the version segment is not knowable from skill text.
    - If `pending` is empty: skip this step entirely.
 
 10. **Compose brief** — Write a concise morning brief in the operator's language (from OPERATOR.md preferences). Use the format below.

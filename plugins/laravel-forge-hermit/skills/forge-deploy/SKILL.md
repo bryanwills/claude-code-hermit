@@ -45,7 +45,7 @@ This triggers the deployment and returns immediately (no blocking wait):
 
 ```
 Deployment started: deploy-id=991 server-id=12345 site-id=67890 status=queued
-Watch with: forge.php deploy-status 12345 67890 991
+Watch with: forge.php deploy-watch 12345 67890 991
 ```
 
 Capture the canonical `deploy-id`, `server-id`, and `site-id` — Step 4 needs them.
@@ -59,17 +59,7 @@ Do **not** poll in a foreground Bash call: a real deploy can outlast the Bash to
 Resolve `${CLAUDE_PLUGIN_ROOT}` to its **absolute path now** (at skill-execution time): the variable is NOT available inside the watch subprocess. Then arm the watch by invoking `/claude-code-hermit:watch` with this command (substitute the absolute path and the three IDs):
 
 ```bash
-prev=""; n=0
-while [ "$n" -lt 180 ]; do
-  st=$(php /ABS/php/forge.php deploy-status <server-id> <site-id> <deploy-id> 2>/dev/null || true)
-  [ -n "$st" ] && [ "$st" != "$prev" ] && echo "deploy <deploy-id>: $st"
-  case "$st" in
-    finished) echo "TERMINAL deploy=<deploy-id> server-id=<server-id> site-id=<site-id> status=finished"; exit 0;;
-    failed|failed-build|cancelled) echo "TERMINAL deploy=<deploy-id> server-id=<server-id> site-id=<site-id> status=$st"; exit 0;;
-  esac
-  prev="$st"; n=$((n+1)); sleep 5
-done
-echo "TERMINAL deploy=<deploy-id> server-id=<server-id> site-id=<site-id> status=timeout"
+php /ABS/php/forge.php deploy-watch <server-id> <site-id> <deploy-id>
 ```
 
 The `TERMINAL` line carries only numeric IDs (never display names) — Forge server names can contain spaces, which would break the space-delimited fields.
