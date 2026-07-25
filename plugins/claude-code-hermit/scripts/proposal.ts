@@ -57,6 +57,7 @@
 //   metrics [<stateDir>] [--source=<key>]        markdown table / one-line verdict
 //   success-signal --validate "<predicate>"      OK (exit 0) / reason (exit 1)
 //   success-signal <stateDir> <date> <sess> <p>  one JSON verdict line
+//   quality-gate <stateDir> <prop-file> [--files-json <json>]   one JSON verdict line
 //
 // Exit 0 always, EXCEPT: a missing verb/state-dir argv exits 1 (creation should
 // never proceed on a mis-invocation, but a resolved, validated failure is always
@@ -80,6 +81,7 @@ import { run as runMicro } from './lib/proposals/micro';
 import { run as runMetrics } from './lib/proposals/metrics';
 import { run as runEvent } from './lib/proposals/event';
 import { run as runSuccessSignal } from './lib/proposals/success-signal';
+import { run as runQualityGate } from './lib/proposals/quality-gate';
 
 type Json = any;
 
@@ -413,7 +415,7 @@ async function verbRoutine(stateDir: string): Promise<void> {
 
 // ------------------------------------------------------------------- main --
 
-const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|event|success-signal';
+const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|event|success-signal|quality-gate';
 
 async function main(): Promise<void> {
   const verb = process.argv[2];
@@ -460,6 +462,7 @@ async function main(): Promise<void> {
       const verdict = runEvent(stateDir, rest);
       return verdict === 'OK' ? ok('OK') : fail(verdict.replace(/^ERROR\|/, ''));
     }
+    case 'quality-gate': return runQualityGate(stateDir, rest);
     default:
       fail('unknown-verb');
   }

@@ -1,8 +1,9 @@
 import { describe, test, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runScript } from './helpers/run';
-import { getPath, setPath, togglePath } from '../scripts/settings-edit';
+import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { getPath, setPath, togglePath, renderShow, applyKnown } from '../scripts/settings-edit';
+import { SETTINGS, tableSettings } from '../scripts/lib/settings/registry';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-settings-edit-');
@@ -164,5 +165,152 @@ describe('settings-edit.ts CLI', () => {
     const file = seedConfig(dir, {});
     const r = await runScript('settings-edit.ts', { args: [file, 'frobnicate', 'x'] });
     expect(r.exitCode).not.toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Registry-backed `show` and `apply-known`.
+//
+// These replaced a ~45-line *example* settings dump in hermit-settings/SKILL.md
+// (invented values, field list drifting every release) and the 14 per-argument
+// prose branches that each spelled out their own dotted path.
+
+describe('settings registry', () => {
+  test('every registry path is a real key in the shipped template', () => {
+    // A row pointing at a path the template never defines would render "default"
+    // forever and write a key nothing reads.
+    const template = JSON.parse(
+      fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'config.json.template'), 'utf8'),
+    );
+    for (const s of SETTINGS) {
+      expect(getPath(template, s.path.split('.')[0])).toBeDefined();
+    }
+  });
+
+  test('the skill table lists exactly the non-exempt registry rows', () => {
+    const skill = fs.readFileSync(
+      path.join(PLUGIN_ROOT, 'skills', 'hermit-settings', 'SKILL.md'), 'utf8',
+    );
+    for (const s of tableSettings()) {
+      expect(skill).toContain(`| \`${s.arg}\` | \`${s.path}\``);
+    }
+    // Exempt rows must NOT be in the table — they do more than write one leaf.
+    for (const s of SETTINGS.filter(x => x.tableExempt)) {
+      expect(skill).not.toContain(`| \`${s.arg}\` | \`${s.path}\``);
+    }
+  });
+
+  test('every remaining skill branch is one the registry deliberately excludes', () => {
+    const skill = fs.readFileSync(
+      path.join(PLUGIN_ROOT, 'skills', 'hermit-settings', 'SKILL.md'), 'utf8',
+    );
+    const branches = [...skill.matchAll(/^\*\*If argument is "([^"]+)":/gm)].map(m => m[1]);
+    const tableArgs = new Set(tableSettings().map(s => s.arg));
+    // A branch that is also in the table means the prose was left behind.
+    for (const b of branches) expect(tableArgs.has(b)).toBe(false);
+    expect(branches.length).toBe(12); // 9 stateful + 3 side-effecting
+  });
+
+  test('enums come from the shared module, not a second copy', () => {
+    const validator = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'validate-config.ts'), 'utf8');
+    expect(validator).toContain("from './lib/settings/enums'");
+    // The literal arrays must be gone from the validator.
+    expect(validator).not.toContain("['conservative', 'balanced', 'autonomous']");
+    expect(validator).not.toContain("['budget', 'balanced', 'quality']");
+  });
+});
+
+describe('settings-edit show', () => {
+  test('renders live values, not an invented example', () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { agent_name: 'Atlas', escalation: 'autonomous', remote: false });
+    const out = renderShow(JSON.parse(fs.readFileSync(file, 'utf8')), file);
+    expect(out).toContain('Atlas');
+    expect(out).toContain('autonomous');
+    expect(out).toContain('disabled');   // remote: false
+  });
+
+  test('absent optional keys render without crashing', () => {
+    const out = renderShow({}, 'cfg.json');
+    expect(out).toContain('Hermit Settings');
+    expect(out).toContain('Identity:');
+    expect(out).toContain('Stateful');
+  });
+
+  test('an over-long value still leaves a space before the arrow', () => {
+    const out = renderShow({ env: { AAAAAAAAAAAAAAAAAAAA: '1', BBBBBBBBBBBBBBBBBBBB: '2' } }, 'cfg.json');
+    expect(out).not.toMatch(/\S→/);
+  });
+
+  test('CLI show exits 0 and prints the summary', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { agent_name: 'Scout' });
+    const r = await runScript('settings-edit.ts', { args: [file, 'show'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Scout');
+  });
+});
+
+describe('settings-edit apply-known', () => {
+  test('writes the registry path and preserves siblings', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { agent_name: 'Atlas', escalation: 'balanced', custom_key: 'kept' });
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'escalation', 'autonomous'] });
+    expect(r.exitCode).toBe(0);
+    const cfg = readConfig(file);
+    expect(cfg.escalation).toBe('autonomous');
+    expect(cfg.custom_key).toBe('kept');
+    expect(cfg.agent_name).toBe('Atlas');
+  });
+
+  test('refuses a value outside the enum', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { escalation: 'balanced' });
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'escalation', 'aggressive'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('conservative');
+    expect(readConfig(file).escalation).toBe('balanced'); // unchanged
+  });
+
+  test('refuses an unknown argument rather than inventing a path', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, {});
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'nonesuch', 'x'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('unknown setting');
+  });
+
+  test('coerces booleans from operator vocabulary', () => {
+    for (const yes of ['on', 'yes', 'true', 'enabled']) {
+      const cfg: any = {};
+      expect(applyKnown(cfg, 'remote', yes).ok).toBe(true);
+      expect(cfg.remote).toBe(true);
+    }
+    for (const no of ['off', 'no', 'false', 'disabled']) {
+      const cfg: any = {};
+      applyKnown(cfg, 'remote', no);
+      expect(cfg.remote).toBe(false);
+    }
+  });
+
+  test('nullable settings accept none/clear; non-nullable refuse it', () => {
+    const cfg: any = {};
+    expect(applyKnown(cfg, 'sign-off', 'none').ok).toBe(true);
+    expect(cfg.sign_off).toBeNull();
+    expect(applyKnown(cfg, 'escalation', 'none').ok).toBe(false);
+  });
+
+  test('int settings reject non-positive and non-numeric input', () => {
+    const cfg: any = {};
+    expect(applyKnown(cfg, 'reflection', '2').ok).toBe(true);
+    expect(cfg.reflection.graduation_min_sessions).toBe(2);
+    expect(applyKnown(cfg, 'reflection', '0').ok).toBe(false);
+    expect(applyKnown(cfg, 'reflection', 'two').ok).toBe(false);
+  });
+
+  test('creates the parent object for a nested path', () => {
+    const cfg: any = {};
+    applyKnown(cfg, 'artifact-dashboard', 'off');
+    expect(cfg.artifacts.dashboard).toBe(false);
   });
 });

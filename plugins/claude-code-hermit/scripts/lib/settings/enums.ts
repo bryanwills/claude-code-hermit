@@ -1,0 +1,25 @@
+// The closed value sets for config.json's enum-valued keys.
+//
+// One definition, imported by everything that needs it: `validate-config.ts`
+// (the PostToolUse hook that rejects a bad write) and `lib/settings/registry.ts`
+// (which drives `/hermit-settings`' rendering and its argument table). Neither
+// imports from the other — the validator covers keys the settings UI never
+// exposes (`routines[].model`, `budget.action`, `telemetry_export`), and the
+// settings UI covers presentation the validator has no business knowing about,
+// so making either the owner would drag one module's concerns into the other.
+
+export const ESCALATION = ['conservative', 'balanced', 'autonomous'] as const;
+export const QUALITY_GATE_TIER = ['budget', 'balanced', 'quality'] as const;
+export const ROUTINE_MODEL = ['opus', 'sonnet', 'haiku'] as const;
+export const IDLE_BEHAVIOR = ['wait', 'discover'] as const;
+export const OPERATOR_PROFILE = ['technical', 'non-technical'] as const;
+export const BUDGET_ACTION = ['alert', 'pause'] as const;
+export const TELEMETRY_DEST = ['webhook'] as const;
+
+// Not validated by validate-config.ts: Claude Code owns the permission-mode set
+// and adds to it independently of this plugin, so the hook stays permissive and
+// only `/hermit-settings` offers the list. Kept here so the two places that do
+// present it (the skill table and `show`) cannot drift apart.
+export const PERMISSION_MODE = [
+  'auto', 'acceptEdits', 'default', 'plan', 'dontAsk', 'bypassPermissions',
+] as const;
