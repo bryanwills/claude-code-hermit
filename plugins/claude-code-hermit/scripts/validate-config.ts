@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { safeForLLM } from './lib/sanitize';
+import * as ENUM from './lib/settings/enums';
 
 type Json = any;
 
@@ -24,13 +25,15 @@ const REQUIRED_KEYS: Record<string, string[]> = {
   'quality_gate': ['object'],
 };
 
-const VALID_ESCALATION = ['conservative', 'balanced', 'autonomous'];
-const VALID_QUALITY_GATE_TIER = ['budget', 'balanced', 'quality'];
-const VALID_ROUTINE_MODEL = ['opus', 'sonnet', 'haiku'];
-const VALID_IDLE_BEHAVIOR = ['wait', 'discover'];
-const VALID_OPERATOR_PROFILE = ['technical', 'non-technical'];
-const VALID_BUDGET_ACTION = ['alert', 'pause'];
-const VALID_TELEMETRY_DEST = ['webhook'];
+// Enum value sets live in lib/settings/enums.ts so this hook and the
+// `/hermit-settings` registry cannot drift apart on what a valid value is.
+const VALID_ESCALATION = ENUM.ESCALATION;
+const VALID_QUALITY_GATE_TIER = ENUM.QUALITY_GATE_TIER;
+const VALID_ROUTINE_MODEL = ENUM.ROUTINE_MODEL;
+const VALID_IDLE_BEHAVIOR = ENUM.IDLE_BEHAVIOR;
+const VALID_OPERATOR_PROFILE = ENUM.OPERATOR_PROFILE;
+const VALID_BUDGET_ACTION = ENUM.BUDGET_ACTION;
+const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
 const TIME_RE = /^\d{2}:\d{2}$/;
 const ENV_VAR_RE = /^[A-Z_][A-Z0-9_]*$/;
 // Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with lib/routines/due.ts.

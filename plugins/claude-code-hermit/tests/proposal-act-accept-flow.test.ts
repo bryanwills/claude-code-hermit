@@ -60,29 +60,28 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('PROCEED');
   });
 
-  // Quality-gate (e.5) tier-branched + NEXT-TASK template assertions.
-  // Guards against losing the tier branching, judge invocation, or NEXT-TASK gating.
-  test('step (e.5) references quality_gate.tier (not enabled)', () => {
-    expect(skill).toContain('quality_gate.tier');
+  // Quality-gate (e.5) delegation + NEXT-TASK template assertions.
+  // The rubric used to be prose here and in the dispatched-subagent prompt, and
+  // the two copies diverged; these now guard that the skill *asks* the verb
+  // rather than deciding, on every path. Rubric behavior itself is covered by
+  // tests/proposal-quality-gate.test.ts.
+  test('step (e.5) delegates to the quality-gate verb', () => {
+    expect(skill).toContain('proposal.ts quality-gate');
+    expect(skill).toContain('--files-json');
   });
 
-  test('step (e.5) decides the balanced branch inline (no quality-gate-judge subagent)', () => {
-    expect(skill).toContain('decide RUN vs SKIP **inline**');
-    expect(skill).toContain('Bias toward RUN when uncertain');
+  test('step (e.5) no longer decides the balanced branch inline', () => {
+    expect(skill).not.toContain('decide RUN vs SKIP **inline**');
+    expect(skill).not.toContain('Bias toward RUN when uncertain');
     expect(skill).not.toContain('quality-gate-judge');
   });
 
-  test('step (e.5) has explicit budget branch (skip)', () => {
-    expect(skill).toMatch(/budget.*(skip|never)/);
+  test('step (e.5) acts on the verdict, not on a tier it resolved itself', () => {
+    expect(skill).toMatch(/`SKIP`.*no cleanup/);
+    expect(skill).toMatch(/`RUN`.*\/claude-code-hermit:simplify/);
   });
 
-  test('step (e.5) has explicit quality branch (always run /claude-code-hermit:simplify)', () => {
-    expect(skill).toMatch(
-      /quality.*(invoke|run).*\/claude-code-hermit:simplify|\/claude-code-hermit:simplify.*quality/,
-    );
-  });
-
-  test('NEXT-TASK.md gating references tier != budget', () => {
+  test('NEXT-TASK.md gating still keys on tier != budget', () => {
     expect(skill).toMatch(/tier.*budget|budget.*tier/);
   });
 
@@ -90,8 +89,11 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('/claude-code-hermit:simplify focus on PROP-NNN implementation');
   });
 
-  test('NEXT-TASK template /claude-code-hermit:simplify bullet present', () => {
-    expect(skill).toContain('Run /claude-code-hermit:simplify on the touched files');
+  test('NEXT-TASK template defers the gate call to the future session', () => {
+    // The queued path cannot run the verb at queue time — no implementation has
+    // happened yet, so there is no diff to classify. It hands the call forward.
+    expect(skill).toContain('Before committing, run: bun');
+    expect(skill).toContain('On "action":"RUN"');
   });
 });
 

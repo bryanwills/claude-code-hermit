@@ -132,7 +132,11 @@ When the operator accepts a proposal:
         >
         > 1. Read the proposal file. The `## Operator Decision` section contains a `PROCEED` line from the falsification gate with the authoritative file list — use that list as your scope (over any files mentioned in the proposal body).
         > 2. Do the edits and any test/fix loops yourself. You may spawn a nested Explore subagent if the proposal warrants a search.
-        > 3. **Quality gate.** Read `.claude-code-hermit/config.json` → `quality_gate.tier` (treat missing/invalid as `budget`). `budget` → skip cleanup. `quality` → invoke `/claude-code-hermit:simplify` focused on the files you touched. `balanced` → decide RUN vs SKIP yourself from the touched files and the proposal's `category`: lean SKIP for `constraint`/`routine`, lean RUN for `bug`/`capability`, judge `improvement` by scope; RUN if any code (`.ts/.js/.sh/.py/.go/.rs`), `SKILL.md`/`agents/*.md`, or structural `.json/.yml` changed with new logic; SKIP if only prose/docs/declarative config or OPERATOR.md; bias toward RUN when uncertain (cleanup is cheap). On RUN invoke `/claude-code-hermit:simplify` as for `quality`; on SKIP skip. Capture `/simplify`'s totals line (`applied N · deduped M · principle-rejected K · …`). Best-effort: if `/simplify` errors, note it and continue — never block on this step.
+        > 3. **Quality gate.** Ask the gate; do not judge the tier or the files yourself:
+        >    ```bash
+        >    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <absolute path to the PROP file> --files-json '<JSON array of the files you touched, repo-root-relative>'
+        >    ```
+        >    One JSON line back: `{"tier","action","reason","focus_files"}`. `SKIP` → no cleanup. `RUN` → invoke `/claude-code-hermit:simplify` focused on `focus_files`, and capture its totals line (`applied N · deduped M · principle-rejected K · …`). Best-effort: if the gate or `/simplify` errors, note it and continue — never block on this step.
         > 4. **Verification.** Read the proposal's `## Verification` section. If it has real steps (more than the HTML-comment placeholder), perform them. If a step fails, attempt **one** fix and re-verify; if it still fails, set `Verification: failed` with the output and stop (do not loop further). If the section is empty or placeholder-only, set `Verification: none defined`.
         > 5. You cannot prompt the operator — if you hit an ambiguous spec or an undecidable/destructive choice at any step, **stop and return an escalation block** rather than guessing.
         >
@@ -164,39 +168,26 @@ When the operator accepts a proposal:
      6. **Do not auto-stage or commit** the new skill file. Notify the operator: "Skill `<name>` installed at `<install_target>`. Commit it if you want it tracked in version control."
 
      **Verification for procedure-capture proposals (e.6 note):** the `## Verification` section of a procedure-capture PROP should instruct reading the installed file's frontmatter (`name`/`description` parse) rather than checking the live available-skills list — the harness only picks up new skills on the next session reload, so the live list is unreliable here. A missing or malformed installed file blocks resolution per the normal e.6 contract.
-     e.5. **Quality gate (tier-branched).** Applies to **in-main** implementations only (the `## Skill Improvement` → skill-creator and `## Skill Draft` → procedure-capture branches). Dispatched implementations run their own quality gate inside the subagent (see the step (e) dispatch) and are resolved there. Read `.claude-code-hermit/config.json` → `quality_gate.tier`. Resolve per this table:
+     e.5. **Quality gate.** Applies to **in-main** implementations only (the `## Skill Improvement` → skill-creator and `## Skill Draft` → procedure-capture branches). Dispatched implementations ran the same gate inside the subagent (step (e)) and are resolved there.
 
-         | Config state | Resolved tier |
-         |---|---|
-         | `tier` is `"budget"` / `"balanced"` / `"quality"` | use as-is |
-         | `tier` missing, `quality_gate` missing, or value not in enum | `budget` (log one-line warning to SHELL.md Findings) |
+         Build a touched-files list from the writes made during the in-main implementation, written repo-root-relative (the frame `git diff --name-only` uses). If you can't reliably enumerate it (multi-turn work), omit `--files-json` and the gate falls back to the working-tree diff.
 
-         Build a touched-files list from the writes made during the in-main implementation (skill-creator / skill-draft). This is the precise scope for `/claude-code-hermit:simplify` and for the judge. If you can't reliably enumerate it (multi-turn work), omit it; downstream falls back to `git diff --name-only HEAD`.
+         ```bash
+         bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <path to the PROP file> [--files-json '["path/a","path/b"]']
+         ```
 
-         Branch on the resolved tier:
+         One JSON line back: `{"tier","action","reason","focus_files"}`. The script owns tier resolution, the session-bookkeeping filter, and the RUN/SKIP call — the same code the dispatched path runs, so the two cannot disagree. Act on `action`:
 
-         - **`budget`**: skip `/claude-code-hermit:simplify` entirely. Proceed to (f). Resolution notification stays plain: "PROP-NNN implemented and resolved."
-         - **`quality`**: invoke `/claude-code-hermit:simplify` directly. Pass the touched-files list as focus when enumerable, otherwise invoke with no focus (it falls back to the working-tree diff):
+         - **`SKIP`** → no cleanup. Proceed to (f). Notification: "PROP-NNN implemented and resolved." (add `Skipped cleanup: <reason>` when the reason is more specific than the budget tier).
+         - **`RUN`** → invoke `/claude-code-hermit:simplify` focused on `focus_files`:
            ```
            /claude-code-hermit:simplify focus on PROP-NNN implementation: path/a, path/b
            ```
-           The skill runs three parallel reviewers (reuse, quality, efficiency), applies the edits it picks itself, and ends with a totals line: `applied N · deduped M · principle-rejected K · stale-anchor skips L · parse failures P`. Capture that line and pass through.
+           It runs three parallel reviewers (reuse, quality, efficiency), applies the edits it picks, and ends with a totals line: `applied N · deduped M · principle-rejected K · stale-anchor skips L · parse failures P`. Notification: "PROP-NNN implemented and resolved. /simplify applied N edits (M deduped, K rejected on principle)." Use "… /simplify made no changes." when `N == 0`, and "… /simplify completed (totals unavailable)." if the line is unparseable — never block resolution.
 
-           Resolution notification: "PROP-NNN implemented and resolved. /simplify applied N edits (M deduped, K rejected on principle)." When `N == 0`: "PROP-NNN implemented and resolved. /simplify made no changes." If the totals line is missing or unparseable, fall back to "PROP-NNN implemented and resolved. /simplify completed (totals unavailable)." — never block resolution.
-         - **`balanced`**: decide RUN vs SKIP **inline** (no subagent) using this rubric, then act as below.
-           - **Scope:** use the touched-files list if enumerable; otherwise run `git diff --name-only HEAD` and drop session-bookkeeping paths (`sessions/SHELL.md`, `state/runtime.json`, `state/monitors.runtime.json`, `state/state-summary.md`, `state/*.jsonl`, `HEARTBEAT.md`, `tasks-snapshot.md`, `proposals/PROP-*.md`).
-           - **Category prior** (PROP frontmatter `category`): `constraint`/`routine` → lean SKIP; `bug`/`capability` → lean RUN; `improvement` → judge by scope.
-           - **RUN** if any remaining path is code (`.ts/.js/.sh/.py/.go/.rs`) with new logic, a `SKILL.md`/`agents/*.md` with new instruction text, or a `.json/.yml` with new structure — or the Proposed Solution describes new branching, loops, helpers, or near-duplicate blocks.
-           - **SKIP** if all remaining paths are pure prose (`CHANGELOG.md`, `README.md`, `docs/**`), purely declarative config (`.gitignore`, value-only bumps), OPERATOR.md-only, or the candidate set is empty after filtering.
-           - **Bias toward RUN when uncertain** — a false RUN wastes ~$0.25; a false SKIP misses a cleanup no one notices.
+         **The quality gate is cleanup, not correctness** — `/simplify` does not check that the proposal works. Correctness is the `## Verification` gate in step (e.6); proposals with no defined verification still resolve, but the skip is recorded.
 
-           Then act on the ≤15-word reason you settled on:
-           - **RUN** → invoke `/claude-code-hermit:simplify` per the `quality` tier above. Notification: "PROP-NNN implemented and resolved. Cleanup: <reason>. /simplify applied N edits (M deduped, K rejected on principle)." When `N == 0` use "… /simplify made no changes." Same totals-missing fallback as the `quality` tier.
-           - **SKIP** → skip `/claude-code-hermit:simplify`. Notification: "PROP-NNN implemented and resolved. Skipped cleanup: <reason>."
-
-         **The quality gate is cleanup, not correctness** — `/simplify` does not check that the proposal works. Correctness is verified by the `## Verification` gate in step (e.6); proposals with no defined verification still resolve, but the skip is recorded.
-
-         Best-effort throughout: if any step errors out (judge fails, `/simplify` failed or totals unavailable, file read fails), log a one-line warning to SHELL.md Findings and fall back to skip. The gate never blocks resolution.
+         Best-effort throughout: if the gate or `/simplify` errors, log a one-line warning to SHELL.md Findings and fall back to skip. The gate never blocks resolution.
      e.6. **Verification gate** (in-main implementations only — dispatched implementations verify inside the subagent). Read the proposal's `## Verification` section.
          - If it contains real steps (more than the HTML-comment placeholder), perform them now — after the quality gate has applied any `/simplify` edits — before resolving. If a defined step fails, **do not resolve**: report the failure to the operator (or channel in autonomous mode) and stop.
          - If the section is empty, missing, or contains only its placeholder comment, append `Verification: none defined for PROP-NNN — skipped.` to SHELL.md `## Findings` and proceed. The omission is recorded, not blocked.
@@ -207,7 +198,8 @@ When the operator accepts a proposal:
    - **"Create a session task"** → assemble the full NEXT-TASK.md content (Task/Context/Suggested Plan derived from the proposal), appending any of the following bullets to the end of the Suggested Plan, in order, numbered sequentially from `4.` (quality-gate bullet is last so `/claude-code-hermit:simplify` reviews any skill-creator output):
        - **(if the proposal contains `## Skill Improvement` AND `/skill-creator:skill-creator` is available)** `Use /skill-creator:skill-creator to build and validate the skill.`
        - **(if the proposal contains `## Skill Draft`)** `Use /skill-creator:skill-creator to author the captured procedure from the source_artifact (see ## Skill Draft), present the final SKILL.md to the operator for confirmation, then install it to the install_target only on confirmation.`
-       - **(if `quality_gate.tier` in `.claude-code-hermit/config.json` is not `"budget"` — i.e. `"balanced"` or `"quality"`)** `Run /claude-code-hermit:simplify on the touched files for a cleanup pass, then commit.`
+       - **(if `quality_gate.tier` in `.claude-code-hermit/config.json` is not `"budget"` — i.e. `"balanced"` or `"quality"`)** `Before committing, run: bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <this PROP file>. On "action":"RUN", run /claude-code-hermit:simplify focused on its focus_files, then commit.`
+         The bullet defers the call rather than making it here: at queue time the implementation hasn't happened, so there is no diff to classify. The future session runs the same verb the other two paths run, with no `--files-json` — the working-tree diff is the evidence by then.
 
      Then create it — the script's exclusive create makes the "already pending" check atomic (no separate existence pre-check needed):
      ```bash
