@@ -198,13 +198,14 @@ if ($cmd === '' || $cmd === '--help' || $cmd === 'help') {
       deploy-history <server> <site>          List recent deployments
       deploy-log <server> <site> <deploy-id>  Fetch a specific deployment log
       deploy-status <server-id> <site-id> <deploy-id>  Print a deployment's status (raw IDs)
+      deploy-watch <server-id> <site-id> <deploy-id>   Poll a deployment until terminal; emits a single TERMINAL line
 
     Preview commands (read-only, never mutate):
       preview-deploy <server> <site>  Show canonical target before deploying
       preview-reboot <server>         Show canonical target before rebooting
 
     Write commands (require --confirm):
-      deploy <server> <site>      Trigger deployment (fire-and-return; watch via deploy-status)
+      deploy <server> <site>      Trigger deployment (fire-and-return; watch via deploy-watch)
       server-reboot <server>      Reboot server
 
     Estate scan:
@@ -496,8 +497,8 @@ if ($cmd === 'preview-reboot') {
 // deploy <server> <site> --confirm   (fire-and-return)
 //
 // Triggers the deployment and returns immediately with the canonical IDs.
-// Watching is decoupled: the forge-deploy skill arms a CC Monitor that polls
-// `deploy-status` until terminal, so a long deploy never blocks a foreground
+// Watching is decoupled: the forge-deploy skill arms a CC Monitor that runs
+// `deploy-watch` until terminal, so a long deploy never blocks a foreground
 // Bash call (which the tool would kill at its timeout).
 // ---------------------------------------------------------------------------
 if ($cmd === 'deploy') {
@@ -511,7 +512,7 @@ if ($cmd === 'deploy') {
 
     $deployment = $forge->createDeployment($org, $server->id, $site->id, []);
     echo "Deployment started: deploy-id={$deployment->id} server-id={$server->id} site-id={$site->id} status={$deployment->status}\n";
-    echo "Watch with: forge.php deploy-status {$server->id} {$site->id} {$deployment->id}\n";
+    echo "Watch with: forge.php deploy-watch {$server->id} {$site->id} {$deployment->id}\n";
     exit(0);
 }
 
@@ -533,6 +534,53 @@ if ($cmd === 'deploy-status') {
         exit(1);
     }
     echo ($d->status ?? 'unknown') . "\n";
+    exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// deploy-watch <server-id> <site-id> <deploy-id>
+//
+// Polls deployment status until terminal or timeout (180 x 5s ~= 15 min),
+// echoing only on change. Emits one TERMINAL line and exits 0. The TERMINAL
+// line carries only numeric IDs — Forge server names can contain spaces,
+// which would break the space-delimited fields.
+// ---------------------------------------------------------------------------
+if ($cmd === 'deploy-watch') {
+    check(isset($positional[2]), "Usage: forge.php deploy-watch <server-id> <site-id> <deploy-id>");
+    [$serverId, $siteId, $deployId] = $positional;
+    $prev    = null;
+    $prevErr = null;
+    for ($n = 0; $n < 180; $n++) {
+        try {
+            $d  = $forge->deployment($org, (int)$serverId, (int)$siteId, (int)$deployId);
+            $st = $d->status ?? 'unknown';
+        } catch (\Throwable $e) {
+            $st = null; // transient API error — keep polling
+            // A permanent error (bad IDs, revoked token) would otherwise surface
+            // only as an opaque `status=timeout` 15 minutes on. The watcher's
+            // notification stream is stdout, so the signal goes there — but as
+            // the exception class alone, holding the metadata-only contract
+            // (messages can carry response bodies). The message goes to stderr,
+            // which reaches the monitor's output file, never a notification.
+            if (get_class($e) !== $prevErr) {
+                $prevErr = get_class($e);
+                echo "deploy {$deployId}: poll error ({$prevErr})\n";
+                fwrite(STDERR, "deploy {$deployId}: poll error: {$e->getMessage()}\n");
+            }
+        }
+        if ($st !== null) {
+            if ($st !== $prev) {
+                echo "deploy {$deployId}: {$st}\n";
+            }
+            if (isTerminalStatus($st)) {
+                echo "TERMINAL deploy={$deployId} server-id={$serverId} site-id={$siteId} status={$st}\n";
+                exit(0);
+            }
+        }
+        $prev = $st;
+        sleep(5);
+    }
+    echo "TERMINAL deploy={$deployId} server-id={$serverId} site-id={$siteId} status=timeout\n";
     exit(0);
 }
 
