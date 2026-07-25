@@ -113,7 +113,7 @@ const sessionState: string | null = runtime && typeof runtime.session_state === 
 // Live-exchange signal: an operator-initiated turn is open (marker written by
 // record-operator-action.ts on kept operator prompts, cleared by stop-pipeline.ts
 // at Stop). TTL bounds a marker orphaned by a failed Stop. Absent, malformed,
-// stale, or future-dated (clock skew — heartbeat-precheck.ts precedent) all read
+// stale, or future-dated (clock skew — lib/heartbeat/precheck.ts precedent) all read
 // as no-open-turn → emit. Fail-open: a broken marker must never starve routines.
 const turnMarker: Json = readJSON(path.join(stateDir, 'operator-turn-open.json'));
 const turnAt = turnMarker && typeof turnMarker.at === 'string' ? new Date(turnMarker.at).getTime() : NaN;

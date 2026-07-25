@@ -338,10 +338,10 @@ function writeRuntimeFields(fields: Record<string, Json>): void {
   fs.renameSync(RUNTIME_JSON_TMP, RUNTIME_JSON);
 }
 
-// Maintains the [opened_at, closed_at] window that session-cost.ts sums cost-log
+// Maintains the [opened_at, closed_at] window that lib/cost-report/session.ts sums cost-log
 // rows over — the logical-session boundary, since cost-log rows carry the shared
 // transcript UUID (never the logical S-NNN) and one transcript holds many logical
-// sessions (see session-cost.ts). Three runtime.json fields define an arc:
+// sessions (see lib/cost-report/session.ts). Three runtime.json fields define an arc:
 //   opened_at        — arc start (first in_progress turn)
 //   closed_at        — arc end, stamped on the idle transition; null while live
 //   opened_transcript— the CC transcript/process id that owns the current arc

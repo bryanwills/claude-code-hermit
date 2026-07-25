@@ -1,4 +1,4 @@
-// Tests for scripts/today-cost.ts: today's spend summary from cost-log.jsonl.
+// Tests for cost-report.ts's today verb: today's spend summary from cost-log.jsonl.
 // Cost-path resolution must be anchored to the hermit root, not process.cwd() —
 // the calling shell (brief, invoked inline in main) persists cd across calls,
 // so a drifted cwd must not silently misreport $0.00.

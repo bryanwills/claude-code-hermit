@@ -230,7 +230,7 @@ function friendlyBoundary(iso: string, timezone: string): string {
 
 // Resolves "now" as epoch ms: real wall-clock, overridable by HERMIT_NOW for
 // deterministic tests. Same override convention as archive-shell.ts/
-// session-archive.ts/routine-due.ts (which return Date) — centralized here so
+// session-archive.ts/lib/routines/due.ts (which return Date) — centralized here so
 // a caller wanting an epoch number doesn't need its own inline copy.
 function resolveHermitNowMs(): number {
   if (process.env.HERMIT_NOW) {

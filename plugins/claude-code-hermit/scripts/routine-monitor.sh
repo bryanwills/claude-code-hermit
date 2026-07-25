@@ -4,12 +4,12 @@
 #      ROUTINE_DUE_SCRIPT=<path> → override routine-due path (tests). Still a bare
 #                                  script path called with `<dir>`; the default
 #                                  now prepends routines.ts's verb.
-# Polls routine-due.ts, which owns all gating/state/liveness writes and prints a
+# Polls `routines.ts due`, which owns all gating/state/liveness writes and prints a
 # ROUTINE_DUE line only when eligible routines are due. No first-iteration
 # suppression needed: routine-due initializes unseen routines to "now" and fires
 # nothing on a fresh baseline.
 #
-# routine-due.ts always exits 0, so the error branch only fires on a hard spawn
+# `routines.ts due` always exits 0, so the error branch only fires on a hard spawn
 # failure (bun missing, script renamed). To avoid a wake-notification storm, the
 # ROUTINE_MONITOR_ERROR line is throttled: emitted on the 1st failure and every
 # 60th consecutive failure thereafter; any success resets the counter.

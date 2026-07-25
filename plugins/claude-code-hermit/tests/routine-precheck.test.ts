@@ -1,4 +1,4 @@
-// Contract tests for scripts/routine-precheck.ts — consolidates a routine fire's
+// Contract tests for `routines.ts precheck` — consolidates a routine fire's
 // pre-dispatch gate (waiting-check + pause-check) and the `started` stamp into one
 // script call. Exercised as a subprocess (argv/stdout/exit-code/file writes), the same
 // way tests/hermit-pause.test.ts exercises hermit-pause.ts (both resolve the hermit

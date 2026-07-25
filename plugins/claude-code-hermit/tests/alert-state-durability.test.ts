@@ -1,5 +1,5 @@
 // Durability of alert-state.json against interrupted/concurrent writes (issue #463).
-// Both writers (heartbeat-precheck.ts, update-alert-state.ts) must (a) write atomically
+// Both writers (lib/heartbeat/precheck.ts, lib/heartbeat/alert-update.ts) must (a) write atomically
 // via temp+rename so a killed write never leaves a truncated file, and (b) never reinit
 // the skill-owned alerts{}/self_eval{} over a file that exists — a present-but-unparseable
 // file is quarantined to alert-state.json.corrupt-<ts>, not silently overwritten.

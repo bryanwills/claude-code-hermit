@@ -118,7 +118,7 @@ export function mutateOwnedAlerts(p: string, mutator: (alerts: Json) => void): b
 // the prior alerts{} and the set of keys firing this tick. The subagent now
 // returns only `{key, text}` pairs for items that need semantic judgment
 // (checklist/custom/waiting-timeout); this ladder is prefix-agnostic — the
-// caller (update-alert-state.ts) is responsible for only including keys it
+// caller (lib/heartbeat/alert-update.ts) is responsible for only including keys it
 // trusts in `firing` (model judgment keys plus script-derived keys — see
 // deriveMicroPendingKeys / deriveProposalPendingKeys / deriveStaleSession below).
 // ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ export interface FiringItem { key: string; text: string; channelText?: string; }
 // Keys backed by a filesystem source-of-truth (see deriveMicroPendingKeys /
 // deriveProposalPendingKeys). These are the ONLY code path that bakes a raw
 // internal id into an alert's text, so channel-safety scrubbing is scoped to
-// them. Shared with update-alert-state.ts (phantom-key filter, freeze).
+// them. Shared with lib/heartbeat/alert-update.ts (phantom-key filter, freeze).
 export const MICRO_PREFIX = 'micro-proposal-pending:';
 export const PROPOSAL_PREFIX = 'proposal-pending:';
 export const STRUCTURED_PREFIXES = [MICRO_PREFIX, PROPOSAL_PREFIX];
@@ -142,7 +142,7 @@ export const isStructuredKey = (key: string): boolean =>
 // like MICRO_PREFIX/PROPOSAL_PREFIX — its text carries no internal id, so it is
 // intentionally excluded from STRUCTURED_PREFIXES/isStructuredKey (no id-scrubbing,
 // no channel-silencing). Its model-phantom-drop is a separate exact-match check
-// in update-alert-state.ts.
+// in lib/heartbeat/alert-update.ts.
 export const STALE_KEY = 'stale-session';
 
 // Strip internal ids that must never reach the operator channel. The banned set
@@ -279,7 +279,7 @@ export function classifyTick(opts: {
 // demonstrated #594 failure). Deriving them here means the model never
 // authors them — omission or garbling by the model is simply impossible,
 // because the model's `firing` entries for these prefixes are ignored
-// (see update-alert-state.ts's phantom-key filter).
+// (see lib/heartbeat/alert-update.ts's phantom-key filter).
 //
 // `ok:false` signals an ambiguous read (not "nothing pending") — the caller
 // must not let an unreadable source-of-truth file age or resolve that

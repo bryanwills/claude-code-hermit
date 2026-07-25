@@ -1,4 +1,4 @@
-// Tests for scripts/session-cost.ts: per-session cost summation from cost-log.jsonl.
+// Tests for cost-report.ts's session verb: per-session cost summation from cost-log.jsonl.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';

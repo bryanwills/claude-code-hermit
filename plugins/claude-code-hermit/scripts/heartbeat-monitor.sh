@@ -4,7 +4,7 @@
 #      HEARTBEAT_PRECHECK=<path> → override precheck path (tests). Still a bare
 #                                  script path called with `--peek <dir>`; the
 #                                  default now prepends heartbeat.ts's verb.
-# Polls heartbeat-precheck.ts --peek and emits a notification only when the
+# Polls `heartbeat.ts precheck` --peek and emits a notification only when the
 # LLM needs to wake up (EVALUATE, AUTO_CLOSE, or ALERT verdict). --peek means
 # the polling itself is read-only; the mutating tick happens once when
 # /heartbeat run re-runs precheck inside the EVALUATE handler.

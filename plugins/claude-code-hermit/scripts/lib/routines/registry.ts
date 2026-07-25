@@ -87,7 +87,7 @@ function resolveMachineTz(): string | null {
 
 // Wraps cron-tz-shift's shiftCron for a single routine. Returns the schedule
 // unchanged (no warn) when the machine timezone can't be resolved — the same
-// fail-open behavior cron-tz-shift.ts's CLI uses.
+// fail-open behavior lib/routines/tz-shift.ts's CLI uses.
 function shiftForRoutine(
   schedule: string, configTz: string | null, machineTz: string | null, ref: Date,
 ): { result: string; warn?: string } {

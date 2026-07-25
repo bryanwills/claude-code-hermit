@@ -1,10 +1,10 @@
-// cost-reflect.ts --plain mode: the channel-safe "why is my bill high" answer
+// cost-report.ts reflect --plain mode: the channel-safe "why is my bill high" answer
 // (audit's "plain spend statement" PR). Verifies composition (total vs typical,
 // drivers named by work, cap status, notional caveat) and — the load-bearing
 // property — that the output never leaks the raw token-category vocabulary the
 // table mode uses (cache_read/cache_write, raw source strings, session ids).
 //
-// Subprocess test (via runScript): cost-reflect.ts is invoked as a standalone
+// Subprocess test (via runScript): the reflect verb is invoked as a standalone
 // script, exactly how the SKILL.md Step 1 command runs it.
 
 import { describe, test, expect, afterAll } from 'bun:test';

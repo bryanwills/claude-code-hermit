@@ -1,4 +1,4 @@
-// PROP-016 budget-gate contract for heartbeat-precheck.ts.
+// PROP-016 budget-gate contract for `heartbeat.ts precheck`.
 //
 // Two mechanisms under test:
 //  1. The pause-escape gate: a budget-reason pause (action:"pause") would normally

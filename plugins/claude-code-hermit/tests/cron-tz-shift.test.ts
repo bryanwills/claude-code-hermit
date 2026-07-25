@@ -1,4 +1,4 @@
-// Tests for scripts/cron-tz-shift.ts — timezone-aware cron shifting
+// Tests for `routines.ts tz-shift` — timezone-aware cron shifting
 // (bun test port of cron-tz-shift.test.sh).
 //
 // Exercised as a subprocess (runScript): the machine timezone (TZ env, resolved

@@ -1,4 +1,4 @@
-// Tests for scripts/cron-registry.ts — the diff-based plan/commit planner behind
+// Tests for `routines.ts cron-registry` — the diff-based plan/commit planner behind
 // hermit-routines `load`. planCron/commitCron are pure (no fs, no Date.now()), so
 // these are in-process unit tests, not subprocess runs — the real boundary
 // (reading config.json/the mirror file, writing the mirror) is exercised by the

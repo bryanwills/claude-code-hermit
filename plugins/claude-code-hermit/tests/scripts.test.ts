@@ -676,7 +676,7 @@ describe('archive-raw', () => {
 });
 
 // -------------------------------------------------------
-// update-alert-state.ts (subprocess — stdin payload + file-write CLI contract)
+// heartbeat.ts alert-state (subprocess — stdin payload + file-write CLI contract)
 // -------------------------------------------------------
 
 describe('update-alert-state', () => {
@@ -1842,7 +1842,7 @@ describe('update-reflection-state', () => {
 });
 
 // -------------------------------------------------------
-// heartbeat-precheck.ts (subprocess — argv/stdout/state-mutation CLI contract)
+// heartbeat.ts precheck (subprocess — argv/stdout/state-mutation CLI contract)
 // -------------------------------------------------------
 
 const DEFAULT_CHECKLIST = '# Heartbeat\n- Review proposals/ for any needing attention\n';
@@ -3031,7 +3031,7 @@ describe('pricing', () => {
 });
 
 // -------------------------------------------------------
-// cost-reflect.ts (subprocess — CWD-relative cost-log read, stdout report)
+// cost-report.ts reflect (subprocess — CWD-relative cost-log read, stdout report)
 // -------------------------------------------------------
 
 async function runCostReflect(dir: string): Promise<string> {
@@ -3514,7 +3514,7 @@ describe('cost-tracker sumTurnUsage', () => {
 });
 
 // -------------------------------------------------------
-// cost-reflect.ts: source attribution tests (subprocess)
+// cost-report.ts reflect: source attribution tests (subprocess)
 // -------------------------------------------------------
 
 describe('cost-reflect source attribution', () => {

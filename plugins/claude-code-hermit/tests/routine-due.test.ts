@@ -1,4 +1,4 @@
-// Contract tests for scripts/routine-due.ts — the monitor-mode deterministic
+// Contract tests for `routines.ts due` — the monitor-mode deterministic
 // scheduler. Exercised as a subprocess (argv/stdout/exit-code/file writes), same
 // convention as tests/routine-precheck.test.ts.
 //

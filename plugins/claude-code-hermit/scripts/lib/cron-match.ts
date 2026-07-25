@@ -1,5 +1,5 @@
 // Pure 5-field cron matcher. Evaluates against wall-clock parts in a target timezone —
-// used by routine-due.ts to check schedules directly in config.timezone (no shiftCron).
+// used by lib/routines/due.ts to check schedules directly in config.timezone (no shiftCron).
 //
 // Two-tier API so hot loops can hoist the invariant work out of the per-candidate scan:
 //   - makeTzFormatter(tz) once per poll, then partsFromFormatter(fmt, date) per candidate;
@@ -52,7 +52,7 @@ export function datePartsInTz(date: Date, tz: string | null): DateParts | null {
 
 // Parse a 5-field cron expr into per-field Sets once. Returns null on a malformed expr
 // (wrong field count or an unparseable field), so callers fail closed. DOW: 7 ≡ 0
-// (cron-tz-shift.ts precedent). Expr should already be validated by validateCronSchedule
+// (lib/routines/tz-shift.ts precedent). Expr should already be validated by validateCronSchedule
 // (which additionally rejects DOM+DOW both restricted), so plain AND of all fields is correct.
 export function compileCron(expr: string): CompiledCron | null {
   const fields = expr.trim().split(/\s+/);
