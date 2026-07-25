@@ -5,6 +5,7 @@
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — core's triage gate already records every verdict. Proposals now carry `tags: [capability-brainstorm]` instead of `[domain-brainstorm, ideation]`, so they count toward the brainstorm kill-criteria segment rather than `reflect`'s.
 - `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
+- `ha-morning-brief`'s micro-proposal lifecycle now mutates `state/micro-proposals.json` through a `JSON.parse`/`JSON.stringify` round-trip and an atomic temp-file rename instead of editing it by hand, so neither a nudge, an expiry, nor a crash mid-write can corrupt the queue. A non-matching id exits non-zero instead of silently doing nothing.
 
 ## [0.4.6] - 2026-07-21
 

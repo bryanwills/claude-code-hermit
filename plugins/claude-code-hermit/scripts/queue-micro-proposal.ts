@@ -20,6 +20,8 @@ import path from 'node:path';
 import { todayYMD, utcISOStamp } from './lib/time';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { readStdin, readJson } from './lib/cli';
+import { writeFileAtomic } from './lib/md-write';
+import { readMicroProposals } from './lib/micro-proposals-io';
 
 type Json = any;
 
@@ -51,8 +53,15 @@ type Json = any;
 
   const stateSubdir = path.join(stateDir, 'state');
   const microPath = path.join(stateSubdir, 'micro-proposals.json');
-  let micro = readJson(microPath);
-  if (!micro || !Array.isArray(micro.pending)) micro = { pending: [] };
+  // Absent file: start empty. Present but unparseable: refuse — defaulting to
+  // {pending:[]} here would silently destroy the whole backlog on the next
+  // queue (issue 649).
+  const read = readMicroProposals(microPath);
+  if (read.status === 'corrupt') {
+    console.error(`${read.error} — refusing to overwrite.`);
+    process.exit(1);
+  }
+  const micro: Json = read.status === 'missing' ? { pending: [] } : read.data;
 
   const existing = micro.pending.find((e: Json) => e.question === question);
   if (existing) {
@@ -88,9 +97,7 @@ type Json = any;
   micro.pending.push(entry);
 
   fs.mkdirSync(stateSubdir, { recursive: true });
-  const tmp = microPath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(micro, null, 2) + '\n', 'utf-8');
-  fs.renameSync(tmp, microPath);
+  writeFileAtomic(microPath, JSON.stringify(micro, null, 2) + '\n');
 
   const event: Json = { ts: utcISOStamp(), type: 'micro-queued', micro_id: id, tier, question };
   if (isBridged) event.kind = 'ask';

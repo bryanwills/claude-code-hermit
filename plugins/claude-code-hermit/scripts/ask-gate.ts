@@ -43,10 +43,10 @@ import { runHook } from './lib/hook-input';
 
 const REDIRECT_REASON =
   'No interactive operator on this surface (always-on channel session). Do not retry ' +
-  'AskUserQuestion. Instead: (1) send the question via the channel reply tool; (2) append ' +
-  'a pending entry to .claude-code-hermit/state/micro-proposals.json (id: MP-YYYYMMDD-N, ' +
-  'tier: 1, status: "pending", follow_up_count: 0, ts, question, and options[] for multiple ' +
-  'choice) so the answer survives restart; (3) continue other work — the answer arrives as a ' +
+  'AskUserQuestion. Instead: (1) send the question via the channel reply tool; (2) queue it ' +
+  'durably by running `bun ${CLAUDE_PLUGIN_ROOT}/scripts/queue-micro-proposal.ts ' +
+  '.claude-code-hermit` with a heredoc payload {"tier":1,"question":"...","options":[...]} — ' +
+  'never hand-edit state/micro-proposals.json; (3) continue other work — the answer arrives as a ' +
   'channel message. If a human operator is in fact attending this terminal, they can relaunch ' +
   'with HERMIT_ASK_GATE=off to disable this gate for that session.';
 
