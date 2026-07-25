@@ -32,17 +32,19 @@ function hitLines(text: string): number[] {
   return out;
 }
 
-// Walk plugins/*, collecting skills/**/*.md, docs/**/*.md,
+// Walk plugins/*, collecting skills/**/*.md, agents/**/*.md, docs/**/*.md,
 // state-templates/** (*.md, *.template), and plugin-root *.md (excluding
 // CHANGELOG.md). Skips node_modules/vendor segments (laravel-forge-hermit's
-// vendored PHP deps carry unrelated matches).
+// vendored PHP deps carry unrelated matches). Only real plugins are scanned —
+// a directory is a plugin iff it has .claude-plugin/plugin.json, which keeps
+// gitignored scratch dirs under plugins/ (e.g. graphify-out/) out of the scan.
 const PLUGINS_DIR = path.join(MONOREPO_ROOT, 'plugins');
 
 function surfaces(): string[] {
   const out: string[] = [];
   for (const plugin of fs.readdirSync(PLUGINS_DIR)) {
     const pluginRoot = path.join(PLUGINS_DIR, plugin);
-    if (!fs.statSync(pluginRoot).isDirectory()) continue;
+    if (!fs.existsSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'))) continue;
 
     for (const entry of fs.readdirSync(pluginRoot, { withFileTypes: true })) {
       if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'CHANGELOG.md') {
@@ -50,7 +52,7 @@ function surfaces(): string[] {
       }
     }
 
-    for (const sub of ['skills', 'docs', 'state-templates']) {
+    for (const sub of ['skills', 'agents', 'docs', 'state-templates']) {
       out.push(...walkFiles(
         path.join(pluginRoot, sub),
         name => name.endsWith('.md') || name.endsWith('.template'),

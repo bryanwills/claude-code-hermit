@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- `ha-boot` no longer tells the operator to copy a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
+- `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
 
 ## [0.4.6] - 2026-07-21
 

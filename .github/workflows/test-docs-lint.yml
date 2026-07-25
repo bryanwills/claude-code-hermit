@@ -5,10 +5,16 @@ on:
     paths:
       - 'plugins/**'
       - '.github/workflows/test-docs-lint.yml'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig.json'
   pull_request:
     paths:
       - 'plugins/**'
       - '.github/workflows/test-docs-lint.yml'
+      - 'package.json'
+      - 'bun.lock'
+      - 'tsconfig.json'
 
 jobs:
   docs-lint:
