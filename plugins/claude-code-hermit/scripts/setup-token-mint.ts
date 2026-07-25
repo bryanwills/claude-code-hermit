@@ -28,6 +28,8 @@
  *   await-token-and-install   capture the token, install it, print the digest
  *   finish                    restart the session so the new token takes effect
  *   abort                     tear down a running mint
+ *   probe [hermitDir]         doctor's expiry probe — one line: OK | EXPIRED |
+ *                             EXPIRES:<iso8601> (see hermit-meta.json)
  */
 
 import fs from 'node:fs';
@@ -511,9 +513,32 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'probe': {
+      // Expiry probe for core's own setup-token credential, declared in
+      // .claude-plugin/hermit-meta.json and run by doctor's credential-expiry
+      // check. Protocol (doctor-check.ts runExpiryProbe): exactly one line of
+      // stdout — OK | EXPIRED | EXPIRES:<iso8601>.
+      //
+      // A hermit not using token auth has no record and prints OK: there is
+      // nothing to check, which is materially different from "expired". Note
+      // this never reads the token file itself — expiry lives in the record.
+      //
+      // Takes an optional dir positionally so the declared probe command can
+      // stay argument-free while tests can point it at a fixture.
+      try {
+        const record = readTokenRecord(process.argv[3] || HERMIT_DIR);
+        console.log(record ? `EXPIRES:${record.expires_at}` : 'OK');
+      } catch {
+        // Never let a probe failure read as a credential problem; doctor
+        // reports an unparseable line as "probe failed" on its own.
+        console.log('OK');
+      }
+      break;
+    }
+
     default:
       process.stderr.write(
-        'Usage: setup-token-mint.ts <terminal|relay|start|await-url|submit-code|await-token-and-install|finish|abort|status>\n'
+        'Usage: setup-token-mint.ts <terminal|relay|start|await-url|submit-code|await-token-and-install|finish|abort|status|probe>\n'
       );
       code = 1;
   }
