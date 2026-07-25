@@ -74,14 +74,20 @@ const NO_ORG_METHODS = ['organizations'];
 
 // ---------------------------------------------------------------------------
 // Deployment status enums.
-// Terminal states are authoritative (the watch grep keys off these). The
-// in-progress set is documentation only — anything not terminal is treated as
-// still-running, which keeps the watch robust to undocumented states (e.g.
-// 'running', seen in the SDK docs but absent from the OpenAPI enum).
+// Terminal states are authoritative (deploy-watch keys off isTerminalStatus()
+// below). The in-progress set is documentation only — anything not terminal is
+// treated as still-running, which keeps the watch robust to undocumented
+// states (e.g. 'running', seen in the SDK docs but absent from the OpenAPI enum).
 // ---------------------------------------------------------------------------
 const STATUS_SUCCESS     = ['finished'];
 const STATUS_FAILURE     = ['failed', 'failed-build', 'cancelled'];
 const STATUS_IN_PROGRESS = ['pending', 'queued', 'running', 'deploying'];
+
+/** True when a deployment status is terminal (success or failure). */
+function isTerminalStatus(string $status): bool
+{
+    return in_array($status, array_merge(STATUS_SUCCESS, STATUS_FAILURE), true);
+}
 
 // ---------------------------------------------------------------------------
 // Matchers — resolve a user-supplied query to candidate server/site records.

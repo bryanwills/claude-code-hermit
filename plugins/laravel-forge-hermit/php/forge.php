@@ -198,6 +198,7 @@ if ($cmd === '' || $cmd === '--help' || $cmd === 'help') {
       deploy-history <server> <site>          List recent deployments
       deploy-log <server> <site> <deploy-id>  Fetch a specific deployment log
       deploy-status <server-id> <site-id> <deploy-id>  Print a deployment's status (raw IDs)
+      deploy-watch <server-id> <site-id> <deploy-id>   Poll a deployment until terminal; emits a single TERMINAL line
 
     Preview commands (read-only, never mutate):
       preview-deploy <server> <site>  Show canonical target before deploying
@@ -533,6 +534,41 @@ if ($cmd === 'deploy-status') {
         exit(1);
     }
     echo ($d->status ?? 'unknown') . "\n";
+    exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// deploy-watch <server-id> <site-id> <deploy-id>
+//
+// Polls deployment status until terminal or timeout (180 x 5s ~= 15 min),
+// echoing only on change. Emits one TERMINAL line and exits 0. The TERMINAL
+// line carries only numeric IDs — Forge server names can contain spaces,
+// which would break the space-delimited fields.
+// ---------------------------------------------------------------------------
+if ($cmd === 'deploy-watch') {
+    check(isset($positional[2]), "Usage: forge.php deploy-watch <server-id> <site-id> <deploy-id>");
+    [$serverId, $siteId, $deployId] = $positional;
+    $prev = null;
+    for ($n = 0; $n < 180; $n++) {
+        try {
+            $d  = $forge->deployment($org, (int)$serverId, (int)$siteId, (int)$deployId);
+            $st = $d->status ?? 'unknown';
+        } catch (\Throwable $e) {
+            $st = null; // transient API error — keep polling
+        }
+        if ($st !== null) {
+            if ($st !== $prev) {
+                echo "deploy {$deployId}: {$st}\n";
+            }
+            if (isTerminalStatus($st)) {
+                echo "TERMINAL deploy={$deployId} server-id={$serverId} site-id={$siteId} status={$st}\n";
+                exit(0);
+            }
+        }
+        $prev = $st;
+        sleep(5);
+    }
+    echo "TERMINAL deploy={$deployId} server-id={$serverId} site-id={$siteId} status=timeout\n";
     exit(0);
 }
 
