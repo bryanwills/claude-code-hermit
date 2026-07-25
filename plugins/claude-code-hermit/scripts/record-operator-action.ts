@@ -92,7 +92,7 @@ function isRoutinePrompt(prompt: string): boolean {
   if (t.startsWith('HEARTBEAT_ERROR: ')) return true;
   if (t.startsWith('ROUTINE_DUE [hermit-routine:')) return true;
   if (t.startsWith('ROUTINE_MONITOR_ERROR: ')) return true;
-  // Watchdog hygiene injections (hermit-watchdog.ts:652,852,991). Native
+  // Watchdog hygiene injections (hermit-watchdog.ts:650,850,988). Native
   // commands may never reach this hook at all; dropping them is safe either
   // way — typing /clear or /compact ends a context, it doesn't signal presence.
   if (t === '/clear' || t.startsWith('/compact')) return true;

@@ -86,7 +86,7 @@ describe('pending-command marker', () => {
   });
 
   test('renders a bare command without a trailing space', () => {
-    expect(renderCommand({ command: '/clear', arg: null, by: 'op', requested_at: 'x' })).toBe('/clear');
+    expect(renderCommand({ command: '/clear', arg: null })).toBe('/clear');
   });
 
   test('absent marker reads as null', () => {
