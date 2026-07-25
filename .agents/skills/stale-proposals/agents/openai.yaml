@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stale Proposals"
+  short_description: "Reconcile stale proposals against shipped work"
+  default_prompt: "Use $stale-proposals to reconcile the open proposal queue with shipped changelog and commit evidence."

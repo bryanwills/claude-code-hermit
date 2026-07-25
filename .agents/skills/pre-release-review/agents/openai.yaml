@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pre-Release Review"
+  short_description: "Audit release windows before tagging plugins"
+  default_prompt: "Use $pre-release-review to audit unreleased plugin changes against their changelogs before tagging."
