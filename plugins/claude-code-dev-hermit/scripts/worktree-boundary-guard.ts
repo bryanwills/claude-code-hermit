@@ -63,7 +63,7 @@ async function main() {
   if (isUnder(target, path.join(mainRoot, '.claude-code-hermit'))) process.exit(0);
   // Block: escapes into the main checkout (or a sibling worktree nested under it).
   if (isUnder(target, mainRoot)) {
-    console.error(`[worktree-boundary-guard] BLOCKED: ${target} is in the main checkout, not this worktree (${worktreeRoot}). Edit inside the worktree.`);
+    console.error(`[worktree-boundary-guard] BLOCKED: ${target} is in the main checkout, not this worktree (${worktreeRoot}). Edit inside the worktree. In a background session the harness isolates you into a worktree on your first edit — this block is not a rule violation, just re-attempt the edit against the worktree path.`);
     process.exit(2);
   }
 

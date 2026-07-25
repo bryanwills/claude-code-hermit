@@ -5,8 +5,8 @@ End-to-end mechanics of a ticket from branch → PR. Read this once to understan
 The plugin's contribution to the workflow is two-part:
 
 1. **A CLAUDE-APPEND template** is injected into the project's `CLAUDE.md` by `/hatch`. The template chosen depends on `hatch_mode`:
-   - **`standard`** (`state-templates/CLAUDE-APPEND.md`): full workflow — §Git Safety, §Branch Discipline, §Implementation Flow, §Tests Before PR, and supporting sections. For greenfield projects without existing dev skills.
-   - **`safety`** (`state-templates/CLAUDE-APPEND.md` rendered by `scripts/render-append.ts safety`): git safety and branch discipline only. No §Implementation Flow or §Tests Before PR. For projects that already have their own `/commit`, `/create-pr`, or `/release` skills — dev-hermit's safety layer without the prescriptive workflow.
+   - **`standard`** (`state-templates/CLAUDE-APPEND.md`): full workflow — §Git Safety, §Branch Discipline, §Implementation Flow and supporting sections. For greenfield projects without existing dev skills.
+   - **`safety`** (`state-templates/CLAUDE-APPEND.md` rendered by `scripts/render-append.ts safety`): git safety and branch discipline only. No §Implementation Flow. For projects that already have their own `/commit`, `/create-pr`, or `/release` skills — dev-hermit's safety layer without the prescriptive workflow.
 2. **`/dev-pr`** is the operator-invoked terminal step that pushes the branch and opens the PR.
 
 Everything between (planning, branch creation, code, tests, cleanup) is the agent following the injected rules. There's no "dev-hermit pipeline" — the rules ARE the pipeline.
@@ -19,7 +19,7 @@ Everything between (planning, branch creation, code, tests, cleanup) is the agen
 
 Operator describes the task. The agent breaks it into Tasks via `TaskCreate`. Trivial single-step tasks skip this.
 
-If the code path is unfamiliar AND `/feature-dev:feature-dev` is installed, the agent runs it first to architect-and-explore before writing code. Trigger is **unfamiliarity, not urgency** — see CLAUDE-APPEND `§Implementation Flow` step 3.
+If the code path is unfamiliar AND `/feature-dev:feature-dev` is installed, the agent runs it first to architect-and-explore before writing code. Trigger is **unfamiliarity, not urgency** — see CLAUDE-APPEND `§Implementation Flow`.
 
 ### Step 2 — Branch
 
@@ -43,7 +43,7 @@ Per `§Implementation Flow`: agent runs `claude-code-dev-hermit.commands.test` b
 
 ### Step 5 — Cleanup pass and re-test
 
-Per `§Tests Before PR`:
+Per `§Implementation Flow`:
 
 1. Run `/claude-code-dev-hermit:dev-quality` on the working tree. It invokes `/claude-code-hermit:simplify` (three parallel reviewers, applies its own edits), then re-runs `commands.test`.
 2. If tests pass → proceed.

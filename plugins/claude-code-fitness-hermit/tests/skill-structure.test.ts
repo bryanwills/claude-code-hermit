@@ -90,7 +90,37 @@ if (fs.existsSync(appendPath)) {
   ok('no Tool catalog table', !/^\|\s*Tool\s*\|/m.test(append));
   ok('no Agent catalog table', !/^\|\s*Agent\s*\|/m.test(append));
   ok('self-advertises instead of cataloging', append.includes('self-advertise through their own SKILL.md'));
-  ok('under post-trim ceiling (~3852 B)', Buffer.byteLength(append, 'utf-8') <= 4300, `${Buffer.byteLength(append, 'utf-8')} B`);
+  // The context-engineering pass then dropped the routine/check tables and the
+  // five-file state map (docs/knowledge-schema.md owns it), landing at ~2,881 B.
+  ok('under post-trim ceiling (~2881 B)', Buffer.byteLength(append, 'utf-8') <= 3200, `${Buffer.byteLength(append, 'utf-8')} B`);
+
+  // Rules the trim was not allowed to touch.
+  ok('keeps connection-first', append.includes('check-strava-connection'));
+  ok('keeps the secrets rule', /[Nn]ever commit Strava tokens/.test(append));
+  ok('keeps the settings-blocked write-tool rule',
+    append.includes('star-segment') && append.includes('settings.json'));
+  ok('keeps the zones rule', append.includes('get-athlete-zones'));
+  ok('keeps full-history authority', append.includes('get-athlete-stats'));
+  ok('keeps the fitness-lab mediation boundary', append.includes('fitness-lab.ts'));
+  ok('points at the schema for state wiring', append.includes('docs/knowledge-schema.md'));
+
+  // The state contracts the APPEND stopped enumerating must exist where it points.
+  const schemaPath = path.join(import.meta.dir, '..', 'docs', 'knowledge-schema.md');
+  const schema = fs.existsSync(schemaPath) ? fs.readFileSync(schemaPath, 'utf-8') : '';
+  for (const contract of [
+    'strava-last-activity-id.txt',
+    'strava-weekly-baselines.json',
+    'activity-notes.json',
+    'strava-pending-rpe.json',
+  ]) {
+    ok(`schema documents ${contract}`, schema.includes(contract));
+  }
+
+  // Distributed half of the single-owner guard for the push-format constant:
+  // core's CLAUDE-APPEND states ≤200 chars; this runs when fitness files change.
+  const brief = fs.readFileSync(path.join(import.meta.dir, '..', 'skills', 'fitness-brief', 'SKILL.md'), 'utf-8');
+  ok('fitness-brief defers to the core push-format owner',
+    !/≤\s*200\s*chars/.test(brief) && brief.includes('Operator Notification push format'));
 }
 
 process.exit(summary() === 0 ? 0 : 1);

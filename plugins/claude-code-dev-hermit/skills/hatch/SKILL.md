@@ -57,7 +57,7 @@ questions: [
       { label: "Keep current (<value>)", description: "Already configured" },        // only on re-run when hatch_mode already in config
       { label: "safety (recommended)", description: "Detected existing skills: <matched names> — skip /dev-quality, /dev-pr, /dev-test workflow sections." },   // when capability scan matched
       { label: "safety", description: "Inject only §Git Safety, §Branch Discipline, §Technical Constraints, and supporting sections." },   // when no match but operator chooses
-      { label: "standard", description: "Inject the full workflow including §Implementation Flow, §Tests Before PR, §Dev Quick Reference." }
+      { label: "standard", description: "Inject the full workflow including §Implementation Flow and §Dev Quick Reference." }
     ]
   }
 ]
@@ -259,7 +259,7 @@ Dev hermit activated (claude-code-dev-hermit vX.Y.Z).
 
 Mode: safety  [or: standard]
   Injected: §Git Safety, §Branch Discipline, §Technical Constraints  [safety]
-  Injected: §Git Safety, §Branch Discipline, §Implementation Flow, §Tests Before PR, §Technical Constraints  [standard]
+  Injected: §Git Safety, §Branch Discipline, §Implementation Flow, §Technical Constraints  [standard]
 
 Git safety:
   Hook profile: strict (git-push-guard active)  [or: standard — no hook enforcement]
@@ -287,7 +287,7 @@ Available skills:
 
 Conventions are in CLAUDE.md (§Git Safety, §Branch Discipline). [safety]
 Conventions are in CLAUDE.md (§Git Safety, §Branch Discipline,
-§Implementation Flow, §Tests Before PR). [standard]
+§Implementation Flow). [standard]
 Any agent doing dev work in this project — native Agent, feature-dev, custom — must follow them.
 ```
 

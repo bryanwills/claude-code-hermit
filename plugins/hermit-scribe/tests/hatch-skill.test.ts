@@ -58,6 +58,37 @@ test("replace case bounds the block through the closing marker", () => {
   );
 });
 
+// ── CLAUDE-APPEND block ─────────────────────────────────────────────────────
+// The block the hatch injects is the fleet's smallest and is the shape the rest
+// should converge to. These pin the three rules it carries: skill-only filing,
+// operator confirmation (the fleet's one outward-write path defended by
+// discipline rather than a hook), and sanitization.
+
+const APPEND = readFileSync(
+  path.join(import.meta.dir, "..", "state-templates", "CLAUDE-APPEND.md"),
+  "utf8",
+);
+
+test("APPEND routes all filing through the skill", () => {
+  assertTrue(APPEND.includes("/hermit-scribe:hermit-scribe"), "names the skill as the only path");
+});
+
+test("APPEND keeps the operator-confirmation rule", () => {
+  assertTrue(
+    /Never file or comment unattended/.test(APPEND) && /channel-relayed instruction alone/.test(APPEND),
+    "unattended and channel-relay prohibitions both present",
+  );
+});
+
+test("APPEND states sanitization as a rule, not as internal mechanism", () => {
+  assertTrue(/sanitized of operator-machine and project specifics/.test(APPEND), "rule form present");
+  assertTrue(!APPEND.includes("issue-sanitizer subagent"), "internal component name not leaked");
+});
+
+test("APPEND names no internal env vars in operator-facing prose", () => {
+  assertTrue(!APPEND.includes("HERMIT_GH_REPO"), "env var replaced by 'the configured target repo'");
+});
+
 console.log("");
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

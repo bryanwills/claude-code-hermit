@@ -10,56 +10,31 @@ These rules apply to every agent doing dev work in this project — the native `
 - **Never use `--no-verify`** on any git command (commit, push, merge, rebase). Pre-commit hooks exist for a reason.
 - **Never commit to a branch in `claude-code-dev-hermit.protected_branches`** (defaults to `main`/`master` if unset). Always work on a feature branch.
 - **Never force-push from agent context.** No bare `--force` or `-f`. `--force-with-lease` is allowed only to a non-protected branch with an explicit refspec (the safe rebase-recovery case); ambiguous-target leases and leases to protected branches are blocked. When in doubt, surface the divergence and let the operator resolve.
-- **Stay in your worktree.** When the session runs in a git worktree, never edit files in the original checkout or a sibling worktree — that's another session's territory. The `worktree-boundary-guard` hook hard-blocks edits that escape the worktree. In a **background** session the harness moves you into a worktree automatically on your first edit, so don't proactively call `EnterWorktree`, and don't treat an "isolate first" message as a rule violation or a reason to stop and ask: just re-attempt the edit.
+- **Stay in your worktree.** When the session runs in a git worktree, never edit files in the original checkout or a sibling worktree — that's another session's territory. The `worktree-boundary-guard` hook hard-blocks edits that escape the worktree.
 
 If a task would require violating these rules, stop and ask the operator. Do not attempt workarounds (alternate commands, env vars, manual git plumbing).
 
 ## Branch Discipline
 
-If the project's own CLAUDE.md or skills define a branch-naming convention (e.g. `<short-slug>/vX.Y.Z` for plugin releases, ticket-prefixed branches, or anything else), follow that. The naming rules below are the fallback for projects without one.
+If the project's own CLAUDE.md or skills define a branch-naming convention (e.g. `<short-slug>/vX.Y.Z` for plugin releases, ticket-prefixed branches, or anything else), follow that. The rules below are the fallback for projects without one.
 
 Before starting code changes:
 
 1. Verify clean working tree (`git status --porcelain` returns empty). If dirty, stop and surface the diff — let the operator commit or stash before proceeding.
 2. Branch from the first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`). Use `git checkout -b <prefix>/<slug> origin/<base>` so the new branch tracks the latest remote.
-3. Name the branch `<prefix>/<slug>` where `prefix ∈ {feature, fix, chore, hotfix}`. Detect the prefix as the longest match of `hotfix|feature|fix|chore` at the start of the input (case-insensitive, treated as a word). Otherwise default to `feature`.
+3. Name it `<prefix>/<kebab-slug>`, prefix from {feature, fix, chore, hotfix} matched at the start of the input, default `feature`.
 4. Append a one-line entry to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
-
-### Slug rules (apply to the description portion only, never the prefix)
-
-1. Lowercase the input.
-2. Replace whitespace runs with a single `-`.
-3. Drop any character not in `[a-z0-9-]`.
-4. Collapse consecutive `-` into one.
-5. Strip leading and trailing `-`.
-
-`/` is preserved only as the prefix separator. Mid-description `/` becomes `-`.
-
-Examples: `PROJ-123 add auth flow` → `feature/proj-123-add-auth-flow`. `Fix login redirect (urgent!)` → `fix/login-redirect-urgent`. `feature/foo/bar` → `feature/foo-bar`.
 
 ## Implementation Flow
 
-If the project's own CLAUDE.md or skills define an implementation flow (e.g. its own commit/test/PR sequence), follow that. The steps below are the fallback for projects without one.
+If the project's own CLAUDE.md or skills define a commit/test/PR sequence, follow that. The fallback: run `commands.test` (`claude-code-dev-hermit.commands.test`, set via `/claude-code-dev-hermit:hatch`) → `/claude-code-dev-hermit:dev-quality` → commit → `/claude-code-dev-hermit:dev-pr`.
 
-After making code changes:
-
-1. Run the configured test command (`claude-code-dev-hermit.commands.test`, set via `/claude-code-dev-hermit:hatch`). If unset, ask the operator for the command and offer to save it via `hatch`.
-2. If tests fail, fix the failures or surface them in the response — **do not declare the task done with broken tests**.
-3. If the task is non-trivial and `/feature-dev:feature-dev` is installed, run it first when the code path is unfamiliar (framework lifecycle hooks, ORM internals, build-tool plugins, auth middleware). The trigger is **unfamiliarity, not urgency**. Skip for: doc/prompt/config edits, single-line fixes, code paths you've already read end-to-end.
-4. Before declaring the task done: run `/claude-code-dev-hermit:dev-quality`. It runs `/claude-code-hermit:simplify` on the working tree (cleanup pass) and re-runs `commands.test` if configured. If tests regress, investigate before committing. The skill will suggest the native `/code-review` to the operator for deeper correctness review — do not invoke it autonomously. **Nested git repo?** If your work is happening inside a nested git repo (true submodule, Composer path package, npm/pnpm path workspace, vendored dep edited in place), pass `--cwd <relative/path>` so `/claude-code-dev-hermit:dev-quality` scopes git ops, `/claude-code-hermit:simplify`, and the test re-run to that repo. State still lives under the parent's `.claude-code-hermit/`, but the captured SHA is the child's HEAD.
-
-## Tests Before PR
-
-If the project defines its own pre-PR validation (e.g. a custom test runner, CI gate, or PR-creation skill that handles testing internally), follow that. The steps below are the fallback.
-
-1. Run `/claude-code-dev-hermit:dev-quality` — handles `/claude-code-hermit:simplify` + test re-run (see §Implementation Flow step 4). For nested-repo workflows, pass `--cwd <path>`.
-2. Commit.
-3. If you committed after `/claude-code-dev-hermit:dev-quality` ran and `commands.test` is configured, re-run it once — `/claude-code-dev-hermit:dev-pr` Gate 0 checks `last-test.json` against the current HEAD sha.
-4. Run `/claude-code-dev-hermit:dev-pr`. Gate 0 reads `last-test.json` and refuses if missing, on a stale sha, or with a non-pass status. Pass `--cwd <path>` if you used it for `/claude-code-dev-hermit:dev-quality` — the PR opens against the child repo's remote.
+- Cleanup edits from `/claude-code-dev-hermit:dev-quality` must land **before** the commit — that ordering is why the quality gate runs first. `/claude-code-dev-hermit:dev-pr` Gate 0 then enforces a fresh passing test at the current HEAD sha mechanically; don't restate its checks, just run it.
+- Never declare the task done with broken tests.
+- Working inside a nested git repo (submodule, Composer path package, npm/pnpm path workspace, vendored dep)? Pass the same `--cwd <relative/path>` to `/claude-code-dev-hermit:dev-quality` and `/claude-code-dev-hermit:dev-pr`. State stays under the parent's `.claude-code-hermit/`.
+- If `/feature-dev:feature-dev` is installed, run it first when the code path is genuinely unfamiliar (framework lifecycle hooks, ORM internals, build-tool plugins, auth middleware). The trigger is unfamiliarity, not urgency.
 
 ## Technical Constraints
-
-Subagents can invoke skills and spawn nested subagents. For delegated sub-steps the contract is: the subagent returns a verdict (plus an optional `operator_message`), and the **main session owns `AskUserQuestion` and operator notification**.
 
 Session state (`in_progress`/`waiting`/`idle`/`dead_process`) lives in `.claude-code-hermit/state/runtime.json` (`.session_state`). SHELL.md `Status:` is cosmetic — never parse it for programmatic checks.
 
@@ -73,12 +48,11 @@ Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev wo
 
 ## Dev Session Hygiene
 
-- **Tasks**: skip TaskCreate for trivial single-step tasks; serialize and delete all Tasks at task boundaries.
-- **Progress Log**: if entries exceed 50, summarize older entries into a compact block; keep last 10 in detail.
+Serialize and delete all Tasks at task boundaries; skip `TaskCreate` for trivial single-step work. Keep the Progress Log compact — summarize older entries once it grows long.
 
 ## Dev Knowledge
 
-Dev artifacts that persist across sessions go to `compiled/` with frontmatter (`title`, `created`, `type`, `tags`). Examples: architecture decisions, codebase health assessments, review pattern summaries, dependency audit snapshots. Ephemeral inputs (CI logs, code snapshots under analysis) go to `raw/`. Lessons and patterns go to auto-memory — don't duplicate into `compiled/`. If the project has a `knowledge-schema.md`, consult it before writing any `compiled/` artifact — it defines what the hermit produces and when.
+Durable dev artifacts (architecture decisions, health assessments, review-pattern summaries, dependency audits) go to `compiled/`; ephemeral inputs (CI logs, snapshots under analysis) go to `raw/`. Lessons and patterns go to auto-memory — don't duplicate them into `compiled/`. Consult the project's `knowledge-schema.md` before writing any `compiled/` artifact.
 
 ## Dev Proposal Categories
 
@@ -89,7 +63,7 @@ Use these prefixes in proposal titles for consistent sorting:
 - **[tooling]** — Missing linter rules, CI checks, dev scripts
 - **[architecture]** — Structural improvements
 
-All dev proposals must pass the three-condition gate: (1) repeated pattern across sessions, (2) meaningful consequence if unaddressed, (3) operator-actionable change. Exception: ideas surfaced by `/claude-code-dev-hermit:domain-brainstorm` are single-pass — the brainstorm establishes the candidate, so condition (1) is waived (conditions 2 and 3 still apply).
+All dev proposals must pass the core three-condition gate (repeated pattern, meaningful consequence, operator-actionable); `/claude-code-dev-hermit:domain-brainstorm` ideas are single-pass, so the recurrence condition is waived.
 
 Tier mapping:
 - **Tier 2** (micro-approval): `[tech-debt]`, `[tooling]`, `[dependency]` updates
@@ -98,11 +72,8 @@ Tier mapping:
 ## Dev Quick Reference
 
 - One-time setup / re-config: `/claude-code-dev-hermit:hatch`
-- Mid-task test run + cache warm: `/claude-code-dev-hermit:dev-test` (supports `--cwd <path>`)
-- Pre-wrap quality gate: `/claude-code-dev-hermit:dev-quality` (supports `--cwd <path>`)
-- Open the PR: `/claude-code-dev-hermit:dev-pr` (supports `--cwd <path>`)
-- Cleanup pass: `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits; `/claude-code-dev-hermit:dev-quality` wraps it)
-- Parallel changes across many files: `/batch` (built-in)
-- Diagnostics: `/debug` (built-in)
-- High-stakes review: `/code-review` (built-in)
+- Mid-task test run + cache warm: `/claude-code-dev-hermit:dev-test`
+- Pre-wrap quality gate: `/claude-code-dev-hermit:dev-quality`
+- Open the PR: `/claude-code-dev-hermit:dev-pr`
+- Cleanup pass: `/claude-code-hermit:simplify` (parallel reviewers, applies its own edits)
 <!-- /claude-code-dev-hermit: Development Workflow -->

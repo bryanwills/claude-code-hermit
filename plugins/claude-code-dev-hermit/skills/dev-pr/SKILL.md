@@ -5,7 +5,7 @@ description: "Operator-sanctioned alternative to bare `git push` from agent cont
 
 # /dev-pr
 
-Push the current branch and open a PR with a structured body. Reads commit history, the test results you just ran (per `state-templates/CLAUDE-APPEND.md` §Tests Before PR), any screenshots in `raw/screenshots/`, and an optional project PR template — assembles them into title + body — then calls the forge-appropriate CLI.
+Push the current branch and open a PR with a structured body. Reads commit history, the test results you just ran (per `state-templates/CLAUDE-APPEND.md` §Implementation Flow), any screenshots in `raw/screenshots/`, and an optional project PR template — assembles them into title + body — then calls the forge-appropriate CLI.
 
 ## Configuration
 
@@ -84,7 +84,7 @@ Otherwise, read `.claude-code-hermit/state/last-test.json`:
 
   For suites longer than 10 min: run tests in a terminal, record with `bun <PLUGIN_ROOT>/scripts/record-test-result.ts write <exit_code> <duration_ms>` (append `--cwd "<path>"` when relevant), then re-run `/dev-pr`.
 
-This is the gate that enforces CLAUDE-APPEND §Tests Before PR mechanically rather than relying on the agent's self-report.
+This is the gate that enforces CLAUDE-APPEND §Implementation Flow mechanically rather than relying on the agent's self-report.
 
 **4. Commits-ahead check.** Resolve base branch — assign to `BASE` in this priority order:
 1. `pr_base_branch` from config if set.

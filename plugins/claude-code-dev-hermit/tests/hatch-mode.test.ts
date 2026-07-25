@@ -76,13 +76,24 @@ if (fs.existsSync(STANDARD)) {
   ok('§Branch Discipline has precedence preamble',
     branchSection !== null && branchSection[0].includes('fallback for projects without one'));
 
-  const implSection = text.match(/## Implementation Flow[\s\S]*?## Tests Before PR/);
+  // §Tests Before PR was folded into §Implementation Flow (the two restated one
+  // ordering); the merged section keeps the precedence preamble and the ordering.
+  const implSection = text.match(/## Implementation Flow[\s\S]*?## Technical Constraints/);
   ok('§Implementation Flow has precedence preamble',
-    implSection !== null && implSection[0].includes('fallback for projects without one'));
+    implSection !== null && implSection[0].includes('follow that') && implSection[0].includes('fallback'));
+  ok('§Implementation Flow keeps the quality-gate-before-commit ordering',
+    implSection !== null && /dev-quality[\s\S]{0,120}commit[\s\S]{0,120}dev-pr/.test(implSection[0]));
+  ok('§Implementation Flow defers test freshness to dev-pr Gate 0',
+    implSection !== null && implSection[0].includes('Gate 0'));
+  ok('no standalone §Tests Before PR section', !text.includes('## Tests Before PR'));
 
-  const prSection = text.match(/## Tests Before PR[\s\S]*?## Technical Constraints/);
-  ok('§Tests Before PR has precedence preamble',
-    prSection !== null && prSection[0].includes('fallback'));
+  // Budgets are measured on the rendered outputs, not the marker-annotated source:
+  // the source carries mode markers an operator never sees.
+  const stdBytes = Buffer.byteLength(render('standard', text), 'utf-8');
+  const safeBytes = Buffer.byteLength(render('safety', text), 'utf-8');
+  // Pre-trim: standard 9,330 B / safety 6,338 B. Post-trim ~6,158 / ~4,703.
+  ok('rendered standard block under ceiling', stdBytes <= 6600, `${stdBytes} B`);
+  ok('rendered safety block under ceiling', safeBytes <= 5100, `${safeBytes} B`);
 }
 
 // ── Hatch SKILL.md references ────────────────────────────────────────────────

@@ -10,6 +10,10 @@
 - `ha-boot` and `SAFETY.md` no longer point the operator at a `.env.example` that does not ship; replaced with a direct "create `.env`" instruction.
 - `ha-morning-brief`'s micro-proposal lifecycle now mutates `state/micro-proposals.json` through a `JSON.parse`/`JSON.stringify` round-trip and an atomic temp-file rename instead of editing it by hand, so neither a nudge, an expiry, nor a crash mid-write can corrupt the queue. A non-matching id exits non-zero instead of silently doing nothing.
 
+### Changed
+- The CLAUDE-APPEND block dropped §Environment (hatch owns `.env` setup and validates it via `boot status`), §Entry Flow, the channel-routing utterance examples, and the unified-vs-legacy routine narrative — per-install config state that drifts the moment an operator edits `config.json`. 9,565 B originally, 5,076 B after the first trim, now ~2,814 B.
+- The actuation, structural-write, and safety-mode statements merged into one rule that states the real boundary: unresolvable or malformed targets hard-block in **both** modes, and `ask` prompts only for a concrete sensitive target. Uncertain-entities-default-sensitive and explicit approval before applying automations or changing safety policy are unchanged.
+
 ## [0.4.6] - 2026-07-21
 
 ### Fixed
