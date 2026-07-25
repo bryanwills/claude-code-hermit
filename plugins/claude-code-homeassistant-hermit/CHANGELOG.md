@@ -14,6 +14,8 @@
 - The CLAUDE-APPEND block dropped §Environment (hatch owns `.env` setup and validates it via `boot status`), §Entry Flow, the channel-routing utterance examples, and the unified-vs-legacy routine narrative — per-install config state that drifts the moment an operator edits `config.json`. 9,565 B originally, 5,076 B after the first trim, now ~2,814 B.
 - The actuation, structural-write, and safety-mode statements merged into one rule that states the real boundary: unresolvable or malformed targets hard-block in **both** modes, and `ask` prompts only for a concrete sensitive target. Uncertain-entities-default-sensitive and explicit approval before applying automations or changing safety policy are unchanged.
 
+## [0.4.6] - 2026-07-21
+
 ### Fixed
 - Dropped no-op `Write(<path>)` allow rules — Claude Code only matches file-permission checks against `Edit(path)` rules (Edit covers all file-editing tools, including Write), so the `Write(.claude-code-hermit/**)`, `Write(**/.claude-code-hermit/OPERATOR.md)`, and `Write(.env)` entries were dead and triggered a boot warning. Their `Edit(...)` twins still grant the same access.
 

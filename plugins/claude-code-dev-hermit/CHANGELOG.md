@@ -9,7 +9,7 @@
 
 ### Changed
 - The CLAUDE-APPEND template gained a closing marker (`<!-- /claude-code-dev-hermit: Development Workflow -->`), placed outside both mode regions so it survives both renderings. Lets core's `hermit-evolve` bound the block exactly instead of a heuristic that used to mistake the template's own `<!-- mode:standard-only -->` annotation for the block marker.
-- §Tests Before PR folded into §Implementation Flow (both stated one ordering, and `dev-pr` Gate 0 enforces the test-freshness half mechanically), the slug algorithm and its worked examples became one naming line, and the harness built-ins left §Dev Quick Reference. Rendered standard block 9,330 B → ~6,158 B, safety 6,338 B → ~4,703 B. §Git Safety is unchanged.
+- §Tests Before PR folded into §Implementation Flow (both stated one ordering, and `dev-pr` Gate 0 enforces the test-freshness half mechanically), the slug algorithm and its worked examples became one naming line, and the harness built-ins left §Dev Quick Reference. Rendered standard block 9,330 B → ~6,158 B, safety 6,338 B → ~4,703 B. No git-safety rule was removed.
 - The background-session recovery advice ("re-attempt the edit") moved out of §Git Safety into `worktree-boundary-guard`'s block message, where it appears at the moment it is actionable instead of in every session's context.
 
 ### Upgrade Instructions

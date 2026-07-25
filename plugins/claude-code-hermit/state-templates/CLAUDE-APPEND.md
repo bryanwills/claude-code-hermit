@@ -34,7 +34,7 @@ Dashboard/proposals/weekly-review, gated by `config.artifacts.*` (default on). O
 
 ## Knowledge Discipline
 
-Auto-memory handles all learning; `compiled/` is for durable domain outputs, not lessons. **Memory-first:** before any suggestion-generating path declares a finding novel, consult auto-memory and suppress as `covered-by-memory` when memory already covers the decision, preference, or pattern — the `claude-code-hermit:proposal-triage` / `claude-code-hermit:reflection-judge` gates own and enforce the full protocol.
+Auto-memory handles all learning; `compiled/` is for durable domain outputs, not lessons. **Memory-first:** before any suggestion-generating path declares a finding novel, consult auto-memory and suppress as `covered-by-memory` when memory already covers the decision, preference, or pattern. On the proposal paths the `claude-code-hermit:proposal-triage` / `claude-code-hermit:reflection-judge` gates enforce this mechanically; elsewhere it is on you. Skills acting on an already-decided intent are exempt.
 
 - **`type` in frontmatter is the discriminator — never a folder.** No subdirectories inside `raw/`/`compiled/`, no new top-level dirs inside `.claude-code-hermit/`. Artifacts outside `raw/`/`compiled/` are invisible to injection and retention.
 - Domain inputs → `raw/<type>-<slug>-<date>.md`; one-off outputs → `compiled/<type>-<slug>-<date>.md`; evolving subjects → `compiled/topic-<slug>.md` updated in place. All require frontmatter (`title`, `type`, `created`, `tags`).
