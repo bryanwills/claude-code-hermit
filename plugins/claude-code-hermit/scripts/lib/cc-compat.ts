@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 type Json = any;
 type TriState = { state: string; count: number; entries: Json[] };
@@ -54,6 +55,51 @@ function hermitDir(): string {
     dir = parent;
   }
   return path.resolve('.claude-code-hermit'); // fail-open: preserves today's behavior
+}
+
+// The main checkout's state dir, or null when git can't answer. In a worktree
+// `--git-common-dir` still points at the main `.git`, so this identifies the
+// one shared, intentionally main-rooted `.claude-code-hermit/`. It cannot name
+// a foreign project: git resolves it from our own cwd, never from argv.
+function mainCheckoutStateDir(): string | null {
+  try {
+    const r = spawnSync('git', ['rev-parse', '--git-common-dir'], { timeout: 5000, encoding: 'utf8' });
+    const common = (r.stdout ?? '').trim();
+    if (!common) return null;
+    const abs = path.resolve(common);
+    if (path.basename(abs) !== '.git') return null;
+    return path.join(path.dirname(abs), '.claude-code-hermit');
+  } catch {
+    return null;
+  }
+}
+
+// The state dir is not caller-chosen. Scripts reached through a wildcarded
+// `Bash(bun */scripts/*.ts*)` grant have every argument pre-approved, so an
+// argv-supplied root let one pre-approved call mutate another project's hermit
+// state. Callers pass their argv value here and refuse on null.
+//
+// Returns the pinned dir when argv agrees with hermitDir(), else null. Because
+// hermitDir() resolves an absolute AGENT_DIR first, that env var stays the one
+// redirect a caller can use — and it has to be written as an env prefix, which
+// is what makes it a boundary rather than a bypass. Probed live on CC 2.1.220:
+// with `Bash(bun */scripts/wildcard.ts*)` allowed, `bun <dir>/scripts/
+// wildcard.ts go` runs unprompted (mid-string wildcards do match), but
+// `AGENT_DIR=/tmp/x bun <dir>/scripts/literal.ts go` prompts for approval even
+// though the same command without the prefix is covered by a literal rule.
+//
+// Line comments, not a block comment: the grant strings above contain `*` and
+// `/` sequences that would close a block comment early.
+function assertStateDir(argvValue: string): string | null {
+  const resolved = path.resolve(argvValue);
+  if (resolved === hermitDir()) return resolved;
+  // Worktree case. Hermit state is deliberately main-rooted and shared across
+  // worktrees, so a worktree session legitimately passes the main checkout's
+  // absolute path — but hermitDir()'s walk-up stops at the partial decoy state
+  // dir a worktree carries, so the two disagree. Consulted only after a
+  // mismatch, so the common path never spawns git.
+  const main = mainCheckoutStateDir();
+  return main !== null && resolved === main ? resolved : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +454,7 @@ function ccVersion(payload?: Json): string | null {
 export {
   // Project-root resolution
   hermitDir,
+  assertStateDir,
   // Hook-payload accessors
   sessionId,
   transcriptPath,

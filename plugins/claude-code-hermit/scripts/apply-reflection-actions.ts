@@ -4,6 +4,9 @@
 // write, so malformed model output can never leave a proposal half-patched.
 //
 // Usage: bun apply-reflection-actions.ts <hermit-state-dir>   (stdin: JSON)
+// <hermit-state-dir> is validated, not trusted: it must resolve to this
+// project's own state dir (or, from a worktree, the main checkout's) via
+// cc-compat's assertStateDir. A foreign root exits 1 without writing.
 // Stdin: {"resolution_actions":[{proposal_id, action, frontmatter_patch,
 //         shell_findings_line}, ...]}   — a non-null `metrics_event` is rejected;
 //         the `resolved` row is derived here from proposal_id.
@@ -17,6 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { assertStateDir, hermitDir } from './lib/cc-compat';
 import { listProposalFiles, readFileWithFrontmatter } from './lib/frontmatter';
 import { appendEvent, resolvedEvent } from './lib/proposals/event';
 import { writeFileAtomic, patchFrontmatter, appendShellLine, PATCH_KEY_RE } from './lib/md-write';
@@ -120,10 +124,21 @@ if (import.meta.main) {
     console.error('Usage: bun apply-reflection-actions.ts <hermit-state-dir>   (stdin: {"resolution_actions":[...]})');
     process.exit(1);
   }
+  // The state dir is not caller-chosen. This script patches proposal
+  // frontmatter and appends to the metrics ledger, and it is reachable through
+  // a pre-approved `Bash(bun */scripts/apply-reflection-actions.ts*)` grant
+  // that covers every argument — so an unvalidated root let one such call
+  // resolve another project's proposals. Joins the missing-argv exit-1 case
+  // above rather than returning a verdict line, for the same reason.
+  const pinned = assertStateDir(stateDir);
+  if (!pinned) {
+    console.error(`apply-reflection-actions.ts: state dir must be this project's (${hermitDir()}); got ${stateDir}`);
+    process.exit(1);
+  }
   let stdin = '';
   try { stdin = fs.readFileSync(0, 'utf-8'); } catch { /* treated as unparseable below */ }
   let result: Json;
-  try { result = apply(path.resolve(stateDir), stdin); }
+  try { result = apply(pinned, stdin); }
   catch (e: any) { result = { ok: false, reason: 'error: ' + e.message }; }
   process.stdout.write(JSON.stringify(result) + '\n');
   process.exit(0);

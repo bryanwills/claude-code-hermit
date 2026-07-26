@@ -134,6 +134,19 @@ Claude Code's `--permission-mode auto` (the hermit's default) routes tool calls 
 
 ---
 
+## Script Argument Trust
+
+The sealed allow-list grants whole scripts, not individual invocations: `Bash(bun */scripts/proposal.ts*)` pre-approves **every argument** that call can carry. Outside auto mode those wildcards resolve normally — probed live on CC 2.1.220, a command matching a mid-string `*` rule runs with no prompt — so a script reached this way must treat its own argv as untrusted input. Two argument classes were reachable before this was enforced:
+
+- **The state dir.** Every production call passes the literal `.claude-code-hermit` from the project root, but the argument was taken as given, so a single pre-approved call could resolve, dismiss, or patch *another project's* proposals. `proposal.ts` now pins it: the argument must resolve to `hermitDir()` for the current project, and a mismatch is a usage error (stderr, exit 1) rather than a stdout verdict, because several verbs own distinct stdout grammars their callers branch on. The shared check is `assertStateDir()` in `scripts/lib/cc-compat.ts`. It accepts two roots, not one: `hermitDir()`, and the main checkout's state dir resolved via `git rev-parse --git-common-dir`. The second is required because hermit state is deliberately main-rooted and shared across worktrees, so a worktree session legitimately passes main's absolute path while `hermitDir()`'s walk-up stops at the partial decoy state dir a worktree carries. Pinning to `hermitDir()` alone breaks every proposal write from a worktree — the exact case `proposal.ts` exists to serve, since Write/Edit are blocked there. The git lookup runs only after a mismatch (so the common path spawns nothing) and resolves from our own cwd, so it can never name a foreign project.
+- **Path fragments joined onto a state-dir subpath.** `proposal.ts patch` joined its filename onto the proposals dir unvalidated, so a `../` prefix reached any frontmatter-bearing `.md` on disk at arbitrary depth. It now requires a direct-child basename. Absolute paths were never an escape here — `path.join` re-roots them — and a regression test pins that.
+
+**The sanctioned override is an env prefix, and that is what makes it a boundary.** `hermitDir()` honors an absolute `AGENT_DIR` ahead of the cwd walk-up, which is how tests target a scratch state dir. Probed on CC 2.1.220: `AGENT_DIR=/tmp/x bun <dir>/scripts/literal.ts go` requires approval even though the identical command without the prefix is covered by an allow rule — an env assignment moves the command outside the rule's prefix match. So redirecting a hermit script at a foreign root cannot be done silently under the sealed grant.
+
+Applies to any script reached through a wildcarded interpreter grant, not just `proposal.ts`. When adding one, assume its arguments are attacker-chosen and validate the state dir and any joined path fragment.
+
+---
+
 ## Bash Sandbox
 
 Hermit does not probe for or configure Claude Code's native bash sandbox (`sandbox.*` settings, `bwrap`/`sandbox-exec`). Predicting whether CC's own sandbox spawn would succeed from outside CC proved unreliable — a false-positive probe could enable a sandbox profile that then broke every subsequent Bash call, with no in-session recovery. `/hatch` instead prints a one-time pointer to CC's own setup: run `/sandbox` (its Dependencies tab checks `bwrap`/`socat` for you) or see the [sandbox docs](https://code.claude.com/docs/en/sandboxing).

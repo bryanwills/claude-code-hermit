@@ -66,9 +66,13 @@ function withTmp(fn: (dir: string) => Promise<void> | void) {
   };
 }
 
+// The script pins its state dir to hermitDir(), which in a test would resolve
+// to this repo's own `.claude-code-hermit` rather than the scratch fixture.
+// An absolute AGENT_DIR is the sanctioned override (see tests/helpers/run.ts).
 async function apply(dir: string, input: unknown) {
   const r = await runScript('apply-reflection-actions.ts', {
     args: [hermit(dir)],
+    env: { AGENT_DIR: hermit(dir) },
     stdin: typeof input === 'string' ? input : JSON.stringify(input),
   });
   expect(r.exitCode).toBe(0);
@@ -303,5 +307,26 @@ describe('apply-reflection-actions: edges', () => {
     const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
     expect(result.ok).toBe(false);
     expect(fs.readFileSync(proposalPath(dir), 'utf-8')).toBe(truncated);
+  }));
+
+  // Same exposure proposal.ts had: the sealed grant covers every argument, so
+  // an unvalidated root let one pre-approved call resolve another project's
+  // proposals. Verified reachable before the guard landed.
+  test('refuses a state dir belonging to another project, writing nothing', withTmp(async (mine) => {
+    const t = makeDir();
+    try {
+      const victim = t.dir;
+      const before = fs.readFileSync(proposalPath(victim), 'utf-8');
+      const r = await runScript('apply-reflection-actions.ts', {
+        args: [hermit(victim)],
+        env: { AGENT_DIR: hermit(mine) },
+        stdin: JSON.stringify({ resolution_actions: [AUTO_RESOLVE] }),
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('state dir must be');
+      expect(fs.readFileSync(proposalPath(victim), 'utf-8')).toBe(before);
+    } finally {
+      t.cleanup();
+    }
   }));
 });

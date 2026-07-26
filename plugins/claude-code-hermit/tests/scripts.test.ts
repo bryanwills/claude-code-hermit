@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
+import { runScript, runProposal, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, fixturesDir, withDir, type Workdir } from './helpers/workdir';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
 
@@ -1271,7 +1271,7 @@ describe('proposal resolve-id', () => {
     write(hermit(dir, 'proposals', filename), `---\ntitle: ${title}\n---\nbody\n`);
   }
   async function resolveProp(dir: string, input: string) {
-    const r = await runScript('proposal.ts', { args: ['resolve-id', hermit(dir), input] });
+    const r = await runProposal(hermit(dir), ['resolve-id', input]);
     expect(r.exitCode).toBe(0);
     return r.stdout.trimEnd();
   }
@@ -1332,10 +1332,10 @@ describe('proposal resolve-id', () => {
 
 describe('proposal gate', () => {
   async function gate(dir: string, opts: { gate: 'triage' | 'judge'; caller?: string; evidenceSource?: string; tags?: string[] }, title: string, verdict: string) {
-    const args = ['gate', hermit(dir), '--gate', opts.gate, '--caller', opts.caller ?? 'reflect'];
+    const args = ['gate', '--gate', opts.gate, '--caller', opts.caller ?? 'reflect'];
     if (opts.evidenceSource) args.push('--evidence-source', opts.evidenceSource);
     if (opts.tags) args.push('--tags', JSON.stringify(opts.tags));
-    const r = await runScript('proposal.ts', { args, stdin: `Title: ${title}\nVerdict: ${verdict}\n` });
+    const r = await runProposal(hermit(dir), args, { stdin: `Title: ${title}\nVerdict: ${verdict}\n` });
     expect(r.exitCode).toBe(0);
     return r.stdout.trim();
   }
@@ -1413,10 +1413,7 @@ describe('proposal gate', () => {
     // exist yet, which would violate this script's own "Exit 0 always" contract.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'record-gate-nodir-'));
     try {
-      const r = await runScript('proposal.ts', {
-        args: ['gate', dir, '--gate', 'triage', '--caller', 'test'],
-        stdin: 'Title: Foo\nVerdict: CREATE: Foo\n',
-      });
+      const r = await runProposal(dir, ['gate', '--gate', 'triage', '--caller', 'test'], { stdin: 'Title: Foo\nVerdict: CREATE: Foo\n' });
       expect(r.exitCode).toBe(0);
       expect(r.stdout.trim()).toBe('PROCEED|CREATE');
       const line = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'proposal-metrics.jsonl'), 'utf-8').trim());
@@ -1437,7 +1434,7 @@ describe('proposal queue-micro', () => {
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
   }
   async function queue(dir: string, payload: any) {
-    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify(payload) });
+    const r = await runProposal(hermit(dir), ['queue-micro'], { stdin: JSON.stringify(payload) });
     expect(r.exitCode).toBe(0);
     return r.stdout.trim();
   }
@@ -1494,13 +1491,13 @@ describe('proposal queue-micro', () => {
 
   test('queue-micro (missing question -> exit 1, no write)', withDir(async (dir) => {
     seed(dir);
-    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify({ tier: 1 }) });
+    const r = await runProposal(hermit(dir), ['queue-micro'], { stdin: JSON.stringify({ tier: 1 }) });
     expect(r.exitCode).toBe(1);
   }));
 
   test('queue-micro (invalid JSON -> exit 1, no write)', withDir(async (dir) => {
     seed(dir);
-    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: 'not-json' });
+    const r = await runProposal(hermit(dir), ['queue-micro'], { stdin: 'not-json' });
     expect(r.exitCode).toBe(1);
   }));
 
@@ -1508,7 +1505,7 @@ describe('proposal queue-micro', () => {
     write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
+    const r = await runProposal(hermit(dir), ['queue-micro'], { stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1516,7 +1513,7 @@ describe('proposal queue-micro', () => {
   test('queue-micro (parseable file with no `pending` key -> heals, other keys preserved)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"active":null}');
-    const r = await runScript('proposal.ts', { args: ['queue-micro', hermit(dir)], stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
+    const r = await runProposal(hermit(dir), ['queue-micro'], { stdin: JSON.stringify({ tier: 1, question: 'New question' }) });
     expect(r.exitCode).toBe(0);
     const micro = readJson(hermit(dir, 'state', 'micro-proposals.json'));
     expect(micro.pending).toHaveLength(1);
@@ -1543,7 +1540,7 @@ describe('proposal micro', () => {
 
   test('resolve (issue 649 regression: file stays parseable and holds the surviving entry after removal)', withDir(async (dir) => {
     seed(dir, [entryA, entryB]);
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id, '--action', 'approved'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', entryA.id, '--action', 'approved']);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe(`RESOLVED|${entryA.id}|approved`);
     const raw = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
@@ -1555,7 +1552,7 @@ describe('proposal micro', () => {
 
   test('nudge (increments follow_up_count, leaves other fields intact)', withDir(async (dir) => {
     seed(dir, [entryA]);
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'nudge', entryA.id] });
+    const r = await runProposal(hermit(dir), ['micro', 'nudge', entryA.id]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe(`NUDGED|${entryA.id}|1`);
     const entry = microFile(dir).pending[0];
@@ -1566,7 +1563,7 @@ describe('proposal micro', () => {
   test('resolve on a corrupt file -> exit 1, file byte-unchanged', withDir(async (dir) => {
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', 'MP-1', '--action', 'approved'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', 'MP-1', '--action', 'approved']);
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1574,7 +1571,7 @@ describe('proposal micro', () => {
   test('resolve unknown id -> NONE|no-match, exit 0, no write', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', 'MP-does-not-exist', '--action', 'approved'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', 'MP-does-not-exist', '--action', 'approved']);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('NONE|no-match');
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
@@ -1582,14 +1579,14 @@ describe('proposal micro', () => {
 
   test('resolve --action answered --answer emits the ledger event shape', withDir(async (dir) => {
     seed(dir, [entryA]);
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id, '--action', 'answered', '--answer', 'session task'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', entryA.id, '--action', 'answered', '--answer', 'session task']);
     expect(r.exitCode).toBe(0);
     const events = ledger(dir);
     expect(events[0]).toMatchObject({ type: 'micro-resolved', micro_id: entryA.id, action: 'answered', answer: 'session task', question: entryA.question });
   }));
 
   test('resolve on absent file -> NONE|no-match, exit 0', withDir(async (dir) => {
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', 'MP-anything', '--action', 'approved'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', 'MP-anything', '--action', 'approved']);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('NONE|no-match');
   }));
@@ -1597,7 +1594,7 @@ describe('proposal micro', () => {
   test('resolve with missing --action -> exit 1, file unchanged', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', entryA.id]);
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1605,14 +1602,14 @@ describe('proposal micro', () => {
   test('resolve with the <MP-id> omitted -> exit 1, never a silent NONE|no-match', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', '--action', 'approved'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', '--action', 'approved']);
     expect(r.exitCode).toBe(1);
     expect(r.stdout).not.toContain('NONE|no-match');
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
 
   test('unknown verb -> exit 1 even when the file is absent', withDir(async (dir) => {
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'expire', 'MP-20260101-0'] });
+    const r = await runProposal(hermit(dir), ['micro', 'expire', 'MP-20260101-0']);
     expect(r.exitCode).toBe(1);
     expect(r.stdout).not.toContain('NONE|no-match');
   }));
@@ -1620,7 +1617,7 @@ describe('proposal micro', () => {
   test('resolve with invalid --action -> exit 1, file unchanged', withDir(async (dir) => {
     seed(dir, [entryA]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'resolve', entryA.id, '--action', 'bogus'] });
+    const r = await runProposal(hermit(dir), ['micro', 'resolve', entryA.id, '--action', 'bogus']);
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -1630,7 +1627,7 @@ describe('proposal micro', () => {
     const c1 = { id: 'MP-c1', tier: 1, status: 'pending', follow_up_count: 1, question: 'q1' };
     const c2 = { id: 'MP-c2', tier: 1, status: 'pending', follow_up_count: 2, question: 'q2' };
     seed(dir, [c0, c1, c2]);
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
     expect(r.exitCode).toBe(0);
     const verdict = JSON.parse(r.stdout.trim());
     // `tier` is carried through — the brief renders "(tier N)" from the verdict alone.
@@ -1650,7 +1647,7 @@ describe('proposal micro', () => {
   test('brief-cycle on an all-count-0 queue is a pure read (no write, no ledger)', withDir(async (dir) => {
     seed(dir, [entryA, entryB]);
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
     expect(r.exitCode).toBe(0);
     const verdict = JSON.parse(r.stdout.trim());
     expect(verdict.new).toHaveLength(2);
@@ -1661,7 +1658,7 @@ describe('proposal micro', () => {
   }));
 
   test('brief-cycle on an absent file -> empty verdict, exit 0, no write', withDir(async (dir) => {
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
     expect(r.exitCode).toBe(0);
     expect(JSON.parse(r.stdout.trim())).toEqual({ new: [], renudged: [], expired: [] });
     expect(fs.existsSync(hermit(dir, 'state', 'micro-proposals.json'))).toBe(false);
@@ -1670,7 +1667,7 @@ describe('proposal micro', () => {
   test('brief-cycle on a corrupt file -> exit 1, file byte-unchanged', withDir(async (dir) => {
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[{"id":"MP-1"},]}');
     const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
-    const r = await runScript('proposal.ts', { args: ['micro', hermit(dir), 'brief-cycle'] });
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
     expect(r.exitCode).toBe(1);
     expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
   }));
@@ -3938,7 +3935,7 @@ describe('channel-log', () => {
 
 describe('proposal metrics', () => {
   const runReport = async (dir: string, ...extra: string[]) => {
-    const r = await runScript('proposal.ts', { args: ['metrics', hermit(dir), ...extra] });
+    const r = await runProposal(hermit(dir), ['metrics', ...extra]);
     expect(r.exitCode).toBe(0);
     return r.stdout + r.stderr;
   };
@@ -3990,9 +3987,7 @@ describe('proposal metrics', () => {
       }
       lines.push('{"ts":"2026-01-01T02:00:00Z","type":"responded","proposal_id":"PROP-001","action":"accept"}');
       write(metricsFile(wd.dir), lines.join('\n') + '\n');
-      const r = await runScript('proposal.ts', {
-        args: ['metrics', hermit(wd.dir), '--source=capability-brainstorm'],
-      });
+      const r = await runProposal(hermit(wd.dir), ['metrics', '--source=capability-brainstorm']);
       out = r.stdout + r.stderr;
     });
     afterAll(() => wd.cleanup());
@@ -4022,7 +4017,7 @@ describe('proposal metrics', () => {
         '{"ts":"2026-01-01T02:00:00Z","type":"responded","proposal_id":"PROP-R1","action":"accept"}',
         '',
       ].join('\n'));
-      const r = await runScript('proposal.ts', { args: ['metrics', hermit(wd.dir)] });
+      const r = await runProposal(hermit(wd.dir), ['metrics']);
       out = r.stdout + r.stderr;
     });
     afterAll(() => wd.cleanup());

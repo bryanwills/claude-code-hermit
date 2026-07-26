@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript } from './helpers/run';
+import { runScript, runProposal } from './helpers/run';
 
 // ---------- helpers ----------
 
@@ -56,9 +56,7 @@ Test.
 
 /** Evaluate-mode run; asserts exit 0 and returns the parsed JSON verdict line. */
 async function evaluate(sdir: string, acceptedDate: string, acceptedInSession: string, predicate: string) {
-  const r = await runScript('proposal.ts', {
-    args: ['success-signal', sdir, acceptedDate, acceptedInSession, predicate],
-  });
+  const r = await runProposal(sdir, ['success-signal', acceptedDate, acceptedInSession, predicate]);
   expect(r.exitCode).toBe(0);
   return JSON.parse(r.stdout);
 }
