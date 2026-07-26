@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.8] - 2026-07-26
 
 ### Fixed
 - `domain-brainstorm` no longer writes its own `brainstorm-emit` event — the call pointed at core's `append-metrics.ts`, unreachable from this plugin, so nothing was ever recorded. Proposals now carry `tags: [capability-brainstorm]` instead, counting toward the brainstorm kill-criteria segment rather than `reflect`'s.
