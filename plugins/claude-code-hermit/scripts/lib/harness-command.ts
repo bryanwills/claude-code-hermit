@@ -63,6 +63,30 @@ export type PendingCommand = {
  * wedged for an hour should not suddenly clear its context when it recovers.
  */
 export const COMMAND_MARKER_TTL_SECS = 3600;
+/** One render beat after submitting /model before inspecting the pane. */
+export const MODEL_CONFIRM_RENDER_MS = 500;
+const MODEL_CONFIRM_TAIL_LINES = 20;
+
+/**
+ * Match only Claude Code's cached-context model-switch confirmation.
+ *
+ * Whitespace is collapsed because the warning wraps according to pane width. The
+ * model label is deliberately not matched: a stable request alias such as `opus`
+ * renders as a release display name such as "Opus 5".
+ */
+export function isModelSwitchConfirmation(paneContent: string): boolean {
+  const tail = paneContent
+    .split('\n')
+    .slice(-MODEL_CONFIRM_TAIL_LINES)
+    .join(' ')
+    .replace(/\s+/g, ' ');
+
+  return tail.includes('Switch model?')
+    && tail.includes('Your next response will be slower and use more tokens')
+    && tail.includes('This conversation is cached for the current model.')
+    && tail.includes('Yes, switch to')
+    && tail.includes('No, go back');
+}
 
 function markerPath(hermitRoot: string): string {
   return path.join(hermitRoot, 'state', 'pending-harness-command.json');

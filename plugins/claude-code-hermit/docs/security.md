@@ -109,7 +109,7 @@ A channel-primary hermit (`always_on: true`, at least one reachable channel) has
 4. **Fail-loud** — when a prompt can't be redirected, notify the operator that something is stuck rather than silently hanging.
 5. **Native bridge** — defer to a first-party mirror/answer path once Anthropic ships one, and shrink custom machinery accordingly.
 
-Never bypass — no auto-answering a permission prompt, no sending Escape on the operator's behalf. Deciding what an unattended agent is allowed to do is always the operator's call, made in advance (config) or asynchronously (channel reply), never invented by the hermit in the moment.
+Never bypass — no auto-answering a permission prompt, no sending Escape on the operator's behalf. Deciding what an unattended agent is allowed to do is always the operator's call, made in advance (config) or asynchronously (channel reply), never invented by the hermit in the moment. The narrow exception is Claude Code's cached-context warning immediately after a trusted sender requested an exact `/model <arg>`: that sender already made the model decision, so the Stop hook confirms only a model-specific, freshly-correlated dialog. Every other native dialog remains untouched.
 
 Two binding instances exist today:
 

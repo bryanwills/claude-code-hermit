@@ -42,6 +42,26 @@ export function tmuxSessionAlive(name: string, transport: Transport = HOST): boo
   return runTmux(transport, ['has-session', '-t', name]).status === 0;
 }
 
+/** Capture the visible pane as text, or null when tmux cannot read it. */
+export function capturePane(name: string, transport: Transport = HOST): string | null {
+  if (!name) return null;
+  const { cmd, argv } = tmuxArgv(transport, ['capture-pane', '-p', '-t', name]);
+  try {
+    const r = spawnSync(cmd, argv, { encoding: 'utf-8', timeout: 5000 });
+    if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
+    return r.stdout;
+  } catch {
+    return null;
+  }
+}
+
+/** Send a single Enter key, returning whether tmux accepted it. */
+export function sendEnter(sessionName: string, transport: Transport = HOST): boolean {
+  if (!sessionName) return false;
+  const submitted = runTmux(transport, ['send-keys', '-t', sessionName, 'Enter']);
+  return !submitted.error && submitted.status === 0;
+}
+
 /** Derive the tmux session name from config (CWD-relative project name). */
 export function getSessionName(config: Json): string {
   const name = config.tmux_session_name ?? 'hermit-{project_name}';
@@ -85,6 +105,5 @@ export function sendKeys(sessionName: string, text: string, transport: Transport
   const typed = runTmux(transport, ['send-keys', '-t', sessionName, '-l', '--', text]);
   if (typed.error || typed.status !== 0) return false;
   Bun.sleepSync(500);
-  const submitted = runTmux(transport, ['send-keys', '-t', sessionName, 'Enter']);
-  return !submitted.error && submitted.status === 0;
+  return sendEnter(sessionName, transport);
 }
