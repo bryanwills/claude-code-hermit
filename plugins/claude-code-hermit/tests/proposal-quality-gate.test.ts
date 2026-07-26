@@ -12,7 +12,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { decide } from '../scripts/lib/proposals/quality-gate';
-import { runScript } from './helpers/run';
+import { runScript, runProposal } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-qgate-');
@@ -272,10 +272,7 @@ describe('structured config changes (needs a real diff)', () => {
 describe('CLI contract', () => {
   test('emits one JSON line and exits 0', async () => {
     const { root, stateDir } = projectAt('balanced');
-    const r = await runScript('proposal.ts', {
-      args: ['quality-gate', stateDir, '--files-json', JSON.stringify(['scripts/a.ts'])],
-      cwd: root,
-    });
+    const r = await runProposal(stateDir, ['quality-gate', '--files-json', JSON.stringify(['scripts/a.ts'])], { cwd: root });
     expect(r.exitCode).toBe(0);
     const lines = r.stdout.trim().split('\n');
     expect(lines).toHaveLength(1);
@@ -290,10 +287,7 @@ describe('CLI contract', () => {
 
   test('malformed --files-json falls back rather than failing the call', async () => {
     const { root, stateDir } = projectAt('balanced');
-    const r = await runScript('proposal.ts', {
-      args: ['quality-gate', stateDir, '--files-json', '{not json'],
-      cwd: root,
-    });
+    const r = await runProposal(stateDir, ['quality-gate', '--files-json', '{not json'], { cwd: root });
     expect(r.exitCode).toBe(0);
     expect(JSON.parse(r.stdout.trim()).action).toBe('SKIP');
   });

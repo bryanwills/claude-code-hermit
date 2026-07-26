@@ -8,6 +8,12 @@
 //
 // Usage: bun proposal.ts <verb> <hermit-state-dir> [args...]
 //
+// <hermit-state-dir> is validated, not trusted: it must resolve to this
+// project's own state dir (`lib/cc-compat.ts` assertStateDir/hermitDir), so a
+// pre-approved call cannot be redirected at another project. An absolute
+// AGENT_DIR is the one sanctioned override, and an env-prefixed command falls
+// outside the `Bash(bun */scripts/proposal.ts*)` grant, so it re-prompts.
+//
 // Verbs:
 //   create <stateDir>
 //     stdin (heredoc): `Key: value` header lines, a bare `---` separator line,
@@ -23,6 +29,10 @@
 //     `ERROR|<token>` with zero writes.
 //
 //   patch <stateDir> <filename> [--set key=value]... [--request-compact]
+//     <filename> must be a direct-child basename of the proposals dir (no `/`,
+//     no leading `.`) — it is joined onto that dir, so a `../` prefix would
+//     otherwise reach any frontmatter-bearing .md on disk. Rejected the same
+//     way a genuinely absent proposal is: `ERROR|no-such-proposal`.
 //     stdin (optional, heredoc): `Decision: <line>` and/or `Set: key=value`
 //     lines (free-text values — argv --set is for enum/bool/date/@now values
 //     only). `@now` in any --set value or stdin line expands to the current
@@ -59,7 +69,7 @@
 //   success-signal <stateDir> <date> <sess> <p>  one JSON verdict line
 //   quality-gate <stateDir> <prop-file> [--files-json <json>]   one JSON verdict line
 //
-// Exit 0 always, EXCEPT: a missing verb/state-dir argv exits 1 (creation should
+// Exit 0 always, EXCEPT: a missing OR foreign state-dir argv exits 1 (creation should
 // never proceed on a mis-invocation, but a resolved, validated failure is always
 // a verdict line, not a crash), and `queue-micro` / `micro` / `success-signal
 // --validate` exit 1 on malformed input — a silent queue-drop or a silently
@@ -68,6 +78,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readStdin, readJson, flagValue } from './lib/cli';
+import { assertStateDir, hermitDir } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, PATCH_KEY_RE } from './lib/md-write';
 import { computeBase, readTimezone, SUFFIX_LETTERS } from './lib/prop-id';
@@ -268,6 +279,11 @@ function sectionEndsWithLine(content: string, heading: string, rawLine: string):
 async function verbPatch(stateDir: string, args: string[]): Promise<void> {
   const { filename, sets: rawSets, requestCompact } = parsePatchArgs(args);
   if (!filename) fail('no-such-proposal');
+  // Direct-child basename only. The `path.join` below would otherwise let a
+  // `../` prefix escape the proposals dir and patch any frontmatter-bearing
+  // .md on disk; the state-dir pin in main() does not constrain this argument.
+  // `startsWith('.')` covers `.`, `..`, and dotfiles in one predicate.
+  if (filename !== path.basename(filename) || filename.startsWith('.')) fail('no-such-proposal');
 
   const sets: Record<string, string> = {};
   for (const kv of rawSets) {
@@ -417,6 +433,21 @@ async function verbRoutine(stateDir: string): Promise<void> {
 
 const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|event|success-signal|quality-gate';
 
+// The state dir is not caller-chosen. Every production call passes the literal
+// `.claude-code-hermit` from the project root; accepting an arbitrary root let
+// one pre-approved `Bash(bun */scripts/proposal.ts*)` call mutate — or read —
+// another project's proposal queue. Deliberately a usage error (stderr, exit 1)
+// rather than `fail()`: `fail()` writes `ERROR|<token>` to stdout, which would
+// corrupt the distinct stdout grammars several verbs own and callers branch on
+// (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|, `micro`
+// -> RESOLVED|). This also turns a drifted cwd into a loud failure instead of a
+// write against the wrong tree.
+function requirePinnedStateDir(dir: string): void {
+  if (assertStateDir(dir)) return;
+  console.error(`proposal.ts: state dir must be this project's (${hermitDir()}); got ${dir}`);
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   const verb = process.argv[2];
   const stateDir = process.argv[3];
@@ -425,10 +456,21 @@ async function main(): Promise<void> {
   // grammar check that reads no state at all — for those two, argv[3] is not a
   // state dir and the guard below must not demand one. Both take the whole tail
   // (argv[3] onward) so their own arg parsing is unchanged from when they were
-  // standalone scripts.
+  // standalone scripts. When they DO carry a state dir it is pinned like every
+  // other verb: both read hermit state (`state/proposal-metrics.jsonl`,
+  // `sessions/`) and print it, so an unpinned root turned one pre-approved call
+  // into a read of another project's queue and session costs. The positional
+  // lookups below mirror each module's own arg parsing.
   const tail = process.argv.slice(3);
-  if (verb === 'metrics') return runMetrics(tail);
-  if (verb === 'success-signal') return runSuccessSignal(tail);
+  if (verb === 'metrics') {
+    const positional = tail.find(a => !a.startsWith('--'));
+    if (positional !== undefined) requirePinnedStateDir(positional);
+    return runMetrics(tail);
+  }
+  if (verb === 'success-signal') {
+    if (tail[0] !== '--validate' && tail.length >= 4) requirePinnedStateDir(tail[0]);
+    return runSuccessSignal(tail);
+  }
   // `index` was fail-open before it was absorbed: a missing state dir answered
   // `SKIP|no state dir` on stdout at exit 0, never a usage error. Preserve that —
   // it is a derived-cache rebuild, and its callers treat a non-zero exit as a
@@ -442,6 +484,8 @@ async function main(): Promise<void> {
     console.error(`Usage: bun proposal.ts <${VERBS}> <hermit-state-dir> [args...]`);
     process.exit(1);
   }
+
+  requirePinnedStateDir(stateDir);
 
   const rest = process.argv.slice(4);
   switch (verb) {

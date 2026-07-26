@@ -46,6 +46,31 @@ export interface RunOptions {
   args?: string[];
 }
 
+/**
+ * Invoke scripts/proposal.ts against a scratch state dir.
+ *
+ * proposal.ts pins its state dir to hermitDir(), which in a test would resolve
+ * to this repo's own `.claude-code-hermit`, not the scratch fixture. An
+ * absolute AGENT_DIR is the sanctioned override, so it is set here rather than
+ * at ~75 call sites — one place enforces it and tests cannot drift back.
+ *
+ * `args` is [verb, ...rest]; the resolved state dir is injected after the verb.
+ * Tests that deliberately pass a foreign or missing state dir call runScript
+ * directly instead.
+ */
+export async function runProposal(
+  stateDir: string,
+  args: string[],
+  opts: Omit<RunOptions, 'args'> = {},
+): Promise<RunResult> {
+  const abs = path.resolve(stateDir);
+  return runScript('proposal.ts', {
+    ...opts,
+    args: [args[0], abs, ...args.slice(1)],
+    env: { AGENT_DIR: abs, ...opts.env },
+  });
+}
+
 export async function runScript(script: string, opts: RunOptions = {}): Promise<RunResult> {
   const proc = Bun.spawn({
     cmd: [process.execPath, path.join(SCRIPTS_DIR, script), ...(opts.args ?? [])],
