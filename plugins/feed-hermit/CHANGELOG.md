@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.2] - 2026-07-26
 
 ### Fixed
 - No-op `Write(path)` settings rules no longer trigger a boot warning; `Write(tmp/**)` is now `Edit(tmp/**)` so tmp fetch-scratch writes are auto-approved.
