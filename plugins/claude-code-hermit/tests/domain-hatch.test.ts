@@ -345,7 +345,7 @@ describe('CLI contract', () => {
   // What those flags used to let a test override is asserted at the library
   // boundary instead: preflight()/ensureHatchTarget() take explicit roots
   // directly, same as every other describe() block in this file.
-  test('preflight prints JSON and exits 0 even when resolution fails', () => {
+  test('preflight returns a verdict rather than throwing when resolution fails', () => {
     const s = scaffold();
     const res = preflight({
       pluginId: 'not-a-plugin',
@@ -355,6 +355,32 @@ describe('CLI contract', () => {
       stdinJson: s.stdinJson,
     });
     expect(res.error).toBe('plugin_not_installed');
+  });
+
+  // The exit code is the half the library boundary cannot assert, and the whole
+  // domain-hatch protocol rests on it: every domain hatch parses preflight's
+  // stdout and branches on the fields, so a resolution failure has to arrive as
+  // exit 0 + JSON, not as a nonzero the caller reads as "no verdict".
+  //
+  // Asserts the exit code and the verdict SHAPE, never the specific error code:
+  // the plugin-list seam is gone, so this reaches the live `claude plugin list
+  // --json`, and which failure comes back depends on the machine. With `claude`
+  // present the list is non-empty and resolvePlugin() says plugin_not_installed;
+  // on a CI runner that installs only bun the list is empty and it says
+  // plugin_list_unavailable instead (resolve.ts distinguishes the two on
+  // purpose — "absent" and "cannot tell" earn different operator advice).
+  // Pinning the code here would fail on CI. The sibling library-boundary test
+  // above owns the specific-code assertion, where the list is stubbed.
+  test('preflight exits 0 on a resolution failure (CLI-level invariant)', async () => {
+    const s = scaffold();
+    const r = await runScript('domain-hatch.ts', {
+      args: ['preflight', 'not-a-plugin'],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot, AGENT_DIR: s.hermit },
+    });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.ok).toBe(false);
+    expect(typeof out.error).toBe('string');
   });
 
   // bad_target is CLI-only argv validation (ensureHatchTarget() has no

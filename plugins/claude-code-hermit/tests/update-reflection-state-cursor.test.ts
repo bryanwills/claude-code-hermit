@@ -15,18 +15,25 @@ import { runScript, runPinnedScript } from './helpers/run';
 const NOW = '2026-07-20T12:00:00Z';
 const CHECK_ID = 'ha-anomaly';
 
+// The fixture mirrors production layout: the hermit root is the scratch dir and
+// the state file lives at <hermit>/state/reflection-state.json, which is what
+// the pin's `state` bound accepts.
 function withTmp(fn: (stateFile: string) => Promise<void> | void) {
   return async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-reflcursor-'));
-    try { await fn(path.join(dir, 'reflection-state.json')); }
+    fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+    try { await fn(path.join(dir, 'state', 'reflection-state.json')); }
     finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
   };
 }
 
+/** The hermit root for a state file produced by withTmp(). */
+const rootOf = (stateFile: string) => path.dirname(path.dirname(stateFile));
+
 async function runCursor(stateFile: string, id?: string) {
   // update-reflection-state.ts's argv is the state FILE, not the hermit root, so
-  // the pin is containment — pass the file's parent dir as the pinned root.
-  return runPinnedScript('update-reflection-state.ts', path.dirname(stateFile), [stateFile, '--scheduled-check-run', ...(id ? [id] : [])], {
+  // the pin is containment against <hermit>/state — pass the hermit root here.
+  return runPinnedScript('update-reflection-state.ts', rootOf(stateFile), [stateFile, '--scheduled-check-run', ...(id ? [id] : [])], {
     env: { HERMIT_NOW: NOW },
   });
 }
@@ -76,18 +83,21 @@ describe('update-reflection-state --scheduled-check-run', () => {
 // argument — the worst-shaped instance of this defect class, since its argv
 // is a file path, not a directory (see docs/security.md § Script Argument
 // Trust). Containment (assertUnderStateDir), not equality: a caller may
-// legitimately pass a file several levels under the pinned root.
+// legitimately pass a file several levels under the pinned root — but the root
+// is <hermit>/state, not <hermit>, because every branch reads-with-fallback
+// then rewrites whole and would otherwise overwrite operator-owned files.
 describe('update-reflection-state: state-dir pin', () => {
   test('refuses a state file belonging to another project', withTmp(async (myStateFile) => {
     const victimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-reflcursor-victim-'));
-    const victimFile = path.join(victimDir, 'reflection-state.json');
+    fs.mkdirSync(path.join(victimDir, 'state'), { recursive: true });
+    const victimFile = path.join(victimDir, 'state', 'reflection-state.json');
     const before = JSON.stringify({ scheduled_checks: { [CHECK_ID]: { last_run: '2020-01-01' } } });
     fs.writeFileSync(victimFile, before);
     try {
       // AGENT_DIR pins hermitDir() to my own project's dir; argv still names the victim file.
       const r = await runScript('update-reflection-state.ts', {
         args: [victimFile, '--scheduled-check-run', CHECK_ID],
-        env: { AGENT_DIR: path.dirname(myStateFile), HERMIT_NOW: NOW },
+        env: { AGENT_DIR: rootOf(myStateFile), HERMIT_NOW: NOW },
       });
       expect(r.exitCode).toBe(1);
       expect(r.stderr).toContain('state file must be under');
@@ -95,5 +105,22 @@ describe('update-reflection-state: state-dir pin', () => {
     } finally {
       fs.rmSync(victimDir, { recursive: true, force: true });
     }
+  }));
+
+  // Containment against the hermit root alone was not enough: every write path
+  // here parses with a fallback to {} and then rewrites the file whole, so an
+  // in-project but non-state target is destroyed, not merged into.
+  test('refuses an in-project file outside state/ (OPERATOR.md is not a counters blob)', withTmp(async (myStateFile) => {
+    const root = rootOf(myStateFile);
+    const operatorMd = path.join(root, 'OPERATOR.md');
+    const before = '# Operator\n\nHand-curated context.\n';
+    fs.writeFileSync(operatorMd, before);
+    const r = await runScript('update-reflection-state.ts', {
+      args: [operatorMd, JSON.stringify({ ran_with_candidates: false })],
+      env: { AGENT_DIR: root, HERMIT_NOW: NOW },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('state file must be under');
+    expect(fs.readFileSync(operatorMd, 'utf-8')).toBe(before);
   }));
 });

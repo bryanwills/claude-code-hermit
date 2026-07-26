@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pinStateDirOrExit } from './lib/cc-compat';
 
 type Json = any;
 
@@ -49,11 +50,16 @@ function main() {
   const args = parseArgs(process.argv);
   const source = args.source || 'manual';
 
-  const stateDir = path.resolve(
-    args['state-dir'] ||
-    process.env.HERMIT_STATE_DIR ||
-    '.claude-code-hermit'
-  );
+  // The state dir is not caller-chosen when it comes from argv. This script has
+  // its own `Bash(bun */scripts/archive-shell.ts*)` grant, so reflect-precheck's
+  // pin does not cover it — a direct pre-approved call with a foreign
+  // `--state-dir` would snapshot and truncate another project's SHELL.md and
+  // rewrite its runtime.json. Only the argv form is pinned: HERMIT_STATE_DIR has
+  // to be written as an env prefix, which falls outside the grant and re-prompts,
+  // and that is exactly what makes it the sanctioned override.
+  const stateDir = typeof args['state-dir'] === 'string'
+    ? pinStateDirOrExit(args['state-dir'], 'archive-shell')
+    : path.resolve(process.env.HERMIT_STATE_DIR || '.claude-code-hermit');
   const sessionsDir = path.join(stateDir, 'sessions');
   const snapshotsDir = path.join(sessionsDir, 'snapshots');
   const shellPath = path.join(sessionsDir, 'SHELL.md');

@@ -20,7 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { assertStateDir, hermitDir } from './lib/cc-compat';
+import { pinStateDirOrExit } from './lib/cc-compat';
 import { listProposalFiles, readFileWithFrontmatter } from './lib/frontmatter';
 import { appendEvent, resolvedEvent } from './lib/proposals/event';
 import { writeFileAtomic, patchFrontmatter, appendShellLine, PATCH_KEY_RE } from './lib/md-write';
@@ -130,11 +130,7 @@ if (import.meta.main) {
   // that covers every argument — so an unvalidated root let one such call
   // resolve another project's proposals. Joins the missing-argv exit-1 case
   // above rather than returning a verdict line, for the same reason.
-  const pinned = assertStateDir(stateDir);
-  if (!pinned) {
-    console.error(`apply-reflection-actions.ts: state dir must be this project's (${hermitDir()}); got ${stateDir}`);
-    process.exit(1);
-  }
+  const pinned = pinStateDirOrExit(stateDir, 'apply-reflection-actions.ts');
   let stdin = '';
   try { stdin = fs.readFileSync(0, 'utf-8'); } catch { /* treated as unparseable below */ }
   let result: Json;

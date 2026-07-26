@@ -25,7 +25,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript } from './helpers/run';
+import { runScript, runPinnedScript } from './helpers/run';
 import { readFrontmatter } from '../scripts/lib/frontmatter';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
@@ -57,8 +57,7 @@ function withTmp(fn: (dir: string) => Promise<void> | void) {
 }
 
 async function archive(dir: string, mode: string, payload: string, now: string) {
-  const r = await runScript('session-archive.ts', {
-    args: ['archive', `--mode=${mode}`, `--state-dir=${hermit(dir)}`],
+  const r = await runPinnedScript('session-archive.ts', hermit(dir), ['archive', `--mode=${mode}`, `--state-dir=${hermit(dir)}`], {
     stdin: payload,
     env: { HERMIT_NOW: now },
   });
@@ -66,8 +65,7 @@ async function archive(dir: string, mode: string, payload: string, now: string) 
 }
 
 async function open(dir: string, payload: string, now: string) {
-  const r = await runScript('session-archive.ts', {
-    args: ['open', `--state-dir=${hermit(dir)}`],
+  const r = await runPinnedScript('session-archive.ts', hermit(dir), ['open', `--state-dir=${hermit(dir)}`], {
     stdin: payload,
     env: { HERMIT_NOW: now },
   });
@@ -75,8 +73,7 @@ async function open(dir: string, payload: string, now: string) {
 }
 
 async function recover(dir: string, now: string) {
-  const r = await runScript('session-archive.ts', {
-    args: ['recover', `--state-dir=${hermit(dir)}`],
+  const r = await runPinnedScript('session-archive.ts', hermit(dir), ['recover', `--state-dir=${hermit(dir)}`], {
     env: { HERMIT_NOW: now },
   });
   return JSON.parse(r.stdout.trim());
@@ -150,7 +147,7 @@ describe('durability', () => {
 // =============================================================================
 describe('outcome contract', () => {
   test('archive requires --mode', withTmp(async (dir) => {
-    const r = await runScript('session-archive.ts', { args: ['archive', `--state-dir=${hermit(dir)}`], stdin: BASIC_CLOSE_PAYLOAD });
+    const r = await runPinnedScript('session-archive.ts', hermit(dir), ['archive', `--state-dir=${hermit(dir)}`], { stdin: BASIC_CLOSE_PAYLOAD });
     const result = JSON.parse(r.stdout.trim());
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('requires --mode');
@@ -807,5 +804,36 @@ describe('post-archive markers', () => {
     expect(result.markers.pending_close).toBe('deleted');
     expect(fs.existsSync(pendingPath(dir))).toBe(false);
     expect(fs.existsSync(clearPath(dir))).toBe(false);
+  }));
+});
+
+// =============================================================================
+// session-archive.ts is reachable through a pre-approved
+// `Bash(bun */scripts/session-archive.ts*)` grant that covers every argument,
+// and every verb writes — an unvalidated root let one such call archive over
+// another project's SHELL.md and S-NNN-REPORT.md (docs/security.md § Script
+// Argument Trust).
+describe('session-archive: state-dir pin', () => {
+  test('refuses a state dir belonging to another project, writing nothing', withTmp(async (mine) => {
+    const t = makeDir();
+    try {
+      const victim = t.dir;
+      await open(victim, 'Task: victim work\n', '2026-07-09T12:00:00Z');
+      const shellBefore = fs.readFileSync(shellPath(victim), 'utf-8');
+      const runtimeBefore = fs.readFileSync(statePath(victim), 'utf-8');
+
+      // AGENT_DIR pins hermitDir() to `mine`; argv still names `victim`.
+      const r = await runScript('session-archive.ts', {
+        args: ['archive', '--mode=close', `--state-dir=${hermit(victim)}`],
+        stdin: BASIC_CLOSE_PAYLOAD,
+        env: { AGENT_DIR: hermit(mine), HERMIT_NOW: '2026-07-09T13:00:00Z' },
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('state dir must be');
+      expect(fs.readFileSync(shellPath(victim), 'utf-8')).toBe(shellBefore);
+      expect(fs.readFileSync(statePath(victim), 'utf-8')).toBe(runtimeBefore);
+    } finally {
+      t.cleanup();
+    }
   }));
 });

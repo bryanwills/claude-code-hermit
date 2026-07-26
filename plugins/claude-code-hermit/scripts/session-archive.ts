@@ -32,7 +32,7 @@ import path from 'node:path';
 import { globDir, readFrontmatter } from './lib/frontmatter';
 import { localISOStamp } from './lib/time';
 import { readAlertState as readRuntime, quarantineAlertState as quarantineRuntime } from './lib/alert-state';
-import { costLogPath } from './lib/cc-compat';
+import { costLogPath, pinStateDirOrExit } from './lib/cc-compat';
 import { computeSessionCost } from './lib/session-cost';
 import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
 
@@ -109,7 +109,14 @@ function readStdinSync(): string {
 
 // Shared setup every verb needs: resolved state dir + derived paths + clock.
 function resolveRunContext(flags: Record<string, string | true>): { stateDir: string; sessionsDir: string; runtimePath: string; now: Date } {
-  const stateDir = path.resolve(typeof flags['state-dir'] === 'string' ? flags['state-dir'] as string : '.claude-code-hermit');
+  // The state dir is not caller-chosen. Reachable through a pre-approved
+  // `Bash(bun */scripts/session-archive.ts*)` grant that covers every argument,
+  // and every verb here writes: an unvalidated root let one such call archive
+  // over another project's SHELL.md and S-NNN-REPORT.md. See cc-compat.ts
+  // assertStateDir(); the absolute-AGENT_DIR env prefix stays the one override.
+  const stateDir = typeof flags['state-dir'] === 'string'
+    ? pinStateDirOrExit(flags['state-dir'] as string, 'session-archive')
+    : path.resolve('.claude-code-hermit');
   const sessionsDir = path.join(stateDir, 'sessions');
   const runtimePath = path.join(stateDir, 'state', 'runtime.json');
   return { stateDir, sessionsDir, runtimePath, now: getNow() };

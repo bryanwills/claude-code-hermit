@@ -1171,7 +1171,8 @@ describe('deriveStaleSession', () => {
 
 describe('observations.ts observe', () => {
   async function observe(stateDir: string, source: string, label: string, ...flags: string[]) {
-    return runScript('observations.ts', { args: ['observe', stateDir, source, ...flags], stdin: label });
+    // observations.ts pins its state-dir argv; AGENT_DIR is the sanctioned override.
+    return runPinnedScript('observations.ts', stateDir, ['observe', stateDir, source, ...flags], { stdin: label });
   }
   const ledgerOf = (dir: string) => hermit(dir, 'state', 'observations.jsonl');
 
@@ -1249,8 +1250,25 @@ describe('observations.ts observe', () => {
   }));
 
   test('observations (mis-invocation exits 1 so a broken call site is loud)', withDir(async (dir) => {
-    const r = await runScript('observations.ts', { args: ['observe', hermit(dir)], stdin: 'label' });
+    const r = await runPinnedScript('observations.ts', hermit(dir), ['observe', hermit(dir)], { stdin: 'label' });
     expect(r.exitCode).toBe(1);
+  }));
+
+  // observations.ts is reachable through a pre-approved
+  // `Bash(bun */scripts/observations.ts observe *)` grant that covers every
+  // argument after the verb (docs/security.md § Script Argument Trust).
+  test('state-dir pin: refuses a ledger belonging to another project', withDir(async (mine) => {
+    await withDir(async (victim) => {
+      // AGENT_DIR pins hermitDir() to `mine`; argv still names `victim`.
+      const r = await runScript('observations.ts', {
+        args: ['observe', hermit(victim), 'reflect-noticed', '--origin=own-work'],
+        env: { AGENT_DIR: hermit(mine) },
+        stdin: 'attacker row',
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('state dir must be');
+      expect(fs.existsSync(ledgerOf(victim))).toBe(false);
+    })();
   }));
 
   // The `scanArgvFreeText` lint that used to live here is deliberately gone, not
@@ -3895,19 +3913,19 @@ describe('channel-log', () => {
 
   describe('scripts/channel-log.ts (subprocess CLI)', () => {
     test('list-unconsolidated: no DB -> exit 0, empty JSON array', withDir(async (dir) => {
-      const r = await runScript('channel-log.ts', { args: [hermit(dir), 'list-unconsolidated'] });
+      const r = await runPinnedScript('channel-log.ts', hermit(dir), [hermit(dir), 'list-unconsolidated']);
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(r.stdout.trim())).toEqual([]);
     }));
 
     test('prune: no DB -> exit 0 (not a failure)', withDir(async (dir) => {
-      const r = await runScript('channel-log.ts', { args: [hermit(dir), 'prune', '90'] });
+      const r = await runPinnedScript('channel-log.ts', hermit(dir), [hermit(dir), 'prune', '90']);
       expect(r.exitCode).toBe(0);
       expect(r.stdout).toContain('pruned 0');
     }));
 
     test('unknown subcommand -> exit 1', withDir(async (dir) => {
-      const r = await runScript('channel-log.ts', { args: [hermit(dir), 'bogus'] });
+      const r = await runPinnedScript('channel-log.ts', hermit(dir), [hermit(dir), 'bogus']);
       expect(r.exitCode).toBe(1);
     }));
 
@@ -3915,16 +3933,35 @@ describe('channel-log', () => {
       const hermitPath = hermit(dir);
       logMessage(hermitPath, { source: 'discord', chat_id: 'C1', direction: 'in', text: 'cli roundtrip message' });
 
-      const listed = await runScript('channel-log.ts', { args: [hermitPath, 'list-unconsolidated'] });
+      const listed = await runPinnedScript('channel-log.ts', hermitPath, [hermitPath, 'list-unconsolidated']);
       expect(listed.exitCode).toBe(0);
       const rows = JSON.parse(listed.stdout.trim());
       expect(rows.length).toBe(1);
 
-      const marked = await runScript('channel-log.ts', { args: [hermitPath, 'mark-consolidated', String(rows[0].id)] });
+      const marked = await runPinnedScript('channel-log.ts', hermitPath, [hermitPath, 'mark-consolidated', String(rows[0].id)]);
       expect(marked.exitCode).toBe(0);
 
-      const listedAfter = await runScript('channel-log.ts', { args: [hermitPath, 'list-unconsolidated'] });
+      const listedAfter = await runPinnedScript('channel-log.ts', hermitPath, [hermitPath, 'list-unconsolidated']);
       expect(JSON.parse(listedAfter.stdout.trim())).toEqual([]);
+    }));
+
+    // channel-log.ts is reachable through a pre-approved
+    // `Bash(bun */scripts/channel-log.ts*)` grant that covers every argument,
+    // and mark-consolidated/prune both mutate (docs/security.md § Script
+    // Argument Trust).
+    test('state-dir pin: refuses a log belonging to another project', withDir(async (mine) => {
+      await withDir(async (victim) => {
+        const victimPath = hermit(victim);
+        logMessage(victimPath, { source: 'discord', chat_id: 'C1', direction: 'in', text: 'victim message' });
+        // AGENT_DIR pins hermitDir() to `mine`; argv still names `victim`.
+        const r = await runScript('channel-log.ts', {
+          args: [victimPath, 'prune', '0'],
+          env: { AGENT_DIR: hermit(mine) },
+        });
+        expect(r.exitCode).toBe(1);
+        expect(r.stderr).toContain('state dir must be');
+        expect(unconsolidated(victimPath).rows?.length).toBe(1);
+      })();
     }));
   });
 });

@@ -194,8 +194,9 @@ if (import.meta.main) {
     // covers every argument; hook mode below is unaffected — it derives its
     // path from a PostToolUse payload for a write that already happened, and
     // a hook is not reachable through that Bash grant. Containment, not
-    // equality: argv here is <hermit>/state, a subdir of the pinned root.
-    run(pinUnderStateDirOrExit(process.argv[2], 'generate-summary.ts', 'state dir'));
+    // equality: argv here is <hermit>/state, and the bound is that branch
+    // alone — nothing this mode writes lives outside it.
+    run(pinUnderStateDirOrExit(process.argv[2], 'generate-summary.ts', 'state dir', 'state'));
     process.exit(0);
   }
 

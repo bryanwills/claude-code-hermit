@@ -129,9 +129,22 @@ function assertStateDir(argvValue: string): string | null {
 // whose argv already equals a root also passes here, since containment includes
 // equality — a script that only ever receives the root itself should still use
 // the plain assertStateDir() so its error message names the expectation exactly.
-function assertUnderStateDir(argvValue: string): string | null {
+//
+// `subdir` narrows the bound from the whole hermit dir to one branch of it, and
+// is REQUIRED rather than optional on purpose. Containment against the hermit
+// root alone still admits every operator-owned file beside `state/` —
+// OPERATOR.md, sessions/SHELL.md, bin/ — and a caller that
+// JSON.parse-with-fallback-then-rewrites (update-reflection-state.ts does
+// exactly that) would overwrite any of them wholesale. An optional parameter on
+// a security-narrowing helper is a footgun: a future caller that omits it
+// silently gets the wide bound this check exists to close. Make each caller
+// state the narrowest branch its argument can name.
+function assertUnderStateDir(argvValue: string, subdir: string): string | null {
   const resolved = path.resolve(argvValue);
-  const isUnder = (root: string) => resolved === root || resolved.startsWith(root + path.sep);
+  const isUnder = (root: string) => {
+    const base = subdir ? path.join(root, subdir) : root;
+    return resolved === base || resolved.startsWith(base + path.sep);
+  };
   return pinnedRoot(resolved, isUnder);
 }
 
@@ -148,11 +161,12 @@ function pinStateDirOrExit(argvValue: string, scriptLabel: string): string {
 
 // Containment counterpart for callers whose argv is a file or subdirectory
 // under the state dir, not the dir itself. `noun` names what argv represents
-// in the error message (e.g. "state dir", "state file").
-function pinUnderStateDirOrExit(argvValue: string, scriptLabel: string, noun: string): string {
-  const pinned = assertUnderStateDir(argvValue);
+// in the error message (e.g. "state dir", "state file"); `subdir` narrows the
+// accepted branch as described on assertUnderStateDir().
+function pinUnderStateDirOrExit(argvValue: string, scriptLabel: string, noun: string, subdir: string): string {
+  const pinned = assertUnderStateDir(argvValue, subdir);
   if (pinned) return pinned;
-  console.error(`${scriptLabel}: ${noun} must be under this project's state dir (${hermitDir()}); got ${argvValue}`);
+  console.error(`${scriptLabel}: ${noun} must be under ${path.join(hermitDir(), subdir)}; got ${argvValue}`);
   process.exit(1);
 }
 

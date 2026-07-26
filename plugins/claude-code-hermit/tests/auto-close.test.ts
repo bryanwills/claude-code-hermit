@@ -25,7 +25,12 @@ const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-her
 interface Tmp { dir: string; cleanup(): void }
 
 function makeDir(): Tmp {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-autoclose-'));
+  // realpath, not the raw mkdtemp value: reflectPrecheck() below sets AGENT_DIR
+  // from this path while passing a relative state dir the child resolves against
+  // process.cwd(), which is already symlink-resolved. On macOS os.tmpdir() is
+  // /var/folders/... behind a symlink to /private/var/folders/..., so the two
+  // sides would disagree and the pin would refuse a legitimate call.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-autoclose-')));
   fs.mkdirSync(hermit(dir, 'sessions'), { recursive: true });
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
   return {
@@ -1010,8 +1015,7 @@ describe('auto-close-decision verb', () => {
   const pendingPath = (dir: string) => hermit(dir, 'state', 'pending-close.json');
 
   async function decide(dir: string, now: string = NOW) {
-    const r = await runScript('session-archive.ts', {
-      args: ['auto-close-decision', `--state-dir=${hermit(dir)}`],
+    const r = await runPinnedScript('session-archive.ts', hermit(dir), ['auto-close-decision', `--state-dir=${hermit(dir)}`], {
       env: { HERMIT_NOW: now, TZ: 'UTC' },
     });
     expect(r.exitCode).toBe(0);

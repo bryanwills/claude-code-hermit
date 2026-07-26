@@ -22,6 +22,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pinStateDirOrExit } from './lib/cc-compat';
 
 type Json = any;
 
@@ -189,7 +190,12 @@ if (import.meta.main) {
   const { hermitDir, core, pluginRoot, siblings } = parseArgs(process.argv.slice(2));
   let result: FinalizeResult;
   try {
-    result = finalize({ hermitDir: path.resolve(hermitDir), core, pluginRoot, siblings });
+    // The hermit dir is not caller-chosen. Reachable through a pre-approved
+    // `Bash(bun */scripts/evolve-finalize.ts*)` grant that covers every
+    // argument, and this script rewrites config.json wholesale — an
+    // unvalidated root let one such call stamp _hermit_versions into another
+    // project's config. See lib/cc-compat.ts assertStateDir().
+    result = finalize({ hermitDir: pinStateDirOrExit(hermitDir, 'evolve-finalize'), core, pluginRoot, siblings });
   } catch (e: any) {
     result = {
       ok: false,

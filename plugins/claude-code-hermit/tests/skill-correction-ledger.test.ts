@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { runScript, runPinnedScript, PLUGIN_ROOT } from './helpers/run';
 
 const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), 'utf-8');
 
@@ -74,9 +74,10 @@ describe('observations.ts: skill-correction row round-trip', () => {
   const setSession = (id: string) =>
     fs.writeFileSync(path.join(stateDir, 'state', 'runtime.json'), JSON.stringify({ session_id: id }));
 
+  // observations.ts pins its state-dir argv to hermitDir(); an absolute
+  // AGENT_DIR is the sanctioned override that points it at this fixture.
   const observe = () =>
-    runScript('observations.ts', {
-      args: ['observe', stateDir, 'skill-correction', '--origin=own-work'],
+    runPinnedScript('observations.ts', stateDir, ['observe', stateDir, 'skill-correction', '--origin=own-work'], {
       stdin: 'skill-correction:my-skill',
     });
 

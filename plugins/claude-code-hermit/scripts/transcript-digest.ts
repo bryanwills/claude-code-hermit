@@ -42,6 +42,7 @@ import {
   classifyToolResults,
   transcriptDirFor,
   hermitDir as resolveHermitRoot,
+  pinStateDirOrExit,
 } from './lib/cc-compat';
 import { classifySource } from './lib/trigger-source';
 import { resolveHermitNowMs } from './lib/time';
@@ -310,8 +311,15 @@ function main(argv: string[]): number {
   // supersedes this, so don't pay the walk-up when the caller already named the dir.
   // Resolved eagerly when recording, since the ledger lives under it; otherwise
   // lazily, so a caller who named --dir doesn't pay for the walk-up.
+  // An absolute stateDir is the one branch where argv chooses the root, and
+  // --record appends to `<root>/state/observations.jsonl` — so pin it. A
+  // relative value is ignored in favor of resolveHermitRoot() (see above), and
+  // pinning it would turn the cwd-drift fallback this comment exists for into a
+  // hard refusal, so that branch stays unpinned.
   let hermitRoot: string | null = null;
-  const rootOnce = () => (hermitRoot ??= path.isAbsolute(args.stateDir) ? args.stateDir : resolveHermitRoot());
+  const rootOnce = () => (hermitRoot ??= path.isAbsolute(args.stateDir)
+    ? pinStateDirOrExit(args.stateDir, 'transcript-digest')
+    : resolveHermitRoot());
 
   let dir = args.dir;
   if (!dir) dir = transcriptDirFor(path.dirname(rootOnce()));

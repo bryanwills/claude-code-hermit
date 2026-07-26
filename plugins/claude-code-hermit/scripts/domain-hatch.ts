@@ -12,8 +12,13 @@
 //   bun domain-hatch.ts preflight <plugin-id>
 //     Read-only. Prints one JSON verdict: which of the two stale-core cases
 //     applies (if any), whether this is a full run or a re-verify, the resolved
-//     CLAUDE target, and what the CLAUDE-APPEND block needs. Always exits 0 —
-//     callers read the fields, not the code.
+//     CLAUDE target, and what the CLAUDE-APPEND block needs. Every resolution
+//     outcome exits 0 — including a failure, which comes back as
+//     `{ok:false,error,message}` with no `action`, because callers read the
+//     fields, not the code. The argv checks below are the one exception: they
+//     reject a malformed invocation before preflight runs, exiting 1 on the
+//     same `{ok:false,error,message}` shape every domain hatch already has a
+//     "relay `message` and stop" branch for.
 //
 //   bun domain-hatch.ts ensure-target <plugin-id> --target <local|committed>
 //     Creates or repairs state/hatch-options.json. Core owns this file; the
