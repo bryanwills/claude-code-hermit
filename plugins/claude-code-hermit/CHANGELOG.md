@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.34] - 2026-07-26
 
 ### Added
 - `proposal.ts quality-gate <state-dir> <proposal-file> [--files-json <json>]` — the single decider for whether an accepted-proposal implementation gets a `/claude-code-hermit:simplify` pass. Reads the tier from `config.json` and the category from the proposal's frontmatter rather than taking them from the caller, applies the session-bookkeeping filter, and returns one JSON verdict. All three consumers route through it. `--files-json` paths are repo-root-relative, the frame `git diff --name-only` emits.
