@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.7] - 2026-07-26
 
 ### Added
 - `ha updates --digest` emits tier-sorted, top-3-collapsed lines; both briefs consume it instead of rendering the list themselves. Default output is unchanged.
