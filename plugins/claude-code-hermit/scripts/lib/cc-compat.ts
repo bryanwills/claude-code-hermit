@@ -57,16 +57,29 @@ function hermitDir(): string {
   return path.resolve('.claude-code-hermit'); // fail-open: preserves today's behavior
 }
 
-// The main checkout's state dir, or null when git can't answer. In a worktree
-// `--git-common-dir` still points at the main `.git`, so this identifies the
-// one shared, intentionally main-rooted `.claude-code-hermit/`. It cannot name
-// a foreign project: git resolves it from our own cwd, never from argv.
+// The main checkout's state dir, or null when we are not in a LINKED worktree
+// (or git can't answer). In a worktree `--git-common-dir` still points at the
+// main `.git`, so this identifies the one shared, intentionally main-rooted
+// `.claude-code-hermit/`. It cannot name a foreign project: git resolves it
+// from our own cwd, never from argv.
+//
+// Gated on `--git-dir !== --git-common-dir` — true only in a linked worktree.
+// Without that gate the main checkout also gets a second accepted root, so a
+// hermit living in a SUBDIRECTORY of a repo would accept the repo root's
+// `.claude-code-hermit/` — a sibling hermit's state, i.e. exactly the
+// cross-project write this pin exists to block. In the main checkout
+// hermitDir()'s walk-up already resolves correctly, so gating loses nothing.
+// Both values are path.resolve()d before comparing: from a subdirectory of the
+// main checkout git answers with an absolute `--git-dir` but a relative
+// `--git-common-dir` (`/repo/.git` and `../.git`), which a raw string compare
+// would misread as a worktree.
 function mainCheckoutStateDir(): string | null {
   try {
-    const r = spawnSync('git', ['rev-parse', '--git-common-dir'], { timeout: 5000, encoding: 'utf8' });
-    const common = (r.stdout ?? '').trim();
-    if (!common) return null;
+    const r = spawnSync('git', ['rev-parse', '--git-dir', '--git-common-dir'], { timeout: 5000, encoding: 'utf8' });
+    const [gitDir, common] = (r.stdout ?? '').trim().split('\n').map(l => l.trim());
+    if (!gitDir || !common) return null;
     const abs = path.resolve(common);
+    if (path.resolve(gitDir) === abs) return null; // main checkout, not a worktree
     if (path.basename(abs) !== '.git') return null;
     return path.join(path.dirname(abs), '.claude-code-hermit');
   } catch {

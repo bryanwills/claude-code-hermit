@@ -433,6 +433,21 @@ async function verbRoutine(stateDir: string): Promise<void> {
 
 const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|event|success-signal|quality-gate';
 
+// The state dir is not caller-chosen. Every production call passes the literal
+// `.claude-code-hermit` from the project root; accepting an arbitrary root let
+// one pre-approved `Bash(bun */scripts/proposal.ts*)` call mutate — or read —
+// another project's proposal queue. Deliberately a usage error (stderr, exit 1)
+// rather than `fail()`: `fail()` writes `ERROR|<token>` to stdout, which would
+// corrupt the distinct stdout grammars several verbs own and callers branch on
+// (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|, `micro`
+// -> RESOLVED|). This also turns a drifted cwd into a loud failure instead of a
+// write against the wrong tree.
+function requirePinnedStateDir(dir: string): void {
+  if (assertStateDir(dir)) return;
+  console.error(`proposal.ts: state dir must be this project's (${hermitDir()}); got ${dir}`);
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   const verb = process.argv[2];
   const stateDir = process.argv[3];
@@ -441,10 +456,21 @@ async function main(): Promise<void> {
   // grammar check that reads no state at all — for those two, argv[3] is not a
   // state dir and the guard below must not demand one. Both take the whole tail
   // (argv[3] onward) so their own arg parsing is unchanged from when they were
-  // standalone scripts.
+  // standalone scripts. When they DO carry a state dir it is pinned like every
+  // other verb: both read hermit state (`state/proposal-metrics.jsonl`,
+  // `sessions/`) and print it, so an unpinned root turned one pre-approved call
+  // into a read of another project's queue and session costs. The positional
+  // lookups below mirror each module's own arg parsing.
   const tail = process.argv.slice(3);
-  if (verb === 'metrics') return runMetrics(tail);
-  if (verb === 'success-signal') return runSuccessSignal(tail);
+  if (verb === 'metrics') {
+    const positional = tail.find(a => !a.startsWith('--'));
+    if (positional !== undefined) requirePinnedStateDir(positional);
+    return runMetrics(tail);
+  }
+  if (verb === 'success-signal') {
+    if (tail[0] !== '--validate' && tail.length >= 4) requirePinnedStateDir(tail[0]);
+    return runSuccessSignal(tail);
+  }
   // `index` was fail-open before it was absorbed: a missing state dir answered
   // `SKIP|no state dir` on stdout at exit 0, never a usage error. Preserve that —
   // it is a derived-cache rebuild, and its callers treat a non-zero exit as a
@@ -459,19 +485,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // The state dir is not caller-chosen. Every production call passes the
-  // literal `.claude-code-hermit` from the project root; accepting an arbitrary
-  // root let one pre-approved `Bash(bun */scripts/proposal.ts*)` call mutate
-  // another project's proposal queue. Deliberately a usage error (stderr, exit
-  // 1) rather than `fail()`: `fail()` writes `ERROR|<token>` to stdout, which
-  // would corrupt the distinct stdout grammars several verbs own and callers
-  // branch on (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/
-  // NONE|, `micro` -> RESOLVED|). This also turns a drifted cwd into a loud
-  // failure instead of a write against the wrong tree.
-  if (!assertStateDir(stateDir)) {
-    console.error(`proposal.ts: state dir must be this project's (${hermitDir()}); got ${stateDir}`);
-    process.exit(1);
-  }
+  requirePinnedStateDir(stateDir);
 
   const rest = process.argv.slice(4);
   switch (verb) {

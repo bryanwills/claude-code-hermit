@@ -531,6 +531,62 @@ describe('proposal.ts state-dir pin', () => {
     expect(fs.existsSync(propPath(main, r.stdout.trim()))).toBe(true);
   }));
 
+  // The worktree carve-out is gated on actually being in a linked worktree.
+  // Ungated, a hermit living in a subdirectory of a repo also gets the repo
+  // root's `.claude-code-hermit/` as a second accepted root — a sibling
+  // hermit's state, which is the cross-project write the pin exists to block.
+  test('refuses the git root state dir from a subdirectory hermit in the main checkout', withDir(async (dir) => {
+    const git = (args: string[], cwd: string) =>
+      Bun.spawnSync({ cmd: ['git', ...args], cwd, stdout: 'pipe', stderr: 'pipe' });
+    git(['init', '-q', '-b', 'main'], dir);
+
+    // Sibling hermit at the git root; ours lives one level down, so hermitDir()
+    // walks up into it and never reaches the root one.
+    seedState(dir);
+    const sub = path.join(dir, 'sub');
+    fs.mkdirSync(path.join(sub, '.claude-code-hermit'), { recursive: true });
+    fs.writeFileSync(path.join(sub, '.claude-code-hermit', 'config.json'), '{}');
+
+    const created = await runScript('proposal.ts', {
+      args: ['create', '.claude-code-hermit'],
+      cwd: dir,
+      stdin: heredoc({ Title: 'Sibling prop' }, MIN_BODY),
+    });
+    const id = created.stdout.trim();
+    const before = fs.readFileSync(propPath(dir, id), 'utf-8');
+
+    const r = await runScript('proposal.ts', {
+      args: ['patch', path.join(dir, '.claude-code-hermit'), `${id}.md`, '--set', 'status=dismissed'],
+      cwd: sub,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('state dir must be');
+    expect(fs.readFileSync(propPath(dir, id), 'utf-8')).toBe(before);
+  }));
+
+  // `metrics` and `success-signal` take the whole argv tail (their state dir is
+  // optional / positionally different), so they bypassed the dispatcher guard.
+  // Both read hermit state and print it — an unpinned root made one
+  // pre-approved call a read of another project's queue and session costs.
+  test('refuses a foreign state dir on the read-only verbs too', withDir(async (mine) => {
+    seedState(mine);
+    await withDir(async (victim) => {
+      seedState(victim);
+      const env = { AGENT_DIR: stateArg(mine) };
+
+      const metrics = await runScript('proposal.ts', { args: ['metrics', stateArg(victim)], env });
+      expect(metrics.exitCode).toBe(1);
+      expect(metrics.stderr).toContain('state dir must be');
+
+      const signal = await runScript('proposal.ts', {
+        args: ['success-signal', stateArg(victim), '2026-01-01', 'S-001', 'avg_session_cost_usd < 5 over 7 sessions'],
+        env,
+      });
+      expect(signal.exitCode).toBe(1);
+      expect(signal.stderr).toContain('state dir must be');
+    })();
+  }));
+
   test('accepts the production shape: relative state dir resolved from cwd', withDir(async (dir) => {
     seedState(dir);
     const created = await runScript('proposal.ts', {
