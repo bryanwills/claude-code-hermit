@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0] - 2026-07-26
 
 ### Added
 - `fitness-brief` skill — daily morning/evening brief (`--morning|--evening|--slot <name>`), composed in the operator's configured voice. Morning is forward-looking (readiness + today's plan); evening is backward-looking (today's training, or an earned-rest note, + tomorrow's setup) and takes over `strava-sync`'s activity sync, RPE binding, and Run deep-dive. Flagging is intent-driven prose, not `strava-sync`'s fixed anomaly/fatigue thresholds.

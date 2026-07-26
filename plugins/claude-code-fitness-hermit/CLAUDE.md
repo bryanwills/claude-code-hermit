@@ -16,6 +16,7 @@ After install, run `/claude-code-fitness-hermit:hatch` in the target project. Th
 ## Plugin Structure
 
 - `skills/hatch/` — one-time setup wizard namespaced as `/claude-code-fitness-hermit:hatch`
+- `skills/fitness-brief/` — daily morning/evening brief (`/claude-code-fitness-hermit:fitness-brief --morning|--evening|--slot <name>`); owns Strava connectivity, activity sync, RPE binding, and Run deep-dive
 - `skills/activity-deep-dive/` — per-activity coaching analysis (`/claude-code-fitness-hermit:activity-deep-dive`)
 - `skills/capture-activity-rpe/` — auto-triggered RPE capture from channel replies (`/claude-code-fitness-hermit:capture-activity-rpe`)
 - `skills/set-rpe/` — manual RPE entry for any activity (`/claude-code-fitness-hermit:set-rpe`)

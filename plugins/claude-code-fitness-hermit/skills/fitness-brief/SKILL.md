@@ -1,6 +1,6 @@
 ---
 name: fitness-brief
-description: Composes and delivers the daily fitness brief — a forward-looking morning read (readiness + today's plan) or a backward-looking evening read (today's training, or an earned-rest note, + tomorrow's setup) — in the operator's configured voice. Invoke with /claude-code-fitness-hermit:fitness-brief --morning|--evening|--slot <name>. Becomes the plugin's two daily beats: the morning Strava connectivity check and the evening activity sync, RPE binding, and Run deep-dive.
+description: Composes and delivers the daily fitness brief — a forward-looking morning read (readiness + today's plan) or a backward-looking evening read (today's training, or an earned-rest note, + tomorrow's setup) — in the operator's configured voice. Invoke with /claude-code-fitness-hermit:fitness-brief --morning|--evening|--slot <name>. Becomes the plugin's two daily beats — the morning Strava connectivity check and the evening activity sync, RPE binding, and Run deep-dive.
 allowed-tools:
   - Read
   - Write
