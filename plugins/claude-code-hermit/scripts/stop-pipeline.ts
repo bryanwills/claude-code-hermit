@@ -7,9 +7,15 @@ import { run as sessionDiff } from './session-diff';
 import { run as evaluateSession } from './evaluate-session';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir } from './lib/cc-compat';
 import { readRuntimeJson } from './lib/runtime';
-import { tmuxSessionAlive, sendKeys } from './lib/tmux';
+import { capturePane, sendEnter, sendKeys, tmuxSessionAlive } from './lib/tmux';
 import { applyContextReset } from './lib/context-reset';
-import { readPendingCommand, clearPendingCommand, renderCommand } from './lib/harness-command';
+import {
+  MODEL_CONFIRM_RENDER_MS,
+  clearPendingCommand,
+  isModelSwitchConfirmation,
+  readPendingCommand,
+  renderCommand,
+} from './lib/harness-command';
 import { currentHHMMOrUTC } from './lib/time';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,6 +71,23 @@ function drainHarnessCommand(): void {
     return;
   }
   clearPendingCommand(HERMIT_DIR);
+
+  // Claude Code applies a model switch immediately when the session has no context.
+  // With cached context it instead renders a confirmation whose selected default is
+  // "Yes". The trusted channel command already authorized that exact switch, so confirm
+  // only the model-specific dialog immediately caused by this delivery. A capture miss,
+  // wording drift, or failed Enter leaves the pane untouched and never reissues /model.
+  if (pending.command === '/model') {
+    Bun.sleepSync(MODEL_CONFIRM_RENDER_MS);
+    const pane = capturePane(sessionName);
+    if (pane !== null && isModelSwitchConfirmation(pane)) {
+      if (sendEnter(sessionName)) {
+        console.error(`[stop-pipeline] harness-command: confirmed cached-context switch for "${text}"`);
+      } else {
+        console.error(`[stop-pipeline] harness-command: tmux refused model-switch confirmation for "${text}"`);
+      }
+    }
+  }
 
   // Bookkeeping AFTER the confirmed send, not before: a refused send keeps the marker for
   // the next turn, and a pre-send stamp would have recorded a reset that never happened —
