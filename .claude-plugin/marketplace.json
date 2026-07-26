@@ -134,7 +134,7 @@
       "name": "hermit-scribe",
       "source": "./plugins/hermit-scribe",
       "description": "Maintainer tool: file GitHub issues via a configured GitHub App bot identity.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "maintainer",
       "author": {
         "name": "gtapps",

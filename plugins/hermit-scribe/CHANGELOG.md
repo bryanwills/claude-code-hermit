@@ -1,12 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.1] - 2026-07-26
 
 ### Fixed
 - `hatch` wrote no `config.json` at all, so its CLAUDE-APPEND block was invisible to `hermit-evolve`'s registry-driven sync, and re-running `hatch` skipped unconditionally whenever the marker was already present — contradicting its own frontmatter promise ("re-run to refresh after an upgrade"). `hatch` now stamps `_hermit_versions["hermit-scribe"]` in `config.json` and version-gates the block refresh the same way the other domain hatches do.
 
 ### Changed
-- Requires core `>=1.2.30`; upgrade core with `/claude-code-hermit:hermit-evolve` before installing or running this release.
+- Requires core `>=1.2.34`; upgrade core with `/claude-code-hermit:hermit-evolve` before installing or running this release.
 - The CLAUDE-APPEND template gained a closing marker (`<!-- /hermit-scribe: Issue Filing -->`), so `hermit-evolve`'s block bounds are exact instead of heuristic.
 - The block names "the configured target repo" instead of the `HERMIT_GH_REPO` env var, and states sanitization as a rule rather than naming the subagent that performs it. Filing-through-the-skill and the operator-confirmation rule are unchanged.
 
