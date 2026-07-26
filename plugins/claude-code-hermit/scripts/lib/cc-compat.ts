@@ -101,18 +101,59 @@ function mainCheckoutStateDir(): string | null {
 // `AGENT_DIR=/tmp/x bun <dir>/scripts/literal.ts go` prompts for approval even
 // though the same command without the prefix is covered by a literal rule.
 //
-// Line comments, not a block comment: the grant strings above contain `*` and
-// `/` sequences that would close a block comment early.
-function assertStateDir(argvValue: string): string | null {
-  const resolved = path.resolve(argvValue);
-  if (resolved === hermitDir()) return resolved;
+// Two accepted roots — hermitDir() and, on a mismatch only, the main
+// checkout's state dir — apply to both the exact-match and the containment
+// form below, so the walk lives once here and each caller just supplies its
+// own comparison.
+function pinnedRoot(resolved: string, matches: (root: string) => boolean): string | null {
+  if (matches(hermitDir())) return resolved;
   // Worktree case. Hermit state is deliberately main-rooted and shared across
   // worktrees, so a worktree session legitimately passes the main checkout's
   // absolute path — but hermitDir()'s walk-up stops at the partial decoy state
   // dir a worktree carries, so the two disagree. Consulted only after a
   // mismatch, so the common path never spawns git.
   const main = mainCheckoutStateDir();
-  return main !== null && resolved === main ? resolved : null;
+  return main !== null && matches(main) ? resolved : null;
+}
+
+// Line comments, not a block comment: the grant strings above contain `*` and
+// `/` sequences that would close a block comment early.
+function assertStateDir(argvValue: string): string | null {
+  const resolved = path.resolve(argvValue);
+  return pinnedRoot(resolved, root => resolved === root);
+}
+
+// Sibling of assertStateDir() for callers whose argv is a FILE or subdirectory
+// under the state dir, not the state dir itself (e.g. update-reflection-state.ts's
+// state-file argument, generate-summary.ts's <hermit>/state argument). A caller
+// whose argv already equals a root also passes here, since containment includes
+// equality — a script that only ever receives the root itself should still use
+// the plain assertStateDir() so its error message names the expectation exactly.
+function assertUnderStateDir(argvValue: string): string | null {
+  const resolved = path.resolve(argvValue);
+  const isUnder = (root: string) => resolved === root || resolved.startsWith(root + path.sep);
+  return pinnedRoot(resolved, isUnder);
+}
+
+// Shared pin-or-exit tail for scripts reached through a wildcarded
+// `Bash(bun */scripts/<name>.ts*)` grant: assert the pin, and on a miss print
+// a scriptLabel-prefixed usage error to stderr and exit 1 — never a stdout
+// verdict, so it's safe regardless of a caller's own stdout grammar.
+function pinStateDirOrExit(argvValue: string, scriptLabel: string): string {
+  const pinned = assertStateDir(argvValue);
+  if (pinned) return pinned;
+  console.error(`${scriptLabel}: state dir must be this project's (${hermitDir()}); got ${argvValue}`);
+  process.exit(1);
+}
+
+// Containment counterpart for callers whose argv is a file or subdirectory
+// under the state dir, not the dir itself. `noun` names what argv represents
+// in the error message (e.g. "state dir", "state file").
+function pinUnderStateDirOrExit(argvValue: string, scriptLabel: string, noun: string): string {
+  const pinned = assertUnderStateDir(argvValue);
+  if (pinned) return pinned;
+  console.error(`${scriptLabel}: ${noun} must be under this project's state dir (${hermitDir()}); got ${argvValue}`);
+  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -468,6 +509,9 @@ export {
   // Project-root resolution
   hermitDir,
   assertStateDir,
+  assertUnderStateDir,
+  pinStateDirOrExit,
+  pinUnderStateDirOrExit,
   // Hook-payload accessors
   sessionId,
   transcriptPath,

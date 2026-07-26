@@ -339,36 +339,55 @@ describe('sync-block', () => {
 });
 
 describe('CLI contract', () => {
-  test('preflight prints JSON and exits 0 even when resolution fails', async () => {
+  // domain-hatch.ts no longer accepts --state-dir/--project-root/--plugin-list-file
+  // (removed so a pre-approved call can't be redirected at another project's
+  // state or fed a forged plugin list — see the script's header comment).
+  // What those flags used to let a test override is asserted at the library
+  // boundary instead: preflight()/ensureHatchTarget() take explicit roots
+  // directly, same as every other describe() block in this file.
+  test('preflight prints JSON and exits 0 even when resolution fails', () => {
     const s = scaffold();
-    const listFile = path.join(s.root, 'list.json');
-    fs.writeFileSync(listFile, s.stdinJson);
-    const r = await runScript('domain-hatch.ts', {
-      args: ['preflight', 'not-a-plugin', '--state-dir', s.hermit, '--project-root', s.root, '--plugin-list-file', listFile],
-      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot },
+    const res = preflight({
+      pluginId: 'not-a-plugin',
+      hermitDir: s.hermit,
+      projectRoot: s.root,
+      corePluginRoot: s.coreRoot,
+      stdinJson: s.stdinJson,
     });
-    expect(r.exitCode).toBe(0);
-    expect(JSON.parse(r.stdout).error).toBe('plugin_not_installed');
+    expect(res.error).toBe('plugin_not_installed');
   });
 
-  test('a plugin id that looks like a path is rejected', async () => {
+  // bad_target is CLI-only argv validation (ensureHatchTarget() has no
+  // equivalent check — it trusts its typed `target` param), and it exits
+  // before pluginList() is ever reached, so this stays a real CLI test.
+  test('a mutating verb exits non-zero on failure (bad --target)', async () => {
     const s = scaffold();
     const r = await runScript('domain-hatch.ts', {
-      args: ['preflight', '../../etc/passwd', '--state-dir', s.hermit, '--project-root', s.root],
-      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot },
+      args: ['ensure-target', PLUGIN, '--target', 'sideways'],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot, AGENT_DIR: s.hermit },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(JSON.parse(r.stdout).error).toBe('bad_target');
+  });
+
+  test('a plugin id that looks like a path is rejected (CLI-level check)', async () => {
+    const s = scaffold();
+    const r = await runScript('domain-hatch.ts', {
+      args: ['preflight', '../../etc/passwd'],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot, AGENT_DIR: s.hermit },
     });
     expect(r.exitCode).toBe(1);
     expect(JSON.parse(r.stdout).error).toBe('invalid_plugin_id');
   });
 
-  test('a mutating verb exits non-zero on failure', async () => {
+  test('unrecognized argv is rejected', async () => {
     const s = scaffold();
     const r = await runScript('domain-hatch.ts', {
-      args: ['ensure-target', PLUGIN, '--target', 'sideways', '--state-dir', s.hermit, '--project-root', s.root],
-      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot },
+      args: ['preflight', PLUGIN, '--state-dir', s.hermit],
+      env: { CLAUDE_PLUGIN_ROOT: s.coreRoot, AGENT_DIR: s.hermit },
     });
     expect(r.exitCode).toBe(1);
-    expect(JSON.parse(r.stdout).error).toBe('bad_target');
+    expect(JSON.parse(r.stdout).error).toBe('unexpected_args');
   });
 
   test('the script is on disk where hermit-exec.sh would dispatch it', () => {

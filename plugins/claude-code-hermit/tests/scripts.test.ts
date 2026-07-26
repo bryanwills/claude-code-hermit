@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript, runProposal, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
+import { runScript, runProposal, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, fixturesDir, withDir, type Workdir } from './helpers/workdir';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
 
@@ -1681,7 +1681,7 @@ describe('update-reflection-state', () => {
   /** Run the script against the workdir's state file and return the resulting JSON. */
   async function updateState(dir: string, payload: string) {
     const stateFile = hermit(dir, 'state', 'reflection-state.json');
-    const r = await runScript('update-reflection-state.ts', { args: [stateFile, payload] });
+    const r = await runPinnedScript('update-reflection-state.ts', hermit(dir), [stateFile, payload]);
     expect(r.exitCode).toBe(0);
     return readJson(stateFile);
   }
@@ -2335,7 +2335,7 @@ if(n%2===1) process.exit(1);
 // -------------------------------------------------------
 
 const runReflectPrecheck = (dir: string, opts: { cwd?: string; env?: Record<string, string> } = {}) =>
-  runScript('reflect-precheck.ts', { args: [hermit(dir), PLUGIN_ROOT], ...opts });
+  runPinnedScript('reflect-precheck.ts', hermit(dir), [hermit(dir), PLUGIN_ROOT], opts);
 
 function seedReflect(dir: string, stateJson: object) {
   write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');

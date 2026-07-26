@@ -12,7 +12,8 @@
 // `/reflect --quick` invocations, which need a deterministic hash to commit after processing,
 // not a gating decision (the skill is already loaded by the time this runs).
 //
-// Exit 0 always.
+// Exit 0 always, EXCEPT a foreign state-dir argv (see the pin below) — that is
+// a mis-invocation, not a runtime condition, so it exits 1 on stderr instead.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +24,7 @@ import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
 import { appendToProgressLog } from './lib/progress-log';
-import { costLogPath as resolveCostLog, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { pinStateDirOrExit, costLogPath as resolveCostLog, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 
 type Json = any;
 
@@ -32,13 +33,22 @@ function emit(verdict: string): never {
   process.exit(0);
 }
 
-const stateDir = process.argv[2];
+const stateDirArg = process.argv[2];
 const pluginRoot = process.argv[3];
 const flags = process.argv.slice(4);
 const quickMode = flags.includes('--quick');
 const forceMode = flags.includes('--force');
 
-if (!stateDir) emit('RUN|{}');
+// Missing is fail-open (existing behaviour); foreign is not — see header.
+if (!stateDirArg) emit('RUN|{}');
+
+// The state dir is not caller-chosen. Reachable through a pre-approved
+// `Bash(bun */scripts/reflect-precheck.ts*)` grant that covers every argument,
+// and this script forwards it on to archive-shell.ts, archive-raw.ts and
+// update-reflection-state.ts, so an unvalidated root would have reached all
+// three. Deliberately a usage error (stderr, exit 1), not a stdout verdict —
+// callers branch on the EMPTY|RUN|... grammar.
+const stateDir = pinStateDirOrExit(stateDirArg, 'reflect-precheck.ts');
 
 const readJSON = (p: string): Json => {
   try { return JSON.parse(fs.readFileSync(p, 'utf-8')); }

@@ -124,3 +124,28 @@ describe('generate-summary hook regenerates the index on a proposal write', () =
     expect(fs.existsSync(hermit(dir, 'state', 'proposals-index.json'))).toBe(false);
   });
 });
+
+// CLI mode only — hook mode above derives its path from a PostToolUse payload
+// for a write that already happened and is not reachable through the
+// pre-approved `Bash(bun */scripts/generate-summary.ts*)` grant. CLI mode is,
+// so an unvalidated `<hermit>/state` argv let one such call regenerate
+// (and read alert/proposal state into) another project's state-summary.md.
+describe('generate-summary CLI mode: state-dir pin', () => {
+  test('refuses a state dir belonging to another project', async () => {
+    const mine = makeDir();
+    const victim = makeDir();
+    fs.writeFileSync(hermit(victim, 'state', 'alert-state.json'), '{}');
+    const summaryPath = hermit(victim, 'state', 'state-summary.md');
+    fs.writeFileSync(summaryPath, 'victim content\n');
+    const before = fs.readFileSync(summaryPath, 'utf-8');
+
+    // AGENT_DIR pins hermitDir() to `mine`; argv still names the victim's state dir.
+    const r = await runScript('generate-summary.ts', {
+      args: [hermit(victim, 'state')],
+      env: { AGENT_DIR: hermit(mine) },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('state dir must be under');
+    expect(fs.readFileSync(summaryPath, 'utf-8')).toBe(before);
+  });
+});

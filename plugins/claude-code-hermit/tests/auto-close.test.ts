@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
+import { runScript, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { composeCompactSteeringMessage } from '../scripts/hermit-watchdog';
 
@@ -67,8 +67,12 @@ async function precheck(dir: string, opts: { now?: string; peek?: boolean } = {}
 }
 
 async function reflectPrecheck(dir: string): Promise<string> {
-  const r = await runScript('reflect-precheck.ts', {
-    args: ['.claude-code-hermit', PLUGIN_ROOT], cwd: dir,
+  // AGENT_DIR pins hermitDir() to THIS scratch project regardless of any
+  // ambient CLAUDE_PROJECT_DIR in the calling shell — same rationale as
+  // runProposal/runPinnedScript elsewhere. The relative './claude-code-hermit'
+  // positional + cwd is kept as-is: it mirrors the real production invocation.
+  const r = await runPinnedScript('reflect-precheck.ts', path.join(dir, '.claude-code-hermit'), ['.claude-code-hermit', PLUGIN_ROOT], {
+    cwd: dir,
   });
   return r.stdout.trim();
 }
