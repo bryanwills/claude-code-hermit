@@ -71,6 +71,35 @@ export async function runProposal(
   });
 }
 
+/**
+ * Invoke a script that pins its state-dir argv via cc-compat's
+ * assertStateDir()/assertUnderStateDir() — manifest-seed.ts, reflect-precheck.ts,
+ * update-reflection-state.ts, generate-summary.ts (CLI mode). Those scripts pin
+ * to hermitDir(), which in a test would resolve to this repo's own
+ * `.claude-code-hermit`, not the scratch fixture — an absolute AGENT_DIR is the
+ * sanctioned override (same rationale as runProposal above), set here once so
+ * call sites cannot drift back to redeclaring it individually.
+ *
+ * `stateDir` is the project's own hermit root even when `args` passes a subdir
+ * or file within it (update-reflection-state.ts's state file,
+ * generate-summary.ts's `<hermit>/state`) — AGENT_DIR always pins to the root;
+ * `args` is passed through untouched since each script's own positional shape
+ * differs. Tests that deliberately pass a foreign or missing state dir call
+ * runScript directly instead.
+ */
+export async function runPinnedScript(
+  script: string,
+  stateDir: string,
+  args: string[],
+  opts: Omit<RunOptions, 'args'> = {},
+): Promise<RunResult> {
+  return runScript(script, {
+    ...opts,
+    args,
+    env: { AGENT_DIR: path.resolve(stateDir), ...opts.env },
+  });
+}
+
 export async function runScript(script: string, opts: RunOptions = {}): Promise<RunResult> {
   const proc = Bun.spawn({
     cmd: [process.execPath, path.join(SCRIPTS_DIR, script), ...(opts.args ?? [])],

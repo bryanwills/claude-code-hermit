@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { finalize } from '../scripts/evolve-finalize';
-import { runScript } from './helpers/run';
+import { runScript, runPinnedScript } from './helpers/run';
 
 // Fake plugin root with plugin.json version "1.2.6" (shared, read-only across tests).
 let PR: string;
@@ -251,9 +251,7 @@ test('sibling first-= split: name and version parsed correctly', withProj(async 
 
 test('process exit 0 on success', withProj(async (dir) => {
   writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
-  const r = await runScript('evolve-finalize.ts', {
-    args: [dir, `--core=1.2.6`, `--plugin-root=${PR}`],
-  });
+  const r = await runPinnedScript('evolve-finalize.ts', dir, [dir, `--core=1.2.6`, `--plugin-root=${PR}`]);
   expect(r.exitCode).toBe(0);
   const out = JSON.parse(r.stdout);
   expect(out.ok).toBe(true);
@@ -262,9 +260,7 @@ test('process exit 0 on success', withProj(async (dir) => {
 
 test('process exit 1 on error (no_config)', withProj(async (dir) => {
   // No config.json
-  const r = await runScript('evolve-finalize.ts', {
-    args: [dir, `--core=1.2.6`, `--plugin-root=${PR}`],
-  });
+  const r = await runPinnedScript('evolve-finalize.ts', dir, [dir, `--core=1.2.6`, `--plugin-root=${PR}`]);
   expect(r.exitCode).toBe(1);
   const out = JSON.parse(r.stdout);
   expect(out.ok).toBe(false);
@@ -273,9 +269,7 @@ test('process exit 1 on error (no_config)', withProj(async (dir) => {
 
 test('process exit 1 on mismatch (core_version_mismatch)', withProj(async (dir) => {
   writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
-  const r = await runScript('evolve-finalize.ts', {
-    args: [dir, `--core=9.9.9`, `--plugin-root=${PR}`],
-  });
+  const r = await runPinnedScript('evolve-finalize.ts', dir, [dir, `--core=9.9.9`, `--plugin-root=${PR}`]);
   expect(r.exitCode).toBe(1);
   const out = JSON.parse(r.stdout);
   expect(out.ok).toBe(false);

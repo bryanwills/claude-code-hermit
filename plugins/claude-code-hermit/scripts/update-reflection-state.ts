@@ -18,11 +18,31 @@
 
 import fs from 'node:fs';
 import { resolveHermitNowMs } from './lib/time';
+import { pinUnderStateDirOrExit } from './lib/cc-compat';
 
 type Json = any;
 
-const stateFile = process.argv[2];
+const stateFileArg = process.argv[2];
 const arg3 = process.argv[3];
+
+// The state file is not caller-chosen. Unlike the other pinned scripts this
+// argument is a FILE inside the state dir, not the dir itself, so the guard
+// is containment, not equality. Reachable through a pre-approved
+// `Bash(bun */scripts/update-reflection-state.ts*)` grant that covers every
+// argument — this was the worst-shaped instance of the defect: an unvalidated
+// file path let one such call write arbitrary JSON at arbitrary depth on
+// disk, not just inside a project's own state dir. Missing stays a
+// downstream usage error (each branch below already checks it); only a
+// PRESENT-but-foreign path is refused here.
+//
+// Bounded to `<hermit>/state`, not the hermit root: every branch below reads
+// with a parse-failure fallback to `{}` and then rewrites the file whole, so a
+// root-wide bound would still let a pre-approved call replace OPERATOR.md,
+// sessions/SHELL.md or bin/hermit-run with a counters blob. The only argument
+// production ever passes is `state/reflection-state.json`.
+const stateFile = stateFileArg
+  ? pinUnderStateDirOrExit(stateFileArg, 'update-reflection-state', 'state file', 'state')
+  : stateFileArg;
 
 if (arg3 === '--quick-hash') {
   const hash = process.argv[4];

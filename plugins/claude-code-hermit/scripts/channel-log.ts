@@ -11,8 +11,8 @@
 // failure). Nonzero only on a genuine error against an existing DB, so
 // weekly-review can't mistake a no-op for completed work.
 
-import path from 'node:path';
 import { unconsolidated, markConsolidated, prune } from './lib/channel-log';
+import { pinStateDirOrExit } from './lib/cc-compat';
 
 function fail(message: string): never {
   process.stderr.write(`channel-log: ${message}\n`);
@@ -28,7 +28,11 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  const hermitDir = path.resolve(args[0]);
+  // The state dir is not caller-chosen. Reachable through a pre-approved
+  // `Bash(bun */scripts/channel-log.ts*)` grant that covers every argument, and
+  // mark-consolidated/prune both mutate: an unvalidated root let one such call
+  // stamp or delete rows in another project's channel log. See cc-compat.ts.
+  const hermitDir = pinStateDirOrExit(args[0], 'channel-log');
   const subcommand = args[1];
   const rest = args.slice(2);
 

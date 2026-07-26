@@ -18,20 +18,28 @@
 // proposal.ts. A metrics row is telemetry — it must never abort a skill step.
 
 import { emit, flagEq as flag, readStdin } from './lib/cli';
+import { pinStateDirOrExit } from './lib/cc-compat';
 import { CLI_SOURCES, appendObservation, resolveSessionId, type CliSource, type Origin } from './lib/observations';
 
 const USAGE = `Usage: bun observations.ts observe <hermit-state-dir> <${CLI_SOURCES.join('|')}> [--origin=own-work|external-content]
        <label on stdin>`;
 
 async function main(): Promise<void> {
-  const [verb, stateDir, source, ...rest] = process.argv.slice(2);
+  const [verb, stateDirArg, source, ...rest] = process.argv.slice(2);
 
   // A mis-invocation is not a resolved verdict — exit 1 so a broken call site is
   // loud in tests and CI rather than silently recording nothing.
-  if (verb !== 'observe' || !stateDir || !source) {
+  if (verb !== 'observe' || !stateDirArg || !source) {
     console.error(USAGE);
     process.exit(1);
   }
+
+  // The state dir is not caller-chosen. Reachable through a pre-approved
+  // `Bash(bun */scripts/observations.ts observe *)` grant that covers every
+  // argument after the verb, so an unvalidated root let one such call append
+  // model-authored rows to another project's observations ledger — the same
+  // mis-invocation class, and refused the same way. See cc-compat.ts.
+  const stateDir = pinStateDirOrExit(stateDirArg, 'observations');
 
   // Rejecting the computed sources here is what keeps ownership honest: cost-spike,
   // behavior-digest and startup-drift are derived from data the model does not hold,

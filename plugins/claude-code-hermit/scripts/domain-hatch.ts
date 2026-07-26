@@ -9,11 +9,16 @@
 // project-resident bin/hermit-run dispatcher is the route in.
 //
 // Usage:
-//   bun domain-hatch.ts preflight <plugin-id> [--project-root <p>] [--state-dir <d>]
+//   bun domain-hatch.ts preflight <plugin-id>
 //     Read-only. Prints one JSON verdict: which of the two stale-core cases
 //     applies (if any), whether this is a full run or a re-verify, the resolved
-//     CLAUDE target, and what the CLAUDE-APPEND block needs. Always exits 0 —
-//     callers read the fields, not the code.
+//     CLAUDE target, and what the CLAUDE-APPEND block needs. Every resolution
+//     outcome exits 0 — including a failure, which comes back as
+//     `{ok:false,error,message}` with no `action`, because callers read the
+//     fields, not the code. The argv checks below are the one exception: they
+//     reject a malformed invocation before preflight runs, exiting 1 on the
+//     same `{ok:false,error,message}` shape every domain hatch already has a
+//     "relay `message` and stop" branch for.
 //
 //   bun domain-hatch.ts ensure-target <plugin-id> --target <local|committed>
 //     Creates or repairs state/hatch-options.json. Core owns this file; the
@@ -25,6 +30,22 @@
 //     when rendered content is piped in and differs, refuses on a duplicated
 //     marker. Version-driven refresh stays hermit-evolve's.
 //
+// stateDir/projectRoot are always derived from hermitDir(), never argv: this
+// script is reachable through a pre-approved
+// `Bash(.claude-code-hermit/bin/hermit-run domain-hatch <verb> *)` grant that
+// covers every argument, so a `--state-dir`/`--project-root` override would
+// have let one such call point ensure-target/sync-block at another project's
+// state or CLAUDE.md. The plugin list is always live for the same reason: a
+// forged list (the removed `--plugin-list-file` test seam) steers
+// resolvePlugin() -> installPath -> planBlock(), which reads the CLAUDE-APPEND
+// block from that path and writes it into the operator's CLAUDE.md — a forged
+// list is attacker-authored content landing in the file that steers the agent.
+// Tests exercise this at the library boundary (lib/domain-hatch/*) with
+// explicit roots instead of shelling out to this CLI with overrides.
+//
+// Every verb's argv beyond <plugin-id> is allow-listed below; anything else
+// exits 1 with `unexpected_args` rather than being silently ignored.
+//
 // Verb dispatch is lazy: preflight is the hot path (every hatch run, including
 // the re-verify that changes nothing) and has no business loading the block
 // writer to do its job.
@@ -34,7 +55,6 @@
 
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
-import { flagValue } from './lib/cli';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -50,6 +70,7 @@ function die(code: string, message: string): never {
 const argv = process.argv.slice(2);
 const verb = argv[0];
 const pluginId = argv[1];
+const rest = argv.slice(2);
 
 if (!verb || !pluginId) {
   process.stderr.write('Usage: domain-hatch.ts <preflight|ensure-target|sync-block> <plugin-id> [args]\n');
@@ -63,9 +84,8 @@ if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(pluginId)) {
   die('invalid_plugin_id', `not a plugin id: ${pluginId}`);
 }
 
-const stateDir = flagValue(argv, '--state-dir') ?? hermitDir();
-const projectRoot = flagValue(argv, '--project-root') ?? path.resolve(stateDir, '..');
-const stdinJsonFile = flagValue(argv, '--plugin-list-file');
+const stateDir = hermitDir();
+const projectRoot = path.resolve(stateDir, '..');
 
 async function readStdinIfFlagged(flag: string): Promise<string | undefined> {
   if (!argv.includes(flag)) return undefined;
@@ -75,23 +95,18 @@ async function readStdinIfFlagged(flag: string): Promise<string | undefined> {
   return buf;
 }
 
-// Test seam shared by all three verbs: read the plugin list from a file so
-// tests never shell out to a live `claude`.
-async function readPluginListFile(): Promise<string | undefined> {
-  if (!stdinJsonFile) return undefined;
-  const fs = await import('node:fs');
-  try { return fs.readFileSync(stdinJsonFile, 'utf8'); } catch { return undefined; }
-}
-
 if (verb === 'preflight') {
+  if (rest.length) die('unexpected_args', `preflight takes no args beyond <plugin-id>: ${rest.join(' ')}`);
   const { preflight } = await import('./lib/domain-hatch/preflight');
-  const stdinJson = await readPluginListFile();
-  out(preflight({ pluginId, hermitDir: stateDir, projectRoot, corePluginRoot: PLUGIN_ROOT, stdinJson }));
+  out(preflight({ pluginId, hermitDir: stateDir, projectRoot, corePluginRoot: PLUGIN_ROOT }));
   process.exit(0);
 }
 
 if (verb === 'ensure-target') {
-  const target = flagValue(argv, '--target');
+  if (rest.length !== 2 || rest[0] !== '--target') {
+    die('unexpected_args', `ensure-target takes exactly --target <local|committed>: ${rest.join(' ')}`);
+  }
+  const target = rest[1];
   if (target !== 'local' && target !== 'committed') {
     die('bad_target', '--target must be local or committed');
   }
@@ -100,8 +115,7 @@ if (verb === 'ensure-target') {
     import('./lib/domain-hatch/resolve'),
     import('./resolve-siblings'),
   ]);
-  const stdinJson = await readPluginListFile();
-  const list = pluginList(stdinJson);
+  const list = pluginList();
   // The only thing this verb takes from the resolution is a version string for
   // the stamp, and that already has a fallback. Failing the whole write when
   // `claude plugin list` cannot be read would leave hatch-options.json
@@ -122,6 +136,9 @@ if (verb === 'ensure-target') {
 }
 
 if (verb === 'sync-block') {
+  if (rest.length && rest.join(' ') !== '--rendered-stdin') {
+    die('unexpected_args', `sync-block takes only an optional --rendered-stdin: ${rest.join(' ')}`);
+  }
   const [{ planBlock, applyBlock }, { readTargetState, targetFile }, { resolvePlugin, isResolveError, pluginList }, { coreScope }] =
     await Promise.all([
       import('./lib/domain-hatch/block'),
@@ -129,8 +146,7 @@ if (verb === 'sync-block') {
       import('./lib/domain-hatch/resolve'),
       import('./resolve-siblings'),
     ]);
-  const stdinJson = await readPluginListFile();
-  const list = pluginList(stdinJson);
+  const list = pluginList();
   const resolved = resolvePlugin(list, pluginId, projectRoot);
   if (isResolveError(resolved)) die(resolved.error, resolved.message);
 

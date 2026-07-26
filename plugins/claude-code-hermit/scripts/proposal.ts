@@ -78,7 +78,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readStdin, readJson, flagValue } from './lib/cli';
-import { assertStateDir, hermitDir } from './lib/cc-compat';
+import { pinStateDirOrExit } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, PATCH_KEY_RE } from './lib/md-write';
 import { computeBase, readTimezone, SUFFIX_LETTERS } from './lib/prop-id';
@@ -443,9 +443,7 @@ const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue
 // -> RESOLVED|). This also turns a drifted cwd into a loud failure instead of a
 // write against the wrong tree.
 function requirePinnedStateDir(dir: string): void {
-  if (assertStateDir(dir)) return;
-  console.error(`proposal.ts: state dir must be this project's (${hermitDir()}); got ${dir}`);
-  process.exit(1);
+  pinStateDirOrExit(dir, 'proposal.ts');
 }
 
 async function main(): Promise<void> {

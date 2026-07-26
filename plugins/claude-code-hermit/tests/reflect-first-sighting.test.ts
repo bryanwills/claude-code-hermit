@@ -14,7 +14,7 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { PLUGIN_ROOT, SCRIPTS_DIR, runScript } from './helpers/run';
+import { PLUGIN_ROOT, SCRIPTS_DIR, runScript, runPinnedScript } from './helpers/run';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +72,7 @@ function readObservations(hermitDir: string): Array<Record<string, unknown>> {
 }
 
 async function runPrecheck(hermitDir: string): Promise<string> {
-  const result = await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+  const result = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
   return result.stdout.trim();
 }
 
@@ -230,10 +230,18 @@ describe('reflect-precheck: drift capture', () => {
   });
 
   test('precheck is fail-open: exits 0 even when hermitDir is missing', async () => {
-    const result = await runScript('reflect-precheck.ts', {
-      args: ['/nonexistent/dir', PLUGIN_ROOT],
-    });
+    // Pinned to the SAME nonexistent path via AGENT_DIR, so this exercises the
+    // script's own fail-open handling of a state dir that doesn't exist on
+    // disk yet — not the state-dir pin's foreign-root refusal (a genuinely
+    // foreign root is asserted separately below).
+    const result = await runPinnedScript('reflect-precheck.ts', '/nonexistent/dir', ['/nonexistent/dir', PLUGIN_ROOT]);
     expect(result.exitCode).toBe(0);
+  });
+
+  test('a foreign state-dir argv is refused (exit 1, stderr)', async () => {
+    const result = await runScript('reflect-precheck.ts', { args: ['/nonexistent/dir', PLUGIN_ROOT] });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('reflect-precheck.ts');
   });
 
   test('no drift written when hermit dirs are clean', async () => {
@@ -547,7 +555,7 @@ describe('reflect-precheck: cost-spike observation', () => {
 
   test('writes one date-scoped row carrying the figures as fields', async () => {
     const hermitDir = makeSpikeProject([10]);
-    const r = await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+    const r = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
     expect(r.exitCode).toBe(0);
 
     const spikes = readObservations(hermitDir).filter(o => o.source === 'cost-spike');
@@ -562,13 +570,13 @@ describe('reflect-precheck: cost-spike observation', () => {
 
   test('a second run the same day with a higher running total still writes only one row', async () => {
     const hermitDir = makeSpikeProject([10]);
-    await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+    await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
 
     // Spend continues: today's total moves 10 → 25. Under a value-bearing label this
     // would be a brand-new pattern and a second row; under the date-scoped label the
     // dedup holds.
     writeCostLog(path.dirname(hermitDir), [10, 15]);
-    await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+    await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
 
     const spikes = readObservations(hermitDir).filter(o => o.source === 'cost-spike');
     expect(spikes).toHaveLength(1);
@@ -577,7 +585,7 @@ describe('reflect-precheck: cost-spike observation', () => {
 
   test('no row when today is not a spike', async () => {
     const hermitDir = makeSpikeProject([1]);
-    await runScript('reflect-precheck.ts', { args: [hermitDir, PLUGIN_ROOT] });
+    await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
     expect(readObservations(hermitDir).filter(o => o.source === 'cost-spike')).toHaveLength(0);
   });
 });

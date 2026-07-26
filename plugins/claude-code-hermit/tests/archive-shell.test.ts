@@ -332,3 +332,49 @@ test('no-tmp: no .tmp.<pid> snapshot leftover', async () => {
     wd.cleanup();
   }
 });
+
+// -------------------------------------------------------
+// 11. State-dir pin: archive-shell.ts has its own
+// `Bash(bun */scripts/archive-shell.ts*)` grant, so reflect-precheck.ts's pin
+// does NOT cover this route. A direct pre-approved call with a foreign
+// --state-dir would snapshot and truncate another project's SHELL.md and
+// rewrite its runtime.json (see docs/security.md § Script Argument Trust).
+// Only argv is pinned: HERMIT_STATE_DIR needs an env prefix, which falls
+// outside the grant and re-prompts.
+// -------------------------------------------------------
+describe('archive-shell: state-dir pin', () => {
+  test('refuses a --state-dir belonging to another project, writing nothing', async () => {
+    const mine = setupWorkdir();
+    const victim = setupWorkdir();
+    try {
+      const shellBefore = fs.readFileSync(shellPath(victim.dir), 'utf-8');
+      // AGENT_DIR pins hermitDir() to `mine`; argv still names `victim`.
+      const r = await runScript('archive-shell.ts', {
+        args: ['--source=routine', `--state-dir=${hermit(victim.dir)}`],
+        env: { AGENT_DIR: hermit(mine.dir), HERMIT_NOW: '2026-05-06T22:00:00Z' },
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('state dir must be');
+      expect(fs.readFileSync(shellPath(victim.dir), 'utf-8')).toBe(shellBefore);
+      expect(fs.existsSync(snapshots(victim.dir))).toBe(false);
+    } finally {
+      mine.cleanup();
+      victim.cleanup();
+    }
+  });
+
+  test('HERMIT_STATE_DIR is untouched by the pin — it is the sanctioned env override', async () => {
+    const wd = setupWorkdir();
+    try {
+      fs.writeFileSync(runtimePath(wd.dir), '{"session_state":"in_progress","last_shell_snapshot_at":null}\n');
+      const r = await runScript('archive-shell.ts', {
+        args: ['--source=routine'],
+        env: { HERMIT_STATE_DIR: hermit(wd.dir), HERMIT_NOW: '2026-05-06T22:00:00Z' },
+      });
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(r.stdout.trim()).archived).toBe(true);
+    } finally {
+      wd.cleanup();
+    }
+  });
+});

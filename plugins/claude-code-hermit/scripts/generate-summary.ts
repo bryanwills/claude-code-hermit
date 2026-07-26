@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { rebuildIndex } from './lib/proposals/index-rebuild';
 import { readMergedAlerts } from './lib/alert-state';
+import { pinUnderStateDirOrExit } from './lib/cc-compat';
 
 type Json = any;
 
@@ -188,7 +189,14 @@ fs.writeFileSync(OUTPUT, content, 'utf-8');
 // CLI mode: bun generate-summary.ts <state-dir-path>
 if (import.meta.main) {
   if (process.argv[2]) {
-    run(process.argv[2]);
+    // The state dir is not caller-chosen. CLI mode is reachable through a
+    // pre-approved `Bash(bun */scripts/generate-summary.ts*)` grant that
+    // covers every argument; hook mode below is unaffected — it derives its
+    // path from a PostToolUse payload for a write that already happened, and
+    // a hook is not reachable through that Bash grant. Containment, not
+    // equality: argv here is <hermit>/state, and the bound is that branch
+    // alone — nothing this mode writes lives outside it.
+    run(pinUnderStateDirOrExit(process.argv[2], 'generate-summary.ts', 'state dir', 'state'));
     process.exit(0);
   }
 

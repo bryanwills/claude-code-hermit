@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { sha256 } from './lib/hash';
+import { pinStateDirOrExit } from './lib/cc-compat';
 
 function die(msg: string): never {
   console.error(`manifest-seed: ${msg}`);
@@ -35,8 +36,13 @@ function isPlainObject(v: any): boolean {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
-const stateDir = process.argv[2];
-if (!stateDir) die('usage: bun manifest-seed.ts <hermit-state-dir>  (JSON payload on stdin)');
+const stateDirArg = process.argv[2];
+if (!stateDirArg) die('usage: bun manifest-seed.ts <hermit-state-dir>  (JSON payload on stdin)');
+// The state dir is not caller-chosen. Reachable through a pre-approved
+// `Bash(bun */scripts/manifest-seed.ts*)` grant that covers every argument, so
+// an unvalidated root let one such call seed a manifest into another project's
+// hermit state. See lib/cc-compat.ts assertStateDir().
+const stateDir = pinStateDirOrExit(stateDirArg, 'manifest-seed');
 
 function apply(raw: string): void {
   if (!raw) die('empty stdin — expected a JSON payload');

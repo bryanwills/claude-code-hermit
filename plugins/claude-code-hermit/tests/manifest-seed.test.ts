@@ -5,7 +5,7 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { runScript, runPinnedScript, PLUGIN_ROOT } from './helpers/run';
 import { withDir } from './helpers/workdir';
 import { sha256 } from '../scripts/lib/hash';
 
@@ -24,8 +24,7 @@ describe('manifest-seed: hashing + shape', () => {
     const f = path.join(dir, 'sample.txt');
     fs.writeFileSync(f, 'hello world\n');
 
-    const r = await runScript('manifest-seed.ts', {
-      args: [stateArg(dir)],
+    const r = await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
       stdin: JSON.stringify({ pluginVersion: '1.2.9', entries: [{ key: 'templates/a', file: f }] }),
     });
     expect(r.exitCode).toBe(0);
@@ -39,8 +38,7 @@ describe('manifest-seed: hashing + shape', () => {
   test('every written sha256 is 64-hex (shape evolve-plan validates)', withDir(async (dir) => {
     const f = path.join(dir, 'sample.txt');
     fs.writeFileSync(f, 'data');
-    await runScript('manifest-seed.ts', {
-      args: [stateArg(dir)],
+    await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
       stdin: JSON.stringify({ pluginVersion: '1.0.0', entries: [{ key: 'bin/x', file: f }] }),
     });
     const m = readManifest(dir);
@@ -66,8 +64,7 @@ describe('manifest-seed: foreign-key preservation', () => {
     const f = path.join(dir, 'a.txt');
     fs.writeFileSync(f, 'new content');
 
-    const r = await runScript('manifest-seed.ts', {
-      args: [stateArg(dir)],
+    const r = await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
       stdin: JSON.stringify({ pluginVersion: '1.2.9', entries: [{ key: 'templates/a', file: f }] }),
     });
     expect(r.exitCode).toBe(0);
@@ -91,8 +88,7 @@ describe('manifest-seed: keyPrefix/dir enumeration', () => {
     fs.writeFileSync(path.join(binSrc, 'hermit-stop'), '#!/usr/bin/env bun\n');
     fs.mkdirSync(path.join(binSrc, 'subdir')); // must be ignored (non-recursive, files only)
 
-    const r = await runScript('manifest-seed.ts', {
-      args: [stateArg(dir)],
+    const r = await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
       stdin: JSON.stringify({ pluginVersion: '1.0.0', entries: [{ keyPrefix: 'bin', dir: binSrc }] }),
     });
     expect(r.exitCode).toBe(0);
@@ -118,8 +114,7 @@ describe('manifest-seed: invalid existing manifest is fatal', () => {
       const f = path.join(dir, 'a.txt');
       fs.writeFileSync(f, 'x');
 
-      const r = await runScript('manifest-seed.ts', {
-        args: [stateArg(dir)],
+      const r = await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
         stdin: JSON.stringify({ pluginVersion: '1.2.9', entries: [{ key: 'templates/a', file: f }] }),
       });
       expect(r.exitCode).toBe(1);
@@ -139,11 +134,39 @@ describe('manifest-seed: malformed stdin is fatal', () => {
   ];
   for (const b of bad) {
     test(`${b.name} -> exit 1, no manifest written`, withDir(async (dir) => {
-      const r = await runScript('manifest-seed.ts', { args: [stateArg(dir)], stdin: b.stdin });
+      const r = await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], { stdin: b.stdin });
       expect(r.exitCode).toBe(1);
       expect(fs.existsSync(manifestPath(dir))).toBe(false);
     }));
   }
+});
+
+// manifest-seed.ts is reachable through a pre-approved
+// `Bash(bun */scripts/manifest-seed.ts*)` grant that covers every argument, so
+// an unvalidated root let one such call seed a manifest into another
+// project's hermit state (see docs/security.md § Script Argument Trust).
+describe('manifest-seed: state-dir pin', () => {
+  test('refuses a state dir belonging to another project', withDir(async (mine) => {
+    await withDir(async (victim) => {
+      fs.writeFileSync(
+        manifestPath(victim),
+        JSON.stringify({ version: 1, files: { 'templates/victim': { sha256: 'a'.repeat(64), plugin_version: '1.0.0' } } }) + '\n',
+      );
+      const before = fs.readFileSync(manifestPath(victim), 'utf8');
+      const f = path.join(victim, 'a.txt');
+      fs.writeFileSync(f, 'attacker content');
+
+      // AGENT_DIR pins hermitDir() to `mine`; argv still names `victim`.
+      const r = await runScript('manifest-seed.ts', {
+        args: [stateArg(victim)],
+        env: { AGENT_DIR: stateArg(mine) },
+        stdin: JSON.stringify({ pluginVersion: '9.9.9', entries: [{ key: 'templates/victim', file: f }] }),
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('state dir must be');
+      expect(fs.readFileSync(manifestPath(victim), 'utf8')).toBe(before);
+    })();
+  }));
 });
 
 // Contract: the three skills that call manifest-seed must hand it the intended

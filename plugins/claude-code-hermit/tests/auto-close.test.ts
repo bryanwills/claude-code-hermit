@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
+import { runScript, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { composeCompactSteeringMessage } from '../scripts/hermit-watchdog';
 
@@ -25,7 +25,12 @@ const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-her
 interface Tmp { dir: string; cleanup(): void }
 
 function makeDir(): Tmp {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-autoclose-'));
+  // realpath, not the raw mkdtemp value: reflectPrecheck() below sets AGENT_DIR
+  // from this path while passing a relative state dir the child resolves against
+  // process.cwd(), which is already symlink-resolved. On macOS os.tmpdir() is
+  // /var/folders/... behind a symlink to /private/var/folders/..., so the two
+  // sides would disagree and the pin would refuse a legitimate call.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-autoclose-')));
   fs.mkdirSync(hermit(dir, 'sessions'), { recursive: true });
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
   return {
@@ -67,8 +72,12 @@ async function precheck(dir: string, opts: { now?: string; peek?: boolean } = {}
 }
 
 async function reflectPrecheck(dir: string): Promise<string> {
-  const r = await runScript('reflect-precheck.ts', {
-    args: ['.claude-code-hermit', PLUGIN_ROOT], cwd: dir,
+  // AGENT_DIR pins hermitDir() to THIS scratch project regardless of any
+  // ambient CLAUDE_PROJECT_DIR in the calling shell — same rationale as
+  // runProposal/runPinnedScript elsewhere. The relative './claude-code-hermit'
+  // positional + cwd is kept as-is: it mirrors the real production invocation.
+  const r = await runPinnedScript('reflect-precheck.ts', path.join(dir, '.claude-code-hermit'), ['.claude-code-hermit', PLUGIN_ROOT], {
+    cwd: dir,
   });
   return r.stdout.trim();
 }
@@ -1006,8 +1015,7 @@ describe('auto-close-decision verb', () => {
   const pendingPath = (dir: string) => hermit(dir, 'state', 'pending-close.json');
 
   async function decide(dir: string, now: string = NOW) {
-    const r = await runScript('session-archive.ts', {
-      args: ['auto-close-decision', `--state-dir=${hermit(dir)}`],
+    const r = await runPinnedScript('session-archive.ts', hermit(dir), ['auto-close-decision', `--state-dir=${hermit(dir)}`], {
       env: { HERMIT_NOW: now, TZ: 'UTC' },
     });
     expect(r.exitCode).toBe(0);
