@@ -15,9 +15,8 @@ Runs a structural cost audit over the last 7 days of `cost-log.jsonl` and delive
 
 ## Step 0 — Channel reply
 
-Unless `$ARGUMENTS` contains `--maintainer`, if this skill was invoked from a channel-arrived message
-(the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool.
-Otherwise emit to conversation.
+On a channel-arrived message without `--maintainer` (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool.
+Otherwise, do not send a channel reply in Step 0; proceed and deliver the result via Step 2 (terminal/manual) or Step 3 (maintainer notice).
 
 ## Step 1 — Run the analyzer
 
