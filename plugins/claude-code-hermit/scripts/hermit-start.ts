@@ -55,7 +55,7 @@ const DEFAULT_CONFIG: Json = {
     { id: 'scheduled-checks', schedule: '5 9 * * *', skill: 'claude-code-hermit:reflect --scheduled-checks', run_during_waiting: true, enabled: true },
     { id: 'weekly-review', schedule: '0 23 * * 0', skill: 'claude-code-hermit:weekly-review', enabled: true },
     { id: 'daily-auto-close', schedule: '0 0 * * *', skill: 'claude-code-hermit:session-close --scheduled', model: 'haiku', run_during_waiting: true, enabled: true },
-    { id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor', model: 'haiku', run_during_waiting: true, enabled: true },
+    { id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor --maintainer', model: 'haiku', run_during_waiting: true, enabled: true },
   ],
   monitors: [],
   env: {
@@ -202,11 +202,10 @@ function loadConfig(): Json {
   return merged;
 }
 
-// One-way ratchet: an always-on boot upgrades a template-default weekly doctor
-// schedule to daily. Only touches the entry if it's still at a KNOWN default —
-// a custom schedule the operator set is left alone. Does not downgrade back to
-// weekly on stop; a box that reverts to interactive keeps daily doctor, which
-// is harmless.
+// One-way ratchet: an always-on boot upgrades template-default doctor fields.
+// Only exact known defaults move forward; operator-customized schedules and
+// skill arguments are left alone. Does not downgrade the schedule on stop; a
+// box that reverts to interactive keeps daily doctor, which is harmless.
 //
 // The set has three entries, not one, because it must recognize schedules from
 // every prior template generation: '0 10 * * 1' is the pre-clustering weekly
@@ -220,6 +219,8 @@ function loadConfig(): Json {
 // from interactive to always-on later).
 const KNOWN_DEFAULT_SCHEDULES = ['0 10 * * 1', '10 9 * * 1', '0 10 * * *'];
 const DOCTOR_DAILY_SCHEDULE = '10 9 * * *';
+const LEGACY_DOCTOR_SKILL = 'claude-code-hermit:hermit-doctor';
+const MAINTAINER_DOCTOR_SKILL = 'claude-code-hermit:hermit-doctor --maintainer';
 
 function applyAlwaysOnDoctorSchedule(config: Json): void {
   const routine = Array.isArray(config.routines)
@@ -227,6 +228,9 @@ function applyAlwaysOnDoctorSchedule(config: Json): void {
     : null;
   if (routine && KNOWN_DEFAULT_SCHEDULES.includes(routine.schedule)) {
     routine.schedule = DOCTOR_DAILY_SCHEDULE;
+  }
+  if (routine?.skill === LEGACY_DOCTOR_SKILL) {
+    routine.skill = MAINTAINER_DOCTOR_SKILL;
   }
 }
 

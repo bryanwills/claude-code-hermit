@@ -2578,7 +2578,7 @@ describe('doctor routine template contract', () => {
     const routine = template.routines.find((r: any) => r.id === 'doctor');
     expect(routine).toBeDefined();
     expect(routine.schedule).toBe('10 9 * * 1');
-    expect(routine.skill).toBe('claude-code-hermit:hermit-doctor');
+    expect(routine.skill).toBe('claude-code-hermit:hermit-doctor --maintainer');
     expect(routine.enabled).toBe(true);
 
     const { errors, warnings } = validate(template);
@@ -2706,8 +2706,28 @@ describe('proactive-notify unification contract', () => {
   test('cost-reflect Step 3 (proactive) routes through --notice', () => {
     const costReflect = read(path.join(SKILLS, 'cost-reflect', 'SKILL.md'));
     const step3 = costReflect.slice(costReflect.indexOf('## Step 3'));
+    expect(costReflect).toContain('Automated (`--maintainer`)');
+    expect(costReflect).toContain('claude-code-hermit:cost-reflect --maintainer');
     expect(step3).toContain('channel-send.ts');
     expect(step3).toContain('--notice');
+    expect(step3).toContain('`maintainer` leg only (no `client` leg)');
+  });
+
+  test('doctor manual and automated delivery modes stay distinct', () => {
+    const doctor = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
+    expect(doctor).toContain('Manual (no arguments)');
+    expect(doctor).toContain('Automated (`--maintainer`)');
+    expect(doctor).toContain('Never include a `client` leg');
+    expect(doctor).toContain('Without `--maintainer`, do not call `channel-send.ts`');
+  });
+
+  test('hermit-evolve uses explicit unattended as the maintainer delivery signal', () => {
+    const evolve = read(path.join(SKILLS, 'hermit-evolve', 'SKILL.md'));
+    expect(evolve).toContain('Only the explicit `unattended` argument authorizes a proactive maintainer notification');
+    expect(evolve).toContain('delivery *direct-channel-reply*');
+    expect(evolve).toContain('`{\"maintainer\":\"<complete condensed result>\"}`');
+    expect(evolve).toContain('no `client` leg');
+    expect(evolve).toContain('hermit-routines load');
   });
 
   test('weekly-review proactive delivery routes through --notice', () => {

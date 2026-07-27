@@ -4,6 +4,7 @@
 
 ### Fixed
 - A trusted channel `/model <arg>` or `/effort <arg>` no longer stalls on Claude Code's cached-context confirmation. The Stop hook recognizes only the freshly-triggered, command-specific switch dialog and confirms its selected `Yes`; direct switches still complete without an extra keypress, and unrelated native prompts remain untouched.
+- Automated maintenance reports no longer duplicate into the primary operator chat when a maintainer channel is configured: the default doctor routine uses `--maintainer`, unattended evolve reports are maintainer-only, and manual doctor/evolve/cost-reflect invocations reply only where they were requested.
 
 ## [1.2.34] - 2026-07-26
 
@@ -91,6 +92,7 @@
 2. Run `bun <plugin_root>/scripts/apply-settings.ts <settings-file> permissions-sync` against the install's settings file (`.claude/settings.local.json` for a `local` hatch target, `.claude/settings.json` for `committed`). This is now the one step that reconciles permissions: it adds every sealed entry the install is missing — including `channel-send.ts`, new this version — and scrubs entries from retired plugin versions: `next-prop-id.ts`, `append-metrics.ts` (deleted this version; replaced by the narrower `observations.ts observe *` grant), the five proposal satellites absorbed into `proposal.ts` verbs, and the two pre-absorption `hermit-run` routes. It replaces the per-entry "re-run hatch so X lands in the allow-list" instructions.
 3. If `claude-code-dev-hermit` is installed and its CLAUDE.md/CLAUDE.local.md contains the literal string `<!-- mode:standard-only -->`, a prior version of `hermit-evolve` hit the marker-discovery bug above and appended the raw, un-rendered dev-hermit template. Remove the entire stray block (from the first `<!-- mode:standard-only -->` or `<!-- mode:safety-only -->` line it introduced through the end of that appended region) — the correctly-rendered `<!-- claude-code-dev-hermit: Development Workflow -->` block elsewhere in the file is unaffected and should be left in place.
 4. If an operator customized their CLAUDE-APPEND block in place (core, `hermit-scribe`, or `claude-code-dev-hermit`), note that the next version-gap sync for that plugin will replace it with the shipped template now that closing markers make the block bounds authoritative — re-apply any customization after that sync.
+5. In `.claude-code-hermit/config.json`, find the routine with `id: "doctor"`. If and only if its `skill` is exactly `"claude-code-hermit:hermit-doctor"`, replace it with `"claude-code-hermit:hermit-doctor --maintainer"`. Preserve its schedule, model, enabled state, and every other field. A skill string with any existing arguments is operator-customized — leave it untouched. The main evolve loop re-runs `/claude-code-hermit:hermit-routines load` after a successful always-on upgrade so fallback CronCreates pick up the changed invocation immediately; the boot-time doctor ratchet applies the same exact-match rewrite as a backstop.
 
 ## [1.2.33] - 2026-07-24
 

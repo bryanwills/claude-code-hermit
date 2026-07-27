@@ -6,19 +6,30 @@ description: "The 'why is my bill high' skill: audits where spend goes across to
 
 Runs a structural cost audit over the last 7 days of `cost-log.jsonl` and delivers the result to the operator. The math is done by a script — your job is to run it and deliver the output through the right channel.
 
+## Invocation mode
+
+- **Manual (no arguments):** reply only to the invoking terminal or channel conversation.
+- **Automated (`--maintainer`):** produce the full technical report and send it as a maintainer-tier
+  notice. Existing routine/proactive invocations without the flag retain this behavior for backward
+  compatibility, but new routine configuration should pass `--maintainer` explicitly.
+
 ## Step 0 — Channel reply
 
-If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool. Otherwise emit to conversation.
+Unless `$ARGUMENTS` contains `--maintainer`, if this skill was invoked from a channel-arrived message
+(the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool.
+Otherwise emit to conversation.
 
 ## Step 1 — Run the analyzer
 
-On a channel-tagged turn (Step 0 detected a `<channel source="...">` tag), run the plain-language mode instead of the full breakdown — a channel operator asking "why is my bill high" shouldn't get raw token-category jargon:
+On a channel-tagged turn without `--maintainer` (Step 0 detected a `<channel source="...">` tag), run
+the plain-language mode instead of the full breakdown — a channel operator asking "why is my bill
+high" shouldn't get raw token-category jargon:
 
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts reflect .claude-code-hermit --plain
 ```
 
-Otherwise (terminal/dev use), run the full breakdown:
+Otherwise (terminal/dev use or `--maintainer`), run the full breakdown:
 
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts reflect .claude-code-hermit
@@ -34,7 +45,10 @@ Capture stdout. If the output starts with "No cost data" or "No spend recorded y
 
 ## Step 3 — Channel delivery
 
-When this skill fires from a routine or proactively (i.e., not from a direct operator conversation), deliver the report through the operator's channel. Spend detail is maintainer-tier by definition, so send it as the `maintainer` leg only (no `client` leg):
+When `$ARGUMENTS` contains `--maintainer`, deliver the report through the operator's channel.
+For backward compatibility, do the same when the invocation is clearly from an existing routine or
+proactive prompt without the flag (i.e., not from a direct operator conversation). Spend detail is
+maintainer-tier by definition, so send it as the `maintainer` leg only (no `client` leg):
 
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
@@ -45,7 +59,9 @@ To set a preferred channel, add `"primary": "<channel-name>"` inside `channels` 
 
 ## Notes
 
-- **Scheduling:** this skill doesn't self-register a routine. To run it weekly, add it via `/claude-code-hermit:hermit-settings` — a Sunday 22:00 cadence (`0 22 * * 0`) before weekly-review works well.
+- **Scheduling:** this skill doesn't self-register a routine. To run it weekly, add
+  `claude-code-hermit:cost-reflect --maintainer` via `/claude-code-hermit:hermit-settings` — a
+  Sunday 22:00 cadence (`0 22 * * 0`) before weekly-review works well.
 - **What it measures:** token-type cost composition (cache_read / cache_write / output / input), per-model breakdown (shown when ≥2 models appear, e.g. Sonnet main + Haiku heartbeat), cold-start turns (context warm-ups with no prior cache hit), and per-session cost attribution. For week-over-week totals and autonomy trends, use `/claude-code-hermit:hermit-evolution` instead.
 - **`--plain` mode** (channel-tagged turns only): today's spend vs. a trailing-7-day typical day, drivers named by work (not token type), spend-cap status, and a one-line notional-dollars caveat. No token categories, session IDs, or internal IDs.
 - **Non-technical installs** (`config.operator_profile === 'non-technical'`): a client-chat spend question never reaches this skill, since `channel-responder` deflects it with a plain "handled by your provider" reply. Spend figures stay maintainer-side (terminal, maintainer chat, weekly review), so a channel-tagged run here is expected only from a maintainer-audience surface.
