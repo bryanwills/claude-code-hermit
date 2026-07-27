@@ -6,6 +6,7 @@ import {
   isHarnessSwitchConfirmation,
   writePendingCommand,
 } from '../scripts/lib/harness-command';
+import { pidAlive } from '../scripts/lib/lockfile';
 import { runScript } from './helpers/run';
 import { withDir } from './helpers/workdir';
 
@@ -61,12 +62,13 @@ function installFakeTmux(
   dir: string,
   pane: string,
   opts: { failLiteral?: boolean; failSecondEnter?: boolean; revealAfterCapture?: number } = {},
-): { bin: string; log: string } {
+): { bin: string; log: string; helperPid: string } {
   const bin = path.join(dir, 'fake-bin');
   const log = path.join(dir, 'tmux-calls.log');
   const paneFile = path.join(dir, 'pane.txt');
   const enterCount = path.join(dir, 'enter-count');
   const captureCount = path.join(dir, 'capture-count');
+  const helperPid = path.join(dir, 'helper-pid');
   fs.mkdirSync(bin);
   fs.writeFileSync(paneFile, pane);
   fs.writeFileSync(path.join(bin, 'tmux'), `#!/usr/bin/env bash
@@ -74,6 +76,7 @@ printf '%s\\n' "$*" >> "${log}"
 case "$1" in
   has-session) exit 0 ;;
   capture-pane)
+    printf '%s' "$PPID" > "${helperPid}"
     count=0
     [[ -f "${captureCount}" ]] && count=$(cat "${captureCount}")
     count=$((count + 1))
@@ -96,7 +99,7 @@ esac
 exit 1
 `);
   fs.chmodSync(path.join(bin, 'tmux'), 0o755);
-  return { bin, log };
+  return { bin, log, helperPid };
 }
 
 async function drain(dir: string, bin: string) {
@@ -109,6 +112,20 @@ async function drain(dir: string, bin: string) {
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
+}
+
+async function waitForVerifierExit(helperPid: string, timeoutMs = 4_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let pid: number | null = null;
+  while (Date.now() < deadline) {
+    if (pid === null && fs.existsSync(helperPid)) {
+      const parsed = Number(fs.readFileSync(helperPid, 'utf-8'));
+      if (Number.isInteger(parsed) && parsed > 0) pid = parsed;
+    }
+    if (pid !== null && !pidAlive(pid)) return;
+    await Bun.sleep(25);
+  }
+  throw new Error('detached harness-switch verifier did not exit before the test deadline');
 }
 
 describe('harness-switch confirmation matcher', () => {
@@ -164,10 +181,10 @@ describe('Stop hook harness-switch delivery', () => {
       seedPendingSwitch(dir, command, arg);
       // The real TUI cannot render this dialog until the Stop hook exits. Make the
       // first detached capture miss so a one-shot synchronous implementation fails.
-      const { bin, log } = installFakeTmux(dir, pane, { revealAfterCapture: 2 });
+      const { bin, log, helperPid } = installFakeTmux(dir, pane, { revealAfterCapture: 2 });
 
       const result = await drain(dir, bin);
-      await Bun.sleep(400);
+      await waitForVerifierExit(helperPid);
 
       expect(result.exitCode).toBe(0);
       const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
@@ -179,10 +196,10 @@ describe('Stop hook harness-switch delivery', () => {
 
     test(`${label}: direct switch does not receive an extra Enter`, withDir(async (dir) => {
       seedPendingSwitch(dir, command, arg);
-      const { bin, log } = installFakeTmux(dir, 'Claude ready');
+      const { bin, log, helperPid } = installFakeTmux(dir, 'Claude ready');
 
       const result = await drain(dir, bin);
-      await Bun.sleep(400);
+      await waitForVerifierExit(helperPid);
 
       expect(result.exitCode).toBe(0);
       const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
@@ -193,10 +210,10 @@ describe('Stop hook harness-switch delivery', () => {
     test(`${label}: stale matching confirmation does not receive an extra Enter`, withDir(async (dir) => {
       seedPendingSwitch(dir, command, arg);
       const stalePane = `${pane}\nClaude ready${'\n'.repeat(20)}`;
-      const { bin, log } = installFakeTmux(dir, stalePane);
+      const { bin, log, helperPid } = installFakeTmux(dir, stalePane);
 
       const result = await drain(dir, bin);
-      await Bun.sleep(400);
+      await waitForVerifierExit(helperPid);
 
       expect(result.exitCode).toBe(0);
       const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
@@ -206,14 +223,14 @@ describe('Stop hook harness-switch delivery', () => {
 
     test(`${label}: unrelated dialog is never answered`, withDir(async (dir) => {
       seedPendingSwitch(dir, command, arg);
-      const { bin, log } = installFakeTmux(dir, `
+      const { bin, log, helperPid } = installFakeTmux(dir, `
 Permission required
 ❯ 1. Yes, allow once
   2. No, go back
 `);
 
       const result = await drain(dir, bin);
-      await Bun.sleep(400);
+      await waitForVerifierExit(helperPid);
 
       expect(result.exitCode).toBe(0);
       const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
@@ -233,10 +250,10 @@ Permission required
 
     test(`${label}: failed confirmation does not reissue the command`, withDir(async (dir) => {
       seedPendingSwitch(dir, command, arg);
-      const { bin, log } = installFakeTmux(dir, pane, { failSecondEnter: true });
+      const { bin, log, helperPid } = installFakeTmux(dir, pane, { failSecondEnter: true });
 
       const result = await drain(dir, bin);
-      await Bun.sleep(400);
+      await waitForVerifierExit(helperPid);
 
       expect(result.exitCode).toBe(0);
       const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');

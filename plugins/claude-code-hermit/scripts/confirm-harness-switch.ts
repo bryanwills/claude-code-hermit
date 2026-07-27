@@ -18,10 +18,12 @@ const deadline = Date.now() + timeoutMs;
 
 while (Date.now() < deadline) {
   await Bun.sleep(100);
-  if (!tmuxSessionAlive(sessionName)) process.exit(1);
-
   const pane = capturePane(sessionName);
-  if (pane !== null && isHarnessSwitchConfirmation(command, pane)) {
+  if (pane === null) {
+    if (!tmuxSessionAlive(sessionName)) process.exit(1);
+    continue;
+  }
+  if (isHarnessSwitchConfirmation(command, pane)) {
     process.exit(sendEnter(sessionName) ? 0 : 1);
   }
 }
