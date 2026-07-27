@@ -3,7 +3,9 @@
 ## [Unreleased]
 
 ### Fixed
-- A trusted channel `/model <arg>` or `/effort <arg>` no longer stalls on Claude Code's cached-context confirmation. The Stop hook recognizes only the freshly-triggered, command-specific switch dialog and confirms its selected `Yes`; direct switches still complete without an extra keypress, and unrelated native prompts remain untouched.
+- A trusted channel `/model <arg>` or `/effort <arg>` no longer stalls on Claude Code's cached-context confirmation. A bounded check runs after the Stop hook returns, tolerates blank renderer rows, and confirms only the command-specific dialog still active at the bottom of the pane; direct switches and stale confirmations in scrollback never receive an extra keypress.
+- The watchdog now recognizes a live native permission/Ask modal even when `tmux capture-pane` includes blank terminal rows below it, while stale modal text followed by even a few lines of progress no longer suppresses recovery.
+- Routine Monitor registration now carries the narrow `routine-monitor.sh` permission grant and passes an absolute state path, avoiding Claude Code's `simple_expansion` approval so configured monitors can start unattended.
 - Automated doctor reports prefer the configured maintainer channel while legacy no-argument doctor invocations keep notifying the primary operator. Unattended evolve is maintainer-only, and direct evolve/cost-reflect requests reply where invoked.
 
 ### Upgrade Instructions

@@ -149,4 +149,15 @@ describe('sealed registries', () => {
     expect(HERMIT_ALLOW).toContain('Bash(bun */scripts/observations.ts observe *)');
     expect(HERMIT_OBSOLETE).toContain('Bash(bun */scripts/append-metrics.ts*)');
   });
+
+  test('the routine Monitor subprocess is granted without widening to arbitrary shell scripts', () => {
+    expect(HERMIT_ALLOW).toContain('Bash(bash */scripts/routine-monitor.sh *)');
+    expect(HERMIT_ALLOW).not.toContain('Bash(bash */scripts/*.sh *)');
+  });
+
+  test('the routine Monitor command uses an absolute state path without shell expansion', () => {
+    const skill = fs.readFileSync(path.join(import.meta.dir, '..', 'skills', 'hermit-routines', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('routine-monitor.sh 60 <abs-project-dir>/.claude-code-hermit');
+    expect(skill).not.toContain('routine-monitor.sh 60 $PWD/.claude-code-hermit');
+  });
 });

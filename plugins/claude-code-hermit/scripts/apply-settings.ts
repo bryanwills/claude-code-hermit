@@ -62,6 +62,9 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/transcript-digest.ts*)',
   'Bash(bun */scripts/setup-token-mint.ts*)',
   'Bash(bun */scripts/routines.ts tz-shift*)',
+  // Monitor evaluates its subprocess command against command permissions.
+  // Keep this grant pinned to the one shipped monitor script.
+  'Bash(bash */scripts/routine-monitor.sh *)',
   'Bash(bun */scripts/evolve-plan.ts*)',
   'Bash(bun */scripts/evolve-finalize.ts*)',
   'Bash(bun */scripts/manifest-seed.ts*)',

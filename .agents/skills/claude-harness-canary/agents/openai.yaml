@@ -1,0 +1,6 @@
+interface:
+  display_name: "Claude Harness Canary"
+  short_description: "Probe current Claude against core contracts"
+  default_prompt: "Use $claude-harness-canary to run the core Claude Code compatibility canary before release."
+policy:
+  allow_implicit_invocation: false

@@ -462,10 +462,21 @@ describe('hasPendingQuestion tail-scan (#8 false-positive guard)', () => {
     expect(hasPendingQuestion(PENDING_QUESTION_PANE)).toBe(true);
   });
 
+  test('a genuine modal still matches with blank terminal rows below it', () => {
+    // Claude 2.1.220 leaves the unused rows of a 50-line pane blank below a
+    // short native permission dialog. capture-pane includes those rows.
+    expect(hasPendingQuestion(`${PENDING_QUESTION_PANE}\n${'\n'.repeat(20)}`)).toBe(true);
+  });
+
   test('the same tokens in scrollback, followed by clean output, do NOT match', () => {
     // A menu / quoted output that scrolled up, then 20 lines of ordinary activity.
     const scrollback = '❯ 1. Red\nEsc to cancel\n' + Array.from({ length: 20 }, (_, i) => `running step ${i}...`).join('\n');
     expect(hasPendingQuestion(scrollback)).toBe(false);
+  });
+
+  test('stale modal followed by short progress and blank terminal rows does NOT match', () => {
+    const progress = Array.from({ length: 6 }, (_, i) => `running step ${i}...`).join('\n');
+    expect(hasPendingQuestion(`${PENDING_QUESTION_PANE}\n${progress}${'\n'.repeat(20)}`)).toBe(false);
   });
 
   test('ordinary output that merely quotes one token does not match', () => {
@@ -573,6 +584,22 @@ test('pending dialog + stale heartbeat + operator silent → notify only, no sen
   } finally {
     stub.stop();
   }
+}));
+
+test('stale dialog scrollback + stale heartbeat → normal nudge recovery continues', withHermit(async (h) => {
+  writeConfig(h);
+  const progress = Array.from({ length: 6 }, (_, i) => `running step ${i}...`).join('\n');
+  writeFakeTmux(h, 0, `${PENDING_QUESTION_PANE}\n${progress}${'\n'.repeat(20)}`);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).not.toContain('stall-question-detected');
+  expect(events).toContain('nudge');
+  expect(fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')).toContain('send-keys');
 }));
 
 // -------------------------------------------------------
