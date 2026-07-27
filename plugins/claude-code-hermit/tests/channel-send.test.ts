@@ -242,16 +242,33 @@ describe('sendOperatorNotice tiering', () => {
   };
   const findings = (wd: Workdir) => fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf8');
 
-  test('maintainer target hit: same token, route maintainer_channel', async () => {
+  test('fallback:primary + maintainer target hit: same token, route maintainer_channel', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir({ maintainer_channel_id: '99999' });
     try {
       const res = await withApi(stub.url, () =>
-        sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'MAINT', fallback: 'client' } }));
+        sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'MAINT', fallback: 'primary' } }));
       expect(res.maintainer).toMatchObject({ ok: true, route: 'maintainer_channel' });
       expect(stub.requests.length).toBe(1);
       expect(stub.requests[0].body.chat_id).toBe('99999');
       expect(stub.requests[0].path).toContain('bottest-token'); // same bot token as the client route
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('fallback:primary + non-technical + no maintainer channel -> primary chat', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir({}, { operator_profile: 'non-technical' });
+    try {
+      const res = await withApi(stub.url, () =>
+        sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'DOCTOR ALERT', fallback: 'primary' } }));
+      expect(res.maintainer).toMatchObject({ ok: true, route: 'client', delivered: true });
+      expect(stub.requests.length).toBe(1);
+      expect(stub.requests[0].body.chat_id).toBe('12345');
+      expect(stub.requests[0].body.text).toBe('DOCTOR ALERT');
+      expect(findings(wd)).not.toContain('DOCTOR ALERT');
     } finally {
       stub.stop();
       wd.cleanup();
@@ -290,13 +307,13 @@ describe('sendOperatorNotice tiering', () => {
     }
   });
 
-  test('failed maintainer send -> Findings, never the client chat (fallback:client honored as intent)', async () => {
+  test('fallback:primary + failed maintainer send -> Findings, never the client chat', async () => {
     const stub = startHttpStub();
     stub.setStatus(500);
     const wd = setupChannelWorkdir({ maintainer_channel_id: '99999' });
     try {
       const res = await withApi(stub.url, () =>
-        sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'USD DETAIL', fallback: 'client' } }));
+        sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'USD DETAIL', fallback: 'primary' } }));
       // Degraded fallback: configured maintainer channel unreachable → delivered:false.
       expect(res.maintainer).toMatchObject({ ok: true, route: 'findings', suppressed: true, delivered: false });
       // Only the failed 500 to the maintainer chat — never a spill to the primary.
@@ -466,6 +483,24 @@ describe('channel-send CLI --notice', () => {
       expect(out.delivered).toBe(true);
       expect(stub.requests.length).toBe(0);
       expect(findings(wd)).toContain('SECRET DETAIL');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('fallback:primary, non-technical, no maintainer chat -> primary chat, exit 0', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir({}, { operator_profile: 'non-technical' });
+    try {
+      const r = await runNotice(wd, { maintainer: 'DOCTOR ALERT', fallback: 'primary' }, stub);
+      expect(r.exitCode).toBe(0);
+      const out = JSON.parse(r.stdout);
+      expect(out.delivered).toBe(true);
+      expect(stub.requests.length).toBe(1);
+      expect(stub.requests[0].body.chat_id).toBe('12345');
+      expect(stub.requests[0].body.text).toBe('DOCTOR ALERT');
+      expect(findings(wd)).not.toContain('DOCTOR ALERT');
     } finally {
       stub.stop();
       wd.cleanup();

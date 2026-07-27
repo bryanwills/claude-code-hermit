@@ -4,6 +4,10 @@
 
 ### Fixed
 - A trusted channel `/model <arg>` or `/effort <arg>` no longer stalls on Claude Code's cached-context confirmation. The Stop hook recognizes only the freshly-triggered, command-specific switch dialog and confirms its selected `Yes`; direct switches still complete without an extra keypress, and unrelated native prompts remain untouched.
+- Automated doctor reports prefer the configured maintainer channel while legacy no-argument doctor invocations keep notifying the primary operator. Unattended evolve is maintainer-only, and direct evolve/cost-reflect requests reply where invoked.
+
+### Upgrade Instructions
+1. In `.claude-code-hermit/config.json`, find the routine with `id: "doctor"`. If and only if its `skill` is exactly `"claude-code-hermit:hermit-doctor"`, replace it with `"claude-code-hermit:hermit-doctor --maintainer"`. Preserve its schedule, model, enabled state, and every other field. Leave a skill string with any existing arguments untouched. The main evolve loop re-runs `/claude-code-hermit:hermit-routines load` after a successful always-on upgrade so fallback CronCreates pick up the changed invocation immediately; the boot-time doctor ratchet applies the same exact-match rewrite as a backstop.
 
 ## [1.2.34] - 2026-07-26
 

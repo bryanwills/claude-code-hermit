@@ -354,6 +354,12 @@ describe('config contract: template and DEFAULT_CONFIG must mirror', () => {
     expect(validTiers).toContain(template.quality_gate?.tier);
     expect(validTiers).toContain(DEFAULT_CONFIG.quality_gate?.tier);
   });
+
+  test('doctor routine uses explicit maintainer delivery in template and DEFAULT_CONFIG', () => {
+    const expected = 'claude-code-hermit:hermit-doctor --maintainer';
+    expect(template.routines.find((r: any) => r.id === 'doctor')?.skill).toBe(expected);
+    expect(DEFAULT_CONFIG.routines.find((r: any) => r.id === 'doctor')?.skill).toBe(expected);
+  });
 });
 
 // ============================================================
@@ -799,6 +805,53 @@ describe('applyAlwaysOnDoctorSchedule', () => {
     const config = { routines: [{ id: 'doctor', schedule: '10 9 * * *', enabled: true }] };
     applyAlwaysOnDoctorSchedule(config);
     expect(config.routines[0].schedule).toBe('10 9 * * *');
+  });
+
+  test('legacy default skill ratchets to explicit maintainer delivery', () => {
+    const config = {
+      routines: [{
+        id: 'doctor',
+        schedule: '10 9 * * *',
+        skill: 'claude-code-hermit:hermit-doctor',
+        model: 'haiku',
+        enabled: true,
+      }],
+    };
+    applyAlwaysOnDoctorSchedule(config);
+    expect(config.routines[0]).toEqual({
+      id: 'doctor',
+      schedule: '10 9 * * *',
+      skill: 'claude-code-hermit:hermit-doctor --maintainer',
+      model: 'haiku',
+      enabled: true,
+    });
+  });
+
+  test('maintainer skill ratchet is idempotent', () => {
+    const config = {
+      routines: [{
+        id: 'doctor',
+        schedule: '10 9 * * *',
+        skill: 'claude-code-hermit:hermit-doctor --maintainer',
+        enabled: true,
+      }],
+    };
+    applyAlwaysOnDoctorSchedule(config);
+    applyAlwaysOnDoctorSchedule(config);
+    expect(config.routines[0].skill).toBe('claude-code-hermit:hermit-doctor --maintainer');
+  });
+
+  test('custom doctor skill arguments are left untouched', () => {
+    const config = {
+      routines: [{
+        id: 'doctor',
+        schedule: '10 9 * * *',
+        skill: 'claude-code-hermit:hermit-doctor --custom',
+        enabled: true,
+      }],
+    };
+    applyAlwaysOnDoctorSchedule(config);
+    expect(config.routines[0].skill).toBe('claude-code-hermit:hermit-doctor --custom');
   });
 
   test('no doctor routine present does not throw', () => {
