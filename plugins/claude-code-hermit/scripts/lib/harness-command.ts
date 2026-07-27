@@ -8,6 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { anchoredPaneTail } from './tmux';
 
 // Args are NOT validated against a fixed value list: Claude Code rejects an unknown
 // model or effort level itself, and any list hard-coded here would go stale on the next
@@ -63,8 +64,6 @@ export type PendingCommand = {
  * wedged for an hour should not suddenly clear its context when it recovers.
  */
 export const COMMAND_MARKER_TTL_SECS = 3600;
-/** One render beat after submitting a confirmable harness switch before inspecting the pane. */
-export const HARNESS_CONFIRM_RENDER_MS = 500;
 const HARNESS_CONFIRM_TAIL_LINES = 20;
 
 const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
@@ -89,11 +88,9 @@ export function isHarnessSwitchConfirmation(command: string, paneContent: string
   const commandAnchors = SWITCH_CONFIRMATION_ANCHORS[command];
   if (!commandAnchors) return false;
 
-  const tail = paneContent
-    .split('\n')
-    .slice(-HARNESS_CONFIRM_TAIL_LINES)
-    .join(' ')
-    .replace(/\s+/g, ' ');
+  const activeTail = anchoredPaneTail(paneContent, HARNESS_CONFIRM_TAIL_LINES, 'No, go back');
+  if (activeTail === null) return false;
+  const tail = activeTail.replace(/\s+/g, ' ');
 
   return commandAnchors.every((anchor) => tail.includes(anchor))
     && tail.includes('Your next response will be slower and use more tokens')

@@ -7,15 +7,9 @@ import { run as sessionDiff } from './session-diff';
 import { run as evaluateSession } from './evaluate-session';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir } from './lib/cc-compat';
 import { readRuntimeJson } from './lib/runtime';
-import { capturePane, sendEnter, sendKeys, tmuxSessionAlive } from './lib/tmux';
+import { sendKeys, tmuxSessionAlive } from './lib/tmux';
 import { applyContextReset } from './lib/context-reset';
-import {
-  HARNESS_CONFIRM_RENDER_MS,
-  clearPendingCommand,
-  isHarnessSwitchConfirmation,
-  readPendingCommand,
-  renderCommand,
-} from './lib/harness-command';
+import { clearPendingCommand, readPendingCommand, renderCommand } from './lib/harness-command';
 import { currentHHMMOrUTC } from './lib/time';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,21 +66,19 @@ function drainHarnessCommand(): void {
   }
   clearPendingCommand(HERMIT_DIR);
 
-  // Claude Code may apply a model/effort switch immediately, or render a cached-context
-  // confirmation whose selected default is "Yes". The trusted channel command already
-  // authorized that exact switch, so confirm only the command-specific dialog immediately
-  // caused by this delivery. A capture miss, wording drift, or failed Enter leaves the pane
-  // untouched and never reissues the command.
+  // Claude does not process the submitted slash command until this Stop hook returns.
+  // Delegate the narrowly-scoped confirmation check so it can observe the resulting
+  // dialog after this process exits; doing a synchronous capture here races a pane that
+  // cannot render yet.
   if (pending.command === '/model' || pending.command === '/effort') {
-    Bun.sleepSync(HARNESS_CONFIRM_RENDER_MS);
-    const pane = capturePane(sessionName);
-    if (pane !== null && isHarnessSwitchConfirmation(pending.command, pane)) {
-      if (sendEnter(sessionName)) {
-        console.error(`[stop-pipeline] harness-command: confirmed cached-context switch for "${text}"`);
-      } else {
-        console.error(`[stop-pipeline] harness-command: tmux refused cached-context confirmation for "${text}"`);
-      }
-    }
+    const helper = path.join(import.meta.dir, 'confirm-harness-switch.ts');
+    const child = Bun.spawn([process.execPath, helper, sessionName, pending.command], {
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+      env: process.env,
+    });
+    child.unref();
   }
 
   // Bookkeeping AFTER the confirmed send, not before: a refused send keeps the marker for

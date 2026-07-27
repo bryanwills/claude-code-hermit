@@ -55,6 +55,34 @@ export function capturePane(name: string, transport: Transport = HOST): string |
   }
 }
 
+/**
+ * Return a bounded pane window only when its required footer is the final
+ * nonblank row.
+ *
+ * tmux preserves unused blank renderer rows below short dialogs. Ignoring those
+ * rows is safe only when the dialog footer still terminates the visible content;
+ * otherwise a matching dialog may be stale scrollback above a newer prompt.
+ */
+export function anchoredPaneTail(
+  paneContent: string,
+  maxLines: number,
+  terminalAnchor: string,
+): string | null {
+  if (maxLines < 1 || !terminalAnchor) return null;
+
+  const lines = paneContent.split('\n');
+  let lastContentLine = lines.length - 1;
+  while (lastContentLine >= 0 && lines[lastContentLine].trim() === '') {
+    lastContentLine--;
+  }
+  if (lastContentLine < 0 || !lines[lastContentLine].includes(terminalAnchor)) {
+    return null;
+  }
+
+  const firstLine = Math.max(0, lastContentLine - maxLines + 1);
+  return lines.slice(firstLine, lastContentLine + 1).join('\n');
+}
+
 /** Send a single Enter key, returning whether tmux accepted it. */
 export function sendEnter(sessionName: string, transport: Transport = HOST): boolean {
   if (!sessionName) return false;

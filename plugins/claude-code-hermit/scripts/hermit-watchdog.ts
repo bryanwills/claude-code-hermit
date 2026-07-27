@@ -29,7 +29,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
-import { tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
+import { anchoredPaneTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { costLogPath } from './lib/cc-compat';
@@ -246,7 +246,7 @@ function getPaneHash(sessionName: string): string | null {
 // conservative, low-false-positive signal that the pane is stalled on an unanswerable
 // dialog. Over-detection costs one deduped push; under-detection is a silent stall.
 const PENDING_OPTION_RE = /❯\s*\d+\./;
-const PENDING_FOOTER_RE = /Esc to cancel/;
+const PENDING_FOOTER = 'Esc to cancel';
 
 // Only the pane TAIL counts: a live blocking modal renders at the bottom of the
 // pane, whereas the same tokens appearing in scrollback or quoted tool output
@@ -259,8 +259,8 @@ const PENDING_TAIL_LINES = 15;
 
 /** True when the pane TAIL looks stalled on an interactive dialog nobody can answer. */
 export function hasPendingQuestion(paneContent: string): boolean {
-  const tail = paneContent.split('\n').slice(-PENDING_TAIL_LINES).join('\n');
-  return PENDING_OPTION_RE.test(tail) && PENDING_FOOTER_RE.test(tail);
+  const tail = anchoredPaneTail(paneContent, PENDING_TAIL_LINES, PENDING_FOOTER);
+  return tail !== null && PENDING_OPTION_RE.test(tail);
 }
 
 // sendKeys now lives in lib/tmux.ts so the harness-command drain shares one
