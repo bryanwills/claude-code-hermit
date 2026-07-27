@@ -10,9 +10,9 @@ import { readRuntimeJson } from './lib/runtime';
 import { capturePane, sendEnter, sendKeys, tmuxSessionAlive } from './lib/tmux';
 import { applyContextReset } from './lib/context-reset';
 import {
-  MODEL_CONFIRM_RENDER_MS,
+  HARNESS_CONFIRM_RENDER_MS,
   clearPendingCommand,
-  isModelSwitchConfirmation,
+  isHarnessSwitchConfirmation,
   readPendingCommand,
   renderCommand,
 } from './lib/harness-command';
@@ -72,19 +72,19 @@ function drainHarnessCommand(): void {
   }
   clearPendingCommand(HERMIT_DIR);
 
-  // Claude Code applies a model switch immediately when the session has no context.
-  // With cached context it instead renders a confirmation whose selected default is
-  // "Yes". The trusted channel command already authorized that exact switch, so confirm
-  // only the model-specific dialog immediately caused by this delivery. A capture miss,
-  // wording drift, or failed Enter leaves the pane untouched and never reissues /model.
-  if (pending.command === '/model') {
-    Bun.sleepSync(MODEL_CONFIRM_RENDER_MS);
+  // Claude Code may apply a model/effort switch immediately, or render a cached-context
+  // confirmation whose selected default is "Yes". The trusted channel command already
+  // authorized that exact switch, so confirm only the command-specific dialog immediately
+  // caused by this delivery. A capture miss, wording drift, or failed Enter leaves the pane
+  // untouched and never reissues the command.
+  if (pending.command === '/model' || pending.command === '/effort') {
+    Bun.sleepSync(HARNESS_CONFIRM_RENDER_MS);
     const pane = capturePane(sessionName);
-    if (pane !== null && isModelSwitchConfirmation(pane)) {
+    if (pane !== null && isHarnessSwitchConfirmation(pending.command, pane)) {
       if (sendEnter(sessionName)) {
         console.error(`[stop-pipeline] harness-command: confirmed cached-context switch for "${text}"`);
       } else {
-        console.error(`[stop-pipeline] harness-command: tmux refused model-switch confirmation for "${text}"`);
+        console.error(`[stop-pipeline] harness-command: tmux refused cached-context confirmation for "${text}"`);
       }
     }
   }

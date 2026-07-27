@@ -63,27 +63,40 @@ export type PendingCommand = {
  * wedged for an hour should not suddenly clear its context when it recovers.
  */
 export const COMMAND_MARKER_TTL_SECS = 3600;
-/** One render beat after submitting /model before inspecting the pane. */
-export const MODEL_CONFIRM_RENDER_MS = 500;
-const MODEL_CONFIRM_TAIL_LINES = 20;
+/** One render beat after submitting a confirmable harness switch before inspecting the pane. */
+export const HARNESS_CONFIRM_RENDER_MS = 500;
+const HARNESS_CONFIRM_TAIL_LINES = 20;
+
+const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
+  '/model': [
+    'Switch model?',
+    'This conversation is cached for the current model.',
+  ],
+  '/effort': [
+    'Change effort level?',
+    'This conversation is cached for the current effort level.',
+  ],
+};
 
 /**
- * Match only Claude Code's cached-context model-switch confirmation.
+ * Match only Claude Code's cached-context confirmation for the delivered switch.
  *
  * Whitespace is collapsed because the warning wraps according to pane width. The
- * model label is deliberately not matched: a stable request alias such as `opus`
- * renders as a release display name such as "Opus 5".
+ * target label is deliberately not matched: a stable model alias such as `opus`
+ * renders as a release display name such as "Opus 5", and effort levels may expand.
  */
-export function isModelSwitchConfirmation(paneContent: string): boolean {
+export function isHarnessSwitchConfirmation(command: string, paneContent: string): boolean {
+  const commandAnchors = SWITCH_CONFIRMATION_ANCHORS[command];
+  if (!commandAnchors) return false;
+
   const tail = paneContent
     .split('\n')
-    .slice(-MODEL_CONFIRM_TAIL_LINES)
+    .slice(-HARNESS_CONFIRM_TAIL_LINES)
     .join(' ')
     .replace(/\s+/g, ' ');
 
-  return tail.includes('Switch model?')
+  return commandAnchors.every((anchor) => tail.includes(anchor))
     && tail.includes('Your next response will be slower and use more tokens')
-    && tail.includes('This conversation is cached for the current model.')
     && tail.includes('Yes, switch to')
     && tail.includes('No, go back');
 }
