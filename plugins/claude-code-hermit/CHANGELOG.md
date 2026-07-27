@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.35] - 2026-07-27
 
 ### Fixed
 - `hermit-docker` no longer exits silently when its running-container probe finds no `hermit` service or Docker Compose itself fails; stopped stacks get start guidance, while probe failures surface a bounded Docker error.
