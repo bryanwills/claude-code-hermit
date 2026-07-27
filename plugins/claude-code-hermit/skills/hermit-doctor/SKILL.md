@@ -10,12 +10,18 @@ is the only one that performs outbound API calls — see Notes) and surfaces the
 to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and appending a summary block to SHELL.md.
 
-## Invocation mode
+## Notification route
 
-- **Manual (no arguments):** return the report only to the invoking conversation. Do not send a
-  second proactive notification, even when a maintainer channel is configured.
-- **Automated (`--maintainer`):** run the same checks and persistence steps, but route newly-failing
-  findings as one maintainer-tier notification. This is the mode used by the default doctor routine.
+Every run with at least one newly-failing finding not already present in alert state sends exactly
+one notification.
+The optional flag changes its destination, not whether doctor notifies:
+
+- **Default (no arguments):** send the notification to the primary operator chat. This preserves
+  the legacy `hermit-doctor` behavior.
+- **Maintainer (`--maintainer`):** prefer the configured `maintainer_channel_id`. When no maintainer
+  destination is configured, fall back to the primary operator chat for every operator profile.
+  When a configured maintainer destination is unreachable, fail closed to SHELL.md Findings and
+  never spill the notification into the primary chat.
 
 ## Steps
 
@@ -58,29 +64,30 @@ to run at any time. Produces no side effects beyond writing
    HERMIT_ALERT_JSON
    ```
 
-   **Maintainer notification — only with `--maintainer` and non-empty `new_entries`.** Compose one
-   complete, concise technical summary covering every newly-failing check, its detail, and a named
-   next action, in the operator's configured language. Deliver it through the canonical notice path:
+   **Notification — when `new_entries` is non-empty.** Compose one complete, concise summary covering
+   every newly-failing check, its detail, and a named next action, in the operator's configured
+   language. Deliver it exactly once through the canonical notice path:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
    ```
-   with `{"maintainer": "<complete technical summary>"}` on stdin. Never include a `client` leg.
-   The router owns fallback: no configured maintainer chat on a technical install falls back to the
-   primary chat; a non-technical install falls back to SHELL.md Findings. Follow § Operator
-   Notification if no channel is available or delivery degrades.
+   Choose one payload from the invocation:
+   - Without `--maintainer`, send `{"client": "<complete summary>"}`. Do not include a `maintainer` leg.
+   - With `--maintainer`, send
+     `{"maintainer": "<complete summary>", "fallback": "primary"}`. Do not include a `client` leg.
 
-   Without `--maintainer`, do not call `channel-send.ts` — step 4 is the requested reply. A check
-   already alerted (its `doctor:<id>` key still present) stays silent on subsequent automated runs
-   until it resolves. Resolving just deletes the key; there is no "recovered" ping in v1.
+   The router owns destination fallback and configured-destination failure handling. Follow
+   § Operator Notification if no channel is available or delivery degrades. A check already alerted
+   (its `doctor:<id>` key still present) stays silent on subsequent runs until it resolves.
+   Resolving just deletes the key; there is no "recovered" ping in v1.
 
 ## Silence policy
 
 - If every check is `ok`, return only: `All twenty-four checks passed.` Do not notify via
   channel (Tier 0). Still resolve any stale `doctor:*` alert-state keys (step 5) and still
   append to SHELL.md so the run is traceable.
-- If any check is `warn` or `fail`, return the full twenty-four-line summary. In `--maintainer`
-  mode, notification is governed by step 5's escalation-and-dedup logic, not a blanket per-run
-  ping: only newly appearing findings message the maintainer route, and only once until they resolve.
+- If any check is `warn` or `fail`, return the full twenty-four-line summary. Notification is
+  governed by step 5's escalation-and-dedup logic, not a blanket per-run ping: only newly appearing
+  findings notify the selected route, and only once until they resolve.
 
 ## What each check looks at
 

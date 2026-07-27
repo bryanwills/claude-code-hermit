@@ -169,13 +169,14 @@ export async function sendToChannel(hermitDir: string, text: string, opts: SendO
  * A two-audience operator notice. `client` is plain, localized copy for the
  * primary chat; `maintainer` carries technical/spend/ops detail whose `fallback`
  * decides where it goes when no `maintainer_channel_id` is configured
- * (`'client'` = the primary chat, today's behavior; `'findings'` = suppressed to
- * SHELL.md, fail-closed on disclosure). `sensitive` keeps the maintainer text
- * out of the episodic channel log.
+ * (`'client'` = the primary chat for technical profiles, `'primary'` = the
+ * primary chat for every profile, `'findings'` = suppressed to SHELL.md).
+ * A configured but unreachable maintainer destination always fails closed to
+ * Findings. `sensitive` keeps the maintainer text out of the episodic channel log.
  */
 export interface OperatorNotice {
   client?: string;
-  maintainer?: { text: string; fallback: 'client' | 'findings'; sensitive?: boolean };
+  maintainer?: { text: string; fallback: 'client' | 'primary' | 'findings'; sensitive?: boolean };
   timeoutMs?: number;
 }
 
@@ -229,11 +230,11 @@ export async function sendOperatorNotice(hermitDir: string, notice: OperatorNoti
       // over the fallback: a bad chat id must never spill technical/spend
       // detail into the client chat.
       out.maintainer = r.ok ? { ...r, route: 'maintainer_channel', delivered: true } : toFindings(true);
-    } else if (m.fallback === 'findings' || nonTechnical) {
+    } else if (m.fallback === 'findings' || (m.fallback === 'client' && nonTechnical)) {
       out.maintainer = toFindings(false);
     } else {
-      // fallback 'client' on a technical profile with no maintainer channel:
-      // today's behavior — the message goes to the primary chat.
+      // fallback 'client' on a technical profile, or explicit 'primary' on any
+      // profile, with no maintainer channel: send to the primary chat.
       const r = await sendToChannel(hermitDir, m.text, {
         target: clientTarget ?? undefined, timeoutMs: notice.timeoutMs, config,
       });

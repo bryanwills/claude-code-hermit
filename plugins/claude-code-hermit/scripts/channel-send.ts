@@ -62,7 +62,7 @@ interface NoticePayload {
   client?: string;
   maintainer?: string;
   sensitive?: boolean;
-  fallback?: 'client' | 'findings';
+  fallback?: 'client' | 'primary' | 'findings';
 }
 
 const NOTICE_KEYS = new Set(['client', 'maintainer', 'sensitive', 'fallback']);
@@ -94,7 +94,7 @@ function parseNotice(raw: string): NoticePayload | { error: string } {
   if (sensitive !== undefined && typeof sensitive !== 'boolean') {
     return { error: 'sensitive must be a boolean' };
   }
-  if (fallback !== undefined && fallback !== 'client' && fallback !== 'findings') {
+  if (fallback !== undefined && fallback !== 'client' && fallback !== 'primary' && fallback !== 'findings') {
     return { error: `invalid fallback: ${fallback}` };
   }
   // Both modifiers apply to the maintainer leg only. Accepting them without one

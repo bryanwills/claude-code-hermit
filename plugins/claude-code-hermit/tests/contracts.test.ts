@@ -2713,12 +2713,15 @@ describe('proactive-notify unification contract', () => {
     expect(step3).toContain('`maintainer` leg only (no `client` leg)');
   });
 
-  test('doctor manual and automated delivery modes stay distinct', () => {
+  test('doctor keeps legacy delivery while --maintainer changes only the route', () => {
     const doctor = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
-    expect(doctor).toContain('Manual (no arguments)');
-    expect(doctor).toContain('Automated (`--maintainer`)');
-    expect(doctor).toContain('Never include a `client` leg');
-    expect(doctor).toContain('Without `--maintainer`, do not call `channel-send.ts`');
+    expect(doctor).toContain('Default (no arguments)');
+    expect(doctor).toContain('Maintainer (`--maintainer`)');
+    expect(doctor).toContain('The optional flag changes its destination, not whether doctor notifies');
+    expect(doctor).toContain('`{"client": "<complete summary>"}`');
+    expect(doctor).toContain('`{"maintainer": "<complete summary>", "fallback": "primary"}`');
+    expect(doctor).toContain('Deliver it exactly once');
+    expect(doctor).not.toContain('Without `--maintainer`, do not call `channel-send.ts`');
   });
 
   test('hermit-evolve uses explicit unattended as the maintainer delivery signal', () => {
