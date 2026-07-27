@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- A trusted channel `/model <arg>` no longer stalls on Claude Code's cached-context confirmation. The Stop hook recognizes only that freshly-triggered model-switch dialog and confirms its selected `Yes`; context-free switches still complete without an extra keypress, and unrelated native prompts remain untouched.
+- A trusted channel `/model <arg>` or `/effort <arg>` no longer stalls on Claude Code's cached-context confirmation. The Stop hook recognizes only the freshly-triggered, command-specific switch dialog and confirms its selected `Yes`; direct switches still complete without an extra keypress, and unrelated native prompts remain untouched.
 
 ## [1.2.34] - 2026-07-26
 

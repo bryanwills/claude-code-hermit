@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
-  isModelSwitchConfirmation,
+  isHarnessSwitchConfirmation,
   writePendingCommand,
 } from '../scripts/lib/harness-command';
 import { runScript } from './helpers/run';
@@ -20,10 +20,26 @@ re-read on your next message.
   2. No, go back
 `;
 
+const EFFORT_SWITCH_PANE = `
+Change effort level?
+Your next response will be slower and use more tokens
+
+This conversation is cached for the current effort level. Switching to high means the full history gets
+re-read on your next message.
+
+❯ 1. Yes, switch to high
+  2. No, go back
+`;
+
+const SWITCH_CASES = [
+  { label: 'model', command: '/model', arg: 'opus', pane: MODEL_SWITCH_PANE },
+  { label: 'effort', command: '/effort', arg: 'high', pane: EFFORT_SWITCH_PANE },
+] as const;
+
 const hermit = (dir: string, ...parts: string[]) =>
   path.join(dir, '.claude-code-hermit', ...parts);
 
-function seedPendingModel(dir: string): void {
+function seedPendingSwitch(dir: string, command: string, arg: string): void {
   fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
   fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
     version: 1,
@@ -34,8 +50,8 @@ function seedPendingModel(dir: string): void {
     shutdown_completed_at: null,
   }));
   writePendingCommand(hermit(dir), {
-    command: '/model',
-    arg: 'opus',
+    command,
+    arg,
     by: 'operator',
     requested_at: new Date().toISOString(),
   });
@@ -86,94 +102,107 @@ async function drain(dir: string, bin: string) {
   });
 }
 
-describe('model-switch confirmation matcher', () => {
-  test('accepts the wrapped cached-context model prompt', () => {
-    expect(isModelSwitchConfirmation(MODEL_SWITCH_PANE)).toBe(true);
+describe('harness-switch confirmation matcher', () => {
+  test('accepts wrapped cached-context model and effort prompts', () => {
+    expect(isHarnessSwitchConfirmation('/model', MODEL_SWITCH_PANE)).toBe(true);
+    expect(isHarnessSwitchConfirmation('/effort', EFFORT_SWITCH_PANE)).toBe(true);
   });
 
   test('rejects unrelated or incomplete dialogs', () => {
-    expect(isModelSwitchConfirmation(`
+    expect(isHarnessSwitchConfirmation('/model', `
 Permission required
 ❯ 1. Yes, allow once
   2. No, go back
 `)).toBe(false);
-    expect(isModelSwitchConfirmation(`
+    expect(isHarnessSwitchConfirmation('/model', `
 Switch model?
 ❯ 1. Yes, switch to Opus 5
   2. No, go back
 `)).toBe(false);
   });
 
+  test('requires anchors for the delivered command', () => {
+    expect(isHarnessSwitchConfirmation('/model', EFFORT_SWITCH_PANE)).toBe(false);
+    expect(isHarnessSwitchConfirmation('/effort', MODEL_SWITCH_PANE)).toBe(false);
+    expect(isHarnessSwitchConfirmation('/clear', MODEL_SWITCH_PANE)).toBe(false);
+  });
+
   test('looks only at the pane tail', () => {
-    expect(isModelSwitchConfirmation(`${MODEL_SWITCH_PANE}\n${'\n'.repeat(20)}ready`)).toBe(false);
+    for (const { command, pane } of SWITCH_CASES) {
+      expect(isHarnessSwitchConfirmation(command, `${pane}\n${'\n'.repeat(20)}ready`)).toBe(false);
+    }
   });
 });
 
-describe('Stop hook model delivery', () => {
-  test('active context submits /model and confirms the selected Yes', withDir(async (dir) => {
-    seedPendingModel(dir);
-    const { bin, log } = installFakeTmux(dir, MODEL_SWITCH_PANE);
+describe('Stop hook harness-switch delivery', () => {
+  for (const { label, command, arg, pane } of SWITCH_CASES) {
+    const text = `${command} ${arg}`;
 
-    const result = await drain(dir, bin);
+    test(`${label}: cached context submits once and confirms the selected Yes`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, arg);
+      const { bin, log } = installFakeTmux(dir, pane);
 
-    expect(result.exitCode).toBe(0);
-    const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
-    expect(calls.filter((line) => line.includes('-l -- /model opus'))).toHaveLength(1);
-    expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(2);
-    expect(calls).toContain('capture-pane -p -t hermit-test');
-    expect(result.stderr).toContain('confirmed cached-context switch');
-    expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
-  }));
+      const result = await drain(dir, bin);
 
-  test('context-free switch does not receive an extra Enter', withDir(async (dir) => {
-    seedPendingModel(dir);
-    const { bin, log } = installFakeTmux(dir, 'Claude ready');
+      expect(result.exitCode).toBe(0);
+      const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
+      expect(calls.filter((line) => line.includes(`-l -- ${text}`))).toHaveLength(1);
+      expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(2);
+      expect(calls).toContain('capture-pane -p -t hermit-test');
+      expect(result.stderr).toContain('confirmed cached-context switch');
+      expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    }));
 
-    const result = await drain(dir, bin);
+    test(`${label}: direct switch does not receive an extra Enter`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, arg);
+      const { bin, log } = installFakeTmux(dir, 'Claude ready');
 
-    expect(result.exitCode).toBe(0);
-    const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
-    expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(1);
-    expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
-  }));
+      const result = await drain(dir, bin);
 
-  test('unrelated dialog is never answered', withDir(async (dir) => {
-    seedPendingModel(dir);
-    const { bin, log } = installFakeTmux(dir, `
+      expect(result.exitCode).toBe(0);
+      const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
+      expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(1);
+      expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    }));
+
+    test(`${label}: unrelated dialog is never answered`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, arg);
+      const { bin, log } = installFakeTmux(dir, `
 Permission required
 ❯ 1. Yes, allow once
   2. No, go back
 `);
 
-    const result = await drain(dir, bin);
+      const result = await drain(dir, bin);
 
-    expect(result.exitCode).toBe(0);
-    const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
-    expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(1);
-  }));
+      expect(result.exitCode).toBe(0);
+      const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
+      expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(1);
+    }));
 
-  test('failed /model submission retains the marker for retry', withDir(async (dir) => {
-    seedPendingModel(dir);
-    const { bin } = installFakeTmux(dir, MODEL_SWITCH_PANE, { failLiteral: true });
+    test(`${label}: failed submission retains the marker for retry`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, arg);
+      const { bin } = installFakeTmux(dir, pane, { failLiteral: true });
 
-    const result = await drain(dir, bin);
+      const result = await drain(dir, bin);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain('marker kept for retry');
-    expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(true);
-  }));
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain('marker kept for retry');
+      expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(true);
+    }));
 
-  test('failed confirmation does not reissue /model', withDir(async (dir) => {
-    seedPendingModel(dir);
-    const { bin, log } = installFakeTmux(dir, MODEL_SWITCH_PANE, { failSecondEnter: true });
+    test(`${label}: failed confirmation does not reissue the command`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, arg);
+      const { bin, log } = installFakeTmux(dir, pane, { failSecondEnter: true });
 
-    const result = await drain(dir, bin);
+      const result = await drain(dir, bin);
 
-    expect(result.exitCode).toBe(0);
-    const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
-    expect(calls.filter((line) => line.includes('-l -- /model opus'))).toHaveLength(1);
-    expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(2);
-    expect(result.stderr).toContain('refused model-switch confirmation');
-    expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
-  }));
+      expect(result.exitCode).toBe(0);
+      const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
+      expect(calls.filter((line) => line.includes(`-l -- ${text}`))).toHaveLength(1);
+      expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(2);
+      expect(result.stderr).toContain('refused cached-context confirmation');
+      expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    }));
+  }
 });
