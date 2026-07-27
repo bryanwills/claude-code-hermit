@@ -215,6 +215,126 @@ describe('static file checks', () => {
 });
 
 // -------------------------------------------------------
+// hermit-docker running-container gate (stubbed Docker)
+// -------------------------------------------------------
+
+describe('hermit-docker running-container gate', () => {
+  function fixture(mode: 'running' | 'stopped' | 'failed') {
+    const wd = setupWorkdir();
+    const proj = wd.dir;
+    const binDir = hermit(proj, 'bin');
+    const stateDir = hermit(proj, 'state');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    for (const name of ['hermit-docker', 'hermit-attach']) {
+      const dest = path.join(binDir, name);
+      fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', name), dest);
+      fs.chmodSync(dest, 0o755);
+    }
+
+    write(hermit(proj, 'config.json'), JSON.stringify({
+      tmux_session_name: 'hermit-{project_name}',
+    }));
+    write(path.join(stateDir, 'runtime.json'), JSON.stringify({
+      runtime_mode: 'docker',
+      tmux_session: `hermit-${path.basename(proj)}`,
+    }));
+    write(path.join(proj, 'docker-compose.hermit.yml'), 'services:\n  hermit:\n    image: test\n');
+    write(path.join(proj, 'docker-compose.security.yml'), 'services:\n  hermit:\n    environment: []\n');
+
+    const stubDir = path.join(proj, '.stub');
+    const callsFile = path.join(stubDir, 'docker-calls.txt');
+    fs.mkdirSync(stubDir, { recursive: true });
+    write(path.join(stubDir, 'docker'), `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_STUB_CALLS"
+if [[ " $* " == *" ps --status running "* ]]; then
+  case "$DOCKER_STUB_MODE" in
+    running) printf 'hermit\n'; exit 0 ;;
+    stopped) printf 'hermit-netguard\n'; exit 0 ;;
+    failed)
+      for i in 1 2 3 4 5 6 7; do
+        printf 'probe-line-%s:%0400d\n' "$i" 0 >&2
+      done
+      exit 23
+      ;;
+  esac
+fi
+exit 0
+`);
+    fs.chmodSync(path.join(stubDir, 'docker'), 0o755);
+
+    return {
+      wd,
+      proj,
+      callsFile,
+      env: {
+        PATH: `${stubDir}:${process.env.PATH}`,
+        DOCKER_STUB_CALLS: callsFile,
+        DOCKER_STUB_MODE: mode,
+      },
+    };
+  }
+
+  test('running service reaches the configured tmux session', async () => {
+    const f = fixture('running');
+    try {
+      const r = await runBash(hermit(f.proj, 'bin', 'hermit-docker'), {
+        args: ['attach'],
+        cwd: f.proj,
+        env: f.env,
+      });
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain(`[hermit] Attaching to tmux session: hermit-${path.basename(f.proj)}`);
+      const calls = fs.readFileSync(f.callsFile, 'utf8');
+      expect(calls).toContain('ps --status running --format {{.Service}}');
+      expect(calls).toContain(`exec hermit tmux attach -t hermit-${path.basename(f.proj)}`);
+    } finally {
+      f.wd.cleanup();
+    }
+  });
+
+  test('stopped service prints start guidance through both attach entrypoints', async () => {
+    const f = fixture('stopped');
+    try {
+      for (const name of ['hermit-docker', 'hermit-attach']) {
+        const r = await runBash(hermit(f.proj, 'bin', name), {
+          args: name === 'hermit-docker' ? ['attach'] : [],
+          cwd: f.proj,
+          env: f.env,
+        });
+        expect(r.exitCode).toBe(1);
+        expect(r.stderr).toContain('[hermit] Container is not running. Start it first:');
+        expect(r.stderr).toContain('.claude-code-hermit/bin/hermit-docker up');
+        expect(r.stderr).not.toContain('Could not query Docker Compose');
+      }
+    } finally {
+      f.wd.cleanup();
+    }
+  });
+
+  test('failed Compose probe prints a bounded underlying cause', async () => {
+    const f = fixture('failed');
+    try {
+      const r = await runBash(hermit(f.proj, 'bin', 'hermit-docker'), {
+        args: ['attach'],
+        cwd: f.proj,
+        env: f.env,
+      });
+      expect(r.exitCode).toBe(1);
+      expect(r.stderr).toContain('[hermit] Could not query Docker Compose for running services.');
+      expect(r.stderr).not.toContain('Container is not running');
+      const diagnosticLines = r.stderr.split('\n').filter(line => line.startsWith('probe-line-'));
+      expect(diagnosticLines).toHaveLength(5);
+      expect(diagnosticLines.every(line => line.length <= 300)).toBe(true);
+      expect(r.stderr).not.toContain('probe-line-6:');
+    } finally {
+      f.wd.cleanup();
+    }
+  });
+});
+
+// -------------------------------------------------------
 // hermit-update (host path, stubbed claude/tmux)
 // -------------------------------------------------------
 

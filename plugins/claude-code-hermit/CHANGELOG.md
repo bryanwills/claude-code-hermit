@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- `hermit-docker` no longer exits silently when its running-container probe finds no `hermit` service or Docker Compose itself fails; stopped stacks get start guidance, while probe failures surface a bounded Docker error.
 - A trusted channel `/model <arg>` or `/effort <arg>` no longer stalls on Claude Code's cached-context confirmation. A bounded check runs after the Stop hook returns, tolerates blank renderer rows, and confirms only the command-specific dialog still active at the bottom of the pane; direct switches and stale confirmations in scrollback never receive an extra keypress.
 - The watchdog now recognizes a live native permission/Ask modal even when `tmux capture-pane` includes blank terminal rows below it, while stale modal text followed by even a few lines of progress no longer suppresses recovery.
 - Routine Monitor registration now carries the narrow `routine-monitor.sh` permission grant and passes an absolute state path, avoiding Claude Code's `simple_expansion` approval so configured monitors can start unattended.

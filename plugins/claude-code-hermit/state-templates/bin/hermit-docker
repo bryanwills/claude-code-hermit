@@ -52,9 +52,13 @@ _oauth_hint() {
 }
 
 _require_running() {
-  local running
-  running="$(cd "$PROJECT_DIR" && "${DC[@]}" ps --status running --format '{{.Service}}' 2>/dev/null | grep -x "$SERVICE")"
-  if [ -z "$running" ]; then
+  local services
+  if ! services="$(cd "$PROJECT_DIR" && "${DC[@]}" ps --status running --format '{{.Service}}' 2>&1)"; then
+    echo "[hermit] Could not query Docker Compose for running services." >&2
+    printf '%s\n' "$services" | awk 'NR <= 5 { print substr($0, 1, 300) }' >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$services" | grep -qx "$SERVICE"; then
     echo "[hermit] Container is not running. Start it first:" >&2
     echo "  .claude-code-hermit/bin/hermit-docker up" >&2
     exit 1
