@@ -73,9 +73,12 @@ function briefCycle(dir: string): never {
 
   for (const e of pending) {
     // Whitelist, not blacklist — the wild holds accepted/dismissed/rejected/
-    // approved/resolved, none of which the script itself ever writes.
-    if (e.status !== 'pending') {
-      dropped.push(e.id);
+    // approved/resolved, none of which the script itself ever writes. The `!e`
+    // guard mirrors every other reader (generate-summary, startup-context,
+    // channel-status-responder): a hand-edited `null` element must not throw
+    // and take the whole brief step down with it.
+    if (!e || e.status !== 'pending') {
+      dropped.push(e?.id ?? null);
       continue; // already resolved elsewhere; no ledger event, no re-report
     }
     const c = typeof e.follow_up_count === 'number' ? e.follow_up_count : 0;

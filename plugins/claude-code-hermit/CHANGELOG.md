@@ -3,8 +3,9 @@
 ## [Unreleased]
 
 ### Fixed
-- `proposal.ts micro brief-cycle` now prunes entries whose `status` isn't `"pending"` and bumps a fresh entry's `follow_up_count` from 0 to 1 on first display. Resolved micro-proposals were resurfacing as new operator prompts because the brief lifecycle never filtered on `status` (every other reader does) and never aged a first-display entry forward, so a stale entry left in `pending[]` — or a genuinely pending one — kept re-rendering as new indefinitely.
-- The in-turn branch of `channel-responder`'s § Channel-safe ask bridge now resolves a micro-proposal through `proposal.ts micro resolve` instead of a hand-written removal, closing the surface that produced the stale entries above.
+- Resolved micro-proposals no longer resurface as new operator prompts. `proposal.ts micro brief-cycle` prunes entries whose `status` isn't `"pending"` and bumps a first-display entry's `follow_up_count` from 0 to 1, so an ignored question now expires after two morning briefs instead of re-rendering as new forever.
+- A same-turn micro-proposal answer is resolved through `proposal.ts micro resolve` rather than a hand-written edit of `state/micro-proposals.json`.
+- `proposal.ts queue-micro` dedups only against live `pending` entries, so a stale row no longer swallows a fresh candidate as `DUPLICATE`.
 
 ## [1.2.35] - 2026-07-27
 

@@ -57,7 +57,10 @@ export async function run(stateDir: string): Promise<void> {
   }
   const micro: Json = read.status === 'missing' ? { pending: [] } : read.data;
 
-  const existing = micro.pending.find((e: Json) => e.question === question);
+  // Dedup against live entries only (issue 676): a stale non-"pending" row left
+  // in the array is invisible to every reader and will be pruned by the next
+  // brief-cycle, so matching it here would silently swallow a fresh candidate.
+  const existing = micro.pending.find((e: Json) => e && e.status === 'pending' && e.question === question);
   if (existing) {
     process.stdout.write(`DUPLICATE|${existing.id}\n`);
     process.exit(0);
