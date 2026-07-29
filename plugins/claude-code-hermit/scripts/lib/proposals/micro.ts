@@ -12,12 +12,16 @@
 //   NONE|no-match
 //   brief-cycle: JSON {"new":[{id,tier,question,options}],
 //                      "renudged":[{id,tier,question,options,follow_up_count}],
-//                      "expired":[{id,question}]}
+//                      "expired":[{id,question}],
+//                      "dropped":[<id>]}
 // brief-cycle ages the whole queue in one pass so the brief skills drive the
-// count-0/1/2+ lifecycle through one call instead of one per entry: count-0
-// entries are reported for first display (not mutated), count-1 entries reported
-// and re-nudged (bumped to 2), count>=2 entries expired. One atomic write (only
-// when something changed), one micro-resolved ledger line per expiry.
+// count-0/1/2+ lifecycle through one call instead of one per entry: any entry
+// whose status isn't "pending" (issue 676 - a caller resolved it elsewhere but
+// left it in the array) is pruned into `dropped`, no ledger event (its
+// resolution is already recorded). Of the rest: count-0 entries are reported
+// for first display and bumped to 1, count-1 entries reported and re-nudged
+// (bumped to 2), count>=2 entries expired. One atomic write (only when
+// something changed), one micro-resolved ledger line per expiry.
 // Exit 1 (+ stderr) on: unparseable micro-proposals.json (never overwritten),
 // unknown verb/action, a missing/flag-shaped <MP-id>, missing --action, or a
 // ledger-append failure. Every malformed invocation fails loud rather than
@@ -48,9 +52,10 @@ function fail(msg: string): never {
 }
 
 // Age the whole pending queue in one pass. Bucketing mirrors the per-entry rules
-// the brief skills used to issue one call at a time: count 0 -> report only,
-// count 1 -> report + bump to 2, count >=2 -> expire. Ledger lines are appended
-// only after the queue write lands (same ordering as the resolve path).
+// the brief skills used to issue one call at a time: any non-"pending" status is
+// pruned first (issue 676), then count 0 -> report + bump to 1, count 1 ->
+// report + bump to 2, count >=2 -> expire. Ledger lines are appended only after
+// the queue write lands (same ordering as the resolve path).
 function briefCycle(dir: string): never {
   const mp = path.join(dir, 'state', 'micro-proposals.json');
   const r = readMicroProposals(mp);
@@ -63,9 +68,19 @@ function briefCycle(dir: string): never {
   const fresh: Json[] = [];
   const renudged: Json[] = [];
   const expired: Json[] = [];
+  const dropped: Json[] = [];
   const kept: Json[] = [];
 
   for (const e of pending) {
+    // Whitelist, not blacklist — the wild holds accepted/dismissed/rejected/
+    // approved/resolved, none of which the script itself ever writes. The `!e`
+    // guard mirrors every other reader (generate-summary, startup-context,
+    // channel-status-responder): a hand-edited `null` element must not throw
+    // and take the whole brief step down with it.
+    if (!e || e.status !== 'pending') {
+      dropped.push(e?.id ?? null);
+      continue; // already resolved elsewhere; no ledger event, no re-report
+    }
     const c = typeof e.follow_up_count === 'number' ? e.follow_up_count : 0;
     if (c >= 2) {
       expired.push({ id: e.id, question: e.question });
@@ -77,14 +92,17 @@ function briefCycle(dir: string): never {
       e.follow_up_count = 2;
       renudged.push({ id: e.id, tier: e.tier, question: e.question, options: e.options, follow_up_count: 2 });
     } else {
+      // Bump 0 -> 1 on first display so the documented lifecycle actually ages
+      // the entry (issue 676 also found nothing else ever calls `micro nudge`).
+      e.follow_up_count = 1;
       fresh.push({ id: e.id, tier: e.tier, question: e.question, options: e.options });
     }
     kept.push(e);
   }
 
-  // Only write when the queue actually changed (a re-nudge bump or an expiry
-  // removal). An all-count-0 queue is a pure read — no write, no ledger.
-  if (renudged.length > 0 || expired.length > 0) {
+  // Every entry lands in exactly one of dropped/expired/renudged/fresh, so a
+  // non-empty queue always changes something on this pass.
+  if (pending.length > 0) {
     data.pending = kept;
     writeFileAtomic(mp, JSON.stringify(data, null, 2) + '\n');
     const ledger = path.join(dir, 'state', 'proposal-metrics.jsonl');
@@ -95,7 +113,7 @@ function briefCycle(dir: string): never {
     }
   }
 
-  emit(JSON.stringify({ new: fresh, renudged, expired }));
+  emit(JSON.stringify({ new: fresh, renudged, expired, dropped }));
 }
 
 export function run(stateDir: string, args: string[]): never {

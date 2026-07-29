@@ -1607,6 +1607,16 @@ describe('proposal queue-micro', () => {
     expect(microFile(dir).pending).toHaveLength(1);
   }));
 
+  test('queue-micro (a stale non-"pending" row with the same question is not a dedup match)', withDir(async (dir) => {
+    seed(dir);
+    write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({
+      pending: [{ id: 'MP-20260101-0', tier: 1, status: 'accepted', follow_up_count: 0, ts: '2026-01-01T00:00:00Z', question: 'Same question here' }],
+    }));
+    const out = await queue(dir, { tier: 1, question: 'Same question here' });
+    expect(out.startsWith('QUEUED|')).toBe(true);
+    expect(microFile(dir).pending).toHaveLength(2);
+  }));
+
   test('queue-micro (on_resolve forces tier 1 and tags the event kind:ask)', withDir(async (dir) => {
     seed(dir);
     await queue(dir, { tier: 3, question: 'Bridged Q?', options: ['a', 'b'], on_resolve: '/skill accept {answer}' });
@@ -1772,33 +1782,69 @@ describe('proposal micro', () => {
     expect(verdict.new).toEqual([{ id: 'MP-c0', tier: 1, question: 'q0', options: ['a', 'b'] }]);
     expect(verdict.renudged).toEqual([{ id: 'MP-c1', tier: 1, question: 'q1', follow_up_count: 2 }]);
     expect(verdict.expired).toEqual([{ id: 'MP-c2', question: 'q2' }]);
-    // Queue: c0 untouched at 0, c1 bumped to 2, c2 removed.
+    expect(verdict.dropped).toEqual([]);
+    // Queue: c0 bumped to 1 (issue 676 — first display now ages the entry), c1 bumped to 2, c2 removed.
     const pending = microFile(dir).pending;
     expect(pending.map((e: any) => e.id)).toEqual(['MP-c0', 'MP-c1']);
-    expect(pending.find((e: any) => e.id === 'MP-c0').follow_up_count).toBe(0);
+    expect(pending.find((e: any) => e.id === 'MP-c0').follow_up_count).toBe(1);
     expect(pending.find((e: any) => e.id === 'MP-c1').follow_up_count).toBe(2);
     const events = ledger(dir);
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'micro-resolved', micro_id: 'MP-c2', action: 'expired', question: 'q2' });
   }));
 
-  test('brief-cycle on an all-count-0 queue is a pure read (no write, no ledger)', withDir(async (dir) => {
+  test('brief-cycle on an all-count-0 queue bumps every entry to 1, no ledger', withDir(async (dir) => {
     seed(dir, [entryA, entryB]);
-    const before = fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8');
     const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
     expect(r.exitCode).toBe(0);
     const verdict = JSON.parse(r.stdout.trim());
     expect(verdict.new).toHaveLength(2);
     expect(verdict.renudged).toEqual([]);
     expect(verdict.expired).toEqual([]);
-    expect(fs.readFileSync(hermit(dir, 'state', 'micro-proposals.json'), 'utf-8')).toBe(before);
+    expect(verdict.dropped).toEqual([]);
+    const pending = microFile(dir).pending;
+    expect(pending.map((e: any) => e.follow_up_count)).toEqual([1, 1]);
     expect(fs.existsSync(hermit(dir, 'state', 'proposal-metrics.jsonl'))).toBe(false);
+  }));
+
+  test('brief-cycle prunes entries whose status is not "pending", no ledger event, id reported in dropped', withDir(async (dir) => {
+    const resolved = { id: 'MP-r0', tier: 1, status: 'accepted', follow_up_count: 0, question: 'already resolved elsewhere' };
+    seed(dir, [entryA, resolved]);
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
+    expect(r.exitCode).toBe(0);
+    const verdict = JSON.parse(r.stdout.trim());
+    expect(verdict.new).toEqual([{ id: entryA.id, tier: entryA.tier, question: entryA.question, options: undefined }]);
+    expect(verdict.dropped).toEqual(['MP-r0']);
+    const pending = microFile(dir).pending;
+    expect(pending.map((e: any) => e.id)).toEqual([entryA.id]);
+    expect(fs.existsSync(hermit(dir, 'state', 'proposal-metrics.jsonl'))).toBe(false);
+  }));
+
+  test('brief-cycle on a queue of only stale-status rows prunes all of them, still writes, no ledger', withDir(async (dir) => {
+    const resolved = { id: 'MP-r0', tier: 1, status: 'resolved', follow_up_count: 0, question: 'stale' };
+    seed(dir, [resolved]);
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
+    expect(r.exitCode).toBe(0);
+    const verdict = JSON.parse(r.stdout.trim());
+    expect(verdict).toEqual({ new: [], renudged: [], expired: [], dropped: ['MP-r0'] });
+    expect(microFile(dir).pending).toEqual([]);
+    expect(fs.existsSync(hermit(dir, 'state', 'proposal-metrics.jsonl'))).toBe(false);
+  }));
+
+  test('brief-cycle survives a hand-edited null element instead of throwing', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [null, entryA] }));
+    const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
+    expect(r.exitCode).toBe(0);
+    const verdict = JSON.parse(r.stdout.trim());
+    expect(verdict.new).toHaveLength(1);
+    expect(verdict.dropped).toEqual([null]);
+    expect(microFile(dir).pending.map((e: any) => e.id)).toEqual([entryA.id]);
   }));
 
   test('brief-cycle on an absent file -> empty verdict, exit 0, no write', withDir(async (dir) => {
     const r = await runProposal(hermit(dir), ['micro', 'brief-cycle']);
     expect(r.exitCode).toBe(0);
-    expect(JSON.parse(r.stdout.trim())).toEqual({ new: [], renudged: [], expired: [] });
+    expect(JSON.parse(r.stdout.trim())).toEqual({ new: [], renudged: [], expired: [], dropped: [] });
     expect(fs.existsSync(hermit(dir, 'state', 'micro-proposals.json'))).toBe(false);
   }));
 
