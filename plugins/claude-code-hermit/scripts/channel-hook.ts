@@ -72,7 +72,12 @@ export function persistDmChannelId(config: Json, channelKey: string, chatId: Jso
   // lib/channel-auth.ts isTrustedController. Replying into the maintainer
   // chat must not re-learn it as the DM channel.
   const maintainer = channel.maintainer_channel_id;
-  if (maintainer != null && String(maintainer) === id) return false;
+  if (maintainer != null && String(maintainer) === id) {
+    process.stderr.write(
+      `[channel-hook] skipped ${channelKey}.dm_channel_id — ${safe(id)} is the maintainer chat\n`
+    );
+    return false;
+  }
 
   channel.dm_channel_id = id;
   process.stderr.write(

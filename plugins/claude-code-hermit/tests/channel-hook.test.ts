@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { persistDmChannelId } from '../scripts/channel-hook';
+import { validate } from '../scripts/validate-config';
 
 // The sender allow-list gate (channel-reply-reminder.ts isAllowedSender) and
 // validate-config both require channel IDs to be strings. If a channel plugin
@@ -63,5 +64,21 @@ describe('persistDmChannelId — maintainer chat exclusion', () => {
     };
     expect(persistDmChannelId(config, 'discord', 'D2')).toBe(true);
     expect(config.channels.discord.dm_channel_id).toBe('D2');
+  });
+
+  // An already-clobbered install (or one configured to the same chat) can't be
+  // repaired by the hook — it must be reported so doctor/the operator sees it.
+  test('validate-config warns when dm_channel_id already equals maintainer_channel_id', () => {
+    const { warnings } = validate({
+      channels: { discord: { enabled: true, dm_channel_id: 'M1', maintainer_channel_id: 'M1' } },
+    });
+    expect(warnings.some(w => w.includes('discord.dm_channel_id equals maintainer_channel_id'))).toBe(true);
+  });
+
+  test('validate-config stays quiet when the two ids differ', () => {
+    const { warnings } = validate({
+      channels: { discord: { enabled: true, dm_channel_id: 'D1', maintainer_channel_id: 'M1' } },
+    });
+    expect(warnings.some(w => w.includes('equals maintainer_channel_id'))).toBe(false);
   });
 });
