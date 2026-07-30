@@ -1,6 +1,6 @@
 # Changelog — laravel-forge-hermit
 
-## [Unreleased]
+## [0.0.10] - 2026-07-30
 
 ### Added
 - `forge.php preview <method>` and `forge.php execute <plan-id>` — a request-bound write path for any SDK method. `preview` runs the SDK against a capture-only Guzzle handler, so it gets the exact outbound HTTP request without sending it, then stores that request under a SHA-256 as a single-use plan expiring in 15 minutes. `execute` re-derives the request from the stored plan and refuses unless it still hashes the same, so an edited payload, a reused plan or a stale window sends nothing.
