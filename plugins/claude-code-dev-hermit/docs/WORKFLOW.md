@@ -28,7 +28,7 @@ Per `§Branch Discipline`:
 1. `git status --porcelain` must be empty. If dirty: stop, surface the diff, let the operator commit/stash.
 2. Resolve base: first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`).
 3. `git checkout -b <prefix>/<slug> origin/<base>`.
-4. Slugify the description per the 5-step rules in CLAUDE-APPEND. Prefix detection: longest case-insensitive match of `hotfix|feature|fix|chore` at input start, else `feature`.
+4. Name the branch `<prefix>/<kebab-slug>`. Choose the prefix from `hotfix`, `feature`, `fix`, or `chore` when matched case-insensitively at the start of the description; otherwise default to `feature`.
 5. Append a one-line entry to `.claude-code-hermit/sessions/SHELL.md` Progress Log.
 
 ### Step 3 — Implement

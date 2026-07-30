@@ -83,7 +83,10 @@ Boots the hermit in a tmux session — sessions, routines, heartbeat, and the le
 ```bash
 claude plugin update claude-code-dev-hermit@claude-code-hermit --scope local
 /claude-code-hermit:hermit-evolve
+/claude-code-dev-hermit:hatch
 ```
+
+Evolve defers this plugin's mode-rendered CLAUDE-APPEND block; re-running `/claude-code-dev-hermit:hatch` renders and refreshes it.
 
 ---
 

@@ -145,7 +145,7 @@ claude-code-homeassistant-hermit (this plugin)
   ├── src/*.ts            TypeScript modules (REST client, policy, simulation, apply, history, silence)
   └── state-templates/    CLAUDE-APPEND.md (injected by hatch)
 
-claude-code-hermit (core, required ≥ 1.1.1)
+claude-code-hermit (core, required ≥ 1.2.34)
   └── Session lifecycle, proposals, reflect, memory, cost tracking
 ```
 

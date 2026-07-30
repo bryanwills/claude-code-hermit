@@ -117,7 +117,7 @@ Everything else — model, heartbeat, idle behavior, per-routine model — is co
 
 ## Requirements
 
-- `claude-code-hermit` ≥1.2.11 (core)
+- `claude-code-hermit` ≥1.2.34 (core)
 - PHP 8.5+ with `ext-json` and `ext-curl`
 - Composer (for the SDK install at hatch time)
 

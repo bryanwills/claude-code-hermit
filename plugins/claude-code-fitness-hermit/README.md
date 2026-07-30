@@ -127,13 +127,13 @@ Everything else — model, heartbeat, idle behavior, per-routine model — is co
 
 ```
 claude-code-fitness-hermit (this plugin)
-  ├── skills/             hatch, activity-deep-dive, capture-activity-rpe, set-rpe
+  ├── skills/             hatch, fitness-brief, activity-deep-dive, capture-activity-rpe, set-rpe
   ├── agents/             strava-data-cruncher (Haiku bulk aggregator)
   ├── state-templates/    routine-*.md + CLAUDE-APPEND.md (injected by hatch)
   ├── docs/               knowledge-schema.md
   └── settings.json       Strava read allow-list, write tools blocked
 
-claude-code-hermit (core, required ≥ 1.1.1)
+claude-code-hermit (core, required ≥ 1.2.34)
   └── Session lifecycle, routines, channels, memory, cost tracking
 ```
 

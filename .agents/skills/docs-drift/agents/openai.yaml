@@ -1,4 +1,4 @@
 interface:
   display_name: "Docs Drift"
-  short_description: "Audit unreleased changes against project docs"
-  default_prompt: "Use $docs-drift to check whether unreleased plugin changes are accurately reflected in project documentation."
+  short_description: "Audit released or unreleased changes against docs"
+  default_prompt: "Use $docs-drift to check whether the latest plugin releases or current unreleased changes are accurately reflected in project documentation."

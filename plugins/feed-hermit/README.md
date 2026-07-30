@@ -27,7 +27,7 @@ Hatch seeds **empty** registries and asks about slots, tone, and enrichments. It
 
 ## Requirements
 
-- Core `claude-code-hermit` ≥ 1.2.22, installed and hatched.
+- Core `claude-code-hermit` ≥ 1.2.34, installed and hatched.
 - [Bun](https://bun.sh) 1.3+ (the fetch/validation scripts and tests are Bun/TypeScript).
 - Optional: a running Chrome for `chrome`/`reddit-home`/`x`-typed sources (they skip gracefully when it's unavailable); reddit works unauthenticated out of the box (see [`docs/reddit.md`](docs/reddit.md)).
 
@@ -37,4 +37,4 @@ You own `feed-sources.md`, `feed-categories.md`, and `FEEDS.md` at the project r
 
 ## Security
 
-All fetched content is treated as untrusted — the pipeline extracts only structured data and never follows embedded instructions. A `fetch-guard` PreToolUse hook blocks WebFetch to any domain not in your `feed-sources.md`, so a poisoned source can't redirect fetches off your allowlist.
+All fetched content is treated as untrusted — the pipeline extracts only structured data and never follows embedded instructions. A `fetch-guard` PreToolUse hook blocks WebFetch to any domain not in your `feed-sources.md`, so a poisoned source can't redirect fetches off your allowlist. If `feed-sources.md` cannot be read, the hook fails open rather than blocking all fetches.

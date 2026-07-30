@@ -4,7 +4,7 @@ A maintainer utility skill that files GitHub issues via a configured GitHub App 
 
 ## This Repo is a Plugin
 
-This repo is structured as a Claude Code plugin. It is NOT a standalone project; it gets installed into other projects via:
+This repo is structured as a Claude Code plugin. It is NOT a standalone project. It requires `claude-code-hermit` ≥1.2.34; upgrade core with `/claude-code-hermit:hermit-evolve` before installing or running this release. It gets installed into other projects via:
 
 ```
 claude plugin marketplace add gtapps/claude-code-hermit
@@ -16,7 +16,7 @@ claude plugin install hermit-scribe@claude-code-hermit --scope local
 - `agents/issue-sanitizer.md`: subagent that sanitizes draft issue content before filing — strips anything personal or specific to the operator's machine and project unless it's clearly part of an upstream hermit plugin. Tools: none (pure text transform).
 - `skills/hermit-scribe/SKILL.md`: the skill, namespaced as `/hermit-scribe:hermit-scribe`
 - `skills/hermit-scribe/file-issue.ts`: stdlib-only TypeScript script (run with Bun) that signs the JWT, gets an install token, and POSTs the issue. Positional args: `<title-file> <body-file> [label...]` — extra labels are appended to the always-present `hermit-filed` label and passed in the POST body. Supports `--check <proposal-id>` to query existing issues before filing, `--comment <issue-number> <body-file>` to post a comment on an existing issue, and `classify <category> <title-file> <body-file>` to derive the Conventional-Commits `{type, scope, labels, title_line}` from a proposal's category and raw text (scope resolved against `_hermit_versions` in `.claude-code-hermit/config.json`). Exports `{ buildLabels, deriveType, resolveScope, deriveLabels, buildTitleLine }` for unit testing.
-- `skills/hatch/SKILL.md`: one-time setup — appends `state-templates/CLAUDE-APPEND.md`'s Issue Filing block to the operator's `CLAUDE.md`/`CLAUDE.local.md` and runs `scripts/automode-env.ts` to seed an auto-mode classifier environment entry for `api.github.com`.
+- `skills/hatch/SKILL.md`: version-gated setup/refresh — appends or replaces `state-templates/CLAUDE-APPEND.md`'s marked Issue Filing block, stamps `_hermit_versions["hermit-scribe"]` in `.claude-code-hermit/config.json`, and runs `scripts/automode-env.ts` to seed an auto-mode classifier environment entry for `api.github.com`.
 - `scripts/automode-env.ts`: writes one `autoMode.environment` entry (scoped to `HERMIT_GH_REPO`) into `.claude/settings.local.json`. Additive, idempotent, sealed content — no config to gate it, since filing is always operator-confirmed regardless.
 - `.claude-plugin/plugin.json`: plugin manifest
 

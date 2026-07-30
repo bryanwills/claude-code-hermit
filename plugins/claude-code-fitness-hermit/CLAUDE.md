@@ -11,7 +11,7 @@ claude plugin marketplace add gtapps/claude-code-hermit
 claude plugin install claude-code-fitness-hermit@claude-code-hermit --scope local
 ```
 
-After install, run `/claude-code-fitness-hermit:hatch` in the target project. The core hermit (`claude-code-hermit` ≥1.0.26) must be installed and hatched first — `hatch` will prompt if it isn't.
+After install, run `/claude-code-fitness-hermit:hatch` in the target project. The core hermit (`claude-code-hermit` ≥1.2.34) must be installed and hatched first — `hatch` will prompt if it isn't.
 
 ## Plugin Structure
 
@@ -33,8 +33,6 @@ After install, run `/claude-code-fitness-hermit:hatch` in the target project. Th
 ## Hatch target routing
 
 `/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-fitness-hermit`; core's `scripts/domain-hatch.ts` owns install-scope detection, target resolution, and stamping `hatch-options.json`. The preflight verdict hands back `target`, `target_file`, `target_default`, and `needs_target_question` — Step 5 only surfaces the Visibility prompt when asked to, records the answer with `domain-hatch ensure-target claude-code-fitness-hermit --target <choice>`, then writes the block with `domain-hatch sync-block claude-code-fitness-hermit`. The skill never reads or writes `hatch-options.json` itself.
-
-**Migration on target change.** When the operator flips `hatch_target` (e.g. via core 1.1.1's `hermit-evolve` Upgrade Instructions), the Fitness block can end up stranded in the old file. The most recent CHANGELOG entry's `### Upgrade Instructions` run a one-shot migration via `hermit-evolve` Step 7's sibling upgrade flow to strip the stranded block.
 
 ## Core Rules
 

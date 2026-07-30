@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Claude Code](https://code.claude.com) v2.1.110+
-- [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) v1.0.26+ (installed and hatched)
+- [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) core, installed and hatched; `/claude-code-dev-hermit:hatch` enforces the required version from `.claude-plugin/hermit-meta.json`
 - Node.js 24+ (for the `git-push-guard` hook at strict profile)
 - `gh` (GitHub) or `glab` (GitLab) for `/dev-pr`; Bitbucket and other forges need `commands.pr_create` set via `/hatch`
 
@@ -106,7 +106,7 @@ The setup wizard offers companion plugins from `claude-plugins-official`. See [R
 
 - **First session in a new project?** Let the agent orient itself before starting work — read existing code, review tests, scan the README.
 - **Talk to your hermit.** "What slowed you down?" / "Suggest improvements" — feedback feeds into the learning loop.
-- **After plugin updates**, run `/claude-code-hermit:hermit-evolve` — it detects companion hermits and syncs their CLAUDE-APPEND blocks automatically.
+- **After plugin updates**, run `/claude-code-hermit:hermit-evolve`, then re-run `/claude-code-dev-hermit:hatch`. Evolve defers this plugin's CLAUDE-APPEND refresh because only its renderer can resolve the mode annotations.
 - **Proposals have categories.** Dev-specific prefixes (`[missing-tests]`, `[tech-debt]`, `[dependency]`, `[tooling]`, `[architecture]`) keep things organized.
 - **"What should I be fixing?"** Run `/claude-code-dev-hermit:domain-brainstorm`. It reads git churn, your last test result, manifest drift, and README coverage to surface at most 2 grounded improvement ideas as PROPs — no manual triage needed.
 - **Channel activation**: run `/claude-code-hermit:channel-setup` for messaging between operator and hermit.

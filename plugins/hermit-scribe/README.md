@@ -11,6 +11,8 @@ Files GitHub issues via a configured GitHub App so they're attributed to a bot i
 
 ## Install
 
+Requires `claude-code-hermit` ≥1.2.34. Before installing or running hermit-scribe 0.1.1, upgrade core with `/claude-code-hermit:hermit-evolve`.
+
 ```bash
 claude plugin marketplace add gtapps/claude-code-hermit
 claude plugin install hermit-scribe@claude-code-hermit --scope local
@@ -47,7 +49,7 @@ Set them in your project `.env` (loaded by Docker hermit via `env_file:`) or in 
 
 ## Setup
 
-Run `/hermit-scribe:hatch` after configuring the env vars above. It appends an Issue Filing block to your `CLAUDE.md`/`CLAUDE.local.md` and seeds an `autoMode.environment` entry for `api.github.com` (context for the auto-mode classifier, not a standing permission grant — filing is always operator-confirmed regardless).
+Run `/hermit-scribe:hatch` after configuring the env vars above. It appends or version-refreshes the Issue Filing block in your `CLAUDE.md`/`CLAUDE.local.md`, stamps `_hermit_versions["hermit-scribe"]` in `.claude-code-hermit/config.json`, and seeds an `autoMode.environment` entry for `api.github.com` (context for the auto-mode classifier, not a standing permission grant — filing is always operator-confirmed regardless). Re-run hatch after an upgrade to refresh the block.
 
 ## Usage
 
@@ -104,7 +106,7 @@ hermit-scribe/
   ├── scripts/
   │     └── automode-env.ts     seeds autoMode.environment entry for api.github.com
   ├── skills/hatch/
-  │     └── SKILL.md            one-time setup: Issue Filing block + autoMode seed
+  │     └── SKILL.md            version-gated setup/refresh: block + version stamp + autoMode seed
   └── skills/hermit-scribe/
         ├── SKILL.md            trigger phrases + filing flow
         └── file-issue.ts       stdlib: JWT → install token → POST /issues; --check flag

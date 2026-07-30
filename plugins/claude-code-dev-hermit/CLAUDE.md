@@ -33,7 +33,7 @@ Language-agnostic safety layer for any agent doing dev work in a hermit project.
 
 `/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-dev-hermit`; core's `scripts/domain-hatch.ts` owns install-scope detection, target resolution, and stamping `hatch-options.json`. The preflight verdict hands back `target`, `target_file`, `target_default`, and `needs_target_question` — the skill only surfaces the Visibility prompt when asked to, records the answer with `domain-hatch ensure-target claude-code-dev-hermit --target <choice>`, and never reads or writes `hatch-options.json` itself. Step 3 pipes the mode-specific rendering into `domain-hatch sync-block claude-code-dev-hermit --rendered-stdin`, so both renderings of the single-source `CLAUDE-APPEND.md` (standard and safety, emitted by `scripts/render-append.ts`) land in the resolved file and a mode change becomes a block replacement.
 
-**Migration on target change.** When the operator flips `hatch_target` (e.g. via core 1.1.1's `hermit-evolve` Upgrade Instructions), the dev block can end up stranded in the old file. The most recent CHANGELOG entry's `### Upgrade Instructions` run a one-shot migration via `hermit-evolve` Step 7's sibling upgrade flow to strip the stranded block.
+**Upgrade refresh.** After updating the plugin, re-run `/claude-code-dev-hermit:hatch`. Core `hermit-evolve` defers this block because only `scripts/render-append.ts` can resolve its mode annotations; hatch renders it and delegates writing to `domain-hatch sync-block ... --rendered-stdin`.
 
 ## Depends On
 
