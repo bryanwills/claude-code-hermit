@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.36] - 2026-07-30
 
 ### Fixed
 - Resolved micro-proposals no longer resurface as new operator prompts. `proposal.ts micro brief-cycle` prunes entries whose `status` isn't `"pending"` and bumps a first-display entry's `follow_up_count` from 0 to 1, so an ignored question now expires after two morning briefs instead of re-rendering as new forever.
