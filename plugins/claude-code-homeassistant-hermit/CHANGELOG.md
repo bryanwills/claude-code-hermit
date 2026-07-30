@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.8] - 2026-07-30
+
+### Fixed
+- `ha-morning-brief` now recognizes the `dropped` entries core's `proposal micro brief-cycle` verdict can return (micro-proposals already resolved elsewhere) and excludes them from the brief instead of leaving the new field unhandled.
+
 ## [0.4.7] - 2026-07-26
 
 ### Added
