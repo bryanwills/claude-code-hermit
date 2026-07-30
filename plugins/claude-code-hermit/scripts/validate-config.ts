@@ -271,6 +271,17 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       if (ch.maintainer_channel_id !== undefined && ch.maintainer_channel_id !== null && typeof ch.maintainer_channel_id !== 'string') {
         errors.push(`channels.${name}.maintainer_channel_id: must be string or null`);
       }
+      // The maintainer chat is outbound-only. If it also sits in dm_channel_id the
+      // primary DM binding was clobbered (fixed in channel-hook's persistDmChannelId)
+      // or was configured to the same chat — either way, that chat now satisfies the
+      // DM-bound operator-trust check and pairing will never self-correct until a real
+      // DM arrives. Surface it so doctor's config check reports it.
+      if (ch.dm_channel_id != null && ch.maintainer_channel_id != null &&
+          String(ch.dm_channel_id) === String(ch.maintainer_channel_id)) {
+        warnings.push(
+          `channels.${name}.dm_channel_id equals maintainer_channel_id — the outbound-only maintainer chat is bound as the operator DM; send a message from the real DM chat to re-pair`,
+        );
+      }
     }
     if (config.channels.primary !== undefined) {
       const primary = config.channels.primary;

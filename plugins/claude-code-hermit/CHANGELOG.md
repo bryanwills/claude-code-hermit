@@ -6,6 +6,10 @@
 - Resolved micro-proposals no longer resurface as new operator prompts. `proposal.ts micro brief-cycle` prunes entries whose `status` isn't `"pending"` and bumps a first-display entry's `follow_up_count` from 0 to 1, so an ignored question now expires after two morning briefs instead of re-rendering as new forever.
 - A same-turn micro-proposal answer is resolved through `proposal.ts micro resolve` rather than a hand-written edit of `state/micro-proposals.json`.
 - `proposal.ts queue-micro` dedups only against live `pending` entries, so a stale row no longer swallows a fresh candidate as `DUPLICATE`.
+- The channel reply hook no longer re-learns the maintainer chat as `dm_channel_id`. A reply into the maintainer chat used to overwrite the primary DM channel with the maintainer's id, silently breaking proactive notifications and handing the maintainer chat the DM-bound operator-trust check. `validate-config` now warns when a channel's `dm_channel_id` already equals its `maintainer_channel_id`, so an install clobbered before the fix is visible to `/hermit-doctor` instead of failing silently.
+
+### Upgrade Instructions
+1. In `.claude-code-hermit/config.json`, for each configured channel, check whether `dm_channel_id` equals that channel's `maintainer_channel_id`. If they match, the DM channel id was clobbered by this bug and its original value is unrecoverable — tell the operator to send a fresh message from their real DM chat (not the maintainer chat) to re-pair `dm_channel_id`. Do not guess or auto-repair the value.
 
 ## [1.2.35] - 2026-07-27
 
