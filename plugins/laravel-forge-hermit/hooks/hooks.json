@@ -12,7 +12,7 @@
             "timeout": 5
           }
         ],
-        "description": "Block forge.php deploy/server-reboot calls lacking --confirm. Allows preview-deploy and preview-reboot through unconditionally."
+        "description": "Block forge.php deploy/server-reboot calls lacking --confirm. Previews, policy inspection, generic reads and plan execution pass through; the generic write path is gated in PHP by hash-checked plans, not by a flag."
       }
     ]
   }

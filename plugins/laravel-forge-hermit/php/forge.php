@@ -73,6 +73,7 @@ $org   = getenv('FORGE_ORG') ?: '';
 // the CLI ships (see forge-lib.php).
 // ---------------------------------------------------------------------------
 require_once __DIR__ . '/forge-lib.php';
+require_once __DIR__ . '/forge-operation.php';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -165,6 +166,66 @@ function printCanonicalSite(object $server, object $site): void {
     echo "Site:   {$site->name} (ID: {$site->id})\n";
 }
 
+/**
+ * Print an SDK return value, scrubbed. Every generic result reaches the operator's
+ * transcript through here — including free-form log strings, which is why the
+ * scrubber sits at the output boundary rather than in the method-name policy.
+ */
+function printResult(mixed $result): void {
+    if (is_iterable($result)) {
+        $rows = [];
+        foreach ($result as $item) {
+            $rows[] = is_object($item) && method_exists($item, 'toArray') ? $item->toArray() : (array) $item;
+        }
+        $out = json_encode($rows, JSON_PRETTY_PRINT);
+    } elseif (is_object($result)) {
+        $out = json_encode(method_exists($result, 'toArray') ? $result->toArray() : (array) $result, JSON_PRETTY_PRINT);
+    } else {
+        $out = json_encode($result, JSON_PRETTY_PRINT);
+    }
+    echo scrubSecrets((string) $out) . "\n";
+}
+
+/**
+ * The method's real parameter list, minus the org slug (which generic dispatch
+ * prepends). Printed on an argument mismatch so a caller can correct its JSON
+ * without going and reading the vendored SDK.
+ */
+function signatureHint(string $method): string {
+    $params = (new \ReflectionMethod(Forge::class, $method))->getParameters();
+    if (takesOrgFirst($method)) {
+        array_shift($params);   // the org slug is not part of the stdin array
+    }
+    $shown = array_map(function (\ReflectionParameter $p): string {
+        $type = $p->getType() instanceof \ReflectionNamedType ? $p->getType()->getName() : 'mixed';
+        return $type . ' $' . $p->getName() . ($p->isOptional() ? ' (optional)' : '');
+    }, $params);
+
+    return "Expected stdin JSON array: [" . implode(', ', $shown) . "]\n"
+         . "The org slug is prepended automatically — do not include it.\n";
+}
+
+/**
+ * Read the JSON argument array from stdin.
+ *
+ * Whitespace-only stdin means "no arguments", not an error — `echo | forge.php
+ * call servers` sends a bare newline, and a caller who piped nothing meant to
+ * pass nothing. A method that genuinely needed an argument then fails at the
+ * capture with signatureHint(), which is a more useful message than a complaint
+ * about stdin.
+ */
+function stdinArgs(): array {
+    $stdin = stream_get_contents(STDIN);
+    $decoded = ($stdin !== false && trim($stdin) !== '') ? json_decode(trim($stdin), true) : [];
+    if (!is_array($decoded)) {
+        // Catches both decode failure (null) and valid-but-non-array JSON
+        // (a bare string/number would crash the ...spread at the call site).
+        fwrite(STDERR, "stdin must be a JSON array of arguments (e.g. '[12]').\n");
+        exit(1);
+    }
+    return $decoded;
+}
+
 // ---------------------------------------------------------------------------
 // Argument parsing
 // ---------------------------------------------------------------------------
@@ -180,6 +241,7 @@ $positional = array_values(array_filter($args, fn($a) => !str_starts_with($a, '-
 // Usage
 // ---------------------------------------------------------------------------
 if ($cmd === '' || $cmd === '--help' || $cmd === 'help') {
+    $ttl = intdiv(PLAN_TTL_SECONDS, 60);
     echo <<<USAGE
     Usage: forge.php <command> [args] [--confirm] [--json]
 
@@ -211,8 +273,15 @@ if ($cmd === '' || $cmd === '--help' || $cmd === 'help') {
     Estate scan:
       failed-deploys [--json]     Find sites with a failed latest deployment
 
-    Generic read dispatch (JSON args on stdin):
-      call <sdk-method>           Call any allowlisted read SDK method
+    Generic dispatch (JSON args on stdin, org slug prepended automatically):
+      policy                      Show what is reachable and what is denied (no credentials needed)
+      call <sdk-method>           Any SDK read the policy allows
+      preview <sdk-method>        Capture the exact request a write would send, store a single-use plan
+      execute <plan-id>           Run an operator-approved plan, if it still hashes to what was approved
+
+    A write is never executed from a flag. `preview` shows the real HTTP request and
+    stores it under a hash; `execute` re-derives that request and refuses unless it
+    still matches. Plans are single use and expire after {$ttl} minutes.
 
     USAGE;
     exit(1);
@@ -222,6 +291,16 @@ if ($cmd === '' || $cmd === '--help' || $cmd === 'help') {
 // check
 // ---------------------------------------------------------------------------
 if ($cmd === 'check') {
+    // Report any active policy lift alongside the credential state, so the hatch
+    // and the doctor can see that this install has widened its own reach.
+    $lifts = loadPolicy($projectRoot);
+    if ($lifts['tiers_lifted'] !== [] || $lifts['methods_lifted'] !== []) {
+        echo 'policy-lift: ' . implode(' ', array_merge(
+            array_map(fn($t) => "tier:$t", $lifts['tiers_lifted']),
+            array_map(fn($m) => "method:$m", $lifts['methods_lifted']),
+        )) . "\n";
+    }
+
     if ($token === '') {
         echo "missing\n";
         exit(0);
@@ -241,65 +320,174 @@ if ($cmd === 'check') {
     exit(0);
 }
 
+// ---------------------------------------------------------------------------
+// policy  (no credentials, no network — the whole point is that an agent can
+// read the boundary it is operating under before it tries anything)
+// ---------------------------------------------------------------------------
+if ($cmd === 'policy') {
+    $policy = loadPolicy($projectRoot);
+
+    $reachable = count(array_filter(
+        array_map(fn($m) => $m->getName(), (new \ReflectionClass(Forge::class))->getMethods(\ReflectionMethod::IS_PUBLIC)),
+        'isEndpointMethod'
+    ));
+
+    $lifted = fn(string $tier) => in_array($tier, $policy['tiers_lifted'], true) ? 'LIFTED ' : 'DENIED ';
+
+    echo "Every SDK endpoint method is reachable ($reachable installed) except the tiers below.\n";
+    echo "Reads go through `call`. Writes require `preview` then `execute <plan-id>`.\n\n";
+
+    echo "Shipped tiers\n";
+    echo '  ' . $lifted('secrets') . " secrets      " . implode(', ', SECRET_METHODS) . "\n";
+    echo "                        plus any method returning " . implode(' / ',
+        array_map(fn($t) => substr((string) strrchr($t, '\\'), 1), SECRET_RETURN_TYPES)) . "\n";
+    echo '  ' . $lifted('destructive') . " destructive  any operation whose captured HTTP verb is "
+        . implode('/', DESTRUCTIVE_VERBS) . "\n\n";
+
+    echo "Operator lifts in .env (the real boundary — the agent cannot edit .env)\n";
+    echo '  FORGE_POLICY_ALLOW_TIERS  ' . ($policy['tiers_lifted'] === [] ? '(not set)' : implode(', ', $policy['tiers_lifted'])) . "\n";
+    echo '  FORGE_POLICY_ALLOW        ' . ($policy['methods_lifted'] === [] ? '(not set)' : implode(', ', $policy['methods_lifted'])) . "\n\n";
+
+    echo "Project denials in .claude-code-hermit/forge-policy.json\n";
+    echo "  A reminder, not a boundary: the agent is allowed to edit this file.\n";
+    echo '  ' . ($policy['project_deny'] === [] ? '(none)' : implode(', ', $policy['project_deny'])) . "\n";
+
+    if ($policy['warnings'] !== []) {
+        echo "\nWarnings\n";
+        foreach ($policy['warnings'] as $w) echo "  $w\n";
+    }
+    exit(0);
+}
+
 // All other commands require a valid token.
 requireToken($token);
 $forge = new Forge($token);
-$org   = requireOrg($org, $forge);
+
+// Org resolution can cost an API call, and 19 endpoint methods take no org slug
+// at all, so it stays lazy for generic dispatch. `execute` never needs it: the
+// plan froze the full argument list at preview time.
+$resolveOrg = function () use (&$org, $forge): string {
+    return $org = requireOrg($org, $forge);
+};
 
 // ---------------------------------------------------------------------------
-// call <method>  (read-only generic dispatch)
+// call <method>     generic read dispatch
+// preview <method>  capture the exact request a write would send, store a plan
+//
+// Both start the same way: resolve the method, capture what it WOULD send
+// without sending it, and apply the policy to that captured request. Nothing
+// here predicts what a method does — the transport already knows.
 // ---------------------------------------------------------------------------
-if ($cmd === 'call') {
+if ($cmd === 'call' || $cmd === 'preview') {
     $method = $positional[0] ?? '';
-    check($method !== '', "call requires a method name. Usage: forge.php call <method>");
+    check($method !== '', "$cmd requires a method name. Usage: forge.php $cmd <method>");
 
-    // Allowlist gate (authoritative — closed set)
-    if (!in_array($method, READ_ALLOWLIST, true)) {
-        fwrite(STDERR, "Method '$method' is not on the read allowlist.\n");
-        fwrite(STDERR, "Allowed methods: " . implode(', ', READ_ALLOWLIST) . "\n");
-        exit(1);
-    }
-    // Defense-in-depth: also block raw transports
-    if (in_array(strtolower($method), RAW_TRANSPORTS, true)) {
-        fwrite(STDERR, "Raw transport '$method' is blocked.\n");
+    if (!isEndpointMethod($method)) {
+        fwrite(STDERR, "'$method' is not a Forge API operation. Run forge.php policy to see what is reachable.\n");
         exit(1);
     }
 
-    check(method_exists($forge, $method), "Method '$method' does not exist on the Forge SDK.");
-
-    $stdin = stream_get_contents(STDIN);
-    $jsonArgs = ($stdin !== false && $stdin !== '') ? json_decode(trim($stdin), true) : [];
-    if (!is_array($jsonArgs)) {
-        // Catches both decode failure (null) and valid-but-non-array JSON
-        // (a bare string/number would crash the ...spread below).
-        fwrite(STDERR, "stdin must be a JSON array of arguments (e.g. '[\"server-id\"]').\n");
-        exit(1);
-    }
-    // Prepend org slug as first argument — most SDK v4 read methods take it
-    // first, but a few global ones (organizations, regions) take no org.
-    if (!in_array($method, NO_ORG_METHODS, true)) {
-        array_unshift($jsonArgs, $org);
+    $callArgs = stdinArgs();
+    if (takesOrgFirst($method)) {
+        array_unshift($callArgs, $resolveOrg());
     }
 
     try {
-        $result = $forge->$method(...$jsonArgs);
-        if (is_iterable($result)) {
-            $rows = [];
-            foreach ($result as $item) {
-                $rows[] = method_exists($item, 'toArray') ? $item->toArray() : (array)$item;
-            }
-            echo json_encode($rows, JSON_PRETTY_PRINT) . "\n";
-        } elseif (is_object($result)) {
-            echo json_encode(method_exists($result, 'toArray') ? $result->toArray() : (array)$result, JSON_PRETTY_PRINT) . "\n";
-        } else {
-            echo json_encode($result, JSON_PRETTY_PRINT) . "\n";
+        $captured = captureRequest($method, $callArgs);
+    } catch (\TypeError $e) {
+        // With 271 methods reachable, a wrong argument shape is the likely
+        // mistake — print the real signature instead of an SDK stack trace.
+        fwrite(STDERR, "Argument mismatch for '$method'.\n" . signatureHint($method));
+        exit(1);
+    }
+
+    $isRead = $captured->getMethod() === 'GET';
+    if ($cmd === 'call' && !$isRead) {
+        fwrite(STDERR, "'$method' is a write ({$captured->getMethod()}). Use: forge.php preview $method\n");
+        exit(1);
+    }
+    if ($cmd === 'preview' && $isRead) {
+        fwrite(STDERR, "'$method' is a read. Use: forge.php call $method\n");
+        exit(1);
+    }
+
+    $refusal = policyRefusal($method, $captured, loadPolicy($projectRoot));
+    if ($refusal !== null) {
+        fwrite(STDERR, $refusal . "\n");
+        exit(1);
+    }
+
+    if ($cmd === 'call') {
+        try {
+            printResult($forge->$method(...$callArgs));
+        } catch (\Throwable $e) {
+            fwrite(STDERR, "SDK error: " . $e->getMessage() . "\n");
+            exit(1);
         }
+        exit(0);
+    }
+
+    // --- preview: show the operator the real request, then store it under a hash
+    $path = canonicalPath($captured);
+
+    echo "--- $method preview (no action taken) ---\n";
+    // The canonical target comes from the CAPTURED URI, so it is right for every
+    // method rather than for the ones whose signature we happened to know.
+    if (preg_match('#/servers/(\d+)#', $path, $m) === 1) {
+        printCanonicalServer(resolveServer($forge, $resolveOrg(), $m[1]));
+    }
+    echo "{$captured->getMethod()} $path\n";
+
+    $body = (string) $captured->getBody();
+    if ($body !== '') {
+        $pretty = json_encode(json_decode($body, true), JSON_PRETTY_PRINT);
+        echo scrubSecrets($pretty === false ? $body : $pretty) . "\n";
+    }
+
+    $stateDir = $projectRoot . '/.claude-code-hermit';
+    purgeExpiredPlans($stateDir);
+    $planId = storePlan($stateDir, [
+        'method' => $method,
+        'args'   => $callArgs,
+        'verb'   => $captured->getMethod(),
+        'path'   => $path,
+        'body'   => $body,
+        'hash'   => planHash($captured),
+    ]);
+
+    $mins = intdiv(PLAN_TTL_SECONDS, 60);
+    echo "Plan: $planId   expires " . gmdate('H:i', time() + PLAN_TTL_SECONDS) . " UTC ($mins min, single use)\n";
+    echo "Relay the target and payload above, wait for the operator's approval, then run:\n";
+    echo "  forge.php execute $planId\n";
+    exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// execute <plan-id>
+//
+// The only path that mutates through generic dispatch. It re-derives the request
+// from the stored plan and refuses unless it still hashes to what was approved,
+// so an edited payload, an expired window, or a reused plan sends nothing.
+// ---------------------------------------------------------------------------
+if ($cmd === 'execute') {
+    $planId = $positional[0] ?? '';
+    check($planId !== '', "execute requires a plan id. Usage: forge.php execute <plan-id>");
+
+    try {
+        printResult(executePlan($projectRoot . '/.claude-code-hermit', $planId, $forge));
+    } catch (PlanRefusal $e) {
+        fwrite(STDERR, $e->getMessage() . "\n");
+        exit(1);
     } catch (\Throwable $e) {
         fwrite(STDERR, "SDK error: " . $e->getMessage() . "\n");
         exit(1);
     }
     exit(0);
 }
+
+// Everything below this line is a curated command, and all of them are
+// org-scoped, so the lazy resolution above is settled once here.
+$resolveOrg();
 
 // ---------------------------------------------------------------------------
 // servers

@@ -1,5 +1,28 @@
 # Changelog — laravel-forge-hermit
 
+## [Unreleased]
+
+### Added
+- `forge.php preview <method>` and `forge.php execute <plan-id>` — a request-bound write path for any SDK method. `preview` runs the SDK against a capture-only Guzzle handler, so it gets the exact outbound HTTP request without sending it, then stores that request under a SHA-256 as a single-use plan expiring in 15 minutes. `execute` re-derives the request from the stored plan and refuses unless it still hashes the same, so an edited payload, a reused plan or a stale window sends nothing.
+- `forge.php policy` prints what is reachable, which deny tiers are active, which `.env` lifts are in effect, and any warnings. Runs with no credentials and no network.
+- Output scrubber on everything `call` and `execute` print — `KEY=`/`PASSWORD=`/`*_TOKEN=` assignments, `Bearer` blobs, PEM blocks, credentials in connection URLs, and long high-entropy strings become `[REDACTED]`. Log-reading methods return free-form text, which no method-name policy could ever cover.
+- `forge.php check` reports an active policy lift alongside the credential state.
+
+### Changed
+- Generic dispatch reaches the whole SDK minus two deny tiers instead of a hand-maintained ~100-entry read allowlist. The Forge API token is what authorizes an operation; this plugin owns autonomy and context hygiene. `secrets` (methods returning credential material) and `destructive` (captured verb `DELETE`) stay denied unless the operator lifts them in `.env`.
+- Reachability is now derived from the installed SDK rather than listed. `isEndpointMethod()` classifies by declaring file, which covers all 11 non-endpoint publics including `setApiKey` and the raw transports; `takesOrgFirst()` decides org prepending by reflection, fixing 19 endpoint methods that a one-name exemption list would have called with the org shifted into their first argument.
+- Destructive operations are classified by the captured HTTP verb, not a name prefix. `disableQuickDeploy` and `disablePushToDeploy` issue `DELETE` without a `delete` prefix and were previously unclassifiable.
+- `serverKey`, `deployKey` and the `storageProvider*` reads are explicitly allowed. All three are public keys or metadata per the SDK's own docblocks and field lists.
+- Org resolution is lazy for generic dispatch, so `policy` and org-less methods no longer pay for or depend on an org lookup.
+- `deploy`, `server-reboot` and their previews are unchanged, `--confirm` included. Their two layers are still the hook plus the in-PHP flag check; the generic write path's two layers are the plan hash and the operator's approval.
+
+### Upgrade Instructions
+
+1. Nothing to migrate — no state format changed, and no new file is created until the first `preview`.
+2. Generic dispatch now reaches SDK methods that were previously unreachable. If you want a narrower surface than the shipped tiers, add `{"deny": ["<method>", "<prefix>*"]}` to `.claude-code-hermit/forge-policy.json`. Treat it as a reminder to the agent, not a boundary: the agent is permitted to edit that file.
+3. To let this hermit delete Forge resources or read credential-bearing endpoints, add `FORGE_POLICY_ALLOW_TIERS=destructive` (and/or `secrets`), or `FORGE_POLICY_ALLOW=<method>,<method>` for named methods only, to `.env` in the project root. Both are off by default. `.env` is operator-only — the agent cannot edit it.
+4. Run `php <plugin>/php/forge.php policy` to confirm the effective boundary after upgrading.
+
 ## [0.0.9] - 2026-07-26
 
 ### Added

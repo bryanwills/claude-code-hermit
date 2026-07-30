@@ -10,7 +10,9 @@ A Laravel Forge domain layer for `claude-code-hermit`: deployment skills, server
 - `skills/forge-deploy/` — preview → approve → deploy; failure → deploy-incident artifact
 - `skills/forge-logs/` — deployment + server logs, triage mode
 - `skills/forge-failed-deploys/` — daily scheduled estate scan (analysis-only)
-- `php/forge.php` — PHP dispatch script: read-only generic dispatch, curated commands, write-confirmation gate
+- `php/forge.php` — PHP dispatch script: curated commands, generic dispatch, write-confirmation gate
+- `php/forge-operation.php` — the write gateway: request capture, canonicalization, plan store, hash-checked execution
+- `php/forge-lib.php` — derived predicates (`isEndpointMethod`, `takesOrgFirst`), deny tiers, policy loading, output scrubber
 - `php/composer.json` + `php/composer.lock` — shipped; `php/vendor/` is gitignored (hatch installs SDK into project space)
 - `hooks/write-confirm-gate.ts` — PreToolUse Bash hook: blocks deploy/server-reboot without `--confirm`
 - `state-templates/CLAUDE-APPEND.md` — Forge Workflow block injected by hatch
@@ -31,11 +33,12 @@ The vendor tree is **not committed to this repo** — hatch installs `laravel/fo
 
 ## Core Rules
 
-- **Surface-then-approve on every write.** Preview first, relay canonical target, wait for explicit approval, re-run with `--confirm`. No exceptions.
-- The write-confirm-gate hook and the in-PHP `--confirm` gate are two independent layers. Neither is optional.
+- **Surface-then-approve on every write.** Preview first, relay canonical target, wait for explicit approval, then execute. No exceptions.
+- **Two write paths, two different enforcement mechanisms.** For the curated `deploy` / `server-reboot` commands the layers are the write-confirm-gate hook plus the in-PHP `--confirm` check; neither is optional. For generic dispatch the layers are the **plan hash** (code-enforced: `execute` re-captures the request and refuses unless it hashes to the approved one) and the **operator's channel approval** (protocol-enforced: the resolver fires on an inbound channel message, which an agent cannot fabricate). `--confirm` plays no part there — it only ever proved a flag was typed, and the agent types the flag.
 - **Never echo, cat, or Read `.env`** — check credential state with `forge.php check` (self-reports `missing`/`invalid`/`unreachable`/`ok`). The `TOKEN` substring in `FORGE_API_TOKEN` triggers the base hermit deny-pattern hook.
 - **Deployment and server logs may contain secrets.** Scrub before relay and before persistence — see CLAUDE-APPEND secret-hygiene rule.
-- Generic dispatch (`forge.php call <method>`) is read-only by design (closed allowlist). Write ops only go through the curated `deploy` / `server-reboot` commands.
+- **Generic dispatch reaches the whole SDK minus two deny tiers** (`secrets`, `destructive`), because the Forge API token is what authorizes an operation — this plugin owns autonomy and context hygiene, not authorization. Reads go through `call`, writes through `preview` → approval → `execute <plan-id>`. Reachability is derived from the installed SDK by reflection and from the captured HTTP verb, never from a hand-maintained list. `forge.php policy` prints the effective state.
+- **`php/forge-operation.php` is the security-critical file.** Capture, canonicalization, plan storage and the hash check live there, with no CLI parsing or output formatting, so `php/tests/run.php` drives it directly. Its Blocks A and B run first in the suite for a reason: if the captured request is not what the SDK would really send, every other guarantee is decorative.
 
 ## Development
 

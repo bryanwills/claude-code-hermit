@@ -91,7 +91,8 @@ claude plugin update laravel-forge-hermit@claude-code-hermit --scope local
 Writes are gated by two independent layers — neither is optional:
 
 - **`write-confirm-gate` hook** — a `PreToolUse` Bash hook that blocks any `deploy` or `server-reboot` call lacking `--confirm`.
-- **In-PHP `--confirm` gate** — `forge.php` re-checks the flag before the SDK fires. Generic dispatch (`forge.php call <method>`) is read-only by design (closed allowlist); writes only flow through the curated `deploy` / `server-reboot` commands.
+- **In-PHP `--confirm` gate** — `forge.php` re-checks the flag before the SDK fires, for those two curated commands.
+- **Hash-checked plans for everything else** — the rest of the SDK is reachable through generic dispatch: `call <method>` for reads, and for writes `preview <method>` → operator approval → `execute <plan-id>`. Preview captures the *actual outbound HTTP request* without sending it, stores it under a SHA-256, and `execute` re-derives that request and refuses unless it still matches. Plans are single use and expire in 15 minutes, so an edited payload, a reused approval or a stale window sends nothing. Two tiers stay denied by default — anything returning credential material, and anything whose captured verb is `DELETE` — and only the operator can lift them, via `.env` (which the agent cannot edit). `forge.php policy` prints the effective boundary.
 
 - **Surface-then-approve** — the canonical target is relayed and approved before any write re-runs with `--confirm`.
 - **Logs are scrubbed** — deployment and server logs may carry secrets; they're scrubbed before relay and before persistence.

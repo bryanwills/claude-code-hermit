@@ -62,7 +62,11 @@ function main(): void {
     'server-log', 'site-log', 'background-process-log',
     'deploy-history', 'deploy-log', 'deploy-status', 'deploy-watch',
     'preview-deploy', 'preview-reboot',
-    'failed-deploys', 'call',
+    'failed-deploys',
+    // Generic dispatch. `execute` mutates, but its authority is the plan hash
+    // plus the operator's channel approval — neither is visible in a Bash
+    // command string, so gating it here would be theatre. It stays in PHP.
+    'policy', 'call', 'preview', 'execute',
     'help', '--help',
   ];
   if (SAFE_SUBCOMMANDS.includes(subcommand)) {

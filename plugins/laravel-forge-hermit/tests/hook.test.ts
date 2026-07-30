@@ -81,6 +81,38 @@ describe('write-confirm-gate: pass-through cases', () => {
     const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php background-process-log web-1 123' } });
     expect(r.exitCode).toBe(0);
   });
+
+  test('policy passes (no credentials, no network)', () => {
+    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php policy' } });
+    expect(r.exitCode).toBe(0);
+  });
+
+  test('preview passes (captures a request, sends nothing)', () => {
+    const r = runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'echo \'[12, {"type":"cpu_load"}]\' | php /plugin/php/forge.php preview createMonitor' },
+    });
+    expect(r.exitCode).toBe(0);
+  });
+
+  // `execute` does mutate. It is deliberately not gated here: its authority is
+  // the plan hash and the operator's channel approval, and neither is visible in
+  // a Bash command string. A hook that documents itself as fail-open must not
+  // pretend to own that decision.
+  test('execute passes — the PHP hash check owns this gate, not the hook', () => {
+    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php execute fp-3f9a1c7b' } });
+    expect(r.exitCode).toBe(0);
+  });
+
+  test('the new verbs pass with ${CLAUDE_PLUGIN_ROOT} and an env prefix', () => {
+    for (const cmd of [
+      'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php policy',
+      'FOO=bar php ${CLAUDE_PLUGIN_ROOT}/php/forge.php preview createMonitor',
+      'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php execute fp-deadbeef',
+    ]) {
+      expect(runHook({ tool_name: 'Bash', tool_input: { command: cmd } }).exitCode).toBe(0);
+    }
+  });
 });
 
 describe('write-confirm-gate: blocked cases', () => {
