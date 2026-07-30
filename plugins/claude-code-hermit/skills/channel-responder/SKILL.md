@@ -98,6 +98,8 @@ After authorization passes, store the inbound `chat_id` to `config.json` → `ch
 
 This is how the agent learns the DM channel ID for proactive outbound notifications. In Discord, the DM channel ID differs from the user ID and is only discoverable from an inbound message. Write back to `config.json` only when the value has changed to avoid unnecessary writes.
 
+**Never store a `chat_id` equal to that channel's `maintainer_channel_id`.** The maintainer chat is an outbound-only second destination (`docs/security.md` § tiered disclosure) and must not be adopted as the primary DM — `dm_channel_id` also binds operator trust (`lib/channel-auth.ts` `isTrustedController`). Replying into the maintainer chat must not re-learn it as the DM channel.
+
 ## 2. Classify the Message
 
 Before running any heavy sub-step — an archive traversal, a multi-file search, or a delegated execution step — apply the **Context-hygiene & delegation** rule: delegate when its criteria hold and keep only the verdict.

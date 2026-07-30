@@ -27,3 +27,41 @@ describe('persistDmChannelId — dm_channel_id string coercion', () => {
     expect(config.channels.discord.dm_channel_id).toBe('D1');
   });
 });
+
+// The maintainer chat is an outbound-only second destination
+// (docs/security.md § tiered disclosure) and must never be re-learned as
+// dm_channel_id — dm_channel_id also binds operator trust in
+// lib/channel-auth.ts isTrustedController.
+describe('persistDmChannelId — maintainer chat exclusion', () => {
+  test('a chatId equal to maintainer_channel_id is refused, dm_channel_id untouched', () => {
+    const config: any = {
+      channels: { discord: { dm_channel_id: 'D1', maintainer_channel_id: 'M1' } },
+    };
+    expect(persistDmChannelId(config, 'discord', 'M1')).toBe(false);
+    expect(config.channels.discord.dm_channel_id).toBe('D1');
+  });
+
+  test('a chatId equal to maintainer_channel_id is refused even when dm_channel_id is null', () => {
+    const config: any = {
+      channels: { discord: { dm_channel_id: null, maintainer_channel_id: 'M1' } },
+    };
+    expect(persistDmChannelId(config, 'discord', 'M1')).toBe(false);
+    expect(config.channels.discord.dm_channel_id).toBe(null);
+  });
+
+  test('a numeric chatId matching a string maintainer_channel_id is still refused', () => {
+    const config: any = {
+      channels: { discord: { dm_channel_id: 'D1', maintainer_channel_id: '555' } },
+    };
+    expect(persistDmChannelId(config, 'discord', 555)).toBe(false);
+    expect(config.channels.discord.dm_channel_id).toBe('D1');
+  });
+
+  test('a chatId different from maintainer_channel_id is still learned normally', () => {
+    const config: any = {
+      channels: { discord: { dm_channel_id: 'D1', maintainer_channel_id: 'M1' } },
+    };
+    expect(persistDmChannelId(config, 'discord', 'D2')).toBe(true);
+    expect(config.channels.discord.dm_channel_id).toBe('D2');
+  });
+});
