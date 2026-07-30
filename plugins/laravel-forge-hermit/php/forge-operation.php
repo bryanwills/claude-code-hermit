@@ -113,16 +113,31 @@ function canonicalPath(RequestInterface $r): string
  */
 function canonicalRequest(RequestInterface $r): string
 {
-    $query = [];
-    parse_str($r->getUri()->getQuery(), $query);
-    ksort($query);
-
     return implode("\n", [
         strtoupper($r->getMethod()),
         canonicalPath($r),
-        http_build_query($query),
+        canonicalQuery($r),
         (string) $r->getBody(),
     ]);
+}
+
+/**
+ * The raw query pairs, sorted — order-independent without being lossy.
+ *
+ * Deliberately NOT parse_str()/http_build_query(): parse_str rewrites `.` and
+ * space in top-level keys to `_` and keeps only the last of a repeated key, so
+ * `?a.b=1` and `?a_b=1` would canonicalize — and therefore hash — identically.
+ * A hash that binds an approval to one exact request cannot afford a collision.
+ */
+function canonicalQuery(RequestInterface $r): string
+{
+    $raw = $r->getUri()->getQuery();
+    if ($raw === '') return '';
+
+    $pairs = explode('&', $raw);
+    sort($pairs, SORT_STRING);
+
+    return implode('&', $pairs);
 }
 
 function planHash(RequestInterface $r): string
@@ -242,9 +257,13 @@ function consumePlan(string $stateDir, string $id): void
  * Executes an approved plan, or refuses. Every refusal path returns before the
  * real client is touched, so no refusal can reach the network.
  *
- * @throws PlanRefusal  reason: malformed | missing | expired | mismatch
+ * `$policy` is re-applied to the RE-CAPTURED request, not just at preview time:
+ * a tier the operator lifted in .env to authorise one preview must not stay
+ * lifted for a plan that is executed after they took it away again.
+ *
+ * @throws PlanRefusal  reason: malformed | missing | expired | mismatch | policy
  */
-function executePlan(string $stateDir, string $id, Forge $real): mixed
+function executePlan(string $stateDir, string $id, Forge $real, ?array $policy = null): mixed
 {
     $plan = loadPlan($stateDir, $id);
 
@@ -259,6 +278,10 @@ function executePlan(string $stateDir, string $id, Forge $real): mixed
     if (!hash_equals((string) $plan['hash'], planHash($recaptured))) {
         throw new PlanRefusal('mismatch',
             "Plan '$id' no longer matches the request it approved. Nothing was sent. Re-run preview.");
+    }
+
+    if ($policy !== null && ($refusal = policyRefusal($method, $recaptured, $policy)) !== null) {
+        throw new PlanRefusal('policy', $refusal . "\nNothing was sent.");
     }
 
     consumePlan($stateDir, $id);

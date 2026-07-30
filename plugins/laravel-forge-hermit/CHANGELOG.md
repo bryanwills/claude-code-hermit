@@ -16,6 +16,9 @@
 - Org resolution is lazy for generic dispatch, so `policy` and org-less methods no longer pay for or depend on an org lookup.
 - `deploy`, `server-reboot` and their previews are unchanged, `--confirm` included. Their two layers are still the hook plus the in-PHP flag check; the generic write path's two layers are the plan hash and the operator's approval.
 
+### Fixed
+- `forge.php call <method>` walks every page of a paginated result instead of printing only the first. An estate larger than one page was silently reported as truncated.
+
 ### Upgrade Instructions
 
 1. Nothing to migrate — no state format changed, and no new file is created until the first `preview`.

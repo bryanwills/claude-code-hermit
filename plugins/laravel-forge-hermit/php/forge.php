@@ -172,6 +172,12 @@ function printCanonicalSite(object $server, object $site): void {
  * scrubber sits at the output boundary rather than in the method-name policy.
  */
 function printResult(mixed $result): void {
+    // A CursorPaginator iterates page 1 only; ->lazy() walks every page, which is
+    // what the curated read commands already do. Without this a `call servers` on
+    // an estate larger than one page silently reports a truncated list.
+    if ($result instanceof \Laravel\Forge\CursorPaginator) {
+        $result = $result->lazy();
+    }
     if (is_iterable($result)) {
         $rows = [];
         foreach ($result as $item) {
@@ -433,8 +439,19 @@ if ($cmd === 'call' || $cmd === 'preview') {
     echo "--- $method preview (no action taken) ---\n";
     // The canonical target comes from the CAPTURED URI, so it is right for every
     // method rather than for the ones whose signature we happened to know.
+    //
+    // This lookup is decoration, not the preview: the request is already captured
+    // and its id is printed on the next line. resolveServer() exits on a miss and
+    // lets SDK errors escape, so it is deliberately NOT reused here — an expired
+    // token, a rate limit or a server absent from the listing must not abort a
+    // preview with an uncaught fatal.
     if (preg_match('#/servers/(\d+)#', $path, $m) === 1) {
-        printCanonicalServer(resolveServer($forge, $resolveOrg(), $m[1]));
+        try {
+            $match = matchServer(iterator_to_array($forge->servers($resolveOrg())->lazy()), $m[1]);
+            if ($match !== []) printCanonicalServer($match[0]);
+        } catch (\Throwable $e) {
+            fwrite(STDERR, "Note: could not resolve server {$m[1]} for display: {$e->getMessage()}\n");
+        }
     }
     echo "{$captured->getMethod()} $path\n";
 
@@ -474,7 +491,7 @@ if ($cmd === 'execute') {
     check($planId !== '', "execute requires a plan id. Usage: forge.php execute <plan-id>");
 
     try {
-        printResult(executePlan($projectRoot . '/.claude-code-hermit', $planId, $forge));
+        printResult(executePlan($projectRoot . '/.claude-code-hermit', $planId, $forge, loadPolicy($projectRoot)));
     } catch (PlanRefusal $e) {
         fwrite(STDERR, $e->getMessage() . "\n");
         exit(1);

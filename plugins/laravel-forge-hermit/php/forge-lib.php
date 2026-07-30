@@ -39,7 +39,27 @@ function isEndpointMethod(string $method): bool
     $rm = new \ReflectionMethod(Forge::class, $method);
     if (!$rm->isPublic()) return false;
 
-    return str_contains(str_replace('\\', '/', (string) $rm->getFileName()), '/Actions/');
+    return str_starts_with(str_replace('\\', '/', (string) $rm->getFileName()), forgeActionsDir());
+}
+
+/**
+ * The SDK's own `src/Actions/` directory, as an absolute prefix.
+ *
+ * Anchored to the directory holding Forge.php rather than matched as a bare
+ * `/Actions/` substring: an install path that merely CONTAINS a directory named
+ * `Actions` (e.g. a project at /srv/Actions/app) would otherwise make every
+ * plumbing method — `get`, `post`, `delete`, `retry`, `setApiKey` — pass the
+ * structural check, because their file paths contain that substring too.
+ */
+function forgeActionsDir(): string
+{
+    static $dir = null;
+    if ($dir === null) {
+        $src = dirname((string) (new \ReflectionClass(Forge::class))->getFileName());
+        $dir = str_replace('\\', '/', $src) . '/Actions/';
+    }
+
+    return $dir;
 }
 
 /**
