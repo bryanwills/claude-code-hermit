@@ -80,7 +80,10 @@ if (fs.existsSync(appendPath)) {
   // The two gates are defence in depth, and the PHP gate is the authoritative
   // one — the block must not claim blanket un-bypassable enforcement.
   ok('states the real enforcement boundary', append.includes('PHP gate authoritative'));
-  ok('keeps the closed read-only allowlist fact', append.includes('closed allowlist'));
+  // Replaced the closed-allowlist assertion: reads no longer use an allowlist,
+  // so asserting it would keep the template documenting a guarantee the code
+  // does not make. The plan hash is the guarantee that took its place.
+  ok('keeps the plan-bound write fact', append.includes('hash-checked plan'));
   ok('keeps the typed-int ID gotcha', append.includes('strict_types'));
   ok('keeps the credential-check command', append.includes('forge.php check'));
   ok('keeps secret hygiene', append.includes('[REDACTED]'));
