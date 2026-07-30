@@ -55,10 +55,11 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
    - Read `.claude-code-hermit/cost-summary.md` if it exists — include yesterday's cost
 
 <!-- keep in sync with plugins/claude-code-hermit/skills/brief/SKILL.md — same MP lifecycle protocol -->
-9a. **Micro-proposals lifecycle** — age the queue in one call: `.claude-code-hermit/bin/hermit-run proposal micro .claude-code-hermit brief-cycle`. This runs core's writer through the project-resident `bin/hermit-run`, which resolves core's plugin root (a static `../claude-code-hermit/…` path can't — HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/` and the version segment isn't knowable from skill text). It performs the whole `follow_up_count` 0/1/2+ lifecycle atomically (re-nudges count-1 entries, expires count-2+ entries, records each expiry) and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…]}`. Never hand-edit `state/micro-proposals.json`. Render from that verdict:
+9a. **Micro-proposals lifecycle** — age the queue in one call: `.claude-code-hermit/bin/hermit-run proposal micro .claude-code-hermit brief-cycle`. This runs core's writer through the project-resident `bin/hermit-run`, which resolves core's plugin root (a static `../claude-code-hermit/…` path can't — HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/` and the version segment isn't knowable from skill text). It performs the whole `follow_up_count` 0/1/2+ lifecycle atomically (re-nudges count-1 entries, expires count-2+ entries, records each expiry, prunes any entry whose `status` isn't `"pending"`) and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…],"dropped":[…]}`. Never hand-edit `state/micro-proposals.json`. Render from that verdict:
    - Each `new` entry: include in `Awaiting decision:` output (see Output Format).
    - Each `renudged` entry: include in `Awaiting decision:` with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] (ignore again to drop it)".
    - `expired` entries were dropped this cycle — do not surface them.
+   - `dropped` entries were already resolved elsewhere (issue 676) — never surface them, never count them.
    - If `new` and `renudged` are both empty: skip this step entirely.
 
 10. **Compose brief** — Write a concise morning brief in the operator's language (from OPERATOR.md preferences). Use the format below.

@@ -267,7 +267,11 @@ Canonical dual-delivery rule for any skill that hits a decision point on a chann
 
 - **(a) Conversational side**: send the question via the channel reply tool, same as any other response — the operator is usually right there.
 - **(b) Durable side, bounded asks only**: a bounded ask (2-4 discrete options, including plain yes/no) ALSO gets queued as a pending entry via `proposal.ts queue-micro` (see reflect's § Micro-approval queuing) — `options` set to the labels (omit for plain yes/no), `tier: 1`, and `on_resolve` set to the skill invocation that should run once an answer is picked, with `{answer}` as the placeholder for the selected label. Free-form asks (no bounded set of answers) are reply-tool only — no entry is queued for those.
-- **Whichever surface answers first resolves it.** If the operator answers in the same live turn (interactive-style, still within the asking skill's own flow), the asking skill acts on it directly AND resolves the MP entry itself — remove it from `pending`, write the file, and append the same `micro-resolved` `"action":"answered"` event as § Micro-approval response above — so the entry doesn't dangle waiting for a reply that already happened. If the operator answers later (new turn, possibly a new session), the § Micro-approval response resolver above handles it via `on_resolve`.
+- **Whichever surface answers first resolves it.** If the operator answers in the same live turn (interactive-style, still within the asking skill's own flow), the asking skill acts on it directly AND resolves the MP entry itself via the same script call § Micro-approval response uses (never hand-edit `state/micro-proposals.json` — issue 676: a hand-written removal left the ledger event recorded but the entry still in `pending`, so it resurfaced as new days later):
+  ```bash
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts micro .claude-code-hermit resolve <id> --action answered --answer "<selected label>"
+  ```
+  so the entry doesn't dangle waiting for a reply that already happened. If the operator answers later (new turn, possibly a new session), the § Micro-approval response resolver above handles it via `on_resolve`.
 - **Never call `AskUserQuestion` on a channel-tagged turn.** It renders in the terminal/transcript, which is invisible to a remote operator — exactly the strand this bridge exists to prevent.
 
 ## Note
