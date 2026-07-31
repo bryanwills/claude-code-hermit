@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The `reflect` doctor check is informational and never warns. It reports the loop's shape — run count, empty rate, output split into proposals and micro-proposals, and the judge suppress mix by code — instead of flagging a high empty rate as an "unproductive loop". A hermit with nothing left to evolve is a legitimate steady state, and the counters can't tell which caller produced the empty runs, so the old warn had no action behind it.
+
 ## [1.2.36] - 2026-07-30
 
 ### Fixed
