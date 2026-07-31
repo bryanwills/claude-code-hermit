@@ -2287,13 +2287,59 @@ describe('doctor-check archival + reflect loop', () => {
     expect(a.detail).toContain('stale active session');
   }));
 
-  test('checkReflectLoop (unproductive ≥10 runs → warn)', withDir(async (dir) => {
+  async function reflectCheck(dir: string, counters: string) {
     seedDoctor(dir);
-    write(hermit(dir, 'state', 'reflection-state.json'),
-      '{"counters":{"total_runs":20,"empty_runs":18,"proposals_created":0}}');
+    write(hermit(dir, 'state', 'reflection-state.json'), `{"counters":${counters}}`);
+    return checkById(await doctorReport(dir), 'reflect');
+  }
+
+  test('checkReflectLoop (high empty rate, no output → ok, not warn)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir,
+      '{"total_runs":20,"empty_runs":18,"proposals_created":0,"since":"2026-06-12"}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toBe('18/20 empty (90%), no output or suppressions since 2026-06-12');
+  }));
+
+  test('checkReflectLoop (micro-proposals count as output, since suffix kept)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir,
+      '{"total_runs":20,"empty_runs":18,"proposals_created":0,"micro_proposals_queued":3,"since":"2026-06-12"}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toContain('3 micro-proposal(s)');
+    expect(rc.detail).toEndWith(' since 2026-06-12');
+  }));
+
+  test('checkReflectLoop (suppress mix rendered in /hermit-health code order)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir,
+      '{"total_runs":94,"empty_runs":82,"judge_suppress":14,' +
+      '"judge_suppress_by_code":{"covered-by-memory":9,"no-sessions":0,"no-evidence":5}}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toBe(
+      '82/94 empty (87%), 0 proposal(s), 0 micro-proposal(s), 14 suppressed (no-evidence:5, covered-by-memory:9)');
+  }));
+
+  test('checkReflectLoop (string counters read as 0, matching update-reflection-state)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir, '{"total_runs":"20","empty_runs":"18"}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toBe('no reflect runs yet');
+  }));
+
+  test('checkReflectLoop (suppress without by-code map omits the parenthetical)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir, '{"total_runs":20,"empty_runs":18,"judge_suppress":4}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toEndWith('4 suppressed');
+  }));
+
+  test('checkReflectLoop (zero runs → ok, no NaN)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir, '{"total_runs":0,"empty_runs":0,"since":"2026-06-12"}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toBe('no reflect runs yet since 2026-06-12');
+  }));
+
+  test('checkReflectLoop (absent state file → ok)', withDir(async (dir) => {
+    seedDoctor(dir);
     const rc = checkById(await doctorReport(dir), 'reflect');
-    expect(rc.status).toBe('warn');
-    expect(rc.detail).toContain('unproductive');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toContain('absent');
   }));
 
   test('checkArchival (idle + non-null session_id → warn)', withDir(async (dir) => {

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+### Changed
+- The `reflect` doctor check is informational and never warns. It reports run count, empty rate, output split into proposals and micro-proposals, and the judge suppress mix by code, instead of flagging a high empty rate as an "unproductive loop".
 ### Fixed
 - The `docker-security` doctor check no longer reports a permanent `warn` on dockerized hermits. `docker compose config` verification is skipped when the check runs inside the container, where the docker CLI does not exist; the presence cross-reference still applies.
 
