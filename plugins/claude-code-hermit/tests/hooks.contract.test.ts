@@ -2234,6 +2234,37 @@ exit 0
 `);
     expect(d.status).toBe('ok');
   }));
+
+  test('docker-security check (isContainer() true → ok, docker never consulted)', withDir(async (dir) => {
+    seedDockerSecurity(dir);
+    const fake = fakeDocker('#!/bin/bash\nexit 1\n');
+    try {
+      const report = await doctorReport(dir, {
+        PATH: `${fake.bin}:${process.env.PATH}`,
+        container: 'docker',
+      });
+      const d = checkById(report, 'docker-security');
+      expect(d.status).toBe('ok');
+      expect(d.detail).toContain('in-container');
+    } finally {
+      fake.cleanup();
+    }
+  }));
+
+  test('docker-security check (runtime_mode: docker on host → ok, docker never consulted)', withDir(async (dir) => {
+    seedDockerSecurity(dir);
+    fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
+    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ runtime_mode: 'docker' }));
+    const fake = fakeDocker('#!/bin/bash\nexit 1\n');
+    try {
+      const report = await doctorReport(dir, { PATH: `${fake.bin}:${process.env.PATH}` });
+      const d = checkById(report, 'docker-security');
+      expect(d.status).toBe('ok');
+      expect(d.detail).toContain('in-container');
+    } finally {
+      fake.cleanup();
+    }
+  }));
 });
 
 // -------------------------------------------------------

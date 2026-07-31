@@ -12,7 +12,7 @@ import { kStr } from './lib/format';
 import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } from './lib/cost-log';
 import { costLogPath } from './lib/cc-compat';
 import { PRICING } from './lib/pricing';
-import { getEnabledChannels } from './hermit-start';
+import { getEnabledChannels, isContainer } from './hermit-start';
 import { readChannelToken } from './lib/channel-token';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
@@ -501,6 +501,20 @@ function checkDockerSecurity() {
         id: 'docker-security',
         status: 'warn',
         detail: 'overlay present but no posture declared in config — likely a manual edit; re-run /docker-security to reconcile',
+      };
+    }
+
+    // Both declared and overlay present. The deep checks below need the docker CLI,
+    // which does not exist inside the hermit container — verification is a host-side
+    // concern. Gating here (rather than degrading the ENOENT to warn) keeps a
+    // dockerized hermit from reporting a permanent, unfixable warn.
+    let runtime: Json = null;
+    try { runtime = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf-8')); } catch {}
+    if (isContainer() || runtime?.runtime_mode === 'docker') {
+      return {
+        id: 'docker-security',
+        status: 'ok',
+        detail: 'posture declared and overlay present (in-container: compose verification runs on the host)',
       };
     }
 
