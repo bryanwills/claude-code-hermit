@@ -195,4 +195,4 @@ The overlay's `hermit-net` subnet (`172.28.0.0/24` by default) collides with ano
 
 **Fix:** Re-run `/claude-code-hermit:docker-security`. The wizard now scans all Docker networks on the host, excludes this project's own `hermit-net` via Compose labels, and auto-picks the first free /24 from a candidate list (`172.28-31`, then `10.244-247`). If all candidates are taken it prompts for a custom CIDR.
 
-The new `docker.security.network.subnet` field in `config.json` records the chosen subnet. Running `/hermit-doctor` will flag a WARN before the next `hermit-docker up` if the stored subnet has since been claimed by another network.
+The new `docker.security.network.subnet` field in `config.json` records the chosen subnet. Running `/hermit-doctor` from the host will flag a WARN before the next `hermit-docker up` if the stored subnet has since been claimed by another network — the scheduled in-container doctor run can't perform this check (no docker CLI inside the container), so it reports `ok` instead.
