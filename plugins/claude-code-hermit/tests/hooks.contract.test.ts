@@ -2251,7 +2251,10 @@ exit 0
     }
   }));
 
-  test('docker-security check (runtime_mode: docker on host → ok, docker never consulted)', withDir(async (dir) => {
+  // runtime_mode records how the hermit was *booted* and stays 'docker' in the
+  // bind-mounted state dir the host reads — it must not suppress the host-side
+  // compose verification, or the ports/netns `fail` becomes unreachable everywhere.
+  test('docker-security check (runtime_mode: docker but on host → compose still verified)', withDir(async (dir) => {
     seedDockerSecurity(dir);
     fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
     write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ runtime_mode: 'docker' }));
@@ -2259,8 +2262,8 @@ exit 0
     try {
       const report = await doctorReport(dir, { PATH: `${fake.bin}:${process.env.PATH}` });
       const d = checkById(report, 'docker-security');
-      expect(d.status).toBe('ok');
-      expect(d.detail).toContain('in-container');
+      expect(d.status).toBe('warn');
+      expect(d.detail).toContain('could not verify');
     } finally {
       fake.cleanup();
     }

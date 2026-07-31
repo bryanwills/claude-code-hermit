@@ -507,10 +507,11 @@ function checkDockerSecurity() {
     // Both declared and overlay present. The deep checks below need the docker CLI,
     // which does not exist inside the hermit container — verification is a host-side
     // concern. Gating here (rather than degrading the ENOENT to warn) keeps a
-    // dockerized hermit from reporting a permanent, unfixable warn.
-    let runtime: Json = null;
-    try { runtime = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf-8')); } catch {}
-    if (isContainer() || runtime?.runtime_mode === 'docker') {
+    // dockerized hermit from reporting a permanent, unfixable warn. Gate on live
+    // container detection only: `runtime_mode` records how the hermit was *booted*
+    // and stays 'docker' in the bind-mounted state dir the host reads, so keying off
+    // it would silently disable the host-side checks for every dockerized hermit.
+    if (isContainer()) {
       return {
         id: 'docker-security',
         status: 'ok',
