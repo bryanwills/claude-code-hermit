@@ -672,8 +672,10 @@ function checkReflectLoop() {
     }
     const rs = JSON.parse(fs.readFileSync(reflectPath, 'utf8'));
     const c = rs.counters || {};
-    // Legacy and hand-edited state files carry strings, negatives, or missing keys.
-    const int = (v: any) => (Number.isFinite(Number(v)) ? Math.max(0, Math.floor(Number(v))) : 0);
+    // Legacy and hand-edited state files carry strings, negatives, or missing keys. Mirrors
+    // intOf() in update-reflection-state.ts, which rejects numeric strings too — so doctor never
+    // reports a count the next reflect run is about to silently reset to 0.
+    const int = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
     const total = int(c.total_runs);
     const since = typeof c.since === 'string' ? ` since ${c.since}` : '';
     if (total === 0) {
@@ -688,19 +690,25 @@ function checkReflectLoop() {
     if (props + micro + suppress === 0) {
       return { id: 'reflect', status: 'ok', detail: `${rate}, no output or suppressions${since}` };
     }
-    // Same code:N shape as /hermit-health's suppress-mix suffix, so the two surfaces read alike.
+    // Same code:N shape and same fixed code order as /hermit-health's suppress-mix suffix, so the
+    // two surfaces read alike. Codes outside the known set sort last, in insertion order.
+    const CODE_ORDER = ['no-evidence', 'covered-by-memory', 'no-sessions'];
+    const rank = (code: string) => {
+      const i = CODE_ORDER.indexOf(code);
+      return i === -1 ? CODE_ORDER.length : i;
+    };
     const byCode = (c.judge_suppress_by_code && typeof c.judge_suppress_by_code === 'object')
       ? Object.entries(c.judge_suppress_by_code)
           .map(([code, n]) => [code, int(n)] as const)
           .filter(([, n]) => n > 0)
-          .sort((a, b) => b[1] - a[1])
+          .sort((a, b) => rank(a[0]) - rank(b[0]))
       : [];
     const mix = byCode.length ? ` (${byCode.map(([code, n]) => `${code}:${n}`).join(', ')})` : '';
     const suppressed = suppress ? `, ${suppress} suppressed${mix}` : '';
     return {
       id: 'reflect',
       status: 'ok',
-      detail: `${rate}, ${props} proposal(s), ${micro} micro-proposal(s)${suppressed}`,
+      detail: `${rate}, ${props} proposal(s), ${micro} micro-proposal(s)${suppressed}${since}`,
     };
   } catch (e: any) {
     return { id: 'reflect', status: 'fail', detail: `check failed: ${e.message}` };

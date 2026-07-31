@@ -2266,20 +2266,27 @@ describe('doctor-check archival + reflect loop', () => {
     expect(rc.detail).toBe('18/20 empty (90%), no output or suppressions since 2026-06-12');
   }));
 
-  test('checkReflectLoop (micro-proposals count as output)', withDir(async (dir) => {
+  test('checkReflectLoop (micro-proposals count as output, since suffix kept)', withDir(async (dir) => {
     const rc = await reflectCheck(dir,
-      '{"total_runs":20,"empty_runs":18,"proposals_created":0,"micro_proposals_queued":3}');
+      '{"total_runs":20,"empty_runs":18,"proposals_created":0,"micro_proposals_queued":3,"since":"2026-06-12"}');
     expect(rc.status).toBe('ok');
     expect(rc.detail).toContain('3 micro-proposal(s)');
+    expect(rc.detail).toEndWith(' since 2026-06-12');
   }));
 
-  test('checkReflectLoop (suppress mix rendered, ordered by count)', withDir(async (dir) => {
+  test('checkReflectLoop (suppress mix rendered in /hermit-health code order)', withDir(async (dir) => {
     const rc = await reflectCheck(dir,
       '{"total_runs":94,"empty_runs":82,"judge_suppress":14,' +
-      '"judge_suppress_by_code":{"no-evidence":5,"no-sessions":0,"covered-by-memory":9}}');
+      '"judge_suppress_by_code":{"covered-by-memory":9,"no-sessions":0,"no-evidence":5}}');
     expect(rc.status).toBe('ok');
     expect(rc.detail).toBe(
-      '82/94 empty (87%), 0 proposal(s), 0 micro-proposal(s), 14 suppressed (covered-by-memory:9, no-evidence:5)');
+      '82/94 empty (87%), 0 proposal(s), 0 micro-proposal(s), 14 suppressed (no-evidence:5, covered-by-memory:9)');
+  }));
+
+  test('checkReflectLoop (string counters read as 0, matching update-reflection-state)', withDir(async (dir) => {
+    const rc = await reflectCheck(dir, '{"total_runs":"20","empty_runs":"18"}');
+    expect(rc.status).toBe('ok');
+    expect(rc.detail).toBe('no reflect runs yet');
   }));
 
   test('checkReflectLoop (suppress without by-code map omits the parenthetical)', withDir(async (dir) => {
