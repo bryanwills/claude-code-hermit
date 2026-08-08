@@ -1,6 +1,12 @@
 // Regenerates state-summary.md from state files. Zero npm dependencies, Node stdlib only.
 // CLI mode:  bun generate-summary.ts <state-dir-path>
 // Hook mode: PostToolUse on Edit|Write — fires automatically when a state/ file is edited
+//
+// The output is a human-facing snapshot and is refreshed only when something triggers this
+// script (the hook above, or proposal.ts in-process). State written by scripts rather than
+// tool calls therefore lands here late — accepted by design: nothing branches on this file.
+// Readers that need current alerts call readMergedAlerts() directly (lib/dashboard.ts,
+// lib/heartbeat/precheck.ts, report-export.ts), following the rebuild-at-read-time pattern.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,16 +32,11 @@ const OUTPUT = path.join(stateDir, 'state-summary.md');
 // Skip entirely if alert-state.json does not exist (not initialized)
 if (!fs.existsSync(ALERT_STATE)) return;
 
-// mtime fast path — skip if output is newer than all source files
-try {
-  const outMtime = fs.statSync(OUTPUT).mtimeMs;
-  const sourceMtimes = [ALERT_STATE, REFLECTION_STATE, METRICS_FILE, MICRO_FILE].map(f => {
-    try { return fs.statSync(f).mtimeMs; } catch { return 0; }
-  });
-  if (outMtime > Math.max(...sourceMtimes)) return;
-} catch {
-  // Output doesn't exist yet — continue to generate
-}
+// No mtime fast path here on purpose (#691). Any stat-based gate has to enumerate the
+// inputs by hand, and that list silently rots: the previous one missed budget-alerts.json
+// and telemetry-alert.json, so a change confined to either left stale counts on disk.
+// Redundant writes are suppressed by the content-equality check before the write instead —
+// it compares the rendered output, so it cannot drift out of sync with the inputs.
 
 // Union alerts across the per-writer files (skill/checklist + budget + telemetry).
 const alerts = readMergedAlerts(path.dirname(stateDir));
@@ -175,12 +176,13 @@ Bridged asks answered: ${microAnswered}
 Last: ${lastReflectionStr}
 `;
 
-// Change detection — skip write if content unchanged (ignoring updated timestamp)
+// Skip the write when only the `updated:` timestamp differs. Must drop both the opening
+// `---` fence and the `updated:` line (content starts with `---\n`) — dropping only one
+// line leaves the timestamp in the comparison and the guard never matches.
 try {
   const existing = fs.readFileSync(OUTPUT, 'utf-8');
-  // Skip the first line (updated: ...) and compare the rest
-  const skipFirst = (s: string) => s.slice(s.indexOf('\n') + 1);
-  if (skipFirst(content) === skipFirst(existing)) return;
+  const skipUpdated = (s: string) => s.split('\n').slice(2).join('\n');
+  if (skipUpdated(content) === skipUpdated(existing)) return;
 } catch {}
 
 fs.writeFileSync(OUTPUT, content, 'utf-8');
