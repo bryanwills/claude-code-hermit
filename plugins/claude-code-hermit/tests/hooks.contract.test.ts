@@ -1359,7 +1359,7 @@ describe('generate-summary', () => {
   }));
 
   // Alert counts come from readMergedAlerts(), which unions alert-state.json,
-  // budget-alerts.json and telemetry-alert.json. The two regressions below pin the
+  // budget-alerts.json, telemetry-alert.json and doctor-alerts.json. The two below pin the
   // pair of defects in #691: a change confined to budget-alerts.json must still be
   // picked up, and an unchanged state must not rewrite the file.
   const updatedLine = (p: string) => fs.readFileSync(p, 'utf-8').split('\n')[1];

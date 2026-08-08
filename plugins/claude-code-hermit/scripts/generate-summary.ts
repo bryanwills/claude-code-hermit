@@ -33,8 +33,10 @@ const OUTPUT = path.join(stateDir, 'state-summary.md');
 if (!fs.existsSync(ALERT_STATE)) return;
 
 // No mtime fast path here on purpose (#691). Any stat-based gate has to enumerate the
-// inputs by hand, and that list silently rots: the previous one missed budget-alerts.json
-// and telemetry-alert.json, so a change confined to either left stale counts on disk.
+// inputs by hand, and that list silently rots: the previous one missed all three of the
+// files readMergedAlerts() unions in besides alert-state.json (budget-alerts.json,
+// telemetry-alert.json, doctor-alerts.json), so a change confined to any of them left
+// stale counts on disk even on a run that did reach this point.
 // Redundant writes are suppressed by the content-equality check before the write instead —
 // it compares the rendered output, so it cannot drift out of sync with the inputs.
 
