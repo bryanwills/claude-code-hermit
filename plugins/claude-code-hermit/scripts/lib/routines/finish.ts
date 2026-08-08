@@ -80,7 +80,15 @@ export function run(args: string[]): void {
     return emit(reason ? `failed|${reason}|${detail}` : 'fired');
   };
 
-  const record = readRunRecord(hermit, id);
+  const declared = declaresContract(hermit, id);
+
+  // Config says this routine has no contract, so any record on disk is a leftover
+  // from a fire made under an older config. Ignore it: replaying its `outcome`
+  // would suppress this routine's terminal row on every future fire, leaving an
+  // unbounded run of `started` rows and re-emitting a stale `failed|…` line the
+  // skill escalates to the operator. Config unreadable (`null`) is not proof of
+  // absence, so a record still applies there.
+  const record = declared === false ? null : readRunRecord(hermit, id);
 
   // Already finalized — a re-triggered fire (the #464 case documented in
   // event.ts). Report the recorded outcome; write no second terminal row.
@@ -95,7 +103,7 @@ export function run(args: string[]): void {
     // precheck failed to write one — that is a verification error, not a success.
     // If config is unreadable we cannot tell, so keep legacy behavior rather than
     // holding every routine hostage to a transient read failure.
-    if (declaresContract(hermit, id) === true) {
+    if (declared === true) {
       stamp('failed-verification-error');
       return emit('failed|verification-error|no run record for a declared contract');
     }

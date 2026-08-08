@@ -16,7 +16,7 @@ import { hermitDir } from '../cc-compat';
 import { loadConfig } from '../channel-auth';
 import { isPaused } from '../pause';
 import { logRoutineEvent } from './event';
-import { resolveArtifactPath, statIdentity, writeRunRecord } from './run-record';
+import { clearRunRecord, resolveArtifactPath, statIdentity, validateExpectArtifact, writeRunRecord } from './run-record';
 import { utcISOStamp } from '../time';
 
 function emit(verdict: string): never {
@@ -52,9 +52,11 @@ function stamp(event: string): void {
  * compares against that baseline instead of against the `started` timestamp,
  * which utcISOStamp() truncates to whole seconds.
  *
- * Silent no-op for routines without a contract, and on any read failure — the
- * gate above has already decided this fire proceeds, and `finish` treats a
- * missing record for a declared contract as a verification error anyway.
+ * Silent no-op on any read failure — the gate above has already decided this fire
+ * proceeds, and `finish` treats a missing record for a declared contract as a
+ * verification error anyway. A routine that no longer declares a contract, or
+ * declares an invalid one, has its stale record dropped instead: leaving a
+ * previous fire's `outcome` behind would make `finish` replay it forever.
  */
 function captureArtifactBaseline(): void {
   try {
@@ -62,7 +64,13 @@ function captureArtifactBaseline(): void {
     if (!config || !Array.isArray(config.routines)) return;
     const entry = config.routines.find((r: any) => r && r.id === id);
     const pattern = entry?.expect_artifact;
-    if (typeof pattern !== 'string' || !pattern.trim()) return;
+    // Re-validated here, not just in validate-config.ts: that validator is a
+    // PostToolUse advisory, so a hand-edited config can put a traversal or
+    // absolute path on disk that would otherwise resolve outside the state dir.
+    if (validateExpectArtifact(pattern)) {
+      clearRunRecord(HERMIT_ROOT, id);
+      return;
+    }
 
     const timezone = typeof config.timezone === 'string' ? config.timezone : null;
     const resolved = resolveArtifactPath(pattern.trim(), timezone);

@@ -54,7 +54,10 @@ export function validateExpectArtifact(value: unknown): string | null {
   if (v.split('/').includes('..')) return 'must not contain ".." path segments';
   if (v.includes('*') || v.includes('?')) return 'must be an exact path — globs are not supported';
   if (!ALLOWED_PREFIXES.some(p => v.startsWith(p))) return 'must start with "raw/" or "compiled/"';
-  const tokens = v.match(/\{[a-z]+\}/g) ?? [];
+  // Matches any brace group, not just lowercase words: `{DATE}` must be rejected
+  // as an unknown token, not silently accepted as a literal filename fragment
+  // that resolveArtifactPath will never substitute.
+  const tokens = v.match(/\{[^}]*\}/g) ?? [];
   if (tokens.length > 1) return 'may contain at most one {date} token';
   if (tokens.length === 1 && tokens[0] !== '{date}') return `unknown token ${tokens[0]} — only {date} is supported`;
   if (v.endsWith('/')) return 'must name a file, not a directory';
@@ -125,6 +128,19 @@ export function writeRunRecord(hermitDir: string, id: string, rec: RunRecord): s
   const all = readAll(hermitDir);
   all[id] = rec;
   return writeAll(hermitDir, all);
+}
+
+/**
+ * Drops `id`'s record. Called by `precheck` when the routine no longer declares a
+ * valid contract — a leftover record still carrying the previous fire's `outcome`
+ * would make every later `finish` replay it instead of writing a terminal row.
+ * No-op when there is nothing to drop, so the common path never rewrites the file.
+ */
+export function clearRunRecord(hermitDir: string, id: string): void {
+  const all = readAll(hermitDir);
+  if (!(id in all)) return;
+  delete all[id];
+  writeAll(hermitDir, all);
 }
 
 export function readRunRecord(hermitDir: string, id: string): RunRecord | null {

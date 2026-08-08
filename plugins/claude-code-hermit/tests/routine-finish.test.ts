@@ -157,6 +157,35 @@ describe('routines.ts finish — declared artifact contract', () => {
     expect(events(dir, 'cal')).toEqual(['started', 'failed-artifact-missing']);
   }));
 
+  // Without this, the stale record's `outcome` short-circuits finish forever:
+  // every later fire logs `started` with no terminal row (which reflect reads as
+  // an errored routine) and re-emits a failure line the skill escalates to the
+  // operator, for a contract that no longer exists.
+  test('dropping expect_artifact from config restores the legacy fired path', withDir(async (dir) => {
+    writeConfig(dir, declared());
+    await precheck(dir, 'cal');
+    await finish(dir, 'cal'); // fails — nothing written
+
+    writeConfig(dir, [{ id: 'cal', schedule: '0 6 * * *', skill: 'calendar-fetch-light', enabled: true }]);
+    await precheck(dir, 'cal');
+    const r = await finish(dir, 'cal');
+    expect(r.stdout.trim()).toBe('fired');
+    expect(events(dir, 'cal')).toEqual(['started', 'failed-artifact-missing', 'started', 'fired']);
+    expect(JSON.parse(fs.readFileSync(hermit(dir, 'state', 'routine-run.json'), 'utf-8')).cal).toBeUndefined();
+  }));
+
+  // validate-config.ts is a PostToolUse advisory — a hand-edited config can land a
+  // traversal on disk. precheck must refuse it rather than freeze a baseline
+  // pointing outside the state dir.
+  test('an invalid expect_artifact is refused at fire time, never silently verified', withDir(async (dir) => {
+    writeConfig(dir, declared({ expect_artifact: 'raw/../../../escape.md' }));
+    await precheck(dir, 'cal');
+    expect(fs.existsSync(hermit(dir, 'state', 'routine-run.json'))).toBe(false);
+    const r = await finish(dir, 'cal');
+    expect(r.stdout.trim()).toContain('failed|verification-error|');
+    expect(events(dir, 'cal')).toEqual(['started', 'failed-verification-error']);
+  }));
+
   test('the next fire re-arms: a new precheck clears the previous outcome', withDir(async (dir) => {
     writeConfig(dir, declared());
     const rel = `raw/snapshot-calendar-${todayUTC()}.md`;

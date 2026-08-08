@@ -535,6 +535,12 @@ describe('routine expect_artifact validation', () => {
     expect(withArtifact('raw/s-{week}.md').errors.some((e: string) => e.includes('{week}'))).toBe(true);
   });
 
+  // A case-wrong token is never substituted by resolveArtifactPath, so accepting
+  // it would mean the routine fails artifact-missing on a nonsense path forever.
+  test('a case-wrong {DATE} token is rejected, not accepted as a literal', () => {
+    expect(withArtifact('raw/s-{DATE}.md').errors.some((e: string) => e.includes('{DATE}'))).toBe(true);
+  });
+
   test('two enabled routines declaring the same artifact is an error', () => {
     const out = runValidate({ routines: [
       { ...ROUTINE, id: 'a', expect_artifact: 'raw/snapshot-{date}.md' },
