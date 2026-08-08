@@ -73,6 +73,7 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/channel-send.ts*)',
   'Bash(bun */scripts/session-archive.ts*)',
   'Bash(bun */scripts/routines.ts precheck*)',
+  'Bash(bun */scripts/routines.ts finish*)',
   'Bash(bun */scripts/routines.ts cron-registry*)',
   // Domain plugins reach core's shared scripts through the project-resident
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned

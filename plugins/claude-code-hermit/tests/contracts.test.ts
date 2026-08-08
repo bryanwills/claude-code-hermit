@@ -489,6 +489,75 @@ describe('push_notifications validation', () => {
   });
 });
 
+// expect_artifact declares the exact file a routine must produce. Globs are
+// rejected because they would make both the change check and the duplicate
+// check unsound (an unrelated fresh match passes; overlapping patterns are not
+// string-equal).
+describe('routine expect_artifact validation', () => {
+  const ROUTINE = { id: 'cal', schedule: '0 6 * * *', skill: 'calendar-fetch-light', enabled: true };
+  const withArtifact = (expect_artifact: unknown, extra: Record<string, unknown> = {}) =>
+    runValidate({ routines: [{ ...ROUTINE, expect_artifact, ...extra }] });
+
+  test('an exact raw/ path with a {date} token is accepted', () => {
+    const out = withArtifact('raw/snapshot-calendar-{date}.md');
+    expect(out.errors).toEqual([]);
+  });
+
+  test('an exact compiled/ path with no token is accepted', () => {
+    expect(withArtifact('compiled/digest-weekly.md').errors).toEqual([]);
+  });
+
+  test('omitting the field entirely is valid', () => {
+    expect(runValidate({ routines: [ROUTINE] }).errors).toEqual([]);
+  });
+
+  test('an absolute path is rejected', () => {
+    expect(withArtifact('/etc/passwd').errors.some((e: string) => e.includes('not absolute'))).toBe(true);
+  });
+
+  test('a traversal segment is rejected', () => {
+    expect(withArtifact('raw/../../escape.md').errors.some((e: string) => e.includes('".."'))).toBe(true);
+  });
+
+  test('a glob is rejected', () => {
+    expect(withArtifact('raw/snapshot-*-{date}.md').errors.some((e: string) => e.includes('globs are not supported'))).toBe(true);
+  });
+
+  test('a path outside raw/ and compiled/ is rejected', () => {
+    expect(withArtifact('state/sneaky.json').errors.some((e: string) => e.includes('raw/'))).toBe(true);
+  });
+
+  test('more than one token is rejected', () => {
+    expect(withArtifact('raw/s-{date}-{date}.md').errors.some((e: string) => e.includes('at most one'))).toBe(true);
+  });
+
+  test('an unknown token is rejected', () => {
+    expect(withArtifact('raw/s-{week}.md').errors.some((e: string) => e.includes('{week}'))).toBe(true);
+  });
+
+  // A case-wrong token is never substituted by resolveArtifactPath, so accepting
+  // it would mean the routine fails artifact-missing on a nonsense path forever.
+  test('a case-wrong {DATE} token is rejected, not accepted as a literal', () => {
+    expect(withArtifact('raw/s-{DATE}.md').errors.some((e: string) => e.includes('{DATE}'))).toBe(true);
+  });
+
+  test('two enabled routines declaring the same artifact is an error', () => {
+    const out = runValidate({ routines: [
+      { ...ROUTINE, id: 'a', expect_artifact: 'raw/snapshot-{date}.md' },
+      { ...ROUTINE, id: 'b', expect_artifact: 'raw/snapshot-{date}.md' },
+    ] });
+    expect(out.errors.some((e: string) => e.includes('already declared by'))).toBe(true);
+  });
+
+  test('a disabled routine may share an artifact with an enabled one', () => {
+    const out = runValidate({ routines: [
+      { ...ROUTINE, id: 'a', expect_artifact: 'raw/snapshot-{date}.md' },
+      { ...ROUTINE, id: 'b', enabled: false, expect_artifact: 'raw/snapshot-{date}.md' },
+    ] });
+    expect(out.errors).toEqual([]);
+  });
+});
+
 describe('routine model validation', () => {
   const BASE_ROUTINE = {
     id: 'check', schedule: '0 9 * * *', skill: 'claude-code-hermit:recall', enabled: true,

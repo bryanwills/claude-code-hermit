@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- Routines can declare the file they must produce via `expect_artifact` (an exact `raw/` or `compiled/` path, optional `{date}` token resolved in `config.timezone` at fire start). `routines.ts precheck` freezes the resolved path and the target's filesystem identity; the new `routines.ts finish` verifies against that baseline and records `fired` only when the file actually changed during the run. Opt-in per routine — core cannot infer what a project-level skill writes — and `validate-config` rejects two enabled routines declaring the same path.
+
 ### Changed
+- A routine fire's terminal ledger row is written by `routines.ts finish`, not by a model-chosen `log-event <id> fired`. A routine whose skill reported success while writing nothing now records `failed-artifact-missing`, `failed-artifact-unchanged`, or `failed-verification-error` and notifies the operator, instead of a clean `fired`. Routines without an `expect_artifact` contract are unaffected. No automatic retry: routine skills include channel sends, session closure and archival, none of them guaranteed idempotent.
+- `promptHash()` covers `expect_artifact`, so adding or editing a contract re-registers that routine's CronCreate in fallback mode instead of leaving the old prompt live.
 - The `reflect` doctor check is informational and never warns. It reports run count, empty rate, output split into proposals and micro-proposals, and the judge suppress mix by code, instead of flagging a high empty rate as an "unproductive loop".
 ### Fixed
 - The `docker-security` doctor check no longer reports a permanent `warn` on dockerized hermits. `docker compose config` verification is skipped when the check runs inside the container, where the docker CLI does not exist; the presence cross-reference still applies.

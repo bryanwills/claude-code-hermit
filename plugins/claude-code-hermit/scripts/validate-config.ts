@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { safeForLLM } from './lib/sanitize';
 import * as ENUM from './lib/settings/enums';
+import { validateExpectArtifact } from './lib/routines/run-record';
 
 type Json = any;
 
@@ -158,6 +159,11 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
 
   if (Array.isArray(config.routines)) {
     const ids = new Set();
+    // Two enabled routines writing the same declared artifact is a same-day
+    // clobber: whichever finishes last wins, and the other's `finish` may read
+    // the wrong file as proof of its own success. Only covers routines that
+    // opted in — it cannot establish ownership over undeclared writers.
+    const artifacts = new Map<string, number>();
     config.routines.forEach((r: Json, i: number) => {
       if (!r.id) errors.push(`routines[${i}]: missing id`);
       else if (!ROUTINE_ID_RE.test(r.id)) {
@@ -190,6 +196,20 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           errors.push(`routines[${i}]: model "${r.model}" not in [${VALID_ROUTINE_MODEL.join(', ')}] (omit to use session model)`);
         } else if (r.id === 'heartbeat-restart') {
           warnings.push(`routines[${i}]: model on "heartbeat-restart" is ignored — re-arm must run in the session`);
+        }
+      }
+      if (r.expect_artifact !== undefined && r.expect_artifact !== null) {
+        const artErr = validateExpectArtifact(r.expect_artifact);
+        if (artErr) {
+          errors.push(`routines[${i}]: expect_artifact ${artErr}`);
+        } else if (r.enabled !== false) {
+          const key = String(r.expect_artifact).trim();
+          const prior = artifacts.get(key);
+          if (prior !== undefined) {
+            errors.push(`routines[${i}]: expect_artifact "${key}" is already declared by routines[${prior}] — two enabled routines cannot own the same artifact`);
+          } else {
+            artifacts.set(key, i);
+          }
         }
       }
     });

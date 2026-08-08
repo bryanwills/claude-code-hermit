@@ -108,6 +108,43 @@ The routine kept its behavior and schedule; the \$/run dropped by roughly two or
 because most fires now resolve in a bash precheck, and the ticks that do need a decision run a
 narrow haiku subagent instead of a broad session-model skill.
 
+## Declaring a routine's output — the exception, not the rule
+
+**Most routines should not declare one.** `expect_artifact` is a receipt for a narrow class of
+routine, not a step in the checklist above, and reaching for it by default is how a hermit stops
+being an agent that decides what's worth doing and starts being a scheduler that must produce a
+file to be considered working. Do not shape a routine around having a declarable output.
+
+It fits exactly one shape: **a single file, at a path known before the run starts, written on
+every run.** A routine that does not match all three should leave the field unset and keep the
+legacy behavior. Disqualifying cases, all legitimate:
+
+- the routine's value is what it says in chat — a morning brief, an evening summary
+- the output is variable — zero, one, or many files depending on what upstream returned
+- the filename depends on what the run found, rather than on the date
+- it updates a living page in place (`compiled/topic-<slug>.md`) chosen at runtime
+- the routine's real job is a decision, not an artifact — most `-light` skills are in this group
+
+Where it does fit, set the exact path:
+
+```json
+{ "id": "calendar-fetch", "schedule": "0 6 * * *", "skill": "calendar-fetch-light",
+  "model": "haiku", "expect_artifact": "raw/snapshot-calendar-{date}.md" }
+```
+
+`routines.ts finish` then records `fired` only when that file actually changed during the run, and
+`failed-artifact-missing` / `failed-artifact-unchanged` otherwise, notifying the operator. Exact
+paths only (no globs), one optional `{date}` token, resolved in `config.timezone` at fire start.
+Two enabled routines may not declare the same path.
+
+Why it exists: a scoped skill dispatched to a subagent returns one line of self-report, and that
+line used to be the only evidence the fire succeeded — a subagent that wrote nothing, or wrote to a
+cwd-relative path outside the state dir, still reported success and still logged `fired`.
+
+This is a receipt, not a substitute for the skill writing correctly. The skill should still write
+atomically and validate its own output before returning; the declaration only catches the case
+where it didn't and said otherwise.
+
 ## Where this fits
 
 - [Config Reference § Idle & Routines](config-reference.md#idle--routines) — the `routines` array
@@ -116,3 +153,5 @@ narrow haiku subagent instead of a broad session-model skill.
   and the model-override dispatch behavior cited above.
 - `scripts/heartbeat.ts precheck`, `scripts/reflect-precheck.ts` — the shipped precheck
   archetypes to copy the shape of, not reinvent.
+- `scripts/lib/routines/finish.ts` — the finalizer that verifies a declared `expect_artifact` and
+  owns the fire's terminal ledger row.
