@@ -160,4 +160,21 @@ describe('sealed registries', () => {
     expect(skill).toContain('routine-monitor.sh 60 <abs-project-dir>/.claude-code-hermit');
     expect(skill).not.toContain('routine-monitor.sh 60 $PWD/.claude-code-hermit');
   });
+
+  // finish resolves the hermit dir itself. A state-dir argument under a wildcard
+  // grant would be a caller-selected root — the cross-project boundary
+  // lib/cc-compat.ts exists to close.
+  test('the routine finalizer is granted verb-pinned and takes no state-dir argument', () => {
+    expect(HERMIT_ALLOW).toContain('Bash(bun */scripts/routines.ts finish*)');
+    expect(HERMIT_ALLOW).not.toContain('Bash(bun */scripts/routines.ts*)');
+    const skill = fs.readFileSync(path.join(import.meta.dir, '..', 'skills', 'hermit-routines', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('routines.ts finish <id> <delivery>');
+    expect(skill).not.toContain('routines.ts finish <id> .claude-code-hermit');
+  });
+
+  // The whole point of #689: the fire path must not log success on its own say-so.
+  test('the shared execution semantics call finish, never a bare fired stamp', () => {
+    const skill = fs.readFileSync(path.join(import.meta.dir, '..', 'skills', 'hermit-routines', 'SKILL.md'), 'utf8');
+    expect(skill).not.toContain('log-event <id> fired');
+  });
 });

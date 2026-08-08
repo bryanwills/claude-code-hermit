@@ -106,6 +106,7 @@ function promptHash(r: Json, shiftedSchedule: string, pluginRoot: string): strin
     run_during_waiting: !!r.run_during_waiting,
     model: r.model ?? null,
     reflect_after: !!r.reflect_after,
+    expect_artifact: r.expect_artifact ?? null,
     shifted_schedule: shiftedSchedule,
     pluginRoot,
   }));

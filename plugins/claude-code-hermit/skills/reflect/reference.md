@@ -114,7 +114,15 @@ per-line with JSON.parse, skipping malformed lines. Count entries where `event =
 `event == "started"` per `routine_id` where `ts` falls within the last 14 days.
 
 `errored = count(started) − count(fired)` per `routine_id`. If `errored >= 2` for any routine,
-produce a `routine_candidates` entry:
+produce a `routine_candidates` entry.
+
+**When the gap is explained by a `failed-*` event** (`failed-artifact-missing`,
+`failed-artifact-unchanged`, `failed-verification-error` — written by `routines.ts finish` when a
+routine's declared `expect_artifact` contract was not met), name that reason in the evidence instead
+of the generic "errored before completion" wording, and count those events for `N`. Those are not
+crashes: the routine ran and its output did not land, which is a different fix.
+
+Entry shape:
 ```json
 { "routine_id": "<id>", "action": "diagnostic", "tier": 1, "schedule": null,
   "evidence": "routine '<id>' fired but errored before completion N× in the last 14 days",

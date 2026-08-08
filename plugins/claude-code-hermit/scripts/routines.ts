@@ -16,6 +16,11 @@
 //   bun routines.ts tz-shift "<cron-expr>" "<from-tz>"
 //     Rewrites a cron expression into the machine's local timezone.
 //
+//   bun routines.ts finish <routine-id> [delivery]
+//     Terminal gate for a fire. Verifies any declared `expect_artifact` contract
+//     against the baseline `precheck` froze, writes the one terminal ledger row,
+//     and prints `fired` or `failed|<reason>|<detail>`.
+//
 //   bun routines.ts log-event <routine-id> <event> [delivery]
 //     Appends one line to state/routine-metrics.jsonl.
 //
@@ -28,7 +33,7 @@
 
 export {}; // module scope: every import here is dynamic, and top-level await needs it
 
-const USAGE = 'Usage: bun routines.ts <due|precheck|cron-registry|tz-shift|log-event> [args...]';
+const USAGE = 'Usage: bun routines.ts <due|precheck|finish|cron-registry|tz-shift|log-event> [args...]';
 
 const verb = process.argv[2];
 const rest = process.argv.slice(3);
@@ -55,6 +60,11 @@ switch (verb) {
   // Already parameterized — pass the tail directly.
   case 'tz-shift': {
     const { run } = await import('./lib/routines/tz-shift');
+    run(rest);
+    break;
+  }
+  case 'finish': {
+    const { run } = await import('./lib/routines/finish');
     run(rest);
     break;
   }

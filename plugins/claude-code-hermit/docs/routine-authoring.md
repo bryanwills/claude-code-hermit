@@ -68,9 +68,29 @@ produce a report.
    for its `reflect` special case (`skills/hermit-routines/SKILL.md`, Shared execution semantics — "skill is exactly claude-code-hermit:reflect"): run the script, branch
    on its single stdout line, only invoke the skill on the "do something" branch.
 
-Applying all four steps turns a routine that always pays for a full skill load and a session-model
-turn into one that usually costs a single cheap bash check, and only pays for the skill (at
-haiku, in an isolated subagent) on the ticks where there's actually something to decide.
+5. **Declare what the routine must write, if it writes something.** A scoped skill dispatched to a
+   subagent returns one line of self-report, and that line used to be the only evidence the fire
+   succeeded — a subagent that wrote nothing, or wrote to a cwd-relative path outside the state dir,
+   still reported success and still logged `fired`. Set `expect_artifact` on the routine to the exact
+   path it produces:
+
+   ```json
+   { "id": "calendar-fetch", "schedule": "0 6 * * *", "skill": "calendar-fetch-light",
+     "model": "haiku", "expect_artifact": "raw/snapshot-calendar-{date}.md" }
+   ```
+
+   `routines.ts finish` then records `fired` only when that file actually changed during the run,
+   and `failed-artifact-missing` / `failed-artifact-unchanged` otherwise, notifying the operator.
+   Exact paths only (no globs), one optional `{date}` token, resolved in `config.timezone` at fire
+   start. Skip it for routines whose value is chat output rather than a file.
+
+   This is a receipt, not a substitute for the skill writing correctly: the skill should still write
+   atomically and validate its own output before returning.
+
+Applying all five steps turns a routine that always pays for a full skill load and a session-model
+turn into one that usually costs a single cheap bash check, only pays for the skill (at haiku, in an
+isolated subagent) on the ticks where there's actually something to decide, and can no longer record
+a silent success.
 
 ## Worked example
 

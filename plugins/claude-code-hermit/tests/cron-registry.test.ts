@@ -85,6 +85,37 @@ describe('planCron — targeted changes', () => {
     expect(plan.keepCount).toBe(1);
   });
 
+  // expect_artifact is embedded in the fallback CronCreate prompt, so it has to
+  // be part of the hash — otherwise adding or editing a contract leaves the old
+  // prompt registered indefinitely.
+  test('expect_artifact added → exactly that id DELETE+CREATE', () => {
+    const before = [r('a'), r('b')];
+    const mirror = seedMirror(before, {}, T0 - 1000);
+    const after = [r('a', { expect_artifact: 'raw/snapshot-{date}.md' }), r('b')];
+    const plan = planCron(after, mirror, BOOT_A, PLUGIN_ROOT, null, 'UTC', T0);
+    expect(plan.deletes).toEqual(['a']);
+    expect(plan.creates.map(c => c.id)).toEqual(['a']);
+    expect(plan.keepCount).toBe(1);
+  });
+
+  test('expect_artifact changed → exactly that id DELETE+CREATE', () => {
+    const before = [r('a', { expect_artifact: 'raw/old-{date}.md' }), r('b')];
+    const mirror = seedMirror(before, {}, T0 - 1000);
+    const after = [r('a', { expect_artifact: 'raw/new-{date}.md' }), r('b')];
+    const plan = planCron(after, mirror, BOOT_A, PLUGIN_ROOT, null, 'UTC', T0);
+    expect(plan.deletes).toEqual(['a']);
+    expect(plan.creates.map(c => c.id)).toEqual(['a']);
+  });
+
+  test('expect_artifact removed → exactly that id DELETE+CREATE', () => {
+    const before = [r('a', { expect_artifact: 'raw/snapshot-{date}.md' }), r('b')];
+    const mirror = seedMirror(before, {}, T0 - 1000);
+    const after = [r('a'), r('b')];
+    const plan = planCron(after, mirror, BOOT_A, PLUGIN_ROOT, null, 'UTC', T0);
+    expect(plan.deletes).toEqual(['a']);
+    expect(plan.creates.map(c => c.id)).toEqual(['a']);
+  });
+
   test('routine removed from config → DELETE only, no matching CREATE', () => {
     const before = [r('a'), r('b')];
     const mirror = seedMirror(before, {}, T0 - 1000);
