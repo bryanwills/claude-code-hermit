@@ -24,7 +24,7 @@ import path from 'node:path';
 import {
   readAlertState, defaultAlertState, quarantineAlertState, writeAlertState,
   classifyTick, deriveMicroPendingKeys, deriveProposalPendingKeys, deriveStaleSession, FiringItem,
-  MICRO_PREFIX, PROPOSAL_PREFIX, STALE_KEY, isStructuredKey,
+  MICRO_PREFIX, PROPOSAL_PREFIX, STALE_KEY, DOCTOR_PREFIX, isStructuredKey,
 } from '../alert-state';
 import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from '../time';
 
@@ -79,7 +79,9 @@ function apply(payloadJson: string): void {
 
   const validated = validateFiring(payload.firing);
   if (validated === null) process.exit(0); // malformed firing shape — reject the tick, no write
-  const modelFiring = validated.filter(f => !isStructuredKey(f.key) && f.key !== STALE_KEY);
+  const modelFiring = validated.filter(
+    f => !isStructuredKey(f.key) && f.key !== STALE_KEY && !f.key.startsWith(DOCTOR_PREFIX),
+  );
 
   const selfEvalUpdates: Json =
     payload.self_eval_updates && typeof payload.self_eval_updates === 'object' && !Array.isArray(payload.self_eval_updates)
@@ -124,6 +126,16 @@ function apply(payloadJson: string): void {
   // refactor exists to prevent) — freeze them untouched instead.
   const frozen: Json = {};
   const classifiable: Json = { ...prevAlerts };
+
+  // Retire doctor:* residue left in alert-state.json by v1.2.17–v1.2.24, when
+  // doctor's escalation payload was still honoured by this writer (issue #690).
+  // Dropped silently — no monitoring line, no notification, no resolution ping:
+  // those entries carry `detail` but neither `text` nor `suppressed`, so aging
+  // them through classifyTick emits a literal "resolved — undefined" into
+  // SHELL.md. doctor-check.ts owns this prefix now, in its own file.
+  for (const k of Object.keys(classifiable)) {
+    if (k.startsWith(DOCTOR_PREFIX)) delete classifiable[k];
+  }
   const freezePrefix = (prefix: string) => {
     for (const k of Object.keys(classifiable)) {
       if (k.startsWith(prefix)) { frozen[k] = classifiable[k]; delete classifiable[k]; }

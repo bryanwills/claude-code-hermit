@@ -8,12 +8,14 @@ description: Returns a twenty-four-check health report on the hermit installatio
 Runs twenty-four read-only health checks against the current hermit install (`channel-liveness`
 is the only one that performs outbound API calls — see Notes) and surfaces the summary. Safe
 to run at any time. Produces no side effects beyond writing
-`.claude-code-hermit/state/doctor-report.json` and appending a summary block to SHELL.md.
+`.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
+and appending a summary block to SHELL.md.
 
 ## Notification route
 
-Every run with at least one newly-failing finding not already present in alert state sends exactly
-one notification.
+A finding gets one notification per unresolved episode: the check script records it, you send it
+once, and it stays silent until it resolves. A send that never reached the operator is re-offered
+on the next run rather than counted as delivered.
 The optional flag changes its destination, not whether doctor notifies:
 
 - **Default (no arguments):** send the notification to the primary operator chat. This preserves
@@ -47,26 +49,21 @@ The optional flag changes its destination, not whether doctor notifies:
 
 4. Return the twenty-four lines to the caller. Cap total output at 30 lines.
 
-5. **Escalation & dedup.** Build the failing set: every JSON check from step 2 with
-   `status: warn|fail`.
+5. **Escalation.** The script already computed this — do not recompute it, and do not write alert
+   state yourself. Read the `escalation` object from the step-1 JSON:
 
-   Read `.claude-code-hermit/state/alert-state.json` `alerts{}` and compute:
-   - `new_entries`: for each failing check whose `doctor:<id>` key is absent from `alerts{}` —
-     `{"doctor:<id>": {"first_seen": "<ISO now>", "status": "<warn|fail>", "detail": "<check detail>"}}`.
-   - `resolved_keys`: every existing `doctor:*` key in `alerts{}` whose check is now `ok` or no
-     longer present in the failing set.
+   - `escalation.new` — findings owed to the operator, each `{id, status, detail}`. Empty means
+     everything currently failing has already been announced; say nothing.
+   - `escalation.resolved` — check ids whose finding cleared. Recorded, never announced: there is
+     no "recovered" ping.
+   - `escalation.persisted: false` — the ledger could not be written. `prior_state_known: false` —
+     the ledger was unreadable and had to be rebuilt, so what was already announced is unknown.
+     **On either, send nothing** and record the findings under `## Findings` in SHELL.md instead;
+     a notification you cannot dedup would repeat every run.
 
-   Do not touch heartbeat-owned fields (`self_eval_updates`, `last_clean_eval_at`). If either
-   `new_entries` or `resolved_keys` is non-empty, persist via the same stdin API heartbeat uses:
-   ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts alert-state .claude-code-hermit/state/alert-state.json <<'HERMIT_ALERT_JSON'
-   {"new_entries": {...}, "updated_entries": {}, "resolved_keys": [...]}
-   HERMIT_ALERT_JSON
-   ```
-
-   **Notification — when `new_entries` is non-empty.** Compose one complete, concise summary covering
-   every newly-failing check, its detail, and a named next action, in the operator's configured
-   language. Deliver it exactly once through the canonical notice path:
+   **When `escalation.new` is non-empty.** Compose one complete, concise summary covering every
+   listed check, its detail, and a named next action, in the operator's configured language.
+   Deliver it once through the canonical notice path:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
    ```
@@ -75,19 +72,24 @@ The optional flag changes its destination, not whether doctor notifies:
    - With `--maintainer`, send
      `{"maintainer": "<complete summary>", "fallback": "primary"}`. Do not include a `client` leg.
 
-   The router owns destination fallback and configured-destination failure handling. Follow
-   § Operator Notification if no channel is available or delivery degrades. A check already alerted
-   (its `doctor:<id>` key still present) stays silent on subsequent runs until it resolves.
-   Resolving just deletes the key; there is no "recovered" ping in v1.
+   **Then confirm delivery**, so those findings stop being re-offered — only when the send actually
+   landed (exit 0):
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/doctor-check.ts .claude-code-hermit --mark-notified <id> [<id>…]
+   ```
+   Pass the `escalation.new[].id` values you just announced. If the send failed or degraded, skip
+   this step — leaving them unconfirmed is what makes the next run retry instead of dropping them.
+   For exit-code handling and the Findings fallback, follow
+   `/claude-code-hermit:channel-responder` § Outbound notification protocol.
 
 ## Silence policy
 
 - If every check is `ok`, return only: `All twenty-four checks passed.` Do not notify via
-  channel (Tier 0). Still resolve any stale `doctor:*` alert-state keys (step 5) and still
-  append to SHELL.md so the run is traceable.
+  channel (Tier 0). Still append to SHELL.md so the run is traceable. Clearing the stale
+  `doctor:*` entries is the script's job, not yours — it happens on every run.
 - If any check is `warn` or `fail`, return the full twenty-four-line summary. Notification is
-  governed by step 5's escalation-and-dedup logic, not a blanket per-run ping: only newly appearing
-  findings notify the selected route, and only once until they resolve.
+  governed by `escalation.new` (step 5), not a blanket per-run ping: only findings not yet
+  confirmed delivered notify the selected route.
 
 ## What each check looks at
 

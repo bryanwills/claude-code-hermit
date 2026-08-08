@@ -13,10 +13,15 @@
 //   - budget-alerts.json   — budget-* alerts (cost-tracker, Stop hook — sole writer)
 //   - telemetry-alert.json — the telemetry export-failed alert (report-export,
 //                            watchdog tick — sole writer)
-// Each of the latter two has exactly one writer process, so the plain atomic
+//   - doctor-alerts.json   — doctor:* finding episodes (doctor-check — sole writer).
+//                            Split out because heartbeat's classifyTick rebuilds
+//                            alerts{} from prevAlerts ∪ firing, so a doctor key
+//                            parked in alert-state.json ages out after two clean
+//                            ticks (issue #690).
+// Each of the latter three has exactly one writer process, so the plain atomic
 // tmp+rename write needs no lock. Generic readers that want "all alerts" call
-// readMergedAlerts() to union the three files (keyspaces are disjoint by
-// construction: checklist / budget-* / telemetry:*).
+// readMergedAlerts() to union the four files (keyspaces are disjoint by
+// construction: checklist / budget-* / telemetry:* / doctor:*).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,6 +38,9 @@ export function budgetAlertsPath(stateDir: string): string {
 }
 export function telemetryAlertPath(stateDir: string): string {
   return path.join(stateDir, 'state', 'telemetry-alert.json');
+}
+export function doctorAlertsPath(stateDir: string): string {
+  return path.join(stateDir, 'state', 'doctor-alerts.json');
 }
 
 export const defaultAlertState = (): Json =>
@@ -74,14 +82,14 @@ export function writeAlertState(p: string, obj: Json): boolean {
 }
 
 /**
- * Union of alert entries across the three per-writer files, for generic readers
+ * Union of alert entries across the four per-writer files, for generic readers
  * (dashboard, cost-summary, telemetry bundle, the heartbeat budget scan) that
  * want the full alert view. Later files win on a key collision, but the keyspaces
  * are disjoint by construction. Unreadable/corrupt/missing files contribute nothing.
  */
 export function readMergedAlerts(stateDir: string): Json {
   const merged: Json = {};
-  for (const p of [alertStatePath(stateDir), budgetAlertsPath(stateDir), telemetryAlertPath(stateDir)]) {
+  for (const p of [alertStatePath(stateDir), budgetAlertsPath(stateDir), telemetryAlertPath(stateDir), doctorAlertsPath(stateDir)]) {
     const r = readAlertState(p);
     if (r.kind === 'ok' && r.value?.alerts && typeof r.value.alerts === 'object') {
       Object.assign(merged, r.value.alerts);
@@ -144,6 +152,13 @@ export const isStructuredKey = (key: string): boolean =>
 // no channel-silencing). Its model-phantom-drop is a separate exact-match check
 // in lib/heartbeat/alert-update.ts.
 export const STALE_KEY = 'stale-session';
+
+// doctor:* episodes live in doctor-alerts.json, written by doctor-check.ts alone.
+// Deliberately NOT in STRUCTURED_PREFIXES: those get id-scrubbing and first-fire
+// channel silencing, neither of which applies here. Heartbeat's only relationship
+// to this prefix is to purge v1.2.17–v1.2.24 residue out of alert-state.json
+// (see lib/heartbeat/alert-update.ts) — it never fires or resolves a doctor key.
+export const DOCTOR_PREFIX = 'doctor:';
 
 // Strip internal ids that must never reach the operator channel. The banned set
 // is the closed list in state-templates/CLAUDE-APPEND.md § Channel voice:
