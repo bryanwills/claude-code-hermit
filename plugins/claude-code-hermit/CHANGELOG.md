@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.37] - 2026-08-08
 
 ### Added
 - Routines can declare the file they must produce via `expect_artifact` (an exact `raw/` or `compiled/` path, optional `{date}` token resolved in `config.timezone` at fire start). `routines.ts precheck` freezes the resolved path and the target's filesystem identity; the new `routines.ts finish` verifies against that baseline and records `fired` only when the file actually changed during the run. Opt-in per routine — core cannot infer what a project-level skill writes — and `validate-config` rejects two enabled routines declaring the same path.
