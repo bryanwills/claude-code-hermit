@@ -1734,6 +1734,10 @@ const NO_ESCALATION = (prior_state_known: boolean): DoctorEscalation =>
 function escalate(checks: Json[], nowIso: string, dir: string = hermitDir): DoctorEscalation {
   try {
     const p = doctorAlertsPath(dir);
+    // writeReport creates state/ too, but it runs *after* this — without the mkdir a hermit
+    // whose state dir is missing gets persisted:false and the skill suppresses the whole
+    // notification, exactly on the broken install where the findings matter most.
+    try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch { /* write below reports the failure */ }
     const failing = new Map<string, Json>();
     for (const c of checks) {
       if (c?.status === 'warn' || c?.status === 'fail') failing.set(DOCTOR_PREFIX + c.id, c);
@@ -1787,7 +1791,12 @@ function escalate(checks: Json[], nowIso: string, dir: string = hermitDir): Doct
 // Flip `notified` on findings the caller confirmed reached the operator. Mirrors
 // cost-tracker.ts's `--mark-budget-notified` verb. Unknown ids are ignored.
 function markNotified(ids: string[], dir: string = hermitDir): boolean {
-  return mutateOwnedAlerts(doctorAlertsPath(dir), (alerts) => {
+  const p = doctorAlertsPath(dir);
+  // Only confirm against a ledger we could actually read. mutateOwnedAlerts would happily
+  // quarantine a corrupt file, rebuild it empty and report success — dropping the episodes
+  // just announced, so the next run reads them as new and re-notifies. Report false instead.
+  if (readAlertState(p).kind !== 'ok') return false;
+  return mutateOwnedAlerts(p, (alerts) => {
     for (const id of ids) {
       const entry = alerts[DOCTOR_PREFIX + id];
       if (entry && entry.notified !== true) entry.notified = true;
