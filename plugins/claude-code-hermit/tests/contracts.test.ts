@@ -2720,7 +2720,10 @@ describe('proactive-notify unification contract', () => {
     expect(doctor).toContain('The optional flag changes its destination, not whether doctor notifies');
     expect(doctor).toContain('`{"client": "<complete summary>"}`');
     expect(doctor).toContain('`{"maintainer": "<complete summary>", "fallback": "primary"}`');
-    expect(doctor).toContain('Deliver it exactly once');
+    // "exactly once" was an overclaim: dedup was persisted before the send, so a
+    // failed send was counted as delivered (issue #690). One attempt per episode,
+    // retried until confirmed, is the guarantee doctor can actually keep.
+    expect(doctor).toContain('Deliver it once through the canonical notice path');
     expect(doctor).not.toContain('Without `--maintainer`, do not call `channel-send.ts`');
   });
 
@@ -2795,6 +2798,37 @@ describe('heartbeat eval-runner return contract', () => {
   test('SKILL.md reads monitoring_lines/notifications/heartbeat_result from the script, not the subagent', () => {
     expect(skill).toContain('"monitoring_lines": [...], "notifications": [...], "heartbeat_result"');
     expect(skill).toContain("per the **script's** `heartbeat_result`");
+  });
+
+  // Issue #690: this guard used to read only heartbeat's two files, so when
+  // #594 stopped the writer accepting `new_entries`/`resolved_keys`,
+  // hermit-doctor kept sending exactly that payload — accepted, discarded,
+  // exit 0 — and doctor's dedup was dead for eleven releases. The invariant is
+  // ownership: alert-state.json has exactly one writer skill.
+  test('only skills/heartbeat/SKILL.md invokes heartbeat.ts alert-state', () => {
+    // Match the invocation form, not the bare phrase — heartbeat/reference.md
+    // mentions the verb in prose three times and must not trip this.
+    const INVOCATION = 'scripts/heartbeat.ts alert-state';
+    const offenders = fs.readdirSync(SKILLS)
+      .flatMap((d) => {
+        const skillDir = path.join(SKILLS, d);
+        if (!fs.statSync(skillDir).isDirectory()) return [];
+        return fs.readdirSync(skillDir)
+          .filter((f) => f.endsWith('.md'))
+          .filter((f) => read(path.join(skillDir, f)).includes(INVOCATION))
+          .map((f) => `${d}/${f}`);
+      });
+    expect(offenders).toEqual(['heartbeat/SKILL.md']);
+  });
+
+  test('hermit-doctor authors no alert-state bookkeeping fields', () => {
+    const doctor = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
+    for (const field of ['new_entries', 'updated_entries', 'resolved_keys']) {
+      expect(doctor).not.toContain(field);
+    }
+    // …and consumes the script-derived verdict instead.
+    expect(doctor).toContain('escalation.new');
+    expect(doctor).toContain('--mark-notified');
   });
 });
 

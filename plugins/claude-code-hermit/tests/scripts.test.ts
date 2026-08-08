@@ -827,6 +827,36 @@ describe('update-alert-state', () => {
     expect(stdout.notifications).toEqual(['Session idle 3h']); // first observation notifies
   }));
 
+  // Issue #690: v1.2.17–v1.2.24 persisted doctor:* keys here, when this writer
+  // still honoured doctor's new_entries payload. Those entries carry `detail`
+  // but neither `text` nor `suppressed`, so aging them through classifyTick
+  // emitted a literal "resolved — undefined" line. doctor-check.ts owns the
+  // prefix now (state/doctor-alerts.json); heartbeat just retires the residue.
+  test('update-alert-state (legacy doctor:* residue is dropped silently in one tick)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts: {
+        'doctor:permissions': { first_seen: '2026-08-04', status: 'warn', detail: 'world-readable' },
+        'checklist:keepme': { count: 1, consecutive_clean: 0, suppressed: false, first_seen: '2026-07-10', last_seen: '2026-07-10', text: 'keep me' },
+      },
+      self_eval: {}, total_ticks: 2,
+    }));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([{ key: 'checklist:keepme', text: 'keep me' }]));
+
+    expect(state.alerts['doctor:permissions']).toBeUndefined();       // gone in ONE tick, not aged over two
+    expect(state.alerts['checklist:keepme']).toBeDefined();           // unrelated keys untouched
+    expect(stdout.monitoring_lines.join('\n')).not.toContain('undefined');
+    expect(stdout.monitoring_lines.join('\n')).not.toContain('doctor:');
+    expect(stdout.notifications.join('\n')).not.toContain('doctor:'); // silent — no resolution ping
+  }));
+
+  test('update-alert-state (a model-authored doctor:* firing key is ignored)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":0}');
+    const { state } = await updateAlertState(dir, firingPayload([
+      { key: 'doctor:permissions', text: 'model tried to author a doctor finding' },
+    ]));
+    expect(state.alerts['doctor:permissions']).toBeUndefined();
+  }));
+
   test('update-alert-state (repeat fire increments count, no notification on ticks 2-4)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{"checklist:idle0001":{"count":1,"consecutive_clean":0,"suppressed":false,"first_seen":"2026-07-08","last_seen":"2026-07-08","text":"old text"}},"self_eval":{},"total_ticks":10}');

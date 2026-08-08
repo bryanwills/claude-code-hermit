@@ -6,6 +6,10 @@
 - The `reflect` doctor check is informational and never warns. It reports run count, empty rate, output split into proposals and micro-proposals, and the judge suppress mix by code, instead of flagging a high empty rate as an "unproductive loop".
 ### Fixed
 - The `docker-security` doctor check no longer reports a permanent `warn` on dockerized hermits. `docker compose config` verification is skipped when the check runs inside the container, where the docker CLI does not exist; the presence cross-reference still applies.
+- `/hermit-doctor` no longer re-notifies the same standing finding on every run. Its escalation write had been silently discarded since v1.2.25, so no `doctor:<id>` key was ever recorded and every failing check read as new. Findings now live in `state/doctor-alerts.json`, derived by `doctor-check.ts` instead of authored by the model, and one whose delivery failed is re-offered on the next run rather than counted as sent.
+- Heartbeat retires leftover `doctor:*` entries written into `alert-state.json` by v1.2.17–v1.2.24. Those entries used to age out into a `Heartbeat: resolved — undefined` line in SHELL.md.
+- `state/doctor-report.json` is written through a PID-specific temp file, so two overlapping doctor runs cannot interleave into it.
+- The alert-state files (`alert-state.json`, `budget-alerts.json`, `telemetry-alert.json`, `doctor-alerts.json`) are written `0600` instead of inheriting the umask, so the `permissions` doctor check no longer reports a `warn` that a `chmod` cannot fix.
 
 ## [1.2.36] - 2026-07-30
 

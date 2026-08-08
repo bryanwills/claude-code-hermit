@@ -16,6 +16,7 @@ import { getEnabledChannels, isContainer } from './hermit-start';
 import { readChannelToken } from './lib/channel-token';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
+import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
 
 type Json = any;
 
@@ -1706,17 +1707,116 @@ async function runAllChecks() {
   ];
 }
 
-function writeReport(checks: Json[]) {
+// ----------------- Escalation ledger (issue #690) -----------------
+//
+// Per-finding dedup lives in state/doctor-alerts.json, this script's own file.
+// It is NOT in alert-state.json: heartbeat's classifyTick rebuilds alerts{} from
+// prevAlerts ∪ firing, so a doctor key parked there ages out after two clean ticks.
+//
+// Deriving the transition here (rather than in SKILL.md prose, as before) is the
+// same correction #594 applied to heartbeat: the model renders and sends, it does
+// not decide what is new. `notified` is the two-phase flag from cost-tracker.ts —
+// set false on write, flipped true only once the send is confirmed, so a finding
+// raised while the channel is down is re-offered on the next run instead of lost.
+
+export interface DoctorEscalation {
+  persisted: boolean;
+  prior_state_known: boolean;
+  new: { id: string; status: string; detail: string }[];
+  resolved: string[];
+}
+
+const NO_ESCALATION = (prior_state_known: boolean): DoctorEscalation =>
+  ({ persisted: false, prior_state_known, new: [], resolved: [] });
+
+// `dir` defaults to the argv-derived hermitDir; tests pass their own so cases
+// stay isolated without reloading this module.
+function escalate(checks: Json[], nowIso: string, dir: string = hermitDir): DoctorEscalation {
+  try {
+    const p = doctorAlertsPath(dir);
+    // writeReport creates state/ too, but it runs *after* this — without the mkdir a hermit
+    // whose state dir is missing gets persisted:false and the skill suppresses the whole
+    // notification, exactly on the broken install where the findings matter most.
+    try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch { /* write below reports the failure */ }
+    const failing = new Map<string, Json>();
+    for (const c of checks) {
+      if (c?.status === 'warn' || c?.status === 'fail') failing.set(DOCTOR_PREFIX + c.id, c);
+    }
+
+    // Classify the prior ledger BEFORE mutating — mutateOwnedAlerts quarantines a
+    // corrupt file and rebuilds from empty, which is indistinguishable downstream
+    // from a first run and would re-notify every standing finding. `missing` is a
+    // genuine first run: an empty ledger is a trustworthy prior (nothing was sent).
+    const prior = readAlertState(p);
+    if (prior.kind === 'ioerror') return NO_ESCALATION(false); // healthy file we couldn't read — touch nothing
+    const priorStateKnown = prior.kind !== 'corrupt';
+
+    const pending: { id: string; status: string; detail: string }[] = [];
+    const resolved: string[] = [];
+    const applied = mutateOwnedAlerts(p, (alerts) => {
+      for (const [key, c] of failing) {
+        const prev = alerts[key];
+        alerts[key] = prev
+          ? { ...prev, status: c.status, message: c.detail, last_seen: nowIso,
+              count: (typeof prev.count === 'number' ? prev.count : 0) + 1 }
+          : { first_seen: nowIso, last_seen: nowIso, status: c.status, message: c.detail,
+              suppressed: false, notified: false, count: 1 };
+        // Anything not yet confirmed delivered is still owed to the operator.
+        if (alerts[key].notified !== true) pending.push({ id: c.id, status: c.status, detail: c.detail });
+      }
+      for (const key of Object.keys(alerts)) {
+        if (key.startsWith(DOCTOR_PREFIX) && !failing.has(key)) {
+          delete alerts[key];
+          resolved.push(key.slice(DOCTOR_PREFIX.length));
+        }
+      }
+    });
+    if (!applied) return NO_ESCALATION(priorStateKnown);
+
+    // On a rebuilt-from-corrupt ledger the entries were re-seeded above (so the
+    // next run dedups normally), but this run stays silent — we cannot know what
+    // the lost ledger had already announced.
+    return {
+      persisted: true,
+      prior_state_known: priorStateKnown,
+      new: priorStateKnown ? pending : [],
+      resolved: priorStateKnown ? resolved : [],
+    };
+  } catch (e: any) {
+    process.stderr.write(`[doctor-check] escalation failed: ${e.message}\n`);
+    return NO_ESCALATION(false);
+  }
+}
+
+// Flip `notified` on findings the caller confirmed reached the operator. Mirrors
+// cost-tracker.ts's `--mark-budget-notified` verb. Unknown ids are ignored.
+function markNotified(ids: string[], dir: string = hermitDir): boolean {
+  const p = doctorAlertsPath(dir);
+  // Only confirm against a ledger we could actually read. mutateOwnedAlerts would happily
+  // quarantine a corrupt file, rebuild it empty and report success — dropping the episodes
+  // just announced, so the next run reads them as new and re-notifies. Report false instead.
+  if (readAlertState(p).kind !== 'ok') return false;
+  return mutateOwnedAlerts(p, (alerts) => {
+    for (const id of ids) {
+      const entry = alerts[DOCTOR_PREFIX + id];
+      if (entry && entry.notified !== true) entry.notified = true;
+    }
+  });
+}
+
+function writeReport(checks: Json[], escalation?: DoctorEscalation) {
   try {
     if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
-    const report = { ts: new Date().toISOString(), checks };
-    const tmp = reportPath + '.tmp';
+    const report = { ts: new Date().toISOString(), checks, ...(escalation ? { escalation } : {}) };
+    // PID-specific tmp so two overlapping runs can't interleave into one file
+    // (matches lib/alert-state.ts's writeAlertState).
+    const tmp = `${reportPath}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(report, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
     fs.renameSync(tmp, reportPath);
     return report;
   } catch (e: any) {
     process.stderr.write(`[doctor-check] write failed: ${e.message}\n`);
-    return { ts: new Date().toISOString(), checks };
+    return { ts: new Date().toISOString(), checks, ...(escalation ? { escalation } : {}) };
   }
 }
 
@@ -1728,13 +1828,21 @@ export {
   checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // runAllChecks is async (checkChannelLiveness performs network I/O) — callers must await it.
-  runAllChecks, writeReport,
+  runAllChecks, writeReport, escalate, markNotified,
 };
 
 if (import.meta.main) {
   try {
+    // `doctor-check.ts <dir> --mark-notified <id>…` — confirm delivery of findings
+    // the caller already sent, so they stop being re-offered. No checks are run.
+    if (process.argv[3] === '--mark-notified') {
+      const ok = markNotified(process.argv.slice(4));
+      process.stdout.write(JSON.stringify({ marked: ok }) + '\n');
+      process.exit(0);
+    }
     const checks = await runAllChecks();
-    const report = writeReport(checks);
+    const escalation = escalate(checks, new Date().toISOString());
+    const report = writeReport(checks, escalation);
     // Print the report JSON so skills/tests can capture it without re-reading.
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } catch (e: any) {
