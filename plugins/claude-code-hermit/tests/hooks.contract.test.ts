@@ -1340,13 +1340,15 @@ describe('generate-summary', () => {
     expect(r.exitCode).toBe(0);
   }));
 
-  test('generate-summary (writes summary)', withDir(async (dir) => {
+  const seedAlertState = (dir: string) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{},"last_digest_date":null,"self_eval":{}}');
-    const r = await runScript('generate-summary.ts', {
-      stdin: `{"tool_name":"Edit","tool_input":{"file_path":"${hermit(dir, 'state', 'alert-state.json')}"}}`,
-      cwd: dir,
-    });
+    return `{"tool_name":"Edit","tool_input":{"file_path":"${hermit(dir, 'state', 'alert-state.json')}"}}`;
+  };
+
+  test('generate-summary (writes summary)', withDir(async (dir) => {
+    const stdin = seedAlertState(dir);
+    const r = await runScript('generate-summary.ts', { stdin, cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(fs.existsSync(hermit(dir, 'state', 'state-summary.md'))).toBe(true);
   }));
@@ -1354,6 +1356,48 @@ describe('generate-summary', () => {
   test('generate-summary (empty stdin)', withDir(async (dir) => {
     const r = await runScript('generate-summary.ts', { stdin: '', cwd: dir });
     expect(r.exitCode).toBe(0);
+  }));
+
+  // Alert counts come from readMergedAlerts(), which unions alert-state.json,
+  // budget-alerts.json, telemetry-alert.json and doctor-alerts.json. The two below pin the
+  // pair of defects in #691: a change confined to budget-alerts.json must still be
+  // picked up, and an unchanged state must not rewrite the file.
+  const updatedLine = (p: string) => fs.readFileSync(p, 'utf-8').split('\n')[1];
+  /** Push a file's mtime into the future so mtime-ordering assertions are granularity-proof. */
+  const makeNewest = (p: string) => {
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(p, future, future);
+  };
+
+  test('generate-summary (budget-alerts-only change still refreshes counts)', withDir(async (dir) => {
+    const summary = hermit(dir, 'state', 'state-summary.md');
+    const stdin = seedAlertState(dir);
+    expect((await runScript('generate-summary.ts', { stdin, cwd: dir })).exitCode).toBe(0);
+    expect(fs.readFileSync(summary, 'utf-8')).toContain('active_alerts: 0');
+
+    // The alert lands in budget-alerts.json alone — the file the old mtime fast path
+    // never stat'd. Forcing the output newest makes the stale skip deterministic.
+    write(hermit(dir, 'state', 'budget-alerts.json'),
+      '{"alerts":{"budget-daily":{"count":1,"suppressed":false,"text":"daily budget exceeded"}}}');
+    makeNewest(summary);
+
+    expect((await runScript('generate-summary.ts', { stdin, cwd: dir })).exitCode).toBe(0);
+    expect(fs.readFileSync(summary, 'utf-8')).toContain('active_alerts: 1');
+  }));
+
+  test('generate-summary (unchanged state does not rewrite)', withDir(async (dir) => {
+    const summary = hermit(dir, 'state', 'state-summary.md');
+    const stdin = seedAlertState(dir);
+    expect((await runScript('generate-summary.ts', { stdin, cwd: dir })).exitCode).toBe(0);
+    const before = updatedLine(summary);
+
+    // Make a source newer than the output so no mtime shortcut can stand in for the
+    // content-equality guard — the rendered state itself is byte-identical, so the
+    // `updated:` stamp must not advance. (mtime is too coarse a witness here.)
+    makeNewest(hermit(dir, 'state', 'alert-state.json'));
+
+    expect((await runScript('generate-summary.ts', { stdin, cwd: dir })).exitCode).toBe(0);
+    expect(updatedLine(summary)).toBe(before);
   }));
 });
 
