@@ -7,7 +7,7 @@
 // dashboard already computes. Self-contained fragment — no
 // <!DOCTYPE>/<html>/<head>/<body> (Artifact tool wraps it).
 
-import { loadProposals, mdToHtml, escapeHtml, proposalLabel, shortPropId, type ProposalRow, type OpenProposalRow } from './dashboard';
+import { loadProposals, loadAgentName, mdToHtml, escapeHtml, proposalLabel, shortPropId, type ProposalRow, type OpenProposalRow } from './dashboard';
 import { sha256 } from './hash';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
 import { card, pills, pageShell } from './artifact-theme';
@@ -15,6 +15,7 @@ import { card, pills, pageShell } from './artifact-theme';
 const UPDATED_TOKEN = '__PROPOSALS_PAGE_UPDATED__';
 
 export interface ProposalsPageState {
+  agentName: string;
   open: OpenProposalRow[];
   other: ProposalRow[];
   otherOmitted: number;
@@ -23,7 +24,7 @@ export interface ProposalsPageState {
 
 export function loadProposalsPageState(hermitDir: string): ProposalsPageState {
   const { open, other, otherOmitted } = loadProposals(hermitDir);
-  return { open, other, otherOmitted, strings: loadStrings(hermitDir) };
+  return { agentName: loadAgentName(hermitDir), open, other, otherOmitted, strings: loadStrings(hermitDir) };
 }
 
 // "PROP-025-some-slug-123243" -> "prop-025". Falls back to a full slugified id
@@ -79,14 +80,13 @@ export function renderProposalsPage(state: ProposalsPageState, opts?: { now?: st
   ]);
 
   const templated = pageShell({
-    title: s.proposals_page_title,
+    title: fmt(s.proposals_page_title, { name: escapeHtml(state.agentName) }),
     heading: s.proposals_page_header,
     updatedLabel: s.label_updated,
     updatedToken: UPDATED_TOKEN,
     body: `${summary}
   ${renderOpen(state.open, s)}
   ${renderOther(state.other, state.otherOmitted, s)}`,
-    footer: s.footer,
   });
 
   const hash = sha256(templated);

@@ -15,12 +15,12 @@ import path from 'node:path';
 import { readFileWithFrontmatter, globDir } from './frontmatter';
 import { formatTokens } from './format';
 import { sha256 } from './hash';
-import { readMergedAlerts } from './alert-state';
+import { readMergedAlerts, PROPOSAL_PREFIX } from './alert-state';
 import { todayYMD } from './time';
 import { costIndexPath, readCostIndex } from './cost-log';
 import { rebuildIndex, type ProposalsIndex } from './proposals/index-rebuild';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
-import { chipHtml, card, statTile, railRow, disclosure, pageShell, META_SEP } from './artifact-theme';
+import { chipHtml, card, statTile, railRow, pageShell, META_SEP } from './artifact-theme';
 
 type Json = any;
 
@@ -275,6 +275,16 @@ function alertMessage(key: string, v: Json, s: ArtifactStrings): string {
   return escapeHtml(key);
 }
 
+function agentNameFromConfig(config: Json): string {
+  return typeof config?.agent_name === 'string' && config.agent_name.trim() ? config.agent_name : 'Hermit';
+}
+
+/** The hermit's own name, used to lead both page titles. Shared with
+ *  proposals-page.ts, which has no other reason to read config.json. */
+export function loadAgentName(hermitDir: string): string {
+  return agentNameFromConfig(readJsonSafe(path.join(hermitDir, 'config.json')));
+}
+
 export function loadDashboardState(hermitDir: string): DashboardState {
   const config = readJsonSafe(path.join(hermitDir, 'config.json')) ?? {};
   const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
@@ -293,7 +303,7 @@ export function loadDashboardState(hermitDir: string): DashboardState {
   }
 
   return {
-    agentName: typeof config.agent_name === 'string' && config.agent_name.trim() ? config.agent_name : 'Hermit',
+    agentName: agentNameFromConfig(config),
     sessionState: typeof runtime?.session_state === 'string' ? runtime.session_state : null,
     todayCostUsd: today.costUsd,
     todayTokens: today.tokens,
@@ -451,45 +461,21 @@ function delta(current: number | null, prior: number | null, unit: 'pp' | '$', s
   return fmt(s.weekly_delta_pp, { prior: Math.round(prior), sign, diff: Math.round(diff) });
 }
 
-// Alert keys are `<kind>:<instance>` (e.g. `proposal-pending:PROP-012`). One row
-// per key turned a 20-proposal backlog into twenty near-identical lines, so kinds
-// listed here state the situation once and keep the instances behind a
-// disclosure. Anything not listed still renders a row each — a new alert kind is
-// never silently collapsed into a count.
-const GROUPED_ALERT_KINDS: Record<string, keyof ArtifactStrings> = {
-  'proposal-pending': 'alert_group_proposals',
-};
-
-function alertKind(key: string): string {
-  const i = key.indexOf(':');
-  return i === -1 ? key : key.slice(0, i);
-}
-
+// The proposals card below is the canonical surface for pending proposals — it
+// carries titles, chips and full bodies, which an alert row cannot. Rendering
+// them here too turned a 20-proposal backlog into twenty near-identical lines
+// that buried every other alert. They still count toward the "Needs you" tile,
+// so the number stays honest and the card explains it.
 function renderAlerts(state: DashboardState): string {
   const s = state.strings;
   if (!state.alerts.length) return `<p class="muted">${s.status_no_alerts}</p>`;
 
-  const groups = new Map<string, AlertRow[]>();
-  for (const a of state.alerts) {
-    const kind = alertKind(a.key);
-    const bucket = groups.get(kind);
-    if (bucket) bucket.push(a);
-    else groups.set(kind, [a]);
-  }
+  const shown = state.alerts.filter(a => !a.key.startsWith(PROPOSAL_PREFIX));
+  // Every alert was card-owned. That is not "no alerts" — the tile says 20 — so
+  // render nothing rather than contradicting it.
+  if (!shown.length) return '';
 
-  const rows: string[] = [];
-  for (const [kind, members] of groups) {
-    const key = GROUPED_ALERT_KINDS[kind];
-    if (key && members.length > 1) {
-      rows.push(railRow({
-        tone: 'warn',
-        title: fmt(s[key], { n: members.length }),
-        extra: disclosure(fmt(s.common_show_all, { n: members.length }), members.map(m => m.message)),
-      }));
-    } else {
-      for (const m of members) rows.push(railRow({ tone: 'warn', title: m.message }));
-    }
-  }
+  const rows = shown.map(a => railRow({ tone: 'warn', title: a.message }));
   return `<div class="alerts">${rows.join('')}</div>`;
 }
 
@@ -561,10 +547,12 @@ function renderProposals(state: DashboardState): string {
   return card(s.proposals_heading, `${oldestLine}${openHtml}${otherHtml}`);
 }
 
+// Omits the card entirely when there is no review yet — an empty section costs a
+// heading and a line of prose to say nothing.
 function renderWeekly(state: DashboardState): string {
   const s = state.strings;
   const w = state.weekly;
-  if (!w) return card(s.weekly_heading, `<p class="muted">${s.weekly_none}</p>`);
+  if (!w) return '';
 
   const costLine = w.costUsd != null
     ? fmt(s.weekly_cost, { amount: `$${w.costUsd.toFixed(2)}`, delta: w.hasPrior ? delta(w.costUsd, w.priorCostUsd, '$', s) : '' })
@@ -612,10 +600,10 @@ function renderCompiledIndex(state: DashboardState): string {
  *  via a placeholder token, so the publish gate can skip no-op republishes). */
 export function renderDashboard(state: DashboardState, opts?: { now?: string }): { html: string; hash: string } {
   const s = state.strings;
+  const title = fmt(s.dashboard_title, { name: escapeHtml(state.agentName) });
   const templated = pageShell({
-    title: s.dashboard_title,
-    heading: fmt(s.dashboard_header, { name: escapeHtml(state.agentName) }),
-    dek: s.dashboard_dek,
+    title,
+    heading: title,
     updatedLabel: s.label_updated,
     updatedToken: UPDATED_TOKEN,
     body: [
@@ -624,8 +612,7 @@ export function renderDashboard(state: DashboardState, opts?: { now?: string }):
       renderProposals(state),
       renderWeekly(state),
       renderCompiledIndex(state),
-    ].join('\n  '),
-    footer: s.footer,
+    ].filter(Boolean).join('\n  '),
   });
 
   const hash = sha256(templated);

@@ -17,14 +17,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const DEFAULT_STRINGS = {
-  // Page shell / shared chrome
-  dashboard_title: 'Hermit Dashboard',
-  dashboard_header: '{name} — Hermit Dashboard',
-  dashboard_dek: 'Autonomous agent status',
-  proposals_page_title: 'Hermit Proposals',
+  // Page shell / shared chrome. Both page titles lead with the hermit's own name
+  // ({name} = config.agent_name, "Hermit" when unset) so an operator running
+  // several hermits can tell two tabs apart — and so a hermit that *is* named
+  // "Hermit" reads "Hermit — Dashboard", not "Hermit — Hermit Dashboard".
+  dashboard_title: '{name} — Dashboard',
+  proposals_page_title: '{name} — Proposals',
   proposals_page_header: 'Proposals',
   label_updated: 'updated',
-  footer: 'Rendered by claude-code-hermit — script-generated, not model-authored.',
 
   // Status card
   status_heading: 'Status',
@@ -34,15 +34,13 @@ export const DEFAULT_STRINGS = {
   status_alerts: 'Needs you',
   status_no_alerts: 'No active alerts.',
 
-  // Session-state labels. runtime.json stores machine enums; an unmapped value
-  // falls back to the raw string rather than rendering blank.
+  // One label per enum runtime.json actually stores — invented states render as
+  // dead keys, and a real state with no key falls back to the raw enum.
   session_in_progress: 'Working',
   session_idle: 'Idle',
-  session_paused: 'Paused',
-  session_closed: 'Closed',
-
-  // Alert grouping — one row per alert *kind*, not per dedup key.
-  alert_group_proposals: '{n} proposals are waiting on your decision',
+  session_waiting: 'Waiting on you',
+  session_dead_process: 'Process died',
+  session_suspect_process: 'Process suspect',
 
   // Budget-alert synthesis (message-less budget alerts)
   budget_text: '{period} budget {state}{amounts}',
@@ -70,9 +68,8 @@ export const DEFAULT_STRINGS = {
   proposals_pill_open: 'open',
   proposals_pill_decided: 'decided',
 
-  // Weekly card
-  weekly_heading: "This week's evolution",
-  weekly_none: 'No weekly review yet.',
+  // Weekly card. No empty state: the card is omitted entirely when there is no
+  // review, rather than spending a section on saying so.
   weekly_week: 'Week {week}',
   weekly_cost: 'Cost: {amount}{delta}',
   weekly_autonomy: 'Autonomy: {pct} self-directed{delta}',
@@ -89,7 +86,6 @@ export const DEFAULT_STRINGS = {
 
   // Shared
   common_more_not_shown: '+{n} more not shown',
-  common_show_all: 'Show all {n}',
 };
 
 export type ArtifactStrings = typeof DEFAULT_STRINGS;

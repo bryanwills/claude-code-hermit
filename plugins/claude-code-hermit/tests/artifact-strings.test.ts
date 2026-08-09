@@ -95,9 +95,9 @@ describe('loadStrings', () => {
   }));
 
   test('{placeholder} tokens in an overlay value survive escaping and still fill via fmt()', withHermitDir((hermitDir) => {
-    writeStrings(hermitDir, { dashboard_header: '{name} — O Painel do Eremita' });
+    writeStrings(hermitDir, { dashboard_title: '{name} — O Painel' });
     const s = loadStrings(hermitDir);
-    expect(fmt(s.dashboard_header, { name: 'Atlas' })).toBe('Atlas — O Painel do Eremita');
+    expect(fmt(s.dashboard_title, { name: 'Atlas' })).toBe('Atlas — O Painel');
   }));
 
   test('every DEFAULT_STRINGS value is a non-empty string', () => {
@@ -118,8 +118,7 @@ describe('renderers honor the overlay', () => {
 
     // English chrome must be gone (all masked to x-runs)...
     for (const phrase of ['Status', 'No active alerts.', 'No open proposals.', 'Latest brief',
-                          'No brief yet.', 'Compiled docs', "This week's evolution", 'No weekly review yet.',
-                          'Hermit Dashboard', 'Rendered by claude-code-hermit']) {
+                          'No brief yet.', 'Compiled docs', 'Dashboard']) {
       expect(html, phrase).not.toContain(phrase);
     }
     // ...replaced by the masked chrome, with the {name} placeholder still filled from config.
@@ -130,7 +129,7 @@ describe('renderers honor the overlay', () => {
   test('proposals page chrome is fully table-sourced', withHermitDir((hermitDir) => {
     writeStrings(hermitDir, fullMaskedOverlay());
     const { html } = renderProposalsPage(loadProposalsPageState(hermitDir), { now: '2026-07-05T09:00:00Z' });
-    for (const phrase of ['Hermit Proposals', 'No open proposals.', 'Rendered by claude-code-hermit']) {
+    for (const phrase of ['Proposals', 'No open proposals.']) {
       expect(html, phrase).not.toContain(phrase);
     }
   }));

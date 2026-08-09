@@ -7,7 +7,9 @@
 
 ### Changed
 - The dashboard and proposals pages are laid out for scanning: a 1100px column, a type scale with headings above body text, monospace for machine values (ids, dates, costs, token counts), severity rails, and summary tiles before the lists. Proposal rows lead with the title; the full id moves to a hover attribute and the row shows `PROP-NNN`.
-- Status alerts group by kind. Twenty `proposal-pending:*` entries render as one row carrying the count, with the proposal titles behind a disclosure, instead of twenty identical dedup keys.
+- Both artifact pages lead their `<title>` with the hermit's own name — `<agent_name> — Dashboard` and `<agent_name> — Proposals` — so two hermits' tabs are distinguishable. The dashboard `<h1>` matches its title instead of reading "Hermit — Hermit Dashboard".
+- `proposal-pending` alerts no longer render rows in the status card; the proposals card is the one surface for them, and they still count in the "Needs you" tile. A 20-proposal backlog no longer buries every other alert.
+- The dashboard drops chrome that carried no information: the "Autonomous agent status" subtitle, the page footer, and the weekly card's empty state (the card is now omitted until there is a review).
 
 ### Fixed
 - Artifact pages paint their own `body` background instead of borrowing the viewer's, which left everything outside the centred column showing the host theme's ground.
@@ -17,7 +19,7 @@
 ### Upgrade Instructions
 
 1. Both artifact pages change shape, so the next publish re-mints each one once. Steady state returns to hash-gated no-op republishes; nothing to do.
-2. **Only if `.claude-code-hermit/state/artifact-strings.json` exists** (a hermit with a translation overlay): regenerate the scaffold with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <language>`, carry the existing translated values across, and translate the ten new keys — `dashboard_dek`, `status_tokens`, `session_in_progress`, `session_idle`, `session_paused`, `session_closed`, `alert_group_proposals`, `common_show_all`, `proposals_pill_open`, `proposals_pill_decided`. Untranslated keys fall back to English per key, so the page renders correctly either way. Also re-check `status_today` and `status_alerts`: their English defaults changed to "Spent today" and "Needs you", so an existing overlay may now read oddly next to the new tiles.
+2. **Only if `.claude-code-hermit/state/artifact-strings.json` exists** (a hermit with a translation overlay): regenerate the scaffold with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <language>`, carry the existing translated values across, and translate the eight new keys — `status_tokens`, `session_in_progress`, `session_idle`, `session_waiting`, `session_dead_process`, `session_suspect_process`, `proposals_pill_open`, `proposals_pill_decided`. Untranslated keys fall back to English per key, so the page renders correctly either way. Two more need a second look: `dashboard_title` and `proposals_page_title` now take a `{name}` placeholder (`{name} — Dashboard`), and `status_today`/`status_alerts` changed to "Spent today"/"Needs you". The scaffold drops `dashboard_header`, `dashboard_dek`, `footer`, `weekly_heading`, `weekly_none`, `alert_group_proposals`, `common_show_all`, `session_paused` and `session_closed` — those strings no longer render anywhere; stale entries are ignored, so nothing breaks if they are left behind.
 3. Hermits with no `artifact-strings.json` need no action.
 
 ## [1.2.37] - 2026-08-08

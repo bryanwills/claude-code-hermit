@@ -98,7 +98,6 @@ body { margin: 0; background: var(--bg); color: var(--fg); }
 .hermit-page header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 .hermit-page header h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
 .hermit-page header .updated { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-.dek { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
 .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
 .pill { display: inline-flex; align-items: baseline; gap: 7px; border-radius: 999px; padding: 5px 13px; font-size: 13px; border: 1px solid transparent; }
 .pill b { font-family: var(--mono); font-weight: 600; font-size: 13.5px; }
@@ -106,7 +105,11 @@ body { margin: 0; background: var(--bg); color: var(--fg); }
 .pill-good { background: var(--chip-good-bg); color: var(--chip-good-fg); }
 .pill-acc { background: var(--chip-acc-bg); color: var(--chip-acc-fg); }
 .pill-mute { background: transparent; color: var(--muted); border-color: var(--border); }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; }
+/* The card is the scroll container for wide content: proposal bodies and the
+   weekly review are model-authored markdown, so a long unbroken token (a file
+   path in inline code, a URL) has to scroll here rather than push the page into
+   a horizontal scroll. */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; overflow-x: auto; }
 .card h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin: 0 0 14px; }
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 18px; margin-bottom: 4px; }
 .stat { display: flex; flex-direction: column; }
@@ -150,19 +153,13 @@ body { margin: 0; background: var(--bg); color: var(--fg); }
 .proposal-history li:first-child { border-top: none; }
 .evolution { list-style: none; margin: 0 0 12px; padding: 0; }
 .evolution li { padding: 3px 0; }
-.weekly-body summary, details.disc > summary { cursor: pointer; color: var(--accent); font-size: 13px; width: fit-content; }
-details.disc { margin-top: 10px; }
-details.disc ul { list-style: none; margin: 10px 0 0; padding: 0; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
-details.disc li { padding: 3px 0; }
-details.disc li b { color: var(--fg); font-weight: 600; }
+.weekly-body summary { cursor: pointer; color: var(--accent); font-size: 13px; width: fit-content; }
 summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
-.scroller { overflow-x: auto; }
 code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 13px; }
 pre { background: var(--code-bg); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
 pre code { background: none; padding: 0; }
 table { border-collapse: collapse; }
 a { color: var(--accent); }
-footer.hermit-footer { color: var(--muted); font-size: 12px; margin-top: 20px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 `;
 
@@ -212,12 +209,6 @@ export function railRow(opts: { tone: Tone; title: string; meta?: string[]; extr
   return `<div class="rail rail-${opts.tone}"><p class="rail-title">${opts.title}</p>${meta}${opts.extra ?? ''}</div>`;
 }
 
-/** Collapsed list used for the "show the rest" tails. */
-export function disclosure(summary: string, items: string[]): string {
-  if (!items.length) return '';
-  return `<details class="disc"><summary>${summary}</summary><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul></details>`;
-}
-
 /** Pill strip: the summary-before-detail layer at the top of a page. There is no
  *  `.pill-crit` on purpose — a rail has room for a distinct critical colour, a
  *  compact pill does not, so `crit` borrows `warn`'s here. */
@@ -234,13 +225,10 @@ export function pills(entries: { tone: Tone; value: string; label: string }[]): 
 export function pageShell(opts: {
   title: string;
   heading: string;
-  dek?: string;
   updatedLabel: string;
   updatedToken: string;
   body: string;
-  footer: string;
 }): string {
-  const dek = opts.dek ? `<p class="dek">${opts.dek}</p>` : '';
   return `<title>${opts.title}</title>
 <style>${CSS}</style>
 <div class="hermit-page">
@@ -248,9 +236,7 @@ export function pageShell(opts: {
     <h1>${opts.heading}</h1>
     <span class="updated">${opts.updatedLabel} ${opts.updatedToken}</span>
   </header>
-  ${dek}
   ${opts.body}
-  <footer class="hermit-footer">${opts.footer}</footer>
 </div>
 `;
 }

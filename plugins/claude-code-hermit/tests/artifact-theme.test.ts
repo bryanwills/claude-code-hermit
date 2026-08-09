@@ -10,7 +10,7 @@
 // resolved from the other theme).
 
 import { describe, test, expect } from 'bun:test';
-import { PALETTE, CSS, chipHtml, railRow, disclosure, pills } from '../scripts/lib/artifact-theme';
+import { PALETTE, CSS, chipHtml, railRow, pills } from '../scripts/lib/artifact-theme';
 
 const TOKENS = Object.keys(PALETTE.light);
 
@@ -78,7 +78,9 @@ describe('page-level rules', () => {
   });
 
   test('wide content can scroll inside its own container', () => {
-    expect(CSS).toContain('.scroller { overflow-x: auto; }');
+    // Every rendered section is a `.card`, and its body can be model-authored
+    // markdown — without this the page itself scrolls horizontally.
+    expect(CSS).toMatch(/\.card\s*\{[^}]*overflow-x:\s*auto/);
     expect(CSS).toMatch(/pre\s*\{[^}]*overflow-x:\s*auto/);
   });
 
@@ -129,8 +131,7 @@ describe('markup helpers', () => {
     expect(railRow({ tone: 'mute', title: 'x', meta: ['a', 'b'] })).toContain('rail-meta');
   });
 
-  test('disclosure and pills collapse to nothing when empty', () => {
-    expect(disclosure('Show all', [])).toBe('');
+  test('pills collapse to nothing when empty', () => {
     expect(pills([])).toBe('');
   });
 });
