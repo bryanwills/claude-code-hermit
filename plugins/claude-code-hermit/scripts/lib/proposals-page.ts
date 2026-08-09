@@ -7,13 +7,15 @@
 // dashboard already computes. Self-contained fragment — no
 // <!DOCTYPE>/<html>/<head>/<body> (Artifact tool wraps it).
 
-import { loadProposals, mdToHtml, escapeHtml, CSS, proposalLabel, type ProposalRow, type OpenProposalRow } from './dashboard';
+import { loadProposals, loadAgentName, mdToHtml, escapeHtml, proposalLabel, shortPropId, type ProposalRow, type OpenProposalRow } from './dashboard';
 import { sha256 } from './hash';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
+import { card, pills, pageShell } from './artifact-theme';
 
 const UPDATED_TOKEN = '__PROPOSALS_PAGE_UPDATED__';
 
 export interface ProposalsPageState {
+  agentName: string;
   open: OpenProposalRow[];
   other: ProposalRow[];
   otherOmitted: number;
@@ -22,47 +24,42 @@ export interface ProposalsPageState {
 
 export function loadProposalsPageState(hermitDir: string): ProposalsPageState {
   const { open, other, otherOmitted } = loadProposals(hermitDir);
-  return { open, other, otherOmitted, strings: loadStrings(hermitDir) };
+  return { agentName: loadAgentName(hermitDir), open, other, otherOmitted, strings: loadStrings(hermitDir) };
 }
 
 // "PROP-025-some-slug-123243" -> "prop-025". Falls back to a full slugified id
 // for legacy rows with no PROP-NNN prefix.
 export function proposalAnchorId(id: string): string {
-  const m = id.match(/^(PROP-\d+)/i);
-  const base = m ? m[1] : id;
-  return base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return shortPropId(id).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-function createdLabel(created: string | null): string {
-  if (!created) return '';
-  return ` <span class="muted">(${escapeHtml(created)})</span>`;
+// Calendar date only. The stored value is a full ISO stamp with an offset, which
+// is noise in a scan line — and the date alone stays activity-driven, so the
+// hash-gate rationale in this file's header still holds.
+function createdMeta(created: string | null): string[] {
+  if (!created) return [];
+  const day = created.slice(0, 10);
+  return [`<span title="${escapeHtml(created)}">${escapeHtml(day)}</span>`];
 }
 
 function renderOpen(open: OpenProposalRow[], s: ArtifactStrings): string {
   if (!open.length) return `<p class="muted">${s.proposals_none_open}</p>`;
   const items = open
     .map(p => `<details class="proposal" id="${proposalAnchorId(p.id)}">
-      <summary>${proposalLabel(p, createdLabel(p.created))}</summary>
+      <summary>${proposalLabel(p, createdMeta(p.created))}</summary>
       <div class="proposal-body">${mdToHtml(p.body)}</div>
     </details>`)
     .join('');
-  return `<section class="card">
-    <h2>${fmt(s.proposals_open_count, { n: open.length })}</h2>
-    ${items}
-  </section>`;
+  return card(fmt(s.proposals_open_count, { n: open.length }), items);
 }
 
 function renderOther(other: ProposalRow[], otherOmitted: number, s: ArtifactStrings): string {
   if (!other.length) return '';
   const items = other
-    .map(p => `<li>${proposalLabel(p, createdLabel(p.created))}</li>`)
+    .map(p => `<li>${proposalLabel(p, createdMeta(p.created))}</li>`)
     .join('');
   const omittedLine = otherOmitted > 0 ? `<li class="muted">${fmt(s.common_more_not_shown, { n: otherOmitted })}</li>` : '';
-  return `
-    <section class="card">
-      <h2>${s.proposals_history}</h2>
-      <ul class="proposal-history">${items}${omittedLine}</ul>
-    </section>`;
+  return card(s.proposals_history, `<ul class="proposal-history">${items}${omittedLine}</ul>`);
 }
 
 /** Renders the full artifact fragment plus a content hash stable across
@@ -73,18 +70,24 @@ function renderOther(other: ProposalRow[], otherOmitted: number, s: ArtifactStri
  *  day even with zero proposal activity; created-date is shown instead. */
 export function renderProposalsPage(state: ProposalsPageState, opts?: { now?: string }): { html: string; hash: string } {
   const s = state.strings;
-  const templated = `<title>${s.proposals_page_title}</title>
-<style>${CSS}</style>
-<div class="hermit-page">
-  <header>
-    <h1>${s.proposals_page_header}</h1>
-    <span class="updated">${s.label_updated} ${UPDATED_TOKEN}</span>
-  </header>
+  // Counts before the list: how many need a decision vs. how many are already
+  // settled is the question this page answers, and it should not require
+  // counting rows. `decided` includes the capped tail, so the total stays true.
+  const decided = state.other.length + state.otherOmitted;
+  const summary = pills([
+    ...(state.open.length ? [{ tone: 'warn' as const, value: String(state.open.length), label: s.proposals_pill_open }] : []),
+    ...(decided ? [{ tone: 'good' as const, value: String(decided), label: s.proposals_pill_decided }] : []),
+  ]);
+
+  const templated = pageShell({
+    title: fmt(s.proposals_page_title, { name: escapeHtml(state.agentName) }),
+    heading: s.proposals_page_header,
+    updatedLabel: s.label_updated,
+    updatedToken: UPDATED_TOKEN,
+    body: `${summary}
   ${renderOpen(state.open, s)}
-  ${renderOther(state.other, state.otherOmitted, s)}
-  <footer class="hermit-footer">${s.footer}</footer>
-</div>
-`;
+  ${renderOther(state.other, state.otherOmitted, s)}`,
+  });
 
   const hash = sha256(templated);
   const now = opts?.now ?? new Date().toISOString();

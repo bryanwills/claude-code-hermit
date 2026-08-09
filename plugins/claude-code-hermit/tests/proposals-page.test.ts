@@ -84,7 +84,7 @@ describe('renderProposalsPage', () => {
     expect(html).not.toMatch(/<html/i);
     expect(html).not.toMatch(/<head>/i);
     expect(html).not.toMatch(/<body>/i);
-    expect(html).toContain('<title>Hermit Proposals</title>');
+    expect(html).toContain('<title>Hermit — Proposals</title>');
   }));
 
   test('renders each open proposal as a collapsed <details> anchored for deep-linking', withHermitDir((hermitDir) => {

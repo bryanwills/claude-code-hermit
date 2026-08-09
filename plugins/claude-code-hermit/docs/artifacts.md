@@ -63,7 +63,11 @@ differ per type (called out in each subsection below):
 latest brief, proposal queue, weekly evolution, and a compiled-docs index — rendered by
 `scripts/lib/dashboard.ts` (deterministic; no model authorship, except the embedded
 "latest brief" text, which is itself model-composed by the `brief` skill and written to
-`state/last-brief.json` — see the file's header comment). `<title>` is `Hermit Dashboard`.
+`state/last-brief.json` — see the file's header comment). `<title>` and the `<h1>` are
+both `<agent_name> — Dashboard` (`agent_name` falls back to `Hermit`), so a fleet
+operator can tell two hermits' tabs apart. The weekly and alert sections are omitted
+rather than rendered empty; pending-proposal alerts are left to the proposals card,
+which owns that surface, and still count in the "Needs you" tile.
 
 Refresh triggers: `brief` (`--morning`/`--evening`), `weekly-review`, `proposal-create`,
 `proposal-act`. `brief` and `weekly-review` append a `📎 <url>` line to their channel
@@ -84,7 +88,8 @@ count (e.g. "3 Open"); deferred/resolved/dismissed proposals stay one-line histo
 — the same "other" bucket the dashboard already computes. Rendered by
 `scripts/lib/proposals-page.ts` (reuses the dashboard's proposal loader, markdown
 converter, and CSS — no CSS changes were needed since `.proposal`/`.proposal-body` already
-existed for the dashboard's own `<details>`). `<title>` is `Hermit Proposals`. Deliberately
+existed for the dashboard's own `<details>`). `<title>` is `<agent_name> — Proposals`,
+matching the dashboard's tab convention. Deliberately
 omits proposal age-in-days (unlike the dashboard) — age is `Date.now()`-derived and would
 otherwise mint a new artifact version once a day even with zero activity; created-date
 is shown instead, keeping the hash purely activity-driven (the open count is likewise
@@ -106,8 +111,8 @@ text unconditionally so the link is useful either way.
 
 ## Localization
 
-The dashboard and proposals renderers read their fixed UI chrome (section headers, stat
-labels, empty states, age labels, the footer, the synthesized budget-alert line) from
+The dashboard and proposals renderers read their fixed UI chrome (page titles, section
+headers, stat labels, empty states, age labels, the synthesized budget-alert line) from
 `scripts/lib/artifact-strings.ts` (`DEFAULT_STRINGS`, English). When
 `.claude-code-hermit/state/artifact-strings.json` is present, `loadStrings()` overlays it
 **per key** over those defaults — a missing key or an absent file falls back to English,
@@ -118,6 +123,46 @@ is an ordinary render input: it's model-composed once at language-set time (`hat
 and steady state stays no-op-gated. Weekly-review has no chrome (pure frontmatter-stripped
 model markdown), so it needs no string table. Number/date formatting (`$`, ISO timestamps)
 is not localized — format, not language.
+
+## Design contract
+
+The two HTML pages share one stylesheet and one set of markup helpers, both in
+`scripts/lib/artifact-theme.ts`. That file is the **only** place a re-sync against
+Claude Code's `artifact-design` skill needs to touch — `dashboard.ts` and
+`proposals-page.ts` contribute content, not styling. `artifact-design` is prose
+guidance with nothing importable, so the sync mechanism is deliberate: keep every
+decision in one module, and encode the checkable rules as
+`tests/artifact-theme.test.ts`. When that skill gains a mechanically-checkable
+rule, add an assertion there rather than trusting a re-read.
+
+Implemented from `artifact-design`:
+
+- **One palette, four theme blocks.** `PALETTE` declares light and dark once, and
+  `:root`, the `prefers-color-scheme` media query (guarded with
+  `:not([data-theme="light"])`), `:root[data-theme="dark"]`, and
+  `:root[data-theme="light"]` are all generated from it. Partial-override drift is
+  unrepresentable, not merely fixed.
+- **`body` paints its own background** from a token, so the page never composites
+  over the viewer's ground.
+- **Two type roles.** System sans for prose; `ui-monospace` for every
+  machine-emitted value (ids, dates, costs, token counts, state enums). Scale runs
+  title > stat > body > meta, with eyebrows small because they are labels.
+- **State encoded as form**, not only as text: severity rails on alert and
+  proposal rows, status chips derived from the semantic trio.
+- **Summary before detail**: stat tiles and count pills precede the lists.
+- Chosen neutrals (a cool cast, deliberately off stock greys), `tabular-nums`,
+  `overflow-x: auto` on wide children, visible focus rings, reduced-motion honored.
+
+Deliberately declined:
+
+- **No inlined webfont.** `artifact-design` suggests a `@font-face` data URI, but
+  the plugin bans build steps and runtime dependencies, subsetting needs tooling
+  the repo does not have, and it would vendor a font plus its license into a
+  public plugin. Two system faces used as distinct roles carry the hierarchy.
+- **No per-publish model authorship.** These pages are script-rendered on purpose
+  (a publish costs a render, not a generation, and publishes fire several times a
+  day) — so the design work is done once, by hand, into the renderer. Never call
+  `artifact-design` on the publish path.
 
 ## Weekly review
 
