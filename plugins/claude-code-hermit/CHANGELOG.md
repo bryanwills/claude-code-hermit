@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `scripts/lib/artifact-theme.ts` owns the visual system for the dashboard and proposals pages — one `PALETTE` generating all four theme blocks, the type scale, and the shared markup helpers. `tests/artifact-theme.test.ts` pins the invariants a hand edit could break.
+
+### Changed
+- The dashboard and proposals pages are laid out for scanning: a 1100px column, a type scale with headings above body text, monospace for machine values (ids, dates, costs, token counts), severity rails, and summary tiles before the lists. Proposal rows lead with the title; the full id moves to a hover attribute and the row shows `PROP-NNN`.
+- Status alerts group by kind. Twenty `proposal-pending:*` entries render as one row carrying the count, with the proposal titles behind a disclosure, instead of twenty identical dedup keys.
+
+### Fixed
+- Artifact pages paint their own `body` background instead of borrowing the viewer's, which left everything outside the centred column showing the host theme's ground.
+- An explicit viewer theme no longer leaves status chips resolved from the other theme — the two `[data-theme]` blocks had redefined 6 of the sheet's 19 tokens.
+- Checklist alerts render the text stored alongside them instead of the raw dedup key. `alertMessage()` read only `message`, which the heartbeat writer never sets.
+
+### Upgrade Instructions
+
+1. Both artifact pages change shape, so the next publish re-mints each one once. Steady state returns to hash-gated no-op republishes; nothing to do.
+2. **Only if `.claude-code-hermit/state/artifact-strings.json` exists** (a hermit with a translation overlay): regenerate the scaffold with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <language>`, carry the existing translated values across, and translate the ten new keys — `dashboard_dek`, `status_tokens`, `session_in_progress`, `session_idle`, `session_paused`, `session_closed`, `alert_group_proposals`, `common_show_all`, `proposals_pill_open`, `proposals_pill_decided`. Untranslated keys fall back to English per key, so the page renders correctly either way. Also re-check `status_today` and `status_alerts`: their English defaults changed to "Spent today" and "Needs you", so an existing overlay may now read oddly next to the new tiles.
+3. Hermits with no `artifact-strings.json` need no action.
+
 ## [1.2.37] - 2026-08-08
 
 ### Added

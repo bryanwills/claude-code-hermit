@@ -20,6 +20,7 @@ import { todayYMD } from './time';
 import { costIndexPath, readCostIndex } from './cost-log';
 import { rebuildIndex, type ProposalsIndex } from './proposals/index-rebuild';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
+import { chipHtml, card, statTile, railRow, disclosure, pageShell, META_SEP } from './artifact-theme';
 
 type Json = any;
 
@@ -249,15 +250,20 @@ function loadCompiledIndex(hermitDir: string): { docs: CompiledDocRow[]; omitted
   return { docs, omitted };
 }
 
-// Alert entries have no single schema: telemetry/checklist alerts carry a `message`
-// string, but budget alerts (the dominant type) store structured fields and no message.
-// Synthesize a readable line for those instead of falling back to the raw dedup key.
+// Alert entries have no single schema. Telemetry alerts carry `message`; the
+// heartbeat checklist writer stores its human sentence under `text` (with a
+// `channelText` variant for chat); budget alerts store structured fields and no
+// prose at all. Read both prose fields before synthesizing or giving up —
+// checking only `message` sent every checklist alert to the raw-dedup-key
+// fallback below, so a page of proposal alerts rendered as
+// "proposal-pending:PROP-012" while the proposal title sat unused on disk.
 // Returns an already-escaped, safe-to-inject-raw string: file-derived parts (message,
 // period, dedup key) are escaped here; the chrome templates are pre-escaped by
 // loadStrings(). renderStatus injects the result without re-escaping, so a translated
 // budget-alert string isn't double-escaped.
 function alertMessage(key: string, v: Json, s: ArtifactStrings): string {
   if (typeof v?.message === 'string') return escapeHtml(v.message);
+  if (typeof v?.text === 'string') return escapeHtml(v.text);
   if (v?.kind === 'budget') {
     const period = escapeHtml(typeof v.period === 'string' ? v.period : 'budget');
     const state = v.level === 'breach' ? s.budget_state_breached : s.budget_state_warning;
@@ -402,10 +408,16 @@ export function mdToHtml(md: string): string {
 // ---------- rendering ----------
 
 export function chip(status: string): string {
-  const cls = ['proposed', 'accepted', 'resolved', 'dismissed', 'deferred'].includes(status)
-    ? status
-    : 'unknown';
-  return `<span class="chip chip-${cls}">${escapeHtml(status)}</span>`;
+  return chipHtml(status, escapeHtml(status));
+}
+
+/** "PROP-012-graphify-optional-recall-source-094353" -> "PROP-012". The slug
+ *  restates the title it sits next to and the trailing HHMMSS is noise; the
+ *  short form is also the handle the operator uses in chat ("accept PROP-012").
+ *  Callers keep the full id in a `title=` attribute. */
+export function shortPropId(id: string): string {
+  const m = id.match(/^(PROP-\d+)/i);
+  return m ? m[1] : id;
 }
 
 function ageLabel(days: number | null, s: ArtifactStrings): string {
@@ -414,11 +426,11 @@ function ageLabel(days: number | null, s: ArtifactStrings): string {
   return fmt(s.age_days, { n: days });
 }
 
-// Renders " (Nd)" (leading space included) or '' when age is unknown, so callers
-// never emit an empty "()" placeholder.
-function ageParen(days: number | null, s: ArtifactStrings): string {
+// Age as a meta part, or nothing at all when unknown — callers spread this into
+// the monospace meta line, so an absent age contributes no separator.
+function ageMeta(days: number | null, s: ArtifactStrings): string[] {
   const label = ageLabel(days, s);
-  return label ? ` <span class="muted">(${label})</span>` : '';
+  return label ? [label] : [];
 }
 
 function pct(n: number | null): string {
@@ -439,31 +451,81 @@ function delta(current: number | null, prior: number | null, unit: 'pp' | '$', s
   return fmt(s.weekly_delta_pp, { prior: Math.round(prior), sign, diff: Math.round(diff) });
 }
 
-function renderStatus(state: DashboardState): string {
-  const s = state.strings;
-  const alertsHtml = state.alerts.length
-    ? `<ul class="alerts">${state.alerts
-        .map(a => `<li>⚠ ${a.message}</li>`)
-        .join('')}</ul>`
-    : `<p class="muted">${s.status_no_alerts}</p>`;
+// Alert keys are `<kind>:<instance>` (e.g. `proposal-pending:PROP-012`). One row
+// per key turned a 20-proposal backlog into twenty near-identical lines, so kinds
+// listed here state the situation once and keep the instances behind a
+// disclosure. Anything not listed still renders a row each — a new alert kind is
+// never silently collapsed into a count.
+const GROUPED_ALERT_KINDS: Record<string, keyof ArtifactStrings> = {
+  'proposal-pending': 'alert_group_proposals',
+};
 
-  return `
-    <section class="card">
-      <h2>${s.status_heading}</h2>
-      <div class="stat-row">
-        <div class="stat"><span class="stat-label">${s.status_session}</span><span class="stat-value">${escapeHtml(state.sessionState ?? 'idle')}</span></div>
-        <div class="stat"><span class="stat-label">${s.status_today}</span><span class="stat-value">$${state.todayCostUsd.toFixed(2)} · ${escapeHtml(formatTokens(state.todayTokens))}</span></div>
-        <div class="stat"><span class="stat-label">${s.status_alerts}</span><span class="stat-value">${state.alerts.length}</span></div>
-      </div>
-      ${alertsHtml}
-    </section>`;
+function alertKind(key: string): string {
+  const i = key.indexOf(':');
+  return i === -1 ? key : key.slice(0, i);
 }
 
-// Shared label for a proposal row: status chip, id, title, plus a caller-supplied
-// suffix (age paren here; proposals-page.ts passes a created-date paren instead).
+function renderAlerts(state: DashboardState): string {
+  const s = state.strings;
+  if (!state.alerts.length) return `<p class="muted">${s.status_no_alerts}</p>`;
+
+  const groups = new Map<string, AlertRow[]>();
+  for (const a of state.alerts) {
+    const kind = alertKind(a.key);
+    const bucket = groups.get(kind);
+    if (bucket) bucket.push(a);
+    else groups.set(kind, [a]);
+  }
+
+  const rows: string[] = [];
+  for (const [kind, members] of groups) {
+    const key = GROUPED_ALERT_KINDS[kind];
+    if (key && members.length > 1) {
+      rows.push(railRow({
+        tone: 'warn',
+        title: fmt(s[key], { n: members.length }),
+        extra: disclosure(fmt(s.common_show_all, { n: members.length }), members.map(m => m.message)),
+      }));
+    } else {
+      for (const m of members) rows.push(railRow({ tone: 'warn', title: m.message }));
+    }
+  }
+  return `<div class="alerts">${rows.join('')}</div>`;
+}
+
+// runtime.json stores a machine enum (`in_progress`); show the operator-facing
+// label when one exists, and the raw value rather than a blank when it doesn't.
+function sessionLabel(state: DashboardState): string {
+  const raw = state.sessionState ?? 'idle';
+  const label = state.strings[`session_${raw}` as keyof ArtifactStrings];
+  return typeof label === 'string' ? label : escapeHtml(raw);
+}
+
+function renderStatus(state: DashboardState): string {
+  const s = state.strings;
+  const tiles = [
+    statTile(s.status_session, sessionLabel(state), 'acc'),
+    statTile(s.status_today, `$${state.todayCostUsd.toFixed(2)}`),
+    statTile(s.status_tokens, escapeHtml(formatTokens(state.todayTokens))),
+    statTile(s.status_alerts, String(state.alerts.length), state.alerts.length ? 'warn' : undefined),
+  ].join('');
+  return card(s.status_heading, `<div class="stat-row">${tiles}</div>${renderAlerts(state)}`);
+}
+
+// Shared two-line template for a proposal row: the title carries the scan, and
+// the machine values (status chip, short id, plus caller-supplied meta — age
+// here, created date on the proposals page) drop to a monospace second line.
+// The full id rides along in `title=` so it stays copyable and searchable
+// without being the loudest thing in the row.
 // Exported so proposals-page.ts's open/history rows reuse the same template.
-export function proposalLabel(p: ProposalRow, suffix: string): string {
-  return `${chip(p.status)} <strong>${escapeHtml(p.id)}</strong> — ${escapeHtml(p.title)}${suffix}`;
+export function proposalLabel(p: ProposalRow, meta: string[]): string {
+  const parts = [
+    chip(p.status),
+    `<span title="${escapeHtml(p.id)}">${escapeHtml(shortPropId(p.id))}</span>`,
+    ...meta,
+  ];
+  return `<p class="rail-title">${escapeHtml(p.title)}</p>` +
+    `<p class="rail-meta">${parts.join(META_SEP)}</p>`;
 }
 
 function renderProposals(state: DashboardState): string {
@@ -474,7 +536,7 @@ function renderProposals(state: DashboardState): string {
     ? open
         .map(
           p => `<details class="proposal">
-            <summary>${proposalLabel(p, ageParen(p.ageDays, s))}</summary>
+            <summary>${proposalLabel(p, ageMeta(p.ageDays, s))}</summary>
             <div class="proposal-body">${mdToHtml(p.body)}</div>
           </details>`
         )
@@ -483,7 +545,7 @@ function renderProposals(state: DashboardState): string {
 
   const otherHtml = other.length
     ? `<ul class="proposal-history">${other
-        .map(p => `<li>${proposalLabel(p, ageParen(p.ageDays, s))}</li>`)
+        .map(p => `<li>${proposalLabel(p, ageMeta(p.ageDays, s))}</li>`)
         .join('')}${otherOmitted > 0 ? `<li class="muted">${fmt(s.common_more_not_shown, { n: otherOmitted })}</li>` : ''}</ul>`
     : '';
 
@@ -496,21 +558,13 @@ function renderProposals(state: DashboardState): string {
       })}</p>`
     : '';
 
-  return `
-    <section class="card">
-      <h2>${s.proposals_heading}</h2>
-      ${oldestLine}
-      ${openHtml}
-      ${otherHtml}
-    </section>`;
+  return card(s.proposals_heading, `${oldestLine}${openHtml}${otherHtml}`);
 }
 
 function renderWeekly(state: DashboardState): string {
   const s = state.strings;
   const w = state.weekly;
-  if (!w) {
-    return `<section class="card"><h2>${s.weekly_heading}</h2><p class="muted">${s.weekly_none}</p></section>`;
-  }
+  if (!w) return card(s.weekly_heading, `<p class="muted">${s.weekly_none}</p>`);
 
   const costLine = w.costUsd != null
     ? fmt(s.weekly_cost, { amount: `$${w.costUsd.toFixed(2)}`, delta: w.hasPrior ? delta(w.costUsd, w.priorCostUsd, '$', s) : '' })
@@ -524,139 +578,55 @@ function renderWeekly(state: DashboardState): string {
 
   const summary = [costLine, autonomyLine, proposalsLine].filter(Boolean) as string[];
 
-  return `
-    <section class="card">
-      <h2>${fmt(s.weekly_week, { week: escapeHtml(w.week) })}</h2>
+  return card(fmt(s.weekly_week, { week: escapeHtml(w.week) }), `
       <ul class="evolution">${summary.map(l => `<li>${l}</li>`).join('')}</ul>
       <details class="weekly-body">
         <summary>${s.weekly_full_review}</summary>
         <div>${w.bodyHtml}</div>
-      </details>
-    </section>`;
+      </details>`);
 }
 
 function renderBrief(state: DashboardState): string {
   const s = state.strings;
   const b = state.lastBrief;
-  if (!b) {
-    return `<section class="card"><h2>${s.brief_heading}</h2><p class="muted">${s.brief_none}</p></section>`;
-  }
+  if (!b) return card(s.brief_heading, `<p class="muted">${s.brief_none}</p>`);
   const when = b.generatedAt ? ` <span class="muted">· ${escapeHtml(b.generatedAt)}</span>` : '';
-  return `
-    <section class="card">
-      <h2>${s.brief_heading} <span class="muted">(${escapeHtml(b.kind)})</span>${when}</h2>
-      ${mdToHtml(b.text)}
-    </section>`;
+  return card(`${s.brief_heading} <span class="muted">(${escapeHtml(b.kind)})</span>${when}`, mdToHtml(b.text));
 }
 
 function renderCompiledIndex(state: DashboardState): string {
   const s = state.strings;
   const { docs, omitted } = state.compiledIndex;
-  if (!docs.length) {
-    return `<section class="card"><h2>${s.compiled_heading}</h2><p class="muted">${s.compiled_none}</p></section>`;
-  }
-  const items = docs.map(d => `<li>${escapeHtml(d.title)} <span class="muted">(${escapeHtml(d.name)})</span></li>`).join('');
+  if (!docs.length) return card(s.compiled_heading, `<p class="muted">${s.compiled_none}</p>`);
+  const items = docs
+    .map(d => `<li>${escapeHtml(d.title)}<span class="rail-meta">${escapeHtml(d.name)}</span></li>`)
+    .join('');
   const omittedLine = omitted > 0 ? `<li class="muted">${fmt(s.common_more_not_shown, { n: omitted })}</li>` : '';
-  return `
-    <section class="card">
-      <h2>${s.compiled_heading}</h2>
+  return card(s.compiled_heading, `
       <p class="muted">${s.compiled_hint}</p>
-      <ul class="proposal-history">${items}${omittedLine}</ul>
-    </section>`;
+      <ul class="proposal-history">${items}${omittedLine}</ul>`);
 }
-
-export const CSS = `
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb; --card-bg: #fafafa;
-  --chip-proposed-bg: #fef3c7; --chip-proposed-fg: #92400e;
-  --chip-accepted-bg: #dbeafe; --chip-accepted-fg: #1e40af;
-  --chip-resolved-bg: #dcfce7; --chip-resolved-fg: #166534;
-  --chip-dismissed-bg: #f3f4f6; --chip-dismissed-fg: #4b5563;
-  --chip-deferred-bg: #ede9fe; --chip-deferred-fg: #5b21b6;
-  --chip-unknown-bg: #f3f4f6; --chip-unknown-fg: #6b7280;
-  --code-bg: #f3f4f6;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115; --fg: #e5e7eb; --muted: #9ca3af; --border: #2a2e37; --card-bg: #171a20;
-    --chip-proposed-bg: #422006; --chip-proposed-fg: #fbbf24;
-    --chip-accepted-bg: #1e3a5f; --chip-accepted-fg: #93c5fd;
-    --chip-resolved-bg: #14321f; --chip-resolved-fg: #86efac;
-    --chip-dismissed-bg: #1f2229; --chip-dismissed-fg: #9ca3af;
-    --chip-deferred-bg: #2e1f4d; --chip-deferred-fg: #c4b5fd;
-    --chip-unknown-bg: #1f2229; --chip-unknown-fg: #9ca3af;
-    --code-bg: #1f2229;
-  }
-}
-:root[data-theme="light"] {
-  --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb; --card-bg: #fafafa; --code-bg: #f3f4f6;
-}
-:root[data-theme="dark"] {
-  --bg: #0f1115; --fg: #e5e7eb; --muted: #9ca3af; --border: #2a2e37; --card-bg: #171a20; --code-bg: #1f2229;
-}
-* { box-sizing: border-box; }
-body, .hermit-page { margin: 0; }
-.hermit-page {
-  background: var(--bg); color: var(--fg);
-  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  font-variant-numeric: tabular-nums;
-  max-width: 720px; margin: 0 auto; padding: 24px 20px 48px;
-}
-.hermit-page header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
-.hermit-page header h1 { font-size: 18px; margin: 0; }
-.hermit-page header .updated { color: var(--muted); font-size: 13px; }
-.card { border: 1px solid var(--border); background: var(--card-bg); border-radius: 8px; padding: 16px 18px; margin-bottom: 16px; overflow-x: auto; }
-.card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 12px; }
-.stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 8px; }
-.stat { display: flex; flex-direction: column; }
-.stat-label { font-size: 12px; color: var(--muted); }
-.stat-value { font-size: 16px; font-weight: 600; }
-.muted { color: var(--muted); font-size: 13px; }
-.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.chip-proposed { background: var(--chip-proposed-bg); color: var(--chip-proposed-fg); }
-.chip-accepted { background: var(--chip-accepted-bg); color: var(--chip-accepted-fg); }
-.chip-resolved { background: var(--chip-resolved-bg); color: var(--chip-resolved-fg); }
-.chip-dismissed { background: var(--chip-dismissed-bg); color: var(--chip-dismissed-fg); }
-.chip-deferred { background: var(--chip-deferred-bg); color: var(--chip-deferred-fg); }
-.chip-unknown { background: var(--chip-unknown-bg); color: var(--chip-unknown-fg); }
-.alerts { margin: 8px 0 0; padding-left: 18px; }
-.proposal { border-top: 1px solid var(--border); padding: 8px 0; }
-.proposal:first-of-type { border-top: none; }
-.proposal summary { cursor: pointer; }
-.proposal-body { margin-top: 8px; padding-left: 4px; }
-.proposal-history { list-style: none; margin: 8px 0 0; padding: 0; }
-.proposal-history li { padding: 4px 0; border-top: 1px solid var(--border); }
-.proposal-history li:first-child { border-top: none; }
-.evolution { margin: 0 0 12px; padding-left: 18px; }
-.weekly-body summary { cursor: pointer; color: var(--muted); }
-code { background: var(--code-bg); border-radius: 4px; padding: 1px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-pre { background: var(--code-bg); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
-pre code { background: none; padding: 0; }
-a { color: inherit; }
-footer.hermit-footer { color: var(--muted); font-size: 12px; margin-top: 8px; }
-`;
 
 /** Renders the full artifact fragment plus a content hash stable across
  *  identical underlying state (the "last updated" stamp is excluded from the hash
  *  via a placeholder token, so the publish gate can skip no-op republishes). */
 export function renderDashboard(state: DashboardState, opts?: { now?: string }): { html: string; hash: string } {
   const s = state.strings;
-  const templated = `<title>${s.dashboard_title}</title>
-<style>${CSS}</style>
-<div class="hermit-page">
-  <header>
-    <h1>${fmt(s.dashboard_header, { name: escapeHtml(state.agentName) })}</h1>
-    <span class="updated">${s.label_updated} ${UPDATED_TOKEN}</span>
-  </header>
-  ${renderStatus(state)}
-  ${renderBrief(state)}
-  ${renderProposals(state)}
-  ${renderWeekly(state)}
-  ${renderCompiledIndex(state)}
-  <footer class="hermit-footer">${s.footer}</footer>
-</div>
-`;
+  const templated = pageShell({
+    title: s.dashboard_title,
+    heading: fmt(s.dashboard_header, { name: escapeHtml(state.agentName) }),
+    dek: s.dashboard_dek,
+    updatedLabel: s.label_updated,
+    updatedToken: UPDATED_TOKEN,
+    body: [
+      renderStatus(state),
+      renderBrief(state),
+      renderProposals(state),
+      renderWeekly(state),
+      renderCompiledIndex(state),
+    ].join('\n  '),
+    footer: s.footer,
+  });
 
   const hash = sha256(templated);
   const now = opts?.now ?? new Date().toISOString();

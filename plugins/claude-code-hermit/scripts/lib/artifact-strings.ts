@@ -20,6 +20,7 @@ export const DEFAULT_STRINGS = {
   // Page shell / shared chrome
   dashboard_title: 'Hermit Dashboard',
   dashboard_header: '{name} — Hermit Dashboard',
+  dashboard_dek: 'Autonomous agent status',
   proposals_page_title: 'Hermit Proposals',
   proposals_page_header: 'Proposals',
   label_updated: 'updated',
@@ -28,9 +29,20 @@ export const DEFAULT_STRINGS = {
   // Status card
   status_heading: 'Status',
   status_session: 'Session',
-  status_today: 'Today',
-  status_alerts: 'Alerts',
+  status_today: 'Spent today',
+  status_tokens: 'Tokens',
+  status_alerts: 'Needs you',
   status_no_alerts: 'No active alerts.',
+
+  // Session-state labels. runtime.json stores machine enums; an unmapped value
+  // falls back to the raw string rather than rendering blank.
+  session_in_progress: 'Working',
+  session_idle: 'Idle',
+  session_paused: 'Paused',
+  session_closed: 'Closed',
+
+  // Alert grouping — one row per alert *kind*, not per dedup key.
+  alert_group_proposals: '{n} proposals are waiting on your decision',
 
   // Budget-alert synthesis (message-less budget alerts)
   budget_text: '{period} budget {state}{amounts}',
@@ -55,6 +67,8 @@ export const DEFAULT_STRINGS = {
   // Proposals page
   proposals_history: 'History',
   proposals_open_count: '{n} Open',
+  proposals_pill_open: 'open',
+  proposals_pill_decided: 'decided',
 
   // Weekly card
   weekly_heading: "This week's evolution",
@@ -75,6 +89,7 @@ export const DEFAULT_STRINGS = {
 
   // Shared
   common_more_not_shown: '+{n} more not shown',
+  common_show_all: 'Show all {n}',
 };
 
 export type ArtifactStrings = typeof DEFAULT_STRINGS;

@@ -119,6 +119,46 @@ and steady state stays no-op-gated. Weekly-review has no chrome (pure frontmatte
 model markdown), so it needs no string table. Number/date formatting (`$`, ISO timestamps)
 is not localized — format, not language.
 
+## Design contract
+
+The two HTML pages share one stylesheet and one set of markup helpers, both in
+`scripts/lib/artifact-theme.ts`. That file is the **only** place a re-sync against
+Claude Code's `artifact-design` skill needs to touch — `dashboard.ts` and
+`proposals-page.ts` contribute content, not styling. `artifact-design` is prose
+guidance with nothing importable, so the sync mechanism is deliberate: keep every
+decision in one module, and encode the checkable rules as
+`tests/artifact-theme.test.ts`. When that skill gains a mechanically-checkable
+rule, add an assertion there rather than trusting a re-read.
+
+Implemented from `artifact-design`:
+
+- **One palette, four theme blocks.** `PALETTE` declares light and dark once, and
+  `:root`, the `prefers-color-scheme` media query (guarded with
+  `:not([data-theme="light"])`), `:root[data-theme="dark"]`, and
+  `:root[data-theme="light"]` are all generated from it. Partial-override drift is
+  unrepresentable, not merely fixed.
+- **`body` paints its own background** from a token, so the page never composites
+  over the viewer's ground.
+- **Two type roles.** System sans for prose; `ui-monospace` for every
+  machine-emitted value (ids, dates, costs, token counts, state enums). Scale runs
+  title > stat > body > meta, with eyebrows small because they are labels.
+- **State encoded as form**, not only as text: severity rails on alert and
+  proposal rows, status chips derived from the semantic trio.
+- **Summary before detail**: stat tiles and count pills precede the lists.
+- Chosen neutrals (a cool cast, deliberately off stock greys), `tabular-nums`,
+  `overflow-x: auto` on wide children, visible focus rings, reduced-motion honored.
+
+Deliberately declined:
+
+- **No inlined webfont.** `artifact-design` suggests a `@font-face` data URI, but
+  the plugin bans build steps and runtime dependencies, subsetting needs tooling
+  the repo does not have, and it would vendor a font plus its license into a
+  public plugin. Two system faces used as distinct roles carry the hierarchy.
+- **No per-publish model authorship.** These pages are script-rendered on purpose
+  (a publish costs a render, not a generation, and publishes fire several times a
+  day) — so the design work is done once, by hand, into the renderer. Never call
+  `artifact-design` on the publish path.
+
 ## Weekly review
 
 `config.artifacts.weekly_review`, state key `weekly_review`. The latest compiled
