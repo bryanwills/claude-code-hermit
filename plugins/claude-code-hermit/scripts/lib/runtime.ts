@@ -60,11 +60,19 @@ function readRuntimeState(stateDir?: string): RuntimeRead {
     if (err?.code === 'ENOENT') return { kind: 'missing' };
     return { kind: 'invalid', reason: err?.code ? `unreadable (${err.code})` : 'unreadable' };
   }
+  let data: Json;
   try {
-    return { kind: 'ok', data: JSON.parse(raw) };
+    data = JSON.parse(raw);
   } catch (err: any) {
     return { kind: 'invalid', reason: `malformed JSON (${err?.message ?? 'parse error'})` };
   }
+  // `null`, arrays and scalars parse cleanly but carry no record. readRuntimeJson()
+  // hands the same bytes back as a bare null, so calling them 'ok' here would make
+  // the two readers disagree — and 'ok' promises `data` is dereferenceable.
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return { kind: 'invalid', reason: 'not a JSON object' };
+  }
+  return { kind: 'ok', data };
 }
 
 /** Read-modify-write runtime.json with atomic write. */

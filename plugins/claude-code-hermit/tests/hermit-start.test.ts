@@ -355,6 +355,15 @@ describe('readRuntimeState tri-state', () => {
     const read = readRuntimeState();
     expect(read.kind).toBe('invalid');
   });
+
+  // 'ok' promises a dereferenceable record. JSON that parses to null/an array/a
+  // scalar carries none, and readRuntimeJson() reports the same bytes as absent.
+  test('parseable non-objects read as invalid, not ok', () => {
+    for (const raw of ['null', '[]', '"hermit"', '42']) {
+      fs.writeFileSync(RUNTIME_PATH, raw);
+      expect(readRuntimeState().kind).toBe('invalid');
+    }
+  });
 });
 
 describe('duplicateSessionRefusal', () => {
@@ -371,6 +380,21 @@ describe('duplicateSessionRefusal', () => {
     expect(text).toContain('state/runtime.json is missing');
     expect(text).toContain('.claude-code-hermit/bin/hermit-stop');
     expect(text).toContain('.claude-code-hermit/bin/hermit-start');
+  });
+
+  // The stub an interrupted hermit-stop leaves behind: updateRuntimeField() seeds
+  // `{}` on a missing read, so runtime.json comes back parseable but carrying no
+  // lifecycle record — and hermit-attach dead-ends on it exactly as it does on a
+  // missing file ("Unknown runtime mode" / "No tmux session recorded").
+  test('stub runtime with no lifecycle record → refuses', () => {
+    fs.writeFileSync(RUNTIME_PATH, JSON.stringify({ shutdown_requested_at: '2026-01-01T00:00:00+00:00' }));
+    const text = duplicateSessionRefusal('hermit-proj')!.join('\n');
+    expect(text).toContain('records no live session');
+  });
+
+  test('runtime with a mode but no tmux session → refuses', () => {
+    fs.writeFileSync(RUNTIME_PATH, JSON.stringify({ ...LIVE_RUNTIME, tmux_session: null }));
+    expect(duplicateSessionRefusal('hermit-proj')).not.toBeNull();
   });
 
   test('corrupt runtime → refuses and surfaces the reason', () => {

@@ -880,6 +880,13 @@ function refuseIfAnotherInstanceAlive(bootMode: 'tmux' | 'interactive'): void {
  * source of truth (skills/session-start/SKILL.md), so a synthesized record would
  * defeat the recovery branches that read it.
  *
+ * Parseable is not the same as usable: a stub record (no runtime_mode, or no
+ * tmux_session while a session of that name is demonstrably alive) dead-ends
+ * bin/hermit-attach exactly like a missing file does ("Unknown runtime mode" /
+ * "No tmux session recorded"). updateRuntimeField() seeds `{}` on a missing
+ * read, so an interrupted hermit-stop leaves precisely that stub behind —
+ * checking the fields, not just the JSON, is what keeps the loop broken.
+ *
  * Callers must also not mutate config on this path: no boot happened, so
  * always_on / applyAlwaysOnDoctorSchedule() must not fire — the doctor ratchet
  * only takes effect via a new session's `hermit-routines load`, so writing it
@@ -887,12 +894,17 @@ function refuseIfAnotherInstanceAlive(bootMode: 'tmux' | 'interactive'): void {
  */
 export function duplicateSessionRefusal(sessionName: string): string[] | null {
   const runtime = readRuntimeState();
-  if (runtime.kind === 'ok') return null;
+  let detail: string;
+  if (runtime.kind === 'missing') {
+    detail = 'state/runtime.json is missing';
+  } else if (runtime.kind === 'invalid') {
+    detail = `state/runtime.json is unusable: ${runtime.reason}`;
+  } else if (!pyTruthy(runtime.data.runtime_mode) || !pyTruthy(runtime.data.tmux_session)) {
+    detail = 'state/runtime.json records no live session (runtime_mode/tmux_session are empty)';
+  } else {
+    return null;
+  }
 
-  const detail =
-    runtime.kind === 'missing'
-      ? 'state/runtime.json is missing'
-      : `state/runtime.json is unusable: ${runtime.reason}`;
   return [
     `ERROR: session "${sessionName}" is running, but ${detail}.`,
     'Lifecycle state cannot be rebuilt from a session already in flight — attach,',
@@ -1144,6 +1156,11 @@ async function main(): Promise<void> {
     console.log('[hermit] Common causes: `claude` not in PATH, missing ANTHROPIC_API_KEY.');
     console.log('[hermit] To debug: tmux new-session -s hermit-debug then run `claude` manually.');
     console.log('[hermit] Falling back to interactive mode...');
+    // Same secret-hygiene reason as the spawn-failure branch above: tmux created
+    // the session, but a shell that died before reaching `rm -f` (a non-POSIX
+    // default shell, a failed `.`) leaves the 0600 env file behind — and execvp
+    // below never returns to clean it up.
+    fs.rmSync(envFile, { force: true });
     const stale = readRuntimeJson();
     stale.runtime_mode = 'interactive';
     stale.tmux_session = null;
