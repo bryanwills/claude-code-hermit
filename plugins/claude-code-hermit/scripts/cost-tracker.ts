@@ -20,6 +20,7 @@ import { evaluateBudget, pauseBoundary } from './lib/budget';
 import { sendOperatorNotice } from './lib/channel-send';
 import { BUDGET, resolveLocale, type Locale } from './lib/messages';
 import { classifySource } from './lib/trigger-source';
+import { runtimeTmpPath } from './lib/runtime';
 
 type Json = any;
 
@@ -31,7 +32,7 @@ const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const STATUS_JSON = path.join(HERMIT_DIR, 'sessions', '.status.json');
 const STATUS_JSON_TMP = path.join(HERMIT_DIR, 'sessions', '.status.json.tmp');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
-const RUNTIME_JSON_TMP = path.join(HERMIT_DIR, 'state', '.runtime.json.tmp');
+const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
 const TASK_SNAPSHOT = path.join(HERMIT_DIR, 'tasks-snapshot.md');
@@ -221,6 +222,28 @@ function sumTurnUsage(lines: string[], billedIndex: number): {
   return { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model, apiCalls, maxPromptTokens };
 }
 
+// Peak prompt size (input + cache) over the calls made since the turn's last compaction,
+// seeded with the last billed call. The max rather than the newest entry alone, because a
+// trailing entry with a degenerate/partial `usage` (cache fields absent → extractUsage
+// zeroes them) would otherwise report a near-empty context and blind both hygiene tiers.
+// Prompts grow monotonically within a segment, so this equals the newest call in the
+// normal case. Boundary checks mirror sumTurnUsage's, for a different purpose: context
+// size at a point in time, not the turn's total bill.
+function peakPromptTokensSinceCompaction(lines: string[], billedIndex: number, seed: number): number {
+  let peak = seed;
+  for (let j = billedIndex - 1; j >= 0; j--) {
+    let prev: Json;
+    try { prev = JSON.parse(lines[j]); } catch { continue; }
+    if (isCompactBoundary(prev)) break;                      // older calls describe a dead context
+    if (prev.type === 'user' && !isToolResult(prev)) break;  // turn boundary (same as sumTurnUsage)
+    const usage = extractUsage(prev);
+    if (!usage) continue;
+    const prompt = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
+    if (prompt > peak) peak = prompt;
+  }
+  return peak;
+}
+
 // Trailing `tailBytes` of a file as whole lines, dropping the partial leading line when
 // the read started mid-file. Throws on any fs error — callers already run inside a
 // try/catch that turns that into "no usable data".
@@ -229,8 +252,11 @@ function readTailLines(filePath: string, tailBytes: number): { lines: string[]; 
   const readFrom = Math.max(0, stat.size - tailBytes);
   const fd = fs.openSync(filePath, 'r');
   const buf = Buffer.alloc(Math.min(tailBytes, stat.size));
-  fs.readSync(fd, buf, 0, buf.length, readFrom);
-  fs.closeSync(fd);
+  try {
+    fs.readSync(fd, buf, 0, buf.length, readFrom);
+  } finally {
+    fs.closeSync(fd);
+  }
   const lines = buf.toString('utf-8').split('\n');
   if (readFrom > 0) lines.shift();
   return { lines, readFrom };
@@ -263,11 +289,13 @@ function readLastTurnUsage(transcriptPath: string): Json {
 
         // Found the last billed entry — sum the whole turn.
         const summed = sumTurnUsage(lines, i);
-        // Context size at the END of the turn, for the hygiene thresholds: the newest call
-        // alone, not the turn-wide max, which would still report the pre-compaction peak
-        // for a turn that compacted mid-flight. Paired with the source-side timestamp so
-        // consumers can tell when the context was observed, not when the row was written.
-        const lastCallPromptTokens = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
+        // Context size at the END of the turn, for the hygiene thresholds — not the
+        // turn-wide max, which would still report the pre-compaction peak for a turn that
+        // compacted mid-flight. Paired with the source-side timestamp so consumers can
+        // tell when the context was observed, not when the row was written.
+        const lastCallPromptTokens = peakPromptTokensSinceCompaction(
+          lines, i, usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens,
+        );
         const observedAt = typeof entry.timestamp === 'string' ? entry.timestamp : '';
 
         // Detect operator interaction for operator_turns tracking.
@@ -302,7 +330,10 @@ function readLastTurnUsage(transcriptPath: string): Json {
 // compares against it. Tail-read: the log is append-only and unbounded, so a full parse
 // on every turn is exactly the cost this codebase avoids elsewhere (see updateCostIndex).
 function lastLoggedMainRow(): Json {
-  const TAIL_BYTES = 16384;
+  // Wide enough that the subagent rows a fan-out turn appends AFTER its main row can't
+  // push that main row out of the window — a turn dispatching ~25 agents writes ~15KB of
+  // them, which would silently disable the guard on exactly the heaviest turns.
+  const TAIL_BYTES = 131072;
   try {
     const { lines } = readTailLines(COST_LOG, TAIL_BYTES);
     for (let i = lines.length - 1; i >= 0; i--) {

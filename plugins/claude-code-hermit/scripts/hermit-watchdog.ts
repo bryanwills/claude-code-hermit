@@ -39,7 +39,7 @@ import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
 import { runTelemetryExportIfDue } from './report-export';
-import { applyContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
+import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 
 type Json = any;
 
@@ -682,6 +682,10 @@ function maybePostCloseClear(config: Json): void {
     // here would change shipped behaviour. Only the stamp + cache clear are shared.
     runtime.context_cleared = true;
     writeRuntimeJson(runtime);
+    // Same machine-readable reset stamp every other reset path writes: PreCompact never
+    // fires for /clear, so without it the pre-clear cost entry stays the newest one for
+    // this session and poisonedEntrySkip cannot tell it apart from a live reading.
+    stampContextReset(HERMIT_ROOT);
     sendKeys(sessionName, '/clear');
     clearStatusCacheAt(HERMIT_ROOT);
     try { fs.rmSync(CLEAR_REQUESTED_JSON); } catch {}
@@ -762,9 +766,10 @@ function getLastCostLogEntry(sessionId: string): Json {
  * multiple of its actual context).
  */
 function promptTokens(entry: Json): number {
-  // Newest-call size when present: unlike max_prompt_tokens (the turn's peak) it stays
-  // correct for a turn that compacted mid-flight, where the peak describes the context
-  // CC already threw away.
+  // Peak since the turn's last compaction when present — the newest call in the normal
+  // case (see peakPromptTokensSinceCompaction in cost-tracker.ts). Unlike max_prompt_tokens
+  // (the turn's peak) it stays correct for a turn that compacted mid-flight, where that
+  // peak describes the context CC already threw away.
   if (typeof entry.last_call_prompt_tokens === 'number') return entry.last_call_prompt_tokens;
   if (typeof entry.max_prompt_tokens === 'number') return entry.max_prompt_tokens;
   const sum = (entry.input_tokens ?? 0) + (entry.cache_write_tokens ?? 0) + (entry.cache_read_tokens ?? 0);
