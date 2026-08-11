@@ -762,6 +762,10 @@ function getLastCostLogEntry(sessionId: string): Json {
  * multiple of its actual context).
  */
 function promptTokens(entry: Json): number {
+  // Newest-call size when present: unlike max_prompt_tokens (the turn's peak) it stays
+  // correct for a turn that compacted mid-flight, where the peak describes the context
+  // CC already threw away.
+  if (typeof entry.last_call_prompt_tokens === 'number') return entry.last_call_prompt_tokens;
   if (typeof entry.max_prompt_tokens === 'number') return entry.max_prompt_tokens;
   const sum = (entry.input_tokens ?? 0) + (entry.cache_write_tokens ?? 0) + (entry.cache_read_tokens ?? 0);
   return isEstimateOnly(entry) ? Math.round(sum / entry.api_calls) : sum;
@@ -773,6 +777,33 @@ function promptTokens(entry: Json): number {
 function isEstimateOnly(entry: Json): boolean {
   return typeof entry.max_prompt_tokens !== 'number'
     && typeof entry.api_calls === 'number' && entry.api_calls > 1;
+}
+
+// A reading above this is not a context, it is corruption — live logs have carried rows
+// citing 6.5M prompt tokens (an old estimate fallback multiplying a summed multi-call turn
+// out). Deliberately far above any real window rather than tracking model context sizes:
+// it exists to reject garbage, not to encode a model contract.
+const MAX_PLAUSIBLE_PROMPT_TOKENS = 2_000_000;
+
+/**
+ * Why this cost-log entry must not drive a hygiene decision, or null when it may.
+ *
+ * Both tiers act on "the last cost entry for this session", which is only a proxy for
+ * current context size. Two ways that proxy lies: the entry was observed before the
+ * context was reset (it describes a context that no longer exists — measured live, where
+ * a re-billed pre-compaction turn drove a compaction of a context 47k UNDER the
+ * threshold), or the number itself is impossible. Both skip rather than guess: a real
+ * turn produces a fresh entry within one wake.
+ */
+function poisonedEntrySkip(entry: Json, runtime: Json): string | null {
+  // observed_at is the source-side observation; the row's own timestamp is ingestion time,
+  // which is fresh even on an entry describing an old context. Legacy rows have only the
+  // latter — better than nothing, and they age out within a session.
+  const observedAt: string = entry.observed_at ?? entry.timestamp ?? '';
+  const resetAt: string = runtime.last_context_reset_at ?? '';
+  if (observedAt && resetAt && observedAt < resetAt) return 'stale-entry';
+  if (promptTokens(entry) > MAX_PLAUSIBLE_PROMPT_TOKENS) return 'aberrant-reading';
+  return null;
 }
 
 /** Active arc ID, falling back to the harness session id cost-tracker persists to
@@ -835,6 +866,9 @@ function maybeContextClear(config: Json): void {
 
   const lastEntry = getLastCostLogEntry(sessionId);
   if (!lastEntry) { stampHygieneEval('clear', 'skip:no-cost-entry'); return; }
+
+  const poisoned = poisonedEntrySkip(lastEntry, runtime);
+  if (poisoned) { stampHygieneEval('clear', `skip:${poisoned}`, promptTokens(lastEntry)); return; }
 
   // Never fire the DESTRUCTIVE /clear on an estimated context size — the per-call mean
   // could sit either side of the 700k threshold. The non-destructive compact tier keeps
@@ -966,6 +1000,9 @@ function maybeContextCompact(config: Json): void {
 
   const lastEntry = getLastCostLogEntry(sessionId);
   if (!lastEntry) { stampHygieneEval('compact', 'skip:no-cost-entry'); return; }
+
+  const poisoned = poisonedEntrySkip(lastEntry, runtime);
+  if (poisoned) { stampHygieneEval('compact', `skip:${poisoned}`, promptTokens(lastEntry)); return; }
 
   const prompt = promptTokens(lastEntry);
 

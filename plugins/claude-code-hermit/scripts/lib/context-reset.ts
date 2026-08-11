@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { flushResetBreadcrumb } from './progress-log';
-import { writeRuntimeJson } from './runtime';
+import { writeRuntimeJson, readRuntimeJson } from './runtime';
 
 type Json = any;
 
@@ -39,6 +39,31 @@ export function clearStatusCache(hermitRoot: string): void {
 }
 
 /**
+ * Record WHEN the context was last reset, machine-readably.
+ *
+ * The breadcrumb below is prose for the next session to read; this stamp is for the
+ * watchdog, which needs to know that a cost-log entry observed before it describes a
+ * context that no longer exists. Every reset path stamps it — /clear through
+ * applyContextReset, and manual or native-auto /compact through precompact-stamp.ts —
+ * because the watchdog's own last_compacted_at only ever sees the resets it caused.
+ *
+ * Fresh read-modify-write against an absolute path: hooks don't share a cwd, and a
+ * cached runtime object would clobber fields another process wrote meanwhile. Fail-open
+ * and never fabricates a partial runtime.json (session_state/session_id must survive).
+ */
+export function stampContextReset(hermitRoot: string): void {
+  const stateDir = path.join(hermitRoot, 'state');
+  const runtime = readRuntimeJson(stateDir);
+  if (!runtime) return; // missing/unreadable/malformed — never fabricate a partial record
+  runtime.last_context_reset_at = new Date().toISOString();
+  try {
+    const tmpPath = path.join(stateDir, '.runtime.json.tmp');
+    fs.writeFileSync(tmpPath, JSON.stringify(runtime, null, 2) + '\n', 'utf-8');
+    fs.renameSync(tmpPath, path.join(stateDir, 'runtime.json'));
+  } catch { /* fail-open */ }
+}
+
+/**
  * Apply the hermit-owned bookkeeping that must accompany a context reset.
  *
  * Call this immediately BEFORE the destructive keystroke: the breadcrumb is the only
@@ -56,6 +81,9 @@ export function applyContextReset(
     runtime.context_cleared = true;
     writeRuntimeJson(runtime);
   } catch { /* fail-open */ }
+
+  // After the write above, so the re-read inside picks it up rather than clobbering it.
+  stampContextReset(hermitRoot);
 
   try {
     flushResetBreadcrumb(path.join(hermitRoot, 'sessions', 'SHELL.md'), {

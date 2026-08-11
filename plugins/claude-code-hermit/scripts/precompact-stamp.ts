@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
 import { flushResetBreadcrumb } from './lib/progress-log';
+import { stampContextReset } from './lib/context-reset';
 import { currentHHMMOrUTC } from './lib/time';
 
 type Json = any;
@@ -42,6 +43,10 @@ function main(raw: string): void {
   const shellPath = path.join(agentDir, 'sessions', 'SHELL.md');
   const hhmm = currentHHMMOrUTC(readConfigTimezone(agentDir));
   flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger, hhmm });
+  // The watchdog's own stamps only cover compactions it initiated; this is the only
+  // signal for an operator-typed /compact or a native auto-compaction, both of which
+  // leave the last cost-log entry describing a context that no longer exists.
+  stampContextReset(agentDir);
 }
 
 try {
