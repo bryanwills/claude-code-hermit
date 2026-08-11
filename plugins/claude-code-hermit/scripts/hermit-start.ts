@@ -128,7 +128,7 @@ const DEFAULT_CONFIG: Json = {
   context_hygiene: {
     compact: {
       enabled: true,
-      min_context_tokens: 150000,
+      min_context_tokens: 100000,
       min_interval: '4h',
     },
   },

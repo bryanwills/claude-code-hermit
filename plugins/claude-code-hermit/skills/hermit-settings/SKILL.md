@@ -172,7 +172,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   Context hygiene compact (config.json context_hygiene.compact)
 
     enabled                true
-    min_context_tokens     150000
+    min_context_tokens     100000
     min_interval           4h
   ```
 - Ask: "Enable watchdog? (yes / no) [current: <value>]"
@@ -190,7 +190,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 - **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above, same as `context_clear_tokens`): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```
   Context hygiene compact sub-fields (press Enter to keep current value):
-    min_context_tokens     — routine-hygiene /compact when prompt tokens exceed this (e.g. 150000) [current]
+    min_context_tokens     — routine-hygiene /compact when estimated compactible conversation exceeds this (e.g. 100000) [current]
     min_interval           — minimum time between compacts, avoids summary-of-summary loss (e.g. 4h) [current]
   ```
   Then ask each field in sequence. Write each changed field through `settings-edit ... set context_hygiene.compact.<field> <value>` (`context_hygiene.compact.enabled`, `context_hygiene.compact.min_context_tokens`, `context_hygiene.compact.min_interval`). No restart/reconcile step needed — the watchdog reads config.json fresh on every scheduler tick.

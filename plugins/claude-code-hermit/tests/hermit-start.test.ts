@@ -512,6 +512,15 @@ describe('config contract: template and DEFAULT_CONFIG must mirror', () => {
     expect(template.routines.find((r: any) => r.id === 'doctor')?.skill).toBe(expected);
     expect(DEFAULT_CONFIG.routines.find((r: any) => r.id === 'doctor')?.skill).toBe(expected);
   });
+
+  test('compact.min_context_tokens value parity: template and DEFAULT_CONFIG carry the same default', () => {
+    // The key/type mirror above never compares values, so the compact threshold
+    // (mirrored in template + DEFAULT_CONFIG + docs) could silently drift if only
+    // one site is changed — this pins the two executable sites to each other and
+    // to the current 100k compactible-conversation default.
+    expect(template.context_hygiene.compact.min_context_tokens).toBe(100000);
+    expect(DEFAULT_CONFIG.context_hygiene.compact.min_context_tokens).toBe(100000);
+  });
 });
 
 // ============================================================

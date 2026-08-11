@@ -17,6 +17,8 @@ import { readChannelToken } from './lib/channel-token';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
+import { promptTokensOf, compactibleTokens } from './lib/context-signal';
+import { readContextSurface } from './lib/context-surface';
 
 type Json = any;
 
@@ -811,11 +813,13 @@ function checkWatchdog() {
     let consecutive = 0;
     let lastRun: string | null = null;
     let lastHygieneEval: Json = null;
+    let hygieneCounts: Json = null;
     try {
       const ws = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
       consecutive = ws.consecutive_stale || 0;
       lastRun = typeof ws.last_run === 'string' ? ws.last_run : null;
       lastHygieneEval = ws.last_hygiene_eval ?? null;
+      hygieneCounts = ws.hygiene_eval_counts ?? null;
     } catch {}
 
     // Liveness: the watchdog stamps last_run on every invocation, before any gate. A
@@ -903,6 +907,30 @@ function checkWatchdog() {
       const ageSuffix = evalMs ? `, ${Math.round((Date.now() - evalMs) / 60000)}m ago` : '';
       parts.push(`last hygiene eval: ${mostRecentHygiene.mech}/${mostRecentHygiene.rec.outcome}${ageSuffix}`);
     }
+    // Durable first-blocker counters (each evaluation records the first guard that
+    // returned, not every binding constraint) — top outcomes per mechanism so the
+    // skip mix is readable from one line without a time series.
+    if (hygieneCounts && typeof hygieneCounts === 'object') {
+      const since = typeof hygieneCounts.since === 'string' ? hygieneCounts.since.slice(0, 10) : '?';
+      for (const mech of ['clear', 'compact']) {
+        const counts = hygieneCounts[mech];
+        if (!counts || typeof counts !== 'object') continue;
+        const top = Object.entries(counts)
+          .filter(([, n]) => typeof n === 'number')
+          .sort((a: Json, b: Json) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([k, n]) => `${k.replace(/^skip:/, '')} ${n}`);
+        if (top.length) parts.push(`${mech} first-blockers since ${since}: ${top.join(', ')}`);
+      }
+    }
+    // Recorded fixed-surface upper bound — informational only (the derivation
+    // carries wake contamination, so growth between readings is not by itself a
+    // surface-growth signal; no warn threshold here).
+    const surfaceRec = readContextSurface(hermitDir);
+    if (surfaceRec) {
+      const prevNote = surfaceRec.prev ? `, prev ${kStr(surfaceRec.prev.surface_upper_bound_tokens)}` : '';
+      parts.push(`surface upper bound ${kStr(surfaceRec.surface_upper_bound_tokens)} (boundary ${String(surfaceRec.boundary_at).slice(0, 10)}${prevNote})`);
+    }
     const label = wCfg.enabled
       ? `enabled, last tick ${Math.round((Date.now() - lastRunMs) / 60000)}m ago`
       : 'restart tier disabled, hygiene tier active';
@@ -924,27 +952,13 @@ function checkWatchdog() {
 // the *symptom* independent of cause — this check does, so a future hygiene-disabling bug
 // doesn't go unnoticed for days again.
 //
-// Mirrors hermit-watchdog.ts's compact-tier hygiene primitives (resolveHygieneSessionId,
-// promptTokens, isEstimateOnly) rather than importing them: that file resolves state paths
-// from a CWD-relative STATE_DIR, while doctor-check.ts is deliberately invocable with an
-// explicit hermit dir different from CWD (see the costLog comment above) — importing would
-// silently read the wrong session on that path. The logic is small enough to duplicate safely.
-
-/** True when a cost-log entry lacks the real per-call peak (max_prompt_tokens) and spans
- *  more than one API call — its only token count is a summed billing total across calls, so
- *  promptTokensOf averages it back down to a per-call figure instead of using the raw sum.
- *  Mirrors hermit-watchdog.ts's isEstimateOnly (the compact tier averages such entries; only
- *  the destructive /clear tier refuses them). */
-function isEstimateOnlyEntry(entry: Json): boolean {
-  return typeof entry.max_prompt_tokens !== 'number'
-    && typeof entry.api_calls === 'number' && entry.api_calls > 1;
-}
-
-function promptTokensOf(entry: Json): number {
-  if (typeof entry.max_prompt_tokens === 'number') return entry.max_prompt_tokens;
-  const sum = (entry.input_tokens ?? 0) + (entry.cache_write_tokens ?? 0) + (entry.cache_read_tokens ?? 0);
-  return isEstimateOnlyEntry(entry) ? Math.round(sum / (entry.api_calls || 1)) : sum;
-}
+// Token-signal selection (promptTokensOf, isEstimateOnlyEntry) now comes from
+// lib/context-signal.ts, shared with hermit-watchdog.ts — the previous local
+// mirror had drifted to prefer the turn-wide max_prompt_tokens, which on a turn
+// that compacted mid-flight describes a context CC already threw away. Only the
+// path-dependent helpers (session id resolution, cost-log read) stay local:
+// doctor-check.ts is deliberately invocable with an explicit hermit dir
+// different from CWD (see the costLog comment above).
 
 /** Session id whose context size to judge: runtime.json's session_id, falling back to the
  *  harness id in sessions/.status.json for idle-phase wakes (heartbeat/routines/channel
@@ -1003,13 +1017,16 @@ function checkContextAge() {
     }
 
     // This is a compact-tier tripwire, so it judges the same token count the compact
-    // tier acts on: promptTokensOf averages an estimate-only entry (as maybeContextCompact
-    // does) rather than skipping it. Only the destructive /clear tier refuses estimate-only
-    // entries — mirroring that skip here would blind the check to a bloated session whose
-    // latest turn happens to be a multi-call estimate, the exact case compact still compacts.
+    // tier acts on: estimated compactible conversation (total prompt minus the recorded
+    // fixed-surface upper bound, or the 50k cold-start assumption), with estimate-only
+    // entries averaged (as maybeContextCompact does) rather than skipped. Only the
+    // destructive /clear tier refuses estimate-only entries — mirroring that skip here
+    // would blind the check to a bloated session whose latest turn happens to be a
+    // multi-call estimate, the exact case compact still compacts.
     const prompt = promptTokensOf(lastEntry);
-    if (prompt <= threshold) {
-      return { id: 'context-age', status: 'ok', detail: `context ${kStr(prompt)} tokens, at/under ${kStr(threshold)} threshold` };
+    const compactible = compactibleTokens(lastEntry, readContextSurface(hermitDir)?.surface_upper_bound_tokens ?? null);
+    if (compactible <= threshold) {
+      return { id: 'context-age', status: 'ok', detail: `context ${kStr(prompt)} tokens (~${kStr(compactible)} compactible), at/under ${kStr(threshold)} threshold` };
     }
 
     const eventsPath = path.join(stateDir, 'watchdog-events.jsonl');
@@ -1034,11 +1051,11 @@ function checkContextAge() {
       return {
         id: 'context-age',
         status: 'warn',
-        detail: `context ${kStr(prompt)} tokens over ${kStr(threshold)} threshold, ${ageNote} — context hygiene may be disabled or stuck; see the watchdog check`,
+        detail: `context ${kStr(prompt)} tokens (~${kStr(compactible)} compactible) over ${kStr(threshold)} threshold, ${ageNote} — context hygiene may be disabled or stuck; see the watchdog check`,
       };
     }
 
-    return { id: 'context-age', status: 'ok', detail: `context ${kStr(prompt)} tokens over threshold, hygiene fired ${ageHours.toFixed(1)}h ago` };
+    return { id: 'context-age', status: 'ok', detail: `context ${kStr(prompt)} tokens (~${kStr(compactible)} compactible) over threshold, hygiene fired ${ageHours.toFixed(1)}h ago` };
   } catch (e: any) {
     return { id: 'context-age', status: 'fail', detail: `check failed: ${e.message}` };
   }
