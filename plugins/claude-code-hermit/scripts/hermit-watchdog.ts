@@ -38,7 +38,7 @@ import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
-import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens } from './lib/context-signal';
+import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
@@ -759,14 +759,9 @@ function getLastCostLogEntry(sessionId: string): Json {
   return lastEntry;
 }
 
-// promptTokens (context size from a cost-log entry) and isEstimateOnly now live in
-// lib/context-signal.ts, shared with doctor-check.ts so the two can't drift again.
-
-// A reading above this is not a context, it is corruption — live logs have carried rows
-// citing 6.5M prompt tokens (an old estimate fallback multiplying a summed multi-call turn
-// out). Deliberately far above any real window rather than tracking model context sizes:
-// it exists to reject garbage, not to encode a model contract.
-const MAX_PLAUSIBLE_PROMPT_TOKENS = 2_000_000;
+// promptTokens (context size from a cost-log entry), isEstimateOnly and
+// MAX_PLAUSIBLE_PROMPT_TOKENS now live in lib/context-signal.ts, shared with
+// doctor-check.ts and cost-tracker.ts so they can't drift again.
 
 /**
  * Why this cost-log entry must not drive a hygiene decision, or null when it may.

@@ -150,11 +150,28 @@ describe('cost-tracker surface derivation', () => {
     };
     writeContextSurface(hermitDir, good);
     await runCostTracker(dir, [
-      compactBoundary('2026-08-11T10:05:00Z', 200_000), // postTokens > first call → surface ≤ 0
+      compactBoundary('2026-08-11T10:05:00Z', 200_000), // postTokens > every call → surface ≤ 0
       triggerPrompt('wake'),
       assistantEntry('2026-08-11T10:06:00Z', 95_000),
     ]);
     expect(readContextSurface(hermitDir)).toEqual(good);
+  }), 20000);
+
+  test('a degenerate earliest call falls through to the next plausible one', withHermitDir(async (dir, hermitDir) => {
+    // A partial `usage` (cache fields absent → extractUsage zeroes them) landing on the
+    // earliest post-boundary call must not abandon the boundary: nothing would ever be
+    // written for it, so every later Stop would re-select the same call and the hermit
+    // would sit on the cold-start assumption until the next compaction.
+    await runCostTracker(dir, [
+      compactBoundary('2026-08-11T10:05:00Z', 30_000),
+      triggerPrompt('wake'),
+      assistantEntry('2026-08-11T10:06:00Z', 0, 0, 2), // degenerate: 2 − 30_000 < 0
+      assistantEntry('2026-08-11T10:07:00Z', 95_000),  // first plausible: 95_002 − 30_000
+    ]);
+    const rec = readContextSurface(hermitDir);
+    expect(rec).not.toBeNull();
+    expect(rec!.surface_upper_bound_tokens).toBe(65_002);
+    expect(rec!.observed_at).toBe('2026-08-11T10:07:00Z');
   }), 20000);
 
   test('no boundary in the tail writes nothing', withHermitDir(async (dir, hermitDir) => {

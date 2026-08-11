@@ -43,6 +43,14 @@ describe('compactibleTokens', () => {
     expect(compactibleTokens({ last_call_prompt_tokens: 160_000 }, null)).toBe(110_000);
   });
 
+  test('clamps at zero when the prompt is smaller than the recorded surface', () => {
+    // Normal right after a /clear or on a fresh session. A raw negative would reach the
+    // doctor digest and watchdog telemetry as apparent corruption; both gates compare
+    // with < / <=, so clamping cannot change a decision.
+    expect(compactibleTokens({ last_call_prompt_tokens: 40_000 }, 65_000)).toBe(0);
+    expect(compactibleTokens({ last_call_prompt_tokens: 1_000 }, null)).toBe(0);
+  });
+
   test('cold-start parity: old 150k absolute default == 100k threshold + assumed surface', () => {
     // A fresh hermit (no surface recorded) must cross the new 100k compactible
     // threshold at the same absolute size the old 150k total default fired at.

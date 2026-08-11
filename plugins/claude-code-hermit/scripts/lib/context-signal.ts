@@ -14,6 +14,14 @@ type Json = any;
  *  assumed 50k ≈ the old 150k total-prompt default. */
 export const ASSUMED_SURFACE_TOKENS = 50_000;
 
+/** A reading above this is not a context, it is corruption — live logs have carried rows
+ *  citing 6.5M prompt tokens (an old estimate fallback multiplying a summed multi-call turn
+ *  out). Deliberately far above any real window rather than tracking model context sizes:
+ *  it exists to reject garbage, not to encode a model contract. Shared by the watchdog's
+ *  poisonedEntrySkip and cost-tracker's surface derivation — a derived surface above a
+ *  plausible whole prompt is corruption by the same argument. */
+export const MAX_PLAUSIBLE_PROMPT_TOKENS = 2_000_000;
+
 /**
  * Prompt-side token count for a cost-log entry — approximates real context size,
  * not the per-turn billing total. Peak since the turn's last compaction when
@@ -45,8 +53,12 @@ export function isEstimateOnly(entry: Json): boolean {
  * or minus ASSUMED_SURFACE_TOKENS when none is recorded. Because the recorded
  * value is an upper bound (it carries post-boundary wake messages), the result
  * is a lower bound on compactible content — the compact gate therefore fires
- * later than exact, never earlier.
+ * later than exact, never earlier. Clamped at zero: a prompt smaller than the
+ * recorded surface is the normal state right after a /clear or on a fresh
+ * session, and the raw negative would reach operator-facing digests and
+ * watchdog telemetry as apparent corruption. Both consumers' comparisons are
+ * unaffected by the clamp.
  */
 export function compactibleTokens(entry: Json, surfaceUpperBound: number | null): number {
-  return promptTokensOf(entry) - (surfaceUpperBound ?? ASSUMED_SURFACE_TOKENS);
+  return Math.max(0, promptTokensOf(entry) - (surfaceUpperBound ?? ASSUMED_SURFACE_TOKENS));
 }

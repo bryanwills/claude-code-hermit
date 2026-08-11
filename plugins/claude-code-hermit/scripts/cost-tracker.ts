@@ -22,6 +22,7 @@ import { BUDGET, resolveLocale, type Locale } from './lib/messages';
 import { classifySource } from './lib/trigger-source';
 import { runtimeTmpPath } from './lib/runtime';
 import { readContextSurface, writeContextSurface } from './lib/context-surface';
+import { MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
 
 type Json = any;
 
@@ -368,7 +369,14 @@ function maybeDeriveSurface(lines: string[]): void {
       const usage = extractUsage(e);
       if (!usage) continue;
       const surface = (usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens) - postTokens;
-      if (surface <= 0 || surface > 2_000_000) return; // implausible — never guess
+      // Implausible — never guess from this call, but keep scanning rather than
+      // abandoning the boundary. A degenerate/partial `usage` (the shape
+      // peakPromptTokensSinceCompaction defends against) on the earliest post-boundary
+      // call would otherwise fail this boundary for good: nothing is written, so every
+      // later Stop re-selects the same call until the boundary leaves the tail window.
+      // A later call only inflates the result, and the record is an upper bound — the
+      // compact gate still errs toward firing later, never earlier.
+      if (surface <= 0 || surface > MAX_PLAUSIBLE_PROMPT_TOKENS) continue;
       writeContextSurface(HERMIT_DIR, {
         surface_upper_bound_tokens: surface,
         post_tokens: postTokens,
