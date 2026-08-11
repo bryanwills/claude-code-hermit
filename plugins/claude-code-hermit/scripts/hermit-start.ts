@@ -15,7 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
-import { writeRuntimeJson, readRuntimeJson, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
+import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
 import { clearStatusCache } from './lib/context-reset';
@@ -865,6 +865,57 @@ function refuseIfAnotherInstanceAlive(bootMode: 'tmux' | 'interactive'): void {
   }
 }
 
+/**
+ * Decide what to do when tmux reports the session already exists: refusal lines,
+ * or null to report "already running" and exit 0. Pure of side effects so it's
+ * unit testable, like shouldRefuseBoot above.
+ *
+ * A duplicate means the session predates this invocation, so this process never
+ * observed its boot and cannot assume lifecycle state was written. A plain
+ * double-run has a healthy runtime.json and is waved through; a hermit whose
+ * state was lost underneath it (project dir recreated, state cleaned, a botched
+ * migration) is refused — 'invalid' as hard as 'missing', since a corrupt record
+ * may hold the only copy of state (see RuntimeRead in lib/runtime.ts).
+ * Deliberately rebuilds nothing either way: runtime.json is the declared single
+ * source of truth (skills/session-start/SKILL.md), so a synthesized record would
+ * defeat the recovery branches that read it.
+ *
+ * Parseable is not the same as usable: a stub record (no runtime_mode, or no
+ * tmux_session while a session of that name is demonstrably alive) dead-ends
+ * bin/hermit-attach exactly like a missing file does ("Unknown runtime mode" /
+ * "No tmux session recorded"). updateRuntimeField() seeds `{}` on a missing
+ * read, so an interrupted hermit-stop leaves precisely that stub behind —
+ * checking the fields, not just the JSON, is what keeps the loop broken.
+ *
+ * Callers must also not mutate config on this path: no boot happened, so
+ * always_on / applyAlwaysOnDoctorSchedule() must not fire — the doctor ratchet
+ * only takes effect via a new session's `hermit-routines load`, so writing it
+ * here would desync config from the scheduler actually running.
+ */
+export function duplicateSessionRefusal(sessionName: string): string[] | null {
+  const runtime = readRuntimeState();
+  let detail: string;
+  if (runtime.kind === 'missing') {
+    detail = 'state/runtime.json is missing';
+  } else if (runtime.kind === 'invalid') {
+    detail = `state/runtime.json is unusable: ${runtime.reason}`;
+  } else if (!pyTruthy(runtime.data.runtime_mode) || !pyTruthy(runtime.data.tmux_session)) {
+    detail = 'state/runtime.json records no live session (runtime_mode/tmux_session are empty)';
+  } else {
+    return null;
+  }
+
+  return [
+    `ERROR: session "${sessionName}" is running, but ${detail}.`,
+    'Lifecycle state cannot be rebuilt from a session already in flight — attach,',
+    'the watchdog and session recovery stay degraded until the session restarts.',
+    'Recover:',
+    '  .claude-code-hermit/bin/hermit-stop',
+    '  .claude-code-hermit/bin/hermit-start',
+    `To inspect it first: tmux attach -t ${sessionName}`,
+  ];
+}
+
 async function main(): Promise<void> {
   const noTmuxFlag = process.argv.includes('--no-tmux');
 
@@ -1027,8 +1078,20 @@ async function main(): Promise<void> {
     encoding: 'utf-8',
   });
   if (result.status !== 0) {
+    // The env file's only cleanup is the `rm -f` inside shellCmd, which runs in
+    // the session tmux was asked to create. No session, no cleanup — so a failed
+    // launch would strand a 0600 file holding the forwarded API key / setup token
+    // on a predictable path in a world-writable tmpdir. Remove it on every
+    // failure path before deciding what to report.
+    fs.rmSync(envFile, { force: true });
+
     const stderrMsg = result.stderr ? result.stderr.trim() : '';
     if (stderrMsg.includes('duplicate session')) {
+      const refusal = duplicateSessionRefusal(sessionName);
+      if (refusal) {
+        for (const line of refusal) console.log(`[hermit] ${line}`);
+        process.exit(1);
+      }
       console.log(`[hermit] Session "${sessionName}" already running (always-on).`);
       console.log(`[hermit] Attach: .claude-code-hermit/bin/hermit-attach  (or: tmux attach -t ${sessionName})`);
       console.log('[hermit] Send tasks via channel, or run hermit-stop to shut down.');
@@ -1093,6 +1156,11 @@ async function main(): Promise<void> {
     console.log('[hermit] Common causes: `claude` not in PATH, missing ANTHROPIC_API_KEY.');
     console.log('[hermit] To debug: tmux new-session -s hermit-debug then run `claude` manually.');
     console.log('[hermit] Falling back to interactive mode...');
+    // Same secret-hygiene reason as the spawn-failure branch above: tmux created
+    // the session, but a shell that died before reaching `rm -f` (a non-POSIX
+    // default shell, a failed `.`) leaves the 0600 env file behind — and execvp
+    // below never returns to clean it up.
+    fs.rmSync(envFile, { force: true });
     const stale = readRuntimeJson();
     stale.runtime_mode = 'interactive';
     stale.tmux_session = null;
@@ -1135,6 +1203,7 @@ export {
   isContainer,
   writeRuntimeJson,
   readRuntimeJson,
+  readRuntimeState,
   checkStaleRuntime,
   clearShutdownStampsOnBoot,
   clearStatusCacheOnBoot,

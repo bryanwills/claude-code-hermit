@@ -12,6 +12,8 @@
 - The dashboard drops chrome that carried no information: the "Autonomous agent status" subtitle, the page footer, and the weekly card's empty state (the card is now omitted until there is a review).
 
 ### Fixed
+- `hermit-start` exits 1 with restart guidance when the session is already running but `state/runtime.json` is missing, unreadable, or holds no lifecycle record (no `runtime_mode`/`tmux_session` — what an interrupted `hermit-stop` leaves behind), instead of reporting success and leaving `hermit-attach` stuck telling you to run start again. A healthy double-boot still exits 0.
+- A failed `tmux new-session` no longer strands its temporary env file (mode 0600, holding the forwarded API key and setup token) in `/tmp`: cleanup previously only ran inside the session that failed to start.
 - Artifact pages paint their own `body` background instead of borrowing the viewer's, which left everything outside the centred column showing the host theme's ground.
 - An explicit viewer theme no longer leaves status chips resolved from the other theme — the two `[data-theme]` blocks had redefined 6 of the sheet's 19 tokens.
 - Checklist alerts render the text stored alongside them instead of the raw dedup key. `alertMessage()` read only `message`, which the heartbeat writer never sets.

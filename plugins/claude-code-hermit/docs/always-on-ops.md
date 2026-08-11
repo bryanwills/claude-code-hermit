@@ -148,7 +148,7 @@ When idle and `idle_behavior` is `"discover"` (set via `/hermit-settings idle`),
 - **Crash during work:** SHELL.md persists. On restart, offers to resume.
 - **Crash during idle:** SHELL.md persists as `idle`. Asks what to work on next.
 - **Crash during waiting:** SHELL.md persists as `waiting`. On restart, re-enters waiting state and checks for operator response.
-- **hermit-start when already running:** Prints guidance, exits.
+- **hermit-start when already running:** Checks `state/runtime.json` before reporting health. Valid → prints attach guidance and exits 0. Missing, unreadable, or carrying no lifecycle record (`runtime_mode`/`tmux_session` empty) → exits 1 and tells you to restart the session: lifecycle state can't be rebuilt for a session already in flight, and inventing it would erase the `transition` / `last_error` markers session-start recovery reads. Until you restart, attach and the watchdog stay degraded.
 - **Docker SIGTERM:** The entrypoint traps SIGTERM and attempts a graceful session close (30s timeout) before the container exits. Sessions are archived even on raw `docker compose down`.
 
 ---
