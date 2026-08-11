@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { flushResetBreadcrumb } from './progress-log';
-import { writeRuntimeJson } from './runtime';
+import { writeRuntimeJson, readRuntimeJson, runtimeTmpPath } from './runtime';
 
 type Json = any;
 
@@ -39,6 +39,35 @@ export function clearStatusCache(hermitRoot: string): void {
 }
 
 /**
+ * Record WHEN the context was last reset, machine-readably.
+ *
+ * The breadcrumb below is prose for the next session to read; this stamp is for the
+ * watchdog, which needs to know that a cost-log entry observed before it describes a
+ * context that no longer exists. Every reset path records it — manual or native-auto
+ * /compact through this function (precompact-stamp.ts), /clear through
+ * applyContextReset's own write — because the watchdog's own last_compacted_at only
+ * ever sees the resets it caused.
+ *
+ * Fresh read-modify-write against an absolute path: hooks don't share a cwd, and a
+ * cached runtime object would clobber fields another process wrote meanwhile. Fail-open
+ * and never fabricates a partial runtime.json (session_state/session_id must survive).
+ */
+export function stampContextReset(hermitRoot: string): void {
+  const stateDir = path.join(hermitRoot, 'state');
+  const runtime = readRuntimeJson(stateDir);
+  if (!runtime) return; // missing/unreadable/malformed — never fabricate a partial record
+  runtime.last_context_reset_at = new Date().toISOString();
+  try {
+    // Not writeRuntimeJson: that stamps updated_at, and this runs from the PreCompact
+    // hook, where refreshing the liveness marker would tell checkStaleRuntime the
+    // runtime is fresh on the strength of a compaction alone.
+    const tmpPath = runtimeTmpPath(stateDir);
+    fs.writeFileSync(tmpPath, JSON.stringify(runtime, null, 2) + '\n', 'utf-8');
+    fs.renameSync(tmpPath, path.join(stateDir, 'runtime.json'));
+  } catch { /* fail-open */ }
+}
+
+/**
  * Apply the hermit-owned bookkeeping that must accompany a context reset.
  *
  * Call this immediately BEFORE the destructive keystroke: the breadcrumb is the only
@@ -52,9 +81,14 @@ export function applyContextReset(
   runtime: Json,
   opts: { kind: 'cleared' | 'compacted'; trigger: string; hhmm: string; tokens?: number },
 ): void {
+  // One anchored write, not writeRuntimeJson() + stampContextReset(): those disagreed on
+  // path mode. writeRuntimeJson() resolves .claude-code-hermit/state RELATIVE TO THE CWD
+  // and mkdirs it, so a caller running anywhere but the project root wrote context_cleared
+  // into a freshly created decoy state dir while the timestamp landed in the real one.
   try {
     runtime.context_cleared = true;
-    writeRuntimeJson(runtime);
+    runtime.last_context_reset_at = new Date().toISOString();
+    writeRuntimeJson(runtime, path.join(hermitRoot, 'state'));
   } catch { /* fail-open */ }
 
   try {

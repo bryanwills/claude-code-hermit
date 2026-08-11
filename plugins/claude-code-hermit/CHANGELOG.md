@@ -12,11 +12,16 @@
 - The dashboard drops chrome that carried no information: the "Autonomous agent status" subtitle, the page footer, and the weekly card's empty state (the card is now omitted until there is a review).
 
 ### Fixed
+- cost-tracker no longer re-bills an earlier turn when the Stop hook reads the transcript mid-flush: it bills nothing when the tail ends in a half-written record, or when a compaction boundary sits above the newest usage, and refuses a turn no newer than the last logged one. Measured live, this had billed a pre-compaction turn a second time hours later and fed its dead context size to the hygiene tiers.
+- Cost rows carry `observed_at` (when the context was seen, not when the row was written) and `last_call_prompt_tokens` (the peak over the calls made since the turn's last compaction, correct for a turn that compacted mid-flight, where `max_prompt_tokens` still reports the discarded peak).
+- The hygiene tiers skip a cost entry observed before the last context reset (`skip:stale-entry`) or citing an impossible size above 2M tokens (`skip:aberrant-reading`) instead of compacting or clearing on it, and every reset path — `/clear`, operator `/compact`, native auto-compaction — now stamps `last_context_reset_at` in `state/runtime.json`.
 - `hermit-start` exits 1 with restart guidance when the session is already running but `state/runtime.json` is missing, unreadable, or holds no lifecycle record (no `runtime_mode`/`tmux_session` — what an interrupted `hermit-stop` leaves behind), instead of reporting success and leaving `hermit-attach` stuck telling you to run start again. A healthy double-boot still exits 0.
 - A failed `tmux new-session` no longer strands its temporary env file (mode 0600, holding the forwarded API key and setup token) in `/tmp`: cleanup previously only ran inside the session that failed to start.
 - Artifact pages paint their own `body` background instead of borrowing the viewer's, which left everything outside the centred column showing the host theme's ground.
 - An explicit viewer theme no longer leaves status chips resolved from the other theme — the two `[data-theme]` blocks had redefined 6 of the sheet's 19 tokens.
 - Checklist alerts render the text stored alongside them instead of the raw dedup key. `alertMessage()` read only `message`, which the heartbeat writer never sets.
+- `state/runtime.json` is written through a per-process temp file. The watchdog, the Stop hook and the PreCompact hook shared one `.runtime.json.tmp`, so two of them could hold it open with `O_TRUNC` at once and publish a zero-length `runtime.json` — which `hermit-start` reads as an unusable lifecycle record and refuses the boot on.
+- `applyContextReset` records `context_cleared` and `last_context_reset_at` in a single write anchored to the hermit root. The flag was written CWD-relative while the timestamp was absolute, so a caller running anywhere but the project root created a decoy `.claude-code-hermit/state` and split the two fields across separate files.
 
 ### Upgrade Instructions
 

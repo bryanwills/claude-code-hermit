@@ -11,7 +11,7 @@ import path from 'node:path';
 import { calculateCost, PRICING } from './lib/pricing';
 import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
-import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
+import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
@@ -20,6 +20,7 @@ import { evaluateBudget, pauseBoundary } from './lib/budget';
 import { sendOperatorNotice } from './lib/channel-send';
 import { BUDGET, resolveLocale, type Locale } from './lib/messages';
 import { classifySource } from './lib/trigger-source';
+import { runtimeTmpPath } from './lib/runtime';
 
 type Json = any;
 
@@ -31,7 +32,7 @@ const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const STATUS_JSON = path.join(HERMIT_DIR, 'sessions', '.status.json');
 const STATUS_JSON_TMP = path.join(HERMIT_DIR, 'sessions', '.status.json.tmp');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
-const RUNTIME_JSON_TMP = path.join(HERMIT_DIR, 'state', '.runtime.json.tmp');
+const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
 const TASK_SNAPSHOT = path.join(HERMIT_DIR, 'tasks-snapshot.md');
@@ -221,27 +222,81 @@ function sumTurnUsage(lines: string[], billedIndex: number): {
   return { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model, apiCalls, maxPromptTokens };
 }
 
+// Peak prompt size (input + cache) over the calls made since the turn's last compaction,
+// seeded with the last billed call. The max rather than the newest entry alone, because a
+// trailing entry with a degenerate/partial `usage` (cache fields absent → extractUsage
+// zeroes them) would otherwise report a near-empty context and blind both hygiene tiers.
+// Prompts grow monotonically within a segment, so this equals the newest call in the
+// normal case. Boundary checks mirror sumTurnUsage's, for a different purpose: context
+// size at a point in time, not the turn's total bill.
+function peakPromptTokensSinceCompaction(lines: string[], billedIndex: number, seed: number): number {
+  let peak = seed;
+  for (let j = billedIndex - 1; j >= 0; j--) {
+    let prev: Json;
+    try { prev = JSON.parse(lines[j]); } catch { continue; }
+    if (isCompactBoundary(prev)) break;                      // older calls describe a dead context
+    if (prev.type === 'user' && !isToolResult(prev)) break;  // turn boundary (same as sumTurnUsage)
+    const usage = extractUsage(prev);
+    if (!usage) continue;
+    const prompt = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
+    if (prompt > peak) peak = prompt;
+  }
+  return peak;
+}
+
+// Trailing `tailBytes` of a file as whole lines, dropping the partial leading line when
+// the read started mid-file. Throws on any fs error — callers already run inside a
+// try/catch that turns that into "no usable data".
+function readTailLines(filePath: string, tailBytes: number): { lines: string[]; readFrom: number } {
+  const stat = fs.statSync(filePath);
+  const readFrom = Math.max(0, stat.size - tailBytes);
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(Math.min(tailBytes, stat.size));
+  try {
+    fs.readSync(fd, buf, 0, buf.length, readFrom);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const lines = buf.toString('utf-8').split('\n');
+  if (readFrom > 0) lines.shift();
+  return { lines, readFrom };
+}
+
 function readLastTurnUsage(transcriptPath: string): Json {
   const TAIL_BYTES = 524288; // 512KB — covers most multi-step agentic turns
   try {
-    const stat = fs.statSync(transcriptPath);
-    const readFrom = Math.max(0, stat.size - TAIL_BYTES);
-    const fd = fs.openSync(transcriptPath, 'r');
-    const buf = Buffer.alloc(Math.min(TAIL_BYTES, stat.size));
-    fs.readSync(fd, buf, 0, buf.length, readFrom);
-    fs.closeSync(fd);
+    const { lines, readFrom } = readTailLines(transcriptPath, TAIL_BYTES);
 
-    const lines = buf.toString('utf-8').split('\n');
-    // Drop the first line when mid-file (it's a partial line)
-    if (readFrom > 0) lines.shift();
+    // A half-written trailing record means CC is still flushing this turn. Scanning past
+    // it finds an OLDER turn's usage and bills it again under a fresh timestamp — measured
+    // live on a production hermit, where a pre-compaction turn was re-billed hours later
+    // and its dead 173k context then drove a needless watchdog compaction. Bill nothing;
+    // the next Stop sees a complete tail. Unbilled beats double-billed.
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].trim()) continue;
+      try { JSON.parse(lines[i]); } catch { return null; }
+      break;
+    }
 
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const entry = JSON.parse(lines[i]);
-        if (!extractUsage(entry)) continue;
+        // Reaching a compaction boundary before any usage means every remaining entry
+        // describes a context CC already destroyed — never bill or measure it.
+        if (isCompactBoundary(entry)) return null;
+        const usage = extractUsage(entry);
+        if (!usage) continue;
 
         // Found the last billed entry — sum the whole turn.
         const summed = sumTurnUsage(lines, i);
+        // Context size at the END of the turn, for the hygiene thresholds — not the
+        // turn-wide max, which would still report the pre-compaction peak for a turn that
+        // compacted mid-flight. Paired with the source-side timestamp so consumers can
+        // tell when the context was observed, not when the row was written.
+        const lastCallPromptTokens = peakPromptTokensSinceCompaction(
+          lines, i, usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens,
+        );
+        const observedAt = typeof entry.timestamp === 'string' ? entry.timestamp : '';
 
         // Detect operator interaction for operator_turns tracking.
         // Note: real transcripts use type:'user', not type:'human', so this is
@@ -264,7 +319,28 @@ function readLastTurnUsage(transcriptPath: string): Json {
         const source = trusted ? resolved.source : 'other';
         const sourceInherited = trusted && resolved.inherited;
         const subagents = collectSubagentUsage(lines, i);
-        return { ...summed, hadHumanTurn, source, sourceInherited, subagents };
+        return { ...summed, hadHumanTurn, source, sourceInherited, subagents, observedAt, lastCallPromptTokens };
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
+// Newest main (non-subagent) row already in the cost log — the duplicate check in run()
+// compares against it. Tail-read: the log is append-only and unbounded, so a full parse
+// on every turn is exactly the cost this codebase avoids elsewhere (see updateCostIndex).
+function lastLoggedMainRow(): Json {
+  // Wide enough that the subagent rows a fan-out turn appends AFTER its main row can't
+  // push that main row out of the window — a turn dispatching ~25 agents writes ~15KB of
+  // them, which would silently disable the guard on exactly the heaviest turns.
+  const TAIL_BYTES = 131072;
+  try {
+    const { lines } = readTailLines(COST_LOG, TAIL_BYTES);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].trim()) continue;
+      try {
+        const row = JSON.parse(lines[i]);
+        if (row && row.subagent !== true) return row;
       } catch {}
     }
   } catch {}
@@ -735,7 +811,7 @@ async function run(data: Json): Promise<string | null> {
       return null;
     }
 
-    const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model: rawModel, hadHumanTurn, source, sourceInherited, apiCalls, maxPromptTokens, subagents } = turn;
+    const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model: rawModel, hadHumanTurn, source, sourceInherited, apiCalls, maxPromptTokens, subagents, observedAt, lastCallPromptTokens } = turn;
     const model = detectModel(rawModel);
 
     const totalTokens = inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens;
@@ -748,6 +824,20 @@ async function run(data: Json): Promise<string | null> {
 
     // Read session_id from runtime.json once per turn (used for log entry + writeStatusJson)
     const runtimeSessionId = readRuntimeSessionId();
+
+    // Duplicate guard: a turn whose newest call is no newer than the last logged row's
+    // already went through here. The scan guards above catch the flush race that produced
+    // the measured incident; this catches every other way the same transcript entry can be
+    // re-found (a manual run racing the Stop hook, a retried hook), which would otherwise
+    // double-bill the spend and republish a dead context size. Same session only — a fresh
+    // session legitimately starts from older transcript entries — and legacy rows without
+    // observed_at never block, so the first post-upgrade turn always bills.
+    const lastRow = lastLoggedMainRow();
+    if (observedAt && lastRow && lastRow.session_id === (runtimeSessionId || sessionId)
+        && typeof lastRow.observed_at === 'string' && observedAt <= lastRow.observed_at) {
+      return null;
+    }
+
     maintainOpenedAt(new Date().toISOString(), sessionId);
 
     // Read config once per turn — timezone drives by_date/by_week/by_month bucketing and
@@ -777,6 +867,12 @@ async function run(data: Json): Promise<string | null> {
       total_tokens: totalTokens,
       api_calls: apiCalls,
       max_prompt_tokens: maxPromptTokens,
+      // Context size and WHEN it was observed, both from the turn's newest call. The row's
+      // own `timestamp` is ingestion time and says nothing about the context it describes;
+      // hygiene consumers need the source-side observation to tell a fresh reading from one
+      // that predates a reset. Absent on rows written before this field existed.
+      ...(observedAt ? { observed_at: observedAt } : {}),
+      last_call_prompt_tokens: lastCallPromptTokens,
       context_usage: data.context_usage ?? data.contextUsage ?? null,
       estimated_cost_usd: roundedCost,
       model_unpriced: modelUnpriced,

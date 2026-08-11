@@ -1383,6 +1383,7 @@ const SESSION_ID = 'S-001';
 function writeCostLog(h: Hermit, entries: {
   session_id: string; input_tokens: number; cache_write_tokens: number; cache_read_tokens: number;
   timestamp?: string; api_calls?: number; max_prompt_tokens?: number; subagent?: boolean;
+  observed_at?: string; last_call_prompt_tokens?: number;
 }[]): void {
   const dir = path.join(h.dir, '.claude');
   fs.mkdirSync(dir, { recursive: true });
@@ -1397,6 +1398,8 @@ function writeCostLog(h: Hermit, entries: {
     estimated_cost_usd: 1.0,
     ...(e.api_calls !== undefined ? { api_calls: e.api_calls } : {}),
     ...(e.max_prompt_tokens !== undefined ? { max_prompt_tokens: e.max_prompt_tokens } : {}),
+    ...(e.observed_at !== undefined ? { observed_at: e.observed_at } : {}),
+    ...(e.last_call_prompt_tokens !== undefined ? { last_call_prompt_tokens: e.last_call_prompt_tokens } : {}),
     ...(e.subagent !== undefined ? { subagent: e.subagent } : {}),
   })).join('\n') + '\n';
   fs.writeFileSync(path.join(dir, 'cost-log.jsonl'), lines);
@@ -1895,8 +1898,12 @@ test('context_clear (mid-arc emergency clear) cross-stamps compact idempotence s
     expect(tmuxLog3).not.toContain('/compact');
     const events3 = fs.readFileSync(eventsFile(h), 'utf-8');
     expect(events3).not.toContain('context-compact');
+    // Two independent guards now cover this entry: the clear stamped last_context_reset_at,
+    // so the poisoned-entry check rejects it as stale before the idempotence cross-stamp is
+    // even consulted. Both are kept — the cross-stamp above still protects an entry the
+    // reset stamp can't date (no timestamp at all).
     const wsAfterTick3 = readJson(state(h, 'watchdog-state.json'));
-    expect(wsAfterTick3.last_hygiene_eval?.compact?.outcome).toBe('skip:already-processed');
+    expect(wsAfterTick3.last_hygiene_eval?.compact?.outcome).toBe('skip:stale-entry');
   }));
 
 test('context_compact: boundary marker waives min_interval but not the 60k floor',
@@ -2206,6 +2213,143 @@ test('context_compact: midnight-adjacent (daily-auto-close due within 2h) → sk
     expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
     const ws = readJson(state(h, 'watchdog-state.json'));
     expect(ws.last_hygiene_eval?.compact?.outcome).toBe('skip:midnight-adjacent');
+  }));
+
+// -------------------------------------------------------
+// poisoned cost-entry guards (both hygiene tiers)
+//
+// The proxy both tiers act on ("last cost entry for this session") lies in two ways:
+// the entry was observed before the context was reset, or the number is impossible.
+// Measured live: a re-billed pre-compaction entry drove a compaction of a context 47k
+// UNDER the threshold.
+// -------------------------------------------------------
+
+test('context_compact: entry observed before the last context reset → skip:stale-entry',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    patchRuntime(h, { last_context_reset_at: isoAgo(1) });
+    // Over threshold, but observed two hours ago — before the reset an hour ago.
+    writeCostLog(h, [{
+      session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000,
+      observed_at: isoAgo(2),
+    }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.compact?.outcome).toBe('skip:stale-entry');
+  }));
+
+test('context_compact: entry observed after the last context reset still fires',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    patchRuntime(h, { last_context_reset_at: isoAgo(2) });
+    writeCostLog(h, [{
+      session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000,
+      observed_at: isoAgo(1),
+    }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.compact?.outcome).toBe('fired');
+  }));
+
+test('context_compact: impossible prompt-token reading → skip:aberrant-reading',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    // The 6.5M-class row seen live: an estimate fallback multiplying a summed turn out.
+    writeCostLog(h, [{
+      session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 0,
+      max_prompt_tokens: 6_588_486,
+    }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.compact).toMatchObject({
+      outcome: 'skip:aberrant-reading', prompt_tokens: 6_588_486,
+    });
+  }));
+
+test('context_clear: entry observed before the last context reset → skip:stale-entry',
+  withHermit(async (h) => {
+    writeContextClearConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    patchRuntime(h, { last_context_reset_at: isoAgo(1) });
+    writeCostLog(h, [{
+      session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000,
+      observed_at: isoAgo(2),
+    }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.clear?.outcome).toBe('skip:stale-entry');
+  }));
+
+test('context_clear: impossible prompt-token reading → skip:aberrant-reading (never a destructive clear)',
+  withHermit(async (h) => {
+    writeContextClearConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    writeCostLog(h, [{
+      session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 0,
+      max_prompt_tokens: 6_588_486,
+    }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.clear?.outcome).toBe('skip:aberrant-reading');
+  }));
+
+test('context_compact: last_call_prompt_tokens wins over the turn-peak max_prompt_tokens',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    // A turn that compacted mid-flight: peak 250k (dead), newest call 30k (real) — under
+    // the 60k floor, so the tier must skip rather than compact a freshly-compacted context.
+    writeCostLog(h, [{
+      session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000,
+      max_prompt_tokens: 250000, last_call_prompt_tokens: 30000,
+    }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.compact).toMatchObject({ outcome: 'skip:below-floor', prompt_tokens: 30000 });
   }));
 
 // -------------------------------------------------------

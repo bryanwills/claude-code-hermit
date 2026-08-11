@@ -12,15 +12,35 @@ type Json = any;
 
 const STATE_DIR = '.claude-code-hermit/state';
 const RUNTIME_JSON = path.join(STATE_DIR, 'runtime.json');
-const RUNTIME_TMP = path.join(STATE_DIR, '.runtime.json.tmp');
 const LIFECYCLE_LOCK = path.join(STATE_DIR, '.lifecycle.lock');
 
-/** Atomic write to state/runtime.json; stamps updated_at. */
-function writeRuntimeJson(data: Json): void {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+/**
+ * Temp path for an atomic runtime.json write, unique per process.
+ *
+ * Four unsynchronized processes write runtime.json: the watchdog daemon, the Stop hook
+ * (cost-tracker and stop-pipeline) and the PreCompact hook. A single shared temp name
+ * lets two of them hold the SAME file open with O_TRUNC — one can then rename a
+ * zero-length temp over runtime.json, and a reader landing on that instant sees a
+ * corrupt record (hermit-start refuses a duplicate boot on one). A per-process temp
+ * keeps the rename genuinely atomic, so readers only ever see a complete old or
+ * complete new file. Concurrent writers can still lose each other's FIELDS — that
+ * needs a lock, not a temp name.
+ */
+function runtimeTmpPath(stateDir: string = STATE_DIR): string {
+  return path.join(stateDir, `.runtime.json.${process.pid}.tmp`);
+}
+
+const RUNTIME_TMP = runtimeTmpPath();
+
+/** Atomic write to state/runtime.json; stamps updated_at. Pass an absolute stateDir to
+ *  write to an anchored location instead of the cwd-relative default. */
+function writeRuntimeJson(data: Json, stateDir?: string): void {
+  const dir = stateDir ?? STATE_DIR;
+  fs.mkdirSync(dir, { recursive: true });
   data.updated_at = localISOStamp();
-  fs.writeFileSync(RUNTIME_TMP, JSON.stringify(data, null, 2) + '\n');
-  fs.renameSync(RUNTIME_TMP, RUNTIME_JSON);
+  const tmp = runtimeTmpPath(dir);
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
+  fs.renameSync(tmp, path.join(dir, 'runtime.json'));
 }
 
 /** Read state/runtime.json; null when missing or invalid. Pass an absolute
@@ -82,5 +102,5 @@ function updateRuntimeField(updates: Json): void {
   writeRuntimeJson(runtime);
 }
 
-export { writeRuntimeJson, readRuntimeJson, readRuntimeState, updateRuntimeField, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK };
+export { writeRuntimeJson, readRuntimeJson, readRuntimeState, updateRuntimeField, runtimeTmpPath, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK };
 export type { RuntimeRead };
