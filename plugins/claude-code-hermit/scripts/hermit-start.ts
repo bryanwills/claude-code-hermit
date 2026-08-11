@@ -15,7 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
-import { writeRuntimeJson, readRuntimeJson, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
+import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
 import { clearStatusCache } from './lib/context-reset';
@@ -865,6 +865,45 @@ function refuseIfAnotherInstanceAlive(bootMode: 'tmux' | 'interactive'): void {
   }
 }
 
+/**
+ * Decide what to do when tmux reports the session already exists: refusal lines,
+ * or null to report "already running" and exit 0. Pure of side effects so it's
+ * unit testable, like shouldRefuseBoot above.
+ *
+ * A duplicate means the session predates this invocation, so this process never
+ * observed its boot and cannot assume lifecycle state was written. A plain
+ * double-run has a healthy runtime.json and is waved through; a hermit whose
+ * state was lost underneath it (project dir recreated, state cleaned, a botched
+ * migration) is refused — 'invalid' as hard as 'missing', since a corrupt record
+ * may hold the only copy of state (see RuntimeRead in lib/runtime.ts).
+ * Deliberately rebuilds nothing either way: runtime.json is the declared single
+ * source of truth (skills/session-start/SKILL.md), so a synthesized record would
+ * defeat the recovery branches that read it.
+ *
+ * Callers must also not mutate config on this path: no boot happened, so
+ * always_on / applyAlwaysOnDoctorSchedule() must not fire — the doctor ratchet
+ * only takes effect via a new session's `hermit-routines load`, so writing it
+ * here would desync config from the scheduler actually running.
+ */
+export function duplicateSessionRefusal(sessionName: string): string[] | null {
+  const runtime = readRuntimeState();
+  if (runtime.kind === 'ok') return null;
+
+  const detail =
+    runtime.kind === 'missing'
+      ? 'state/runtime.json is missing'
+      : `state/runtime.json is unusable: ${runtime.reason}`;
+  return [
+    `ERROR: session "${sessionName}" is running, but ${detail}.`,
+    'Lifecycle state cannot be rebuilt from a session already in flight — attach,',
+    'the watchdog and session recovery stay degraded until the session restarts.',
+    'Recover:',
+    '  .claude-code-hermit/bin/hermit-stop',
+    '  .claude-code-hermit/bin/hermit-start',
+    `To inspect it first: tmux attach -t ${sessionName}`,
+  ];
+}
+
 async function main(): Promise<void> {
   const noTmuxFlag = process.argv.includes('--no-tmux');
 
@@ -1027,8 +1066,20 @@ async function main(): Promise<void> {
     encoding: 'utf-8',
   });
   if (result.status !== 0) {
+    // The env file's only cleanup is the `rm -f` inside shellCmd, which runs in
+    // the session tmux was asked to create. No session, no cleanup — so a failed
+    // launch would strand a 0600 file holding the forwarded API key / setup token
+    // on a predictable path in a world-writable tmpdir. Remove it on every
+    // failure path before deciding what to report.
+    fs.rmSync(envFile, { force: true });
+
     const stderrMsg = result.stderr ? result.stderr.trim() : '';
     if (stderrMsg.includes('duplicate session')) {
+      const refusal = duplicateSessionRefusal(sessionName);
+      if (refusal) {
+        for (const line of refusal) console.log(`[hermit] ${line}`);
+        process.exit(1);
+      }
       console.log(`[hermit] Session "${sessionName}" already running (always-on).`);
       console.log(`[hermit] Attach: .claude-code-hermit/bin/hermit-attach  (or: tmux attach -t ${sessionName})`);
       console.log('[hermit] Send tasks via channel, or run hermit-stop to shut down.');
@@ -1135,6 +1186,7 @@ export {
   isContainer,
   writeRuntimeJson,
   readRuntimeJson,
+  readRuntimeState,
   checkStaleRuntime,
   clearShutdownStampsOnBoot,
   clearStatusCacheOnBoot,

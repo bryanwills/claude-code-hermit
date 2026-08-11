@@ -38,7 +38,9 @@ import {
   hydrateSetupTokenEnv,
   shouldRefuseBoot,
   dockerHermitRunning,
+  duplicateSessionRefusal,
 } from '../scripts/hermit-start';
+import { readRuntimeState } from '../scripts/lib/runtime';
 import { TOKEN_ENV_VAR } from '../scripts/lib/setup-token';
 
 // The top-level beforeEach/afterEach below process.chdir()s into a fresh
@@ -291,6 +293,132 @@ describe.if(!IN_CONTAINER)('boot singleton guard', () => {
     fs.writeFileSync('.claude-code-hermit/state/runtime.json', JSON.stringify({ runtime_mode: 'docker', shutdown_completed_at: '2026-07-24T11:00:00Z' }));
     fs.writeFileSync('.claude-code-hermit/state/routine-monitor-liveness.json', '{}');
     expect(shouldRefuseBoot('tmux')).toBeNull();
+  });
+});
+
+// ============================================================
+// Duplicate-session handling + tri-state runtime read
+// ============================================================
+
+const RUNTIME_PATH = '.claude-code-hermit/state/runtime.json';
+
+// A realistic live record: a session mid-work, carrying the recovery markers
+// session-start reads. Used to prove nothing on the duplicate path rewrites it.
+const LIVE_RUNTIME = {
+  version: 1,
+  session_state: 'in_progress',
+  session_id: 'S-007',
+  runtime_mode: 'tmux',
+  tmux_session: 'hermit-proj',
+  transition: 'archiving',
+  last_error: 'unclean_shutdown',
+};
+
+describe('readRuntimeState tri-state', () => {
+  test('absent file reads as missing, not invalid', () => {
+    expect(readRuntimeState()).toEqual({ kind: 'missing' });
+  });
+
+  test('valid JSON reads as ok with parsed data', () => {
+    fs.writeFileSync(RUNTIME_PATH, JSON.stringify(LIVE_RUNTIME));
+    const read = readRuntimeState();
+    expect(read.kind).toBe('ok');
+    expect(read.kind === 'ok' && read.data.session_state).toBe('in_progress');
+  });
+
+  test('malformed JSON reads as invalid, not missing', () => {
+    fs.writeFileSync(RUNTIME_PATH, '{"session_state": "in_progr');
+    const read = readRuntimeState();
+    expect(read.kind).toBe('invalid');
+    expect(read.kind === 'invalid' && read.reason).toContain('malformed JSON');
+  });
+
+  // The distinction that matters: an unreadable file may hold live state we
+  // simply cannot see, so it must never be mistaken for an empty slot.
+  // Skipped as root, where the mode bits are ignored and the read would succeed.
+  // An in-test `if` would let this pass while asserting nothing; the skip makes
+  // the lost coverage visible in the report (same shape as IN_CONTAINER above).
+  test.skipIf(process.getuid?.() === 0)('unreadable file reads as invalid, not missing', () => {
+    fs.writeFileSync(RUNTIME_PATH, JSON.stringify(LIVE_RUNTIME));
+    fs.chmodSync(RUNTIME_PATH, 0o000);
+    try {
+      const read = readRuntimeState();
+      expect(read.kind).toBe('invalid');
+      expect(read.kind === 'invalid' && read.reason).toContain('unreadable');
+    } finally {
+      fs.chmodSync(RUNTIME_PATH, 0o644);
+    }
+  });
+
+  test('a directory in place of the file reads as invalid', () => {
+    fs.mkdirSync(RUNTIME_PATH);
+    const read = readRuntimeState();
+    expect(read.kind).toBe('invalid');
+  });
+});
+
+describe('duplicateSessionRefusal', () => {
+  test('healthy runtime → null (plain double-boot is waved through)', () => {
+    fs.writeFileSync(RUNTIME_PATH, JSON.stringify(LIVE_RUNTIME));
+    expect(duplicateSessionRefusal('hermit-proj')).toBeNull();
+  });
+
+  test('missing runtime → refuses, naming the session and the recovery steps', () => {
+    const lines = duplicateSessionRefusal('hermit-proj');
+    expect(lines).not.toBeNull();
+    const text = lines!.join('\n');
+    expect(text).toContain('hermit-proj');
+    expect(text).toContain('state/runtime.json is missing');
+    expect(text).toContain('.claude-code-hermit/bin/hermit-stop');
+    expect(text).toContain('.claude-code-hermit/bin/hermit-start');
+  });
+
+  test('corrupt runtime → refuses and surfaces the reason', () => {
+    fs.writeFileSync(RUNTIME_PATH, 'not json at all');
+    const text = duplicateSessionRefusal('hermit-proj')!.join('\n');
+    expect(text).toContain('unusable');
+    expect(text).toContain('malformed JSON');
+  });
+
+  // The whole point of refusing: reconstructing state would zero the transition
+  // and last_error markers that session-start recovery depends on.
+  test('never writes runtime.json — a corrupt record survives byte-identical', () => {
+    const corrupt = '{"session_state": "in_progr';
+    fs.writeFileSync(RUNTIME_PATH, corrupt);
+    duplicateSessionRefusal('hermit-proj');
+    expect(fs.readFileSync(RUNTIME_PATH, 'utf-8')).toBe(corrupt);
+  });
+
+  test('never creates runtime.json when it is missing', () => {
+    duplicateSessionRefusal('hermit-proj');
+    expect(fs.existsSync(RUNTIME_PATH)).toBe(false);
+  });
+
+  // No boot happened on this path, so no boot-time config mutation may either —
+  // the doctor ratchet only takes effect via a new session's `hermit-routines
+  // load`, so writing it here would desync config from the running scheduler.
+  test('never mutates config on any branch', () => {
+    const config = {
+      always_on: false,
+      routines: [{ id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor' }],
+    };
+    writeConfig(config);
+    const before = fs.readFileSync('.claude-code-hermit/config.json', 'utf-8');
+
+    duplicateSessionRefusal('hermit-proj'); // missing runtime
+    fs.writeFileSync(RUNTIME_PATH, JSON.stringify(LIVE_RUNTIME));
+    duplicateSessionRefusal('hermit-proj'); // healthy runtime
+
+    expect(fs.readFileSync('.claude-code-hermit/config.json', 'utf-8')).toBe(before);
+  });
+
+  test('leaves boot-only markers alone', () => {
+    fs.mkdirSync('.claude-code-hermit/sessions', { recursive: true });
+    fs.writeFileSync('.claude-code-hermit/state/.boot-id', 'boot-abc');
+    fs.writeFileSync('.claude-code-hermit/sessions/.status.json', '{"cached":true}');
+    duplicateSessionRefusal('hermit-proj');
+    expect(fs.readFileSync('.claude-code-hermit/state/.boot-id', 'utf-8')).toBe('boot-abc');
+    expect(fs.existsSync('.claude-code-hermit/sessions/.status.json')).toBe(true);
   });
 });
 

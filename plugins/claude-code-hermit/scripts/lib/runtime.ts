@@ -34,6 +34,39 @@ function readRuntimeJson(stateDir?: string): Json | null {
   }
 }
 
+/**
+ * Outcome of a runtime.json read, keeping "absent" distinct from "unusable".
+ *
+ * readRuntimeJson() collapses both into null, which is fine for callers that
+ * only branch on "do I have state?" — but a caller deciding whether it may
+ * WRITE lifecycle state must not treat a corrupt or unreadable record as an
+ * empty slot: overwriting it destroys the only copy of transition/last_error
+ * markers that session-start recovery reads.
+ */
+type RuntimeRead =
+  | { kind: 'ok'; data: Json }
+  | { kind: 'missing' }
+  | { kind: 'invalid'; reason: string };
+
+/** Read state/runtime.json as a tri-state. See RuntimeRead. */
+function readRuntimeState(stateDir?: string): RuntimeRead {
+  const p = stateDir ? path.join(stateDir, 'runtime.json') : RUNTIME_JSON;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(p, 'utf-8');
+  } catch (err: any) {
+    // Only a genuine absence is 'missing'. EACCES/EISDIR/EIO mean the file may
+    // well hold live state we simply cannot see — that is 'invalid', not empty.
+    if (err?.code === 'ENOENT') return { kind: 'missing' };
+    return { kind: 'invalid', reason: err?.code ? `unreadable (${err.code})` : 'unreadable' };
+  }
+  try {
+    return { kind: 'ok', data: JSON.parse(raw) };
+  } catch (err: any) {
+    return { kind: 'invalid', reason: `malformed JSON (${err?.message ?? 'parse error'})` };
+  }
+}
+
 /** Read-modify-write runtime.json with atomic write. */
 function updateRuntimeField(updates: Json): void {
   const runtime = readRuntimeJson() || {};
@@ -41,4 +74,5 @@ function updateRuntimeField(updates: Json): void {
   writeRuntimeJson(runtime);
 }
 
-export { writeRuntimeJson, readRuntimeJson, updateRuntimeField, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK };
+export { writeRuntimeJson, readRuntimeJson, readRuntimeState, updateRuntimeField, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK };
+export type { RuntimeRead };
