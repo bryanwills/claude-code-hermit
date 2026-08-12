@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.38] - 2026-08-12
 
 ### Added
 - `artifacts.backend` (default `"claude"`) publishes artifact pages to a connected MCP artifact server instead of claude.ai, following that server's own MCP instructions; set it via `/hermit-settings artifact-backend`, registering and permissioning the server yourself. `state/artifacts.json` records which backend minted each URL (a switch republishes to the new host rather than redeploying the old URL), and a failed publish skips rather than falling back to claude.ai. `hermit-start`'s boot-time `Artifact` grant is skipped on a non-`claude` backend, so the tool that backend forbids is never standing pre-approved.

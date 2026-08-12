@@ -1,7 +1,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.37-green.svg" alt="Version 1.2.37" /></a>
+  <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.38-green.svg" alt="Version 1.2.38" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -42,7 +42,7 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 - **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
 - **Channels** let you DM a session; the hermit agent acts on it (*"accept PROP-014"*, *"status"*) and **pings you first** when something needs a yes/no.
 - **Pause it from your phone — and it actually stops.** Ask for status, pause, resume, or snooze over Discord or Telegram. The pause is enforced at the tool boundary, not merely treated as a conversational request.
-- **Native Claude Code Artifacts integration** publishes a live Hermit Dashboard, open proposals, weekly reviews, and any compiled document you request as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs, with organization sharing where supported.
+- **Native Claude Code Artifacts integration** publishes a live Hermit Dashboard, open proposals, weekly reviews, and any compiled document you request as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs, with organization sharing where supported. Point `artifacts.backend` at your own MCP artifact server to publish there instead.
 - **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget on fresh and resumed starts. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
 - **Task snapshots** persist native `Tasks` past session end, so the plan survives archives.
 - **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context.
@@ -80,7 +80,7 @@ What it proposes: improvements, routines, new capabilities (skills, agents, hear
 
 ## Observable
 
-The native Hermit Dashboard, proposals page, and weekly review stay current as Claude Code Artifacts at stable URLs.
+The native Hermit Dashboard, proposals page, and weekly review stay current as Claude Code Artifacts at stable URLs — or on a self-hosted artifact server, if you configure one.
 
 On-demand skills — pullable from the Claude app, your terminal, or a DM:
 
@@ -174,7 +174,7 @@ Tune via `/hermit-settings` (or just by asking the hermit). Some of the settings
 | `auto_session` | auto-start session on boot — **`true`** |
 | `boot_skill` / `shutdown_skill` | custom boot / teardown skill |
 | `post_close_clear` | clear context after midnight close — **`true`** |
-| `context_hygiene.compact` | compact long-running active context — **enabled**, `150000` tokens / `4h` cooldown |
+| `context_hygiene.compact` | compact long-running active context — **enabled**, `100000` compactible tokens / `4h` cooldown |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | auto-compact at % of context — **`65`** |
 | `MAX_THINKING_TOKENS` | thinking-token cap per turn — **`10000`** |
 | `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it |
