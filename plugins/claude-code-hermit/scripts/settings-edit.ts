@@ -227,6 +227,10 @@ export function coerce(setting: Setting, raw: string): { ok: true; value: Json }
       return { ok: true, value: n };
     }
     default:
+      // Free-text rows store the operator's value verbatim, so refuse an empty one
+      // here — this is the point of the write. Clearing goes through none/clear above
+      // (nullable rows only); an empty string is not a value any string row wants.
+      if (raw.trim() === '') return { ok: false, message: `${setting.arg} expects a non-empty value` };
       return { ok: true, value: raw };
   }
 }

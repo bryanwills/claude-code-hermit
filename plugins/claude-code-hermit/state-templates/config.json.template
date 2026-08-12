@@ -92,7 +92,8 @@
     "dashboard": true,
     "proposals": true,
     "weekly_review": true,
-    "publish_authorized": null
+    "publish_authorized": null,
+    "backend": "claude"
   },
   "context_hygiene": {
     "compact": {

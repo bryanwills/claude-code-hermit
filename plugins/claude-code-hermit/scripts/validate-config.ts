@@ -567,6 +567,17 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       ) {
         errors.push('artifacts.publish_authorized: must be a boolean or null');
       }
+      // Backstop, not the primary guard: settings-edit.ts refuses an empty value at
+      // write time, but it writes through fs and so never trips the validate-config
+      // PostToolUse hook — a hand-edited config.json would otherwise reach the publish
+      // path with an empty string as the backend name.
+      if (config.artifacts.backend !== undefined) {
+        if (typeof config.artifacts.backend !== 'string') {
+          errors.push('artifacts.backend: must be a string');
+        } else if (config.artifacts.backend.trim() === '') {
+          errors.push('artifacts.backend: must not be empty or whitespace-only');
+        }
+      }
     }
   }
 

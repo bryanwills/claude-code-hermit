@@ -300,6 +300,19 @@ describe('settings-edit apply-known', () => {
     expect(applyKnown(cfg, 'escalation', 'none').ok).toBe(false);
   });
 
+  test('string settings refuse an empty or whitespace-only value', () => {
+    for (const blank of ['', '   ', '\t']) {
+      const cfg: any = {};
+      const r = applyKnown(cfg, 'artifact-backend', blank);
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain('non-empty');
+      expect(cfg.artifacts).toBeUndefined();
+    }
+    const cfg: any = {};
+    expect(applyKnown(cfg, 'artifact-backend', 'my-artifact-host').ok).toBe(true);
+    expect(cfg.artifacts.backend).toBe('my-artifact-host');
+  });
+
   test('int settings reject non-positive and non-numeric input', () => {
     const cfg: any = {};
     expect(applyKnown(cfg, 'reflection', '2').ok).toBe(true);

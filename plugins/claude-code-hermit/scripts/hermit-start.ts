@@ -124,6 +124,7 @@ const DEFAULT_CONFIG: Json = {
     proposals: true,
     weekly_review: true,
     publish_authorized: null,
+    backend: 'claude',
   },
   context_hygiene: {
     compact: {
@@ -755,11 +756,19 @@ function writeSettingsEnv(config: Json): void {
  * config.artifacts.publish_authorized (a channel reply may only flip hermit
  * config, never permissions — this is where the permission write happens).
  * Idempotent and self-healing: sealed set-merges, re-ensured every boot.
+ *
+ * Scoped to the default backend. What it grants is the native Artifact tool —
+ * exactly the tool a hermit on a non-claude artifacts.backend must never call
+ * (the artifacts doc's § Non-claude backend deviations forbids that fallback).
+ * A standing grant there would pre-approve, prompt-free, the one publish the
+ * operator configured a backend to prevent.
  */
 function applyArtifactGrant(config: Json): void {
   const artifacts = isDict(config.artifacts) ? config.artifacts : {};
   const anyPage = ['dashboard', 'proposals', 'weekly_review'].some((k) => pyTruthy(artifacts[k]));
   if (!anyPage || artifacts.publish_authorized !== true) return;
+  const backend = typeof artifacts.backend === 'string' ? artifacts.backend.trim() : '';
+  if (backend !== '' && backend !== 'claude') return;
   const script = path.join(PLUGIN_ROOT, 'scripts', 'apply-settings.ts');
   for (const op of ['artifact-allow', 'automode-seed']) {
     const r = spawnSync('bun', [script, '.claude/settings.local.json', op], { stdio: 'pipe', encoding: 'utf-8' });

@@ -43,6 +43,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings artifact-proposals — toggle the Proposals-page artifact (full-text open-proposal page with deep-linked anchors)
 /claude-code-hermit:hermit-settings artifact-weekly-review — toggle the Weekly-review artifact (stable-URL passthrough of the compiled weekly report)
 /claude-code-hermit:hermit-settings artifact-authorization — record the unattended Artifact publish decision (applied by hermit-start at boot, not from this session)
+/claude-code-hermit:hermit-settings artifact-backend — where pages publish: `claude` (default), or the name of a connected MCP artifact server you registered yourself
 ```
 
 ## Plan
@@ -96,6 +97,7 @@ Pass the **argument name**, not the dotted path — the script looks the path up
 | `artifact-dashboard` | `artifacts.dashboard` | boolean | on / off | next refresh |
 | `artifact-proposals` | `artifacts.proposals` | boolean | on / off | next refresh |
 | `artifact-weekly-review` | `artifacts.weekly_review` | boolean | on / off | next refresh |
+| `artifact-backend` | `artifacts.backend` | string | `claude`, or a connected MCP server name | next refresh |
 
 The enum values, dotted paths, and "applies" notes come from `scripts/lib/settings/registry.ts` — the same module `show` renders from and `validate-config.ts` shares its enums with. When a setting is added, add the row there; this table mirrors it.
 

@@ -825,6 +825,23 @@ describe('applyArtifactGrant', () => {
     expect(fs.readFileSync('.claude/settings.local.json', 'utf-8')).toBe('{}');
   });
 
+  test('a non-claude backend does nothing — the granted tool is the one it must never call', () => {
+    writeSettings({});
+    applyArtifactGrant({ artifacts: { dashboard: true, publish_authorized: true, backend: 'my-artifact-host' } });
+    expect(fs.readFileSync('.claude/settings.local.json', 'utf-8')).toBe('{}');
+  });
+
+  test('an explicit or absent claude backend still grants', () => {
+    for (const artifacts of [
+      { dashboard: true, publish_authorized: true, backend: 'claude' },
+      { dashboard: true, publish_authorized: true },
+    ]) {
+      writeSettings({});
+      captureLog(() => applyArtifactGrant({ artifacts }));
+      expect(readSettings().permissions.allow).toContain('Artifact');
+    }
+  });
+
   test('is idempotent', () => {
     writeSettings({});
     const config = { artifacts: { dashboard: true, publish_authorized: true } };

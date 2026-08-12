@@ -2,7 +2,11 @@
 
 Home for the hermit's use of Claude Code's [Artifacts](https://code.claude.com/docs/en/artifacts)
 feature — private `claude.ai/code/artifact/<uuid>` pages published from the main
-session. Gated per artifact type under `config.artifacts.*` (default **on** — the
+session. That is the default and everything below describes it; `config.artifacts.backend`
+can instead point publishing at a connected MCP artifact server the operator runs, in which
+case this file's claude.ai-specific mechanics (tool-call shape, `force`, entitlement,
+TUI-only reachability) are replaced by that server's own protocol — see § Non-claude
+backend deviations. Gated per artifact type under `config.artifacts.*` (default **on** — the
 plugin's research-preview feature-defaults rule; disable a single page via
 `/hermit-settings artifact-dashboard|artifact-proposals|artifact-weekly-review`, or
 disable Artifacts entirely via Claude Code's own `disableArtifact`,
@@ -32,30 +36,74 @@ publishes silently no-op (step 5 below) — a deliberate choice, not a bug.
 
 ## Shared refresh procedure
 
+**Resolve the backend first.** `config.artifacts.backend` is `"claude"` by default — the
+native `Artifact` tool, and the five steps below apply unchanged. Any other value names a
+**connected MCP artifact server** the operator registered and permissioned themselves —
+take the § Non-claude backend deviations after step 2, which defers entirely to that
+server's own MCP `instructions`.
+
 Every script-rendered artifact type (dashboard, proposals page, weekly review) follows
 the same five steps; only the render script, `<title>`, and `state/artifacts.json` key
 differ per type (called out in each subsection below):
 
 1. Run the type's render script (e.g. `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render dashboard .claude-code-hermit`)
    and parse stdout JSON (`path`, `bytes`, `hash`).
-2. Read `.claude-code-hermit/state/artifacts.json` (if present) and compare `hash` to
-   `<key>.hash`. **Unchanged → stop here**, no publish (avoids minting a no-op
-   artifact version).
-3. Changed or no prior record → call `Artifact` with `file_path` set to the rendered
-   path, a stable `<title>` for that type, a stable favicon (pick once, keep it across
-   republishes), and `url` set to `<key>.url` from `state/artifacts.json` when present
-   (redeploys to the same address instead of minting a new one), plus `force: true`
-   whenever `url` is present — these pages are single-writer, regenerated from
-   authoritative state, so Claude Code 2.1.x's "hasn't viewed the latest version"
-   redeploy guard (fires after any restart, since the session only read the URL from
-   state) is overridden here, not resolved by re-fetching. First publish (no `url`)
-   omits it.
+2. Read `.claude-code-hermit/state/artifacts.json` (if present). **Compare `<key>.backend`
+   against the active backend before anything else** — an entry with **no** `backend` field
+   is a pre-existing native record and counts as `"claude"`. A mismatch means the recorded
+   URL was minted on a different host, so the entry is **treated as unpublished**: ignore
+   both its `hash` and its `url`, take step 3 as a **first publish** (no `url`, no `force`),
+   and overwrite the entry in step 4. This ordering matters — a backend switch typically
+   leaves the content hash unchanged, so checking the hash first would silently stop at the
+   gate below and leave the recorded URL pointing at the old host. Only on a backend match,
+   compare `hash` to `<key>.hash`: **unchanged → stop here**, no publish (avoids minting a
+   no-op artifact version).
+3. Changed, no prior record, or a backend mismatch from step 2 → call `Artifact` with
+   `file_path` set to the rendered path, a stable `<title>` for that type, a stable favicon
+   (pick once, keep it across republishes), and `url` set to `<key>.url` from
+   `state/artifacts.json` when a **backend-matching** entry has one (redeploys to the same
+   address instead of minting a new one), plus `force: true` whenever `url` is passed —
+   these pages are single-writer, regenerated from authoritative state, so Claude Code
+   2.1.x's "hasn't viewed the latest version" redeploy guard (fires after any restart,
+   since the session only read the URL from state) is overridden here, not resolved by
+   re-fetching. A first publish omits both `url` and `force` — and per step 2, a backend
+   mismatch **is** a first publish, however stale-but-present the recorded `url` looks.
 4. On success, write `.claude-code-hermit/state/artifacts.json`:
-   `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>"}}`
+   `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>", "backend": "<active backend>"}}`
    (merge — never drop sibling keys belonging to other artifact types).
 5. On any failure (tool absent, no entitlement, publish error) — skip silently, append
    one SHELL.md Findings line for the session (not one per attempt), and continue.
    Never block or degrade the calling skill's normal channel/markdown output.
+
+### Non-claude backend deviations
+
+When `config.artifacts.backend` is anything other than `"claude"`, steps 1 and 2 are
+unchanged (render, then the hash and backend gate). Steps 3 and 5 change:
+
+- **Step 3 — publish via the named MCP server's own artifact tools.** Follow that server's
+  `instructions` for tool selection, argument names, content shape, create-vs-update, and
+  version-conflict handling; this doc deliberately specifies none of it, so a compatible
+  backend needs no core change. The only requirement core places on a backend is that its
+  create/update tools accept a title plus the page content and return a stable `url`.
+  A recurring page is **updated in place** so its URL stays stable across refreshes — never
+  re-created, with one exception: after a backend switch, step 2 treats the page as
+  unpublished, so the first publish on the new host is a create, not an update against a
+  URL another host minted. `file_path`, `force`, and favicon are `Artifact`-tool concepts
+  and do not apply here.
+- **Step 5 — same skip-and-log as the default path above, plus no fallback.** Server not
+  connected, its tools unavailable, or any call fails → skip and log as above.
+  **Never fall back to the native `Artifact` tool.** An operator who configured a
+  self-hosted backend must not have hermit content quietly published to Anthropic's host
+  instead.
+
+Registering the server, minting its token, and granting its tool permissions are the
+operator's own manual setup — core neither performs nor verifies them. `hermit-start`'s
+boot-time grant is no help here and is not meant to be: it covers only the native
+`Artifact` tool, and on a non-`claude` backend it is **skipped entirely**, so the tool this
+backend must never call is never newly pre-approved. It is not *revoked*, though — a hermit
+that ran on the default backend before the switch keeps the `Artifact` entry its earlier
+boots wrote; drop it by hand from `.claude/settings.local.json` (`permissions.allow`) if you
+want that pre-approval gone.
 
 ## Dashboard
 
@@ -189,12 +237,17 @@ version history — not new content.
 
 Any compiled doc or proposal can be published as a one-off page on operator request
 ("open <compiled doc | PROP-NNN> as a page") — **no config gate; operator-initiated by
-definition.** Publishes that `.md` file directly via the same `Artifact` call shape as
-the weekly-review page (no HTML render step). The URL is recorded under
-`documents.<basename>` in `state/artifacts.json` so a repeated request for the same
-document redeploys to the same URL instead of minting a new one — same hash-gate
-discipline as the other types (skip the publish call when the file's content hash is
-unchanged from the last recorded one), plus `force: true` on redeploy (verbatim copy of
-the local file, which is authoritative). No automatic per-document publishing; the
+definition.** The missing gate is on *whether* to publish, not on *where*:
+`config.artifacts.backend` still applies here exactly as in § Shared refresh procedure —
+resolve it first, and take § Non-claude backend deviations when it is anything other than
+`"claude"`. Publishes that `.md` file directly, no HTML render step (on the default
+backend, the same `Artifact` call shape as the weekly-review page). The URL is recorded
+under `documents.<basename>` in `state/artifacts.json`, same entry shape as the other
+types including its `backend` field, so a repeated request for the same document
+redeploys to the same URL instead of minting a new one — under the same gate discipline
+as step 2: a backend mismatch is a first publish on the new host (no `url`, no `force`);
+otherwise skip the publish call when the file's content hash is unchanged from the last
+recorded one, and pass `force: true` on redeploy (verbatim copy of the local file, which
+is authoritative). No automatic per-document publishing; the
 dashboard's compiled-docs index is the discovery surface for what's available to ask
 for.

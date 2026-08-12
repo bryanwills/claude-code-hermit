@@ -81,6 +81,9 @@ export const SETTINGS: readonly Setting[] = [
     label: 'Proposals page', hint: 'full text of open proposals, deep-linked' },
   { arg: 'artifact-weekly-review', path: 'artifacts.weekly_review', kind: 'boolean', group: 'Artifacts',
     label: 'Weekly-review page', hint: 'the compiled weekly report at a stable URL' },
+  { arg: 'artifact-backend', path: 'artifacts.backend', kind: 'string', group: 'Artifacts',
+    label: 'Artifact backend', hint: "'claude', or the name of a connected MCP artifact server",
+    applies: 'next refresh' },
 ];
 
 /** Read-only rows `show` renders but no argument sets. */

@@ -236,15 +236,19 @@ Publishing of hermit-generated pages to Claude Code's [Artifacts](https://code.c
 | `proposals` | boolean | `true` | Publish the full text of open proposals, each anchored for deep-linking, refreshed by `proposal-create` and `proposal-act`. |
 | `weekly_review` | boolean | `true` | Publish the latest compiled weekly review as a stable-URL page, refreshed by `weekly-review`. |
 | `publish_authorized` | boolean \| `null` | `null` | Whether unattended sessions may publish without a permission prompt. `null` = undecided, `true` = authorized (grant applied at next boot), `false` = declined (attended banking instead). See below. Set via `/hermit-settings artifact-authorization`, never edited directly. |
+| `backend` | string | `"claude"` | Where pages publish. `"claude"` is Claude Code's native Artifacts. Any other value names a connected MCP artifact server. See below. |
 
 ```json
 "artifacts": {
   "dashboard": true,
   "proposals": true,
   "weekly_review": true,
-  "publish_authorized": null
+  "publish_authorized": null,
+  "backend": "claude"
 }
 ```
+
+**Alternative backend:** setting `backend` to anything other than `"claude"` routes publishing to a connected MCP artifact server instead of claude.ai. The value is that server's name as Claude Code knows it. Setup is entirely yours and entirely manual — register the server, mint its token, and grant its tool permissions yourself; the hermit neither performs nor verifies any of that. `hermit-start`'s boot-time grant covers only the native `Artifact` tool and is skipped once `backend` is not `"claude"` — it can't grant your server's tools, and leaving a standing grant on the tool this backend forbids would work against you. Once set, the hermit follows that server's own MCP `instructions` for how to publish (see [`docs/artifacts.md`](artifacts.md) § Non-claude backend deviations) — the plugin hardcodes nothing about any particular server. If the server is unreachable or a call fails, the publish is **skipped**, not retried against claude.ai; a `state/artifacts.json` entry records which backend minted its URL, so switching backends never redeploys a page against the wrong host. Two things worth checking before you choose one: the pages are large (the dashboard and proposals pages run well over 100 KB and grow with your proposal queue), and the HTML they render is a fragment without a `<!doctype>` wrapper — a backend that wraps content itself handles this, one that serves HTML verbatim may render it in quirks mode.
 
 **Requirements and fallback:** publishing needs a `/login`-authenticated session (API-key/gateway-token/cloud-provider sessions can't publish) with Artifacts entitled — available on Pro, Max, Team, and Enterprise plans, off by default in the Agent SDK/GitHub Action/MCP-server contexts and when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set. There is no reliable pre-check, so the hermit just tries to publish and falls back silently to the existing markdown-only channel delivery on any failure — flip a flag on and off freely, nothing else changes.
 
