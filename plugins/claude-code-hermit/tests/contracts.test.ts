@@ -2038,6 +2038,20 @@ describe('doctor version-currency check', () => {
   }), 20000);
 });
 
+describe('shared context-signal helper (anti-drift)', () => {
+  // The pre-extraction local copies drifted once already: doctor preferred the stale
+  // turn-wide max_prompt_tokens while the watchdog had moved to last_call_prompt_tokens.
+  // Both consumers must import the shared helper and keep no local selector behind.
+  test('watchdog and doctor import lib/context-signal and define no local selector', () => {
+    for (const f of ['hermit-watchdog.ts', 'doctor-check.ts']) {
+      const src = fs.readFileSync(path.join(SCRIPTS, f), 'utf-8');
+      expect(src).toContain("./lib/context-signal");
+      expect(src).not.toMatch(/function promptTokens(Of)?\(/);
+      expect(src).not.toMatch(/function isEstimateOnly(Entry)?\(/);
+    }
+  });
+});
+
 describe('doctor context-age check', () => {
   const caCheck = (report: any) => (report.checks ?? []).find((c: any) => c.id === 'context-age');
   const HYGIENE_CONFIG = { context_hygiene: { compact: { enabled: true, min_context_tokens: 1000 } } };
@@ -2063,6 +2077,16 @@ describe('doctor context-age check', () => {
     const ts = new Date(Date.now() - ageHours * 3600000).toISOString();
     fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'watchdog-events.jsonl'),
       JSON.stringify({ ts, action, reason: 'test' }) + '\n');
+  }
+
+  // The check judges compactible conversation (prompt − recorded surface, or − the 50k
+  // cold-start assumption). A tiny recorded surface keeps these fixtures' small token
+  // values meaningful while also exercising the context-surface.json read path.
+  function writeSurface(dir: string, tokens: number) {
+    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'context-surface.json'), JSON.stringify({
+      surface_upper_bound_tokens: tokens, post_tokens: 100,
+      boundary_at: new Date().toISOString(), observed_at: new Date().toISOString(), prev: null,
+    }));
   }
 
   test('compact tier not enabled → ok', withTmpdir(async (dir) => {
@@ -2092,6 +2116,7 @@ describe('doctor context-age check', () => {
     writeConfig(dir, HYGIENE_CONFIG);
     writeRuntime(dir, 'in_progress', 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 2000);
+    writeSurface(dir, 500); // compactible 1500 > 1000 threshold
     writeHygieneEvent(dir, 'context-compact', 1);
     const c = caCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('ok');
@@ -2102,6 +2127,7 @@ describe('doctor context-age check', () => {
     writeConfig(dir, HYGIENE_CONFIG);
     writeRuntime(dir, 'in_progress', 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 2000);
+    writeSurface(dir, 500); // compactible 1500 > 1000 threshold
     writeHygieneEvent(dir, 'context-compact', 48);
     const c = caCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('warn');
@@ -2122,10 +2148,35 @@ describe('doctor context-age check', () => {
       estimated_cost_usd: 0,
     };
     fs.writeFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), JSON.stringify(entry) + '\n');
+    writeSurface(dir, 500); // avg 2000 − 500 = 1500 > 1000 threshold
     writeHygieneEvent(dir, 'context-compact', 48);
     const c = caCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('context hygiene may be disabled or stuck');
+  }), 20000);
+
+  // Cold start: no context-surface.json → the 50k assumed surface is subtracted, so a
+  // prompt must exceed threshold + 50k to read as over-threshold (behavior parity with
+  // the pre-gate absolute default).
+  test('no surface recorded → 50k assumed surface subtracted', withTmpdir(async (dir) => {
+    writeConfig(dir, HYGIENE_CONFIG);
+    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeCostLogEntry(dir, 'sess-1', 45000); // compactible −5000 ≤ 1000 threshold
+    const c = caCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('ok');
+    expect(c.detail).toContain('under');
+  }), 20000);
+
+  // Malformed surface file degrades to the assumed-surface fallback, never throws.
+  test('malformed context-surface.json → fallback, no failure', withTmpdir(async (dir) => {
+    writeConfig(dir, HYGIENE_CONFIG);
+    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeCostLogEntry(dir, 'sess-1', 52000); // compactible 2000 > 1000 threshold via 50k fallback
+    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'context-surface.json'), '{ truncated');
+    writeHygieneEvent(dir, 'context-compact', 1);
+    const c = caCheck(await runDoctorCheck(dir));
+    expect(c.status).toBe('ok');
+    expect(c.detail).toContain('hygiene fired');
   }), 20000);
 });
 

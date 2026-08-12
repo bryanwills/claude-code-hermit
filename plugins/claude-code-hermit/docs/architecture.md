@@ -199,7 +199,8 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/.heartbeat`             | heartbeat-touch.ts only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.ts only                                | hermit-stop.ts (cleanup)                                      |
 | `state/cost-index.json`        | cost-tracker.ts only                                | cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts |
-| `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (`last_run` liveness + consecutive_stale)     |
+| `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (`last_run` liveness + `consecutive_stale` + `last_hygiene_eval` + `hygiene_eval_counts`) |
+| `state/context-surface.json`   | cost-tracker.ts only (derived at each compaction boundary) | hermit-watchdog.ts (compact-tier conversation gate), doctor-check.ts (`context-age`) |
 | `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), session-start (restart reason)|
 | `state/template-manifest.json` | `manifest-seed.ts` (called by hatch seed, docker-setup baselines, hermit-evolve update-after-copy) | evolve-plan.ts (classify), doctor-check.ts (shape check) |
 
@@ -336,7 +337,7 @@ Three context-reset mechanisms live in the watchdog script, each owning a distin
 
 1. **`post_close_clear`** — fires right after `daily-auto-close` archives the session. `/clear` is free here because the archive that just ran externalized everything; there is nothing left to preserve.
 2. **`watchdog.context_clear_tokens`** (700k default) — an emergency `/clear` for a context that grew far past routine hygiene. Destructive and conservative by design: it can fire mid-arc, with only `SHELL.md`'s task ledger (not the live reasoning thread) surviving.
-3. **`context_hygiene.compact`** (150k default) — routine hygiene. Always-on hermits wake on events ≥2 min apart, past the 5-minute prompt-cache TTL, so every wake re-pays the full accumulated context from cold. A `/compact` at a low, frequent threshold keeps that cost bounded; `startup-context.ts`'s post-compaction pointer section (`source === "compact"`, see Layer 4/5 above) re-seeds `runtime.json` state, pending micro-approvals, and outbound channel routing on the next `SessionStart`, which is what makes a threshold this low safe — nothing operationally load-bearing survives only in the discarded conversation.
+3. **`context_hygiene.compact`** (100k compactible-conversation default) — routine hygiene. Always-on hermits wake on events ≥2 min apart, past the 5-minute prompt-cache TTL, so every wake re-pays the full accumulated context from cold. A `/compact` at a low, frequent threshold keeps that cost bounded; `startup-context.ts`'s post-compaction pointer section (`source === "compact"`, see Layer 4/5 above) re-seeds `runtime.json` state, pending micro-approvals, and outbound channel routing on the next `SessionStart`, which is what makes a threshold this low safe — nothing operationally load-bearing survives only in the discarded conversation.
 
 Mechanism 3 also has a secondary effect on mechanism-independent native/proactive auto-compaction (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`): by keeping context low at quiescent moments, it reduces how often native auto-compaction gets the chance to fire mid-task in the first place.
 

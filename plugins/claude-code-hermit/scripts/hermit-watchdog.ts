@@ -38,6 +38,8 @@ import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
+import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
+import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 
@@ -757,38 +759,9 @@ function getLastCostLogEntry(sessionId: string): Json {
   return lastEntry;
 }
 
-/**
- * Prompt-side token count for a cost-log entry — approximates real context size,
- * not the per-turn billing total. `max_prompt_tokens` (the largest single API
- * call's input+cache in the turn) is the real thing; entries logged before that
- * field existed fall back to the per-call average of the summed total, which is
- * far closer to context size than the raw sum (a multi-call turn's sum is a
- * multiple of its actual context).
- */
-function promptTokens(entry: Json): number {
-  // Peak since the turn's last compaction when present — the newest call in the normal
-  // case (see peakPromptTokensSinceCompaction in cost-tracker.ts). Unlike max_prompt_tokens
-  // (the turn's peak) it stays correct for a turn that compacted mid-flight, where that
-  // peak describes the context CC already threw away.
-  if (typeof entry.last_call_prompt_tokens === 'number') return entry.last_call_prompt_tokens;
-  if (typeof entry.max_prompt_tokens === 'number') return entry.max_prompt_tokens;
-  const sum = (entry.input_tokens ?? 0) + (entry.cache_write_tokens ?? 0) + (entry.cache_read_tokens ?? 0);
-  return isEstimateOnly(entry) ? Math.round(sum / entry.api_calls) : sum;
-}
-
-/** True when a cost-log entry lacks the real per-call peak (max_prompt_tokens) and
- *  spans more than one API call — promptTokens() can only average such an entry,
- *  which is why the destructive /clear tier refuses to act on it (see maybeContextClear). */
-function isEstimateOnly(entry: Json): boolean {
-  return typeof entry.max_prompt_tokens !== 'number'
-    && typeof entry.api_calls === 'number' && entry.api_calls > 1;
-}
-
-// A reading above this is not a context, it is corruption — live logs have carried rows
-// citing 6.5M prompt tokens (an old estimate fallback multiplying a summed multi-call turn
-// out). Deliberately far above any real window rather than tracking model context sizes:
-// it exists to reject garbage, not to encode a model contract.
-const MAX_PLAUSIBLE_PROMPT_TOKENS = 2_000_000;
+// promptTokens (context size from a cost-log entry), isEstimateOnly and
+// MAX_PLAUSIBLE_PROMPT_TOKENS now live in lib/context-signal.ts, shared with
+// doctor-check.ts and cost-tracker.ts so they can't drift again.
 
 /**
  * Why this cost-log entry must not drive a hygiene decision, or null when it may.
@@ -800,7 +773,7 @@ const MAX_PLAUSIBLE_PROMPT_TOKENS = 2_000_000;
  * threshold), or the number itself is impossible. Both skip rather than guess: a real
  * turn produces a fresh entry within one wake.
  */
-function poisonedEntrySkip(entry: Json, runtime: Json): string | null {
+function poisonedEntrySkip(entry: Json, runtime: Json): PoisonReason | null {
   // observed_at is the source-side observation; the row's own timestamp is ingestion time,
   // which is fresh even on an entry describing an old context. Legacy rows have only the
   // latter — better than nothing, and they age out within a session.
@@ -823,26 +796,64 @@ function resolveHygieneSessionId(runtime: Json): string {
   return status && typeof status.session_id === 'string' ? status.session_id : '';
 }
 
+/** The two ways a cost-log entry can be poisoned (see poisonedEntrySkip). Typed so
+ *  the `skip:${PoisonReason}` template below stays a closed set. */
+type PoisonReason = 'stale-entry' | 'aberrant-reading';
+
+/** Closed registry of hygiene evaluation outcomes — every setHygieneEval call site
+ *  resolves into this union, so hygiene_eval_counts has a fixed key set by
+ *  construction (≤20 distinct strings across both mechanisms) and a typo'd or
+ *  novel outcome is a compile error, not a silent new counter key. */
+type HygieneOutcome =
+  | 'fired'
+  | `skip:lifecycle:${GuardReason}`
+  | `skip:${PoisonReason}`
+  | 'skip:no-session-id'
+  | 'skip:no-cost-entry'
+  | 'skip:estimate-only'
+  | 'skip:under-threshold'
+  | 'skip:below-floor'
+  | 'skip:interval-cooldown'
+  | 'skip:midnight-adjacent'
+  | 'skip:already-processed'
+  | 'skip:quiescence-pending'
+  | 'skip:lock-held';
+
 /** Records this tick's hygiene outcome on a held watchdog-state object, keyed by
  *  mechanism, so the clear and compact tiers each keep their own most-recent eval.
  *  A single tick runs clear then compact; a shared slot would let compact's outcome
  *  clobber clear's every time compact is enabled, hiding the clear tier's skip/fire
  *  reason — the exact diagnosability this record exists to provide. The caller owns
- *  the subsequent writeWatchdogState (folds into a write it was already making). */
-function setHygieneEval(ws: Json, mechanism: 'clear' | 'compact', outcome: string, promptTokensVal?: number): void {
+ *  the subsequent writeWatchdogState (folds into a write it was already making).
+ *
+ *  Also increments hygiene_eval_counts[mechanism][outcome] — durable, monotonic
+ *  FIRST-BLOCKER counters (each evaluation stamps exactly one outcome, the first
+ *  guard that returned, not every simultaneously-binding constraint). Counts ≠
+ *  scheduler ticks: disabled/invalid config, a missing runtime.json, post-close-clear
+ *  ticks, and the process.exit(0) after a clear-tier fire all leave one or both
+ *  mechanisms unstamped. Readers diff snapshots against `since` for rates. */
+function setHygieneEval(ws: Json, mechanism: 'clear' | 'compact', outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): void {
   if (!ws.last_hygiene_eval || typeof ws.last_hygiene_eval !== 'object') ws.last_hygiene_eval = {};
   ws.last_hygiene_eval[mechanism] = {
     ts: utcStamp(),
     outcome,
     ...(promptTokensVal != null ? { prompt_tokens: promptTokensVal } : {}),
+    ...(compactibleVal != null ? { compactible_tokens: compactibleVal } : {}),
   };
+  if (!ws.hygiene_eval_counts || typeof ws.hygiene_eval_counts !== 'object') {
+    ws.hygiene_eval_counts = { since: utcStamp(), clear: {}, compact: {} };
+  }
+  if (!ws.hygiene_eval_counts[mechanism] || typeof ws.hygiene_eval_counts[mechanism] !== 'object') {
+    ws.hygiene_eval_counts[mechanism] = {};
+  }
+  ws.hygiene_eval_counts[mechanism][outcome] = (ws.hygiene_eval_counts[mechanism][outcome] ?? 0) + 1;
 }
 
 /** Read-modify-write variant of setHygieneEval for early-exit branches that don't
  *  already hold a loaded watchdogState in hand. */
-function stampHygieneEval(mechanism: 'clear' | 'compact', outcome: string, promptTokensVal?: number): void {
+function stampHygieneEval(mechanism: 'clear' | 'compact', outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): void {
   const ws = readWatchdogState();
-  setHygieneEval(ws, mechanism, outcome, promptTokensVal);
+  setHygieneEval(ws, mechanism, outcome, promptTokensVal, compactibleVal);
   writeWatchdogState(ws);
 }
 
@@ -949,7 +960,9 @@ const COMPACT_MARKER_TTL_SECS = 3600;
 /**
  * Routine-hygiene compaction — separate mechanism from maybeContextClear (destructive
  * /clear, 700k emergency backstop) and maybePostCloseClear (archived boundary /clear).
- * Fires arc-preserving /compact at a low threshold (default 150k) so cold-cache wakes
+ * Fires arc-preserving /compact at a low threshold (default 100k of estimated
+ * compactible conversation — total prompt minus the recorded fixed-surface upper
+ * bound, or minus the 50k cold-start assumption) so cold-cache wakes
  * (heartbeat/routines/channel messages, always ≥5min apart — past the prompt cache TTL)
  * pay a small prompt instead of the full accumulated context. Sends no pointer payload
  * itself — pointers survive via startup-context.ts's SessionStart source==="compact"
@@ -1011,9 +1024,23 @@ function maybeContextCompact(config: Json): void {
 
   const prompt = promptTokens(lastEntry);
 
-  // Token floor: never compact a small context, even with a boundary marker in play
-  if (prompt < MIN_COMPACT_FLOOR_TOKENS) { stampHygieneEval('compact', 'skip:below-floor', prompt); return; }
-  if (prompt <= threshold) { stampHygieneEval('compact', 'skip:under-threshold', prompt); return; }
+  // Conversation gate (PROP-076): subtract the hermit's recorded fixed-surface
+  // upper bound (state/context-surface.json, derived by cost-tracker at each
+  // compaction boundary) — or the 50k cold-start assumption before the first
+  // measurement — so min_context_tokens denominates estimated compactible
+  // conversation rather than total prompt. Total prompt included a per-hermit
+  // fixed surface compaction cannot reclaim, which made one configured number
+  // fire at very different conversation sizes per hermit and silently tighten
+  // as plugins/memory grew. The recorded value is an upper bound (it carries
+  // post-boundary wake messages), so `compactible` is a lower bound: the gate
+  // errs toward compacting later, never earlier.
+  const surface = readContextSurface(HERMIT_ROOT);
+  const compactible = compactibleTokens(lastEntry, surface?.surface_upper_bound_tokens ?? null);
+
+  // Token floor: never compact away a small compactible conversation, even with a
+  // boundary marker in play — same units as the threshold above.
+  if (compactible < MIN_COMPACT_FLOOR_TOKENS) { stampHygieneEval('compact', 'skip:below-floor', prompt, compactible); return; }
+  if (compactible <= threshold) { stampHygieneEval('compact', 'skip:under-threshold', prompt, compactible); return; }
 
   const watchdogState = readWatchdogState();
 
@@ -1036,7 +1063,7 @@ function maybeContextCompact(config: Json): void {
   if (!boundaryWaive && watchdogState.last_compacted_at) {
     const sinceLast = ageSecs(watchdogState.last_compacted_at);
     if (sinceLast !== null && sinceLast < minIntervalSecs) {
-      setHygieneEval(watchdogState, 'compact', 'skip:interval-cooldown', prompt);
+      setHygieneEval(watchdogState, 'compact', 'skip:interval-cooldown', prompt, compactible);
       writeWatchdogState(watchdogState);
       return;
     }
@@ -1044,20 +1071,20 @@ function maybeContextCompact(config: Json): void {
 
   // Idempotence: bail if this cost-log entry was already compacted
   if (watchdogState.last_compacted_cost_ts && watchdogState.last_compacted_cost_ts === lastEntry.timestamp) {
-    setHygieneEval(watchdogState, 'compact', 'skip:already-processed', prompt);
+    setHygieneEval(watchdogState, 'compact', 'skip:already-processed', prompt, compactible);
     writeWatchdogState(watchdogState);
     return;
   }
 
   if (!paneStable) {
-    setHygieneEval(watchdogState, 'compact', 'skip:quiescence-pending', prompt);
+    setHygieneEval(watchdogState, 'compact', 'skip:quiescence-pending', prompt, compactible);
     writeWatchdogState(watchdogState);
     return;
   }
 
   // Pane stable across two ticks — safe to compact
   if (!tryAcquireLifecycleLock()) {
-    setHygieneEval(watchdogState, 'compact', 'skip:lock-held', prompt);
+    setHygieneEval(watchdogState, 'compact', 'skip:lock-held', prompt, compactible);
     writeWatchdogState(watchdogState);
     return;
   }
@@ -1071,12 +1098,12 @@ function maybeContextCompact(config: Json): void {
     watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
     watchdogState.last_compacted_at = utcStamp();
     watchdogState.last_pane_hash_compact = null; // reset so next bloat cycle re-arms
-    setHygieneEval(watchdogState, 'compact', 'fired', prompt);
+    setHygieneEval(watchdogState, 'compact', 'fired', prompt, compactible);
     writeWatchdogState(watchdogState);
     try { fs.rmSync(COMPACT_REQUESTED_JSON); } catch {} // consume the boundary waiver now that it fired
-    // Prompt-token count travels in the event so the next cost-log entry gives a
+    // Both token counts travel in the event so the next cost-log entry gives a
     // before/after for free — feeds /hermit-evolution and threshold calibration.
-    appendEvent('context-compact', `prompt tokens ${prompt} over threshold ${threshold}, flavor ${flavor}`);
+    appendEvent('context-compact', `prompt tokens ${prompt} (compactible ~${compactible}) over threshold ${threshold}, flavor ${flavor}`);
   } finally {
     releaseLock(LIFECYCLE_LOCK);
   }

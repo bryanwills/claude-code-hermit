@@ -2711,3 +2711,163 @@ describe('watchdog message localization', () => {
     expect(pt).toContain('O seu hermit está em pausa (o watchdog) até ');
   });
 });
+
+// -------------------------------------------------------
+// conversation gate + hygiene first-blocker counters
+// -------------------------------------------------------
+
+function writeSurfaceFile(h: Hermit, tokens: number): void {
+  fs.writeFileSync(state(h, 'context-surface.json'), JSON.stringify({
+    surface_upper_bound_tokens: tokens, post_tokens: 30000,
+    boundary_at: isoAgo(24), observed_at: isoAgo(24), prev: null,
+  }) + '\n');
+}
+
+function readWdState(h: Hermit): any {
+  return JSON.parse(fs.readFileSync(state(h, 'watchdog-state.json'), 'utf-8'));
+}
+
+test('context_compact: recorded surface subtracted — under-threshold skip carries compactible_tokens',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 100000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    writeSurfaceFile(h, 65000);
+    // 160k total − 65k surface = 95k compactible ≤ 100k threshold → skip
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 160000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    const r = await watchdog(h, 'run');
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    const ws = readWdState(h);
+    expect(ws.last_hygiene_eval.compact.outcome).toBe('skip:under-threshold');
+    expect(ws.last_hygiene_eval.compact.prompt_tokens).toBe(160000);
+    expect(ws.last_hygiene_eval.compact.compactible_tokens).toBe(95000);
+  }));
+
+test('context_compact: recorded surface subtracted — fires once compactible crosses the threshold',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 100000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    writeSurfaceFile(h, 65000);
+    // 170k total − 65k surface = 105k compactible > 100k threshold → fires on tick 2
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 170000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run'); // tick 1: quiescence pending
+    const r2 = await watchdog(h, 'run'); // tick 2: fires
+    expect(r2.exitCode).toBe(0);
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('prompt tokens 170000 (compactible ~105000) over threshold 100000');
+    const ws = readWdState(h);
+    expect(ws.last_hygiene_eval.compact.outcome).toBe('fired');
+    expect(ws.last_hygiene_eval.compact.compactible_tokens).toBe(105000);
+  }));
+
+test('context_compact: no surface file → 50k assumed surface gives cold-start parity with the old 150k total default',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 100000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    // 150k total − 50k assumed = 100k compactible, NOT > threshold → never fires
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 150000 }]);
+    await watchdog(h, 'run');
+    await watchdog(h, 'run');
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    expect(readWdState(h).last_hygiene_eval.compact.outcome).toBe('skip:under-threshold');
+
+    // 151k total − 50k assumed = 101k compactible > threshold → fires
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 1000, cache_write_tokens: 0, cache_read_tokens: 150000 }]);
+    await watchdog(h, 'run');
+    const r = await watchdog(h, 'run');
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-compact');
+  }));
+
+test('context_compact: malformed context-surface.json degrades to the assumed-surface fallback, never throws',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 100000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    fs.writeFileSync(state(h, 'context-surface.json'), '{ truncated');
+    // 250k total − 50k fallback = 200k compactible → fires on tick 2
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-compact');
+  }));
+
+test('context_compact: floor applies to the subtracted value (compactible below 60k floor → skip:below-floor)',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 1000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    // No surface file: 100k total − 50k assumed = 50k compactible < 60k floor
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 100000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    await watchdog(h, 'run');
+    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
+    expect(readWdState(h).last_hygiene_eval.compact.outcome).toBe('skip:below-floor');
+  }));
+
+test('hygiene_eval_counts: monotonic first-blocker counters keyed per mechanism with a stable since',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 100000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 30000 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const ws1 = readWdState(h);
+    // compactible −20k → below floor is the first blocker on every tick
+    expect(ws1.hygiene_eval_counts.compact['skip:below-floor']).toBe(1);
+    expect(typeof ws1.hygiene_eval_counts.since).toBe('string');
+
+    await watchdog(h, 'run');
+    const ws2 = readWdState(h);
+    expect(ws2.hygiene_eval_counts.compact['skip:below-floor']).toBe(2);
+    expect(ws2.hygiene_eval_counts.since).toBe(ws1.hygiene_eval_counts.since);
+    // clear tier is unconfigured (no context_clear_tokens) → silent, never counted
+    expect(Object.keys(ws2.hygiene_eval_counts.clear ?? {}).length).toBe(0);
+  }));
+
+test('hygiene_eval_counts: a clear-tier fire exits the tick before compact ever stamps (first-blocker semantics)',
+  withHermit(async (h) => {
+    writeContextCompactConfig(h, { minContextTokens: 100000, clearTokens: 700000 });
+    writeAlwaysOnRuntime(h, 'idle');
+    // 800k total: over the 700k clear threshold AND the compact threshold
+    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 800000, max_prompt_tokens: 800000, api_calls: 1 }]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run'); // tick 1: clear quiescence-pending, then compact also stamps
+    const ws1 = readWdState(h);
+    expect(ws1.hygiene_eval_counts.clear['skip:quiescence-pending']).toBe(1);
+    const compactTick1 = Object.values(ws1.hygiene_eval_counts.compact as Record<string, number>).reduce((a: number, b: any) => a + b, 0);
+    expect(compactTick1).toBe(1);
+
+    const r2 = await watchdog(h, 'run'); // tick 2: clear FIRES and process.exit(0)s the tick
+    expect(r2.exitCode).toBe(0);
+    const ws2 = readWdState(h);
+    expect(ws2.hygiene_eval_counts.clear.fired).toBe(1);
+    // compact never ran on the firing tick — its counters are untouched since tick 1
+    const compactTick2 = Object.values(ws2.hygiene_eval_counts.compact as Record<string, number>).reduce((a: number, b: any) => a + b, 0);
+    expect(compactTick2).toBe(compactTick1);
+  }));

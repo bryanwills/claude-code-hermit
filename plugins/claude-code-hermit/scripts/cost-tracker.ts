@@ -21,6 +21,8 @@ import { sendOperatorNotice } from './lib/channel-send';
 import { BUDGET, resolveLocale, type Locale } from './lib/messages';
 import { classifySource } from './lib/trigger-source';
 import { runtimeTmpPath } from './lib/runtime';
+import { readContextSurface, writeContextSurface } from './lib/context-surface';
+import { MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
 
 type Json = any;
 
@@ -319,11 +321,74 @@ function readLastTurnUsage(transcriptPath: string): Json {
         const source = trusted ? resolved.source : 'other';
         const sourceInherited = trusted && resolved.inherited;
         const subagents = collectSubagentUsage(lines, i);
-        return { ...summed, hadHumanTurn, source, sourceInherited, subagents, observedAt, lastCallPromptTokens };
+        return { ...summed, hadHumanTurn, source, sourceInherited, subagents, observedAt, lastCallPromptTokens, tailLines: lines };
       } catch {}
     }
   } catch {}
   return null;
+}
+
+// Fixed-surface derivation (state/context-surface.json): when the tail contains a
+// compact_boundary not yet recorded, the earliest assistant call after it minus the
+// boundary's compactMetadata.postTokens (the summarized conversation alone) is an
+// upper bound on this hermit's fixed surface — the input the watchdog's compact
+// gate subtracts. Runs on the tail readLastTurnUsage already read; a boundary
+// outside that window was recorded on an earlier Stop. peakPromptTokensSinceCompaction
+// cannot be reused here: it breaks at the turn's user-entry boundary before ever
+// reaching the compact_boundary record. postTokens is an uncontracted harness field
+// (probe-verified, not documented), so every branch validates and skips rather than
+// guesses — a failed derivation keeps the previous record.
+function maybeDeriveSurface(lines: string[]): void {
+  try {
+    // Cheap prefilter: boundaries are rare (one per compaction) but this runs on
+    // every Stop, and the backward scan below JSON.parses the whole tail when no
+    // boundary exists — the common case. A substring miss is an exact negative
+    // (isCompactBoundary can't match without the literal appearing); a false
+    // positive just falls through to the precise parse loop.
+    if (!lines.some(l => l.includes('compact_boundary'))) return;
+
+    let boundaryIdx = -1;
+    let boundary: Json = null;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let e: Json;
+      try { e = JSON.parse(lines[i]); } catch { continue; }
+      if (isCompactBoundary(e)) { boundaryIdx = i; boundary = e; break; }
+    }
+    if (boundaryIdx < 0) return;
+    const boundaryAt: string = typeof boundary.timestamp === 'string' ? boundary.timestamp : '';
+    if (!boundaryAt) return;
+    const existing = readContextSurface(HERMIT_DIR);
+    if (existing && existing.boundary_at === boundaryAt) return; // already recorded
+    const postTokens = boundary.compactMetadata?.postTokens;
+    if (typeof postTokens !== 'number' || !Number.isFinite(postTokens) || postTokens <= 0) return;
+    // Earliest assistant call after the boundary — extractUsage is assistant-only,
+    // so subagent tool_result usage can never be picked up here.
+    for (let j = boundaryIdx + 1; j < lines.length; j++) {
+      let e: Json;
+      try { e = JSON.parse(lines[j]); } catch { continue; }
+      const usage = extractUsage(e);
+      if (!usage) continue;
+      const surface = (usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens) - postTokens;
+      // Implausible — never guess from this call, but keep scanning rather than
+      // abandoning the boundary. A degenerate/partial `usage` (the shape
+      // peakPromptTokensSinceCompaction defends against) on the earliest post-boundary
+      // call would otherwise fail this boundary for good: nothing is written, so every
+      // later Stop re-selects the same call until the boundary leaves the tail window.
+      // A later call only inflates the result, and the record is an upper bound — the
+      // compact gate still errs toward firing later, never earlier.
+      if (surface <= 0 || surface > MAX_PLAUSIBLE_PROMPT_TOKENS) continue;
+      writeContextSurface(HERMIT_DIR, {
+        surface_upper_bound_tokens: surface,
+        post_tokens: postTokens,
+        boundary_at: boundaryAt,
+        observed_at: typeof e.timestamp === 'string' ? e.timestamp : '',
+        prev: existing
+          ? { surface_upper_bound_tokens: existing.surface_upper_bound_tokens, boundary_at: existing.boundary_at }
+          : null,
+      });
+      return;
+    }
+  } catch {}
 }
 
 // Newest main (non-subagent) row already in the cost log — the duplicate check in run()
@@ -810,6 +875,10 @@ async function run(data: Json): Promise<string | null> {
     if (!turn) {
       return null;
     }
+
+    // Surface derivation is idempotent (boundary_at-gated) and independent of the
+    // billing dedupe below — run it before any early return can skip it.
+    maybeDeriveSurface(turn.tailLines);
 
     const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model: rawModel, hadHumanTurn, source, sourceInherited, apiCalls, maxPromptTokens, subagents, observedAt, lastCallPromptTokens } = turn;
     const model = detectModel(rawModel);
