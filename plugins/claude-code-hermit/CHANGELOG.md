@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `artifacts.backend` (default `"claude"`) publishes artifact pages to a connected MCP artifact server instead of claude.ai, following that server's own MCP instructions; set it via `/hermit-settings artifact-backend`, registering and permissioning the server yourself. `state/artifacts.json` records which backend minted each URL, and a failed publish skips rather than falling back to claude.ai.
 - `scripts/lib/artifact-theme.ts` owns the visual system for the dashboard and proposals pages — one `PALETTE` generating all four theme blocks, the type scale, and the shared markup helpers. `tests/artifact-theme.test.ts` pins the invariants a hand edit could break.
 - Hygiene evaluations keep durable first-blocker counters in `watchdog-state.json` (`hygiene_eval_counts`: per mechanism, outcome → count, plus `since`), so the skip mix (cooldown vs threshold vs operator-recency) is reconstructable from state instead of overwritten every tick. `hermit-doctor`'s watchdog check digests the top outcomes per mechanism.
 - cost-tracker records the hermit's fixed-surface upper bound in `state/context-surface.json` at each compaction boundary (earliest post-boundary call minus the boundary's `compactMetadata.postTokens`, strictly validated), keeping the previous reading for comparison. `hermit-doctor` shows it informationally.

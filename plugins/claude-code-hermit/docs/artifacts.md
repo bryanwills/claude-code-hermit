@@ -2,7 +2,11 @@
 
 Home for the hermit's use of Claude Code's [Artifacts](https://code.claude.com/docs/en/artifacts)
 feature — private `claude.ai/code/artifact/<uuid>` pages published from the main
-session. Gated per artifact type under `config.artifacts.*` (default **on** — the
+session. That is the default and everything below describes it; `config.artifacts.backend`
+can instead point publishing at a connected MCP artifact server the operator runs, in which
+case this file's claude.ai-specific mechanics (tool-call shape, `force`, entitlement,
+TUI-only reachability) are replaced by that server's own protocol — see § Non-claude
+backend deviations. Gated per artifact type under `config.artifacts.*` (default **on** — the
 plugin's research-preview feature-defaults rule; disable a single page via
 `/hermit-settings artifact-dashboard|artifact-proposals|artifact-weekly-review`, or
 disable Artifacts entirely via Claude Code's own `disableArtifact`,
@@ -32,6 +36,12 @@ publishes silently no-op (step 5 below) — a deliberate choice, not a bug.
 
 ## Shared refresh procedure
 
+**Resolve the backend first.** `config.artifacts.backend` is `"claude"` by default — the
+native `Artifact` tool, and the five steps below apply unchanged. Any other value names a
+**connected MCP artifact server** the operator registered and permissioned themselves —
+take the § Non-claude backend deviations after step 2, which defers entirely to that
+server's own MCP `instructions`.
+
 Every script-rendered artifact type (dashboard, proposals page, weekly review) follows
 the same five steps; only the render script, `<title>`, and `state/artifacts.json` key
 differ per type (called out in each subsection below):
@@ -40,7 +50,11 @@ differ per type (called out in each subsection below):
    and parse stdout JSON (`path`, `bytes`, `hash`).
 2. Read `.claude-code-hermit/state/artifacts.json` (if present) and compare `hash` to
    `<key>.hash`. **Unchanged → stop here**, no publish (avoids minting a no-op
-   artifact version).
+   artifact version). First check `<key>.backend` against the active backend — an entry
+   with **no** `backend` field is a pre-existing native record and counts as `"claude"`;
+   an entry whose `backend` differs from the active one is **treated as unpublished**
+   (fall through to a fresh create in step 3 and overwrite the entry in step 4, ignoring
+   its `hash` and `url`).
 3. Changed or no prior record → call `Artifact` with `file_path` set to the rendered
    path, a stable `<title>` for that type, a stable favicon (pick once, keep it across
    republishes), and `url` set to `<key>.url` from `state/artifacts.json` when present
@@ -51,11 +65,34 @@ differ per type (called out in each subsection below):
    state) is overridden here, not resolved by re-fetching. First publish (no `url`)
    omits it.
 4. On success, write `.claude-code-hermit/state/artifacts.json`:
-   `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>"}}`
+   `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>", "backend": "<active backend>"}}`
    (merge — never drop sibling keys belonging to other artifact types).
 5. On any failure (tool absent, no entitlement, publish error) — skip silently, append
    one SHELL.md Findings line for the session (not one per attempt), and continue.
    Never block or degrade the calling skill's normal channel/markdown output.
+
+### Non-claude backend deviations
+
+When `config.artifacts.backend` is anything other than `"claude"`, steps 1 and 2 are
+unchanged (render, then the hash and backend gate). Steps 3 and 5 change:
+
+- **Step 3 — publish via the named MCP server's own artifact tools.** Follow that server's
+  `instructions` for tool selection, argument names, content shape, create-vs-update, and
+  version-conflict handling; this doc deliberately specifies none of it, so a compatible
+  backend needs no core change. The only requirement core places on a backend is that its
+  create/update tools accept a title plus the page content and return a stable `url`.
+  A recurring page is **updated in place** so its URL stays stable across refreshes — never
+  re-created. `file_path`, `force`, and favicon are `Artifact`-tool concepts and do not
+  apply here.
+- **Step 5 — same skip-and-log as the default path above, plus no fallback.** Server not
+  connected, its tools unavailable, or any call fails → skip and log as above.
+  **Never fall back to the native `Artifact` tool.** An operator who configured a
+  self-hosted backend must not have hermit content quietly published to Anthropic's host
+  instead.
+
+Registering the server, minting its token, and granting its tool permissions are the
+operator's own manual setup — core neither performs nor verifies them, and
+`hermit-start`'s boot-time grant covers only the native `Artifact` tool.
 
 ## Dashboard
 

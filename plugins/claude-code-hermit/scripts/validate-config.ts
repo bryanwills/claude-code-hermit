@@ -567,6 +567,17 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       ) {
         errors.push('artifacts.publish_authorized: must be a boolean or null');
       }
+      // Written by settings-edit.ts, which writes through fs and so never trips the
+      // validate-config PostToolUse hook — and its `kind: 'string'` path stores the
+      // operator's value verbatim. An empty string would otherwise reach the publish
+      // path as a backend name, so reject it here rather than type-check alone.
+      if (config.artifacts.backend !== undefined) {
+        if (typeof config.artifacts.backend !== 'string') {
+          errors.push('artifacts.backend: must be a string');
+        } else if (config.artifacts.backend.trim() === '') {
+          errors.push('artifacts.backend: must not be empty or whitespace-only');
+        }
+      }
     }
   }
 

@@ -124,6 +124,7 @@ const DEFAULT_CONFIG: Json = {
     proposals: true,
     weekly_review: true,
     publish_authorized: null,
+    backend: 'claude',
   },
   context_hygiene: {
     compact: {

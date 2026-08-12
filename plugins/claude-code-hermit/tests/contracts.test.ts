@@ -770,6 +770,29 @@ describe('artifacts validation', () => {
     const out = runValidate({ artifacts: { publish_authorized: 'yes' } });
     expect(out.errors.some((e: string) => e.includes('artifacts.publish_authorized: must be a boolean or null'))).toBe(true);
   });
+
+  test('artifacts.backend accepts the default and an MCP server name', () => {
+    for (const value of ['claude', 'my-artifact-host']) {
+      const out = runValidate({ artifacts: { backend: value } });
+      expect(out.errors.filter((e: string) => e.includes('backend'))).toEqual([]);
+    }
+  });
+
+  test('non-string artifacts.backend is an error', () => {
+    for (const value of [true, 3, null, ['a']]) {
+      const out = runValidate({ artifacts: { backend: value } });
+      expect(out.errors.some((e: string) => e.includes('artifacts.backend: must be a string'))).toBe(true);
+    }
+  });
+
+  test('empty or whitespace-only artifacts.backend is an error', () => {
+    for (const value of ['', '   ', '\t\n']) {
+      const out = runValidate({ artifacts: { backend: value } });
+      expect(
+        out.errors.some((e: string) => e.includes('artifacts.backend: must not be empty or whitespace-only')),
+      ).toBe(true);
+    }
+  });
 });
 
 // ============================================================
