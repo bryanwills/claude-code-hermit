@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- One anchored parser in `scripts/lib/md-write.ts` now owns the `## <heading>` section grammar for SHELL.md — locating, reading, appending, replacing, and the placeholder-comment rule. The local parsers across `startup-context.ts`, `reflect-precheck.ts`, `lib/progress-log.ts`, `evaluate-session.ts`, `lib/alert-state.ts`, `cost-tracker.ts`, `session-archive.ts` and `archive-shell.ts` are deleted. Operator-added custom sections and hand edits still pass through untouched.
+
+### Fixed
+- A `###` sub-heading above a real section no longer hijacks that section's body. Most section reads used `indexOf('## Task')` or an unanchored `/## Blockers\n/`, and `'### Task'.indexOf('## Task') === 1`, so a sub-heading written anywhere above the section silently won — affecting session-start context injection, the `.status.json` task/blockers fields the channel status responder reads, Progress Log staleness detection, the Monitoring bloat check, and the `reflect --quick` content hash.
+
 ## [1.2.38] - 2026-08-12
 
 ### Added

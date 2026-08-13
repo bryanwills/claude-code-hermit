@@ -1,6 +1,10 @@
 // lib/md-write.ts — transactional markdown/frontmatter write helpers, promoted
 // from apply-reflection-actions.ts so proposal.ts's create/patch/shell-append
 // verbs can reuse the same atomic-write and section-append primitives.
+//
+// Also the single home for the `## <heading>` section grammar (findSection and
+// the extract/replace/placeholder helpers built on it). Every SHELL.md reader
+// and writer goes through here so they agree on where a section starts and ends.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -59,6 +63,45 @@ export function findSection(content: string, heading: string): { start: number; 
   const start = m.index + m[0].length;
   const nextHeading = content.indexOf('\n## ', start);
   return { start, end: nextHeading === -1 ? content.length : nextHeading };
+}
+
+// Reads a `## <heading>` section's body (heading line excluded, otherwise
+// verbatim — callers own their own trimming). Null when the heading is absent.
+// Anchored via findSection: `'### Task'.indexOf('## Task') === 1`, so the
+// unanchored substring/regex reads this replaces would let a `### Task`
+// sub-heading anywhere above the real section hijack the answer.
+export function extractSection(content: string, heading: string): string | null {
+  const section = findSection(content, heading);
+  if (!section) return null;
+  const body = content.slice(section.start, section.end);
+  return body.startsWith('\n') ? body.slice(1) : body;
+}
+
+// Drops placeholder comments (`<!-- ... -->`, possibly multi-line) and trims.
+// The single rule for "is this section really empty, or does it just still
+// carry its template placeholder?".
+export function stripPlaceholders(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, '').trim();
+}
+
+// First non-empty, non-placeholder line of a section body, optionally clipped.
+// '' when the section holds nothing but blanks and placeholders.
+export function firstContentLine(section: string, maxLen?: number): string {
+  for (const line of section.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('<!--')) continue;
+    return maxLen ? trimmed.slice(0, maxLen) : trimmed;
+  }
+  return '';
+}
+
+// Replaces a `## <heading>` section's body wholesale; content unchanged when the
+// heading is absent. `newBody` is inserted immediately after the heading line's
+// text, so it must carry its own leading newline.
+export function replaceSectionInPlace(content: string, heading: string, newBody: string): string {
+  const section = findSection(content, heading);
+  if (!section) return content;
+  return content.slice(0, section.start) + newBody + content.slice(section.end);
 }
 
 // Appends a pre-rendered line to a `## <heading>` section (inserted at section

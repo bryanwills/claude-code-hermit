@@ -76,3 +76,64 @@ describe('cost-tracker: writeStatusJson populates status/task from real state', 
     expect(status.task).toBe('Test task for hook validation');
   });
 });
+
+// Regression: the section reads went through an unanchored `/## Blockers\n/`,
+// and a `### Blockers` sub-heading in a Progress Log entry matches that substring.
+// The status responder then reported a stale sub-heading's body as the live blocker.
+describe('cost-tracker: a ### sub-heading does not hijack the section read', () => {
+  let dir: string;
+  let statusPath: string;
+
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cost-decoy-'));
+    const cchDir = path.join(dir, '.claude-code-hermit');
+    fs.mkdirSync(path.join(cchDir, 'state'), { recursive: true });
+    fs.mkdirSync(path.join(cchDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(cchDir, 'state', 'runtime.json'),
+      JSON.stringify({ session_id: 'test-session', session_state: 'in_progress' })
+    );
+    fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({ timezone: null }));
+    fs.writeFileSync(path.join(cchDir, 'sessions', 'SHELL.md'), [
+      '# Active Session',
+      '',
+      '## Session Info',
+      '- **ID:** S-001',
+      '',
+      '## Task',
+      'Real task',
+      '',
+      '## Progress Log',
+      '[09:00] Wrote up findings under a sub-heading:',
+      '### Blockers',
+      'decoy blocker from a sub-heading',
+      '',
+      '## Blockers',
+      'the real blocker',
+      '',
+      '## Session Summary',
+      '',
+    ].join('\n'));
+
+    const transcriptPath = path.join(dir, 'transcript.jsonl');
+    fs.writeFileSync(transcriptPath, [
+      triggerPrompt('[hermit-routine:demo] start'),
+      assistantEntry('claude-sonnet-4-6', 1000, 500),
+    ].join('\n') + '\n');
+    const stdin = JSON.stringify({ session_id: 'test-session', transcript_path: transcriptPath });
+    await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+
+    statusPath = path.join(cchDir, 'sessions', '.status.json');
+  });
+
+  afterAll(() => {
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  test('blockers reads the real ## Blockers section, not the ### decoy', () => {
+    const status = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
+    expect(status.blockers).toBe('the real blocker');
+  });
+});

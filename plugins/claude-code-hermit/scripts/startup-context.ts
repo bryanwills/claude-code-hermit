@@ -19,6 +19,7 @@ import { loadConfig } from './lib/channel-auth';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { formatTokens } from './lib/format';
+import { extractSection, firstContentLine } from './lib/md-write';
 
 type Json = any;
 
@@ -88,16 +89,6 @@ function emitArtifacts(artifacts: Json[], budget: number, headerFn: (a: Json) =>
   }
 }
 
-// Extract a named ## Section from markdown content.
-// Returns the section body (without the header line), or null if not found.
-function extractSection(md: string, name: string): string | null {
-  const idx = md.indexOf(`## ${name}`);
-  if (idx === -1) return null;
-  const bodyStart = md.indexOf('\n', idx) + 1;
-  const nextSection = md.indexOf('\n## ', bodyStart);
-  return nextSection !== -1 ? md.slice(bodyStart, nextSection) : md.slice(bodyStart);
-}
-
 // Return last N non-empty lines from a string.
 function lastLines(text: string, n: number): string {
   const lines = text.split('\n').filter(l => l.trim());
@@ -142,11 +133,8 @@ function buildCompactionPointers(agentDir: string): string {
 
   try {
     const shellContent = fs.readFileSync(path.resolve(agentDir, 'sessions', 'SHELL.md'), 'utf-8');
-    const task = extractSection(shellContent, 'Task');
-    const firstLine = task
-      ? task.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('<!--'))
-      : null;
-    if (firstLine) parts.push(`task: ${guarded('sessions/SHELL.md', firstLine.slice(0, 300))}`);
+    const firstLine = firstContentLine(extractSection(shellContent, 'Task') ?? '', 300);
+    if (firstLine) parts.push(`task: ${guarded('sessions/SHELL.md', firstLine)}`);
     const progress = extractSection(shellContent, 'Progress Log');
     const lastEntry = progress
       ? progress.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('<!--')).pop()
