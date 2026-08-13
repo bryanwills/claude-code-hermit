@@ -656,6 +656,42 @@ describe('stop-pipeline', () => {
     expect(r.exitCode).toBe(0);
     expect(fs.existsSync(hermit(dir, 'state', 'operator-turn-open.json'))).toBe(false);
   }));
+
+  // Ordering the drain depends on, previously asserted only by a comment: the
+  // accounting stages read the outgoing transcript, so a /clear must not land
+  // before them, and the heartbeat touch must survive the drain either way.
+  test('stop-pipeline drains a harness command after accounting and still touches the heartbeat',
+    withGitDir(async (dir) => {
+      const bin = path.join(dir, 'fake-bin');
+      fs.mkdirSync(bin, { recursive: true });
+      write(path.join(bin, 'tmux'), '#!/usr/bin/env bash\nexit 0\n');
+      fs.chmodSync(path.join(bin, 'tmux'), 0o755);
+
+      write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
+      write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
+        version: 1,
+        session_state: 'in_progress',
+        runtime_mode: 'headless',
+        tmux_session: 'hermit-test',
+      }));
+      write(hermit(dir, 'state', 'pending-harness-command.json'), JSON.stringify({
+        command: '/clear', arg: null, by: 'operator', requested_at: new Date().toISOString(),
+      }));
+
+      const r = await runScript('stop-pipeline.ts', {
+        stdin: stopHookInput(dir),
+        cwd: dir,
+        env: { ...PIPE_ENV, AGENT_HOOK_PROFILE: 'minimal', PATH: `${bin}:${process.env.PATH}` },
+      });
+
+      expect(r.exitCode).toBe(0);
+      const delivered = r.stderr.indexOf('harness-command: delivered');
+      const accounted = r.stderr.indexOf('cost-tracker');
+      expect(delivered).toBeGreaterThan(-1);
+      expect(accounted).toBeGreaterThan(-1); // else the ordering below passes vacuously
+      expect(accounted).toBeLessThan(delivered);
+      expect(fs.existsSync(hermit(dir, 'state', '.heartbeat'))).toBe(true);
+    }));
 });
 
 // -------------------------------------------------------

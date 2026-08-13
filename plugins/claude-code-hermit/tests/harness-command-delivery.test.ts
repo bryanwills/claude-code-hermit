@@ -40,7 +40,7 @@ const SWITCH_CASES = [
 const hermit = (dir: string, ...parts: string[]) =>
   path.join(dir, '.claude-code-hermit', ...parts);
 
-function seedPendingSwitch(dir: string, command: string, arg: string): void {
+function seedPendingSwitch(dir: string, command: string, arg: string | null): void {
   fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
   fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
     version: 1,
@@ -61,7 +61,12 @@ function seedPendingSwitch(dir: string, command: string, arg: string): void {
 function installFakeTmux(
   dir: string,
   pane: string,
-  opts: { failLiteral?: boolean; failSecondEnter?: boolean; revealAfterCapture?: number } = {},
+  opts: {
+    failLiteral?: boolean;
+    failSecondEnter?: boolean;
+    revealAfterCapture?: number;
+    deadSession?: boolean;
+  } = {},
 ): { bin: string; log: string; helperPid: string } {
   const bin = path.join(dir, 'fake-bin');
   const log = path.join(dir, 'tmux-calls.log');
@@ -74,7 +79,7 @@ function installFakeTmux(
   fs.writeFileSync(path.join(bin, 'tmux'), `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "${log}"
 case "$1" in
-  has-session) exit 0 ;;
+  has-session) exit ${opts.deadSession ? 1 : 0} ;;
   capture-pane)
     printf '%s' "$PPID" > "${helperPid}"
     count=0
@@ -262,4 +267,67 @@ Permission required
       expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
     }));
   }
+});
+
+// The reset commands take a different tail than the switch commands: no detached
+// confirmation, and /clear alone carries the hermit-owned bookkeeping.
+describe('Stop hook reset-command delivery', () => {
+  const marker = (dir: string) => hermit(dir, 'state', 'pending-harness-command.json');
+  const readRuntime = (dir: string) =>
+    JSON.parse(fs.readFileSync(hermit(dir, 'state', 'runtime.json'), 'utf-8'));
+
+  test('/clear applies the context-reset bookkeeping after a confirmed send', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/clear', null);
+    const statusCache = hermit(dir, 'sessions', '.status.json');
+    fs.writeFileSync(statusCache, '{}');
+    const { bin, log } = installFakeTmux(dir, 'Claude ready');
+
+    const result = await drain(dir, bin);
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(log, 'utf-8')).toContain('-l -- /clear');
+    expect(fs.existsSync(marker(dir))).toBe(false);
+    expect(readRuntime(dir).context_cleared).toBe(true);
+    expect(fs.existsSync(statusCache)).toBe(false);
+  }));
+
+  test('/compact delivers but deliberately leaves the reset bookkeeping alone', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/compact', null);
+    const statusCache = hermit(dir, 'sessions', '.status.json');
+    fs.writeFileSync(statusCache, '{}');
+    const { bin, log } = installFakeTmux(dir, 'Claude ready');
+
+    const result = await drain(dir, bin);
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(log, 'utf-8')).toContain('-l -- /compact');
+    expect(fs.existsSync(marker(dir))).toBe(false);
+    expect(readRuntime(dir).context_cleared).toBeUndefined();
+    expect(fs.existsSync(statusCache)).toBe(true);
+  }));
+
+  test('a refused /clear send leaves no reset trace and keeps the marker', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/clear', null);
+    const { bin } = installFakeTmux(dir, 'Claude ready', { failLiteral: true });
+
+    const result = await drain(dir, bin);
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.existsSync(marker(dir))).toBe(true);
+    expect(readRuntime(dir).context_cleared).toBeUndefined();
+  }));
+
+  test('a dead tmux session is probed but never typed into', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/clear', null);
+    const { bin, log } = installFakeTmux(dir, 'Claude ready', { deadSession: true });
+
+    const result = await drain(dir, bin);
+
+    expect(result.exitCode).toBe(0);
+    const calls = fs.readFileSync(log, 'utf-8');
+    expect(calls).toContain('has-session');
+    expect(calls).not.toContain('send-keys');
+    expect(fs.existsSync(marker(dir))).toBe(true);
+    expect(readRuntime(dir).context_cleared).toBeUndefined();
+  }));
 });
