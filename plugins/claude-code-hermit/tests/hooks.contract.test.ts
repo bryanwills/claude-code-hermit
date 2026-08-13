@@ -414,6 +414,17 @@ describe('enforce-deny-patterns (hook wiring)', () => {
     expect(r.exitCode).toBe(0);
   }));
 
+  // The hook must resolve the profile through lib/hook-input's normalizing
+  // isStrictProfile(), not a bare `=== 'strict'` — a capitalized/padded value
+  // still counts as strict.
+  test('AGENT_HOOK_PROFILE="Strict" (capitalized) still resolves always_on', withDir(async (dir) => {
+    const r = await runScript('enforce-deny-patterns.ts', {
+      stdin: '{"tool_name":"Edit","tool_input":{"file_path":".claude-code-hermit/OPERATOR.md"}}',
+      cwd: dir, env: { AGENT_HOOK_PROFILE: 'Strict', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+    });
+    expect(r.exitCode).toBe(2);
+  }));
+
   // The stdin cap rose from 64KB to 1MB (lib/hook-input.ts MAX_HOOK_STDIN) —
   // a denied command padded past the old cap must still be blocked.
   test('blocks a denied command padded past the old 64KB cap', withDir(async (dir) => {
