@@ -24,8 +24,11 @@ interface DomainHatch {
   slug: string;
   file: string;
   text: string;
-  templateText: string;
 }
+
+const templatePathFor = (slug: string) =>
+  path.join(PLUGINS_DIR, slug, 'state-templates', 'CLAUDE-APPEND.md');
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // A plugin is in scope when it has a hatch, declares a core dependency, and
 // that hatch actually does target routing. The first two conditions alone would
@@ -52,23 +55,28 @@ function discover(): DomainHatch[] {
       return { slug: p.slug, file: p.file, meta, text: fs.readFileSync(p.file, 'utf-8') };
     })
     .filter((p) => Boolean(p.meta?.required_core_version) && p.text.includes('domain-hatch'))
-    .map(({ slug, file, text }) => ({
-      slug,
-      file,
-      text,
-      templateText: fs.readFileSync(
-        path.join(PLUGINS_DIR, slug, 'state-templates', 'CLAUDE-APPEND.md'),
-        'utf-8',
-      ),
-    }))
+    .map(({ slug, file, text }) => ({ slug, file, text }))
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 const HATCHES = discover();
 
 describe('discovery', () => {
+  // Set equality by name, not a count floor: a count stays green when a sixth
+  // plugin ships and a hatch is later rewritten to stop invoking the protocol
+  // — the exact drift class this file exists to prevent. hermit-scribe is the
+  // one named exemption (it declares the floor but only reads the target,
+  // never resolves or stamps it).
   test('finds the domain hatches that run the shared protocol', () => {
-    expect(HATCHES.length).toBeGreaterThanOrEqual(5);
+    const expected = pluginSlugs()
+      .filter(
+        (slug) =>
+          slug !== 'hermit-scribe' &&
+          fs.existsSync(path.join(PLUGINS_DIR, slug, 'skills', 'hatch', 'SKILL.md')) &&
+          fs.existsSync(path.join(PLUGINS_DIR, slug, '.claude-plugin', 'hermit-meta.json')),
+      )
+      .sort();
+    expect(HATCHES.map((h) => h.slug)).toEqual(expected);
   });
 
   test('never includes core, which is not a consumer of its own protocol', () => {
@@ -76,7 +84,7 @@ describe('discovery', () => {
   });
 });
 
-for (const { slug, text, templateText } of HATCHES) {
+for (const { slug, text } of HATCHES) {
   describe(`${slug}:hatch`, () => {
     test('reaches core through bin/hermit-run, not a relative path', () => {
       expect(text).toContain('.claude-code-hermit/bin/hermit-run domain-hatch');
@@ -135,7 +143,7 @@ for (const { slug, text, templateText } of HATCHES) {
     test('stamps its own version into _hermit_versions, sourced from the preflight verdict', () => {
       expect(text).toContain(`_hermit_versions["${slug}"]`);
       expect(
-        new RegExp(`_hermit_versions\\["${slug}"\\][\\s\\S]{0,60}self_version`).test(text),
+        new RegExp(`_hermit_versions\\["${escapeRe(slug)}"\\][\\s\\S]{0,60}self_version`).test(text),
       ).toBe(true);
     });
 
@@ -169,19 +177,45 @@ for (const { slug, text, templateText } of HATCHES) {
     // Reuses evolve-plan's own marker resolver instead of a second regex: that
     // heuristic has a documented bug history (unrelated leading comments
     // mistaken for the block marker) a from-scratch regex would re-expose.
+    // Read lazily (inside each test, not at collection) so a plugin missing
+    // its template fails exactly the test that needs it, with the path in the
+    // message, instead of aborting the whole file's collection from discover().
+    const loadTemplate = () => {
+      const templateText = fs.readFileSync(templatePathFor(slug), 'utf-8');
+      return { templateText, open: extractSiblingMarker(templateText, slug) };
+    };
+
     test('CLAUDE-APPEND template carries a matched marker pair', () => {
-      const open = extractSiblingMarker(templateText, slug);
+      const { templateText, open } = loadTemplate();
       expect(open).toBeTruthy();
       expect(templateText).toContain(closingMarkerFor(open!));
+    });
+
+    // The deleted per-plugin tests pinned each marker literal. The template is
+    // now the single source of truth (sync-block derives the marker from it,
+    // block.ts falls back to APPEND when the target's block has a stale name),
+    // so pin the skill prose to the template instead: any marker the skill
+    // names must be the template's own. Dev's SKILL.md names none (render-append
+    // generates it), which passes vacuously; a rename that touches only one
+    // side fails here.
+    test('any marker the skill names matches the template', () => {
+      const { open } = loadTemplate();
+      const named = text.match(new RegExp(`<!-- /?${escapeRe(slug)}:[^>]*-->`, 'g')) ?? [];
+      for (const marker of named) {
+        expect([open, closingMarkerFor(open!)]).toContain(marker);
+      }
     });
   });
 }
 
 // The three places a plugin declares its core floor: `required_core_version`
 // and `requires["claude-code-hermit"]` in hermit-meta.json, and the resolver's
-// `dependencies` entry in plugin.json. Until now only the /bump-core-req skill
-// kept the copies aligned. Scope is wider than HATCHES — scribe declares the
-// dependency without running the hatch protocol.
+// `dependencies` entry in plugin.json. Relocated from core's
+// hooks.contract.test.ts (which never fires on a domain-manifest-only PR under
+// the per-plugin path filters); the /bump-core-req skill and the
+// release-auditor's check 7 keep the copies aligned at write/release time.
+// Scope is wider than HATCHES — scribe declares the dependency without running
+// the hatch protocol.
 describe('core-floor version triple', () => {
   const declaring = pluginSlugs()
     .filter((slug) =>
@@ -190,7 +224,14 @@ describe('core-floor version triple', () => {
     .sort();
 
   test('every domain plugin declares the floor', () => {
-    expect(declaring.length).toBeGreaterThanOrEqual(6);
+    // Set equality by name: a plugin dir that ships a plugin.json without a
+    // hermit-meta.json floor must fail here, not slip under a count.
+    const expected = pluginSlugs()
+      .filter((slug) =>
+        fs.existsSync(path.join(PLUGINS_DIR, slug, '.claude-plugin', 'plugin.json')),
+      )
+      .sort();
+    expect(declaring).toEqual(expected);
   });
 
   for (const slug of declaring) {
@@ -206,8 +247,11 @@ describe('core-floor version triple', () => {
       const dep = (pj.dependencies ?? []).find(
         (d: { name: string; version: string }) => d.name === 'claude-code-hermit',
       );
-      // ">=X.Y.Z" in hermit-meta ⇔ "^X.Y.Z" in the native resolver field.
-      expect(dep?.version).toBe(floor.replace(/^>=/, '^'));
+      // The dep carries whatever range operator its plugin uses (`^` today;
+      // /bump-core-req preserves `^`, `~`, `>=`, or exact) — the invariant is
+      // that the X.Y.Z base agrees with the hermit-meta floor.
+      expect(dep?.version).toBeDefined();
+      expect(dep.version.replace(/^[<>=^~!]+/, '')).toBe(floor.replace(/^>=/, ''));
     });
   }
 });

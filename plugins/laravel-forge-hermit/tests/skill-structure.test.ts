@@ -66,12 +66,18 @@ for (const { name, gates } of SKILLS) {
 // contract test; the PHP floor is the one hatch invariant that stays
 // forge-specific (the contract test deliberately scopes its no-version-floor
 // rule to the CORE floor, so this hatch may state its own PHP requirement).
+// The floor itself is read from php/composer.json — the manifest that actually
+// enforces it — so the prose can't drift when the constraint bumps. hatch's
+// existence is already asserted by the SKILLS loop above; a missing file here
+// should throw, not silently skip.
 console.log('\nhatch/SKILL.md forge-specific floor:');
-const hatchPath = path.join(SKILL_DIR, 'hatch', 'SKILL.md');
-if (fs.existsSync(hatchPath)) {
-  const hatchText = fs.readFileSync(hatchPath, 'utf-8');
-  ok('still states its own PHP floor', /PHP 8\.5\+? is required/.test(hatchText));
-}
+const hatchText = fs.readFileSync(path.join(SKILL_DIR, 'hatch', 'SKILL.md'), 'utf-8');
+const composerJson = JSON.parse(
+  fs.readFileSync(path.join(import.meta.dir, '..', 'php', 'composer.json'), 'utf-8'),
+);
+const phpFloor = (composerJson.require.php as string).replace(/^[<>=^~]+/, '');
+ok(`still states its own PHP floor (${phpFloor}, from composer.json)`,
+  new RegExp(`PHP ${phpFloor.replace(/\./g, '\\.')}\\+? is required`).test(hatchText));
 
 // CLAUDE-APPEND token-efficiency guard. The block is re-paid on every session
 // load and every subagent dispatch, so the trim that removed the restated 4-step
