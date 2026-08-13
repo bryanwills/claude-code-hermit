@@ -12,10 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { startHttpStub, type Stub } from './helpers/http-stub';
-import { triggerPrompt, assistantEntry as entry } from './helpers/transcript';
-
-const assistantEntry = (model: string, inputTokens: number, outputTokens: number): string =>
-  entry({ model, inputTokens, outputTokens });
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
+import { writeConfig } from './helpers/workdir';
 
 function setupWithChannel(budgetConfig: object, opts: { maintainerChannelId?: string } = {}): { dir: string; cchDir: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cost-budget-push-'));
@@ -35,11 +33,11 @@ function setupWithChannel(budgetConfig: object, opts: { maintainerChannelId?: st
     fs.mkdirSync(path.join(cchDir, 'sessions'), { recursive: true });
     fs.writeFileSync(path.join(cchDir, 'sessions', 'SHELL.md'), '# SHELL\n\n## Findings\n');
   }
-  fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({
+  writeConfig(dir, {
     timezone: 'UTC',
     channels: { telegram },
     budget: budgetConfig,
-  }));
+  });
   return { dir, cchDir };
 }
 
@@ -167,7 +165,7 @@ function setupCustom(config: object): { dir: string; cchDir: string } {
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_' + 'TOKEN=test-token\n');
   fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
-  fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify(config));
+  writeConfig(dir, config);
   return { dir, cchDir };
 }
 

@@ -12,11 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { fixturesDir } from './helpers/workdir';
-import { triggerPrompt, assistantEntry as entry } from './helpers/transcript';
-
-const assistantEntry = (model: string, inputTokens: number, outputTokens: number): string =>
-  entry({ model, inputTokens, outputTokens });
+import { fixturesDir, writeConfig } from './helpers/workdir';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 describe('cost-tracker: writeStatusJson populates status/task from real state', () => {
   let dir: string;
@@ -33,7 +30,7 @@ describe('cost-tracker: writeStatusJson populates status/task from real state', 
       path.join(cchDir, 'state', 'runtime.json'),
       JSON.stringify({ session_id: 'test-session', session_state: 'in_progress' })
     );
-    fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({ timezone: null }));
+    writeConfig(dir, { timezone: null });
     fs.copyFileSync(
       path.join(fixturesDir, 'shell-session.md'),
       path.join(cchDir, 'sessions', 'SHELL.md')

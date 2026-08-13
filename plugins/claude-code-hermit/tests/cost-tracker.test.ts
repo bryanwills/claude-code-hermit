@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
-import { triggerPrompt, assistantEntry as entry } from './helpers/transcript';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 const HELPER = path.join(import.meta.dir, 'helpers', 'collect-subagent-usage.ts');
 
@@ -58,9 +58,6 @@ function subagentEntry(resolvedModel: string | undefined, inputTokens: number, o
     },
   });
 }
-
-const assistantEntry = (model: string, inputTokens: number, outputTokens: number): string =>
-  entry({ model, inputTokens, outputTokens });
 
 // ---------------------------------------------------------------------------
 // Unit: collectSubagentUsage (via subprocess helper to avoid module-cache pollution)

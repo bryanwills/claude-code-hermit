@@ -1,6 +1,9 @@
 // Claude Code transcript JSONL builders. The schema encoded here is the one
-// scripts/lib/cc-compat.ts parses (extractUsage / turnPromptText) — when the
-// harness changes shape, tests/fixture-helpers.test.ts is the loud failure.
+// scripts/lib/cc-compat.ts parses (extractUsage / turnPromptText).
+// tests/fixture-helpers.test.ts pins the two together, so a cc-compat field
+// rename that isn't mirrored here fails loudly there instead of silently
+// zeroing every cost suite. It cannot detect an upstream Claude Code schema
+// change on its own — nothing here reads a real transcript.
 
 export function triggerPrompt(text: string): string {
   return JSON.stringify({ type: 'user', message: { content: text } });
@@ -39,3 +42,8 @@ export function assistantEntry(opts: AssistantEntryOpts = {}): string {
     },
   });
 }
+
+// Positional form the cost/subagent suites bill against: a model plus plain
+// input/output tokens, no cache traffic and no timestamp.
+export const assistantEntryFor = (model: string, inputTokens: number, outputTokens: number): string =>
+  assistantEntry({ model, inputTokens, outputTokens });

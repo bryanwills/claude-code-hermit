@@ -17,14 +17,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { triggerPrompt, assistantEntry as entry } from './helpers/transcript';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 // ---------------------------------------------------------------------------
 // Helpers — synthetic transcript builders
 // ---------------------------------------------------------------------------
-
-const assistantEntry = (model: string, inputTokens: number, outputTokens: number): string =>
-  entry({ model, inputTokens, outputTokens });
 
 // Async-launch dispatch result — written to the PARENT transcript at launch time
 // (matches the real shape: { isAsync:true, status:"async_launched", agentId, ... }).

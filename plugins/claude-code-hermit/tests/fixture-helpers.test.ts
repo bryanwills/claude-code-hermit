@@ -1,11 +1,12 @@
 // Pins the shared test fixtures against the production readers they feed.
-// When Claude Code changes transcript shape, this file fails instead of the
-// seven cost/context suites drifting one by one.
+// When cc-compat's field names move, this file fails instead of the seven
+// cost/context suites silently reading zeros one by one. It does NOT detect an
+// upstream Claude Code schema change — nothing here reads a real transcript.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { triggerPrompt, assistantEntry } from './helpers/transcript';
+import { triggerPrompt, assistantEntry, assistantEntryFor } from './helpers/transcript';
 import { setupWorkdir, writeConfig, freshDirFactory } from './helpers/workdir';
 import { extractUsage, turnPromptText } from '../scripts/lib/cc-compat';
 
@@ -34,6 +35,16 @@ describe('transcript fixtures round-trip through cc-compat', () => {
       cacheReadTokens: 0,
       outputTokens: 50,
       model: 'claude-sonnet-4-6',
+    });
+  });
+
+  test('assistantEntryFor maps its positional args to model/input/output', () => {
+    expect(extractUsage(JSON.parse(assistantEntryFor('claude-opus-4-8', 100, 50)))).toEqual({
+      inputTokens: 100,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 0,
+      outputTokens: 50,
+      model: 'claude-opus-4-8',
     });
   });
 
