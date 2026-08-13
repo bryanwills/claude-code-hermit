@@ -62,6 +62,17 @@ for (const { name, gates } of SKILLS) {
   ok(`internal links resolve (${linksChecked} checked)`, linksBad === 0, `${linksBad} bad`);
 }
 
+// The shared domain-hatch protocol is asserted by the repo-root cross-plugin
+// contract test; the PHP floor is the one hatch invariant that stays
+// forge-specific (the contract test deliberately scopes its no-version-floor
+// rule to the CORE floor, so this hatch may state its own PHP requirement).
+console.log('\nhatch/SKILL.md forge-specific floor:');
+const hatchPath = path.join(SKILL_DIR, 'hatch', 'SKILL.md');
+if (fs.existsSync(hatchPath)) {
+  const hatchText = fs.readFileSync(hatchPath, 'utf-8');
+  ok('still states its own PHP floor', /PHP 8\.5\+? is required/.test(hatchText));
+}
+
 // CLAUDE-APPEND token-efficiency guard. The block is re-paid on every session
 // load and every subagent dispatch, so the trim that removed the restated 4-step
 // walk, the two extra dispatch examples, the scheduled-check contract, and the
