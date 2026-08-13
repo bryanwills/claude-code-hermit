@@ -172,6 +172,24 @@ function buildToolCall(event: Json): { tool: string; content: string; candidates
   return { tool: name, content: '', candidates: [] };
 }
 
+type ToolCall = ReturnType<typeof buildToolCall>;
+
+function decideToolCall(toolCall: ToolCall, patterns: string[]): string | null {
+  if (!toolCall.content) return null;
+
+  for (const pattern of patterns) {
+    if (matchesPattern(toolCall, pattern)) return pattern;
+  }
+  return null;
+}
+
+// The decision seam: hook event + resolved pattern list -> matched pattern, or
+// null to allow. Pure — no stdin, no fs, no exit. The caller resolves which
+// patterns apply (profile) and turns the verdict into an exit code.
+export function decide(event: Json, patterns: string[]): string | null {
+  return decideToolCall(buildToolCall(event), patterns);
+}
+
 async function run() {
   const event = await readHookInput();
   if (!event || event === OVERSIZE) process.exit(0); // empty / unparseable / oversize — fail open
@@ -199,11 +217,10 @@ async function run() {
     ...(isStrictProfile() ? (patterns.always_on || []) : []),
   ];
 
-  for (const pattern of allPatterns) {
-    if (matchesPattern(toolCall, pattern)) {
-      process.stderr.write(`BLOCKED by deny-patterns: ${pattern}\n`);
-      process.exit(2);
-    }
+  const blocked = decideToolCall(toolCall, allPatterns);
+  if (blocked) {
+    process.stderr.write(`BLOCKED by deny-patterns: ${blocked}\n`);
+    process.exit(2);
   }
 }
 
@@ -215,4 +232,5 @@ async function main() {
   }
 }
 
-main();
+// Gated: importing this module for `decide()` must not read stdin or exit.
+if (import.meta.main) main();

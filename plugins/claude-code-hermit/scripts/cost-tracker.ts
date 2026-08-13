@@ -14,6 +14,7 @@ import { kStr, formatTokens } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
+import { extractSection, stripPlaceholders } from './lib/md-write';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
 import { setPause, isPaused } from './lib/pause';
 import { evaluateBudget, pauseBoundary } from './lib/budget';
@@ -514,11 +515,11 @@ function maintainOpenedAt(nowIso: string, transcriptId: string): void {
 
 function writeStatusJson(shellContent: string, cumulative: { cost: number; tokens: number; operatorTurns: number }, sessionId: string): void {
   const { cost: cumulativeCost, tokens: cumulativeTokens, operatorTurns: cumulativeOperatorTurns } = cumulative;
-  const taskMatch = shellContent.match(/## Task\n([\s\S]*?)(?=\n## |$)/);
-  const blockersMatch = shellContent.match(/## Blockers\n([\s\S]*?)(?=\n## |$)/);
+  const taskSection = extractSection(shellContent, 'Task');
+  const blockersSection = extractSection(shellContent, 'Blockers');
   const tasksMatch = shellContent.match(/\*\*Tasks Completed:\*\*\s*(\d+)/);
 
-  const task = taskMatch ? taskMatch[1].trim().replace(/<!--.*?-->/g, '').trim() : '';
+  const task = stripPlaceholders(taskSection ?? '');
 
   // Plan progress from native Claude Code Tasks
   const tasks = readTasks();
@@ -527,7 +528,7 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
   // Write tasks-snapshot.md
   writeTaskSnapshot(tasks, progress);
 
-  const blockersText = blockersMatch ? blockersMatch[1].trim().replace(/<!--.*?-->/g, '').trim() : '';
+  const blockersText = stripPlaceholders(blockersSection ?? '');
   const hasBlockers = blockersText.length > 0 && !/^none$/i.test(blockersText);
 
   const statusData = {

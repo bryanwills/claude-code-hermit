@@ -80,7 +80,7 @@ import path from 'node:path';
 import { emit, readStdin, readJson, flagValue } from './lib/cli';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
-import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, PATCH_KEY_RE } from './lib/md-write';
+import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, escapeRegExp, PATCH_KEY_RE } from './lib/md-write';
 import { computeBase, readTimezone, SUFFIX_LETTERS } from './lib/prop-id';
 import { zonedISOStamp, utcISOStamp } from './lib/time';
 import { rebuildIndex, run as runIndex } from './lib/proposals/index-rebuild';
@@ -253,10 +253,6 @@ function parsePatchArgs(args: string[]): { filename: string | undefined; sets: s
 
 const TIMESTAMP_RE_SRC = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:[+-]\\d{2}:\\d{2}|Z)';
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 // True when `heading`'s section already ends with `rawLine` — makes a re-run of
 // the same patch call idempotent instead of duplicating the Operator Decision
 // entry. Compares against the RAW (unexpanded) line with `@now` as a timestamp
@@ -268,7 +264,7 @@ export function sectionEndsWithLine(content: string, heading: string, rawLine: s
   if (!section) return false;
   const lines = content.slice(section.start, section.end).split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length === 0) return false;
-  const pattern = rawLine.trim().split('@now').map(escapeRe).join(TIMESTAMP_RE_SRC);
+  const pattern = rawLine.trim().split('@now').map(escapeRegExp).join(TIMESTAMP_RE_SRC);
   return new RegExp(`^${pattern}$`).test(lines[lines.length - 1]);
 }
 
