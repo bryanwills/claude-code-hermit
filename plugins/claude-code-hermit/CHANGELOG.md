@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `scripts/lib/md-write.ts` now owns the whole `## <heading>` grammar for SHELL.md (locate, read, append, replace, placeholder-stripping); the ten local parsers are gone. Operator-added custom sections still pass through untouched.
+
+### Fixed
+- A `###` sub-heading above a real section no longer hijacks that section's body — affects session-start injection, `.status.json` task/blockers, Progress Log staleness, the Monitoring bloat check, and the `reflect --quick` hash.
+- Session-start injection and the session quality score no longer read a section as empty when its content sits below a retained `<!-- ... -->` placeholder.
+
 ## [1.2.38] - 2026-08-12
 
 ### Added
