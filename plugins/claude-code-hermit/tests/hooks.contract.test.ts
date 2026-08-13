@@ -3,8 +3,8 @@
 //
 // These are CONTRACT tests: hooks are exercised as subprocesses (via runScript)
 // because that is the boundary Claude Code sees — stdin in, exit code/stdout out,
-// fail-open. Only pure exported helpers (getCumulativeCost, cidrOverlap) are
-// tested in-process.
+// fail-open. Only pure exported helpers (getCumulativeCost, cidrOverlap,
+// enforce-deny-patterns' decide) are tested in-process.
 //
 // Usage: bun test tests/hooks.contract.test.ts   (from the plugin root)
 
@@ -16,6 +16,7 @@ import path from 'node:path';
 import { runScript, PLUGIN_ROOT, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, setupGitWorkdir, fixturesDir, type Workdir } from './helpers/workdir';
 import { cidrOverlap, checkHeartbeat } from '../scripts/doctor-check';
+import { decide } from '../scripts/enforce-deny-patterns';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
 
 // ---------- small local helpers ----------
@@ -252,9 +253,128 @@ describe('session-diff', () => {
 // -------------------------------------------------------
 // enforce-deny-patterns
 // -------------------------------------------------------
+//
+// The matching corpus (obfuscation, segmentation, quoting) runs IN-PROCESS
+// through the exported `decide()` seam, against the SHIPPED
+// state-templates/deny-patterns.json — the same list the hook resolves at
+// runtime, so every row still proves the real pattern file blocks that
+// spelling. The spawns below cover what a pure function cannot: stdin to exit
+// code, AGENT_HOOK_PROFILE plumbing, the stdin cap, and fail-open.
 
-describe('enforce-deny-patterns', () => {
-  test('enforce-deny-patterns (block rm -rf)', withDir(async (dir) => {
+const DENY = readJson(path.join(PLUGIN_ROOT, 'state-templates', 'deny-patterns.json'));
+/** What an interactive (standard-profile) session resolves. */
+const DEFAULT_PATTERNS: string[] = DENY.default;
+/** What an always-on (strict-profile) session resolves. */
+const STRICT_PATTERNS: string[] = [...DENY.default, ...DENY.always_on];
+
+const bash = (command: string) => ({ tool_name: 'Bash', tool_input: { command } });
+const edit = (file_path: string) => ({ tool_name: 'Edit', tool_input: { file_path } });
+
+type DenyRow = [
+  name: string,
+  event: unknown,
+  verdict: 'block' | 'allow',
+  patterns?: string[],
+];
+
+const DENY_ROWS: DenyRow[] = [
+  ['allow a safe command', bash('ls -la'), 'allow'],
+  [
+    'block an Edit into the plugin marketplaces dir',
+    edit('/home/u/.claude/plugins/marketplaces/claude-code-hermit/plugins/claude-code-hermit/scripts/foo.ts'),
+    'block',
+  ],
+  ['allow a normal project path', edit('/home/u/project/src/foo.ts'), 'allow'],
+
+  // Compound-command segmentation: a deny pattern anchored to a leading command
+  // must still fire when that command hides behind `cd …`, `;`, or a pipe.
+  ['block rm -rf behind &&', bash('cd /tmp && rm -rf x'), 'block'],
+  ['block chmod 777 behind ;', bash('true; chmod 777 /tmp/f'), 'block'],
+  ['block printenv in a pipe', bash('id | printenv'), 'block'],
+  ['allow a safe compound', bash('ls -la && echo done'), 'allow'],
+  ['allow a safe pipeline', bash('cat notes.md | grep todo'), 'allow'],
+
+  // always_on patterns resolve only under the strict profile.
+  ['block git push --force behind && (strict list)', bash('cd repo && git push --force origin x'), 'block', STRICT_PATTERNS],
+  ['allow the same compound under the default list', bash('cd repo && git push --force origin x'), 'allow'],
+
+  // An escaped quote (`\'`) is a literal to bash and must not open a quoted run
+  // that swallows the following `&&`, or the trailing `rm -rf` segment escapes.
+  ['block rm -rf behind an escaped-quote separator', bash("echo it\\'s done && rm -rf x"), 'block'],
+  ['block rm -rf on a newline-separated command', bash('cd /tmp\nrm -rf x'), 'block'],
+
+  // A separator inside a quoted string must NOT fragment the command — a plain
+  // echo/commit that merely mentions `rm -rf` after a `;` is not a real bypass.
+  ['a quoted separator does not fragment the command', bash('echo "step 1; rm -rf build"'), 'allow'],
+  ['an Edit path containing | is not split', edit('/home/u/project/weird|name.ts'), 'allow'],
+
+  // rm flag-order / path-prefixed spellings, each functionally identical to
+  // `rm -rf` in bash (documented caveat in root CLAUDE.md).
+  ...(['rm -fr x', 'rm -r -f x', 'rm -f -r x', './rm -rf x', '/bin/rm -rf x'] as const).map(
+    (command): DenyRow => [`block rm flag/path variant: ${command}`, bash(command), 'block'],
+  ),
+
+  // Normalization: whitespace runs, $IFS, backslash-newline continuation.
+  ['block rm -rf with doubled internal whitespace', bash('rm  -rf  x'), 'block'],
+  ['block rm -rf via unquoted $IFS', bash('rm${IFS}-rf${IFS}x'), 'block'],
+  ['block rm -rf via backslash-newline continuation', bash('rm -rf \\\nx'), 'block'],
+
+  // Backslash-escape bypass (issue #578): bash collapses \X -> X for ordinary
+  // X, so `r\m -rf` executes `rm -rf` and normalize() must fold it.
+  ...(['r\\m -rf x', 'rm -r\\f x', '\\rm -rf x'] as const).map(
+    (command): DenyRow => [`block rm -rf via unquoted backslash escape: ${command}`, bash(command), 'block'],
+  ),
+
+  // False-positive guards: an escape inside quotes is DATA — bash keeps it
+  // literal (double quotes) or verbatim (single quotes), so it must not fold
+  // into a match. The double-quoted case also guards quote-tracking: a folded
+  // \" would mis-close the run.
+  ['a backslash escape inside single quotes is not folded', bash("printf '%s' 'r\\m -rf x'"), 'allow'],
+  ['a backslash escape inside double quotes is not folded', bash('echo "r\\m -rf x"'), 'allow'],
+  ['a legit unquoted backslash escape introduces no spurious deny', bash('grep -r \\* .'), 'allow'],
+
+  // An unquoted escaped SEPARATOR (`\;`) is a literal char in bash, so
+  // `echo a\; rm -rf x` is a single harmless echo — folding it would fabricate
+  // a `;` that fragments the command into a spurious `rm -rf x` segment.
+  ['an escaped separator is not folded into a spurious segment', bash('echo a\\; rm -rf x'), 'allow'],
+
+  // Mirror case: an unquoted escaped QUOTE is a literal quote char, and must
+  // not fold into a bare quote that opens a spurious run and swallows the
+  // following obfuscated segment. `echo \" ; r\m -rf x` runs `rm -rf x`.
+  ...(['echo \\" ; r\\m -rf x', "echo \\' ; r\\m -rf x"] as const).map(
+    (command): DenyRow => [`an escaped quote must not desync the segment split: ${command}`, bash(command), 'block'],
+  ),
+
+  // Compound + obfuscation combined — the segment-level normalization gap. A
+  // whole-command-only normalized candidate would miss these: the anchored
+  // regex can't match past a `true &&`/`cd /tmp &&` prefix, and the raw segment
+  // still carries the obfuscation.
+  ['block $IFS-obfuscated rm -rf behind &&', bash('true && rm${IFS}-rf${IFS}x'), 'block'],
+  ['block doubled-whitespace rm -rf behind &&', bash('cd /tmp && rm  -rf  x'), 'block'],
+
+  // A quoted ${IFS} is DATA, not shell syntax — the primary false-positive risk
+  // the normalization pass must avoid.
+  ['a quoted ${IFS} is not folded', bash("printf '%s' 'sudo${IFS}whoami'"), 'allow'],
+
+  // Glob narrowing (`*/rm …`, not a bare `*rm`) must not fire on a command that
+  // merely contains "rm" as a substring of another word.
+  ['allow a command containing "rm" as a substring', bash('confirm -rf x'), 'allow'],
+];
+
+describe('enforce-deny-patterns (decide, in-process)', () => {
+  for (const [name, event, verdict, patterns = DEFAULT_PATTERNS] of DENY_ROWS) {
+    test(name, () => {
+      const hit = decide(event, patterns);
+      if (verdict === 'block') expect(hit).not.toBeNull();
+      else expect(hit).toBeNull();
+    });
+  }
+});
+
+// The wiring the seam can't prove: stdin to exit code, profile env, stdin cap,
+// fail-open. These stay subprocess contract tests.
+describe('enforce-deny-patterns (hook wiring)', () => {
+  test('a denied command exits 2', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}',
       cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
@@ -262,160 +382,41 @@ describe('enforce-deny-patterns', () => {
     expect(r.exitCode).toBe(2);
   }));
 
-  test('enforce-deny-patterns (allow safe)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (block OPERATOR.md always-on)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Edit","tool_input":{"file_path":".claude-code-hermit/OPERATOR.md"}}',
-      cwd: dir, env: { AGENT_HOOK_PROFILE: 'strict', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (allow OPERATOR.md interactive)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Edit","tool_input":{"file_path":".claude-code-hermit/OPERATOR.md"}}',
-      cwd: dir, env: { AGENT_HOOK_PROFILE: 'standard', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (block marketplaces path)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/.claude/plugins/marketplaces/claude-code-hermit/plugins/claude-code-hermit/scripts/foo.ts"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (allow normal project path)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/project/src/foo.ts"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (empty stdin)', withDir(async (dir) => {
+  test('empty stdin — fail open', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: '', cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
     expect(r.exitCode).toBe(0);
   }));
 
-  // Compound-command segmentation: a deny pattern anchored to a leading command
-  // must still fire when that command hides behind `cd …`, `;`, or a pipe.
-  test('enforce-deny-patterns (block rm -rf behind &&)', withDir(async (dir) => {
+  // No deny file under CLAUDE_PLUGIN_ROOT — allow rather than block.
+  test('missing deny file — fail open', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"cd /tmp && rm -rf x"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (block chmod 777 behind ;)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"true; chmod 777 /tmp/f"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (block printenv in a pipe)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"id | printenv"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (allow safe compound)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"ls -la && echo done"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
+      stdin: '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}',
+      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: dir },
     });
     expect(r.exitCode).toBe(0);
   }));
 
-  test('enforce-deny-patterns (allow safe pipeline)', withDir(async (dir) => {
+  test('AGENT_HOOK_PROFILE=strict resolves the always_on set', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"cat notes.md | grep todo"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (block always-on git push --force behind &&)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"cd repo && git push --force origin x"}}',
+      stdin: '{"tool_name":"Edit","tool_input":{"file_path":".claude-code-hermit/OPERATOR.md"}}',
       cwd: dir, env: { AGENT_HOOK_PROFILE: 'strict', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
     expect(r.exitCode).toBe(2);
   }));
 
-  test('enforce-deny-patterns (same compound allowed when not strict)', withDir(async (dir) => {
+  test('AGENT_HOOK_PROFILE=standard skips the always_on set', withDir(async (dir) => {
     const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"cd repo && git push --force origin x"}}',
+      stdin: '{"tool_name":"Edit","tool_input":{"file_path":".claude-code-hermit/OPERATOR.md"}}',
       cwd: dir, env: { AGENT_HOOK_PROFILE: 'standard', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
     expect(r.exitCode).toBe(0);
   }));
 
-  // An escaped quote (`\'`) is a literal to bash and must not open a quoted run
-  // that swallows the following `&&`, or the trailing `rm -rf` segment escapes.
-  test('enforce-deny-patterns (block rm -rf behind escaped-quote separator)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: "echo it\\'s done && rm -rf x" } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (block rm -rf on a newline-separated command)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: "cd /tmp\nrm -rf x" } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  // A separator inside a quoted string must NOT fragment the command — a plain
-  // echo/commit that merely mentions `rm -rf` after a `;` is not a real bypass.
-  test('enforce-deny-patterns (quoted separator does not fragment command)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"echo \\"step 1; rm -rf build\\""}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (Edit path containing | is not split)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Edit","tool_input":{"file_path":"/home/u/project/weird|name.ts"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  // AGENT_HOOK_PROFILE normalization (lib/hook-input.ts isStrictProfile): a
-  // differently-cased or padded value must still count as strict.
-  test('enforce-deny-patterns (block always-on when profile is "Strict", capitalized)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"cd repo && git push --force origin x"}}',
-      cwd: dir, env: { AGENT_HOOK_PROFILE: 'Strict', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
   // The stdin cap rose from 64KB to 1MB (lib/hook-input.ts MAX_HOOK_STDIN) —
-  // a denied command padded past the old 64KB cap must still be blocked.
-  test('enforce-deny-patterns (block rm -rf padded past the old 64KB cap)', withDir(async (dir) => {
+  // a denied command padded past the old cap must still be blocked.
+  test('blocks a denied command padded past the old 64KB cap', withDir(async (dir) => {
     const command = `rm -rf x # ${'a'.repeat(70 * 1024)}`;
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
@@ -424,159 +425,10 @@ describe('enforce-deny-patterns', () => {
     expect(r.exitCode).toBe(2);
   }));
 
-  // ---- rm flag-order / path-prefixed bypass regressions ----
-  // Each spelling below previously slipped the `Bash(rm -rf *)`-only pattern
-  // (documented caveat in root CLAUDE.md) despite being functionally identical
-  // to `rm -rf` in bash. Covers the four enumerated flag orders (bare + path-
-  // prefixed) added to state-templates/deny-patterns.json.
-  for (const command of ['rm -fr x', 'rm -r -f x', 'rm -f -r x', './rm -rf x', '/bin/rm -rf x']) {
-    test(`enforce-deny-patterns (block rm flag/path variant: ${command})`, withDir(async (dir) => {
-      const r = await runScript('enforce-deny-patterns.ts', {
-        stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
-        cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-      });
-      expect(r.exitCode).toBe(2);
-    }));
-  }
-
-  // ---- normalization regressions (whitespace / $IFS / backslash-continuation) ----
-  test('enforce-deny-patterns (block rm -rf with doubled internal whitespace)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"rm  -rf  x"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (stdin over the 1MB cap — fail-open, allow)', withDir(async (dir) => {
+  test('stdin over the 1MB cap — fail open', withDir(async (dir) => {
     const command = `rm -rf x # ${'a'.repeat(1.5 * 1024 * 1024)}`;
     const r = await runScript('enforce-deny-patterns.ts', {
       stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (block rm -rf via unquoted $IFS)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"rm${IFS}-rf${IFS}x"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (block rm -rf via backslash-newline continuation)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'rm -rf \\\nx' } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  // ---- backslash-escape bypass (issue #578) ----
-  // Bash collapses \X -> X for ordinary X, so `r\m -rf` executes `rm -rf`.
-  // normalize() must fold the unquoted escape so the anchored deny glob fires.
-  for (const cmd of ['r\\m -rf x', 'rm -r\\f x', '\\rm -rf x']) {
-    test(`enforce-deny-patterns (block rm -rf via unquoted backslash escape: ${cmd})`, withDir(async (dir) => {
-      const r = await runScript('enforce-deny-patterns.ts', {
-        stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd } }),
-        cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-      });
-      expect(r.exitCode).toBe(2);
-    }));
-  }
-
-  // False-positive guard: a backslash escape inside quotes is DATA — bash keeps
-  // it literal (double quotes) or verbatim (single quotes), so it must not fold
-  // into a match. The double-quoted case also guards quote-tracking: a folded \"
-  // would mis-close the run.
-  test('enforce-deny-patterns (backslash escape inside single quotes not folded — no false match)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: "printf '%s' 'r\\m -rf x'" } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('enforce-deny-patterns (backslash escape inside double quotes not folded — no false match)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo "r\\m -rf x"' } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  // A legit unquoted \$ / \* escape must not fold into a spurious deny.
-  test('enforce-deny-patterns (legit unquoted backslash escape does not introduce a spurious deny)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'grep -r \\* .' } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  // An unquoted escaped QUOTE (`\"` / `\'`) is a literal quote char in bash — it
-  // must not fold to a bare quote in the normalized string, or it opens a
-  // spurious run that swallows the following obfuscated segment and lets a real
-  // `rm -rf` slip past the deny glob. `echo \" ; r\m -rf x` runs `rm -rf x`.
-  for (const cmd of ['echo \\" ; r\\m -rf x', "echo \\' ; r\\m -rf x"]) {
-    test(`enforce-deny-patterns (escaped quote must not desync segment split: ${cmd})`, withDir(async (dir) => {
-      const r = await runScript('enforce-deny-patterns.ts', {
-        stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: cmd } }),
-        cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-      });
-      expect(r.exitCode).toBe(2);
-    }));
-  }
-
-  // Mirror false-positive guard: an unquoted escaped SEPARATOR (`\;`) is a
-  // literal char in bash, so `echo a\; rm -rf x` is a single harmless echo — it
-  // must not fold into a fabricated `;` that fragments the command into a
-  // spurious `rm -rf x` segment.
-  test('enforce-deny-patterns (escaped separator not folded into a spurious segment)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo a\\; rm -rf x' } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  // ---- compound + obfuscation combined (the segment-level normalization gap) ----
-  // A whole-command-only normalized candidate would miss these: the anchored
-  // regex can't match past a `true &&`/`cd /tmp &&` prefix, and the raw segment
-  // still carries the obfuscation. Segment-level normalization closes this.
-  test('enforce-deny-patterns (block $IFS-obfuscated rm -rf behind &&)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"true && rm${IFS}-rf${IFS}x"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  test('enforce-deny-patterns (block doubled-whitespace rm -rf behind &&)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"cd /tmp && rm  -rf  x"}}',
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(2);
-  }));
-
-  // ---- false-positive guard (primary) ----
-  // A quoted ${IFS} is DATA, not shell syntax — it must never be folded into a
-  // match. This is the risk the segment/whole normalization pass must avoid.
-  test('enforce-deny-patterns (quoted ${IFS} is not folded — no false match)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: JSON.stringify({ tool_name: 'Bash', tool_input: { command: "printf '%s' 'sudo${IFS}whoami'" } }),
-      cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  // Confirms glob narrowing (`*/rm …`, not a bare `*rm`) doesn't false-positive
-  // on commands that merely contain "rm" as a substring of another word.
-  test('enforce-deny-patterns (allow command containing "rm" as a substring)', withDir(async (dir) => {
-    const r = await runScript('enforce-deny-patterns.ts', {
-      stdin: '{"tool_name":"Bash","tool_input":{"command":"confirm -rf x"}}',
       cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
     });
     expect(r.exitCode).toBe(0);
