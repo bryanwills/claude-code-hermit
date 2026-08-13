@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `ha-agent-lab` keeps one record per command in `src/cli.ts` — parser spec, `--help` block and handler together. The command list, the `ha --help` body and the dispatch all derive from that table, so a command can no longer be declared without a spec (previously a runtime crash rather than a type error). No command behavior changed and `--help` output is byte-identical, now pinned by a fixture test.
+
 ## [0.4.8] - 2026-07-30
 
 ### Fixed
