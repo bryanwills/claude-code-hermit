@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `proposal.ts`'s write verbs (`create`, `patch`, `shell-append`, `next-task`, `routine`) return their stdout token instead of exiting, and are exported behind an `import.meta.main` guard, so the write-path grammar — header parsing, the id suffix walk, the `@now` decision-append guard — is testable in-process. Same argv, same stdout grammar, same exit codes.
+
 ## [1.2.38] - 2026-08-12
 
 ### Added
