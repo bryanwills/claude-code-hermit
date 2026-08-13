@@ -56,7 +56,7 @@
 //
 // The verbs below are the proposal-lifecycle *readers and satellites*, absorbed
 // from what used to be one top-level script each. They keep their own stdout
-// grammars and exit codes rather than being forced into `ok()`/`fail()` —
+// grammars and exit codes rather than being forced into `OK`/`ERROR|<token>` —
 // callers branch on those, and rewriting them would be a behavior change:
 //
 //   resolve-id <stateDir> <operator-input>       MATCH|… AMBIGUOUS|… NONE|…
@@ -427,11 +427,11 @@ const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue
 // `.claude-code-hermit` from the project root; accepting an arbitrary root let
 // one pre-approved `Bash(bun */scripts/proposal.ts*)` call mutate — or read —
 // another project's proposal queue. Deliberately a usage error (stderr, exit 1)
-// rather than `fail()`: `fail()` writes `ERROR|<token>` to stdout, which would
-// corrupt the distinct stdout grammars several verbs own and callers branch on
-// (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|, `micro`
-// -> RESOLVED|). This also turns a drifted cwd into a loud failure instead of a
-// write against the wrong tree.
+// rather than an `ERROR|<token>` verdict line: that line goes to stdout, which
+// would corrupt the distinct stdout grammars several verbs own and callers
+// branch on (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|,
+// `micro` -> RESOLVED|). This also turns a drifted cwd into a loud failure
+// instead of a write against the wrong tree.
 function requirePinnedStateDir(dir: string): void {
   pinStateDirOrExit(dir, 'proposal.ts');
 }
@@ -499,7 +499,7 @@ async function main(): Promise<void> {
     case 'event': return emit(runEvent(stateDir, rest));
     case 'quality-gate': return runQualityGate(stateDir, rest);
     default:
-      emit('ERROR|unknown-verb');
+      return emit('ERROR|unknown-verb');
   }
 }
 
