@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 const HELPER = path.join(import.meta.dir, 'helpers', 'collect-subagent-usage.ts');
 
@@ -56,21 +57,6 @@ function subagentEntry(resolvedModel: string | undefined, inputTokens: number, o
       usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens },
     },
   });
-}
-
-function assistantEntry(model: string, inputTokens: number, outputTokens: number): string {
-  return JSON.stringify({
-    type: 'assistant',
-    message: {
-      model,
-      usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens },
-      content: [{ type: 'text', text: 'ok' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
 }
 
 // ---------------------------------------------------------------------------

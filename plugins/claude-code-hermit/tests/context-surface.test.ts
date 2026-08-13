@@ -10,27 +10,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { readContextSurface, writeContextSurface, contextSurfacePath } from '../scripts/lib/context-surface';
+import { triggerPrompt, assistantEntry as entry } from './helpers/transcript';
 
-function assistantEntry(timestamp: string, cacheRead: number, cacheWrite = 0, inputTokens = 2): string {
-  return JSON.stringify({
-    type: 'assistant',
-    timestamp,
-    message: {
-      model: 'claude-sonnet-4-6',
-      usage: {
-        input_tokens: inputTokens,
-        cache_creation_input_tokens: cacheWrite,
-        cache_read_input_tokens: cacheRead,
-        output_tokens: 50,
-      },
-      content: [{ type: 'text', text: 'ok' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
-}
+const assistantEntry = (timestamp: string, cacheRead: number, cacheWrite = 0, inputTokens = 2): string =>
+  entry({ timestamp, cacheRead, cacheWrite, inputTokens });
 
 function compactBoundary(timestamp: string, postTokens: any): string {
   return JSON.stringify({

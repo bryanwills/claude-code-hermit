@@ -31,6 +31,13 @@ export function setupWorkdir(): Workdir {
   };
 }
 
+// Writes .claude-code-hermit/config.json under an existing throwaway dir.
+export function writeConfig(dir: string, cfg: object): void {
+  const stateDir = path.join(dir, '.claude-code-hermit');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify(cfg));
+}
+
 // Test-body factory: wraps a test in a throwaway workdir, always cleaning up.
 // Safe under `bun test --concurrent` — each call gets its own mkdtemp dir and
 // cleans up only its own dir. Usage: test('name', withDir(async (dir) => {...}))
