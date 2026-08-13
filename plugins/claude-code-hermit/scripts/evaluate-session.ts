@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { readTasks } from './lib/tasks';
 import { hermitDir } from './lib/cc-compat';
 import { currentHHMM, elapsedSinceHHMM, resolveHermitNowMs } from './lib/time';
-import { extractSection } from './lib/md-write';
+import { extractSection, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
@@ -70,8 +70,8 @@ function evaluateSession(content: Json, tasks: Json[]): Json {
   // Helper: check if a markdown section exists and has non-comment content
   function checkSection(sectionName: string): { exists: boolean; hasContent: Json } {
     const section = extractSection(content, sectionName);
-    const text = section ? section.trim() : '';
-    return { exists: section !== null, hasContent: text && !text.startsWith('<!--') };
+    // stripPlaceholders, not startsWith('<!--') — see its doc comment in md-write.ts.
+    return { exists: section !== null, hasContent: stripPlaceholders(section ?? '').length > 0 };
   }
 
   // Criterion 3: Blockers section

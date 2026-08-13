@@ -19,7 +19,7 @@ import { loadConfig } from './lib/channel-auth';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { formatTokens } from './lib/format';
-import { extractSection, firstContentLine } from './lib/md-write';
+import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
@@ -264,24 +264,25 @@ function emitFullContext(source: string | null) {
   } else {
     const parts: string[] = [];
 
-    const task = extractSection(shellContent, 'Task');
-    if (task && task.trim() && !task.trim().startsWith('<!--')) {
-      parts.push(`## Task\n${task.trimEnd()}`);
+    // stripPlaceholders, not startsWith('<!--') — see its doc comment in md-write.ts.
+    const task = stripPlaceholders(extractSection(shellContent, 'Task') ?? '');
+    if (task) {
+      parts.push(`## Task\n${task}`);
     }
 
-    const progressRaw = extractSection(shellContent, 'Progress Log');
-    if (progressRaw && progressRaw.trim() && !progressRaw.trim().startsWith('<!--')) {
+    const progressRaw = stripPlaceholders(extractSection(shellContent, 'Progress Log') ?? '');
+    if (progressRaw) {
       const recent = lastLines(progressRaw, 10);
       parts.push(`## Progress Log (last 10)\n${recent}`);
     }
 
-    const blockers = extractSection(shellContent, 'Blockers');
-    if (blockers && blockers.trim() && !blockers.trim().startsWith('<!--')) {
-      parts.push(`## Blockers\n${blockers.trimEnd()}`);
+    const blockers = stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '');
+    if (blockers) {
+      parts.push(`## Blockers\n${blockers}`);
     }
 
-    const monitoringRaw = extractSection(shellContent, 'Monitoring');
-    if (monitoringRaw && monitoringRaw.trim() && !monitoringRaw.trim().startsWith('<!--')) {
+    const monitoringRaw = stripPlaceholders(extractSection(shellContent, 'Monitoring') ?? '');
+    if (monitoringRaw) {
       const monLines = monitoringRaw.split('\n').filter(l => l.trim() && (l.startsWith('- ') || l.startsWith('[')));
       if (monLines.length > 0) {
         parts.push(`## Monitoring (last 5)\n${monLines.slice(-5).join('\n')}`);

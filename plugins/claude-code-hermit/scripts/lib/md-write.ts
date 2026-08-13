@@ -52,12 +52,19 @@ export function patchFrontmatter(content: string, patch: Record<string, Json>): 
   return '---\n' + lines.join('\n') + content.slice(end);
 }
 
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // Locates a `## <heading>` section's body — [start, end) bounded by the next
 // `## ` heading or EOF. Returns null when the heading is absent. Shared by
 // appendToSection and proposal.ts's read-only idempotency check so both agree
 // on where a section ends.
 export function findSection(content: string, heading: string): { start: number; end: number } | null {
-  const re = new RegExp(`^## ${heading}[ \\t]*$`, 'm');
+  // Escaped: the heading is a literal, and an operator-named section carrying a
+  // regex metacharacter (`## Notes (2026)`, `## v1.2.3`) would otherwise be read
+  // as a pattern and match the wrong line — or no line at all.
+  const re = new RegExp(`^## ${escapeRegExp(heading)}[ \\t]*$`, 'm');
   const m = re.exec(content);
   if (!m) return null;
   const start = m.index + m[0].length;
@@ -74,12 +81,18 @@ export function extractSection(content: string, heading: string): string | null 
   const section = findSection(content, heading);
   if (!section) return null;
   const body = content.slice(section.start, section.end);
-  return body.startsWith('\n') ? body.slice(1) : body;
+  // `\r?\n`, not `\n`: findSection's `$` matches before a CR too, so on a CRLF
+  // SHELL.md the span starts at the `\r` and a bare `\n` strip would leave it
+  // glued to the first body line.
+  return body.replace(/^\r?\n/, '');
 }
 
 // Drops placeholder comments (`<!-- ... -->`, possibly multi-line) and trims.
 // The single rule for "is this section really empty, or does it just still
-// carry its template placeholder?".
+// carry its template placeholder?". Use this rather than a whole-body
+// `startsWith('<!--')` check: the reset templates keep their placeholder
+// comments in place and real content is appended below them, so a whole-body
+// check reads a populated section as empty.
 export function stripPlaceholders(text: string): string {
   return text.replace(/<!--[\s\S]*?-->/g, '').trim();
 }

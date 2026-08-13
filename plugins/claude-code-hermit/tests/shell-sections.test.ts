@@ -234,6 +234,56 @@ describe('startup-context injection is not hijackable by a ### sub-heading', () 
   });
 });
 
+// Content under a retained placeholder is the steady state after any idle
+// reset, not an edge case — see stripPlaceholders' doc comment in md-write.ts.
+describe('startup-context sees content below a retained placeholder', () => {
+  test('injects Task and Progress Log content written under the template comments', async () => {
+    const wd = setupWorkdir();
+    try {
+      fs.writeFileSync(path.join(wd.dir, '.claude-code-hermit', 'sessions', 'SHELL.md'), [
+        '# Active Session',
+        '',
+        '## Session Info',
+        '- **ID:** S-001',
+        '',
+        '## Task',
+        '<!-- Awaiting next task -->',
+        'REAL-TASK ship the thing',
+        '',
+        '## Progress Log',
+        '<!-- Primary record of work -->',
+        '<!-- Format: [HH:MM] Did X — result/outcome -->',
+        '[09:00] REAL-ENTRY started',
+        '',
+        '## Blockers',
+        '',
+        '## Session Summary',
+        '',
+      ].join('\n'));
+
+      const res = await runScript('startup-context.ts', {
+        stdin: '{}',
+        env: { AGENT_DIR: path.join(wd.dir, '.claude-code-hermit') },
+      });
+
+      expect(res.stdout).toContain('REAL-TASK ship the thing');
+      expect(res.stdout).toContain('[09:00] REAL-ENTRY started');
+      expect(res.stdout).not.toContain('Awaiting next task');
+      expect(res.stdout).not.toContain('has no actionable content');
+    } finally {
+      wd.cleanup();
+    }
+  });
+});
+
+describe('findSection escapes the heading', () => {
+  test('a metacharacter in the heading is matched literally', () => {
+    expect(extractSection('## Notes (2026)\nbody\n', 'Notes (2026)')?.trim()).toBe('body');
+    expect(extractSection('## Notes 2026\nbody\n', 'Notes (2026)')).toBeNull();
+    expect(extractSection('## AxB\nbody\n', 'A.B')).toBeNull();
+  });
+});
+
 describe('findSection agrees with extractSection', () => {
   test('the located span, minus its leading newline, is the extracted body', () => {
     for (const heading of ['Session Info', 'Task', 'Progress Log', 'Blockers', 'Session Summary']) {
