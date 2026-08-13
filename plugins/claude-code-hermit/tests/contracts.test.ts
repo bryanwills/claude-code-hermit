@@ -25,6 +25,7 @@ import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { validateCronSchedule, validate } from '../scripts/validate-config';
 import { resolve } from '../scripts/resolve-outbound-channel';
+import { resolvePaths, checkConfig } from '../scripts/doctor-check';
 
 const SCRIPTS = path.join(PLUGIN_ROOT, 'scripts');
 const SKILLS = path.join(PLUGIN_ROOT, 'skills');
@@ -59,6 +60,10 @@ function withTmpdir(fn: (dir: string) => Promise<void> | void) {
 const writeConfig = (dir: string, config: any) =>
   fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'config.json'), JSON.stringify(config));
 
+// Stays a subprocess: it asserts the whole-report path (argv → 24 checks → stdout
+// JSON → exit 0), which an in-process runAllChecks() would stop covering. Converting
+// it was tried and measured slower here (~2.4s → ~4s for this file), so the seam
+// buys per-check reach, not spawn count — don't "optimize" this back in-process.
 async function runDoctorCheck(dir: string): Promise<any> {
   const r = await runScript('doctor-check.ts', {
     args: ['.claude-code-hermit'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
@@ -1964,6 +1969,32 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
     expect(skill).not.toContain('fifteen');
     expect(skill.toLowerCase()).toContain('twenty-four');
   });
+});
+
+// The seam the rest of this file's doctor cases ride on: a check takes its paths as
+// an argument, so one check runs against one scratch dir without a subprocess and
+// without the module ever seeing that dir in argv. Without this, nothing fails when
+// a check quietly goes back to closing over module-level constants.
+describe('doctor per-check seam', () => {
+  // Asserts path routing, not config validity — a check reads the dir it was handed,
+  // so the schema can gain required keys without this case going red.
+  test('one check, two scratch dirs, one process — each reads the dir it was handed',
+    withTmpdir(async (seeded) => {
+      writeConfig(seeded, {});                              // config.json exists (contents irrelevant here)
+      const empty = makeTmpdir();
+      try {
+        fs.mkdirSync(path.join(empty, '.claude-code-hermit'), { recursive: true });  // no config.json
+        const at = (d: string) => checkConfig(resolvePaths(path.join(d, '.claude-code-hermit'), PLUGIN_ROOT));
+
+        expect(at(seeded).detail).not.toContain('not found');
+        const missing = at(empty);
+        expect(missing.id).toBe('config');
+        expect(missing.status).toBe('fail');
+        expect(missing.detail).toContain('not found');
+      } finally {
+        try { fs.rmSync(empty, { recursive: true, force: true }); } catch {}
+      }
+    }));
 });
 
 describe('doctor version-currency check', () => {

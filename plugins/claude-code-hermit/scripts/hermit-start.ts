@@ -21,6 +21,8 @@ import { tmuxSessionAlive, getSessionName } from './lib/tmux';
 import { clearStatusCache } from './lib/context-reset';
 import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-token';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { isContainer } from './lib/container';
+import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels } from './lib/channel-config';
 
 type Json = any;
 
@@ -149,17 +151,6 @@ const DEFAULT_CONFIG: Json = {
 };
 
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
-
-/** Python-style truthiness: empty arrays/objects/strings are falsy. */
-function pyTruthy(v: Json): boolean {
-  if (Array.isArray(v)) return v.length > 0;
-  if (v && typeof v === 'object') return Object.keys(v).length > 0;
-  return Boolean(v);
-}
-
-function isDict(v: Json): boolean {
-  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-}
 
 /** Python shlex.quote: safe chars pass through, everything else single-quoted. */
 function shlexQuote(s: string): string {
@@ -305,15 +296,6 @@ function checkPrerequisites(): Json {
   }
 
   return { tmux: hasTmux, bun: hasBun };
-}
-
-/** Detect if running inside a container (Docker, Podman, LXC). */
-function isContainer(): boolean {
-  return (
-    fs.existsSync('/.dockerenv') ||
-    fs.existsSync('/run/.containerenv') ||
-    process.env.container === 'docker'
-  );
 }
 
 /** Check for stale runtime state from a previous run and warn. */
@@ -463,24 +445,6 @@ function fetchRegisteredMarketplaces(): Json[] | null {
   } catch {
     return null;
   }
-}
-
-/** Yield [name, cfg] for channels whose config is a valid dict. */
-function* iterChannelConfigs(config: Json): Generator<[string, Json]> {
-  const channels = 'channels' in config ? config.channels : {};
-  if (!isDict(channels)) return;
-  for (const [name, cfg] of Object.entries(channels)) {
-    if (isDict(cfg)) yield [name, cfg];
-  }
-}
-
-/** Return list of enabled channel names. */
-function getEnabledChannels(config: Json): string[] {
-  const names: string[] = [];
-  for (const [name, cfg] of iterChannelConfigs(config)) {
-    if (pyTruthy('enabled' in cfg ? cfg.enabled : true)) names.push(name);
-  }
-  return names;
 }
 
 /** Resolve a state_dir path (absolute pass-through, relative against cwd). */
