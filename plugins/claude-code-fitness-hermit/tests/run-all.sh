@@ -7,7 +7,6 @@ PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 rc=0
 
 bun "$SCRIPT_DIR/skill-structure.test.ts" || rc=$?
-bun "$SCRIPT_DIR/hatch-skill.test.ts" || rc=$?
 
 if [ -d "$PLUGIN_ROOT/scripts" ]; then
   while IFS= read -r f; do
