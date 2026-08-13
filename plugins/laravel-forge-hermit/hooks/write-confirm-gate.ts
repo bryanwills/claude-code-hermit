@@ -15,8 +15,60 @@
 // ONLY when we positively identify a write command lacking --confirm; if we
 // can't parse or classify the call, we pass through and let the authoritative
 // in-PHP gate handle it.
+//
+// classify() is the whole decision, exported so it can be tested as a function
+// and so the inventories below can be asserted against the subcommands
+// php/forge.php actually dispatches. main() owns only stdin, exit codes, and
+// the stderr message.
 
 import { readFileSync, writeSync } from 'node:fs';
+
+export const SAFE_SUBCOMMANDS: readonly string[] = [
+  'check', 'servers', 'server', 'sites', 'site', 'logs',
+  'server-log', 'site-log', 'background-process-log',
+  'deploy-history', 'deploy-log', 'deploy-status', 'deploy-watch',
+  'preview-deploy', 'preview-reboot',
+  'failed-deploys',
+  // Generic dispatch. `execute` mutates, but its authority is the plan hash
+  // plus the operator's channel approval — neither is visible in a Bash
+  // command string, so gating it here would be theatre. It stays in PHP.
+  'policy', 'call', 'preview', 'execute',
+  'help', '--help',
+];
+
+export const WRITE_SUBCOMMANDS: readonly string[] = ['deploy', 'server-reboot'];
+
+export type Classification =
+  | { gate: 'pass' }
+  | { gate: 'needs-confirm'; subcommand: string; preview: string };
+
+const PASS: Classification = { gate: 'pass' };
+
+export function classify(command: string): Classification {
+  if (!command.includes('forge.php')) return PASS;
+
+  const tokens = command.trim().split(/\s+/);
+  const idx = tokens.findIndex(t => t === 'forge.php' || t.endsWith('/forge.php'));
+
+  // forge.php is present but no subcommand token — pass through (e.g., --help).
+  if (idx === -1 || idx + 1 >= tokens.length) return PASS;
+
+  const subcommand = tokens[idx + 1]!;
+
+  if (SAFE_SUBCOMMANDS.includes(subcommand)) return PASS;
+
+  // Unknown subcommand — pass through (in-PHP gate handles it).
+  if (!WRITE_SUBCOMMANDS.includes(subcommand)) return PASS;
+
+  // Exact token, matching the in-PHP in_array() check.
+  if (tokens.includes('--confirm')) return PASS;
+
+  return {
+    gate: 'needs-confirm',
+    subcommand,
+    preview: subcommand === 'deploy' ? 'preview-deploy' : 'preview-reboot',
+  };
+}
 
 function block(message: string): never {
   try { writeSync(2, `${message}\n`); } catch {}
@@ -45,46 +97,10 @@ function main(): void {
   const command = (toolInput as Record<string, unknown>)['command'];
   if (typeof command !== 'string') process.exit(0);
 
-  if (!command.includes('forge.php')) process.exit(0);
+  const verdict = classify(command);
+  if (verdict.gate === 'pass') process.exit(0);
 
-  const tokens = command.trim().split(/\s+/);
-  const idx = tokens.findIndex(t => t === 'forge.php' || t.endsWith('/forge.php'));
-
-  if (idx === -1 || idx + 1 >= tokens.length) {
-    // forge.php is present but no subcommand token — pass through (e.g., --help).
-    process.exit(0);
-  }
-
-  const subcommand = tokens[idx + 1]!;
-
-  const SAFE_SUBCOMMANDS = [
-    'check', 'servers', 'server', 'sites', 'site', 'logs',
-    'server-log', 'site-log', 'background-process-log',
-    'deploy-history', 'deploy-log', 'deploy-status', 'deploy-watch',
-    'preview-deploy', 'preview-reboot',
-    'failed-deploys',
-    // Generic dispatch. `execute` mutates, but its authority is the plan hash
-    // plus the operator's channel approval — neither is visible in a Bash
-    // command string, so gating it here would be theatre. It stays in PHP.
-    'policy', 'call', 'preview', 'execute',
-    'help', '--help',
-  ];
-  if (SAFE_SUBCOMMANDS.includes(subcommand)) {
-    process.exit(0);
-  }
-
-  const WRITE_SUBCOMMANDS = ['deploy', 'server-reboot'];
-  if (!WRITE_SUBCOMMANDS.includes(subcommand)) {
-    // Unknown subcommand — pass through (in-PHP gate handles it).
-    process.exit(0);
-  }
-
-  if (tokens.includes('--confirm')) { // exact token, matching the in-PHP in_array() check
-    process.exit(0);
-  }
-
-  const preview = subcommand === 'deploy' ? 'preview-deploy' : 'preview-reboot';
-  block(`forge.php ${subcommand} requires --confirm. Run ${preview} first to review the canonical target, then re-run with --confirm.`);
+  block(`forge.php ${verdict.subcommand} requires --confirm. Run ${verdict.preview} first to review the canonical target, then re-run with --confirm.`);
 }
 
 if (import.meta.main) {

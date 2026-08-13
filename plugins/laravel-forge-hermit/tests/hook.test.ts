@@ -1,11 +1,18 @@
 // Structural and behavioral tests for write-confirm-gate.ts
 // Run with: bun test tests/hook.test.ts
+//
+// Classification is tested as a function (classify); spawns are kept only for
+// the process edges the function cannot cover — stdin parsing, exit codes and
+// the stderr message.
 
 import { test, expect, describe } from 'bun:test';
 import { spawnSync } from 'child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { classify, SAFE_SUBCOMMANDS, WRITE_SUBCOMMANDS } from '../hooks/write-confirm-gate';
 
 const HOOK = path.join(import.meta.dir, '..', 'hooks', 'write-confirm-gate.ts');
+const FORGE_PHP = path.join(import.meta.dir, '..', 'php', 'forge.php');
 
 function runHook(payload: unknown): { exitCode: number; stderr: string; stdout: string } {
   const input = JSON.stringify(payload);
@@ -21,155 +28,101 @@ function runHook(payload: unknown): { exitCode: number; stderr: string; stdout: 
   };
 }
 
-describe('write-confirm-gate: pass-through cases', () => {
-  test('non-Bash tool always passes', () => {
-    const r = runHook({ tool_name: 'Read', tool_input: { file_path: '/some/file' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('Bash call not involving forge.php passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'ls -la' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('forge.php servers (read command) passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php servers' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('forge.php check passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php check' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('preview-deploy passes (read-only)', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php preview-deploy prod-web myapp.com' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('preview-reboot passes (read-only)', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php preview-reboot prod-web' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('failed-deploys passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php failed-deploys --json' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('deploy-status passes (read-only poll, not a write)', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy-status 12 34 8821' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('deploy-watch passes (read-only poll loop, not a write)', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy-watch 12 34 8821' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('call method passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'echo \'["s1"]\' | php /plugin/php/forge.php call servers' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('site-log (read command) passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php site-log web-1 example.com application' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('background-process-log (read command) passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php background-process-log web-1 123' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('policy passes (no credentials, no network)', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php policy' } });
-    expect(r.exitCode).toBe(0);
-  });
-
-  test('preview passes (captures a request, sends nothing)', () => {
-    const r = runHook({
-      tool_name: 'Bash',
-      tool_input: { command: 'echo \'[12, {"type":"cpu_load"}]\' | php /plugin/php/forge.php preview createMonitor' },
+describe('classify: every safe subcommand passes', () => {
+  for (const sub of SAFE_SUBCOMMANDS) {
+    test(`${sub} passes`, () => {
+      expect(classify(`php /plugin/php/forge.php ${sub}`).gate).toBe('pass');
     });
-    expect(r.exitCode).toBe(0);
-  });
+  }
+});
 
-  // `execute` does mutate. It is deliberately not gated here: its authority is
-  // the plan hash and the operator's channel approval, and neither is visible in
-  // a Bash command string. A hook that documents itself as fail-open must not
-  // pretend to own that decision.
-  test('execute passes — the PHP hash check owns this gate, not the hook', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php execute fp-3f9a1c7b' } });
-    expect(r.exitCode).toBe(0);
-  });
+describe('classify: pass-through cases', () => {
+  const PASS_CASES: Array<[string, string]> = [
+    ['a command not involving forge.php', 'ls -la'],
+    ['forge.php with no subcommand token', 'php /plugin/php/forge.php'],
+    ['a read command with arguments', 'php /plugin/php/forge.php site-log web-1 example.com application'],
+    ['deploy-status — a read-only poll, not a write', 'php /plugin/php/forge.php deploy-status 12 34 8821'],
+    ['deploy-watch — a read-only poll loop, not a write', 'php /plugin/php/forge.php deploy-watch 12 34 8821'],
+    ['a piped generic-dispatch read', 'echo \'["s1"]\' | php /plugin/php/forge.php call servers'],
+    // `execute` does mutate. It is deliberately not gated here: its authority is
+    // the plan hash and the operator's channel approval, and neither is visible
+    // in a Bash command string. A hook that documents itself as fail-open must
+    // not pretend to own that decision.
+    ['execute — the PHP hash check owns this gate, not the hook', 'php /plugin/php/forge.php execute fp-3f9a1c7b'],
+    ['an unknown subcommand — the in-PHP gate handles it', 'php /plugin/php/forge.php delete-site prod-web myapp.com'],
+    ['deploy with --confirm', 'php /plugin/php/forge.php deploy prod-web myapp.com --confirm'],
+    ['deploy with --confirm after another flag', 'php /plugin/php/forge.php deploy prod-web myapp.com --json --confirm'],
+    ['server-reboot with --confirm', 'php /plugin/php/forge.php server-reboot prod-web --confirm'],
+    ['${CLAUDE_PLUGIN_ROOT} deploy with --confirm', 'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php deploy srv site --confirm'],
+    ['an env-var prefix before a safe subcommand', 'FOO=bar php ${CLAUDE_PLUGIN_ROOT}/php/forge.php preview createMonitor'],
+  ];
 
-  test('the new verbs pass with ${CLAUDE_PLUGIN_ROOT} and an env prefix', () => {
-    for (const cmd of [
-      'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php policy',
-      'FOO=bar php ${CLAUDE_PLUGIN_ROOT}/php/forge.php preview createMonitor',
-      'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php execute fp-deadbeef',
-    ]) {
-      expect(runHook({ tool_name: 'Bash', tool_input: { command: cmd } }).exitCode).toBe(0);
-    }
+  for (const [label, command] of PASS_CASES) {
+    test(label, () => {
+      expect(classify(command).gate).toBe('pass');
+    });
+  }
+});
+
+describe('classify: writes lacking --confirm need confirmation', () => {
+  const BLOCK_CASES: Array<[string, string, string, string]> = [
+    ['deploy without --confirm', 'php /plugin/php/forge.php deploy prod-web myapp.com', 'deploy', 'preview-deploy'],
+    ['deploy with an unrelated trailing flag', 'php /plugin/php/forge.php deploy prod-web myapp.com --json', 'deploy', 'preview-deploy'],
+    // --confirm is matched as an exact token, mirroring the in-PHP in_array().
+    ['deploy with a --confirm substring flag', 'php /plugin/php/forge.php deploy prod-web myapp.com --confirm-later', 'deploy', 'preview-deploy'],
+    ['server-reboot without --confirm', 'php /plugin/php/forge.php server-reboot prod-web', 'server-reboot', 'preview-reboot'],
+    ['an env-var prefix does not confuse tokenization', 'FORGE_ORG=myorg php /plugin/php/forge.php deploy srv site', 'deploy', 'preview-deploy'],
+    // Under --plugin-dir the harness does not substitute ${CLAUDE_PLUGIN_ROOT},
+    // so the literal reaches the hook and must still resolve to forge.php.
+    ['${CLAUDE_PLUGIN_ROOT} as a literal path', 'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php deploy srv site', 'deploy', 'preview-deploy'],
+  ];
+
+  for (const [label, command, subcommand, preview] of BLOCK_CASES) {
+    test(label, () => {
+      expect(classify(command)).toEqual({ gate: 'needs-confirm', subcommand, preview });
+    });
+  }
+});
+
+describe('inventory sync: forge.php dispatch vs the hook classifier', () => {
+  // A subcommand added to forge.php but not classified here would fall through
+  // the hook's unknown-subcommand branch, silently reducing the documented
+  // two-layer write gate to the in-PHP check alone.
+  test('every forge.php subcommand is classified', () => {
+    const source = readFileSync(FORGE_PHP, 'utf8');
+    const dispatched = [...source.matchAll(/\$cmd === '([a-z-]+)'/g)].map(m => m[1]!);
+    const unique = [...new Set(dispatched)];
+
+    // Guards against the regex silently rotting into a vacuous pass if the
+    // dispatch style in forge.php ever changes.
+    expect(unique.length).toBeGreaterThanOrEqual(24);
+
+    const known = new Set([...SAFE_SUBCOMMANDS, ...WRITE_SUBCOMMANDS]);
+    const unclassified = unique.filter(sub => !known.has(sub));
+    expect(unclassified).toEqual([]);
   });
 });
 
-describe('write-confirm-gate: blocked cases', () => {
-  test('deploy without --confirm is blocked', () => {
+describe('write-confirm-gate: process contract', () => {
+  test('a write lacking --confirm exits 2 and names the preview command', () => {
     const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy prod-web myapp.com' } });
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain('--confirm');
+    expect(r.stderr).toContain('preview-deploy');
   });
 
-  test('deploy with an unknown trailing flag but no --confirm is blocked', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy prod-web myapp.com --json' } });
-    expect(r.exitCode).toBe(2);
-  });
-
-  test('server-reboot without --confirm is blocked', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php server-reboot prod-web' } });
-    expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain('--confirm');
-  });
-
-  test('a --confirm substring (e.g. --confirm-later) does NOT satisfy the gate', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy prod-web myapp.com --confirm-later' } });
-    expect(r.exitCode).toBe(2);
-  });
-});
-
-describe('write-confirm-gate: allowed write cases', () => {
-  test('deploy with --confirm passes', () => {
+  test('a write with --confirm exits 0', () => {
     const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy prod-web myapp.com --confirm' } });
     expect(r.exitCode).toBe(0);
   });
 
-  test('deploy with --confirm anywhere in the args passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php deploy prod-web myapp.com --json --confirm' } });
+  test('non-Bash tool calls are never classified', () => {
+    const r = runHook({ tool_name: 'Read', tool_input: { file_path: '/some/file' } });
     expect(r.exitCode).toBe(0);
   });
 
-  test('server-reboot with --confirm passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php /plugin/php/forge.php server-reboot prod-web --confirm' } });
-    expect(r.exitCode).toBe(0);
-  });
-});
-
-describe('write-confirm-gate: env-var prefix + path variants', () => {
-  test('env-var prefix before php does not confuse tokenization', () => {
-    // The subcommand is still after forge.php
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'FORGE_ORG=myorg php /plugin/php/forge.php deploy srv site' } });
-    expect(r.exitCode).toBe(2);
-  });
-
-  test('${CLAUDE_PLUGIN_ROOT} as literal in command is handled (plugin-dir mode)', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php deploy srv site' } });
-    expect(r.exitCode).toBe(2);
-  });
-
-  test('${CLAUDE_PLUGIN_ROOT} deploy with --confirm passes', () => {
-    const r = runHook({ tool_name: 'Bash', tool_input: { command: 'php ${CLAUDE_PLUGIN_ROOT}/php/forge.php deploy srv site --confirm' } });
+  test('a Bash payload without a command string passes through', () => {
+    const r = runHook({ tool_name: 'Bash', tool_input: {} });
     expect(r.exitCode).toBe(0);
   });
 });
