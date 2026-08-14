@@ -67,11 +67,10 @@ export function run(args: string[]): void {
     // Nothing to verify against and nowhere to log — never claim success.
     emit('failed|verification-error|hermit dir unresolvable');
   }
-  const projectRoot = path.dirname(hermit);
 
   const stamp = (event: string): void => {
     try {
-      logRoutineEvent(id, event, delivery, projectRoot);
+      logRoutineEvent(id, event, hermit, delivery);
     } catch { /* a stamp failure must not crash the fire path */ }
   };
 

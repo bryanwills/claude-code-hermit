@@ -8,6 +8,12 @@ import fs from 'node:fs';
 
 type Json = any;
 
+// findHermitDir() honors CLAUDE_PROJECT_DIR. These tests run inside a Claude Code
+// session, where it names the real repo — every fixture below would resolve to the
+// repo's own hermit state instead of its temp project. Scrub it for the whole file;
+// the two cases that need it set pass it explicitly.
+delete process.env.CLAUDE_PROJECT_DIR;
+
 const GUARD = path.join(import.meta.dir, 'git-push-guard.ts');
 
 let passed = 0;
@@ -267,6 +273,51 @@ console.log('\nInactive-profile notice:');
   const r = runCapture('npm test', { AGENT_HOOK_PROFILE: 'standard' });
   assert('non-strict non-push exits 0', r.status, 0);
   assertEmpty('non-strict non-push emits no notice', r.stderr || '');
+}
+
+// --- CLAUDE_PROJECT_DIR precedence (drifted cwd) ---
+// The guard's config lookup used to start at process.cwd(); a session that had
+// `cd`-ed anywhere outside the project silently lost operator protected_branches
+// and fell back to the built-in main/master list.
+console.log('\nCLAUDE_PROJECT_DIR precedence:');
+{
+  // A hatched project whose config protects release/*, and a drifted cwd outside it.
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-proj-'));
+  const drifted = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-drift-'));
+  const hermitDir = path.join(proj, '.claude-code-hermit');
+  fs.mkdirSync(hermitDir);
+  fs.writeFileSync(
+    path.join(hermitDir, 'config.json'),
+    JSON.stringify({ 'claude-code-dev-hermit': { protected_branches: ['release/prod'] } })
+  );
+  const guardFrom = (cwd: string, env: Json) =>
+    spawnSync(process.execPath, [GUARD], {
+      input: makeInput('git push origin release/prod'),
+      env: { ...process.env, AGENT_HOOK_PROFILE: 'strict', ...env },
+      encoding: 'utf-8',
+      cwd,
+    }).status;
+
+  try {
+    assert(
+      'env-named project wins over a drifted cwd',
+      guardFrom(drifted, { CLAUDE_PROJECT_DIR: proj }),
+      2
+    );
+    assert(
+      'stale env falls through to the walk-up',
+      guardFrom(proj, { CLAUDE_PROJECT_DIR: path.join(os.tmpdir(), 'guard-no-such-dir') }),
+      2
+    );
+    assert(
+      'no env and a drifted cwd still degrades to the built-in list',
+      guardFrom(drifted, {}),
+      0
+    );
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+    fs.rmSync(drifted, { recursive: true, force: true });
+  }
 }
 
 // --- Summary ---

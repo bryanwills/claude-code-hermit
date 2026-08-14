@@ -42,7 +42,6 @@ const hermitDir = process.argv[2];
 if (!hermitDir) process.exit(0);
 
 const stateDir = path.join(hermitDir, 'state');
-const projectRoot = path.dirname(hermitDir);
 const schedulePath = path.join(stateDir, 'routine-schedule.json');
 const livenessPath = path.join(stateDir, 'routine-monitor-liveness.json');
 
@@ -80,7 +79,7 @@ function writeLiveness(): void {
 
 function stamp(id: string, event: string): void {
   try {
-    logRoutineEvent(id, event, 'monitor', projectRoot);
+    logRoutineEvent(id, event, hermitDir, 'monitor');
   } catch { /* fail-open — a stamp failure must not block the routine */ }
 }
 

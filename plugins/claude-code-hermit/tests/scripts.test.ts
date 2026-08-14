@@ -15,8 +15,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, runProposal, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
-import { setupWorkdir, fixturesDir, withDir, type Workdir } from './helpers/workdir';
+import { setupWorkdir, fixturesDir, withDir, writeConfig, type Workdir } from './helpers/workdir';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
+import { logRoutineEvent } from '../scripts/lib/routines/event';
 
 // In-process imports — pure libs with no import-time CWD dependence.
 import { safeForLLM, safeForLLMMultiline } from '../scripts/lib/sanitize';
@@ -2828,6 +2829,28 @@ describe('routines.ts log-event', () => {
       const content = fs.readFileSync(metrics(), 'utf-8');
       expect(content).toContain('"routine_id":"daily-brief","event":"started"');
     });
+  });
+
+  // The in-process callers (precheck, finish, due) hand over a hermit dir they
+  // already resolved. logRoutineEvent must write under exactly that dir and not
+  // re-derive one: when it walked, a config-less dir nested under a hatched
+  // parent sent the row to the parent's ledger — a cross-project write, and in
+  // finish.ts a split between the run record and the ledger row.
+  test('logRoutineEvent writes under the hermit dir it is given, without walking', () => {
+    const wd = setupWorkdir();
+    try {
+      writeConfig(wd.dir, { agent_name: 'test' }); // ancestor is hatched — pass 1 would prefer it
+      const child = path.join(wd.dir, 'child', '.claude-code-hermit');
+      fs.mkdirSync(path.join(child, 'state'), { recursive: true }); // no config.json
+      expect(logRoutineEvent('nested-routine', 'fired', child, 'monitor')).toBeNull();
+
+      const childLedger = path.join(child, 'state', 'routine-metrics.jsonl');
+      expect(fs.readFileSync(childLedger, 'utf-8')).toContain('"routine_id":"nested-routine"');
+      // The hatched ancestor a walk would have preferred stays untouched.
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'routine-metrics.jsonl'))).toBe(false);
+    } finally {
+      wd.cleanup();
+    }
   });
 
   // Order-coupled: both tests append to the same shared routine-metrics.jsonl

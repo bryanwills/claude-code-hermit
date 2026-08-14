@@ -5,7 +5,11 @@
  * Exit 0 = allow. Exit 2 = block. Fails open on missing feed-sources.md / malformed input.
  */
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+
 const SOURCES_FILE = "feed-sources.md";
+const SENTINEL = join(".claude-code-hermit", "config.json");
 
 const INFRA_ALLOWLIST = [
   "raw.githubusercontent.com",
@@ -14,6 +18,24 @@ const INFRA_ALLOWLIST = [
   "pypi.org",
   "codeload.github.com",
 ];
+
+// Sealed copy of the fleet root walk (core cc-compat.ts hermitDir, dev
+// find-hermit-dir.ts) — fleet plugins cannot import core at runtime. Returns the
+// project ROOT, not the state dir: feed-sources.md is operator-owned and lives at
+// the root. A hook's cwd is the session's shell cwd and drifts with `cd`, so the
+// allowlist is never read relative to it.
+export function projectRoot(): string {
+  const proj = process.env.CLAUDE_PROJECT_DIR;
+  if (proj && existsSync(join(proj, SENTINEL))) return proj;
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(dir, SENTINEL))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd(); // never-hatched project — same behavior as before this anchor existed
+}
 
 export function parseAllowlist(sourcesMd: string): string[] {
   const hosts = new Set<string>();
@@ -62,7 +84,7 @@ async function main(): Promise<void> {
 
   let sources: string;
   try {
-    sources = await Bun.file(SOURCES_FILE).text();
+    sources = await Bun.file(join(projectRoot(), SOURCES_FILE)).text();
   } catch {
     process.exit(0); // can't read the allowlist file — fail open
   }

@@ -41,7 +41,7 @@ function restoreEnv() {
 
 // hermitDir() reads process.env at call time (not module load time), so we can
 // import once and control env per-call.
-const { hermitDir } = await import('../scripts/lib/cc-compat');
+const { hermitDir, findHermitDir } = await import('../scripts/lib/cc-compat');
 
 // -------------------------------------------------------------------------
 // Tests
@@ -131,5 +131,63 @@ describe('hermitDir()', () => {
     } finally {
       fs.rmSync(noHermit, { recursive: true, force: true });
     }
+  });
+
+  // findHermitDir() is hermitDir()'s walk without the env branches or the
+  // fail-open tail: callers that start somewhere other than cwd (routines/event.ts)
+  // need a null they can refuse on, and must not have an ambient
+  // CLAUDE_PROJECT_DIR override the root their caller resolved.
+  describe('findHermitDir()', () => {
+    // Builds <root>/a/b/... `levels` deep; the hermit lives at the root.
+    function nest(levels: number): { root: string; deepest: string } {
+      const root = makeTmpHermit();
+      let deepest = root;
+      for (let i = 0; i < levels; i++) {
+        deepest = path.join(deepest, `l${i}`);
+        fs.mkdirSync(deepest);
+      }
+      return { root, deepest };
+    }
+
+    // The cap is 8 CHECKS — the start dir plus 7 ancestors — so the deepest
+    // findable sentinel sits 7 levels up. Pinned because both the cap and the
+    // off-by-one are easy to "tidy" into a different boundary later.
+    it('finds a sentinel 7 levels up, and gives up at 8', () => {
+      const at7 = nest(7);
+      const at8 = nest(8);
+      try {
+        expect(findHermitDir(at7.deepest)).toBe(path.join(at7.root, '.claude-code-hermit'));
+        expect(findHermitDir(at8.deepest)).toBeNull();
+      } finally {
+        fs.rmSync(at7.root, { recursive: true, force: true });
+        fs.rmSync(at8.root, { recursive: true, force: true });
+      }
+    });
+
+    it('walks past a config-less decoy to the real project above it', () => {
+      // A partially-populated `.claude-code-hermit/` — OPERATOR.md but no
+      // config.json — must not capture the walk. (Not the git-worktree shape:
+      // `.worktreeinclude`'s managed block copies config.json in, so a worktree
+      // copy IS the match.)
+      const root = makeTmpHermit();
+      try {
+        const worktree = path.join(root, '.claude', 'worktrees', 'wt');
+        fs.mkdirSync(path.join(worktree, '.claude-code-hermit'), { recursive: true });
+        fs.writeFileSync(path.join(worktree, '.claude-code-hermit', 'OPERATOR.md'), '');
+        expect(findHermitDir(worktree)).toBe(path.join(root, '.claude-code-hermit'));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('ignores CLAUDE_PROJECT_DIR — the caller-supplied start wins', () => {
+      const elsewhere = makeTmpHermit();
+      try {
+        process.env.CLAUDE_PROJECT_DIR = elsewhere;
+        expect(findHermitDir(tmp)).toBe(path.join(tmp, '.claude-code-hermit'));
+      } finally {
+        fs.rmSync(elsewhere, { recursive: true, force: true });
+      }
+    });
   });
 });

@@ -5,6 +5,13 @@ import path from 'node:path';
 
 type Json = any;
 
+// findHermitDir() honors CLAUDE_PROJECT_DIR; scrub the inherited value so these
+// fixtures resolve to their own temp projects, not the repo this suite runs in.
+// Deleting it from process.env is not enough — spawnSync snapshots the parent env
+// and only an explicit `env` reaches the child, so every spawn below passes CLEAN_ENV.
+delete process.env.CLAUDE_PROJECT_DIR;
+const CLEAN_ENV = { ...process.env };
+
 const HOOK = path.join(import.meta.dir, 'record-test-result.ts');
 
 let passed = 0;
@@ -28,6 +35,7 @@ function runHook(cwd: string, payload: Json) {
     input: JSON.stringify(payload),
     cwd,
     encoding: 'utf-8',
+    env: CLEAN_ENV,
   });
   return result.status;
 }
@@ -113,9 +121,9 @@ cleanup(proj);
 
 // write subcommand — pass
 proj = setupProject('npm test');
-spawnSync(process.execPath, [HOOK, 'write', '0', '1234'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'write', '0', '1234'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
-const expectedSha = execSync('git rev-parse HEAD', { cwd: proj, encoding: 'utf-8' }).trim();
+const expectedSha = execSync('git rev-parse HEAD', { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV }).trim();
 assert('write: records pass with exit_code 0', s !== null && s.exit_code === 0 && s.status === 'pass');
 assert('write: records duration_ms', s !== null && s.duration_ms === 1234);
 assert('write: records git HEAD sha', s !== null && s.sha === expectedSha);
@@ -123,23 +131,23 @@ cleanup(proj);
 
 // write subcommand — fail
 proj = setupProject('npm test');
-spawnSync(process.execPath, [HOOK, 'write', '1', '500'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'write', '1', '500'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
 assert('write: records fail with exit_code 1', s !== null && s.exit_code === 1 && s.status === 'fail');
 cleanup(proj);
 
 // write subcommand — invalid args
 proj = setupProject('npm test');
-spawnSync(process.execPath, [HOOK, 'write', '0abc', '1234'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'write', '0abc', '1234'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
 assert('write: does not write on invalid exit_code arg', s === null);
 cleanup(proj);
 
 // run subcommand — pass
 proj = setupProject('exit 0');
-const runPass = spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, encoding: 'utf-8' });
+const runPass = spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV });
 s = readState(proj);
-const runSha = execSync('git rev-parse HEAD', { cwd: proj, encoding: 'utf-8' }).trim();
+const runSha = execSync('git rev-parse HEAD', { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV }).trim();
 assert('run: exits 0 on passing test command', runPass.status === 0);
 assert('run: records pass', s !== null && s.status === 'pass');
 assert('run: records git HEAD sha', s !== null && s.sha === runSha);
@@ -147,7 +155,7 @@ cleanup(proj);
 
 // run subcommand — fail
 proj = setupProject('exit 1');
-const runFail = spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, encoding: 'utf-8' });
+const runFail = spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV });
 s = readState(proj);
 assert('run: exits 1 on failing test command', runFail.status === 1);
 assert('run: records fail', s !== null && s.status === 'fail');
@@ -155,7 +163,7 @@ cleanup(proj);
 
 // run subcommand — no commands.test
 proj = setupProject(null);
-const runNoCmd = spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, encoding: 'utf-8' });
+const runNoCmd = spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV });
 s = readState(proj);
 assert('run: exits 1 when commands.test not configured', runNoCmd.status === 1);
 assert('run: does not write when commands.test not configured', s === null);
@@ -163,28 +171,28 @@ cleanup(proj);
 
 // likely_cause — oom (137)
 proj = setupProject('exit 137');
-spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
 assert('likely_cause: oom on exit 137', s !== null && s.likely_cause === 'oom');
 cleanup(proj);
 
 // likely_cause — timeout (124)
 proj = setupProject('exit 124');
-spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
 assert('likely_cause: timeout on exit 124', s !== null && s.likely_cause === 'timeout');
 cleanup(proj);
 
 // likely_cause — user-interrupt (130)
 proj = setupProject('exit 130');
-spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
 assert('likely_cause: user-interrupt on exit 130', s !== null && s.likely_cause === 'user-interrupt');
 cleanup(proj);
 
 // likely_cause — absent on generic non-zero
 proj = setupProject('exit 1');
-spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj });
+spawnSync(process.execPath, [HOOK, 'run'], { cwd: proj, env: CLEAN_ENV });
 s = readState(proj);
 assert('likely_cause: absent on generic exit 1', s !== null && !('likely_cause' in s));
 cleanup(proj);
@@ -196,10 +204,10 @@ const child = path.join(proj, 'packages', 'foo');
 fs.mkdirSync(child, { recursive: true });
 const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
 execSync('git init -q && git commit -q --allow-empty -m child-init', { cwd: child, env: gitEnv, stdio: 'ignore' });
-const parentSha = execSync('git rev-parse HEAD', { cwd: proj, encoding: 'utf-8' }).trim();
+const parentSha = execSync('git rev-parse HEAD', { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV }).trim();
 const childSha = execSync('git rev-parse HEAD', { cwd: child, encoding: 'utf-8' }).trim();
 assert('--cwd test setup: parent and child SHAs differ', parentSha !== childSha);
-const cwdRun = spawnSync(process.execPath, [HOOK, 'run', '--cwd', child], { cwd: proj, encoding: 'utf-8' });
+const cwdRun = spawnSync(process.execPath, [HOOK, 'run', '--cwd', child], { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV });
 s = readState(proj);
 assert('run --cwd: exits 0 on passing test command', cwdRun.status === 0);
 assert('run --cwd: captures child HEAD sha (not parent)', s !== null && s.sha === childSha);
@@ -207,7 +215,7 @@ cleanup(proj);
 
 // --cwd: bogus path fails fast
 proj = setupProject('exit 0');
-const cwdBogus = spawnSync(process.execPath, [HOOK, 'run', '--cwd', '/nonexistent/path/xyz'], { cwd: proj, encoding: 'utf-8' });
+const cwdBogus = spawnSync(process.execPath, [HOOK, 'run', '--cwd', '/nonexistent/path/xyz'], { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV });
 assert('run --cwd: exits non-zero on missing path', cwdBogus.status !== 0);
 assert('run --cwd: does not write last-test.json on missing path', readState(proj) === null);
 cleanup(proj);
@@ -215,7 +223,7 @@ cleanup(proj);
 // `git rev-parse --git-dir` walks up, so the dir must be outside any git repo.
 proj = setupProject('exit 0');
 const notGit = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-test-notgit-'));
-const cwdNotGit = spawnSync(process.execPath, [HOOK, 'run', '--cwd', notGit], { cwd: proj, encoding: 'utf-8' });
+const cwdNotGit = spawnSync(process.execPath, [HOOK, 'run', '--cwd', notGit], { cwd: proj, encoding: 'utf-8', env: CLEAN_ENV });
 assert('run --cwd: exits non-zero on non-git dir', cwdNotGit.status !== 0);
 assert('run --cwd: does not write last-test.json on non-git dir', readState(proj) === null);
 fs.rmSync(notGit, { recursive: true, force: true });
