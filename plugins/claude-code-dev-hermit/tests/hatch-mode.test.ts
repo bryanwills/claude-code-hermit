@@ -4,7 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeReporter } from './test-utils';
+import { makeReporter } from '../../../tests/lib/skill-lint';
 import { render } from '../scripts/render-append';
 
 const PLUGIN_ROOT = path.join(import.meta.dir, '..');

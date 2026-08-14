@@ -26,6 +26,7 @@ on:
       - '!plugins/claude-code-hermit/state-templates/CLAUDE-APPEND.md'
       - 'plugins/claude-code-hermit/scripts/**'
       - 'tests/cross-plugin/**'
+      - 'tests/lib/**'
       - '.github/workflows/test-cross-plugin.yml'
       - 'package.json'
       - 'bun.lock'
@@ -41,6 +42,7 @@ on:
       - '!plugins/claude-code-hermit/state-templates/CLAUDE-APPEND.md'
       - 'plugins/claude-code-hermit/scripts/**'
       - 'tests/cross-plugin/**'
+      - 'tests/lib/**'
       - '.github/workflows/test-cross-plugin.yml'
       - 'package.json'
       - 'bun.lock'
@@ -55,4 +57,4 @@ jobs:
         with:
           bun-version: '1.3.14'
       - run: bun install --frozen-lockfile
-      - run: bun test tests/cross-plugin/
+      - run: bun test tests/cross-plugin/ tests/lib/
