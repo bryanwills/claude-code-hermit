@@ -14,8 +14,12 @@
 // nothing and is deliberately not consulted.
 //
 // INVARIANT: mirrors core's cc-compat.ts hermitDir() shape (same 8-level cap,
-// same config.json sentinel, same env precedence) — if you change the walk or the
-// precedence here, check that file too.
+// same config.json sentinel, env checked before the walk) — if you change the walk
+// or the precedence here, check that file too. One deliberate difference: core's
+// CLAUDE_PROJECT_DIR branch accepts a bare `.claude-code-hermit/` while this one
+// requires the config.json sentinel, so in a git worktree (whose partial copy
+// carries no config.json) core resolves to the worktree and this resolves to the
+// main checkout.
 
 import fs from 'node:fs';
 import path from 'node:path';

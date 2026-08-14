@@ -40,9 +40,13 @@ const USAGE = 'Usage: routines.ts log-event <routine-id> <event> [delivery]';
 // Env precedence deliberately does not apply: in-process callers pass a root they
 // already resolved, and ambient env must not override an explicit argument.
 function nearestHermitDir(from: string): string | null {
-  const hatched = findHermitDir(from);
+  // Resolve once, up front: a relative `from` would give findHermitDir() a walk
+  // that dies after one check (`path.dirname('.') === '.'`), silently demoting
+  // the hatched-project preference to the second pass's nearest-dir behavior.
+  const start = path.resolve(from);
+  const hatched = findHermitDir(start);
   if (hatched) return hatched;
-  let dir = path.resolve(from);
+  let dir = start;
   for (let i = 0; i < 8; i++) {
     const candidate = path.join(dir, '.claude-code-hermit');
     if (fs.existsSync(candidate)) return candidate;
@@ -81,10 +85,18 @@ export function logRoutineEvent(
   // suppressed — same fail-open behavior as the inline scan this replaced.
   if (event === 'fired' && lastRoutineEvent(metrics, id) === 'fired') return null;
 
-  return appendJsonlLine(
-    metrics,
-    JSON.stringify({ ts: utcISOStamp(), routine_id: id, event, delivery }),
-  );
+  // appendFileSync throws when the resolved dir has no state/ (a scaffolded-but-
+  // unfinished hatch, a worktree's partial copy). Return that as the documented
+  // error string rather than letting it escape — `run()` below does not catch,
+  // so a throw here surfaces as a stack trace instead of one stderr line.
+  try {
+    return appendJsonlLine(
+      metrics,
+      JSON.stringify({ ts: utcISOStamp(), routine_id: id, event, delivery }),
+    );
+  } catch (err: any) {
+    return `could not append to ${metrics}: ${err?.message ?? err}`;
+  }
 }
 
 export function run(args: string[]): void {
