@@ -170,216 +170,6 @@ class ParserExit extends Error {
 
 const TOP_USAGE = 'usage: ha_agent_lab [-h] {boot,ha} ...';
 const BOOT_USAGE = 'usage: ha_agent_lab boot [-h] {status,store} ...';
-const HA_COMMANDS = [
-  'refresh-context',
-  'simulate',
-  'validate-apply',
-  'policy-check',
-  'audit-automations',
-  'audit-scripts',
-  'probe',
-  'integration-health',
-  'updates',
-  'fetch-history',
-  'list-automations',
-  'list-scripts',
-  'list-scenes',
-  'delete-automation',
-  'delete-script',
-  'delete-scene',
-  'get-automation-config',
-  'get-script-config',
-  'get-scene-config',
-  'automation-diff',
-  'snapshot-states',
-  'restore-states',
-  'list-helpers',
-  'create-helper',
-  'delete-helper',
-  'list-areas',
-  'create-area',
-  'delete-area',
-  'list-entities',
-  'rename-entity',
-  'set-entity-area',
-  'set-entity-enabled',
-  'set-entity-icon',
-  'set-entity-hidden',
-  'set-entity-labels',
-  'set-entity-categories',
-  'set-entity-aliases',
-  'list-devices',
-  'set-device-area',
-  'rename-device',
-  'list-dashboards',
-  'get-dashboard',
-  'apply-dashboard',
-  'create-dashboard',
-  'delete-dashboard',
-  'render-template',
-  'check-config',
-  'call-service',
-  'set-core-config',
-  'error-log',
-  'logbook',
-  'system-log',
-  'list-floors',
-  'create-floor',
-  'delete-floor',
-  'list-labels',
-  'create-label',
-  'delete-label',
-  'rename-area',
-  'set-area-icon',
-  'set-area-floor',
-  'set-area-labels',
-  'list-exposed-entities',
-  'expose-entity',
-  'list-backups',
-  'create-backup',
-  'list-blueprints',
-  'import-blueprint',
-  'get-energy-prefs',
-  'set-energy-prefs',
-  'reload-entry',
-  'disable-entry',
-  'trigger-automation',
-] as const;
-const HA_USAGE = [
-  'usage: ha_agent_lab ha [-h]',
-  `                       {${HA_COMMANDS.join(',')}}`,
-  '                       ...',
-].join('\n');
-
-const TOP_HELP = `${TOP_USAGE}
-
-positional arguments:
-  {boot,ha}
-
-options:
-  -h, --help  show this help message and exit`;
-
-const BOOT_HELP = `${BOOT_USAGE}
-
-positional arguments:
-  {status,store}
-
-options:
-  -h, --help      show this help message and exit`;
-
-const HA_HELP = `${HA_USAGE}
-
-positional arguments:
-  {${HA_COMMANDS.join(',')}}
-    audit-automations   Audit all live HA automations against the safety
-                        policy.
-    audit-scripts       Audit all live HA scripts against the safety policy.
-    probe               GET a raw HA REST path and print the JSON response.
-                        Useful for verifying endpoints.
-    integration-health  Detect degraded HA integrations and write
-                        state/integration-health-degraded-domains.json.
-    updates             List pending Home Assistant updates (update.* domain)
-                        with version deltas, tiered core/os/supervisor/addon/
-                        hacs.
-    fetch-history       Fetch and aggregate HA history into a snapshot
-                        artifact. Requires a normalized snapshot; runs
-                        \`refresh-context\` first if none exists.
-    list-automations    List all automation entity IDs and config IDs.
-    list-scripts        List all script entity IDs and config IDs.
-    list-scenes         List all scene entity IDs and config IDs.
-    delete-automation   Delete an automation config by ID.
-    delete-script       Delete a script config by ID.
-    delete-scene        Delete a scene config by ID.
-    get-automation-config
-                        Read an automation's stored config from HA.
-    get-script-config   Read a script's stored config from HA.
-    get-scene-config    Read a scene's stored config from HA.
-    automation-diff     Report automations added/removed/edited/disabled since
-                        the last snapshot (change memory across sessions).
-    snapshot-states     Capture entity states to a named artifact for later
-                        restore.
-    restore-states      Restore captured entity states via scene.apply
-                        (gated by ha_safety_mode).
-    list-helpers        List helpers (input_*, timer, counter, schedule) via
-                        WebSocket. Optional --type to scope to one.
-    create-helper       Create a helper from JSON via WebSocket (gated write).
-    delete-helper       Delete a helper by id via WebSocket (gated write).
-    list-areas          List areas via WebSocket.
-    create-area         Create an area by name via WebSocket (gated write).
-    delete-area         Delete an area by id via WebSocket (gated write).
-    list-entities       List the entity registry via WebSocket (--registry).
-    rename-entity       Set an entity's friendly name (gated write).
-    set-entity-area     Assign an entity to an area (gated write).
-    set-entity-enabled  Enable/disable an entity (gated write).
-    set-entity-icon     Set an entity's icon (gated write).
-    set-entity-hidden   Hide/show an entity in the UI (gated write).
-    set-entity-labels   Set an entity's labels (gated write).
-    set-entity-categories
-                        Set an entity's per-scope categories from JSON
-                        (gated write).
-    set-entity-aliases  Set an entity's Assist aliases (gated write).
-    list-devices        List the device registry via WebSocket.
-    set-device-area     Assign a device to an area (gated write).
-    rename-device       Set a device's user name (gated write).
-    list-dashboards     List Lovelace dashboards via WebSocket.
-    get-dashboard       Read a dashboard's config via WebSocket (--url-path;
-                        default dashboard if omitted).
-    apply-dashboard     Save/replace a dashboard's config from an artifact
-                        via WebSocket (gated write).
-    create-dashboard    Create a dashboard from JSON via WebSocket (gated
-                        write).
-    delete-dashboard    Delete a dashboard by id via WebSocket (gated write).
-    render-template     Render a Jinja2 template against live state
-                        (POST /api/template). Not gated (read-only against
-                        HA's template engine).
-    check-config        Validate the HA configuration
-                        (POST /api/config/core/check_config). Not gated.
-    call-service        Call any HA service (POST /api/services/...).
-                        Sensitive domains/entities gated by ha_safety_mode;
-                        non-sensitive calls proceed in both modes.
-    set-core-config     Partial update of location/unit system/currency/
-                        timezone/country via WebSocket (gated write).
-    error-log           Print the current-session HA error log
-                        (GET /api/error_log, plaintext).
-    logbook             Fetch the HA logbook (GET /api/logbook/<ts>).
-    system-log          List structured system log entries, with levels,
-                        via WebSocket (system_log/list).
-    list-floors         List floors via WebSocket.
-    create-floor        Create a floor by name via WebSocket (gated write).
-    delete-floor        Delete a floor by id via WebSocket (gated write).
-    list-labels         List labels via WebSocket.
-    create-label        Create a label by name via WebSocket (gated write).
-    delete-label        Delete a label by id via WebSocket (gated write).
-    rename-area         Set an area's friendly name (gated write).
-    set-area-icon       Set an area's icon (gated write).
-    set-area-floor      Assign an area to a floor (gated write).
-    set-area-labels     Set an area's labels (gated write).
-    list-exposed-entities
-                        List entities exposed to each Assist assistant via
-                        WebSocket.
-    expose-entity       Expose/unexpose entities to one or more Assist
-                        assistants (gated write). Sets HA's expose-to-
-                        Assist boundary; config, not control (see
-                        SAFETY.md's Assist Control section).
-    list-backups        List backups via WebSocket (backup/info).
-    create-backup       Generate a backup via WebSocket (backup/generate,
-                        gated write).
-    list-blueprints     List blueprints for a domain via WebSocket
-                        (blueprint/list).
-    import-blueprint    Import a blueprint from a URL and save it under a
-                        domain via WebSocket (gated write).
-    get-energy-prefs    Read energy dashboard preferences via WebSocket
-                        (energy/get_prefs).
-    set-energy-prefs    Replace energy dashboard preferences from JSON via
-                        WebSocket (energy/save_prefs, gated write).
-    reload-entry        Reload a config entry (REST, gated write).
-    disable-entry       Enable/disable a config entry via WebSocket
-                        (config_entries/disable, gated write).
-    trigger-automation  Fire an automation by entity_id via automation.trigger.
-
-options:
-  -h, --help            show this help message and exit`;
-
 function argError(prog: string, usage: string, message: string): never {
   console.error(`${usage}\n${prog}: error: ${message}`);
   throw new ParserExit(2);
@@ -402,6 +192,20 @@ interface LeafSpec {
   usage: string;
   positionals: string[];
   flags: Record<string, FlagSpec>;
+}
+
+interface CommandContext {
+  config: AppConfig;
+  root: string;
+  deps: CliDeps;
+}
+
+interface CommandRecord {
+  spec: LeafSpec;
+  /** This command's block of the `ha --help` body, pre-wrapped to argparse's
+   *  column layout. Empty for commands argparse never described. */
+  help: string;
+  run(args: ParsedArgs, ctx: CommandContext): number | Promise<number>;
 }
 
 interface ParsedLeaf {
@@ -490,530 +294,1448 @@ function rejectExtras(extras: string[]): void {
   }
 }
 
-const LEAF_SPECS: Record<string, LeafSpec> = {
+/** Everything the CLI knows about one command: how to parse it, how it
+ *  documents itself, and what it does. Adding a command means adding one
+ *  record — the command list, the `ha --help` body and the dispatch all
+ *  derive from this table, so they cannot drift out of sync.
+ *
+ *  Declaration order is load-bearing: it is the order `--help` prints. */
+export const COMMANDS: Record<string, CommandRecord> = {
   'boot status': {
-    prog: 'ha_agent_lab boot status',
-    usage: 'usage: ha_agent_lab boot status [-h] [--probe]',
-    positionals: [],
-    flags: { '--probe': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab boot status',
+      usage: 'usage: ha_agent_lab boot status [-h] [--probe]',
+      positionals: [],
+      flags: { '--probe': { kind: 'store_true' } },
+    },
+    help: '',
+    run: async (args, { config, root, deps }) => {
+      const status = await bootStatus(config, { probe: Boolean(args.flags['--probe']) });
+      console.log(jsonDumps(status));
+      return 0;
+    },
   },
   'boot store': {
-    prog: 'ha_agent_lab boot store',
-    usage:
-      'usage: ha_agent_lab boot store [-h] [--language LANGUAGE] [--url URL]\n' +
-      '                               [--local-url LOCAL_URL]\n' +
-      '                               [--remote-url REMOTE_URL] [--token TOKEN]',
-    positionals: [],
-    flags: {
-      '--language': { kind: 'value' },
-      '--url': { kind: 'value' },
-      '--local-url': { kind: 'value' },
-      '--remote-url': { kind: 'value' },
-      '--token': { kind: 'value' },
+    spec: {
+      prog: 'ha_agent_lab boot store',
+      usage:
+        'usage: ha_agent_lab boot store [-h] [--language LANGUAGE] [--url URL]\n' +
+        '                               [--local-url LOCAL_URL]\n' +
+        '                               [--remote-url REMOTE_URL] [--token TOKEN]',
+      positionals: [],
+      flags: {
+        '--language': { kind: 'value' },
+        '--url': { kind: 'value' },
+        '--local-url': { kind: 'value' },
+        '--remote-url': { kind: 'value' },
+        '--token': { kind: 'value' },
+      },
+    },
+    help: '',
+    run: async (args, { config, root, deps }) => {
+      const changes = saveBootPreferences(root, {
+        language: (args.flags['--language'] as string | undefined) ?? null,
+        url: (args.flags['--url'] as string | undefined) ?? null,
+        localUrl: (args.flags['--local-url'] as string | undefined) ?? null,
+        remoteUrl: (args.flags['--remote-url'] as string | undefined) ?? null,
+        token: (args.flags['--token'] as string | undefined) ?? null,
+      });
+      console.log(jsonDumps({ updated: changes }));
+      return 0;
     },
   },
   'ha refresh-context': {
-    prog: 'ha_agent_lab ha refresh-context',
-    usage: 'usage: ha_agent_lab ha refresh-context [-h] [--incremental]',
-    positionals: [],
-    flags: { '--incremental': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha refresh-context',
+      usage: 'usage: ha_agent_lab ha refresh-context [-h] [--incremental]',
+      positionals: [],
+      flags: { '--incremental': { kind: 'store_true' } },
+    },
+    help: '',
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        if (args.flags['--incremental']) {
+          const [payload, delta] = await refreshContextIncremental(root, client, deps);
+          console.log(
+            jsonDumps({
+              status: 'ok',
+              mode: 'incremental',
+              entities: Object.keys(payload.entity_index).length,
+              added: delta.added.length,
+              removed: delta.removed.length,
+              changed: delta.changed.length,
+              base_url_source: client.baseUrlSource,
+            }),
+          );
+        } else {
+          const payload = await deps.refreshContext(root, client);
+          console.log(
+            jsonDumps({
+              status: 'ok',
+              mode: 'full',
+              entities: Object.keys(payload.entity_index).length,
+              base_url_source: client.baseUrlSource,
+            }),
+          );
+        }
+        return 0;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha simulate': {
-    prog: 'ha_agent_lab ha simulate',
-    usage: 'usage: ha_agent_lab ha simulate [-h] artifact',
-    positionals: ['artifact'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha simulate',
+      usage: 'usage: ha_agent_lab ha simulate [-h] artifact',
+      positionals: ['artifact'],
+      flags: {},
+    },
+    help: '',
+    run: async (args, { config, root, deps }) => {
+      const result = simulateArtifact(root, resolve(args.positionals[0]!));
+      console.log(
+        jsonDumps({
+          valid: result.isValid,
+          missing_entities: result.missingEntities,
+          blocked_reasons: result.blockedReasons,
+        }),
+      );
+      return result.isValid ? 0 : 1;
+    },
   },
   'ha validate-apply': {
-    prog: 'ha_agent_lab ha validate-apply',
-    usage:
-      'usage: ha_agent_lab ha validate-apply [-h] [--reload {automation,script,scene}]\n' +
-      '                                      artifact',
-    positionals: ['artifact'],
-    flags: { '--reload': { kind: 'value', choices: ['automation', 'script', 'scene'] } },
+    spec: {
+      prog: 'ha_agent_lab ha validate-apply',
+      usage:
+        'usage: ha_agent_lab ha validate-apply [-h] [--reload {automation,script,scene}]\n' +
+        '                                      artifact',
+      positionals: ['artifact'],
+      flags: { '--reload': { kind: 'value', choices: ['automation', 'script', 'scene'] } },
+    },
+    help: '',
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const result = await validateAndApply(
+          root,
+          client,
+          resolve(args.positionals[0]!),
+          (args.flags['--reload'] as string | undefined) ?? null,
+        );
+        console.log(
+          jsonDumps({
+            ok: result.ok,
+            config_id: result.configId,
+            creation_attempted: result.creationAttempted,
+            creation_ok: result.creationOk,
+            reload_attempted: result.reloadAttempted,
+            message: result.message,
+            report_path: relative(root, result.reportPath),
+            base_url_source: client.baseUrlSource,
+          }),
+        );
+        return result.ok ? 0 : 1;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha policy-check': {
-    prog: 'ha_agent_lab ha policy-check',
-    usage: 'usage: ha_agent_lab ha policy-check [-h] target',
-    positionals: ['target'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha policy-check',
+      usage: 'usage: ha_agent_lab ha policy-check [-h] target',
+      positionals: ['target'],
+      flags: {},
+    },
+    help: '',
+    run: async (args, { config, root, deps }) => {
+      return handlePolicyCheck(args.positionals[0]!, root);
+    },
   },
   'ha audit-automations': {
-    prog: 'ha_agent_lab ha audit-automations',
-    usage: 'usage: ha_agent_lab ha audit-automations [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha audit-automations',
+      usage: 'usage: ha_agent_lab ha audit-automations [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    audit-automations   Audit all live HA automations against the safety
+                        policy.`,
+    run: async (args, { config, root, deps }) => {
+      return handleAudit('automation', root, config, deps);
+    },
   },
   'ha audit-scripts': {
-    prog: 'ha_agent_lab ha audit-scripts',
-    usage: 'usage: ha_agent_lab ha audit-scripts [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha audit-scripts',
+      usage: 'usage: ha_agent_lab ha audit-scripts [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    audit-scripts       Audit all live HA scripts against the safety policy.`,
+    run: async (args, { config, root, deps }) => {
+      return handleAudit('script', root, config, deps);
+    },
   },
   'ha probe': {
-    prog: 'ha_agent_lab ha probe',
-    usage: 'usage: ha_agent_lab ha probe [-h] path',
-    positionals: ['path'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha probe',
+      usage: 'usage: ha_agent_lab ha probe [-h] path',
+      positionals: ['path'],
+      flags: {},
+    },
+    help: `    probe               GET a raw HA REST path and print the JSON response.
+                        Useful for verifying endpoints.`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const response = await client.get(args.positionals[0]!);
+        console.log(jsonDumps(response, { ensureAscii: false }));
+        return 0;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.error(`HA error ${exc.statusCode}: ${String(exc.payload).slice(0, 500)}`);
+        return 1;
+      }
+    },
   },
   'ha integration-health': {
-    prog: 'ha_agent_lab ha integration-health',
-    usage: 'usage: ha_agent_lab ha integration-health [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha integration-health',
+      usage: 'usage: ha_agent_lab ha integration-health [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    integration-health  Detect degraded HA integrations and write
+                        state/integration-health-degraded-domains.json.`,
+    run: async (args, { config, root, deps }) => {
+      return handleIntegrationHealth(root, config, deps);
+    },
   },
   'ha updates': {
-    prog: 'ha_agent_lab ha updates',
-    usage: 'usage: ha_agent_lab ha updates [-h] [--digest]',
-    positionals: [],
-    flags: { '--digest': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha updates',
+      usage: 'usage: ha_agent_lab ha updates [-h] [--digest]',
+      positionals: [],
+      flags: { '--digest': { kind: 'store_true' } },
+    },
+    help: `    updates             List pending Home Assistant updates (update.* domain)
+                        with version deltas, tiered core/os/supervisor/addon/
+                        hacs.`,
+    run: async (args, { config, root, deps }) => {
+      return handleUpdates(config, deps, Boolean(args.flags['--digest']));
+    },
   },
   'ha fetch-history': {
-    prog: 'ha_agent_lab ha fetch-history',
-    usage:
-      'usage: ha_agent_lab ha fetch-history [-h] [--window-days WINDOW_DAYS]\n' +
-      '                                     [--entities ENTITY [ENTITY ...]]\n' +
-      '                                     [--include-transitions]',
-    positionals: [],
-    flags: {
-      '--window-days': { kind: 'value', int: true },
-      '--entities': { kind: 'plus' },
-      '--include-transitions': { kind: 'store_true' },
+    spec: {
+      prog: 'ha_agent_lab ha fetch-history',
+      usage:
+        'usage: ha_agent_lab ha fetch-history [-h] [--window-days WINDOW_DAYS]\n' +
+        '                                     [--entities ENTITY [ENTITY ...]]\n' +
+        '                                     [--include-transitions]',
+      positionals: [],
+      flags: {
+        '--window-days': { kind: 'value', int: true },
+        '--entities': { kind: 'plus' },
+        '--include-transitions': { kind: 'store_true' },
+      },
+    },
+    help: `    fetch-history       Fetch and aggregate HA history into a snapshot
+                        artifact. Requires a normalized snapshot; runs
+                        \`refresh-context\` first if none exists.`,
+    run: async (args, { config, root, deps }) => {
+      return handleFetchHistory(
+        root,
+        config,
+        deps,
+        (args.flags['--window-days'] as number | undefined) ?? 7,
+        (args.flags['--entities'] as string[] | undefined) ?? null,
+        Boolean(args.flags['--include-transitions']),
+      );
     },
   },
   'ha list-automations': {
-    prog: 'ha_agent_lab ha list-automations',
-    usage: 'usage: ha_agent_lab ha list-automations [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-automations',
+      usage: 'usage: ha_agent_lab ha list-automations [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-automations    List all automation entity IDs and config IDs.`,
+    run: async (args, { config, root, deps }) => {
+      return handleListDomain('automation', config, deps);
+    },
   },
   'ha list-scripts': {
-    prog: 'ha_agent_lab ha list-scripts',
-    usage: 'usage: ha_agent_lab ha list-scripts [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-scripts',
+      usage: 'usage: ha_agent_lab ha list-scripts [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-scripts        List all script entity IDs and config IDs.`,
+    run: async (args, { config, root, deps }) => {
+      return handleListDomain('script', config, deps);
+    },
   },
   'ha list-scenes': {
-    prog: 'ha_agent_lab ha list-scenes',
-    usage: 'usage: ha_agent_lab ha list-scenes [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-scenes',
+      usage: 'usage: ha_agent_lab ha list-scenes [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-scenes         List all scene entity IDs and config IDs.`,
+    run: async (args, { config, root, deps }) => {
+      return handleListDomain('scene', config, deps);
+    },
   },
   'ha delete-automation': {
-    prog: 'ha_agent_lab ha delete-automation',
-    usage: 'usage: ha_agent_lab ha delete-automation [-h] id',
-    positionals: ['id'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha delete-automation',
+      usage: 'usage: ha_agent_lab ha delete-automation [-h] id',
+      positionals: ['id'],
+      flags: {},
+    },
+    help: `    delete-automation   Delete an automation config by ID.`,
+    run: async (args, { config, root, deps }) => {
+      return handleDeleteConfig('automation', args.positionals[0]!, root, config, deps);
+    },
   },
   'ha delete-script': {
-    prog: 'ha_agent_lab ha delete-script',
-    usage: 'usage: ha_agent_lab ha delete-script [-h] id',
-    positionals: ['id'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha delete-script',
+      usage: 'usage: ha_agent_lab ha delete-script [-h] id',
+      positionals: ['id'],
+      flags: {},
+    },
+    help: `    delete-script       Delete a script config by ID.`,
+    run: async (args, { config, root, deps }) => {
+      return handleDeleteConfig('script', args.positionals[0]!, root, config, deps);
+    },
   },
   'ha delete-scene': {
-    prog: 'ha_agent_lab ha delete-scene',
-    usage: 'usage: ha_agent_lab ha delete-scene [-h] id',
-    positionals: ['id'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha delete-scene',
+      usage: 'usage: ha_agent_lab ha delete-scene [-h] id',
+      positionals: ['id'],
+      flags: {},
+    },
+    help: `    delete-scene        Delete a scene config by ID.`,
+    run: async (args, { config, root, deps }) => {
+      return handleDeleteConfig('scene', args.positionals[0]!, root, config, deps);
+    },
   },
   'ha get-automation-config': {
-    prog: 'ha_agent_lab ha get-automation-config',
-    usage: 'usage: ha_agent_lab ha get-automation-config [-h] id',
-    positionals: ['id'],
-    flags: {},
-  },
-  'ha get-scene-config': {
-    prog: 'ha_agent_lab ha get-scene-config',
-    usage: 'usage: ha_agent_lab ha get-scene-config [-h] id',
-    positionals: ['id'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha get-automation-config',
+      usage: 'usage: ha_agent_lab ha get-automation-config [-h] id',
+      positionals: ['id'],
+      flags: {},
+    },
+    help: `    get-automation-config
+                        Read an automation's stored config from HA.`,
+    run: async (args, { config, root, deps }) => {
+      return handleReadConfig('automation', args.positionals[0]!, config, deps);
+    },
   },
   'ha get-script-config': {
-    prog: 'ha_agent_lab ha get-script-config',
-    usage: 'usage: ha_agent_lab ha get-script-config [-h] id',
-    positionals: ['id'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha get-script-config',
+      usage: 'usage: ha_agent_lab ha get-script-config [-h] id',
+      positionals: ['id'],
+      flags: {},
+    },
+    help: `    get-script-config   Read a script's stored config from HA.`,
+    run: async (args, { config, root, deps }) => {
+      return handleReadConfig('script', args.positionals[0]!, config, deps);
+    },
+  },
+  'ha get-scene-config': {
+    spec: {
+      prog: 'ha_agent_lab ha get-scene-config',
+      usage: 'usage: ha_agent_lab ha get-scene-config [-h] id',
+      positionals: ['id'],
+      flags: {},
+    },
+    help: `    get-scene-config    Read a scene's stored config from HA.`,
+    run: async (args, { config, root, deps }) => {
+      return handleReadConfig('scene', args.positionals[0]!, config, deps);
+    },
   },
   'ha automation-diff': {
-    prog: 'ha_agent_lab ha automation-diff',
-    usage: 'usage: ha_agent_lab ha automation-diff [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha automation-diff',
+      usage: 'usage: ha_agent_lab ha automation-diff [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    automation-diff     Report automations added/removed/edited/disabled since
+                        the last snapshot (change memory across sessions).`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const result = await automationDiff(root, client);
+        console.log(formatAutomationDiff(result));
+        return 0;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha snapshot-states': {
-    prog: 'ha_agent_lab ha snapshot-states',
-    usage:
-      'usage: ha_agent_lab ha snapshot-states [-h] [--name NAME]\n' +
-      '                                       [--domains DOMAINS]\n' +
-      '                                       [--entities ENTITY [ENTITY ...]]',
-    positionals: [],
-    flags: {
-      '--name': { kind: 'value' },
-      '--domains': { kind: 'value' },
-      '--entities': { kind: 'plus' },
+    spec: {
+      prog: 'ha_agent_lab ha snapshot-states',
+      usage:
+        'usage: ha_agent_lab ha snapshot-states [-h] [--name NAME]\n' +
+        '                                       [--domains DOMAINS]\n' +
+        '                                       [--entities ENTITY [ENTITY ...]]',
+      positionals: [],
+      flags: {
+        '--name': { kind: 'value' },
+        '--domains': { kind: 'value' },
+        '--entities': { kind: 'plus' },
+      },
+    },
+    help: `    snapshot-states     Capture entity states to a named artifact for later
+                        restore.`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const domainsFlag = args.flags['--domains'] as string | undefined;
+        const entities = args.flags['--entities'] as string[] | undefined;
+        const result = await captureStates(root, client, {
+          name: (args.flags['--name'] as string | undefined) ?? 'snapshot',
+          domains: domainsFlag
+            ? domainsFlag.split(',').map((d) => d.trim()).filter(Boolean)
+            : DEFAULT_DOMAINS,
+          entities,
+        });
+        console.log(
+          jsonDumps(
+            {
+              ok: result.ok,
+              name: result.name,
+              captured: result.captured,
+              entities: result.entities,
+              report_path: relative(root, result.reportPath),
+              message: result.message,
+            },
+            { ensureAscii: false },
+          ),
+        );
+        return result.ok ? 0 : 1;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
     },
   },
   'ha restore-states': {
-    prog: 'ha_agent_lab ha restore-states',
-    usage: 'usage: ha_agent_lab ha restore-states [-h] [--confirm] artifact',
-    positionals: ['artifact'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha restore-states',
+      usage: 'usage: ha_agent_lab ha restore-states [-h] [--confirm] artifact',
+      positionals: ['artifact'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    restore-states      Restore captured entity states via scene.apply
+                        (gated by ha_safety_mode).`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const result = await restoreStates(root, client, {
+          artifactPath: resolve(args.positionals[0]!),
+          confirm: Boolean(args.flags['--confirm']),
+        });
+        const payload: Record<string, unknown> = {
+          ok: result.ok,
+          blocked: result.blocked,
+          needs_confirm: result.needsConfirm,
+          applied: result.applied,
+          entities: result.entities,
+          sensitive: result.sensitive,
+          reason: result.reason,
+          message: result.message,
+        };
+        if (result.suggestion) payload.suggestion = result.suggestion;
+        if (result.reportPath) payload.report_path = relative(root, result.reportPath);
+        console.log(jsonDumps(payload, { ensureAscii: false }));
+        return result.ok ? 0 : 1;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha list-helpers': {
-    prog: 'ha_agent_lab ha list-helpers',
-    usage: `usage: ha_agent_lab ha list-helpers [-h] [--type {${HELPER_TYPES.join(',')}}]`,
-    positionals: [],
-    flags: { '--type': { kind: 'value', choices: HELPER_TYPES } },
+    spec: {
+      prog: 'ha_agent_lab ha list-helpers',
+      usage: `usage: ha_agent_lab ha list-helpers [-h] [--type {${HELPER_TYPES.join(',')}}]`,
+      positionals: [],
+      flags: { '--type': { kind: 'value', choices: HELPER_TYPES } },
+    },
+    help: `    list-helpers        List helpers (input_*, timer, counter, schedule) via
+                        WebSocket. Optional --type to scope to one.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, (ws) => listHelpers(ws, args.flags['--type'] as string | undefined));
+    },
   },
   'ha create-helper': {
-    prog: 'ha_agent_lab ha create-helper',
-    usage: `usage: ha_agent_lab ha create-helper [-h] [--confirm] {${HELPER_TYPES.join(',')}} json`,
-    positionals: ['type', 'json'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha create-helper',
+      usage: `usage: ha_agent_lab ha create-helper [-h] [--confirm] {${HELPER_TYPES.join(',')}} json`,
+      positionals: ['type', 'json'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    create-helper       Create a helper from JSON via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        createHelper(root, ws, args.positionals[0]!, args.positionals[1]!),
+      );
+    },
   },
   'ha delete-helper': {
-    prog: 'ha_agent_lab ha delete-helper',
-    usage: `usage: ha_agent_lab ha delete-helper [-h] [--confirm] {${HELPER_TYPES.join(',')}} id`,
-    positionals: ['type', 'id'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha delete-helper',
+      usage: `usage: ha_agent_lab ha delete-helper [-h] [--confirm] {${HELPER_TYPES.join(',')}} id`,
+      positionals: ['type', 'id'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    delete-helper       Delete a helper by id via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        deleteHelper(root, ws, args.positionals[0]!, args.positionals[1]!),
+      );
+    },
   },
   'ha list-areas': {
-    prog: 'ha_agent_lab ha list-areas',
-    usage: 'usage: ha_agent_lab ha list-areas [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-areas',
+      usage: 'usage: ha_agent_lab ha list-areas [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-areas          List areas via WebSocket.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listAreas);
+    },
   },
   'ha create-area': {
-    prog: 'ha_agent_lab ha create-area',
-    usage: 'usage: ha_agent_lab ha create-area [-h] [--confirm] name',
-    positionals: ['name'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha create-area',
+      usage: 'usage: ha_agent_lab ha create-area [-h] [--confirm] name',
+      positionals: ['name'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    create-area         Create an area by name via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        createArea(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha delete-area': {
-    prog: 'ha_agent_lab ha delete-area',
-    usage: 'usage: ha_agent_lab ha delete-area [-h] [--confirm] id',
-    positionals: ['id'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha delete-area',
+      usage: 'usage: ha_agent_lab ha delete-area [-h] [--confirm] id',
+      positionals: ['id'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    delete-area         Delete an area by id via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        deleteArea(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha list-entities': {
-    prog: 'ha_agent_lab ha list-entities',
-    usage: 'usage: ha_agent_lab ha list-entities [-h] --registry',
-    positionals: [],
-    flags: { '--registry': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha list-entities',
+      usage: 'usage: ha_agent_lab ha list-entities [-h] --registry',
+      positionals: [],
+      flags: { '--registry': { kind: 'store_true' } },
+    },
+    help: `    list-entities       List the entity registry via WebSocket (--registry).`,
+    run: async (args, { config, root, deps }) => {
+      if (!args.flags['--registry']) {
+        console.log(jsonDumps({ ok: false, message: 'Only registry mode is supported; pass --registry.' }));
+        return 1;
+      }
+      return runWsRead(deps, config, listEntities);
+    },
   },
   'ha rename-entity': {
-    prog: 'ha_agent_lab ha rename-entity',
-    usage: 'usage: ha_agent_lab ha rename-entity [-h] [--confirm] --name NAME entity_id',
-    positionals: ['entity_id'],
-    flags: { '--name': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha rename-entity',
+      usage: 'usage: ha_agent_lab ha rename-entity [-h] [--confirm] --name NAME entity_id',
+      positionals: ['entity_id'],
+      flags: { '--name': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    rename-entity       Set an entity's friendly name (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const name = requireFlag(args.flags['--name'], '--name');
+      if (name === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { name }, 'rename-entity'),
+      );
+    },
   },
   'ha set-entity-area': {
-    prog: 'ha_agent_lab ha set-entity-area',
-    usage: 'usage: ha_agent_lab ha set-entity-area [-h] [--confirm] --area AREA entity_id',
-    positionals: ['entity_id'],
-    flags: { '--area': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-area',
+      usage: 'usage: ha_agent_lab ha set-entity-area [-h] [--confirm] --area AREA entity_id',
+      positionals: ['entity_id'],
+      flags: { '--area': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-area     Assign an entity to an area (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const area = requireFlag(args.flags['--area'], '--area');
+      if (area === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { area_id: area }, 'set-entity-area'),
+      );
+    },
   },
   'ha set-entity-enabled': {
-    prog: 'ha_agent_lab ha set-entity-enabled',
-    usage: 'usage: ha_agent_lab ha set-entity-enabled [-h] [--confirm] --enabled {true,false} entity_id',
-    positionals: ['entity_id'],
-    flags: { '--enabled': { kind: 'value', choices: ['true', 'false'] }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-enabled',
+      usage: 'usage: ha_agent_lab ha set-entity-enabled [-h] [--confirm] --enabled {true,false} entity_id',
+      positionals: ['entity_id'],
+      flags: { '--enabled': { kind: 'value', choices: ['true', 'false'] }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-enabled  Enable/disable an entity (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const enabled = requireFlag(args.flags['--enabled'], '--enabled');
+      if (enabled === null) return 1;
+      const disabledBy = enabled === 'true' ? null : 'user';
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { disabled_by: disabledBy }, 'set-entity-enabled'),
+      );
+    },
   },
   'ha set-entity-icon': {
-    prog: 'ha_agent_lab ha set-entity-icon',
-    usage: 'usage: ha_agent_lab ha set-entity-icon [-h] [--confirm] --icon ICON entity_id',
-    positionals: ['entity_id'],
-    flags: { '--icon': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-icon',
+      usage: 'usage: ha_agent_lab ha set-entity-icon [-h] [--confirm] --icon ICON entity_id',
+      positionals: ['entity_id'],
+      flags: { '--icon': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-icon     Set an entity's icon (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const icon = requireFlag(args.flags['--icon'], '--icon');
+      if (icon === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { icon }, 'set-entity-icon'),
+      );
+    },
   },
   'ha set-entity-hidden': {
-    prog: 'ha_agent_lab ha set-entity-hidden',
-    usage: 'usage: ha_agent_lab ha set-entity-hidden [-h] [--confirm] --hidden {true,false} entity_id',
-    positionals: ['entity_id'],
-    flags: { '--hidden': { kind: 'value', choices: ['true', 'false'] }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-hidden',
+      usage: 'usage: ha_agent_lab ha set-entity-hidden [-h] [--confirm] --hidden {true,false} entity_id',
+      positionals: ['entity_id'],
+      flags: { '--hidden': { kind: 'value', choices: ['true', 'false'] }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-hidden   Hide/show an entity in the UI (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const hidden = requireFlag(args.flags['--hidden'], '--hidden');
+      if (hidden === null) return 1;
+      const hiddenBy = hidden === 'true' ? 'user' : null;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { hidden_by: hiddenBy }, 'set-entity-hidden'),
+      );
+    },
   },
   'ha set-entity-labels': {
-    prog: 'ha_agent_lab ha set-entity-labels',
-    usage: 'usage: ha_agent_lab ha set-entity-labels [-h] [--confirm] --labels LABEL [LABEL ...] entity_id',
-    positionals: ['entity_id'],
-    flags: { '--labels': { kind: 'plus' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-labels',
+      usage: 'usage: ha_agent_lab ha set-entity-labels [-h] [--confirm] --labels LABEL [LABEL ...] entity_id',
+      positionals: ['entity_id'],
+      flags: { '--labels': { kind: 'plus' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-labels   Set an entity's labels (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const labels = requirePlusFlag(args.flags['--labels'], '--labels');
+      if (labels === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { labels }, 'set-entity-labels'),
+      );
+    },
   },
   'ha set-entity-categories': {
-    prog: 'ha_agent_lab ha set-entity-categories',
-    usage: 'usage: ha_agent_lab ha set-entity-categories [-h] [--confirm] --categories JSON entity_id',
-    positionals: ['entity_id'],
-    flags: { '--categories': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-categories',
+      usage: 'usage: ha_agent_lab ha set-entity-categories [-h] [--confirm] --categories JSON entity_id',
+      positionals: ['entity_id'],
+      flags: { '--categories': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-categories
+                        Set an entity's per-scope categories from JSON
+                        (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const raw = requireFlag(args.flags['--categories'], '--categories');
+      if (raw === null) return 1;
+      const parsed = parseJsonObject(raw);
+      if (!parsed.ok) {
+        console.log(jsonDumps({ ok: false, message: `--categories ${parsed.message}` }));
+        return 1;
+      }
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { categories: parsed.payload }, 'set-entity-categories'),
+      );
+    },
   },
   'ha set-entity-aliases': {
-    prog: 'ha_agent_lab ha set-entity-aliases',
-    usage: 'usage: ha_agent_lab ha set-entity-aliases [-h] [--confirm] --aliases ALIAS [ALIAS ...] entity_id',
-    positionals: ['entity_id'],
-    flags: { '--aliases': { kind: 'plus' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-entity-aliases',
+      usage: 'usage: ha_agent_lab ha set-entity-aliases [-h] [--confirm] --aliases ALIAS [ALIAS ...] entity_id',
+      positionals: ['entity_id'],
+      flags: { '--aliases': { kind: 'plus' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-entity-aliases  Set an entity's Assist aliases (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const aliases = requirePlusFlag(args.flags['--aliases'], '--aliases');
+      if (aliases === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateEntity(root, ws, args.positionals[0]!, { aliases }, 'set-entity-aliases'),
+      );
+    },
   },
   'ha list-devices': {
-    prog: 'ha_agent_lab ha list-devices',
-    usage: 'usage: ha_agent_lab ha list-devices [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-devices',
+      usage: 'usage: ha_agent_lab ha list-devices [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-devices        List the device registry via WebSocket.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listDevices);
+    },
   },
   'ha set-device-area': {
-    prog: 'ha_agent_lab ha set-device-area',
-    usage: 'usage: ha_agent_lab ha set-device-area [-h] [--confirm] --area AREA device_id',
-    positionals: ['device_id'],
-    flags: { '--area': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-device-area',
+      usage: 'usage: ha_agent_lab ha set-device-area [-h] [--confirm] --area AREA device_id',
+      positionals: ['device_id'],
+      flags: { '--area': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-device-area     Assign a device to an area (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const area = requireFlag(args.flags['--area'], '--area');
+      if (area === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateDevice(root, ws, args.positionals[0]!, { area_id: area }, 'set-device-area'),
+      );
+    },
   },
   'ha rename-device': {
-    prog: 'ha_agent_lab ha rename-device',
-    usage: 'usage: ha_agent_lab ha rename-device [-h] [--confirm] --name NAME device_id',
-    positionals: ['device_id'],
-    flags: { '--name': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha rename-device',
+      usage: 'usage: ha_agent_lab ha rename-device [-h] [--confirm] --name NAME device_id',
+      positionals: ['device_id'],
+      flags: { '--name': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    rename-device       Set a device's user name (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const name = requireFlag(args.flags['--name'], '--name');
+      if (name === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateDevice(root, ws, args.positionals[0]!, { name_by_user: name }, 'rename-device'),
+      );
+    },
   },
   'ha list-dashboards': {
-    prog: 'ha_agent_lab ha list-dashboards',
-    usage: 'usage: ha_agent_lab ha list-dashboards [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-dashboards',
+      usage: 'usage: ha_agent_lab ha list-dashboards [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-dashboards     List Lovelace dashboards via WebSocket.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listDashboards);
+    },
   },
   'ha get-dashboard': {
-    prog: 'ha_agent_lab ha get-dashboard',
-    usage: 'usage: ha_agent_lab ha get-dashboard [-h] [--url-path URL_PATH]',
-    positionals: [],
-    flags: { '--url-path': { kind: 'value' } },
+    spec: {
+      prog: 'ha_agent_lab ha get-dashboard',
+      usage: 'usage: ha_agent_lab ha get-dashboard [-h] [--url-path URL_PATH]',
+      positionals: [],
+      flags: { '--url-path': { kind: 'value' } },
+    },
+    help: `    get-dashboard       Read a dashboard's config via WebSocket (--url-path;
+                        default dashboard if omitted).`,
+    run: async (args, { config, root, deps }) => {
+      const urlPath = (args.flags['--url-path'] as string | undefined) ?? null;
+      return runWsRead(deps, config, (ws) => getDashboard(ws, urlPath));
+    },
   },
   'ha apply-dashboard': {
-    prog: 'ha_agent_lab ha apply-dashboard',
-    usage:
-      'usage: ha_agent_lab ha apply-dashboard [-h] [--url-path URL_PATH]\n' +
-      '                                       [--confirm]\n' +
-      '                                       artifact',
-    positionals: ['artifact'],
-    flags: { '--url-path': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha apply-dashboard',
+      usage:
+        'usage: ha_agent_lab ha apply-dashboard [-h] [--url-path URL_PATH]\n' +
+        '                                       [--confirm]\n' +
+        '                                       artifact',
+      positionals: ['artifact'],
+      flags: { '--url-path': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    apply-dashboard     Save/replace a dashboard's config from an artifact
+                        via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const urlPath = (args.flags['--url-path'] as string | undefined) ?? null;
+      const artifactPath = resolve(args.positionals[0]!);
+      // Read+parse before opening the WS: a missing/malformed artifact must
+      // surface a clean {ok:false} (not an uncaught throw past runWsMutation's
+      // HomeAssistantError-only catch), and without wasting a WS connection.
+      if (!existsSync(artifactPath)) {
+        console.log(jsonDumps({ ok: false, message: `Dashboard artifact not found: ${args.positionals[0]}` }));
+        return 1;
+      }
+      let dashboardConfig: unknown;
+      try {
+        dashboardConfig = parseYaml(readFileSync(artifactPath, 'utf8'));
+      } catch (exc) {
+        console.log(
+          jsonDumps({ ok: false, message: `Failed to parse dashboard artifact: ${exc instanceof Error ? exc.message : String(exc)}` }),
+        );
+        return 1;
+      }
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        saveDashboard(root, ws, urlPath, dashboardConfig),
+      );
+    },
   },
   'ha create-dashboard': {
-    prog: 'ha_agent_lab ha create-dashboard',
-    usage: 'usage: ha_agent_lab ha create-dashboard [-h] [--confirm] json',
-    positionals: ['json'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha create-dashboard',
+      usage: 'usage: ha_agent_lab ha create-dashboard [-h] [--confirm] json',
+      positionals: ['json'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    create-dashboard    Create a dashboard from JSON via WebSocket (gated
+                        write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        createDashboard(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha delete-dashboard': {
-    prog: 'ha_agent_lab ha delete-dashboard',
-    usage: 'usage: ha_agent_lab ha delete-dashboard [-h] [--confirm] dashboard_id',
-    positionals: ['dashboard_id'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha delete-dashboard',
+      usage: 'usage: ha_agent_lab ha delete-dashboard [-h] [--confirm] dashboard_id',
+      positionals: ['dashboard_id'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    delete-dashboard    Delete a dashboard by id via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        deleteDashboard(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha render-template': {
-    prog: 'ha_agent_lab ha render-template',
-    usage: 'usage: ha_agent_lab ha render-template [-h] template',
-    positionals: ['template'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha render-template',
+      usage: 'usage: ha_agent_lab ha render-template [-h] template',
+      positionals: ['template'],
+      flags: {},
+    },
+    help: `    render-template     Render a Jinja2 template against live state
+                        (POST /api/template). Not gated (read-only against
+                        HA's template engine).`,
+    run: async (args, { config, root, deps }) => {
+      const source = args.positionals[0]!;
+      if (source !== '-' && !existsSync(resolve(source))) {
+        console.log(jsonDumps({ ok: false, message: `Template file not found: ${source}` }));
+        return 1;
+      }
+      try {
+        const client = await deps.createClient(config);
+        const template = source === '-' ? await Bun.stdin.text() : readFileSync(resolve(source), 'utf8');
+        const rendered = await client.postText('/api/template', { template });
+        console.log(rendered);
+        return 0;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha check-config': {
-    prog: 'ha_agent_lab ha check-config',
-    usage: 'usage: ha_agent_lab ha check-config [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha check-config',
+      usage: 'usage: ha_agent_lab ha check-config [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    check-config        Validate the HA configuration
+                        (POST /api/config/core/check_config). Not gated.`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const result = await client.post('/api/config/core/check_config');
+        console.log(jsonDumps(result, { ensureAscii: false }));
+        return isConfigCheckOk(result) ? 0 : 1;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha call-service': {
-    prog: 'ha_agent_lab ha call-service',
-    usage: 'usage: ha_agent_lab ha call-service [-h] [--data DATA] [--confirm] domain.service',
-    positionals: ['domain.service'],
-    flags: { '--data': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha call-service',
+      usage: 'usage: ha_agent_lab ha call-service [-h] [--data DATA] [--confirm] domain.service',
+      positionals: ['domain.service'],
+      flags: { '--data': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    call-service        Call any HA service (POST /api/services/...).
+                        Sensitive domains/entities gated by ha_safety_mode;
+                        non-sensitive calls proceed in both modes.`,
+    run: async (args, { config, root, deps }) => {
+      return handleCallService(
+        args.positionals[0]!,
+        args.flags['--data'] as string | undefined,
+        Boolean(args.flags['--confirm']),
+        root,
+        config,
+        deps,
+      );
+    },
   },
   'ha set-core-config': {
-    prog: 'ha_agent_lab ha set-core-config',
-    usage:
-      'usage: ha_agent_lab ha set-core-config [-h] [--latitude LATITUDE]\n' +
-      '                                       [--longitude LONGITUDE]\n' +
-      '                                       [--elevation ELEVATION]\n' +
-      '                                       [--unit-system {metric,us_customary}]\n' +
-      '                                       [--currency CURRENCY]\n' +
-      '                                       [--time-zone TIME_ZONE] [--country COUNTRY]\n' +
-      '                                       [--confirm]',
-    positionals: [],
-    flags: {
-      '--latitude': { kind: 'value' },
-      '--longitude': { kind: 'value' },
-      '--elevation': { kind: 'value', int: true },
-      '--unit-system': { kind: 'value', choices: ['metric', 'us_customary'] },
-      '--currency': { kind: 'value' },
-      '--time-zone': { kind: 'value' },
-      '--country': { kind: 'value' },
-      '--confirm': { kind: 'store_true' },
+    spec: {
+      prog: 'ha_agent_lab ha set-core-config',
+      usage:
+        'usage: ha_agent_lab ha set-core-config [-h] [--latitude LATITUDE]\n' +
+        '                                       [--longitude LONGITUDE]\n' +
+        '                                       [--elevation ELEVATION]\n' +
+        '                                       [--unit-system {metric,us_customary}]\n' +
+        '                                       [--currency CURRENCY]\n' +
+        '                                       [--time-zone TIME_ZONE] [--country COUNTRY]\n' +
+        '                                       [--confirm]',
+      positionals: [],
+      flags: {
+        '--latitude': { kind: 'value' },
+        '--longitude': { kind: 'value' },
+        '--elevation': { kind: 'value', int: true },
+        '--unit-system': { kind: 'value', choices: ['metric', 'us_customary'] },
+        '--currency': { kind: 'value' },
+        '--time-zone': { kind: 'value' },
+        '--country': { kind: 'value' },
+        '--confirm': { kind: 'store_true' },
+      },
+    },
+    help: `    set-core-config     Partial update of location/unit system/currency/
+                        timezone/country via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const fields: Record<string, unknown> = {};
+      // Reject a non-numeric latitude/longitude up front: Number('40,7') is NaN,
+      // which JSON.stringify serializes as null, silently blanking the stored
+      // coordinate instead of erroring.
+      for (const [flag, key] of [
+        ['--latitude', 'latitude'],
+        ['--longitude', 'longitude'],
+      ] as const) {
+        const raw = args.flags[flag];
+        if (raw === undefined) continue;
+        const num = Number(raw);
+        if (!Number.isFinite(num)) {
+          console.log(jsonDumps({ ok: false, message: `${flag} must be a number, got: '${raw}'` }));
+          return 1;
+        }
+        fields[key] = num;
+      }
+      const setIfPresent = (flag: string, key: string) => {
+        const value = args.flags[flag];
+        if (value !== undefined) fields[key] = value;
+      };
+      setIfPresent('--elevation', 'elevation');
+      setIfPresent('--unit-system', 'unit_system');
+      setIfPresent('--currency', 'currency');
+      setIfPresent('--time-zone', 'time_zone');
+      setIfPresent('--country', 'country');
+
+      if (Object.keys(fields).length === 0) {
+        console.log(jsonDumps({ ok: false, message: 'At least one config field flag is required.' }));
+        return 1;
+      }
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        setCoreConfig(root, ws, fields),
+      );
     },
   },
   'ha error-log': {
-    prog: 'ha_agent_lab ha error-log',
-    usage: 'usage: ha_agent_lab ha error-log [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha error-log',
+      usage: 'usage: ha_agent_lab ha error-log [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    error-log           Print the current-session HA error log
+                        (GET /api/error_log, plaintext).`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        console.log(await client.getText('/api/error_log'));
+        return 0;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha logbook': {
-    prog: 'ha_agent_lab ha logbook',
-    usage:
-      'usage: ha_agent_lab ha logbook [-h] [--window-days WINDOW_DAYS]\n' +
-      '                               [--entity ENTITY]',
-    positionals: [],
-    flags: { '--window-days': { kind: 'value', int: true }, '--entity': { kind: 'value' } },
+    spec: {
+      prog: 'ha_agent_lab ha logbook',
+      usage:
+        'usage: ha_agent_lab ha logbook [-h] [--window-days WINDOW_DAYS]\n' +
+        '                               [--entity ENTITY]',
+      positionals: [],
+      flags: { '--window-days': { kind: 'value', int: true }, '--entity': { kind: 'value' } },
+    },
+    help: `    logbook             Fetch the HA logbook (GET /api/logbook/<ts>).`,
+    run: async (args, { config, root, deps }) => {
+      try {
+        const client = await deps.createClient(config);
+        const windowDays = (args.flags['--window-days'] as number | undefined) ?? 1;
+        const windowStart = daysAgo(windowDays);
+        const entity = args.flags['--entity'] as string | undefined;
+        const path = `/api/logbook/${encodeURIComponent(isoUtc(windowStart))}${entity ? `?entity=${encodeURIComponent(entity)}` : ''}`;
+        const result = await client.get(path);
+        console.log(jsonDumps(result, { ensureAscii: false }));
+        return 0;
+      } catch (exc) {
+        if (!(exc instanceof HomeAssistantError)) throw exc;
+        console.log(exc.message);
+        return 1;
+      }
+    },
   },
   'ha system-log': {
-    prog: 'ha_agent_lab ha system-log',
-    usage: 'usage: ha_agent_lab ha system-log [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha system-log',
+      usage: 'usage: ha_agent_lab ha system-log [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    system-log          List structured system log entries, with levels,
+                        via WebSocket (system_log/list).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listSystemLog);
+    },
   },
   'ha list-floors': {
-    prog: 'ha_agent_lab ha list-floors',
-    usage: 'usage: ha_agent_lab ha list-floors [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-floors',
+      usage: 'usage: ha_agent_lab ha list-floors [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-floors         List floors via WebSocket.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listFloors);
+    },
   },
   'ha create-floor': {
-    prog: 'ha_agent_lab ha create-floor',
-    usage: 'usage: ha_agent_lab ha create-floor [-h] [--confirm] name',
-    positionals: ['name'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha create-floor',
+      usage: 'usage: ha_agent_lab ha create-floor [-h] [--confirm] name',
+      positionals: ['name'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    create-floor        Create a floor by name via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        createFloor(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha delete-floor': {
-    prog: 'ha_agent_lab ha delete-floor',
-    usage: 'usage: ha_agent_lab ha delete-floor [-h] [--confirm] id',
-    positionals: ['id'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha delete-floor',
+      usage: 'usage: ha_agent_lab ha delete-floor [-h] [--confirm] id',
+      positionals: ['id'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    delete-floor        Delete a floor by id via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        deleteFloor(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha list-labels': {
-    prog: 'ha_agent_lab ha list-labels',
-    usage: 'usage: ha_agent_lab ha list-labels [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-labels',
+      usage: 'usage: ha_agent_lab ha list-labels [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-labels         List labels via WebSocket.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listLabels);
+    },
   },
   'ha create-label': {
-    prog: 'ha_agent_lab ha create-label',
-    usage: 'usage: ha_agent_lab ha create-label [-h] [--confirm] name',
-    positionals: ['name'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha create-label',
+      usage: 'usage: ha_agent_lab ha create-label [-h] [--confirm] name',
+      positionals: ['name'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    create-label        Create a label by name via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        createLabel(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha delete-label': {
-    prog: 'ha_agent_lab ha delete-label',
-    usage: 'usage: ha_agent_lab ha delete-label [-h] [--confirm] id',
-    positionals: ['id'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha delete-label',
+      usage: 'usage: ha_agent_lab ha delete-label [-h] [--confirm] id',
+      positionals: ['id'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    delete-label        Delete a label by id via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        deleteLabel(root, ws, args.positionals[0]!),
+      );
+    },
   },
   'ha rename-area': {
-    prog: 'ha_agent_lab ha rename-area',
-    usage: 'usage: ha_agent_lab ha rename-area [-h] [--confirm] --name NAME area_id',
-    positionals: ['area_id'],
-    flags: { '--name': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha rename-area',
+      usage: 'usage: ha_agent_lab ha rename-area [-h] [--confirm] --name NAME area_id',
+      positionals: ['area_id'],
+      flags: { '--name': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    rename-area         Set an area's friendly name (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const name = requireFlag(args.flags['--name'], '--name');
+      if (name === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateArea(root, ws, args.positionals[0]!, { name }, 'rename-area'),
+      );
+    },
   },
   'ha set-area-icon': {
-    prog: 'ha_agent_lab ha set-area-icon',
-    usage: 'usage: ha_agent_lab ha set-area-icon [-h] [--confirm] --icon ICON area_id',
-    positionals: ['area_id'],
-    flags: { '--icon': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-area-icon',
+      usage: 'usage: ha_agent_lab ha set-area-icon [-h] [--confirm] --icon ICON area_id',
+      positionals: ['area_id'],
+      flags: { '--icon': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-area-icon       Set an area's icon (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const icon = requireFlag(args.flags['--icon'], '--icon');
+      if (icon === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateArea(root, ws, args.positionals[0]!, { icon }, 'set-area-icon'),
+      );
+    },
   },
   'ha set-area-floor': {
-    prog: 'ha_agent_lab ha set-area-floor',
-    usage: 'usage: ha_agent_lab ha set-area-floor [-h] [--confirm] --floor FLOOR area_id',
-    positionals: ['area_id'],
-    flags: { '--floor': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-area-floor',
+      usage: 'usage: ha_agent_lab ha set-area-floor [-h] [--confirm] --floor FLOOR area_id',
+      positionals: ['area_id'],
+      flags: { '--floor': { kind: 'value' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-area-floor      Assign an area to a floor (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const floor = requireFlag(args.flags['--floor'], '--floor');
+      if (floor === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateArea(root, ws, args.positionals[0]!, { floor_id: floor }, 'set-area-floor'),
+      );
+    },
   },
   'ha set-area-labels': {
-    prog: 'ha_agent_lab ha set-area-labels',
-    usage: 'usage: ha_agent_lab ha set-area-labels [-h] [--confirm] --labels LABEL [LABEL ...] area_id',
-    positionals: ['area_id'],
-    flags: { '--labels': { kind: 'plus' }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-area-labels',
+      usage: 'usage: ha_agent_lab ha set-area-labels [-h] [--confirm] --labels LABEL [LABEL ...] area_id',
+      positionals: ['area_id'],
+      flags: { '--labels': { kind: 'plus' }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-area-labels     Set an area's labels (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const labels = requirePlusFlag(args.flags['--labels'], '--labels');
+      if (labels === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        updateArea(root, ws, args.positionals[0]!, { labels }, 'set-area-labels'),
+      );
+    },
   },
   'ha list-exposed-entities': {
-    prog: 'ha_agent_lab ha list-exposed-entities',
-    usage: 'usage: ha_agent_lab ha list-exposed-entities [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-exposed-entities',
+      usage: 'usage: ha_agent_lab ha list-exposed-entities [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-exposed-entities
+                        List entities exposed to each Assist assistant via
+                        WebSocket.`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listExposedEntities);
+    },
   },
   'ha expose-entity': {
-    prog: 'ha_agent_lab ha expose-entity',
-    usage:
-      'usage: ha_agent_lab ha expose-entity [-h] --entity-ids ENTITY [ENTITY ...]\n' +
-      '                                     --assistants ASSISTANT [ASSISTANT ...]\n' +
-      '                                     --expose {true,false} [--confirm]',
-    positionals: [],
-    flags: {
-      '--entity-ids': { kind: 'plus' },
-      '--assistants': { kind: 'plus' },
-      '--expose': { kind: 'value', choices: ['true', 'false'] },
-      '--confirm': { kind: 'store_true' },
+    spec: {
+      prog: 'ha_agent_lab ha expose-entity',
+      usage:
+        'usage: ha_agent_lab ha expose-entity [-h] --entity-ids ENTITY [ENTITY ...]\n' +
+        '                                     --assistants ASSISTANT [ASSISTANT ...]\n' +
+        '                                     --expose {true,false} [--confirm]',
+      positionals: [],
+      flags: {
+        '--entity-ids': { kind: 'plus' },
+        '--assistants': { kind: 'plus' },
+        '--expose': { kind: 'value', choices: ['true', 'false'] },
+        '--confirm': { kind: 'store_true' },
+      },
+    },
+    help: `    expose-entity       Expose/unexpose entities to one or more Assist
+                        assistants (gated write). Sets HA's expose-to-
+                        Assist boundary; config, not control (see
+                        SAFETY.md's Assist Control section).`,
+    run: async (args, { config, root, deps }) => {
+      const entityIds = requirePlusFlag(args.flags['--entity-ids'], '--entity-ids');
+      if (entityIds === null) return 1;
+      const assistants = requirePlusFlag(args.flags['--assistants'], '--assistants');
+      if (assistants === null) return 1;
+      const expose = requireFlag(args.flags['--expose'], '--expose');
+      if (expose === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        exposeEntity(root, ws, entityIds, assistants, expose === 'true'),
+      );
     },
   },
   'ha list-backups': {
-    prog: 'ha_agent_lab ha list-backups',
-    usage: 'usage: ha_agent_lab ha list-backups [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-backups',
+      usage: 'usage: ha_agent_lab ha list-backups [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    list-backups        List backups via WebSocket (backup/info).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, listBackups);
+    },
   },
   'ha create-backup': {
-    prog: 'ha_agent_lab ha create-backup',
-    usage:
-      'usage: ha_agent_lab ha create-backup [-h] --agent-ids AGENT [AGENT ...]\n' +
-      '                                     [--name NAME] [--password PASSWORD]\n' +
-      '                                     [--include-addons SLUG [SLUG ...]]\n' +
-      '                                     [--include-all-addons]\n' +
-      '                                     [--include-database {true,false}]\n' +
-      '                                     [--include-folders FOLDER [FOLDER ...]]\n' +
-      '                                     [--include-homeassistant {true,false}]\n' +
-      '                                     [--confirm]',
-    positionals: [],
-    flags: {
-      '--agent-ids': { kind: 'plus' },
-      '--name': { kind: 'value' },
-      '--password': { kind: 'value' },
-      '--include-addons': { kind: 'plus' },
-      '--include-all-addons': { kind: 'store_true' },
-      '--include-database': { kind: 'value', choices: ['true', 'false'] },
-      '--include-folders': { kind: 'plus' },
-      '--include-homeassistant': { kind: 'value', choices: ['true', 'false'] },
-      '--confirm': { kind: 'store_true' },
+    spec: {
+      prog: 'ha_agent_lab ha create-backup',
+      usage:
+        'usage: ha_agent_lab ha create-backup [-h] --agent-ids AGENT [AGENT ...]\n' +
+        '                                     [--name NAME] [--password PASSWORD]\n' +
+        '                                     [--include-addons SLUG [SLUG ...]]\n' +
+        '                                     [--include-all-addons]\n' +
+        '                                     [--include-database {true,false}]\n' +
+        '                                     [--include-folders FOLDER [FOLDER ...]]\n' +
+        '                                     [--include-homeassistant {true,false}]\n' +
+        '                                     [--confirm]',
+      positionals: [],
+      flags: {
+        '--agent-ids': { kind: 'plus' },
+        '--name': { kind: 'value' },
+        '--password': { kind: 'value' },
+        '--include-addons': { kind: 'plus' },
+        '--include-all-addons': { kind: 'store_true' },
+        '--include-database': { kind: 'value', choices: ['true', 'false'] },
+        '--include-folders': { kind: 'plus' },
+        '--include-homeassistant': { kind: 'value', choices: ['true', 'false'] },
+        '--confirm': { kind: 'store_true' },
+      },
+    },
+    help: `    create-backup       Generate a backup via WebSocket (backup/generate,
+                        gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const agentIds = requirePlusFlag(args.flags['--agent-ids'], '--agent-ids');
+      if (agentIds === null) return 1;
+      const fields: Record<string, unknown> = { agent_ids: agentIds };
+      const setIfPresent = (flag: string, key: string, transform: (v: unknown) => unknown = (v) => v) => {
+        const value = args.flags[flag];
+        if (value !== undefined) fields[key] = transform(value);
+      };
+      setIfPresent('--name', 'name');
+      setIfPresent('--password', 'password');
+      setIfPresent('--include-addons', 'include_addons');
+      setIfPresent('--include-all-addons', 'include_all_addons');
+      setIfPresent('--include-database', 'include_database', (v) => v === 'true');
+      setIfPresent('--include-folders', 'include_folders');
+      setIfPresent('--include-homeassistant', 'include_homeassistant', (v) => v === 'true');
+
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        createBackup(root, ws, fields),
+      );
     },
   },
   'ha list-blueprints': {
-    prog: 'ha_agent_lab ha list-blueprints',
-    usage: 'usage: ha_agent_lab ha list-blueprints [-h] domain',
-    positionals: ['domain'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha list-blueprints',
+      usage: 'usage: ha_agent_lab ha list-blueprints [-h] domain',
+      positionals: ['domain'],
+      flags: {},
+    },
+    help: `    list-blueprints     List blueprints for a domain via WebSocket
+                        (blueprint/list).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, (ws) => listBlueprints(ws, args.positionals[0]!));
+    },
   },
   'ha import-blueprint': {
-    prog: 'ha_agent_lab ha import-blueprint',
-    usage: 'usage: ha_agent_lab ha import-blueprint [-h] [--confirm] domain url',
-    positionals: ['domain', 'url'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha import-blueprint',
+      usage: 'usage: ha_agent_lab ha import-blueprint [-h] [--confirm] domain url',
+      positionals: ['domain', 'url'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    import-blueprint    Import a blueprint from a URL and save it under a
+                        domain via WebSocket (gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        importBlueprint(root, ws, args.positionals[0]!, args.positionals[1]!),
+      );
+    },
   },
   'ha get-energy-prefs': {
-    prog: 'ha_agent_lab ha get-energy-prefs',
-    usage: 'usage: ha_agent_lab ha get-energy-prefs [-h]',
-    positionals: [],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha get-energy-prefs',
+      usage: 'usage: ha_agent_lab ha get-energy-prefs [-h]',
+      positionals: [],
+      flags: {},
+    },
+    help: `    get-energy-prefs    Read energy dashboard preferences via WebSocket
+                        (energy/get_prefs).`,
+    run: async (args, { config, root, deps }) => {
+      return runWsRead(deps, config, getEnergyPrefs);
+    },
   },
   'ha set-energy-prefs': {
-    prog: 'ha_agent_lab ha set-energy-prefs',
-    usage: 'usage: ha_agent_lab ha set-energy-prefs [-h] [--confirm] json',
-    positionals: ['json'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha set-energy-prefs',
+      usage: 'usage: ha_agent_lab ha set-energy-prefs [-h] [--confirm] json',
+      positionals: ['json'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    set-energy-prefs    Replace energy dashboard preferences from JSON via
+                        WebSocket (energy/save_prefs, gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const parsed = parseJsonObject(args.positionals[0]!);
+      if (!parsed.ok) {
+        console.log(jsonDumps({ ok: false, message: `energy prefs JSON ${parsed.message}` }));
+        return 1;
+      }
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        setEnergyPrefs(root, ws, parsed.payload),
+      );
+    },
   },
   'ha reload-entry': {
-    prog: 'ha_agent_lab ha reload-entry',
-    usage: 'usage: ha_agent_lab ha reload-entry [-h] [--confirm] entry_id',
-    positionals: ['entry_id'],
-    flags: { '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha reload-entry',
+      usage: 'usage: ha_agent_lab ha reload-entry [-h] [--confirm] entry_id',
+      positionals: ['entry_id'],
+      flags: { '--confirm': { kind: 'store_true' } },
+    },
+    help: `    reload-entry        Reload a config entry (REST, gated write).`,
+    run: async (args, { config, root, deps }) => {
+      return handleReloadEntry(args.positionals[0]!, Boolean(args.flags['--confirm']), root, config, deps);
+    },
   },
   'ha disable-entry': {
-    prog: 'ha_agent_lab ha disable-entry',
-    usage: 'usage: ha_agent_lab ha disable-entry [-h] [--confirm] --disabled {true,false} entry_id',
-    positionals: ['entry_id'],
-    flags: { '--disabled': { kind: 'value', choices: ['true', 'false'] }, '--confirm': { kind: 'store_true' } },
+    spec: {
+      prog: 'ha_agent_lab ha disable-entry',
+      usage: 'usage: ha_agent_lab ha disable-entry [-h] [--confirm] --disabled {true,false} entry_id',
+      positionals: ['entry_id'],
+      flags: { '--disabled': { kind: 'value', choices: ['true', 'false'] }, '--confirm': { kind: 'store_true' } },
+    },
+    help: `    disable-entry       Enable/disable a config entry via WebSocket
+                        (config_entries/disable, gated write).`,
+    run: async (args, { config, root, deps }) => {
+      const disabled = requireFlag(args.flags['--disabled'], '--disabled');
+      if (disabled === null) return 1;
+      return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
+        disableConfigEntry(root, ws, args.positionals[0]!, disabled === 'true'),
+      );
+    },
   },
   'ha trigger-automation': {
-    prog: 'ha_agent_lab ha trigger-automation',
-    usage: 'usage: ha_agent_lab ha trigger-automation [-h] automation_id',
-    positionals: ['automation_id'],
-    flags: {},
+    spec: {
+      prog: 'ha_agent_lab ha trigger-automation',
+      usage: 'usage: ha_agent_lab ha trigger-automation [-h] automation_id',
+      positionals: ['automation_id'],
+      flags: {},
+    },
+    help: `    trigger-automation  Fire an automation by entity_id via automation.trigger.`,
+    run: async (args, { config, root, deps }) => {
+      return handleTriggerAutomation(args.positionals[0]!, config, deps);
+    },
   },
 };
+
+export const HA_COMMANDS = Object.keys(COMMANDS)
+  .filter((key) => key.startsWith('ha '))
+  .map((key) => key.slice(3));
+
+const BOOT_COMMANDS = Object.keys(COMMANDS)
+  .filter((key) => key.startsWith('boot '))
+  .map((key) => key.slice(5));
+
+const HA_USAGE = [
+  'usage: ha_agent_lab ha [-h]',
+  `                       {${HA_COMMANDS.join(',')}}`,
+  '                       ...',
+].join('\n');
+
+const TOP_HELP = `${TOP_USAGE}
+
+positional arguments:
+  {boot,ha}
+
+options:
+  -h, --help  show this help message and exit`;
+
+const BOOT_HELP = `${BOOT_USAGE}
+
+positional arguments:
+  {status,store}
+
+options:
+  -h, --help      show this help message and exit`;
+
+// argparse only described the commands that carry a help block; the four
+// oldest ha commands never had one, and their records leave `help` empty.
+const HA_HELP = `${HA_USAGE}
+
+positional arguments:
+  {${HA_COMMANDS.join(',')}}
+${HA_COMMANDS.map((cmd) => COMMANDS[`ha ${cmd}`].help)
+  .filter(Boolean)
+  .join('\n')}
+
+options:
+  -h, --help            show this help message and exit`;
 
 interface ParsedArgs {
   command: 'boot' | 'ha';
@@ -1047,14 +1769,14 @@ function parseArgs(argv: string[]): ParsedArgs {
     argError(subProg, subUsage, `the following arguments are required: ${subDest}`);
   }
   const sub = rest[0]!;
-  const validSubs = command === 'boot' ? ['status', 'store'] : [...HA_COMMANDS];
-  if (!validSubs.includes(sub)) {
+  const validSubs = command === 'boot' ? BOOT_COMMANDS : HA_COMMANDS;
+  const record = COMMANDS[`${command} ${sub}`];
+  if (!record) {
     const choices = validSubs.map((c) => `'${c}'`).join(', ');
     argError(subProg, subUsage, `argument ${subDest}: invalid choice: '${sub}' (choose from ${choices})`);
   }
 
-  const spec = LEAF_SPECS[`${command} ${sub}`]!;
-  const leaf = parseLeaf(spec, rest.slice(1));
+  const leaf = parseLeaf(record.spec, rest.slice(1));
   rejectExtras(leaf.extras);
   return { command: command as 'boot' | 'ha', sub, positionals: leaf.positionals, flags: leaf.flags };
 }
@@ -1062,6 +1784,104 @@ function parseArgs(argv: string[]): ParsedArgs {
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
+
+/** Shared body for `audit-automations` / `audit-scripts`. */
+async function handleAudit(
+  domain: 'automation' | 'script',
+  root: string,
+  config: AppConfig,
+  deps: CliDeps,
+): Promise<number> {
+  try {
+    const client = await deps.createClient(config);
+    const summary =
+      domain === 'automation'
+        ? await auditAutomations(root, client)
+        : await auditScripts(root, client);
+    printSafetyAuditSummary(summary, domain);
+    return 0;
+  } catch (exc) {
+    if (!(exc instanceof HomeAssistantError)) throw exc;
+    console.log(exc.message);
+    return 1;
+  }
+}
+
+/** Shared body for `list-automations` / `list-scripts` / `list-scenes`. */
+async function handleListDomain(
+  domain: 'automation' | 'script' | 'scene',
+  config: AppConfig,
+  deps: CliDeps,
+): Promise<number> {
+  try {
+    const client = await deps.createClient(config);
+    const items = await listDomain(client, domain);
+    console.log(jsonDumps(items, { ensureAscii: false }));
+    return 0;
+  } catch (exc) {
+    if (!(exc instanceof HomeAssistantError)) throw exc;
+    console.log(exc.message);
+    return 1;
+  }
+}
+
+/** Shared body for `delete-automation` / `delete-script` / `delete-scene`. */
+async function handleDeleteConfig(
+  domain: 'automation' | 'script' | 'scene',
+  configId: string,
+  root: string,
+  config: AppConfig,
+  deps: CliDeps,
+): Promise<number> {
+  try {
+    const client = await deps.createClient(config);
+    const result = await removeConfig(root, client, domain, configId);
+    console.log(
+      jsonDumps({
+        ok: result.ok,
+        domain: result.domain,
+        config_id: result.configId,
+        message: result.message,
+        report_path: relative(root, result.reportPath),
+      }),
+    );
+    return result.ok ? 0 : 1;
+  } catch (exc) {
+    if (!(exc instanceof HomeAssistantError)) throw exc;
+    console.log(exc.message);
+    return 1;
+  }
+}
+
+/** Shared body for `get-automation-config` / `get-script-config` / `get-scene-config`. */
+async function handleReadConfig(
+  domain: 'automation' | 'script' | 'scene',
+  configId: string,
+  config: AppConfig,
+  deps: CliDeps,
+): Promise<number> {
+  try {
+    const client = await deps.createClient(config);
+    const result = await readConfig(client, domain, configId);
+    console.log(
+      jsonDumps(
+        {
+          ok: result.ok,
+          domain: result.domain,
+          config_id: result.configId,
+          config: result.config,
+          message: result.message,
+        },
+        { ensureAscii: false },
+      ),
+    );
+    return result.ok ? 0 : 1;
+  } catch (exc) {
+    if (!(exc instanceof HomeAssistantError)) throw exc;
+    console.log(exc.message);
+    return 1;
+  }
+}
 
 export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Promise<number> {
   const deps = resolveDeps(overrides);
@@ -1077,752 +1897,13 @@ export async function main(argv: string[], overrides: Partial<CliDeps> = {}): Pr
   const config = deps.loadConfig(projectRoot());
   const root = config.root;
 
-  if (args.command === 'ha' && args.sub === 'policy-check') {
-    return handlePolicyCheck(args.positionals[0]!, root);
-  }
-
-  if (args.command === 'boot' && args.sub === 'status') {
-    const status = await bootStatus(config, { probe: Boolean(args.flags['--probe']) });
-    console.log(jsonDumps(status));
-    return 0;
-  }
-
-  if (args.command === 'boot' && args.sub === 'store') {
-    const changes = saveBootPreferences(root, {
-      language: (args.flags['--language'] as string | undefined) ?? null,
-      url: (args.flags['--url'] as string | undefined) ?? null,
-      localUrl: (args.flags['--local-url'] as string | undefined) ?? null,
-      remoteUrl: (args.flags['--remote-url'] as string | undefined) ?? null,
-      token: (args.flags['--token'] as string | undefined) ?? null,
-    });
-    console.log(jsonDumps({ updated: changes }));
-    return 0;
-  }
-
-  if (args.command === 'ha' && args.sub === 'integration-health') {
-    return handleIntegrationHealth(root, config, deps);
-  }
-
-  if (args.command === 'ha' && args.sub === 'updates') {
-    return handleUpdates(config, deps, Boolean(args.flags['--digest']));
-  }
-
-  if (args.command === 'ha' && args.sub === 'refresh-context') {
-    try {
-      const client = await deps.createClient(config);
-      if (args.flags['--incremental']) {
-        const [payload, delta] = await refreshContextIncremental(root, client, deps);
-        console.log(
-          jsonDumps({
-            status: 'ok',
-            mode: 'incremental',
-            entities: Object.keys(payload.entity_index).length,
-            added: delta.added.length,
-            removed: delta.removed.length,
-            changed: delta.changed.length,
-            base_url_source: client.baseUrlSource,
-          }),
-        );
-      } else {
-        const payload = await deps.refreshContext(root, client);
-        console.log(
-          jsonDumps({
-            status: 'ok',
-            mode: 'full',
-            entities: Object.keys(payload.entity_index).length,
-            base_url_source: client.baseUrlSource,
-          }),
-        );
-      }
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'fetch-history') {
-    return handleFetchHistory(
-      root,
-      config,
-      deps,
-      (args.flags['--window-days'] as number | undefined) ?? 7,
-      (args.flags['--entities'] as string[] | undefined) ?? null,
-      Boolean(args.flags['--include-transitions']),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'simulate') {
-    const result = simulateArtifact(root, resolve(args.positionals[0]!));
-    console.log(
-      jsonDumps({
-        valid: result.isValid,
-        missing_entities: result.missingEntities,
-        blocked_reasons: result.blockedReasons,
-      }),
-    );
-    return result.isValid ? 0 : 1;
-  }
-
-  if (args.command === 'ha' && (args.sub === 'audit-automations' || args.sub === 'audit-scripts')) {
-    try {
-      const client = await deps.createClient(config);
-      const domain = args.sub === 'audit-automations' ? 'automation' : 'script';
-      const summary =
-        domain === 'automation'
-          ? await auditAutomations(root, client)
-          : await auditScripts(root, client);
-      printSafetyAuditSummary(summary, domain);
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'probe') {
-    try {
-      const client = await deps.createClient(config);
-      const response = await client.get(args.positionals[0]!);
-      console.log(jsonDumps(response, { ensureAscii: false }));
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.error(`HA error ${exc.statusCode}: ${String(exc.payload).slice(0, 500)}`);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'validate-apply') {
-    try {
-      const client = await deps.createClient(config);
-      const result = await validateAndApply(
-        root,
-        client,
-        resolve(args.positionals[0]!),
-        (args.flags['--reload'] as string | undefined) ?? null,
-      );
-      console.log(
-        jsonDumps({
-          ok: result.ok,
-          config_id: result.configId,
-          creation_attempted: result.creationAttempted,
-          creation_ok: result.creationOk,
-          reload_attempted: result.reloadAttempted,
-          message: result.message,
-          report_path: relative(root, result.reportPath),
-          base_url_source: client.baseUrlSource,
-        }),
-      );
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && (args.sub === 'list-automations' || args.sub === 'list-scripts')) {
-    try {
-      const client = await deps.createClient(config);
-      const domain = args.sub === 'list-automations' ? 'automation' : 'script';
-      const items = await listDomain(client, domain);
-      console.log(jsonDumps(items, { ensureAscii: false }));
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'list-scenes') {
-    try {
-      const client = await deps.createClient(config);
-      const items = await listDomain(client, 'scene');
-      console.log(jsonDumps(items, { ensureAscii: false }));
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && (args.sub === 'delete-automation' || args.sub === 'delete-script')) {
-    try {
-      const client = await deps.createClient(config);
-      const domain = args.sub === 'delete-automation' ? 'automation' : 'script';
-      const result = await removeConfig(root, client, domain, args.positionals[0]!);
-      console.log(
-        jsonDumps({
-          ok: result.ok,
-          domain: result.domain,
-          config_id: result.configId,
-          message: result.message,
-          report_path: relative(root, result.reportPath),
-        }),
-      );
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'delete-scene') {
-    try {
-      const client = await deps.createClient(config);
-      const result = await removeConfig(root, client, 'scene', args.positionals[0]!);
-      console.log(
-        jsonDumps({
-          ok: result.ok,
-          domain: result.domain,
-          config_id: result.configId,
-          message: result.message,
-          report_path: relative(root, result.reportPath),
-        }),
-      );
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (
-    args.command === 'ha' &&
-    (args.sub === 'get-automation-config' || args.sub === 'get-script-config')
-  ) {
-    try {
-      const client = await deps.createClient(config);
-      const domain = args.sub === 'get-automation-config' ? 'automation' : 'script';
-      const result = await readConfig(client, domain, args.positionals[0]!);
-      console.log(
-        jsonDumps(
-          {
-            ok: result.ok,
-            domain: result.domain,
-            config_id: result.configId,
-            config: result.config,
-            message: result.message,
-          },
-          { ensureAscii: false },
-        ),
-      );
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'get-scene-config') {
-    try {
-      const client = await deps.createClient(config);
-      const result = await readConfig(client, 'scene', args.positionals[0]!);
-      console.log(
-        jsonDumps(
-          {
-            ok: result.ok,
-            domain: result.domain,
-            config_id: result.configId,
-            config: result.config,
-            message: result.message,
-          },
-          { ensureAscii: false },
-        ),
-      );
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'automation-diff') {
-    try {
-      const client = await deps.createClient(config);
-      const result = await automationDiff(root, client);
-      console.log(formatAutomationDiff(result));
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'snapshot-states') {
-    try {
-      const client = await deps.createClient(config);
-      const domainsFlag = args.flags['--domains'] as string | undefined;
-      const entities = args.flags['--entities'] as string[] | undefined;
-      const result = await captureStates(root, client, {
-        name: (args.flags['--name'] as string | undefined) ?? 'snapshot',
-        domains: domainsFlag
-          ? domainsFlag.split(',').map((d) => d.trim()).filter(Boolean)
-          : DEFAULT_DOMAINS,
-        entities,
-      });
-      console.log(
-        jsonDumps(
-          {
-            ok: result.ok,
-            name: result.name,
-            captured: result.captured,
-            entities: result.entities,
-            report_path: relative(root, result.reportPath),
-            message: result.message,
-          },
-          { ensureAscii: false },
-        ),
-      );
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'restore-states') {
-    try {
-      const client = await deps.createClient(config);
-      const result = await restoreStates(root, client, {
-        artifactPath: resolve(args.positionals[0]!),
-        confirm: Boolean(args.flags['--confirm']),
-      });
-      const payload: Record<string, unknown> = {
-        ok: result.ok,
-        blocked: result.blocked,
-        needs_confirm: result.needsConfirm,
-        applied: result.applied,
-        entities: result.entities,
-        sensitive: result.sensitive,
-        reason: result.reason,
-        message: result.message,
-      };
-      if (result.suggestion) payload.suggestion = result.suggestion;
-      if (result.reportPath) payload.report_path = relative(root, result.reportPath);
-      console.log(jsonDumps(payload, { ensureAscii: false }));
-      return result.ok ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  // --- WebSocket structural commands (helpers, areas, registries) ---
-
-  if (args.command === 'ha' && args.sub === 'list-helpers') {
-    return runWsRead(deps, config, (ws) => listHelpers(ws, args.flags['--type'] as string | undefined));
-  }
-  if (args.command === 'ha' && args.sub === 'create-helper') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      createHelper(root, ws, args.positionals[0]!, args.positionals[1]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'delete-helper') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      deleteHelper(root, ws, args.positionals[0]!, args.positionals[1]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'list-areas') {
-    return runWsRead(deps, config, listAreas);
-  }
-  if (args.command === 'ha' && args.sub === 'create-area') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      createArea(root, ws, args.positionals[0]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'delete-area') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      deleteArea(root, ws, args.positionals[0]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'list-entities') {
-    if (!args.flags['--registry']) {
-      console.log(jsonDumps({ ok: false, message: 'Only registry mode is supported; pass --registry.' }));
-      return 1;
-    }
-    return runWsRead(deps, config, listEntities);
-  }
-  if (args.command === 'ha' && args.sub === 'rename-entity') {
-    const name = requireFlag(args.flags['--name'], '--name');
-    if (name === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { name }, 'rename-entity'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-area') {
-    const area = requireFlag(args.flags['--area'], '--area');
-    if (area === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { area_id: area }, 'set-entity-area'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-enabled') {
-    const enabled = requireFlag(args.flags['--enabled'], '--enabled');
-    if (enabled === null) return 1;
-    const disabledBy = enabled === 'true' ? null : 'user';
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { disabled_by: disabledBy }, 'set-entity-enabled'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-icon') {
-    const icon = requireFlag(args.flags['--icon'], '--icon');
-    if (icon === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { icon }, 'set-entity-icon'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-hidden') {
-    const hidden = requireFlag(args.flags['--hidden'], '--hidden');
-    if (hidden === null) return 1;
-    const hiddenBy = hidden === 'true' ? 'user' : null;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { hidden_by: hiddenBy }, 'set-entity-hidden'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-labels') {
-    const labels = requirePlusFlag(args.flags['--labels'], '--labels');
-    if (labels === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { labels }, 'set-entity-labels'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-categories') {
-    const raw = requireFlag(args.flags['--categories'], '--categories');
-    if (raw === null) return 1;
-    const parsed = parseJsonObject(raw);
-    if (!parsed.ok) {
-      console.log(jsonDumps({ ok: false, message: `--categories ${parsed.message}` }));
-      return 1;
-    }
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { categories: parsed.payload }, 'set-entity-categories'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-entity-aliases') {
-    const aliases = requirePlusFlag(args.flags['--aliases'], '--aliases');
-    if (aliases === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateEntity(root, ws, args.positionals[0]!, { aliases }, 'set-entity-aliases'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'list-devices') {
-    return runWsRead(deps, config, listDevices);
-  }
-  if (args.command === 'ha' && args.sub === 'set-device-area') {
-    const area = requireFlag(args.flags['--area'], '--area');
-    if (area === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateDevice(root, ws, args.positionals[0]!, { area_id: area }, 'set-device-area'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'rename-device') {
-    const name = requireFlag(args.flags['--name'], '--name');
-    if (name === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateDevice(root, ws, args.positionals[0]!, { name_by_user: name }, 'rename-device'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'list-dashboards') {
-    return runWsRead(deps, config, listDashboards);
-  }
-  if (args.command === 'ha' && args.sub === 'get-dashboard') {
-    const urlPath = (args.flags['--url-path'] as string | undefined) ?? null;
-    return runWsRead(deps, config, (ws) => getDashboard(ws, urlPath));
-  }
-  if (args.command === 'ha' && args.sub === 'apply-dashboard') {
-    const urlPath = (args.flags['--url-path'] as string | undefined) ?? null;
-    const artifactPath = resolve(args.positionals[0]!);
-    // Read+parse before opening the WS: a missing/malformed artifact must
-    // surface a clean {ok:false} (not an uncaught throw past runWsMutation's
-    // HomeAssistantError-only catch), and without wasting a WS connection.
-    if (!existsSync(artifactPath)) {
-      console.log(jsonDumps({ ok: false, message: `Dashboard artifact not found: ${args.positionals[0]}` }));
-      return 1;
-    }
-    let dashboardConfig: unknown;
-    try {
-      dashboardConfig = parseYaml(readFileSync(artifactPath, 'utf8'));
-    } catch (exc) {
-      console.log(
-        jsonDumps({ ok: false, message: `Failed to parse dashboard artifact: ${exc instanceof Error ? exc.message : String(exc)}` }),
-      );
-      return 1;
-    }
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      saveDashboard(root, ws, urlPath, dashboardConfig),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'create-dashboard') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      createDashboard(root, ws, args.positionals[0]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'delete-dashboard') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      deleteDashboard(root, ws, args.positionals[0]!),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'render-template') {
-    const source = args.positionals[0]!;
-    if (source !== '-' && !existsSync(resolve(source))) {
-      console.log(jsonDumps({ ok: false, message: `Template file not found: ${source}` }));
-      return 1;
-    }
-    try {
-      const client = await deps.createClient(config);
-      const template = source === '-' ? await Bun.stdin.text() : readFileSync(resolve(source), 'utf8');
-      const rendered = await client.postText('/api/template', { template });
-      console.log(rendered);
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'check-config') {
-    try {
-      const client = await deps.createClient(config);
-      const result = await client.post('/api/config/core/check_config');
-      console.log(jsonDumps(result, { ensureAscii: false }));
-      return isConfigCheckOk(result) ? 0 : 1;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'call-service') {
-    return handleCallService(
-      args.positionals[0]!,
-      args.flags['--data'] as string | undefined,
-      Boolean(args.flags['--confirm']),
-      root,
-      config,
-      deps,
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'set-core-config') {
-    const fields: Record<string, unknown> = {};
-    // Reject a non-numeric latitude/longitude up front: Number('40,7') is NaN,
-    // which JSON.stringify serializes as null, silently blanking the stored
-    // coordinate instead of erroring.
-    for (const [flag, key] of [
-      ['--latitude', 'latitude'],
-      ['--longitude', 'longitude'],
-    ] as const) {
-      const raw = args.flags[flag];
-      if (raw === undefined) continue;
-      const num = Number(raw);
-      if (!Number.isFinite(num)) {
-        console.log(jsonDumps({ ok: false, message: `${flag} must be a number, got: '${raw}'` }));
-        return 1;
-      }
-      fields[key] = num;
-    }
-    const setIfPresent = (flag: string, key: string) => {
-      const value = args.flags[flag];
-      if (value !== undefined) fields[key] = value;
-    };
-    setIfPresent('--elevation', 'elevation');
-    setIfPresent('--unit-system', 'unit_system');
-    setIfPresent('--currency', 'currency');
-    setIfPresent('--time-zone', 'time_zone');
-    setIfPresent('--country', 'country');
-
-    if (Object.keys(fields).length === 0) {
-      console.log(jsonDumps({ ok: false, message: 'At least one config field flag is required.' }));
-      return 1;
-    }
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      setCoreConfig(root, ws, fields),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'error-log') {
-    try {
-      const client = await deps.createClient(config);
-      console.log(await client.getText('/api/error_log'));
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'logbook') {
-    try {
-      const client = await deps.createClient(config);
-      const windowDays = (args.flags['--window-days'] as number | undefined) ?? 1;
-      const windowStart = daysAgo(windowDays);
-      const entity = args.flags['--entity'] as string | undefined;
-      const path = `/api/logbook/${encodeURIComponent(isoUtc(windowStart))}${entity ? `?entity=${encodeURIComponent(entity)}` : ''}`;
-      const result = await client.get(path);
-      console.log(jsonDumps(result, { ensureAscii: false }));
-      return 0;
-    } catch (exc) {
-      if (!(exc instanceof HomeAssistantError)) throw exc;
-      console.log(exc.message);
-      return 1;
-    }
-  }
-
-  if (args.command === 'ha' && args.sub === 'system-log') {
-    return runWsRead(deps, config, listSystemLog);
-  }
-
-  if (args.command === 'ha' && args.sub === 'list-floors') {
-    return runWsRead(deps, config, listFloors);
-  }
-  if (args.command === 'ha' && args.sub === 'create-floor') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      createFloor(root, ws, args.positionals[0]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'delete-floor') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      deleteFloor(root, ws, args.positionals[0]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'list-labels') {
-    return runWsRead(deps, config, listLabels);
-  }
-  if (args.command === 'ha' && args.sub === 'create-label') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      createLabel(root, ws, args.positionals[0]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'delete-label') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      deleteLabel(root, ws, args.positionals[0]!),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'rename-area') {
-    const name = requireFlag(args.flags['--name'], '--name');
-    if (name === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateArea(root, ws, args.positionals[0]!, { name }, 'rename-area'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-area-icon') {
-    const icon = requireFlag(args.flags['--icon'], '--icon');
-    if (icon === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateArea(root, ws, args.positionals[0]!, { icon }, 'set-area-icon'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-area-floor') {
-    const floor = requireFlag(args.flags['--floor'], '--floor');
-    if (floor === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateArea(root, ws, args.positionals[0]!, { floor_id: floor }, 'set-area-floor'),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'set-area-labels') {
-    const labels = requirePlusFlag(args.flags['--labels'], '--labels');
-    if (labels === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      updateArea(root, ws, args.positionals[0]!, { labels }, 'set-area-labels'),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'list-exposed-entities') {
-    return runWsRead(deps, config, listExposedEntities);
-  }
-  if (args.command === 'ha' && args.sub === 'expose-entity') {
-    const entityIds = requirePlusFlag(args.flags['--entity-ids'], '--entity-ids');
-    if (entityIds === null) return 1;
-    const assistants = requirePlusFlag(args.flags['--assistants'], '--assistants');
-    if (assistants === null) return 1;
-    const expose = requireFlag(args.flags['--expose'], '--expose');
-    if (expose === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      exposeEntity(root, ws, entityIds, assistants, expose === 'true'),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'list-backups') {
-    return runWsRead(deps, config, listBackups);
-  }
-  if (args.command === 'ha' && args.sub === 'create-backup') {
-    const agentIds = requirePlusFlag(args.flags['--agent-ids'], '--agent-ids');
-    if (agentIds === null) return 1;
-    const fields: Record<string, unknown> = { agent_ids: agentIds };
-    const setIfPresent = (flag: string, key: string, transform: (v: unknown) => unknown = (v) => v) => {
-      const value = args.flags[flag];
-      if (value !== undefined) fields[key] = transform(value);
-    };
-    setIfPresent('--name', 'name');
-    setIfPresent('--password', 'password');
-    setIfPresent('--include-addons', 'include_addons');
-    setIfPresent('--include-all-addons', 'include_all_addons');
-    setIfPresent('--include-database', 'include_database', (v) => v === 'true');
-    setIfPresent('--include-folders', 'include_folders');
-    setIfPresent('--include-homeassistant', 'include_homeassistant', (v) => v === 'true');
-
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      createBackup(root, ws, fields),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'list-blueprints') {
-    return runWsRead(deps, config, (ws) => listBlueprints(ws, args.positionals[0]!));
-  }
-  if (args.command === 'ha' && args.sub === 'import-blueprint') {
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      importBlueprint(root, ws, args.positionals[0]!, args.positionals[1]!),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'get-energy-prefs') {
-    return runWsRead(deps, config, getEnergyPrefs);
-  }
-  if (args.command === 'ha' && args.sub === 'set-energy-prefs') {
-    const parsed = parseJsonObject(args.positionals[0]!);
-    if (!parsed.ok) {
-      console.log(jsonDumps({ ok: false, message: `energy prefs JSON ${parsed.message}` }));
-      return 1;
-    }
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      setEnergyPrefs(root, ws, parsed.payload),
-    );
-  }
-  if (args.command === 'ha' && args.sub === 'reload-entry') {
-    return handleReloadEntry(args.positionals[0]!, Boolean(args.flags['--confirm']), root, config, deps);
-  }
-  if (args.command === 'ha' && args.sub === 'disable-entry') {
-    const disabled = requireFlag(args.flags['--disabled'], '--disabled');
-    if (disabled === null) return 1;
-    return runWsMutation(deps, config, root, Boolean(args.flags['--confirm']), (ws) =>
-      disableConfigEntry(root, ws, args.positionals[0]!, disabled === 'true'),
-    );
-  }
-
-  if (args.command === 'ha' && args.sub === 'trigger-automation') {
-    return handleTriggerAutomation(args.positionals[0]!, config, deps);
-  }
-
-  // Unreachable: every subcommand is handled above (argparse parity guard).
-  console.error(`${TOP_USAGE}\nha_agent_lab: error: Unsupported command.`);
-  return 2;
+  const record = COMMANDS[`${args.command} ${args.sub}`];
+  if (!record) {
+    // Unreachable: parseArgs rejects any key this table does not carry.
+    console.error(`${TOP_USAGE}\nha_agent_lab: error: Unsupported command.`);
+    return 2;
+  }
+  return record.run(args, { config, root, deps });
 }
 
 /** A value flag the handler needs but argparse treats as optional. Prints and returns null when absent. */

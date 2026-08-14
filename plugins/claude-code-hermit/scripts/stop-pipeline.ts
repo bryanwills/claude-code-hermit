@@ -6,11 +6,7 @@ import { run as costTracker } from './cost-tracker';
 import { run as sessionDiff } from './session-diff';
 import { run as evaluateSession } from './evaluate-session';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir } from './lib/cc-compat';
-import { readRuntimeJson } from './lib/runtime';
-import { sendKeys, tmuxSessionAlive } from './lib/tmux';
-import { applyContextReset } from './lib/context-reset';
-import { clearPendingCommand, readPendingCommand, renderCommand } from './lib/harness-command';
-import { currentHHMMOrUTC } from './lib/time';
+import { drainHarnessCommand } from './lib/harness-drain';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -20,79 +16,6 @@ const HERMIT_DIR = hermitDir();
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const SNAPSHOT_FILE = path.join(HERMIT_DIR, 'state', 'cc-stop-snapshot.json');
 const TURN_FILE = path.join(HERMIT_DIR, 'state', 'operator-turn-open.json');
-
-/** Hermit timezone for breadcrumb stamps — every other Progress Log writer uses it. */
-function configTimezone(): string {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(HERMIT_DIR, 'config.json'), 'utf-8')).timezone ?? 'UTC';
-  } catch { return 'UTC'; }
-}
-
-/**
- * Deliver a pending channel-requested harness command into the pane.
- *
- * Guards, in order: marker present and within TTL; runtime readable; not interactive
- * (those sessions have no tmux_session); no lifecycle transition or shutdown in flight
- * (the same runtime stamps passesLifecycleGuards checks in hermit-watchdog.ts — a /clear
- * landing mid-archive would destroy the context session-close is still writing from);
- * tmux session alive. The marker is deleted ONLY on a confirmed send — sendKeys returning
- * false means tmux never accepted the keys, so leaving the marker lets the next turn retry
- * rather than silently dropping the request.
- *
- * A /clear additionally routes the hermit-owned bookkeeping through applyContextReset, so
- * an operator-initiated clear leaves the same trace a watchdog-initiated one does —
- * without it the status cache would survive and the watchdog could fire a spurious
- * /compact against the freshly-cleared context. /compact deliberately gets NOTHING: it is
- * exactly what an operator typing /compact in the pane already does, PreCompact fires for
- * a manual /compact and writes the breadcrumb itself (precompact-stamp.ts), and
- * context_cleared is /clear's marker alone (the watchdog's compact tier never sets it).
- */
-function drainHarnessCommand(): void {
-  const pending = readPendingCommand(HERMIT_DIR);
-  if (!pending) return;
-
-  const runtime = readRuntimeJson();
-  if (!runtime || runtime.runtime_mode === 'interactive') return;
-  if (runtime.transition || runtime.shutdown_requested_at || runtime.shutdown_completed_at) return;
-
-  const sessionName: string = runtime.tmux_session ?? '';
-  if (!sessionName || !tmuxSessionAlive(sessionName)) return;
-
-  const text = renderCommand(pending);
-
-  if (!sendKeys(sessionName, text)) {
-    console.error(`[stop-pipeline] harness-command: tmux refused "${text}" — marker kept for retry`);
-    return;
-  }
-  clearPendingCommand(HERMIT_DIR);
-
-  // Claude does not process the submitted slash command until this Stop hook returns.
-  // Delegate the narrowly-scoped confirmation check so it can observe the resulting
-  // dialog after this process exits; doing a synchronous capture here races a pane that
-  // cannot render yet.
-  if (pending.command === '/model' || pending.command === '/effort') {
-    const helper = path.join(import.meta.dir, 'confirm-harness-switch.ts');
-    const child = Bun.spawn([process.execPath, helper, sessionName, pending.command], {
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'ignore',
-      env: process.env,
-    });
-    child.unref();
-  }
-
-  // Bookkeeping AFTER the confirmed send, not before: a refused send keeps the marker for
-  // the next turn, and a pre-send stamp would have recorded a reset that never happened —
-  // then re-recorded it on every retry until the TTL expired.
-  if (pending.command === '/clear') {
-    applyContextReset(HERMIT_DIR, runtime, {
-      kind: 'cleared',
-      trigger: 'channel',
-      hhmm: currentHHMMOrUTC(configTimezone()),
-    });
-  }
-  console.error(`[stop-pipeline] harness-command: delivered "${text}" (requested by ${pending.by})`);
-}
 
 async function main(): Promise<void> {
   // Read stdin once
@@ -149,7 +72,7 @@ async function main(): Promise<void> {
   // the hook that recorded it deliberately did NOT type, because it runs at turn START.
   // Runs before the heartbeat touch but after the accounting stages, so a /clear can
   // never race cost-tracker still reading the outgoing transcript.
-  try { drainHarnessCommand(); }
+  try { drainHarnessCommand(HERMIT_DIR); }
   catch (e: any) { console.error(`[stop-pipeline] harness-command: ${e.message}`); }
 
   // Guaranteed heartbeat touch — runs even if all stages fail

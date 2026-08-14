@@ -12,22 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { fixturesDir } from './helpers/workdir';
-
-function assistantEntry(model: string, inputTokens: number, outputTokens: number): string {
-  return JSON.stringify({
-    type: 'assistant',
-    message: {
-      model,
-      usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens },
-      content: [{ type: 'text', text: 'ok' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
-}
+import { fixturesDir, writeConfig } from './helpers/workdir';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 describe('cost-tracker: writeStatusJson populates status/task from real state', () => {
   let dir: string;
@@ -44,7 +30,7 @@ describe('cost-tracker: writeStatusJson populates status/task from real state', 
       path.join(cchDir, 'state', 'runtime.json'),
       JSON.stringify({ session_id: 'test-session', session_state: 'in_progress' })
     );
-    fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({ timezone: null }));
+    writeConfig(dir, { timezone: null });
     fs.copyFileSync(
       path.join(fixturesDir, 'shell-session.md'),
       path.join(cchDir, 'sessions', 'SHELL.md')
@@ -95,7 +81,7 @@ describe('cost-tracker: a ### sub-heading does not hijack the section read', () 
       path.join(cchDir, 'state', 'runtime.json'),
       JSON.stringify({ session_id: 'test-session', session_state: 'in_progress' })
     );
-    fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({ timezone: null }));
+    writeConfig(dir, { timezone: null });
     fs.writeFileSync(path.join(cchDir, 'sessions', 'SHELL.md'), [
       '# Active Session',
       '',
