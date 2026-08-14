@@ -36,7 +36,12 @@ export const SAFE_SUBCOMMANDS: readonly string[] = [
   'help', '--help',
 ];
 
-export const WRITE_SUBCOMMANDS: readonly string[] = ['deploy', 'server-reboot'];
+// subcommand -> the read-only command that previews it. A map rather than a
+// list so a new write subcommand cannot be added without naming its preview.
+export const WRITE_SUBCOMMANDS: Readonly<Record<string, string>> = {
+  'deploy': 'preview-deploy',
+  'server-reboot': 'preview-reboot',
+};
 
 export type Classification =
   | { gate: 'pass' }
@@ -58,16 +63,13 @@ export function classify(command: string): Classification {
   if (SAFE_SUBCOMMANDS.includes(subcommand)) return PASS;
 
   // Unknown subcommand — pass through (in-PHP gate handles it).
-  if (!WRITE_SUBCOMMANDS.includes(subcommand)) return PASS;
+  const preview = WRITE_SUBCOMMANDS[subcommand];
+  if (preview === undefined) return PASS;
 
   // Exact token, matching the in-PHP in_array() check.
   if (tokens.includes('--confirm')) return PASS;
 
-  return {
-    gate: 'needs-confirm',
-    subcommand,
-    preview: subcommand === 'deploy' ? 'preview-deploy' : 'preview-reboot',
-  };
+  return { gate: 'needs-confirm', subcommand, preview };
 }
 
 function block(message: string): never {

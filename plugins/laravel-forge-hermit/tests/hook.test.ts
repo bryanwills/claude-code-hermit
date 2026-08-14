@@ -28,12 +28,20 @@ function runHook(payload: unknown): { exitCode: number; stderr: string; stdout: 
   };
 }
 
-describe('classify: every safe subcommand passes', () => {
-  for (const sub of SAFE_SUBCOMMANDS) {
-    test(`${sub} passes`, () => {
+describe('classify: the subcommand inventories', () => {
+  test('every safe subcommand passes', () => {
+    for (const sub of SAFE_SUBCOMMANDS) {
       expect(classify(`php /plugin/php/forge.php ${sub}`).gate).toBe('pass');
-    });
-  }
+    }
+  });
+
+  // The inventory-sync test below pushes new forge.php subcommands into one of
+  // these lists; a write landing in SAFE_SUBCOMMANDS would satisfy it while
+  // silently disarming the gate.
+  test('no subcommand is both safe and a write', () => {
+    const writes = Object.keys(WRITE_SUBCOMMANDS);
+    expect(SAFE_SUBCOMMANDS.filter(sub => writes.includes(sub))).toEqual([]);
+  });
 });
 
 describe('classify: pass-through cases', () => {
@@ -90,14 +98,16 @@ describe('inventory sync: forge.php dispatch vs the hook classifier', () => {
   // two-layer write gate to the in-PHP check alone.
   test('every forge.php subcommand is classified', () => {
     const source = readFileSync(FORGE_PHP, 'utf8');
-    const dispatched = [...source.matchAll(/\$cmd === '([a-z-]+)'/g)].map(m => m[1]!);
+    // Any non-empty quoted literal, so a subcommand with a digit or underscore
+    // is not silently invisible to this check.
+    const dispatched = [...source.matchAll(/\$cmd === '([^']+)'/g)].map(m => m[1]!);
     const unique = [...new Set(dispatched)];
 
     // Guards against the regex silently rotting into a vacuous pass if the
     // dispatch style in forge.php ever changes.
     expect(unique.length).toBeGreaterThanOrEqual(24);
 
-    const known = new Set([...SAFE_SUBCOMMANDS, ...WRITE_SUBCOMMANDS]);
+    const known = new Set([...SAFE_SUBCOMMANDS, ...Object.keys(WRITE_SUBCOMMANDS)]);
     const unclassified = unique.filter(sub => !known.has(sub));
     expect(unclassified).toEqual([]);
   });
