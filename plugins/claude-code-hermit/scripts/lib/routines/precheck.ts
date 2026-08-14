@@ -36,11 +36,10 @@ try {
 } catch {
   emit('PROCEED'); // fail-open: can't resolve the hermit dir → never silently kill the routine
 }
-const PROJECT_ROOT = path.dirname(HERMIT_ROOT);
 
 function stamp(event: string): void {
   try {
-    logRoutineEvent(id, event, delivery, PROJECT_ROOT);
+    logRoutineEvent(id, event, HERMIT_ROOT, delivery);
   } catch { /* fail-open — a stamp failure must not block the routine */ }
 }
 

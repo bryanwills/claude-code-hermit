@@ -19,14 +19,17 @@ import { findHermitDir } from '../cc-compat';
 // and rejecting one here would refuse input that used to be recorded.
 const USAGE = 'Usage: routines.ts log-event <routine-id> <event> [delivery]';
 
-// CronCreate prompts fire with cwd set to the session's primary working
-// directory, which may be a subdirectory of the hermit project root, so the
-// ledger is found by walking up. Two passes, both capped at 8 levels.
+// Only the CLI verb walks: a CronCreate prompt fires with cwd set to the
+// session's primary working directory, which may be a subdirectory of the hermit
+// project root. Two passes, both capped at 8 levels. In-process callers never
+// reach here — they pass the hermit dir they already resolved.
 //
-// A hatched project (config.json) wins, so the walk goes PAST the config-less
-// `.claude-code-hermit/` that `.worktreeinclude` ships into a git worktree
-// (OPERATOR.md + compiled/ only): rows land in the main checkout's real ledger
-// instead of a copy that dies with the worktree.
+// A hatched project (config.json) wins, so the walk goes PAST a config-less
+// `.claude-code-hermit/`. That does NOT single out a git worktree's partial copy:
+// the copy carries config.json, because the dev hermit's /dev-quality and /dev-pr
+// read commands.test and commands.pr_create from it. Discriminating the worktree
+// case needs a sentinel the copy does not carry, and belongs in hermitDir()
+// rather than here.
 //
 // A bare `.claude-code-hermit/` still counts on the second pass, because
 // config-less is a shipped state, not only a decoy: hatch scaffolds the tree
@@ -36,9 +39,6 @@ const USAGE = 'Usage: routines.ts log-event <routine-id> <event> [delivery]';
 // `source: 'ok'` to routines/health.ts, turning a lost row into a false zero the
 // model may act on. Falling back also keeps this consistent with hermitDir(),
 // which fail-opens to the same dir when no config is found.
-//
-// Env precedence deliberately does not apply: in-process callers pass a root they
-// already resolved, and ambient env must not override an explicit argument.
 function nearestHermitDir(from: string): string | null {
   // Resolve once, up front: a relative `from` would give findHermitDir() a walk
   // that dies after one check (`path.dirname('.') === '.'`), silently demoting
@@ -60,21 +60,21 @@ function nearestHermitDir(from: string): string | null {
 /**
  * Appends one routine event. Returns null on success, or an error message.
  *
- * `fromDir` is where the .claude-code-hermit/ walk-up starts — the in-process
- * callers (due.ts, precheck.ts) pass the project root they already resolved,
- * which is what they used to pass as the subprocess `cwd`. They now call this
- * directly rather than spawning, saving a process per stamp on the routine
- * fire path.
+ * `hermitRoot` is the resolved `.claude-code-hermit/` directory, not a project
+ * root to search from. The in-process callers (due.ts, precheck.ts, finish.ts)
+ * each already hold one — from hermitDir() or, for the monitor, from argv — and
+ * used to hand over its parent so this function could walk back down. That round
+ * trip could only lose information: once the walk gained a config.json sentinel
+ * the two resolvers could disagree and land in a different project, and in
+ * finish.ts it split the run record and the ledger row across two roots.
  */
 export function logRoutineEvent(
   id: string,
   event: string,
+  hermitRoot: string,
   delivery = 'cron-create',
-  fromDir: string = process.cwd(),
 ): string | null {
-  const hermit = nearestHermitDir(fromDir);
-  if (!hermit) return `could not find .claude-code-hermit/ in any parent of ${fromDir}`;
-  const metrics = path.join(hermit, 'state', 'routine-metrics.jsonl');
+  const metrics = path.join(hermitRoot, 'state', 'routine-metrics.jsonl');
 
   // Dedup guard (issue #464): heartbeat-restart re-invokes `hermit-routines
   // load` at its own prompt tail, which can re-trigger the cron and emit a
@@ -105,7 +105,14 @@ export function run(args: string[]): void {
     process.stderr.write(`${USAGE}\n`);
     process.exit(1);
   }
-  const err = logRoutineEvent(id, event, delivery || 'cron-create');
+  const hermit = nearestHermitDir(process.cwd());
+  if (!hermit) {
+    process.stderr.write(
+      `routines.ts log-event: could not find .claude-code-hermit/ in any parent of ${process.cwd()}\n`,
+    );
+    process.exit(1);
+  }
+  const err = logRoutineEvent(id, event, hermit, delivery || 'cron-create');
   if (err) {
     process.stderr.write(`routines.ts log-event: ${err}\n`);
     process.exit(1);
