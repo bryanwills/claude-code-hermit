@@ -115,7 +115,7 @@ Today's priorities:
 - [from OPERATOR.md Current Priority, filtered to actionable items]
 ```
 
-Adapt the greeting and section headers to the operator's configured language. Keep the entire brief under 25 lines — strip lower-priority lines if the Overnight section pushes over the cap. **`Awaiting decision:` lines are final and non-droppable** — strip from `Energy`, `Cost`, `Today's priorities`, and `Updates` (in that order) before touching MP lines.
+Adapt the greeting and section headers to the operator's configured language. Keep the entire brief under 25 lines — strip lower-priority lines if the Overnight section pushes over the cap. **`Awaiting decision:` lines are final and non-droppable, and so is `Cost:`** (it only renders on a flagged spike, so its presence is itself the alert) — strip from `Energy`, `Today's priorities`, and `Updates` (in that order) before touching MP lines.
 
 ## Delivery
 

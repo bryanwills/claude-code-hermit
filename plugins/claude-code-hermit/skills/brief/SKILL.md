@@ -93,7 +93,7 @@ Current behavior — general purpose summary as described below.
      ```
      [Brief] YYYY-MM-DD | idle | N tasks completed
      Session: since [start date]
-     Last: [latest Session Summary entry] — [status]
+     Last: [latest Session Summary entry, with the trailing `($X.XX)` spend figure stripped] — [status]
      Status: Idle — ready for what's next (run /claude-code-hermit:session-start to begin)
      ```
      Then check for auto-detected proposals (step after Output Format) and return.
