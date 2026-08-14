@@ -66,7 +66,7 @@ All state lives under `.claude-code-hermit/` in the project root.
    On the slow path: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` (empty `Task:` payload if no task is known yet) to create/update SHELL.md and pre-compute the session ID. Gate on the returned `ok`; if `false`, surface the `reason` to the operator before proceeding.
 4b. If `runtime.json` `session_state` is `idle` (session between tasks — SHELL.md exists but no active task):
    - This is a session between tasks — do NOT create a new session or SHELL.md
-   - Present: session start date, tasks completed count, latest entry from Session Summary
+   - Present: session start date, tasks completed count, latest entry from Session Summary (strip its trailing `($X.XX)` spend figure — spend is on request via `/cost-reflect`)
    - Skip to step 5 (NEXT-TASK.md check) to determine the task source
    - When a task is provided: pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to update runtime.json `session_state` to `in_progress` and fill in Task. After confirming the plan with the operator, create native Tasks (`TaskCreate`) for each step.
    - The session ID is pre-computed in runtime.json (set by the previous idle transition's `archive --mode=idle`)
@@ -132,7 +132,7 @@ All state lives under `.claude-code-hermit/` in the project root.
    - If the session status is `blocked`: suggest running `/debug` to diagnose tool/hook failures before re-attempting the blocked work
    - Ask the operator if they want to continue the current task or start a new one
 9b. If resuming an idle session (runtime.json `session_state` is `idle`):
-   - Show session continuity info: tasks completed, session duration, cumulative cost
+   - Show session continuity info: tasks completed, session duration
    - Ask: "What should I work on next?" (unless a NEXT-TASK.md was accepted in step 6)
    - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. After confirming the plan, create native Tasks for each step.
 10. If starting a new session:

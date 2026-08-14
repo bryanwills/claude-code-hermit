@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Routine operator messages report outcomes. `/brief` (every mode, including the single-line push fallback), the idle status reply, and the session-start resume line carry work status; the brief runner contract returns work fields only. Spend detail lives in `/cost-reflect`, `/hermit-doctor`, the dashboard, the weekly review's `Spend:` line, and budget alerts when a cap is configured.
+- Session-start injection carries operator, session, knowledge, and report context. Spend reaches the operator on request (`/cost-reflect`, the deterministic `status` reply) or when a budget cap fires.
+
 ## [1.2.39] - 2026-08-14
 
 ### Added
