@@ -747,6 +747,17 @@ describe('startup-context', () => {
     expect(r.stdout).toContain('---Active Session---');
   }));
 
+  // The label names OPERATOR.md so the model can tell operator-curated context
+  // apart from the plugin-owned CLAUDE.md block. Pinned here because the compact
+  // path's banned-label list must keep matching what the full path emits.
+  test('startup-context (operator context is labelled with its source file)', withDir(async (dir) => {
+    write(hermit(dir, 'OPERATOR.md'), '# Operator\nProject focus body.\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('---Operator Context (OPERATOR.md)---');
+    expect(r.stdout).toContain('Project focus body.');
+  }));
+
   test('startup-context (large SHELL.md)', withDir(async (dir) => {
     const fixture = fs.readFileSync(path.join(fixturesDir, 'shell-session.md'), 'utf-8');
     const extra = Array.from({ length: 150 },
@@ -1071,7 +1082,7 @@ Rota body.
     expect(r.exitCode).toBe(0);
     expect(r.stdout.length).toBeLessThanOrEqual(1200);
     expect(r.stdout).toContain('---Compaction Pointers---');
-    for (const banned of ['---Session Context---', '---Active Session---', '---Compiled Knowledge---',
+    for (const banned of ['---Operator Context (OPERATOR.md)---', '---Active Session---', '---Compiled Knowledge---',
       '---Schema Drift---', '---Storage Drift---', '---Session Cost---', '---Last Report---', '---Upgrade Check---']) {
       expect(r.stdout).not.toContain(banned);
     }

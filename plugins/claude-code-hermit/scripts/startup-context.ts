@@ -238,7 +238,7 @@ function emitFullContext(source: string | null) {
   try {
     const lines = fs.readFileSync(operatorPath, 'utf-8').split('\n').slice(0, 50).join('\n');
     if (lines.trim()) {
-      emit('Session Context', guarded('OPERATOR.md', lines.slice(0, BUDGETS.operator)));
+      emit('Operator Context (OPERATOR.md)', guarded('OPERATOR.md', lines.slice(0, BUDGETS.operator)));
     }
   } catch {
     // No OPERATOR.md — skip silently

@@ -11,6 +11,8 @@
 - `reflect`'s errored-routine detection replaces `errored = started − fired` with the attempt fold. A crash (`incomplete`) and a missed `expect_artifact` contract (`failures`) are now separate findings with separate wording, and an attempt still running at the window edge no longer reads as a failure.
 - `reflect` no longer computes a channel-engagement ratio. `channel-replies.jsonl` records outbound hermit sends only, so the metric measured how often the hermit spoke twice, not whether the operator engaged. Routine ROI now cites the routine's measured cost instead. Restoring an engagement signal needs producer-side `routine_id` correlation that does not exist yet.
 - The `fired` dedup guard in `lib/routines/event.ts` matches parsed fields instead of a `"event":"fired"` substring, so JSON key order is no longer load-bearing for correctness. The row shape is unchanged.
+- Session-start injection labels operator context `---Operator Context (OPERATOR.md)---` instead of `---Session Context---`, restoring the provenance of the injected content.
+- The `OPERATOR.md` rule in the session-discipline block states the ownership split: operator-curated context lives in `OPERATOR.md`, behavior lives in the plugin-owned block that upgrades refresh, and improvement ideas go to proposals rather than edits.
 
 ### Fixed
 - Async subagent cost rows now advance `cost-index.json`. `subagent-cost.ts` appended and exited, and `readCostIndex` validates only the schema version, so the dashboard, telemetry export, spend-status and doctor under-reported that spend until the next Stop hook — indefinitely on a hermit that dispatches async work and then goes idle. Budget enforcement was never affected.
