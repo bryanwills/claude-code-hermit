@@ -3,9 +3,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseFrontmatter, makeReporter } from './test-utils';
+import { makeReporter, lintSkills } from '../../../tests/lib/skill-lint';
 
-const SKILL_DIR = path.join(import.meta.dir, '..', 'skills');
+const PLUGIN_ROOT = path.join(import.meta.dir, '..');
 
 const SKILLS = [
   { name: 'hatch', gates: 0 },
@@ -18,49 +18,26 @@ const SKILLS = [
 
 const { ok, summary } = makeReporter();
 
-for (const { name, gates } of SKILLS) {
-  console.log(`\n${name}/SKILL.md:`);
-  const file = path.join(SKILL_DIR, name, 'SKILL.md');
-  ok('file exists', fs.existsSync(file), file);
-  if (!fs.existsSync(file)) continue;
+console.log('\nskill structure:');
+const lintFailures = lintSkills(PLUGIN_ROOT, SKILLS);
+ok(`${SKILLS.length} skills pass structural lint`, lintFailures.length === 0, lintFailures.join('; '));
 
-  const text = fs.readFileSync(file, 'utf-8');
-  const fm = parseFrontmatter(text);
-  ok('frontmatter parseable', fm !== null);
-  if (!fm) continue;
-
-  ok('frontmatter has name', !!fm.fields.name, JSON.stringify(fm.fields));
-  ok('frontmatter name matches dir', fm.fields.name === name, `${fm.fields.name} vs ${name}`);
-  ok('frontmatter has description', !!fm.fields.description && fm.fields.description.length > 20);
-
-  const gateMatches = fm.body.match(/^### Gate \d+ —/gm) || [];
-  ok(`expected ${gates} Gate headers`, gateMatches.length === gates, `found ${gateMatches.length}`);
-
-  if (gates > 0) {
-    ok('Gate 0 present', /^### Gate 0 —/m.test(fm.body));
-    ok(`Gate ${gates - 1} present`, new RegExp(`^### Gate ${gates - 1} —`, 'm').test(fm.body));
-  }
-
-  // Internal links: resolve [text](relative/path) and verify the target exists.
-  const linkRe = /\[[^\]]+\]\(([^)]+)\)/g;
-  const skillBaseDir = path.dirname(file);
-  let linkMatch: RegExpExecArray | null;
-  let linksChecked = 0;
-  let linksBad = 0;
-  while ((linkMatch = linkRe.exec(fm.body)) !== null) {
-    const target = linkMatch[1];
-    if (/^(https?:|mailto:|#)/.test(target)) continue;
-    const cleanTarget = target.split('#')[0];
-    if (!cleanTarget) continue;
-    const resolved = path.resolve(skillBaseDir, cleanTarget);
-    linksChecked += 1;
-    if (!fs.existsSync(resolved)) {
-      linksBad += 1;
-      console.error(`    bad link: ${target} → ${resolved}`);
-    }
-  }
-  ok(`internal links resolve (${linksChecked} checked)`, linksBad === 0, `${linksBad} bad`);
-}
+// The shared domain-hatch protocol is asserted by the repo-root cross-plugin
+// contract test; the PHP floor is the one hatch invariant that stays
+// forge-specific (the contract test deliberately scopes its no-version-floor
+// rule to the CORE floor, so this hatch may state its own PHP requirement).
+// The floor itself is read from php/composer.json — the manifest that actually
+// enforces it — so the prose can't drift when the constraint bumps. hatch's
+// existence is already asserted by the SKILLS loop above; a missing file here
+// should throw, not silently skip.
+console.log('\nhatch/SKILL.md forge-specific floor:');
+const hatchText = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'hatch', 'SKILL.md'), 'utf-8');
+const composerJson = JSON.parse(
+  fs.readFileSync(path.join(import.meta.dir, '..', 'php', 'composer.json'), 'utf-8'),
+);
+const phpFloor = (composerJson.require.php as string).replace(/^[<>=^~]+/, '');
+ok(`still states its own PHP floor (${phpFloor}, from composer.json)`,
+  new RegExp(`PHP ${phpFloor.replace(/\./g, '\\.')}\\+? is required`).test(hatchText));
 
 // CLAUDE-APPEND token-efficiency guard. The block is re-paid on every session
 // load and every subagent dispatch, so the trim that removed the restated 4-step

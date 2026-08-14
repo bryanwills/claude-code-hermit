@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript } from './helpers/run';
+import { writeConfig } from './helpers/workdir';
 import { costByType } from '../scripts/lib/pricing';
 
 const dirs: string[] = [];
@@ -43,7 +44,7 @@ function setup(budget: object | null, entries: LogEntry[]): { dir: string; cchDi
   const cchDir = path.join(dir, '.claude-code-hermit');
   fs.mkdirSync(path.join(cchDir, 'state'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
-  fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({ timezone: 'UTC', budget }));
+  writeConfig(dir, { timezone: 'UTC', budget });
 
   const lines = entries.map((e, i) => {
     const ts = new Date(Date.now() - e.daysAgo * 86400000).toISOString();

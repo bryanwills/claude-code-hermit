@@ -7,7 +7,12 @@ name: Cross-Plugin Guards
 # The hatch/hermit-meta/core-scripts globs cover the domain-hatch contract: a
 # hatch rewrite, a changed core floor declaration, and the shared script itself
 # all have to re-run that guard, and none of them would trigger any single
-# plugin's own workflow.
+# plugin's own workflow. The CLAUDE-APPEND and plugin.json globs exist for the
+# same reason: the contract asserts the template's marker pair and the
+# version-triple agreement, so edits to either must re-run it. Core's own
+# plugin.json (bumped on every release) and CLAUDE-APPEND are negated: the
+# contract never reads core's manifest or template, so those edits can't
+# change its outcome.
 on:
   push:
     branches: [main]
@@ -15,8 +20,13 @@ on:
       - 'plugins/*/scripts/automode-env.ts'
       - 'plugins/*/skills/hatch/**'
       - 'plugins/*/.claude-plugin/hermit-meta.json'
+      - 'plugins/*/.claude-plugin/plugin.json'
+      - '!plugins/claude-code-hermit/.claude-plugin/plugin.json'
+      - 'plugins/*/state-templates/CLAUDE-APPEND.md'
+      - '!plugins/claude-code-hermit/state-templates/CLAUDE-APPEND.md'
       - 'plugins/claude-code-hermit/scripts/**'
       - 'tests/cross-plugin/**'
+      - 'tests/lib/**'
       - '.github/workflows/test-cross-plugin.yml'
       - 'package.json'
       - 'bun.lock'
@@ -26,8 +36,13 @@ on:
       - 'plugins/*/scripts/automode-env.ts'
       - 'plugins/*/skills/hatch/**'
       - 'plugins/*/.claude-plugin/hermit-meta.json'
+      - 'plugins/*/.claude-plugin/plugin.json'
+      - '!plugins/claude-code-hermit/.claude-plugin/plugin.json'
+      - 'plugins/*/state-templates/CLAUDE-APPEND.md'
+      - '!plugins/claude-code-hermit/state-templates/CLAUDE-APPEND.md'
       - 'plugins/claude-code-hermit/scripts/**'
       - 'tests/cross-plugin/**'
+      - 'tests/lib/**'
       - '.github/workflows/test-cross-plugin.yml'
       - 'package.json'
       - 'bun.lock'
@@ -42,4 +57,4 @@ jobs:
         with:
           bun-version: '1.3.14'
       - run: bun install --frozen-lockfile
-      - run: bun test tests/cross-plugin/
+      - run: bun test tests/cross-plugin/ tests/lib/

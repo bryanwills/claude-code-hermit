@@ -5,23 +5,22 @@
 // section-boundary logic instead of re-deriving it.
 
 import fs from 'node:fs';
+import { findSection } from './md-write';
 
-// Same boundary convention as startup-context.ts's extractSection and cost-tracker.ts's
-// ## Blockers regex: a section ends at the next `\n## ` or EOF.
+// Deliberately not md-write's appendToSection: this path must never throw on a
+// missing heading (it appends at EOF instead), and it inserts the raw line
+// without appendToSection's blank-line normalization, so an operator's SHELL.md
+// spacing survives an autonomous flush untouched.
 function appendToProgressLog(shellPath: string, line: string): void {
   try {
     let content = fs.readFileSync(shellPath, 'utf-8');
-    const marker = '## Progress Log';
-    const idx = content.indexOf(marker);
-    if (idx === -1) {
+    const section = findSection(content, 'Progress Log');
+    if (!section) {
       content = content.trimEnd() + '\n\n' + line + '\n';
+    } else if (section.end === content.length) {
+      content = content.trimEnd() + '\n' + line + '\n';
     } else {
-      const nextSection = content.indexOf('\n## ', idx + marker.length);
-      if (nextSection === -1) {
-        content = content.trimEnd() + '\n' + line + '\n';
-      } else {
-        content = content.slice(0, nextSection) + '\n' + line + content.slice(nextSection);
-      }
+      content = content.slice(0, section.end) + '\n' + line + content.slice(section.end);
     }
     fs.writeFileSync(shellPath, content, 'utf-8');
   } catch { /* fail-open */ }

@@ -11,27 +11,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { triggerPrompt, assistantEntry as entry } from './helpers/transcript';
 
-function assistantEntry(timestamp: string, cacheRead: number, cacheWrite = 0, outputTokens = 50): string {
-  return JSON.stringify({
-    type: 'assistant',
-    timestamp,
-    message: {
-      model: 'claude-sonnet-4-6',
-      usage: {
-        input_tokens: 2,
-        cache_creation_input_tokens: cacheWrite,
-        cache_read_input_tokens: cacheRead,
-        output_tokens: outputTokens,
-      },
-      content: [{ type: 'text', text: 'ok' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
-}
+const assistantEntry = (timestamp: string, cacheRead: number, cacheWrite = 0, outputTokens = 50): string =>
+  entry({ timestamp, cacheRead, cacheWrite, outputTokens });
 
 function compactBoundary(timestamp: string, preTokens: number, postTokens: number): string {
   return JSON.stringify({
