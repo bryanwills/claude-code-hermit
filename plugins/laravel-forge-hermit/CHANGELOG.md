@@ -1,9 +1,6 @@
 # Changelog — laravel-forge-hermit
 
-## [Unreleased]
-
-### Added
-- Inventory-sync test between `php/forge.php` and the write-confirm-gate hook: a subcommand added to the PHP dispatch chain without a matching entry in the hook's classifier now fails the test suite instead of silently falling through the hook's unknown-subcommand branch.
+## [0.0.11] - 2026-08-14
 
 ### Fixed
 - Guzzle `7.15.2` hardens request-host validation, cookie-domain matching, and derived `Host` regeneration.
