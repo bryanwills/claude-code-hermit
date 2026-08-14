@@ -656,6 +656,42 @@ describe('stop-pipeline', () => {
     expect(r.exitCode).toBe(0);
     expect(fs.existsSync(hermit(dir, 'state', 'operator-turn-open.json'))).toBe(false);
   }));
+
+  // Ordering the drain depends on, previously asserted only by a comment: the
+  // accounting stages read the outgoing transcript, so a /clear must not land
+  // before them, and the heartbeat touch must survive the drain either way.
+  test('stop-pipeline drains a harness command after accounting and still touches the heartbeat',
+    withGitDir(async (dir) => {
+      const bin = path.join(dir, 'fake-bin');
+      fs.mkdirSync(bin, { recursive: true });
+      write(path.join(bin, 'tmux'), '#!/usr/bin/env bash\nexit 0\n');
+      fs.chmodSync(path.join(bin, 'tmux'), 0o755);
+
+      write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
+      write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
+        version: 1,
+        session_state: 'in_progress',
+        runtime_mode: 'headless',
+        tmux_session: 'hermit-test',
+      }));
+      write(hermit(dir, 'state', 'pending-harness-command.json'), JSON.stringify({
+        command: '/clear', arg: null, by: 'operator', requested_at: new Date().toISOString(),
+      }));
+
+      const r = await runScript('stop-pipeline.ts', {
+        stdin: stopHookInput(dir),
+        cwd: dir,
+        env: { ...PIPE_ENV, AGENT_HOOK_PROFILE: 'minimal', PATH: `${bin}:${process.env.PATH}` },
+      });
+
+      expect(r.exitCode).toBe(0);
+      const delivered = r.stderr.indexOf('harness-command: delivered');
+      const accounted = r.stderr.indexOf('cost-tracker');
+      expect(delivered).toBeGreaterThan(-1);
+      expect(accounted).toBeGreaterThan(-1); // else the ordering below passes vacuously
+      expect(accounted).toBeLessThan(delivered);
+      expect(fs.existsSync(hermit(dir, 'state', '.heartbeat'))).toBe(true);
+    }));
 });
 
 // -------------------------------------------------------
@@ -1813,41 +1849,10 @@ describe('doctor-check', () => {
 // -------------------------------------------------------
 // Sibling manifest invariant (live monorepo walk)
 // -------------------------------------------------------
-
-const stripOp = (v: string) => v.replace(/^[<>=^~!]+/, '');
-
-test('sibling manifests: required_core_version vs requires consistency', () => {
-  const pluginsDir = path.join(MONOREPO_ROOT, 'plugins');
-  for (const slug of fs.readdirSync(pluginsDir)) {
-    const metaPath = path.join(pluginsDir, slug, '.claude-plugin', 'hermit-meta.json');
-    if (!fs.existsSync(metaPath)) continue;
-    const meta = readJson(metaPath);
-    const rcv = meta.required_core_version;
-    const req = meta.requires?.['claude-code-hermit'];
-    if (rcv && req) {
-      // Mismatch output includes the offending plugin slug.
-      expect({ slug, required_core_version: rcv })
-        .toEqual({ slug, required_core_version: req });
-    }
-  }
-});
-
-// The version triad spans two files: required_core_version lives in
-// hermit-meta.json, the resolver dependency in plugin.json. The auditor's
-// check 7 enforces this at release time; this pins it in CI so drift reddens.
-test('sibling manifests: hermit-meta required_core_version vs plugin.json dependency base', () => {
-  const pluginsDir = path.join(MONOREPO_ROOT, 'plugins');
-  for (const slug of fs.readdirSync(pluginsDir)) {
-    const metaPath = path.join(pluginsDir, slug, '.claude-plugin', 'hermit-meta.json');
-    if (!fs.existsSync(metaPath)) continue;
-    const rcv = readJson(metaPath).required_core_version;
-    if (!rcv) continue;
-    const pj = readJson(path.join(pluginsDir, slug, '.claude-plugin', 'plugin.json'));
-    const dep = (pj.dependencies ?? []).find((d: { name: string }) => d.name === 'claude-code-hermit');
-    expect({ slug, dependency: dep?.version }).not.toEqual({ slug, dependency: undefined });
-    expect({ slug, base: stripOp(dep.version) }).toEqual({ slug, base: stripOp(rcv) });
-  }
-});
+// The required_core_version / requires / plugin.json-dependency triple is
+// asserted by tests/cross-plugin/domain-hatch.contract.test.ts ('core-floor
+// version triple'), whose workflow path filters fire on domain-manifest edits
+// that this suite's never would.
 
 test('marketplace.json and plugin dirs are in sync (name + version, bidirectional)', () => {
   const root = MONOREPO_ROOT;

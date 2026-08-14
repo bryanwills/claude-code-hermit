@@ -17,25 +17,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 // ---------------------------------------------------------------------------
 // Helpers — synthetic transcript builders
 // ---------------------------------------------------------------------------
-
-function assistantEntry(model: string, inputTokens: number, outputTokens: number): string {
-  return JSON.stringify({
-    type: 'assistant',
-    message: {
-      model,
-      usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens },
-      content: [{ type: 'text', text: 'done' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
-}
 
 // Async-launch dispatch result — written to the PARENT transcript at launch time
 // (matches the real shape: { isAsync:true, status:"async_launched", agentId, ... }).

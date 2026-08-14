@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter, listProposalFiles } from './frontmatter';
 import { elapsedSinceHHMM } from './time';
+import { extractSection } from './md-write';
 
 type Json = any;
 
@@ -399,8 +400,8 @@ export function deriveStaleSession(
     return err?.code === 'ENOENT' ? { ok: true, items: [] } : { ok: false, items: [] };
   }
 
-  const section = shell.match(/## Progress Log\n([\s\S]*?)(?=\n## |$)/);
-  const entries = section ? section[1].match(/\[(\d{1,2}:\d{2})\]/g) : null;
+  const section = extractSection(shell, 'Progress Log');
+  const entries = section ? section.match(/\[(\d{1,2}:\d{2})\]/g) : null;
   if (!entries || entries.length === 0) return { ok: true, items: [] };
 
   const last = entries[entries.length - 1].replace(/[\[\]]/g, '');

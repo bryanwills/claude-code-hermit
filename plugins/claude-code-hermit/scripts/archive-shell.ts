@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pinStateDirOrExit } from './lib/cc-compat';
+import { findSection } from './lib/md-write';
 
 type Json = any;
 
@@ -105,30 +106,19 @@ function main() {
   }
   try { fs.unlinkSync(snapshotTmp); } catch { /* tmp already gone */ }
 
-  const progressLogRe = /^## Progress Log[ \t]*$/m;
-  const startMatch = progressLogRe.exec(shell);
+  const progressLog = findSection(shell, 'Progress Log');
 
   let updatedShell = shell;
   let keptLineCount = archivedLineCount;
   let compacted = false;
 
-  if (startMatch) {
-    const bodyStart = startMatch.index + startMatch[0].length;
-    const after = shell.slice(bodyStart);
-    const nextHeadingMatch = /\n## /.exec(after);
-    const bodyEnd = nextHeadingMatch
-      ? bodyStart + nextHeadingMatch.index
-      : shell.length;
-
-    const before = shell.slice(0, bodyStart);
-    const tail = shell.slice(bodyEnd);
-
+  if (progressLog) {
     const newBody =
       `\n` +
       `<!-- snapshot @ ${nowIso} → snapshots/${snapshotName} (${archivedLineCount} lines) -->\n` +
       `- [archived] previous entries → snapshots/${snapshotName}\n`;
 
-    updatedShell = before + newBody + tail;
+    updatedShell = shell.slice(0, progressLog.start) + newBody + shell.slice(progressLog.end);
     keptLineCount = updatedShell.split('\n').length;
     compacted = true;
 

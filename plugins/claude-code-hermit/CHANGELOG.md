@@ -16,6 +16,15 @@
 - Async subagent cost rows now advance `cost-index.json`. `subagent-cost.ts` appended and exited, and `readCostIndex` validates only the schema version, so the dashboard, telemetry export, spend-status and doctor under-reported that spend until the next Stop hook — indefinitely on a hermit that dispatches async work and then goes idle. Budget enforcement was never affected.
 - `reflect`'s routine cost-per-day summed a `cost` field filtered on `ts`; cost rows carry `estimated_cost_usd` and `timestamp`, so every routine's spend evidence resolved to ~$0.
 - `hermit-evolution` read `routine-metrics.jsonl` raw with no bound at all, pulling the whole ledger into the runner's context.
+### Fixed
+- The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
+### Changed
+- `proposal.ts`'s write verbs (`create`, `patch`, `shell-append`, `next-task`, `routine`) return their stdout token instead of exiting, and are exported behind an `import.meta.main` guard, so the write-path grammar — header parsing, the id suffix walk, the `@now` decision-append guard — is testable in-process. Same argv, same stdout grammar, same exit codes.
+- `scripts/lib/md-write.ts` now owns the whole `## <heading>` grammar for SHELL.md (locate, read, append, replace, placeholder-stripping); the ten local parsers are gone. Operator-added custom sections still pass through untouched.
+
+### Fixed
+- A `###` sub-heading above a real section no longer hijacks that section's body — affects session-start injection, `.status.json` task/blockers, Progress Log staleness, the Monitoring bloat check, and the `reflect --quick` hash.
+- Session-start injection and the session quality score no longer read a section as empty when its content sits below a retained `<!-- ... -->` placeholder.
 
 ## [1.2.38] - 2026-08-12
 
