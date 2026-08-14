@@ -47,14 +47,28 @@ function hermitDir(): string {
   if (agent && path.isAbsolute(agent)) return path.resolve(agent);
   const proj = process.env.CLAUDE_PROJECT_DIR;
   if (proj) { const d = path.join(proj, '.claude-code-hermit'); if (fs.existsSync(d)) return d; }
-  let dir = process.cwd();
+  return findHermitDir(process.cwd())
+    ?? path.resolve('.claude-code-hermit'); // fail-open: preserves today's behavior
+}
+
+/**
+ * The bounded walk behind hermitDir(), for callers that start somewhere other than
+ * cwd and need to know when nothing was found: same 8-level cap and config.json
+ * sentinel, null instead of the fail-open default.
+ *
+ * Deliberately env-free. Callers like routines/event.ts pass a root their caller
+ * already resolved; an ambient CLAUDE_PROJECT_DIR must not override an explicit
+ * argument. Env precedence belongs in hermitDir(), which owns the cwd default.
+ */
+function findHermitDir(startDir: string): string | null {
+  let dir = startDir;
   for (let i = 0; i < 8; i++) {
     if (fs.existsSync(path.join(dir, '.claude-code-hermit', 'config.json'))) return path.join(dir, '.claude-code-hermit');
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return path.resolve('.claude-code-hermit'); // fail-open: preserves today's behavior
+  return null;
 }
 
 // The main checkout's state dir, or null when we are not in a LINKED worktree
@@ -522,6 +536,7 @@ function ccVersion(payload?: Json): string | null {
 export {
   // Project-root resolution
   hermitDir,
+  findHermitDir,
   assertStateDir,
   assertUnderStateDir,
   pinStateDirOrExit,

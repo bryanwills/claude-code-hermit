@@ -13,22 +13,44 @@ import path from 'node:path';
 import { utcISOStamp } from '../time';
 import { appendJsonlLine } from '../append-jsonl';
 import { lastRoutineEvent } from './history';
+import { findHermitDir } from '../cc-compat';
 
 // Deliberately not an enum check: the shell version accepted any event string,
 // and rejecting one here would refuse input that used to be recorded.
 const USAGE = 'Usage: routines.ts log-event <routine-id> <event> [delivery]';
 
 // CronCreate prompts fire with cwd set to the session's primary working
-// directory, which may be a subdirectory of the hermit project root. Walk up to
-// the nearest ancestor containing .claude-code-hermit/ so the relative path
-// resolves correctly regardless of launch cwd.
-function findHermitRoot(from: string): string | null {
+// directory, which may be a subdirectory of the hermit project root, so the
+// ledger is found by walking up. Two passes, both capped at 8 levels.
+//
+// A hatched project (config.json) wins, so the walk goes PAST the config-less
+// `.claude-code-hermit/` that `.worktreeinclude` ships into a git worktree
+// (OPERATOR.md + compiled/ only): rows land in the main checkout's real ledger
+// instead of a copy that dies with the worktree.
+//
+// A bare `.claude-code-hermit/` still counts on the second pass, because
+// config-less is a shipped state, not only a decoy: hatch scaffolds the tree
+// (Step 2) before the wizard writes config.json (Step 5), and an aborted hatch
+// can leave it that way indefinitely. Refusing there would drop the row silently
+// — every caller discards the error string below — and a short ledger still reads
+// `source: 'ok'` to routines/health.ts, turning a lost row into a false zero the
+// model may act on. Falling back also keeps this consistent with hermitDir(),
+// which fail-opens to the same dir when no config is found.
+//
+// Env precedence deliberately does not apply: in-process callers pass a root they
+// already resolved, and ambient env must not override an explicit argument.
+function nearestHermitDir(from: string): string | null {
+  const hatched = findHermitDir(from);
+  if (hatched) return hatched;
   let dir = path.resolve(from);
-  while (dir !== path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, '.claude-code-hermit'))) return dir;
-    dir = path.dirname(dir);
+  for (let i = 0; i < 8; i++) {
+    const candidate = path.join(dir, '.claude-code-hermit');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
-  return fs.existsSync(path.join(dir, '.claude-code-hermit')) ? dir : null;
+  return null;
 }
 
 /**
@@ -46,9 +68,9 @@ export function logRoutineEvent(
   delivery = 'cron-create',
   fromDir: string = process.cwd(),
 ): string | null {
-  const root = findHermitRoot(fromDir);
-  if (!root) return `could not find .claude-code-hermit/ in any parent of ${fromDir}`;
-  const metrics = path.join(root, '.claude-code-hermit', 'state', 'routine-metrics.jsonl');
+  const hermit = nearestHermitDir(fromDir);
+  if (!hermit) return `could not find .claude-code-hermit/ in any parent of ${fromDir}`;
+  const metrics = path.join(hermit, 'state', 'routine-metrics.jsonl');
 
   // Dedup guard (issue #464): heartbeat-restart re-invokes `hermit-routines
   // load` at its own prompt tail, which can re-trigger the cron and emit a

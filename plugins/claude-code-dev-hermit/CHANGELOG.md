@@ -7,6 +7,7 @@
 - `record-test-result` crashed with exit 1 on a valid-JSON payload that is not an object (`null`), instead of failing open.
 - `worktree-boundary-guard` exited on `WORKTREE_GUARD=off` before reading stdin, so disabling the guard broke the pipe on any payload larger than the pipe buffer; the drain now runs before the switch is honored.
 - All three hooks exited 1 on an unhandled stdin stream error; `main()` now catches and exits 0.
+- `findHermitDir` honors `CLAUDE_PROJECT_DIR` (existence-checked against `.claude-code-hermit/config.json`, falling through to the walk when it doesn't name a hatched project). A session that had `cd`-ed out of the project dropped operator-configured `protected_branches` back to the built-in `main`/`master` list and skipped `last-test.json` writes.
 
 ## [0.4.8] - 2026-07-26
 

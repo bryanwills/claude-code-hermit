@@ -104,9 +104,11 @@ async function main(): Promise<void> {
     process.exit(0); // not a feed-sources.md edit — pass through
   }
 
+  // Validate the file the hook reported, not a same-named one under the session's
+  // (drift-prone) cwd. The harness normalizes tool_input.file_path to absolute.
   let markdown: string;
   try {
-    markdown = await Bun.file(SOURCES_FILE).text();
+    markdown = await Bun.file(path).text();
   } catch {
     process.exit(0); // missing feed-sources.md — skip
   }

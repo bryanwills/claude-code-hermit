@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- Routine events fired from inside a git worktree land in the project's real `routine-metrics.jsonl` instead of the config-less `.claude-code-hermit/` that `.worktreeinclude` ships there — rows used to go to a copy that died with the worktree, silently under-counting routine health. The walk-up is also capped at 8 levels like every other resolver; a hermit dir without `config.json` (a scaffolded-but-unfinished hatch) still records, so no row is ever dropped.
+
 ### Added
 - `scripts/lib/config-read.ts` — one settled read path for `config.json`: `readSettledConfig` never throws, settles malformed values by declared shape (never vocabulary, so custom operator values survive), preserves explicit `null`s and unknown keys at every nesting level, and settles malformed containers to empty rather than template seeds. `readConfigRaw` remains for the few consumers that must distinguish an unreadable config (routines run records, the prompt pipeline's disclosure gates, `channel-send`'s `config_read_failed`).
 

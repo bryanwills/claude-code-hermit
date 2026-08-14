@@ -1,8 +1,30 @@
 import { test, expect } from "bun:test";
 import { join } from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { validateSourcesTable } from "../scripts/validate-sources";
 
 const SCRIPT = join(import.meta.dir, "..", "scripts", "validate-sources.ts");
+
+const BAD_TABLE = `| Name | Type | URL |
+| ---- | ---- | --- |
+| Bad | bogus | https://x.com |
+`;
+
+/** Writes feed-sources.md into a fresh dir and returns its absolute path. */
+function sourcesFileIn(markdown: string): { dir: string; file: string } {
+  const dir = mkdtempSync(join(tmpdir(), "validate-sources-"));
+  const file = join(dir, "feed-sources.md");
+  writeFileSync(file, markdown);
+  return { dir, file };
+}
+
+async function runHook(cwd: string, filePath: string): Promise<number> {
+  const proc = Bun.spawn(["bun", SCRIPT], { stdin: "pipe", stdout: "ignore", stderr: "ignore", cwd });
+  proc.stdin.write(JSON.stringify({ tool_input: { file_path: filePath } }));
+  await proc.stdin.end();
+  return await proc.exited;
+}
 
 const GOOD = `# Sources
 
@@ -51,4 +73,18 @@ test("hook passes through (exit 0) for a foreign sources.md edit", async () => {
   proc.stdin.write(JSON.stringify({ tool_input: { file_path: "/tmp/sources.md" } }));
   await proc.stdin.end();
   expect(await proc.exited).toBe(0);
+});
+
+// Two same-named feed-sources.md files: the one the hook reports is the one
+// validated, in both directions — cwd's copy is never opened.
+test("validates the payload-named file, not cwd's copy (payload good, cwd bad)", async () => {
+  const cwdCopy = sourcesFileIn(BAD_TABLE);
+  const edited = sourcesFileIn(GOOD);
+  expect(await runHook(cwdCopy.dir, edited.file)).toBe(0);
+});
+
+test("validates the payload-named file, not cwd's copy (payload bad, cwd good)", async () => {
+  const cwdCopy = sourcesFileIn(GOOD);
+  const edited = sourcesFileIn(BAD_TABLE);
+  expect(await runHook(cwdCopy.dir, edited.file)).toBe(1);
 });
