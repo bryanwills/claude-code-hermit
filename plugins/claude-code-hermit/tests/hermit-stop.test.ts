@@ -116,6 +116,40 @@ describe('hermit-stop contract', () => {
     }
   });
 
+  test('config.json is never rewritten from the settled read-view', async () => {
+    const dir = makeDir();
+    try {
+      // `routines` is an object, not an array — the settled read-view turns that
+      // into [] and a corrupt file into full template defaults. Neither may reach
+      // disk: stop patches always_on onto the raw object and writes that.
+      writeConfig(dir, { routines: { broken: true }, budget: { daily_usd: '5' } });
+      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      const { bin } = installFakeTmux(dir, { hasSession: false });
+      await runStop(dir, [], bin);
+      const after = readJson(dir, '.claude-code-hermit/config.json');
+      expect(after.always_on).toBe(false);
+      expect(after.routines).toEqual({ broken: true });
+      expect(after.budget).toEqual({ daily_usd: '5' });
+      expect(after.heartbeat).toBeUndefined(); // no template defaults materialized
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('unparseable config.json is left untouched by the stop write-back', async () => {
+    const dir = makeDir();
+    try {
+      const p = path.join(dir, '.claude-code-hermit', 'config.json');
+      fs.writeFileSync(p, '{"agent_name": "t", "always_on": tru');
+      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      const { bin } = installFakeTmux(dir, { hasSession: false });
+      await runStop(dir, [], bin);
+      expect(fs.readFileSync(p, 'utf-8')).toBe('{"agent_name": "t", "always_on": tru');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('no session, non-interactive → idle written with cleared transition', async () => {
     const dir = makeDir();
     try {

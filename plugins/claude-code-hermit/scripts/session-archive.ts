@@ -35,6 +35,7 @@ import { readAlertState as readRuntime, quarantineAlertState as quarantineRuntim
 import { costLogPath, pinStateDirOrExit } from './lib/cc-compat';
 import { computeSessionCost } from './lib/session-cost';
 import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
+import { readSettledConfig } from './lib/config-read';
 import { extractSection as sectionBody, firstContentLine, replaceSectionInPlace, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
@@ -326,9 +327,7 @@ function resolveOperatorTurns(sessionsDir: string): number {
 // verb and pass the parsed object into these instead of each resolving it
 // independently (was 3 separate reads+parses per idle-mode archive call).
 function readConfig(stateDir: string): Json {
-  const raw = readFileSafe(path.join(stateDir, 'config.json'));
-  if (!raw) return {};
-  try { return JSON.parse(raw); } catch { return {}; }
+  return readSettledConfig(stateDir);
 }
 
 function resolveEscalation(config: Json): string {

@@ -28,6 +28,7 @@ import { isPaused } from '../pause';
 import { validateCronSchedule, ROUTINE_ID_RE } from '../../validate-config';
 import { makeTzFormatter, partsFromFormatter, compileCron, cronMatchesCompiled } from '../cron-match';
 import { readJson as readJSON } from '../cli';
+import { readConfigRaw } from '../config-read';
 import { logRoutineEvent } from './event';
 
 type Json = any;
@@ -95,7 +96,9 @@ const nowDate = now();
 const nowMinute = floorToMinute(nowDate);
 const windowFloor = new Date(nowMinute.getTime() - WINDOW_MS);
 
-const config = readJSON(path.join(hermitDir, 'config.json'));
+// Raw, not settled: absent/unreadable config must short-circuit before cursor
+// init/pruning below — a settled empty routines list would still run them.
+const config = readConfigRaw(hermitDir);
 if (!config) finish([]);
 
 const timezone: string | null = typeof config.timezone === 'string' ? config.timezone : null;

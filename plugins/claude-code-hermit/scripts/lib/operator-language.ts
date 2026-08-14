@@ -15,7 +15,7 @@
 // and returns an enum, so it needs no sanitization.
 
 import { scanInjected } from './sanitize';
-import { loadConfig } from './channel-auth';
+import { readSettledConfig } from './config-read';
 
 type Json = any;
 
@@ -41,7 +41,6 @@ export function sanitizeLanguage(value: unknown, onThreat?: (reason: string) => 
 
 /** Read and sanitize `config.language` for the hermit at `agentDir`. */
 export function operatorLanguage(agentDir: string, onThreat?: (reason: string) => void): string | null {
-  const config: Json = loadConfig(agentDir);
-  if (!config) return null;
+  const config: Json = readSettledConfig(agentDir);
   return sanitizeLanguage(config.language, onThreat);
 }

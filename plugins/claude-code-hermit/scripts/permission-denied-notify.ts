@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { hermitDir } from './lib/cc-compat';
-import { loadConfig } from './lib/channel-auth';
+import { readSettledConfig } from './lib/config-read';
 import { channelLikelyDown } from './lib/channel-health';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { sendOperatorNotice } from './lib/channel-send';
@@ -81,8 +81,7 @@ async function main(raw: string): Promise<void> {
   if (process.env.HERMIT_MANAGED !== '1') return; // attended session sees the denial natively
 
   const dir = hermitDir();
-  const config = loadConfig(dir);
-  if (!config || typeof config !== 'object') return; // fail-open
+  const config = readSettledConfig(dir); // settled: absent/malformed -> defaults (always_on false -> no-op)
   if (config.always_on !== true) return;
 
   const target = resolveOutboundChannel(config.channels);

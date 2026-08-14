@@ -27,6 +27,7 @@ import { isLoopbackUrl } from './validate-config';
 import { readFrontmatter, globDir } from './lib/frontmatter';
 import { safe } from './lib/sanitize';
 import { todayYMD, thisMonthYYYYMM } from './lib/time';
+import { readSettledConfig } from './lib/config-read';
 
 type Json = any;
 
@@ -517,7 +518,7 @@ async function main(): Promise<void> {
   const printOnly = argv.includes('--print');
   const hermitDirArg = argv.find((a) => !a.startsWith('--')) ?? '.claude-code-hermit';
   const hermitDir = path.resolve(hermitDirArg);
-  const config = readJson(path.join(hermitDir, 'config.json')) ?? {};
+  const config = readSettledConfig(hermitDir);
 
   if (printOnly) {
     const redact = config?.telemetry_export?.redact_operator_text !== false;

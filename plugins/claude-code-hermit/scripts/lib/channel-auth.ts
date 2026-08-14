@@ -4,19 +4,9 @@
 // stages in lib/prompt-stages/).
 // A single copy so the allowlist rule can't drift out of sync between callers.
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { normalizeChannelSource } from './channel-envelope';
 
 type Json = any;
-
-export function loadConfig(dir: string): Json | null {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Resolves an envelope's (possibly plugin-qualified) source to its configured

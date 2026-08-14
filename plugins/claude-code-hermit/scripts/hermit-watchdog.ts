@@ -33,6 +33,7 @@ import { anchoredPaneTail, tmuxSessionAlive, getSessionName as deriveSessionName
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { costLogPath } from './lib/cc-compat';
+import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
@@ -1204,14 +1205,8 @@ function maybeEscapePausedSession(timezone: string): void {
 // --- Main decision loop ---
 
 async function main(): Promise<void> {
-  if (!fs.existsSync(CONFIG_PATH)) process.exit(0);
-
-  let config: Json;
-  try {
-    config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-  } catch {
-    process.exit(0);
-  }
+  if (!fs.existsSync(CONFIG_PATH)) process.exit(0); // absence: not a hermit project
+  const config: Json = readSettledConfig(HERMIT_ROOT); // malformed settles to defaults
 
   // 0. Liveness stamp — record that the scheduler/loop invoked us, before any gate or
   // pre-gate handler (which can process.exit(0)). A fresh last_run proves the watchdog
@@ -1447,11 +1442,7 @@ async function main(): Promise<void> {
 /** Read tmux session name from config for install commands. */
 function getSessionName(): string {
   if (!fs.existsSync(CONFIG_PATH)) return 'hermit';
-  try {
-    return deriveSessionName(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8')));
-  } catch {
-    return 'hermit';
-  }
+  return deriveSessionName(readSettledConfig(HERMIT_ROOT));
 }
 
 /** Locate state-templates/watchdog/ relative to this script's plugin root. */
@@ -1596,12 +1587,7 @@ async function cmdRestart(reason: string): Promise<void> {
     process.stderr.write('[watchdog] no config — nothing to restart\n');
     process.exit(0);
   }
-  let config: Json;
-  try {
-    config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-  } catch {
-    process.exit(0);
-  }
+  const config: Json = readSettledConfig(HERMIT_ROOT);
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
   const sessionName = runtime.tmux_session || deriveSessionName(config);

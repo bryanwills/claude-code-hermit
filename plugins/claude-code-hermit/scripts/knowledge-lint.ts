@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, readFileWithFrontmatter, newestByType, globDirRecursive } from './lib/frontmatter';
+import { readSettledConfig } from './lib/config-read';
 
 type Json = any;
 
@@ -51,7 +52,7 @@ function lint(hermitDir: string, options: Json = {}): { findings: Json[]; counts
   let compiledBudgetChars = 1000;
   let workingSetWarn = 20;
   try {
-    const config = JSON.parse(fs.readFileSync(path.join(hermitDir, 'config.json'), 'utf8'));
+    const config = readSettledConfig(hermitDir);
     if (config.knowledge) {
       if (typeof config.knowledge.raw_retention_days === 'number') retentionDays = config.knowledge.raw_retention_days;
       if (typeof config.knowledge.compiled_budget_chars === 'number') compiledBudgetChars = config.knowledge.compiled_budget_chars;
