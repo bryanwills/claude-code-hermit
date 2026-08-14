@@ -81,7 +81,7 @@ describe('cost-tracker: a ### sub-heading does not hijack the section read', () 
       path.join(cchDir, 'state', 'runtime.json'),
       JSON.stringify({ session_id: 'test-session', session_state: 'in_progress' })
     );
-    fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify({ timezone: null }));
+    writeConfig(dir, { timezone: null });
     fs.writeFileSync(path.join(cchDir, 'sessions', 'SHELL.md'), [
       '# Active Session',
       '',
