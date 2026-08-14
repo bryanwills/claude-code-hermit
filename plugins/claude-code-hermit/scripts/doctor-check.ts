@@ -11,6 +11,7 @@ import { validate } from './validate-config';
 import { kStr } from './lib/format';
 import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } from './lib/cost-log';
 import { costLogPath } from './lib/cc-compat';
+import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
 import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
@@ -505,7 +506,7 @@ function cidrOverlap(a: string, b: string): boolean {
 }
 
 function checkDockerSecurity(p: DoctorPaths = PATHS) {
-  const { hermitDir, configPath } = p;
+  const { hermitDir } = p;
   // Presence check between docker.security.* in config.json and the rendered
   // docker-compose.security.yml overlay. When both are present, also shells out
   // to `docker compose config --format json` (timeout 10s) to detect:
@@ -518,8 +519,7 @@ function checkDockerSecurity(p: DoctorPaths = PATHS) {
     const overlayPath = path.join(projectRoot, 'docker-compose.security.yml');
     const overlayPresent = fs.existsSync(overlayPath);
 
-    let config: Json = {};
-    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    const config: Json = readSettledConfig(hermitDir);
     const sec = (config.docker && config.docker.security) || null;
     const declared = sec && Object.values(sec).some((v: Json) =>
       v && typeof v === 'object' ? v.enabled === true : v === true
@@ -830,10 +830,10 @@ function checkScheduler(p: DoctorPaths = PATHS) {
 // ----------------- Watchdog -----------------
 
 function checkWatchdog(p: DoctorPaths = PATHS) {
-  const { hermitDir, configPath, stateDir } = p;
+  const { hermitDir, stateDir } = p;
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const wCfg = config.watchdog || {};
+    const config = readSettledConfig(hermitDir);
+    const wCfg = config.watchdog;
 
     // Steps 0a-0c (post-close clear, emergency clear, routine-hygiene compact) run
     // independent of watchdog.enabled — a hermit can have the restart tier off and
@@ -1120,10 +1120,10 @@ function checkOpusWake(p: DoctorPaths = PATHS) {
 }
 
 function checkHeartbeat(p: DoctorPaths = PATHS) {
-  const { configPath, stateDir } = p;
+  const { hermitDir, stateDir } = p;
   try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    const hbCfg = config.heartbeat || {};
+    const config = readSettledConfig(hermitDir);
+    const hbCfg = config.heartbeat;
 
     if (!hbCfg.enabled) {
       return { id: 'heartbeat', status: 'ok', detail: 'heartbeat: disabled' };
@@ -1498,15 +1498,15 @@ function checkCredentialExpiry(p: DoctorPaths = PATHS) {
 // checkConfig()'s job, so a missing/unreadable file here is 'ok', not a second
 // failure for the same root cause.
 function readConfigOrCovered(id: string, p: DoctorPaths): { config: Json } | { covered: { id: string; status: string; detail: string } } {
-  const { configPath } = p;
-  if (!fs.existsSync(configPath)) {
+  const { hermitDir } = p;
+  if (!configExists(hermitDir)) {
     return { covered: { id, status: 'ok', detail: 'config.json absent (covered by config check)' } };
   }
-  try {
-    return { config: JSON.parse(fs.readFileSync(configPath, 'utf8')) };
-  } catch {
+  const config = readConfigRaw(hermitDir);
+  if (config === null) {
     return { covered: { id, status: 'ok', detail: 'config.json unreadable (covered by config check)' } };
   }
+  return { config };
 }
 
 function checkModelPricingKnown(p: DoctorPaths = PATHS) {

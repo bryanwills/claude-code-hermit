@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { safe } from './lib/sanitize';
 import { hermitDir } from './lib/cc-compat';
+import { readConfigRaw } from './lib/config-read';
 import { logMessage, isLoggingEnabled } from './lib/channel-log';
 
 type Json = any;
@@ -15,7 +16,9 @@ type Json = any;
  *   below so replies on not-yet-configured channels are still captured.
  * - Persisting dm_channel_id from chat_id in tool input (config.json)
  * - Updating last_reply_at timestamp (state/channel-activity.json)
- * - Appending a reply event to state/channel-replies.jsonl (routine-ROI source)
+ * - Appending an outbound-send event to state/channel-replies.jsonl. The ledger has no
+ *   reader today: reflect's routine-ROI engagement join was removed because these rows
+ *   record the hermit's own sends, so they cannot measure operator engagement.
  *
  * The config-persistence steps below only act once the channel is already
  * configured in config.json — episodic capture is the one exception.
@@ -44,11 +47,7 @@ function resolveChannel(toolName: string): string | null {
 }
 
 function readConfig(): Json | null {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readConfigRaw(HERMIT_DIR);
 }
 
 function writeConfig(config: Json): void {

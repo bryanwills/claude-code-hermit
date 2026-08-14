@@ -56,7 +56,7 @@
 //
 // The verbs below are the proposal-lifecycle *readers and satellites*, absorbed
 // from what used to be one top-level script each. They keep their own stdout
-// grammars and exit codes rather than being forced into `ok()`/`fail()` —
+// grammars and exit codes rather than being forced into `OK`/`ERROR|<token>` —
 // callers branch on those, and rewriting them would be a behavior change:
 //
 //   resolve-id <stateDir> <operator-input>       MATCH|… AMBIGUOUS|… NONE|…
@@ -77,11 +77,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readStdin, readJson, flagValue } from './lib/cli';
+import { emit, readStdin, readJson, flagValue } from './lib/cli';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
-import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, PATCH_KEY_RE } from './lib/md-write';
-import { computeBase, readTimezone, SUFFIX_LETTERS } from './lib/prop-id';
+import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, escapeRegExp, PATCH_KEY_RE } from './lib/md-write';
+import { computeBase, SUFFIX_LETTERS } from './lib/prop-id';
+import { readSettledConfig } from './lib/config-read';
 import { zonedISOStamp, utcISOStamp } from './lib/time';
 import { rebuildIndex, run as runIndex } from './lib/proposals/index-rebuild';
 import { run as regenerateSummary } from './generate-summary';
@@ -96,15 +97,12 @@ import { run as runQualityGate } from './lib/proposals/quality-gate';
 
 type Json = any;
 
-function fail(token: string): never {
-  process.stdout.write(`ERROR|${token}\n`);
-  process.exit(0);
-}
-
-function ok(token: string): never {
-  process.stdout.write(`${token}\n`);
-  process.exit(0);
-}
+// The write verbs return their complete stdout token — `ERROR|<reason>` or the
+// success line — rather than exiting, so the write-path grammar is callable
+// from a test without a subprocess. `main()`, via lib/cli's `emit`, is the only
+// exit adapter. An exported verb takes `stateDir` already pinned (see
+// requirePinnedStateDir): the pin is a property of the CLI entry, so an
+// in-process caller owns it.
 
 function warn(msg: string): void {
   console.error(`WARN: ${msg}`);
@@ -121,13 +119,13 @@ function regenTail(stateDir: string): void {
 
 const VALID_CATEGORIES = new Set(['improvement', 'routine', 'capability', 'constraint', 'bug']);
 
-function grabHeader(header: string, key: string): string | null {
+export function grabHeader(header: string, key: string): string | null {
   const m = new RegExp(`^${key}:[ \\t]*(.*)$`, 'm').exec(header);
   return m ? m[1].trim() : null;
 }
 
 // Returns [] for an absent/blank header, null to signal invalid JSON/shape.
-function parseStringArray(raw: string | null): string[] | null {
+export function parseStringArray(raw: string | null): string[] | null {
   if (raw == null || raw.trim() === '') return [];
   try {
     const parsed = JSON.parse(raw);
@@ -136,16 +134,15 @@ function parseStringArray(raw: string | null): string[] | null {
   return null;
 }
 
-async function verbCreate(stateDir: string): Promise<void> {
-  const stdin = await readStdin();
+export function verbCreate(stateDir: string, stdin: string): string {
   const sep = /^---[ \t]*$/m.exec(stdin);
-  if (!sep) fail('missing-separator');
+  if (!sep) return 'ERROR|missing-separator';
   const header = stdin.slice(0, sep.index);
   let body = stdin.slice(sep.index + sep[0].length).replace(/^\n+/, '').replace(/\s+$/, '');
-  if (!body) fail('empty-body');
+  if (!body) return 'ERROR|empty-body';
 
   const title = grabHeader(header, 'Title');
-  if (!title) fail('missing-title');
+  if (!title) return 'ERROR|missing-title';
 
   const source = grabHeader(header, 'Source') || 'manual';
   let session = grabHeader(header, 'Session');
@@ -157,23 +154,23 @@ async function verbCreate(stateDir: string): Promise<void> {
     session = runtime?.session_id ?? null;
   }
   const category = grabHeader(header, 'Category') || 'improvement';
-  if (!VALID_CATEGORIES.has(category)) fail('invalid-category');
+  if (!VALID_CATEGORIES.has(category)) return 'ERROR|invalid-category';
 
   const tags = parseStringArray(grabHeader(header, 'Tags'));
-  if (tags === null) fail('invalid-tags');
+  if (tags === null) return 'ERROR|invalid-tags';
   const relatedSessions = parseStringArray(grabHeader(header, 'Related-Sessions'));
-  if (relatedSessions === null) fail('invalid-related-sessions');
+  if (relatedSessions === null) return 'ERROR|invalid-related-sessions';
   const findingsSummary = grabHeader(header, 'Findings');
 
-  if (!fs.existsSync(stateDir)) fail('state-dir-not-found');
+  if (!fs.existsSync(stateDir)) return 'ERROR|state-dir-not-found';
 
   const templatePath = path.join(stateDir, 'templates', 'PROPOSAL.md.template');
   let templateContent: string;
   try { templateContent = fs.readFileSync(templatePath, 'utf-8'); }
-  catch { fail('template-missing'); }
-  if (!templateContent.startsWith('---')) fail('template-malformed');
+  catch { return 'ERROR|template-missing'; }
+  if (!templateContent.startsWith('---')) return 'ERROR|template-malformed';
   const fmEnd = templateContent.indexOf('\n---', 3);
-  if (fmEnd === -1) fail('template-malformed');
+  if (fmEnd === -1) return 'ERROR|template-malformed';
   const templateFrontmatterBlock = templateContent.slice(0, fmEnd + 4);
 
   if (!/^## Operator Decision[ \t]*$/m.test(body)) {
@@ -181,7 +178,7 @@ async function verbCreate(stateDir: string): Promise<void> {
   }
 
   const now = new Date();
-  const timezone = readTimezone(stateDir);
+  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
   const created = zonedISOStamp(timezone, now);
   const base = computeBase(stateDir, title, now, timezone);
 
@@ -206,10 +203,10 @@ async function verbCreate(stateDir: string): Promise<void> {
       claimedId = candidateId;
       break;
     } catch (e: any) {
-      if (e.code !== 'EEXIST') fail('proposals-dir-unwritable');
+      if (e.code !== 'EEXIST') return 'ERROR|proposals-dir-unwritable';
     }
     suffixIdx++;
-    if (suffixIdx >= SUFFIX_LETTERS.length) fail('collision-suffixes-exhausted');
+    if (suffixIdx >= SUFFIX_LETTERS.length) return 'ERROR|collision-suffixes-exhausted';
     suffix = SUFFIX_LETTERS[suffixIdx];
   }
 
@@ -231,7 +228,7 @@ async function verbCreate(stateDir: string): Promise<void> {
 
   regenTail(stateDir);
 
-  ok(claimedId!);
+  return claimedId!;
 }
 
 // ----------------------------------------------------------------- patch ---
@@ -257,47 +254,39 @@ function parsePatchArgs(args: string[]): { filename: string | undefined; sets: s
 
 const TIMESTAMP_RE_SRC = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:[+-]\\d{2}:\\d{2}|Z)';
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 // True when `heading`'s section already ends with `rawLine` — makes a re-run of
 // the same patch call idempotent instead of duplicating the Operator Decision
 // entry. Compares against the RAW (unexpanded) line with `@now` as a timestamp
 // wildcard: every SKILL-documented Decision line is `... on @now.`, which
 // expands to a fresh stamp each second, so a byte-comparison against the
 // expanded line would never match on a retry and the guard would never fire.
-function sectionEndsWithLine(content: string, heading: string, rawLine: string): boolean {
+export function sectionEndsWithLine(content: string, heading: string, rawLine: string): boolean {
   const section = findSection(content, heading);
   if (!section) return false;
   const lines = content.slice(section.start, section.end).split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length === 0) return false;
-  const pattern = rawLine.trim().split('@now').map(escapeRe).join(TIMESTAMP_RE_SRC);
+  const pattern = rawLine.trim().split('@now').map(escapeRegExp).join(TIMESTAMP_RE_SRC);
   return new RegExp(`^${pattern}$`).test(lines[lines.length - 1]);
 }
 
-async function verbPatch(stateDir: string, args: string[]): Promise<void> {
+export function verbPatch(stateDir: string, stdin: string, args: string[]): string {
   const { filename, sets: rawSets, requestCompact } = parsePatchArgs(args);
-  if (!filename) fail('no-such-proposal');
+  if (!filename) return 'ERROR|no-such-proposal';
   // Direct-child basename only. The `path.join` below would otherwise let a
   // `../` prefix escape the proposals dir and patch any frontmatter-bearing
   // .md on disk; the state-dir pin in main() does not constrain this argument.
   // `startsWith('.')` covers `.`, `..`, and dotfiles in one predicate.
-  if (filename !== path.basename(filename) || filename.startsWith('.')) fail('no-such-proposal');
+  if (filename !== path.basename(filename) || filename.startsWith('.')) return 'ERROR|no-such-proposal';
 
   const sets: Record<string, string> = {};
   for (const kv of rawSets) {
     const eq = kv.indexOf('=');
-    if (eq === -1) fail('invalid-set');
+    if (eq === -1) return 'ERROR|invalid-set';
     const key = kv.slice(0, eq);
-    if (!PATCH_KEY_RE.test(key)) fail(`invalid-key:${key}`);
+    if (!PATCH_KEY_RE.test(key)) return `ERROR|invalid-key:${key}`;
     sets[key] = kv.slice(eq + 1);
   }
 
-  // patch is the one verb documented as stdin-optional (defer/dismiss with no
-  // note omit the heredoc) — skip the read on a TTY so an interactive invocation
-  // with no piped input doesn't hang waiting for EOF.
-  const stdin = process.stdin.isTTY ? '' : await readStdin();
   // `[ \t]*` not `\s*`: `\s` matches newlines, so a bare `Decision:` line
   // followed by a `Set:` line would capture the Set line as the decision text
   // (and then also apply it as a frontmatter set).
@@ -307,7 +296,7 @@ async function verbPatch(stateDir: string, args: string[]): Promise<void> {
   const setLineRe = /^Set:[ \t]*([^\s=]+)=(.*)$/gm;
   let m: RegExpExecArray | null;
   while ((m = setLineRe.exec(stdin))) {
-    if (!PATCH_KEY_RE.test(m[1])) fail(`invalid-key:${m[1]}`);
+    if (!PATCH_KEY_RE.test(m[1])) return `ERROR|invalid-key:${m[1]}`;
     stdinSets[m[1]] = m[2];
   }
 
@@ -318,14 +307,14 @@ async function verbPatch(stateDir: string, args: string[]): Promise<void> {
     const p = path.join(proposalsDir, name);
     if (fs.existsSync(p)) { targetPath = p; break; }
   }
-  if (!targetPath) fail('no-such-proposal');
+  if (!targetPath) return 'ERROR|no-such-proposal';
 
   let content: string;
   try { content = fs.readFileSync(targetPath, 'utf-8'); }
-  catch { fail('no-such-proposal'); }
+  catch { return 'ERROR|no-such-proposal'; }
 
   const now = new Date();
-  const timezone = readTimezone(stateDir);
+  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
   const nowStamp = zonedISOStamp(timezone, now);
   const expand = (v: string) => v.replaceAll('@now', nowStamp);
 
@@ -336,18 +325,18 @@ async function verbPatch(stateDir: string, args: string[]): Promise<void> {
   let patched = content;
   if (Object.keys(patch).length > 0) {
     try { patched = patchFrontmatter(content, patch); }
-    catch { fail('frontmatter-terminator-missing'); }
+    catch { return 'ERROR|frontmatter-terminator-missing'; }
   }
 
   if (decisionLine) {
     if (!sectionEndsWithLine(patched, 'Operator Decision', decisionLine)) {
       try { patched = appendToSection(patched, 'Operator Decision', expand(decisionLine)); }
-      catch { fail('no-operator-decision-section'); }
+      catch { return 'ERROR|no-operator-decision-section'; }
     }
   }
 
   try { writeFileAtomic(targetPath, patched); }
-  catch { fail('write-failed'); }
+  catch { return 'ERROR|write-failed'; }
 
   if (requestCompact) {
     try {
@@ -362,57 +351,55 @@ async function verbPatch(stateDir: string, args: string[]): Promise<void> {
 
   regenTail(stateDir);
 
-  ok(`OK|${path.basename(targetPath).replace(/\.md$/, '')}`);
+  return `OK|${path.basename(targetPath).replace(/\.md$/, '')}`;
 }
 
 // ----------------------------------------------------------- shell-append --
 
-async function verbShellAppend(stateDir: string, args: string[]): Promise<void> {
-  const line = (await readStdin()).trim();
+export function verbShellAppend(stateDir: string, stdin: string, args: string[]): string {
+  const line = stdin.trim();
   const section = flagValue(args, '--section');
-  if (section !== 'findings' && section !== 'progress') fail('unknown-section');
-  if (!line) fail('empty-line');
+  if (section !== 'findings' && section !== 'progress') return 'ERROR|unknown-section';
+  if (!line) return 'ERROR|empty-line';
   const heading = section === 'findings' ? 'Findings' : 'Progress Log';
   const err = appendShellLine(path.join(stateDir, 'sessions'), heading, line);
   if (err) {
-    if (err.startsWith('SHELL.md unreadable')) fail('shell-unreadable');
-    fail('shell-append-failed');
+    if (err.startsWith('SHELL.md unreadable')) return 'ERROR|shell-unreadable';
+    return 'ERROR|shell-append-failed';
   }
-  ok('OK');
+  return 'OK';
 }
 
 // --------------------------------------------------------------- next-task -
 
-async function verbNextTask(stateDir: string): Promise<void> {
-  const content = await readStdin();
-  if (!content.trim()) fail('empty-content');
+export function verbNextTask(stateDir: string, stdin: string): string {
+  if (!stdin.trim()) return 'ERROR|empty-content';
   const target = path.join(stateDir, 'sessions', 'NEXT-TASK.md');
   try {
-    fs.writeFileSync(target, content, { flag: 'wx' });
+    fs.writeFileSync(target, stdin, { flag: 'wx' });
   } catch (e: any) {
-    if (e.code === 'EEXIST') fail('next-task-exists');
-    fail('write-failed');
+    if (e.code === 'EEXIST') return 'ERROR|next-task-exists';
+    return 'ERROR|write-failed';
   }
-  ok('OK');
+  return 'OK';
 }
 
 // ------------------------------------------------------------------ routine
 
 const ROUTINE_REQUIRED_FIELDS = ['id', 'schedule', 'skill', 'enabled'];
 
-async function verbRoutine(stateDir: string): Promise<void> {
-  const stdin = await readStdin();
+export function verbRoutine(stateDir: string, stdin: string): string {
   let entry: Json;
-  try { entry = JSON.parse(stdin); } catch { fail('invalid-json'); }
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail('invalid-json');
+  try { entry = JSON.parse(stdin); } catch { return 'ERROR|invalid-json'; }
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'ERROR|invalid-json';
   for (const field of ROUTINE_REQUIRED_FIELDS) {
-    if (!(field in entry)) fail(`missing-field:${field}`);
+    if (!(field in entry)) return `ERROR|missing-field:${field}`;
   }
-  if (typeof entry.id !== 'string' || !entry.id) fail('missing-field:id');
+  if (typeof entry.id !== 'string' || !entry.id) return 'ERROR|missing-field:id';
 
   const configPath = path.join(stateDir, 'config.json');
   const config: Json = readJson(configPath);
-  if (!config) fail('config-unreadable');
+  if (!config) return 'ERROR|config-unreadable';
 
   if (!Array.isArray(config.routines)) config.routines = [];
   const idx = config.routines.findIndex((r: Json) => r && r.id === entry.id);
@@ -423,10 +410,10 @@ async function verbRoutine(stateDir: string): Promise<void> {
   try {
     writeFileAtomic(configPath, JSON.stringify(config, null, 2) + '\n');
   } catch {
-    fail('config-write-failed');
+    return 'ERROR|config-write-failed';
   }
 
-  ok(`OK|${verdict}`);
+  return `OK|${verdict}`;
 }
 
 // ------------------------------------------------------------------- main --
@@ -437,11 +424,11 @@ const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue
 // `.claude-code-hermit` from the project root; accepting an arbitrary root let
 // one pre-approved `Bash(bun */scripts/proposal.ts*)` call mutate — or read —
 // another project's proposal queue. Deliberately a usage error (stderr, exit 1)
-// rather than `fail()`: `fail()` writes `ERROR|<token>` to stdout, which would
-// corrupt the distinct stdout grammars several verbs own and callers branch on
-// (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|, `micro`
-// -> RESOLVED|). This also turns a drifted cwd into a loud failure instead of a
-// write against the wrong tree.
+// rather than an `ERROR|<token>` verdict line: that line goes to stdout, which
+// would corrupt the distinct stdout grammars several verbs own and callers
+// branch on (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|,
+// `micro` -> RESOLVED|). This also turns a drifted cwd into a loud failure
+// instead of a write against the wrong tree.
 function requirePinnedStateDir(dir: string): void {
   pinStateDirOrExit(dir, 'proposal.ts');
 }
@@ -487,11 +474,17 @@ async function main(): Promise<void> {
 
   const rest = process.argv.slice(4);
   switch (verb) {
-    case 'create': return verbCreate(stateDir);
-    case 'patch': return verbPatch(stateDir, rest);
-    case 'shell-append': return verbShellAppend(stateDir, rest);
-    case 'next-task': return verbNextTask(stateDir);
-    case 'routine': return verbRoutine(stateDir);
+    case 'create': return emit(verbCreate(stateDir, await readStdin()));
+    case 'patch': {
+      // patch is the one verb documented as stdin-optional (defer/dismiss with
+      // no note omit the heredoc) — skip the read on a TTY so an interactive
+      // invocation with no piped input doesn't hang waiting for EOF.
+      const stdin = process.stdin.isTTY ? '' : await readStdin();
+      return emit(verbPatch(stateDir, stdin, rest));
+    }
+    case 'shell-append': return emit(verbShellAppend(stateDir, await readStdin(), rest));
+    case 'next-task': return emit(verbNextTask(stateDir, await readStdin()));
+    case 'routine': return emit(verbRoutine(stateDir, await readStdin()));
     case 'resolve-id': return runResolveId(stateDir, rest[0]);
     case 'gate': return runGate(stateDir, rest);
     case 'queue-micro': return runQueueMicro(stateDir);
@@ -500,18 +493,18 @@ async function main(): Promise<void> {
     // `event` is the writer; `metrics` above is the reader. Deliberately not named
     // `metric` — one character from `metrics` in a dispatcher whose default branch
     // exits 0 would make a typo a silent no-op in either direction.
-    case 'event': {
-      const verdict = runEvent(stateDir, rest);
-      return verdict === 'OK' ? ok('OK') : fail(verdict.replace(/^ERROR\|/, ''));
-    }
+    case 'event': return emit(runEvent(stateDir, rest));
     case 'quality-gate': return runQualityGate(stateDir, rest);
     default:
-      fail('unknown-verb');
+      return emit('ERROR|unknown-verb');
   }
 }
 
-main().catch((e: any) => {
-  console.error('proposal.ts: unexpected error: ' + e.message);
-  process.stdout.write('ERROR|unexpected\n');
-  process.exit(0);
-});
+// Guarded so importing a verb for an in-process test does not run the CLI.
+if (import.meta.main) {
+  main().catch((e: any) => {
+    console.error('proposal.ts: unexpected error: ' + e.message);
+    process.stdout.write('ERROR|unexpected\n');
+    process.exit(0);
+  });
+}

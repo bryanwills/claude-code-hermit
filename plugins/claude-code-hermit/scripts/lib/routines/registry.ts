@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { sha256 } from '../hash';
 import { shiftCron } from '../cron-shift';
+import { readConfigRaw } from '../config-read';
 import { parseCronField } from '../../validate-config';
 
 type Json = any;
@@ -306,9 +307,11 @@ export function runCli(): void {
   }
 
   try {
-    const configPath = path.join(hermitDir, 'config.json');
     const mirrorPath = path.join(hermitDir, 'state', 'cron-registry.json');
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    // Raw, not settled: an unreadable config must throw into the outer catch so
+    // the cron registry is left untouched (settled routines [] would wipe it).
+    const config = readConfigRaw(hermitDir);
+    if (config === null) throw new Error('config.json unreadable');
     const allRoutines: Json[] = Array.isArray(config.routines) ? config.routines : [];
     const idsFlagIndex = process.argv.indexOf('--ids');
     const idsFilter = idsFlagIndex !== -1 ? process.argv[idsFlagIndex + 1] : null;

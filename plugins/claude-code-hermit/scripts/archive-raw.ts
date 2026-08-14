@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, globDir } from './lib/frontmatter';
+import { readSettledConfig } from './lib/config-read';
 
 const hermitDir = process.argv[2] || '.claude-code-hermit';
 const rawDir = path.join(hermitDir, 'raw');
@@ -19,7 +20,7 @@ const compiledDir = path.join(hermitDir, 'compiled');
 let retentionDays = 14;
 let archiveRetentionDays: number | null = null;
 try {
-  const config = JSON.parse(fs.readFileSync(path.join(hermitDir, 'config.json'), 'utf8'));
+  const config = readSettledConfig(hermitDir);
   if (config.knowledge) {
     if (typeof config.knowledge.raw_retention_days === 'number') {
       retentionDays = config.knowledge.raw_retention_days;

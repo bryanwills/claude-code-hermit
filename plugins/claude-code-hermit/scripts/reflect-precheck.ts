@@ -24,7 +24,9 @@ import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
 import { appendToProgressLog } from './lib/progress-log';
+import { extractSection, stripPlaceholders } from './lib/md-write';
 import { pinStateDirOrExit, costLogPath as resolveCostLog, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { readSettledConfig } from './lib/config-read';
 
 type Json = any;
 
@@ -55,27 +57,20 @@ const readJSON = (p: string): Json => {
   catch { return null; }
 };
 
-// Extract a top-level ## Section from SHELL.md, dropping placeholder-comment and
-// blank lines so a real finding appended under a retained `<!-- ... -->` placeholder
-// still counts (per-line filter, same idiom as startup-context.ts's task scan — a
-// whole-body startsWith('<!--') check would mask content sitting below the comment).
-// Same boundary convention as startup-context.ts's extractSection and cost-tracker.ts's
-// ## Blockers regex: a section ends at the next `\n## ` or EOF.
+// A top-level ## Section of SHELL.md with placeholder comments and blank lines
+// dropped, so a real finding appended under a retained `<!-- ... -->` placeholder
+// still counts. Feeds the --quick content hash, so the normalization (trim each
+// line, drop empties) must stay stable — it decides whether the chain re-fires.
 function extractQuickSection(md: string, name: string): string {
-  const idx = md.indexOf(`## ${name}`);
-  if (idx === -1) return '';
-  const bodyStart = md.indexOf('\n', idx) + 1;
-  const nextSection = md.indexOf('\n## ', bodyStart);
-  const raw = nextSection !== -1 ? md.slice(bodyStart, nextSection) : md.slice(bodyStart);
-  return raw
+  return stripPlaceholders(extractSection(md, name) ?? '')
     .split('\n')
     .map(l => l.trim())
-    .filter(l => l && !l.startsWith('<!--'))
+    .filter(Boolean)
     .join('\n');
 }
 
 function logQuickEmpty(stateDir: string): void {
-  const timezone = (readJSON(path.join(stateDir, 'config.json')) ?? {}).timezone ?? 'UTC';
+  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
   const hhmm = currentHHMM(timezone);
   appendToProgressLog(
     path.join(stateDir, 'sessions', 'SHELL.md'),
@@ -246,7 +241,7 @@ const phase = computePhase(since);
 const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
 const sessionState = runtime.session_state ?? 'idle';
 
-const config = readJSON(path.join(stateDir, 'config.json')) ?? {};
+const config = readSettledConfig(stateDir);
 const timezone = config.timezone ?? 'UTC';
 
 const phases: Record<string, boolean> = {};

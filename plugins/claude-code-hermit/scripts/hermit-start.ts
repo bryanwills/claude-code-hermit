@@ -15,6 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
+import { readConfigRaw } from './lib/config-read';
 import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -23,6 +24,7 @@ import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-tok
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels } from './lib/channel-config';
+import { cmpSemver } from './lib/semver';
 
 type Json = any;
 
@@ -164,6 +166,9 @@ function shlexJoin(args: string[]): string {
   return args.map(shlexQuote).join(' ');
 }
 
+/** True when config.json exists but could not be parsed — gates the write-back. */
+let configReadFailed = false;
+
 /** Load config.json or return defaults. */
 function loadConfig(): Json {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -172,9 +177,18 @@ function loadConfig(): Json {
     process.exit(1);
   }
 
-  const config: Json = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  // Malformed JSON no longer aborts the boot: fail open to the defaults merge
+  // below (validate-config and doctor surface the corruption). The always-on
+  // branch writes config.json back, so record the failure — writing the merged
+  // defaults over an unparseable file would destroy the operator's config.
+  const raw = readConfigRaw(path.dirname(CONFIG_PATH));
+  configReadFailed = raw === null;
+  const config: Json = raw ?? {};
 
   // Merge with defaults — shallow for top-level, deep for nested dicts.
+  // This boot-time merge deliberately SEEDS containers (routines, env) for
+  // sparse configs — different from lib/config-read's read-path settling,
+  // which settles missing containers to empty.
   // Values in config may be null (JSON null), so fall back to {} for spreading.
   const merged: Json = { ...DEFAULT_CONFIG, ...config };
   for (const [key, def] of Object.entries(DEFAULT_CONFIG)) {
@@ -226,15 +240,29 @@ function applyAlwaysOnDoctorSchedule(config: Json): void {
   }
 }
 
-/** Print a notice if the plugin version is newer than config version. */
+/** Print a notice when the loaded plugin and the applied config stamp disagree.
+ *  Which way they disagree decides the remedy, so the direction is compared, never
+ *  just equality: plugin newer means an upgrade is pending, plugin OLDER means this
+ *  boot resolved a stale copy and evolve is the wrong tool (it would no-op, or
+ *  downgrade the applied stamp). Unparseable either side stays silent.
+ *
+ *  The remedy differs from check-upgrade.sh's on purpose: that one runs from the
+ *  SessionStart hook against the installed plugin (a `claude plugin list` entry), while
+ *  bin/hermit-run resolves PLUGIN_ROOT by scanning the marketplace clone, which never
+ *  appears in that listing — so this surface points at the marketplace refresh. */
 function checkForUpgrade(config: Json): void {
   const pluginJson = path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json');
   try {
     const pluginVer = JSON.parse(fs.readFileSync(pluginJson, 'utf-8')).version ?? '0.0.0';
     const configVer = (config._hermit_versions ?? {})['claude-code-hermit'] ?? '0.0.0';
-    if (pluginVer !== configVer) {
+    const rel = cmpSemver(pluginVer, configVer);
+    if (rel > 0) {
       console.log(`[hermit] Upgrade available: v${configVer} -> v${pluginVer}`);
       console.log('[hermit] Run /claude-code-hermit:hermit-evolve inside Claude Code');
+    } else if (rel < 0) {
+      console.log(`[hermit] Stale plugin runtime: boot scripts loaded v${pluginVer} from ${PLUGIN_ROOT},`);
+      console.log(`[hermit] older than this hermit's applied state v${configVer}. hermit-evolve cannot fix this.`);
+      console.log('[hermit] Run: claude plugin marketplace update claude-code-hermit');
     }
   } catch {}
 }
@@ -1117,9 +1145,14 @@ async function main(): Promise<void> {
   // Mark as always-on mode in config
   config.always_on = true;
   applyAlwaysOnDoctorSchedule(config);
-  try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
-  } catch {}
+  // Skipped when the on-disk config was unparseable: `config` is then pure
+  // DEFAULT_CONFIG, and writing it would silently replace the operator's
+  // identity, channels, routines and budget with template defaults.
+  if (!configReadFailed) {
+    try {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+    } catch {}
+  }
 
   // Verify the session survived the boot period
   await sleep(3); // Wait for Claude to boot — increase if on slow hardware

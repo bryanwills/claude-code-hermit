@@ -35,7 +35,7 @@ const HEARTBEAT_DEFAULT =
 
 // clean_recheck_cooldown: null disables the damper so these tests isolate the
 // item-loop resolution (the damper has its own coverage in auto-close.test.ts).
-const CONFIG = JSON.stringify({ timezone: 'UTC', heartbeat: { clean_recheck_cooldown: null } });
+const CONFIG = JSON.stringify({ timezone: 'UTC', heartbeat: { clean_recheck_cooldown: null, active_hours: { start: '00:00', end: '24:00' } } });
 
 interface Fixture {
   heartbeat?: string;

@@ -17,25 +17,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 // ---------------------------------------------------------------------------
 // Helpers — synthetic transcript builders
 // ---------------------------------------------------------------------------
-
-function assistantEntry(model: string, inputTokens: number, outputTokens: number): string {
-  return JSON.stringify({
-    type: 'assistant',
-    message: {
-      model,
-      usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens },
-      content: [{ type: 'text', text: 'done' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
-}
 
 // Async-launch dispatch result — written to the PARENT transcript at launch time
 // (matches the real shape: { isAsync:true, status:"async_launched", agentId, ... }).
@@ -337,4 +323,41 @@ describe('subagent-cost: routine dispatch source attribution', () => {
   afterAll(() => fs.rmSync(layout.root, { recursive: true }));
 
   test('source is routine:daily-brief', () => expect(rows[0].source).toBe('routine:daily-brief'));
+});
+
+describe('subagent-cost: the appended row reaches cost-index.json', () => {
+  // Regression: the hook used to append and exit, leaving the index behind the log.
+  // readCostIndex validates only the schema version, so every index reader
+  // (dashboard, report-export, spend-status, doctor) under-reported the spend
+  // until the next Stop hook happened to run — indefinitely on a hermit that
+  // dispatches async work and then goes idle.
+  let layout: Layout;
+  let index: any;
+
+  beforeAll(async () => {
+    layout = buildLayout();
+    fs.writeFileSync(layout.subagentTranscriptPath, [
+      assistantEntry('claude-sonnet-4-6', 1000, 400),
+    ].join('\n') + '\n');
+    fs.writeFileSync(layout.parentTranscriptPath, [
+      triggerPrompt('do the thing'),
+      asyncLaunchEntry(layout.agentId, 'claude-sonnet-4-6'),
+    ].join('\n') + '\n');
+    await runHookAndReadLog(layout);
+    const indexPath = path.join(layout.root, '.claude-code-hermit', 'state', 'cost-index.json');
+    index = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, 'utf-8')) : null;
+  });
+
+  afterAll(() => fs.rmSync(layout.root, { recursive: true }));
+
+  test('an index exists after the append', () => expect(index).not.toBeNull());
+
+  test('the index total covers the appended row', () => {
+    expect(index.total_cost_usd).toBeGreaterThan(0);
+    expect(index.total_tokens).toBe(1400);
+  });
+
+  test('the index byte_offset has caught up with the log', () => {
+    expect(index.byte_offset).toBe(fs.statSync(layout.logPath).size);
+  });
 });

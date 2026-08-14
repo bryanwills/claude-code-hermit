@@ -3093,3 +3093,33 @@ describe('hermit-evolve permission delegation contract', () => {
     }
   });
 });
+
+// ---------- stale-plugin-runtime header (config ahead of loaded plugin) ----------
+//
+// check-upgrade.sh emits two different headers, and which one appears decides whether a
+// hermit runs hermit-evolve. Config-ahead means a stale install copy got loaded: evolve
+// reads that as up-to-date, and finalizing would downgrade the applied stamp. So the
+// header has to stay distinct and its consumers must not treat it as an upgrade —
+// without this pin a later prose edit can quietly collapse both headers back into one
+// "any banner -> run evolve" rule, which is the loop this contract exists to prevent.
+describe('stale plugin runtime header', () => {
+  const HEADER = '---Stale Plugin Runtime---';
+  const emitter = read(path.join(SCRIPTS, 'check-upgrade.sh'));
+  const sessionStart = read(path.join(SKILLS, 'session-start', 'SKILL.md'));
+  const brief = read(path.join(SKILLS, 'brief', 'SKILL.md'));
+
+  test('check-upgrade.sh emits the header without an evolve directive', () => {
+    expect(emitter).toContain(HEADER);
+    // The branch may NAME hermit-evolve (to say it cannot help) but must never carry
+    // the slash-command directive form that session-start acts on, nor REQUIRED.
+    const staleBranch = emitter.slice(emitter.indexOf(`echo "${HEADER}"`), emitter.indexOf('echo "---Upgrade Available---"'));
+    expect(staleBranch.length).toBeGreaterThan(0);
+    expect(staleBranch).not.toContain('/claude-code-hermit:hermit-evolve');
+    expect(staleBranch).not.toContain('REQUIRED');
+  });
+
+  test('both banner consumers recognize the header', () => {
+    expect(sessionStart).toContain(HEADER);
+    expect(brief).toContain(HEADER);
+  });
+});

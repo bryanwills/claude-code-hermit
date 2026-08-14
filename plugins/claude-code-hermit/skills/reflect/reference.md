@@ -11,9 +11,8 @@ populate the corresponding field in the return JSON instead — the main session
 - `.claude-code-hermit/state/reflection-state.json` — for `last_resolution_check`, `last_sparse_nudge`
 - `.claude-code-hermit/proposals/PROP-*.md` — for accepted proposals (Resolution Check)
 - `.claude-code-hermit/sessions/S-*-REPORT.md` — 3 most recent (frontmatter first; open a full body only per the Step 1 rule below)
-- `.claude-code-hermit/state/routine-metrics.jsonl` — last 400 lines (routine check)
-- `.claude-code-hermit/state/channel-replies.jsonl` — last 200 lines (engagement check; skip if absent)
-- `.claude/cost-log.jsonl` — last 200 lines (cost join; project root, sibling of `.claude-code-hermit/` — not nested under it)
+- routine fires, failures and cost — via `routines.ts health` in Step 2, never by reading
+  `routine-metrics.jsonl` or `cost-log.jsonl` directly
 - `MEMORY.md` — operator's auto-memory index (procedure detection)
 
 The calling skill passes `phases_json` (the precheck output object listing which phases are due) and
@@ -107,32 +106,51 @@ Run this step only if `session_state` in `.claude-code-hermit/state/runtime.json
 calling skill reads runtime.json in main; the dispatch prompt may pass this). If not in idle state,
 emit `routine_candidates: []` and skip this step.
 
+Run this once and use its output for every detection below. Do not read
+`routine-metrics.jsonl` or `cost-log.jsonl` yourself — the counting, the 14-day window, and the
+cost attribution are all this script's job:
+
+```
+bun <plugin_root>/scripts/routines.ts health .claude-code-hermit --days 14
+```
+
+It prints one JSON object:
+
+- `source` — `ok` | `missing` | `unreadable`. If it is not `ok`, emit `routine_candidates: []` and
+  skip the rest of this step: an unreadable ledger is not evidence that routines are healthy.
+- `malformed_rows` — corrupt ledger lines skipped. Mention in a finding only if non-zero.
+- `routines[]` — per routine: `fires`, `failures` (counts keyed by bare reason),
+  `failure_total`, `incomplete`, `orphan_terminals`, `open_attempt`, `skips`, `last_fire`,
+  `cost_usd`.
+- `unattributable_multi_cost_usd` — spend from wakes that served two or more routines at once. It
+  belongs to no single routine; never fold it into one routine's evidence.
+
 **Errored-routine detection:**
 
-Read the last 400 lines of `state/routine-metrics.jsonl` via `Bash` (e.g. `tail -400`). Parse
-per-line with JSON.parse, skipping malformed lines. Count entries where `event == "fired"` and where
-`event == "started"` per `routine_id` where `ts` falls within the last 14 days.
+`incomplete` counts attempts that started and never reached a terminal row — a crash, a killed
+session, a hung skill. If `incomplete >= 2` for a routine, produce a `routine_candidates` entry:
 
-`errored = count(started) − count(fired)` per `routine_id`. If `errored >= 2` for any routine,
-produce a `routine_candidates` entry.
-
-**When the gap is explained by a `failed-*` event** (`failed-artifact-missing`,
-`failed-artifact-unchanged`, `failed-verification-error` — written by `routines.ts finish` when a
-routine's declared `expect_artifact` contract was not met), name that reason in the evidence instead
-of the generic "errored before completion" wording, and count those events for `N`. Those are not
-crashes: the routine ran and its output did not land, which is a different fix.
-
-Entry shape:
 ```json
 { "routine_id": "<id>", "action": "diagnostic", "tier": 1, "schedule": null,
-  "evidence": "routine '<id>' fired but errored before completion N× in the last 14 days",
+  "evidence": "routine '<id>' started but never completed N× in the last 14 days",
   "sessions": [],
-  "shell_findings_line": "routine '<id>' fired but errored before completion N× in the last 14 days — its output and cost are unattributed." }
+  "shell_findings_line": "routine '<id>' started but never completed N× in the last 14 days — its output and cost are unattributed." }
 ```
+
+**Failed-contract detection:**
+
+`failures` is a different fault and gets different wording: the routine ran and its declared
+`expect_artifact` contract was not met (`artifact-missing`, `artifact-unchanged`,
+`verification-error`). If `failure_total >= 2`, produce the same entry shape naming the dominant
+reason — "routine '<id>' ran but its output did not land (artifact-missing) N× in the last 14
+days" — not the generic errored wording. These are not crashes and the fix is different.
+
+`orphan_terminals` (a terminal row with no matching start) and `open_attempt` (an attempt still
+running at the window edge) are diagnostic context, not candidates on their own.
 
 **Uncited-routine detection:**
 
-For each routine with ≥5 fires in the last 14 days: read the 3 most recent `sessions/S-*-REPORT.md`
+For each routine with `fires >= 5`: read the 3 most recent `sessions/S-*-REPORT.md`
 (reuse the frontmatter rows already read in Step 1 if available; open a body only for a legacy report
 or when the row's `task`/`lessons`/`artifacts` don't settle the citation check). If no session report cites the routine's
 `routine_id` or skill output as producing findings, decisions, or follow-ups — apply the
@@ -141,34 +159,15 @@ Three-Condition Rule:
 2. Meaningful consequence: routine runs but produces no downstream effect.
 3. Operator-actionable: disable or reschedule.
 If all three hold, produce a `routine_candidates` entry with `action: "disable"` or `"retime"` (prefer
-retime if timing mismatch is apparent from `fired` timestamps vs. session activity times):
+retime if timing mismatch is apparent from `last_fire` vs. session activity times). Quantify the
+consequence with the routine's own `cost_usd` from the health output — that is the spend buying
+nothing:
 ```json
 { "routine_id": "<id>", "action": "disable", "tier": 1, "schedule": null,
-  "evidence": "<fire count + window + citation count>",
+  "evidence": "<fire count + window + citation count + $cost_usd over the window>",
   "sessions": ["<S-NNN>", ...],
   "shell_findings_line": null }
 ```
-
-**Channel-engagement detection:**
-
-For any routine with ≥10 fires in the last 14 days:
-
-1. Read last 200 lines of `state/channel-replies.jsonl` (skip silently if absent/empty). Parse per-line;
-   collect `{ ts, channel }` for entries with `event == "reply"`.
-
-2. **Engagement join (delivery-anchored, same-channel window):** for each routine, sort its `fired`
-   events by `ts`. For a fire at `T` (next fire at `T_next`, or 14-day window boundary for the last):
-   - Take the first reply event at or after `T` within a 10-minute window as the delivery (`T_deliver`,
-     channel `C`). If no reply lands in that window, count as *not engaged*.
-   - **Engaged** if at least one *further* reply on channel `C` has `ts` in `(T_deliver, T_next]`.
-   Engagement ratio = `engaged_fires / total_fires`.
-
-3. Read last 200 lines of `.claude/cost-log.jsonl` (project root). Sum `cost` for entries where
-   `source` starts with `"routine:<id>"` and `ts` is within the last 14 days. Divide by 14 → `$/day`.
-
-4. If engagement ratio ≤ 20% — apply the Three-Condition Rule (consequence: `~$X/day` for ignored
-   output). If all three hold, produce a `routine_candidates` entry with `action: "retime"` (if obvious
-   better time) or `"disable"`, `evidence` citing `"~$X/day, R replies in N sends over 14 days"`.
 
 ## Step 3 — Procedure-Capture Detection
 

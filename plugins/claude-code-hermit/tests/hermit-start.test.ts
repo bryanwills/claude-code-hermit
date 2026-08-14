@@ -39,6 +39,7 @@ import {
   shouldRefuseBoot,
   dockerHermitRunning,
   duplicateSessionRefusal,
+  checkForUpgrade,
 } from '../scripts/hermit-start';
 import { readRuntimeState } from '../scripts/lib/runtime';
 import { TOKEN_ENV_VAR } from '../scripts/lib/setup-token';
@@ -927,9 +928,11 @@ describe('writeSettingsEnv sandbox overlay', () => {
 // ============================================================
 
 describe('negative paths', () => {
-  test('invalid JSON in config.json throws', () => {
+  test('invalid JSON in config.json falls open to the defaults merge', () => {
     fs.writeFileSync('.claude-code-hermit/config.json', '{bad json');
-    expect(() => loadConfig()).toThrow(SyntaxError);
+    const merged = loadConfig();
+    expect(merged.escalation).toBe('balanced');
+    expect(merged.model).toBe('sonnet');
   });
 
   test('non-dict channels does not crash iterChannelConfigs', () => {
@@ -1163,5 +1166,43 @@ describe('hydrateSetupTokenEnv', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'hermit-start.ts'), 'utf-8');
     const decl = src.slice(src.indexOf('const forwardVars ='));
     expect(decl.slice(0, decl.indexOf('\n'))).toContain('TOKEN_ENV_VAR');
+  });
+});
+
+// -------------------------------------------------------
+// checkForUpgrade — direction, not just inequality
+// -------------------------------------------------------
+//
+// checkForUpgrade reads the real plugin.json next to the script (PLUGIN_ROOT is a
+// module-level const), so these drive the stamp instead of faking the plugin version.
+describe('checkForUpgrade', () => {
+  const pluginVer: string = JSON.parse(
+    fs.readFileSync(path.join(import.meta.dir, '..', '.claude-plugin', 'plugin.json'), 'utf-8'),
+  ).version;
+  const run = (stamp: string) =>
+    captureLog(() => checkForUpgrade({ _hermit_versions: { 'claude-code-hermit': stamp } } as any)).out;
+
+  test('stamp equal to the loaded plugin -> silent', () => {
+    expect(run(pluginVer).trim()).toBe('');
+  });
+
+  test('plugin newer than the stamp -> upgrade notice', () => {
+    const out = run('0.0.1');
+    expect(out).toContain('Upgrade available');
+    expect(out).toContain('hermit-evolve');
+  });
+
+  // The stale-install direction. Previously this printed a backwards arrow
+  // ("v<newer> -> v<older>") and told the operator to run evolve, which cannot fix it.
+  test('stamp newer than the loaded plugin -> stale-runtime notice, no evolve, no arrow', () => {
+    const out = run('99.0.0');
+    expect(out).toContain('Stale plugin runtime');
+    expect(out).toContain('marketplace update'); // this surface loads the marketplace clone
+    expect(out).not.toContain('hermit-evolve inside Claude Code');
+    expect(out).not.toContain(`v99.0.0 -> v${pluginVer}`);
+  });
+
+  test('unparseable stamp -> silent', () => {
+    expect(run('not-a-version').trim()).toBe('');
   });
 });

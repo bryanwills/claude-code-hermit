@@ -127,6 +127,34 @@ describe('check-upgrade.sh always_on banner', () => {
     const out = await run({ always_on: true, _hermit_versions: { 'claude-code-hermit': pluginVer } });
     expect(out).not.toContain('---Upgrade Available---');
   });
+
+  // Config ahead of the loaded plugin = a stale install copy is loaded. evolve cannot
+  // fix that state (it reads as up-to-date, and finalizing would downgrade the stamp),
+  // so this branch must never emit the evolve directive — under any always_on value.
+  test('config ahead of plugin -> stale-runtime notice, never an evolve directive', async () => {
+    for (const always_on of [true, false]) {
+      const out = await run({ always_on, _hermit_versions: { 'claude-code-hermit': '99.0.0' } });
+      expect(out).toContain('---Stale Plugin Runtime---');
+      expect(out).not.toContain('---Upgrade Available---');
+      expect(out).not.toContain('REQUIRED');
+      expect(out).not.toContain('/claude-code-hermit:hermit-evolve');
+      expect(out).toContain(`v${pluginVer}`);
+      expect(out).toContain('v99.0.0');
+      expect(out).toContain(PLUGIN_ROOT); // the loaded root identifies the stale entry
+    }
+  });
+
+  // startup-context.ts slices this section to BUDGETS.upgrade (500). The install path is
+  // machine-dependent and printed last, so only the fixed prose is budgeted here.
+  test('stale-runtime prose leaves room for the path within the 500-char budget', async () => {
+    const out = await run({ always_on: true, _hermit_versions: { 'claude-code-hermit': '99.0.0' } });
+    const prose = out.split('Loaded from:')[0];
+    expect(prose.length).toBeLessThanOrEqual(350);
+  });
+
+  test('unparseable version on either side -> silent', async () => {
+    expect(await run({ _hermit_versions: { 'claude-code-hermit': 'garbage' } })).toBe('');
+  });
 });
 
 // -------------------------------------------------------
@@ -564,7 +592,9 @@ describe('knowledge-lint', () => {
       const dir = wd.dir;
       fs.mkdirSync(hermit(dir, 'raw'), { recursive: true });
       fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
-      write(hermit(dir, 'config.json'), '{}');
+      // Pin the budget below the 1500-char fixtures: an absent knowledge block
+      // now settles to the template default (2500), which would exempt them.
+      write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":1000}}');
       write(hermit(dir, 'raw', 'old-snap.md'),
         '---\ntitle: old\ncreated: 2025-01-01T00:00:00+00:00\n---\ndata');
       write(hermit(dir, 'compiled', 'note.md'),
@@ -599,7 +629,8 @@ describe('knowledge-lint', () => {
       wd = setupWorkdir();
       const dir = wd.dir;
       fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
-      write(hermit(dir, 'config.json'), '{}');
+      // Pin the budget below the 1500-char fixtures (see findings suite above).
+      write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":1000}}');
       write(hermit(dir, 'compiled', 'context-stubbed.md'),
         `---\ntitle: stubbed\ntype: context\ncreated: 2026-06-01T00:00:00+00:00\ntags: [foundational]\ninjection_stub: House profile stub\n---\n${'x'.repeat(1500)}`);
       write(hermit(dir, 'compiled', 'briefing-big.md'),
@@ -2827,6 +2858,40 @@ describe('routines.ts log-event', () => {
       await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'started'], cwd: wd.dir });
       await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'fired'], cwd: wd.dir });
       expect(firedCount()).toBe(before + 1);
+    });
+  });
+
+  describe('duplicate fired guard reads fields, not bytes', () => {
+    // A workdir per test: both seed the same ledger path, so sharing one would
+    // make them race (the reason the #464 block above is marked test.serial).
+    const seeded = async (row: object, id: string) => {
+      const wd = setupWorkdir();
+      try {
+        const metrics = hermit(wd.dir, 'state', 'routine-metrics.jsonl');
+        fs.writeFileSync(metrics, JSON.stringify(row) + '\n');
+        await runScript('routines.ts', { args: ['log-event', id, 'fired'], cwd: wd.dir });
+        return fs.readFileSync(metrics, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+      } finally {
+        wd.cleanup();
+      }
+    };
+
+    test('suppresses against a prior row whose keys are in a different order', async () => {
+      // The guard used to substring-match `"event":"fired"`, which made JSON key
+      // order load-bearing for correctness. An operator-written or migrated row
+      // serialized differently would have silently disabled the guard.
+      const rows = await seeded({
+        event: 'fired', delivery: 'monitor', routine_id: 'reorder-check', ts: new Date().toISOString(),
+      }, 'reorder-check');
+      expect(rows).toHaveLength(1);
+    });
+
+    test('a routine id that prefixes another does not suppress it', async () => {
+      const rows = await seeded({
+        ts: new Date().toISOString(), routine_id: 'brief-extended', event: 'fired', delivery: 'monitor',
+      }, 'brief');
+      expect(rows).toHaveLength(2);
+      expect(rows[1]).toMatchObject({ routine_id: 'brief', event: 'fired' });
     });
   });
 

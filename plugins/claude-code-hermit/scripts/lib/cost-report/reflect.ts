@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { costByType } from '../pricing';
-import { loadConfig } from '../channel-auth';
+import { readSettledConfig } from '../config-read';
 import { money, resolveTimezone, budgetLine } from '../spend-status';
 import { todayYMD } from '../time';
 import { costLogPath, hermitDir } from '../cc-compat';
@@ -85,7 +85,7 @@ function buildDriverLine(bySource: Record<string, number>): string | null {
 }
 
 function buildPlainStatement(stateDir: string, costLog: string): string {
-  const config = loadConfig(stateDir) || {};
+  const config = readSettledConfig(stateDir);
   const timezone = resolveTimezone(config);
 
   // Timezone-aware calendar-day key, matching how lib/cost-log.ts buckets the same

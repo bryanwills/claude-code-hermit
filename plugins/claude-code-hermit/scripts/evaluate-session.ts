@@ -11,6 +11,8 @@ import crypto from 'node:crypto';
 import { readTasks } from './lib/tasks';
 import { hermitDir } from './lib/cc-compat';
 import { currentHHMM, elapsedSinceHHMM, resolveHermitNowMs } from './lib/time';
+import { readSettledConfig } from './lib/config-read';
+import { extractSection, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
@@ -19,14 +21,6 @@ const HERMIT_DIR = hermitDir();
 const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const HASH_FILE = path.join(HERMIT_DIR, 'sessions', '.eval-hash');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
-const CONFIG_JSON = path.join(HERMIT_DIR, 'config.json');
-
-// config.timezone is the zone Progress Log [HH:MM] stamps are written in (every
-// writer uses currentHHMM(config.timezone)); fail-open to UTC on any read error.
-function configTimezone(): string {
-  try { return (JSON.parse(fs.readFileSync(CONFIG_JSON, 'utf-8')).timezone as string) ?? 'UTC'; }
-  catch { return 'UTC'; }
-}
 
 function evaluateSession(content: Json, tasks: Json[]): Json {
   const results: Json = {
@@ -68,9 +62,9 @@ function evaluateSession(content: Json, tasks: Json[]): Json {
 
   // Helper: check if a markdown section exists and has non-comment content
   function checkSection(sectionName: string): { exists: boolean; hasContent: Json } {
-    const section = content.match(new RegExp(`## ${sectionName}\n([\\s\\S]*?)(?=\n## |$)`));
-    const text = section ? section[1].trim() : '';
-    return { exists: !!section, hasContent: text && !text.startsWith('<!--') };
+    const section = extractSection(content, sectionName);
+    // stripPlaceholders, not startsWith('<!--') — see its doc comment in md-write.ts.
+    return { exists: section !== null, hasContent: stripPlaceholders(section ?? '').length > 0 };
   }
 
   // Criterion 3: Blockers section
@@ -175,13 +169,13 @@ async function _evaluate(): Promise<string | null> {
         // Progress Log timestamps are date-less [HH:MM]. Use the bottom-most entry
         // (append-ordered) and resolve it as its most recent past occurrence, so a
         // session spanning midnight doesn't backdate today's entries.
-        const progressSection = content.match(/## Progress Log\n([\s\S]*?)(?=\n## |$)/);
-        const progressText = progressSection ? progressSection[1].trim() : '';
+        const progressText = (extractSection(content, 'Progress Log') ?? '').trim();
         const timeEntries = progressText.match(/\[(\d{1,2}:\d{2})\]/g);
         if (timeEntries && timeEntries.length > 0) {
           const lastTime = timeEntries[timeEntries.length - 1].replace(/[\[\]]/g, '');
           const nowDate = new Date(now);
-          const nowHHMM = currentHHMM(configTimezone(), nowDate) ?? nowDate.toISOString().slice(11, 16);
+          // config.timezone is the zone Progress Log [HH:MM] stamps are written in.
+          const nowHHMM = currentHHMM(readSettledConfig(HERMIT_DIR).timezone ?? 'UTC', nowDate) ?? nowDate.toISOString().slice(11, 16);
           const hoursAgo = elapsedSinceHHMM(nowHHMM, lastTime) / 3600000;
           if (hoursAgo > 4) {
             console.error(`No progress logged in ${Math.round(hoursAgo)}h. Update Progress Log or Blockers.`);
@@ -191,9 +185,9 @@ async function _evaluate(): Promise<string | null> {
     }
 
     // Monitoring bloat check (any status)
-    const monitoringSection = content.match(/## Monitoring\n([\s\S]*?)(?=\n## |$)/);
-    if (monitoringSection) {
-      const monitoringLines = (monitoringSection[1].match(/\n/g) || []).length;
+    const monitoringSection = extractSection(content, 'Monitoring');
+    if (monitoringSection !== null) {
+      const monitoringLines = (monitoringSection.match(/\n/g) || []).length;
       if (monitoringLines > 40) {
         console.error('Monitoring section too large. Alert dedup should prevent this — check if dedup is working.');
       }

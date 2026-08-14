@@ -15,9 +15,9 @@
 //
 // The failure reason is encoded in the event string (failed-artifact-missing, …)
 // rather than a separate column, because routine-metrics.jsonl's row shape is
-// pinned to four keys. Any non-`fired` terminal event widens reflect's existing
-// `started − fired` gap, so the errored-routine diagnostic picks these up with
-// no change to its arithmetic.
+// pinned to four keys. lib/routines/history.ts folds these into typed per-reason
+// failure counts, so a contract miss reads as its own outcome rather than as an
+// unexplained gap.
 //
 // Fail-closed on declared contracts, fail-open otherwise: a routine with no
 // artifact contract keeps the legacy unconditional `fired`, while a routine that
@@ -26,7 +26,7 @@
 
 import path from 'node:path';
 import { hermitDir } from '../cc-compat';
-import { loadConfig } from '../channel-auth';
+import { readConfigRaw } from '../config-read';
 import { logRoutineEvent } from './event';
 import { readRunRecord, markOutcome, statIdentity, identityChanged } from './run-record';
 
@@ -44,7 +44,9 @@ function emit(line: string): never {
 
 /** true/false when config is readable, null when it is not (caller falls back to the run record). */
 function declaresContract(hermit: string, id: string): boolean | null {
-  const config: Json = loadConfig(hermit);
+  // Raw, not settled: "config unreadable" (null) must stay distinct from
+  // "routine declares no contract" (false) — see the caller's comment.
+  const config: Json = readConfigRaw(hermit);
   if (!config || !Array.isArray(config.routines)) return null;
   const entry = config.routines.find((r: Json) => r && r.id === id);
   return !!(entry && typeof entry.expect_artifact === 'string' && entry.expect_artifact.trim());

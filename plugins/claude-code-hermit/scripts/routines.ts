@@ -24,6 +24,11 @@
 //   bun routines.ts log-event <routine-id> <event> [delivery]
 //     Appends one line to state/routine-metrics.jsonl.
 //
+//   bun routines.ts health [hermit-dir] [--days N]
+//     Bounded per-routine health digest (JSON): fires, typed failures, abandoned
+//     attempts, skips, and windowed cost. The fronting script for reflect and
+//     hermit-evolution, which used to tail and hand-parse the ledgers themselves.
+//
 // Verb dispatch is lazy, and for the first three the verb is spliced out of
 // process.argv so each module keeps the argv indices it used as a standalone
 // script — ~650 lines of scheduling, cron matching and registry reconciliation
@@ -33,7 +38,7 @@
 
 export {}; // module scope: every import here is dynamic, and top-level await needs it
 
-const USAGE = 'Usage: bun routines.ts <due|precheck|finish|cron-registry|tz-shift|log-event> [args...]';
+const USAGE = 'Usage: bun routines.ts <due|precheck|finish|cron-registry|tz-shift|log-event|health> [args...]';
 
 const verb = process.argv[2];
 const rest = process.argv.slice(3);
@@ -70,6 +75,11 @@ switch (verb) {
   }
   case 'log-event': {
     const { run } = await import('./lib/routines/event');
+    run(rest);
+    break;
+  }
+  case 'health': {
+    const { run } = await import('./lib/routines/health');
     run(rest);
     break;
   }

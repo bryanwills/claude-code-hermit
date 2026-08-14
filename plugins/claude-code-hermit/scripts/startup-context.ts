@@ -15,10 +15,11 @@ import { readFrontmatter, readFileWithFrontmatter, globDir } from './lib/frontma
 import { hermitDir } from './lib/cc-compat';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { safe, safeForLLMMultiline, scanInjected } from './lib/sanitize';
-import { loadConfig } from './lib/channel-auth';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
+import { readSettledConfig } from './lib/config-read';
 import { formatTokens } from './lib/format';
+import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
@@ -88,16 +89,6 @@ function emitArtifacts(artifacts: Json[], budget: number, headerFn: (a: Json) =>
   }
 }
 
-// Extract a named ## Section from markdown content.
-// Returns the section body (without the header line), or null if not found.
-function extractSection(md: string, name: string): string | null {
-  const idx = md.indexOf(`## ${name}`);
-  if (idx === -1) return null;
-  const bodyStart = md.indexOf('\n', idx) + 1;
-  const nextSection = md.indexOf('\n## ', bodyStart);
-  return nextSection !== -1 ? md.slice(bodyStart, nextSection) : md.slice(bodyStart);
-}
-
 // Return last N non-empty lines from a string.
 function lastLines(text: string, n: number): string {
   const lines = text.split('\n').filter(l => l.trim());
@@ -142,11 +133,8 @@ function buildCompactionPointers(agentDir: string): string {
 
   try {
     const shellContent = fs.readFileSync(path.resolve(agentDir, 'sessions', 'SHELL.md'), 'utf-8');
-    const task = extractSection(shellContent, 'Task');
-    const firstLine = task
-      ? task.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('<!--'))
-      : null;
-    if (firstLine) parts.push(`task: ${guarded('sessions/SHELL.md', firstLine.slice(0, 300))}`);
+    const firstLine = firstContentLine(extractSection(shellContent, 'Task') ?? '', 300);
+    if (firstLine) parts.push(`task: ${guarded('sessions/SHELL.md', firstLine)}`);
     const progress = extractSection(shellContent, 'Progress Log');
     const lastEntry = progress
       ? progress.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('<!--')).pop()
@@ -165,7 +153,7 @@ function buildCompactionPointers(agentDir: string): string {
   } catch {}
 
   try {
-    const config = JSON.parse(fs.readFileSync(path.resolve(agentDir, 'config.json'), 'utf-8'));
+    const config = readSettledConfig(agentDir);
     const route = resolveOutboundChannel(config.channels);
     if (route) parts.push(`outbound channel: ${safe(route.id)} (chat_id: ${safe(route.chat_id)})`);
   } catch {}
@@ -250,7 +238,7 @@ function emitFullContext(source: string | null) {
   try {
     const lines = fs.readFileSync(operatorPath, 'utf-8').split('\n').slice(0, 50).join('\n');
     if (lines.trim()) {
-      emit('Session Context', guarded('OPERATOR.md', lines.slice(0, BUDGETS.operator)));
+      emit('Operator Context (OPERATOR.md)', guarded('OPERATOR.md', lines.slice(0, BUDGETS.operator)));
     }
   } catch {
     // No OPERATOR.md — skip silently
@@ -276,24 +264,25 @@ function emitFullContext(source: string | null) {
   } else {
     const parts: string[] = [];
 
-    const task = extractSection(shellContent, 'Task');
-    if (task && task.trim() && !task.trim().startsWith('<!--')) {
-      parts.push(`## Task\n${task.trimEnd()}`);
+    // stripPlaceholders, not startsWith('<!--') — see its doc comment in md-write.ts.
+    const task = stripPlaceholders(extractSection(shellContent, 'Task') ?? '');
+    if (task) {
+      parts.push(`## Task\n${task}`);
     }
 
-    const progressRaw = extractSection(shellContent, 'Progress Log');
-    if (progressRaw && progressRaw.trim() && !progressRaw.trim().startsWith('<!--')) {
+    const progressRaw = stripPlaceholders(extractSection(shellContent, 'Progress Log') ?? '');
+    if (progressRaw) {
       const recent = lastLines(progressRaw, 10);
       parts.push(`## Progress Log (last 10)\n${recent}`);
     }
 
-    const blockers = extractSection(shellContent, 'Blockers');
-    if (blockers && blockers.trim() && !blockers.trim().startsWith('<!--')) {
-      parts.push(`## Blockers\n${blockers.trimEnd()}`);
+    const blockers = stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '');
+    if (blockers) {
+      parts.push(`## Blockers\n${blockers}`);
     }
 
-    const monitoringRaw = extractSection(shellContent, 'Monitoring');
-    if (monitoringRaw && monitoringRaw.trim() && !monitoringRaw.trim().startsWith('<!--')) {
+    const monitoringRaw = stripPlaceholders(extractSection(shellContent, 'Monitoring') ?? '');
+    if (monitoringRaw) {
       const monLines = monitoringRaw.split('\n').filter(l => l.trim() && (l.startsWith('- ') || l.startsWith('[')));
       if (monLines.length > 0) {
         parts.push(`## Monitoring (last 5)\n${monLines.slice(-5).join('\n')}`);
@@ -316,7 +305,7 @@ function emitFullContext(source: string | null) {
     try {
       let knowledgeBudget = BUDGETS.knowledge;
       try {
-        const config = JSON.parse(fs.readFileSync(path.resolve(AGENT_DIR, 'config.json'), 'utf-8'));
+        const config = readSettledConfig(AGENT_DIR);
         if (config.knowledge && typeof config.knowledge.compiled_budget_chars === 'number') {
           knowledgeBudget = config.knowledge.compiled_budget_chars;
         }
