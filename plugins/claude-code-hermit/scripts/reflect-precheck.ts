@@ -26,6 +26,7 @@ import { sha256 } from './lib/hash';
 import { appendToProgressLog } from './lib/progress-log';
 import { extractSection, stripPlaceholders } from './lib/md-write';
 import { pinStateDirOrExit, costLogPath as resolveCostLog, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { readSettledConfig } from './lib/config-read';
 
 type Json = any;
 
@@ -69,7 +70,7 @@ function extractQuickSection(md: string, name: string): string {
 }
 
 function logQuickEmpty(stateDir: string): void {
-  const timezone = (readJSON(path.join(stateDir, 'config.json')) ?? {}).timezone ?? 'UTC';
+  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
   const hhmm = currentHHMM(timezone);
   appendToProgressLog(
     path.join(stateDir, 'sessions', 'SHELL.md'),
@@ -240,7 +241,7 @@ const phase = computePhase(since);
 const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
 const sessionState = runtime.session_state ?? 'idle';
 
-const config = readJSON(path.join(stateDir, 'config.json')) ?? {};
+const config = readSettledConfig(stateDir);
 const timezone = config.timezone ?? 'UTC';
 
 const phases: Record<string, boolean> = {};

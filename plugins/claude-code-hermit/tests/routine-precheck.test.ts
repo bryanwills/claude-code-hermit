@@ -121,7 +121,7 @@ describe('routine-precheck', () => {
     expect(rows[0]).toMatchObject({ routine_id: 'nested-routine', event: 'started' });
   }));
 
-  test('row schema is byte-identical to log-routine-event.sh (ts, routine_id, event, delivery only)', withDir(async (dir) => {
+  test('row schema is exactly (ts, routine_id, event, delivery)', withDir(async (dir) => {
     await run('schema-check', 'false', dir);
     const rows = readMetricsRows(dir);
     expect(Object.keys(rows[0]).sort()).toEqual(['delivery', 'event', 'routine_id', 'ts']);

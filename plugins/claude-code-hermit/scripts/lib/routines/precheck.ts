@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from '../cc-compat';
-import { loadConfig } from '../channel-auth';
+import { readConfigRaw } from '../config-read';
 import { isPaused } from '../pause';
 import { logRoutineEvent } from './event';
 import { clearRunRecord, resolveArtifactPath, statIdentity, validateExpectArtifact, writeRunRecord } from './run-record';
@@ -60,7 +60,9 @@ function stamp(event: string): void {
  */
 function captureArtifactBaseline(): void {
   try {
-    const config: any = loadConfig(HERMIT_ROOT);
+    // Raw, not settled: unreadable config must stay distinct from "no contract"
+    // (a settled empty routines list would clear run records here).
+    const config: any = readConfigRaw(HERMIT_ROOT);
     if (!config || !Array.isArray(config.routines)) return;
     const entry = config.routines.find((r: any) => r && r.id === id);
     const pattern = entry?.expect_artifact;

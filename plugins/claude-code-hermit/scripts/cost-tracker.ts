@@ -12,10 +12,11 @@ import { calculateCost, PRICING } from './lib/pricing';
 import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
-import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
+import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { extractSection, stripPlaceholders } from './lib/md-write';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
+import { readSettledConfig } from './lib/config-read';
 import { setPause, isPaused } from './lib/pause';
 import { evaluateBudget, pauseBoundary } from './lib/budget';
 import { sendOperatorNotice } from './lib/channel-send';
@@ -39,7 +40,6 @@ const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
 const TASK_SNAPSHOT = path.join(HERMIT_DIR, 'tasks-snapshot.md');
-const CONFIG_JSON = path.join(HERMIT_DIR, 'config.json');
 const BUDGET_ALERTS = budgetAlertsPath(HERMIT_DIR);
 
 let _runtimeCache: Json;
@@ -912,8 +912,7 @@ async function run(data: Json): Promise<string | null> {
 
     // Read config once per turn — timezone drives by_date/by_week/by_month bucketing and
     // budget-window boundaries (PROP-016); budgetConfig drives the breach check below.
-    let config: Json = {};
-    try { config = JSON.parse(fs.readFileSync(CONFIG_JSON, 'utf-8')); } catch {}
+    const config: Json = readSettledConfig(HERMIT_DIR);
     const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
 
     // Unknown model string → still priced at sonnet rates (refusing would zero the log),
@@ -924,68 +923,61 @@ async function run(data: Json): Promise<string | null> {
     const rawModelLower = rawModel ? rawModel.toLowerCase() : '';
     const modelUnpriced = !!rawModel && !Object.keys(PRICING).some(tier => rawModelLower.includes(tier));
 
-    // Log to JSONL
-    const logEntry = {
-      timestamp: new Date().toISOString(),
-      session_id: runtimeSessionId || sessionId,
+    // Log to JSONL. The row shape lives in lib/cost-log.ts — `observed_at` is the
+    // context size and WHEN it was observed, both from the turn's newest call (the
+    // row's own `timestamp` is ingestion time and says nothing about the context it
+    // describes), and `source_inherited` marks a source that came from the dispatch
+    // hop rather than this turn's own prompt. Both are absent, not false, when they
+    // do not apply.
+    const logEntry = buildMainCostRow({
+      sessionId: runtimeSessionId || sessionId,
       source,
       model,
-      input_tokens: inputTokens,
-      cache_write_tokens: cacheWriteTokens,
-      cache_read_tokens: cacheReadTokens,
-      output_tokens: outputTokens,
-      total_tokens: totalTokens,
-      api_calls: apiCalls,
-      max_prompt_tokens: maxPromptTokens,
-      // Context size and WHEN it was observed, both from the turn's newest call. The row's
-      // own `timestamp` is ingestion time and says nothing about the context it describes;
-      // hygiene consumers need the source-side observation to tell a fresh reading from one
-      // that predates a reset. Absent on rows written before this field existed.
-      ...(observedAt ? { observed_at: observedAt } : {}),
-      last_call_prompt_tokens: lastCallPromptTokens,
-      context_usage: data.context_usage ?? data.contextUsage ?? null,
-      estimated_cost_usd: roundedCost,
-      model_unpriced: modelUnpriced,
-      source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
-      // Source came from the dispatch hop (a subagent-completion ingestion turn), not this
-      // turn's own prompt — real cost of that source, but not a separate invocation of it.
-      ...(sourceInherited ? { source_inherited: true } : {}),
-    };
-
-    fs.appendFileSync(COST_LOG, JSON.stringify(logEntry) + '\n', 'utf-8');
+      inputTokens,
+      cacheWriteTokens,
+      cacheReadTokens,
+      outputTokens,
+      totalTokens,
+      apiCalls,
+      maxPromptTokens,
+      observedAt,
+      lastCallPromptTokens,
+      contextUsage: data.context_usage ?? data.contextUsage ?? null,
+      estimatedCostUsd: roundedCost,
+      modelUnpriced,
+      sourceInherited,
+    });
 
     // Emit one log line per dispatched subagent at its resolved model.
     // Subagent assistant entries live in separate transcript files; only the Agent tool_result
     // (type:'user' with toolUseResult.usage) appears here. collectSubagentUsage captured them;
     // attribute them to the same source so cost-reflect folds them into the dispatching row.
     let subTokens = 0, subCost = 0;
+    const subagentRows: any[] = [];
     for (const sa of (subagents || [])) {
       const saTotal = sa.inputTokens + sa.cacheWriteTokens + sa.cacheReadTokens + sa.outputTokens;
       if (saTotal === 0) continue;
       const saModel = detectModel(sa.model);
       const saCostRaw = calculateCost(saModel, sa.inputTokens, sa.cacheWriteTokens, sa.cacheReadTokens, sa.outputTokens);
       const saCost = Math.round(saCostRaw * 10000) / 10000;
-      fs.appendFileSync(COST_LOG, JSON.stringify({
-        timestamp: new Date().toISOString(),
-        session_id: runtimeSessionId || sessionId,
+      subagentRows.push(buildSubagentCostRow({
+        sessionId: runtimeSessionId || sessionId,
         source,
         model: saModel,
-        input_tokens: sa.inputTokens,
-        cache_write_tokens: sa.cacheWriteTokens,
-        cache_read_tokens: sa.cacheReadTokens,
-        output_tokens: sa.outputTokens,
-        total_tokens: saTotal,
-        api_calls: 0,
-        subagent: true,
-        agent_type: sa.agentType,
-        model_resolved: !!sa.model,   // false → resolvedModel was absent; model is a sonnet-default guess
-        context_usage: null,
-        estimated_cost_usd: saCost,
-        source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
-      }) + '\n', 'utf-8');
+        inputTokens: sa.inputTokens,
+        cacheWriteTokens: sa.cacheWriteTokens,
+        cacheReadTokens: sa.cacheReadTokens,
+        outputTokens: sa.outputTokens,
+        totalTokens: saTotal,
+        agentType: sa.agentType,
+        modelResolved: !!sa.model,
+        estimatedCostUsd: saCost,
+      }));
       subTokens += saTotal;
       subCost += saCost;
     }
+
+    appendCostRows(COST_LOG, [logEntry, ...subagentRows]);
 
     // Update incremental index — O(1) in the common case; O(n) only on first run or log truncation.
     // Must happen before getCumulativeCost so the index fallback sees this turn's lines.

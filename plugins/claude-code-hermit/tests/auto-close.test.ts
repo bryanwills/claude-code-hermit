@@ -50,6 +50,9 @@ function withTmp(fn: (dir: string) => Promise<void> | void) {
 const HEARTBEAT_MD = '# Heartbeat\n\n- [ ] Check system\n';
 const RUNTIME_IN_PROGRESS = '{"session_state":"in_progress","session_id":"S-001"}';
 const ALERT_EMPTY = '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":0}';
+// Full-day active hours: without a config.json the settled defaults (08:00-23:00)
+// would gate the tick by the real wall clock.
+const FULL_DAY_HEARTBEAT_CONFIG = '{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"24:00"}}}';
 
 const writeState = (dir: string, name: string, content: string) =>
   fs.writeFileSync(hermit(dir, 'state', name), content);
@@ -121,6 +124,7 @@ const TODAY_DATE = new Date().toISOString().slice(0, 10);
 
 // Standard precheck fixture: HEARTBEAT.md + SHELL.md + runtime + empty alert state.
 function seedPrecheck(dir: string, opts: { shellAgeHours?: number } = {}): void {
+  fs.writeFileSync(hermit(dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
   fs.writeFileSync(hermit(dir, 'HEARTBEAT.md'), HEARTBEAT_MD);
   touchAgo(hermit(dir, 'sessions', 'SHELL.md'), opts.shellAgeHours ?? 0);
   writeState(dir, 'runtime.json', RUNTIME_IN_PROGRESS);
@@ -129,6 +133,7 @@ function seedPrecheck(dir: string, opts: { shellAgeHours?: number } = {}): void 
 
 // Reusable fixture for the drain cases: HEARTBEAT.md with one item + alert-state scaffold.
 function hbSetup(dir: string): void {
+  fs.writeFileSync(hermit(dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
   fs.writeFileSync(hermit(dir, 'HEARTBEAT.md'), HEARTBEAT_MD);
   fs.writeFileSync(hermit(dir, 'sessions', 'SHELL.md'), '');
   writeState(dir, 'alert-state.json', ALERT_EMPTY);
@@ -138,7 +143,7 @@ function hbSetup(dir: string): void {
 function seedReflect(dir: string, reportMd: string): void {
   fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
   fs.copyFileSync(path.join(fixturesDir, 'shell-session.md'), hermit(dir, 'sessions', 'SHELL.md'));
-  fs.writeFileSync(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
+  fs.writeFileSync(hermit(dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
   fs.writeFileSync(hermit(dir, 'sessions', 'S-001-REPORT.md'), reportMd);
   // old lastRunAt so the report mtime appears newer; old since so phase is
   // 'adult' (prevents newborn/digest from firing); recent behavior cursor so the
@@ -193,7 +198,7 @@ describe('weekly-review partition of auto-archived sessions', () => {
 
   beforeAll(async () => {
     wd = makeDir();
-    fs.writeFileSync(hermit(wd.dir, 'config.json'), '{"timezone":"UTC"}');
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
     fs.writeFileSync(hermit(wd.dir, 'sessions', 'S-001-REPORT.md'), report({
       id: 'S-001', date: TODAY, duration: '2h', cost: '1.50', tokens: 50000,
       task: 'real work', turns: 5, closedVia: 'operator', overview: 'Real work session.',
@@ -778,7 +783,7 @@ describe('empty-12h-archive exclusion in weekly-review / reflect-precheck', () =
 
     beforeAll(async () => {
       wd = makeDir();
-      fs.writeFileSync(hermit(wd.dir, 'config.json'), '{"timezone":"UTC"}');
+      fs.writeFileSync(hermit(wd.dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
       fs.writeFileSync(hermit(wd.dir, 'sessions', 'S-001-REPORT.md'), report({
         id: 'S-001', date: TODAY, duration: '2h', cost: '1.50', tokens: 50000,
         task: 'real work', turns: 5, closedVia: 'operator', overview: 'Real work session.',
@@ -841,6 +846,7 @@ describe('stale-session gate: skip LLM wake when operator is present', () => {
 
   // HEARTBEAT.md with a plain (non-checkbox) item, per the bash fixture.
   function seedStale(dir: string, alertState: string = SUPPRESSED_ALERT_STATE): void {
+    fs.writeFileSync(hermit(dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
     fs.writeFileSync(hermit(dir, 'HEARTBEAT.md'), '# Heartbeat\n\n- Check system\n');
     fs.writeFileSync(hermit(dir, 'sessions', 'SHELL.md'), '');
     writeState(dir, 'runtime.json', RUNTIME_IN_PROGRESS);

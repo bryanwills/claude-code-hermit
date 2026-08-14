@@ -15,9 +15,9 @@ import { readFrontmatter, readFileWithFrontmatter, globDir } from './lib/frontma
 import { hermitDir } from './lib/cc-compat';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { safe, safeForLLMMultiline, scanInjected } from './lib/sanitize';
-import { loadConfig } from './lib/channel-auth';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
+import { readSettledConfig } from './lib/config-read';
 import { formatTokens } from './lib/format';
 import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
 
@@ -153,7 +153,7 @@ function buildCompactionPointers(agentDir: string): string {
   } catch {}
 
   try {
-    const config = JSON.parse(fs.readFileSync(path.resolve(agentDir, 'config.json'), 'utf-8'));
+    const config = readSettledConfig(agentDir);
     const route = resolveOutboundChannel(config.channels);
     if (route) parts.push(`outbound channel: ${safe(route.id)} (chat_id: ${safe(route.chat_id)})`);
   } catch {}
@@ -238,7 +238,7 @@ function emitFullContext(source: string | null) {
   try {
     const lines = fs.readFileSync(operatorPath, 'utf-8').split('\n').slice(0, 50).join('\n');
     if (lines.trim()) {
-      emit('Session Context', guarded('OPERATOR.md', lines.slice(0, BUDGETS.operator)));
+      emit('Operator Context (OPERATOR.md)', guarded('OPERATOR.md', lines.slice(0, BUDGETS.operator)));
     }
   } catch {
     // No OPERATOR.md — skip silently
@@ -305,7 +305,7 @@ function emitFullContext(source: string | null) {
     try {
       let knowledgeBudget = BUDGETS.knowledge;
       try {
-        const config = JSON.parse(fs.readFileSync(path.resolve(AGENT_DIR, 'config.json'), 'utf-8'));
+        const config = readSettledConfig(AGENT_DIR);
         if (config.knowledge && typeof config.knowledge.compiled_budget_chars === 'number') {
           knowledgeBudget = config.knowledge.compiled_budget_chars;
         }

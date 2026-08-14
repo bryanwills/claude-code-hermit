@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { currentHHMM, todayYMD, parseDuration } from '../time';
+import { readSettledConfig } from '../config-read';
 import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts } from '../alert-state';
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
 import { isProposalScanItem } from '../heartbeat-items';
@@ -218,8 +219,8 @@ try {
   }
 } catch { /* fail-open: scan trouble must not block the tick */ }
 
-const config = readJSON(path.join(stateDir, 'config.json')) ?? {};
-const hbConfig = config.heartbeat ?? {};
+const config = readSettledConfig(stateDir);
+const hbConfig = config.heartbeat;
 const timezone = config.timezone ?? 'UTC';
 const activeHours = hbConfig.active_hours;
 

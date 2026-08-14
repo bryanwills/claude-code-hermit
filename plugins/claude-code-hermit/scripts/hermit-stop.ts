@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
+import { settleConfig, readConfigRaw } from './lib/config-read';
 import { localISOStamp } from './lib/time';
 import { readRuntimeJson, updateRuntimeField, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -29,12 +30,18 @@ const DEFAULT_TIMEOUT = 60; // seconds to wait for graceful close
 
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 
-function loadConfig(): Json {
+function loadConfig(): { config: Json; raw: Json } {
   if (!fs.existsSync(CONFIG_PATH)) {
     console.log('[hermit] No config found. Is this a hermit project?');
     process.exit(1);
   }
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  // Malformed JSON no longer aborts the stop — settle to defaults so a broken
+  // config can't strand a running session. The exact on-disk object travels
+  // beside the settled read-view so saveConfig() never persists settling
+  // artifacts (see saveConfig). raw === null means unparseable. Both views come
+  // from one read, so they always describe the same snapshot.
+  const raw = readConfigRaw(path.dirname(CONFIG_PATH));
+  return { config: settleConfig(raw ?? undefined), raw };
 }
 
 function findLatestReport(): string | null {
@@ -84,9 +91,17 @@ function readActiveSession(): Json | null {
   return Object.keys(stats).length ? stats : null;
 }
 
-function saveConfig(config: Json): void {
+// `always_on` is the only field the stop flow mutates, so it is patched onto the
+// RAW object and that is what gets written. Persisting the settled read-view
+// instead would bake read-path normalization into the operator's file: a
+// non-array `routines` would be written back as `[]` (every routine gone), a
+// mistyped `budget.daily_usd: "5"` as `null`, and an unparseable config as a
+// full set of template defaults. A config we could not parse is left untouched.
+function saveConfig(config: Json, raw: Json): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+  raw.always_on = config.always_on;
   try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n');
   } catch {}
 }
 
@@ -122,7 +137,7 @@ async function verifyTreeExited(tree: { pids: number[]; capped: boolean }): Prom
 async function main(): Promise<void> {
   const force = process.argv.includes('--force');
 
-  const config = loadConfig();
+  const { config, raw } = loadConfig();
   acquireLifecycleLock();
   const sessionName = getSessionName(config);
 
@@ -135,7 +150,7 @@ async function main(): Promise<void> {
       console.log('[hermit] Hermit is running in interactive mode.');
       console.log('[hermit] Terminate the Claude process in your terminal (Ctrl+C).');
       config.always_on = false;
-      saveConfig(config);
+      saveConfig(config, raw);
       releaseLifecycleLock();
       process.exit(0);
     }
@@ -155,7 +170,7 @@ async function main(): Promise<void> {
 
     console.log(`[hermit] No running session: ${sessionName}`);
     config.always_on = false;
-    saveConfig(config);
+    saveConfig(config, raw);
     updateRuntimeField({
       session_state: 'idle',
       shutdown_completed_at: localISOStamp(),
@@ -182,7 +197,7 @@ async function main(): Promise<void> {
   if (force) {
     console.log(`[hermit] Force-killing session: ${sessionName}`);
     config.always_on = false;
-    saveConfig(config);
+    saveConfig(config, raw);
     // Capture the pane's process tree BEFORE killing the session so we can
     // verify the claude process actually died rather than orphaning.
     const tree = collectTree(paneRootPids(sessionName));
@@ -271,7 +286,7 @@ async function main(): Promise<void> {
 
   // Reset always_on flag
   config.always_on = false;
-  saveConfig(config);
+  saveConfig(config, raw);
 
   // Kill tmux session
   if (tmuxSessionAlive(sessionName)) {

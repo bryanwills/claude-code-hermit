@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import { readTasks } from './lib/tasks';
 import { hermitDir } from './lib/cc-compat';
 import { currentHHMM, elapsedSinceHHMM, resolveHermitNowMs } from './lib/time';
+import { readSettledConfig } from './lib/config-read';
 import { extractSection, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
@@ -20,14 +21,6 @@ const HERMIT_DIR = hermitDir();
 const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const HASH_FILE = path.join(HERMIT_DIR, 'sessions', '.eval-hash');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
-const CONFIG_JSON = path.join(HERMIT_DIR, 'config.json');
-
-// config.timezone is the zone Progress Log [HH:MM] stamps are written in (every
-// writer uses currentHHMM(config.timezone)); fail-open to UTC on any read error.
-function configTimezone(): string {
-  try { return (JSON.parse(fs.readFileSync(CONFIG_JSON, 'utf-8')).timezone as string) ?? 'UTC'; }
-  catch { return 'UTC'; }
-}
 
 function evaluateSession(content: Json, tasks: Json[]): Json {
   const results: Json = {
@@ -181,7 +174,8 @@ async function _evaluate(): Promise<string | null> {
         if (timeEntries && timeEntries.length > 0) {
           const lastTime = timeEntries[timeEntries.length - 1].replace(/[\[\]]/g, '');
           const nowDate = new Date(now);
-          const nowHHMM = currentHHMM(configTimezone(), nowDate) ?? nowDate.toISOString().slice(11, 16);
+          // config.timezone is the zone Progress Log [HH:MM] stamps are written in.
+          const nowHHMM = currentHHMM(readSettledConfig(HERMIT_DIR).timezone ?? 'UTC', nowDate) ?? nowDate.toISOString().slice(11, 16);
           const hoursAgo = elapsedSinceHHMM(nowHHMM, lastTime) / 3600000;
           if (hoursAgo > 4) {
             console.error(`No progress logged in ${Math.round(hoursAgo)}h. Update Progress Log or Blockers.`);

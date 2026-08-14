@@ -592,7 +592,9 @@ describe('knowledge-lint', () => {
       const dir = wd.dir;
       fs.mkdirSync(hermit(dir, 'raw'), { recursive: true });
       fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
-      write(hermit(dir, 'config.json'), '{}');
+      // Pin the budget below the 1500-char fixtures: an absent knowledge block
+      // now settles to the template default (2500), which would exempt them.
+      write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":1000}}');
       write(hermit(dir, 'raw', 'old-snap.md'),
         '---\ntitle: old\ncreated: 2025-01-01T00:00:00+00:00\n---\ndata');
       write(hermit(dir, 'compiled', 'note.md'),
@@ -627,7 +629,8 @@ describe('knowledge-lint', () => {
       wd = setupWorkdir();
       const dir = wd.dir;
       fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
-      write(hermit(dir, 'config.json'), '{}');
+      // Pin the budget below the 1500-char fixtures (see findings suite above).
+      write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":1000}}');
       write(hermit(dir, 'compiled', 'context-stubbed.md'),
         `---\ntitle: stubbed\ntype: context\ncreated: 2026-06-01T00:00:00+00:00\ntags: [foundational]\ninjection_stub: House profile stub\n---\n${'x'.repeat(1500)}`);
       write(hermit(dir, 'compiled', 'briefing-big.md'),
@@ -2855,6 +2858,40 @@ describe('routines.ts log-event', () => {
       await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'started'], cwd: wd.dir });
       await runScript('routines.ts', { args: ['log-event', 'heartbeat-restart', 'fired'], cwd: wd.dir });
       expect(firedCount()).toBe(before + 1);
+    });
+  });
+
+  describe('duplicate fired guard reads fields, not bytes', () => {
+    // A workdir per test: both seed the same ledger path, so sharing one would
+    // make them race (the reason the #464 block above is marked test.serial).
+    const seeded = async (row: object, id: string) => {
+      const wd = setupWorkdir();
+      try {
+        const metrics = hermit(wd.dir, 'state', 'routine-metrics.jsonl');
+        fs.writeFileSync(metrics, JSON.stringify(row) + '\n');
+        await runScript('routines.ts', { args: ['log-event', id, 'fired'], cwd: wd.dir });
+        return fs.readFileSync(metrics, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+      } finally {
+        wd.cleanup();
+      }
+    };
+
+    test('suppresses against a prior row whose keys are in a different order', async () => {
+      // The guard used to substring-match `"event":"fired"`, which made JSON key
+      // order load-bearing for correctness. An operator-written or migrated row
+      // serialized differently would have silently disabled the guard.
+      const rows = await seeded({
+        event: 'fired', delivery: 'monitor', routine_id: 'reorder-check', ts: new Date().toISOString(),
+      }, 'reorder-check');
+      expect(rows).toHaveLength(1);
+    });
+
+    test('a routine id that prefixes another does not suppress it', async () => {
+      const rows = await seeded({
+        ts: new Date().toISOString(), routine_id: 'brief-extended', event: 'fired', delivery: 'monitor',
+      }, 'brief');
+      expect(rows).toHaveLength(2);
+      expect(rows[1]).toMatchObject({ routine_id: 'brief', event: 'fired' });
     });
   });
 

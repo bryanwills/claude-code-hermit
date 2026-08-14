@@ -13,24 +13,17 @@ process.stdout.on('error', () => {});
 // (hook_event_name === "PreCompact", trigger ∈ {"auto","manual"}). Malformed/unexpected
 // stdin is a no-op — never guess a breadcrumb from an absent/garbage trigger.
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
 import { flushResetBreadcrumb } from './lib/progress-log';
 import { stampContextReset } from './lib/context-reset';
 import { currentHHMMOrUTC } from './lib/time';
+import { readSettledConfig } from './lib/config-read';
 
 type Json = any;
 
 function readJSON(raw: string): Json | null {
   try { return JSON.parse(raw); } catch { return null; }
-}
-
-function readConfigTimezone(agentDir: string): string {
-  try {
-    const config = JSON.parse(fs.readFileSync(path.join(agentDir, 'config.json'), 'utf-8'));
-    return config.timezone ?? 'UTC';
-  } catch { return 'UTC'; }
 }
 
 function main(raw: string): void {
@@ -41,7 +34,7 @@ function main(raw: string): void {
 
   const agentDir = hermitDir();
   const shellPath = path.join(agentDir, 'sessions', 'SHELL.md');
-  const hhmm = currentHHMMOrUTC(readConfigTimezone(agentDir));
+  const hhmm = currentHHMMOrUTC(readSettledConfig(agentDir).timezone ?? 'UTC');
   flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger, hhmm });
   // The watchdog's own stamps only cover compactions it initiated; this is the only
   // signal for an operator-typed /compact or a native auto-compaction, both of which

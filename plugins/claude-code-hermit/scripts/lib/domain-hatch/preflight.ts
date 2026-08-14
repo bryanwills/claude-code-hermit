@@ -13,6 +13,7 @@
 import path from 'node:path';
 import { coreScope } from '../../resolve-siblings';
 import { readJson } from '../cli';
+import { readConfigRaw } from '../config-read';
 import { resolvePlugin, isResolveError, pluginList, type ResolvedPlugin } from './resolve';
 import { readTargetState, targetFile, type Target, type CoreScope } from './target';
 import { planBlock } from './block';
@@ -82,7 +83,8 @@ export interface PreflightInput {
 export function preflight(input: PreflightInput): Preflight {
   const { pluginId, hermitDir, projectRoot, corePluginRoot } = input;
 
-  const config = readJson(path.join(hermitDir, 'config.json'));
+  // Raw, not settled: absent/unreadable config IS the bootstrap-core signal.
+  const config = readConfigRaw(hermitDir);
   if (config === null) {
     return {
       ok: true,

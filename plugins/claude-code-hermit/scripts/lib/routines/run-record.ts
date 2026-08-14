@@ -3,10 +3,9 @@
 // `finish` reads it to decide the terminal outcome.
 //
 // Why a sidecar and not extra columns on routine-metrics.jsonl: that ledger's
-// row shape is pinned to exactly (ts, routine_id, event, delivery) by
-// tests/routine-precheck.test.ts ("byte-identical to log-routine-event.sh"),
-// because cost attribution and the doctor's routine-cost check match on the
-// literal substring. state/ is the documented bucket for cross-invocation
+// row shape is pinned to exactly (ts, routine_id, event, delivery), asserted by
+// tests/routine-precheck.test.ts, and every consumer is written against those
+// four keys. state/ is the documented bucket for cross-invocation
 // coordination (docs/artifact-naming.md), so the run record lives there and
 // the ledger keeps its frozen shape.
 //

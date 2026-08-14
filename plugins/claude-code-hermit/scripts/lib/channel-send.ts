@@ -16,7 +16,7 @@
 import path from 'node:path';
 import { resolve as resolveOutboundChannel, resolveMaintainerTarget } from '../resolve-outbound-channel';
 import { logMessage, isLoggingEnabled } from './channel-log';
-import { loadConfig } from './channel-auth';
+import { settleConfig, readConfigRaw, readSettledConfig } from './config-read';
 import { readChannelToken } from './channel-token';
 import { recordChannelHealth } from './channel-health';
 import { appendShellLine } from './md-write';
@@ -123,8 +123,11 @@ const SENDERS: Record<string, (token: string, chatId: string, text: string, time
  */
 export async function sendToChannel(hermitDir: string, text: string, opts: SendOptions = {}): Promise<SendResult> {
   try {
-    const config = opts.config ?? loadConfig(hermitDir);
-    if (!config) return { ok: false, error: 'config_read_failed' };
+    // Raw gate first so an unreadable config keeps its distinct error code,
+    // then settle so downstream shape access is uniform.
+    const rawCfg = opts.config ?? readConfigRaw(hermitDir);
+    if (!rawCfg) return { ok: false, error: 'config_read_failed' };
+    const config = settleConfig(rawCfg);
 
     const target = opts.target ?? resolveOutboundChannel(config.channels);
     if (!target) return { ok: false, error: 'no_reachable_channel' };
@@ -203,12 +206,11 @@ function appendMaintainerFindings(hermitDir: string, text: string): string | nul
  */
 export async function sendOperatorNotice(hermitDir: string, notice: OperatorNotice): Promise<OperatorNoticeResult> {
   const out: OperatorNoticeResult = {};
-  let config: Json = null;
-  try { config = loadConfig(hermitDir); } catch { config = null; }
-  const channels = config?.channels;
-  const clientTarget = channels ? resolveOutboundChannel(channels) : null;
-  const maintainerTarget = channels ? resolveMaintainerTarget(channels) : null;
-  const nonTechnical = config?.operator_profile === 'non-technical';
+  const config: Json = readSettledConfig(hermitDir);
+  const channels = config.channels;
+  const clientTarget = resolveOutboundChannel(channels);
+  const maintainerTarget = resolveMaintainerTarget(channels);
+  const nonTechnical = config.operator_profile === 'non-technical';
 
   if (notice.maintainer) {
     const m = notice.maintainer;
