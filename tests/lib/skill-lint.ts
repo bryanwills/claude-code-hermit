@@ -36,8 +36,12 @@ function parseFrontmatter(text: string): Frontmatter | null {
     let value = kv[2].trim();
     if (/^[|>][+-]?$/.test(value)) {
       const folded: string[] = [];
-      while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) {
-        folded.push(lines[++i].trim());
+      // A blank line is a paragraph break *inside* the block, not its end — stop
+      // only at the next line that is neither indented nor blank, or the value
+      // would silently truncate at the first empty line.
+      while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1]) || lines[i + 1].trim() === '')) {
+        const next = lines[++i].trim();
+        if (next) folded.push(next);
       }
       value = folded.join(' ');
     }

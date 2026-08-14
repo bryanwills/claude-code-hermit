@@ -38,6 +38,13 @@ test('folds YAML block scalars into a single-line value', () => {
   expect(fm?.fields.model).toBe('haiku');
 });
 
+test('keeps folding a block scalar across a paragraph break', () => {
+  const md = ['---', 'description: |', '  First para.', '', '  Second para.', 'model: haiku', '---', 'body', ''].join('\n');
+  const fm = parseFrontmatter(md);
+  expect(fm?.fields.description).toBe('First para. Second para.');
+  expect(fm?.fields.model).toBe('haiku');
+});
+
 // ── lintSkills ──────────────────────────────────────────────────────────────
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-lint-'));
