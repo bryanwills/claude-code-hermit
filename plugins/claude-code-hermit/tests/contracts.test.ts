@@ -25,6 +25,7 @@ import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { validateCronSchedule, validate } from '../scripts/validate-config';
 import { resolve } from '../scripts/resolve-outbound-channel';
+import { resolvePaths, checkConfig } from '../scripts/doctor-check';
 
 const SCRIPTS = path.join(PLUGIN_ROOT, 'scripts');
 const SKILLS = path.join(PLUGIN_ROOT, 'skills');
@@ -59,6 +60,10 @@ function withTmpdir(fn: (dir: string) => Promise<void> | void) {
 const writeConfig = (dir: string, config: any) =>
   fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'config.json'), JSON.stringify(config));
 
+// Stays a subprocess: it asserts the whole-report path (argv → 24 checks → stdout
+// JSON → exit 0), which an in-process runAllChecks() would stop covering. Converting
+// it was tried and measured slower here (~2.4s → ~4s for this file), so the seam
+// buys per-check reach, not spawn count — don't "optimize" this back in-process.
 async function runDoctorCheck(dir: string): Promise<any> {
   const r = await runScript('doctor-check.ts', {
     args: ['.claude-code-hermit'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },
@@ -1966,6 +1971,31 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
   });
 });
 
+// The seam the rest of this file's doctor cases ride on: a check takes its paths as
+// an argument, so one check runs against one scratch dir without a subprocess and
+// without the module ever seeing that dir in argv. Without this, nothing fails when
+// a check quietly goes back to closing over module-level constants.
+describe('doctor per-check seam', () => {
+  // Asserts path routing, not config validity — a check reads the dir it was handed,
+  // so the schema can gain required keys without this case going red.
+  test('one check, two scratch dirs, one process — each reads the dir it was handed',
+    withTmpdir(async (seeded) => {
+      writeConfig(seeded, {});                              // config.json exists (contents irrelevant here)
+      const empty = makeTmpdir();                             // .claude-code-hermit/ exists, no config.json in it
+      try {
+        const at = (d: string) => checkConfig(resolvePaths(path.join(d, '.claude-code-hermit'), PLUGIN_ROOT));
+
+        expect(at(seeded).detail).not.toContain('not found');
+        const missing = at(empty);
+        expect(missing.id).toBe('config');
+        expect(missing.status).toBe('fail');
+        expect(missing.detail).toContain('not found');
+      } finally {
+        try { fs.rmSync(empty, { recursive: true, force: true }); } catch {}
+      }
+    }));
+});
+
 describe('doctor version-currency check', () => {
   const vcCheck = (report: any) => (report.checks ?? []).find((c: any) => c.id === 'version-currency');
   const coreManifest = readJson(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'));
@@ -3061,5 +3091,35 @@ describe('hermit-evolve permission delegation contract', () => {
     for (const stale of ['run-with-profile.ts', 'suggest-compact.ts', 'Bash(python3:*)']) {
       expect(step8).not.toContain(stale);
     }
+  });
+});
+
+// ---------- stale-plugin-runtime header (config ahead of loaded plugin) ----------
+//
+// check-upgrade.sh emits two different headers, and which one appears decides whether a
+// hermit runs hermit-evolve. Config-ahead means a stale install copy got loaded: evolve
+// reads that as up-to-date, and finalizing would downgrade the applied stamp. So the
+// header has to stay distinct and its consumers must not treat it as an upgrade —
+// without this pin a later prose edit can quietly collapse both headers back into one
+// "any banner -> run evolve" rule, which is the loop this contract exists to prevent.
+describe('stale plugin runtime header', () => {
+  const HEADER = '---Stale Plugin Runtime---';
+  const emitter = read(path.join(SCRIPTS, 'check-upgrade.sh'));
+  const sessionStart = read(path.join(SKILLS, 'session-start', 'SKILL.md'));
+  const brief = read(path.join(SKILLS, 'brief', 'SKILL.md'));
+
+  test('check-upgrade.sh emits the header without an evolve directive', () => {
+    expect(emitter).toContain(HEADER);
+    // The branch may NAME hermit-evolve (to say it cannot help) but must never carry
+    // the slash-command directive form that session-start acts on, nor REQUIRED.
+    const staleBranch = emitter.slice(emitter.indexOf(`echo "${HEADER}"`), emitter.indexOf('echo "---Upgrade Available---"'));
+    expect(staleBranch.length).toBeGreaterThan(0);
+    expect(staleBranch).not.toContain('/claude-code-hermit:hermit-evolve');
+    expect(staleBranch).not.toContain('REQUIRED');
+  });
+
+  test('both banner consumers recognize the header', () => {
+    expect(sessionStart).toContain(HEADER);
+    expect(brief).toContain(HEADER);
   });
 });

@@ -41,7 +41,13 @@ cat tests/fixtures/stop-hook-input.json | \
 # evaluate-session (Stop hook — standard/strict profile)
 echo '{}' | AGENT_HOOK_PROFILE=standard bun scripts/evaluate-session.ts
 
-# check-upgrade (SessionStart hook)
+# check-upgrade (SessionStart hook) — three outcomes, driven by the stamp in
+# .claude-code-hermit/config.json vs the plugin.json at the root you pass:
+#   stamp older  -> ---Upgrade Available---     (run hermit-evolve)
+#   stamp equal  -> silent
+#   stamp newer  -> ---Stale Plugin Runtime---  (a stale install copy is loaded;
+#                                                evolve cannot fix it)
+# An unparseable version on either side is silent.
 bash scripts/check-upgrade.sh .
 ```
 

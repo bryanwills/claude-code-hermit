@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { sha256 } from './lib/hash';
+import { cmpSemver } from './lib/semver';
 
 type Json = any;
 
@@ -65,19 +66,6 @@ const TEMPLATE_FILES = [
   'SESSION-REPORT.md.template',
   'PROPOSAL.md.template',
 ];
-
-// 3-way compare of X.Y.Z leading semver. Unparseable forms compare equal
-// (don't second-guess), matching doctor-check.ts satisfiesRange's posture.
-function cmpSemver(a: string, b: string): number {
-  const pa = String(a).match(/^(\d+)\.(\d+)\.(\d+)/);
-  const pb = String(b).match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!pa || !pb) return 0;
-  for (let i = 1; i <= 3; i++) {
-    const d = parseInt(pa[i], 10) - parseInt(pb[i], 10);
-    if (d !== 0) return d < 0 ? -1 : 1;
-  }
-  return 0;
-}
 
 function isPlainObject(v: any): boolean {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -740,6 +728,14 @@ function buildPlan({ hermitDir, pluginRoot, hatchTarget, pluginListJsonPath }: {
   plan.from = from;
   plan.to = to;
   plan.up_to_date = to != null && cmpSemver(from, to) >= 0;
+  // Config stamped AHEAD of the loaded plugin: this session loaded a stale install copy,
+  // not a hermit awaiting an upgrade. `up_to_date` deliberately collapses "ahead" into
+  // "current", so it cannot carry this — and `work_pending` can still be true here via a
+  // sibling gap or CLAUDE-APPEND drift, which would walk the runner into Step 7's
+  // migrations and then Step 9, where finalizing with the older `to` would downgrade the
+  // applied stamp without reversing anything. Separate blocking field, consumed by the
+  // skill's Version check BEFORE any step runs.
+  plan.loaded_core_older_than_applied = to != null && cmpSemver(from, to) > 0;
 
   try {
     const cl = fs.readFileSync(path.join(pluginRoot, 'CHANGELOG.md'), 'utf8');

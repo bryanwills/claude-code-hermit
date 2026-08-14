@@ -145,6 +145,80 @@ test('core_version_mismatch: --core differs from plugin.json → error, file unc
 }));
 
 // -------------------------------------------------------
+// 4b. Monotonicity — the stamp records APPLIED migrations, so it never moves back
+// -------------------------------------------------------
+
+// The incident shape: the session loaded a STALE plugin copy (1.2.6) while this hermit
+// had already applied 1.2.8. --core matches that copy's plugin.json, so the cross-check
+// above passes; only the monotonicity guard stops the downgrade.
+test('core_version_regression: --core older than applied stamp → refuse, file byte-identical', withProj(async (dir) => {
+  const original = '{"_hermit_versions":{"claude-code-hermit":"1.2.8","claude-code-dev-hermit":"0.3.0"}}';
+  writeConfig(dir, original);
+
+  const result = finalize({
+    hermitDir: dir,
+    core: '1.2.6',
+    pluginRoot: PR,
+    siblings: [{ name: 'claude-code-dev-hermit', version: '0.4.0' }],
+  });
+
+  expect(result.ok).toBe(false);
+  expect(result.errors.map(e => e.code)).toContain('core_version_regression');
+  expect(result.core.confirmed).toBeNull();
+  expect(result.siblings_confirmed).toEqual({}); // sibling writes never reached
+  expect(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).toBe(original);
+}));
+
+// Equal must pass: the documented sibling-only run re-stamps the same version, and so
+// does a re-run after a crash mid-evolve. Blocking it would break both.
+test('equal core: idempotent re-stamp still succeeds', withProj(async (dir) => {
+  writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.6"}}');
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(result.core.confirmed).toBe('1.2.6');
+  expect(readConfig(dir)._hermit_versions['claude-code-hermit']).toBe('1.2.6');
+}));
+
+test('absent stamp: bootstrap write is not treated as a regression', withProj(async (dir) => {
+  writeConfig(dir, '{}');
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(readConfig(dir)._hermit_versions['claude-code-hermit']).toBe('1.2.6');
+}));
+
+// cmpSemver reads garbage as equal, so the sole writer can REPAIR a hand-mangled stamp.
+// A hard reject here would wedge evolve with no in-band recovery path.
+test('unparseable stamp: repaired by the valid --core', withProj(async (dir) => {
+  writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"not-a-version"}}');
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(readConfig(dir)._hermit_versions['claude-code-hermit']).toBe('1.2.6');
+}));
+
+// Sibling versions come from a runner-assembled command line with no cross-check, so
+// they get the same no-downgrade rule — as a skip, never a failure of the core bump.
+test('sibling regression: skipped with marker, core bump still lands', withProj(async (dir) => {
+  writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5","claude-code-dev-hermit":"0.4.0"}}');
+  const result = finalize({
+    hermitDir: dir,
+    core: '1.2.6',
+    pluginRoot: PR,
+    siblings: [{ name: 'claude-code-dev-hermit', version: '0.3.0' }],
+  });
+
+  expect(result.ok).toBe(true);
+  expect(result.siblings_skipped).toContain('[regression:claude-code-dev-hermit]');
+  expect('claude-code-dev-hermit' in result.siblings_confirmed).toBe(false);
+
+  const onDisk = readConfig(dir);
+  expect(onDisk._hermit_versions['claude-code-hermit']).toBe('1.2.6'); // core still bumped
+  expect(onDisk._hermit_versions['claude-code-dev-hermit']).toBe('0.4.0'); // sibling untouched
+}));
+
+// -------------------------------------------------------
 // 5. Missing config → no_config; malformed config → config_json_invalid
 // -------------------------------------------------------
 

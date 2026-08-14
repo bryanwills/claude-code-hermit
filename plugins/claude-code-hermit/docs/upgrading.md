@@ -47,6 +47,18 @@ This detects the version gap, shows what changed, prompts for new settings, refr
 
 `hermit-start.ts` merges missing config keys from defaults at runtime. Session start shows a soft nudge: "A hermit upgrade is available."
 
+### 5. "Stale Plugin Runtime" — the opposite case
+
+If session start reports `---Stale Plugin Runtime---`, the session is running a plugin copy *older* than the version this hermit has already applied. That is a stale install, not a pending upgrade, and `/claude-code-hermit:hermit-evolve` cannot fix it — it would either no-op or try to stamp the older version. The notice prints the path the session loaded; find the entry with that path in `claude plugin list` and update it with that entry's own scope:
+
+```bash
+claude plugin update claude-code-hermit@claude-code-hermit --scope <local|project|user>
+```
+
+Then restart the session. A scope-less `plugin update` targets the default scope and can leave the stale entry in place. If the notice appears when running `bin/hermit-start` instead, it is the marketplace clone that lags: `claude plugin marketplace update claude-code-hermit`.
+
+**Deliberately rolling back to an older core?** The applied-version stamp in `_hermit_versions` only moves forward — `evolve-finalize` refuses to lower it (`core_version_regression`), because lowering it would claim migrations were reversed when nothing reversed them. A genuine rollback needs the stamp edited by hand in `.claude-code-hermit/config.json` to match the version you rolled back to; re-running `hatch` will not do it (it only adds missing keys).
+
 ---
 
 ## Hermit Plugins

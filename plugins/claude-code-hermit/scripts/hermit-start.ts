@@ -22,6 +22,9 @@ import { tmuxSessionAlive, getSessionName } from './lib/tmux';
 import { clearStatusCache } from './lib/context-reset';
 import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-token';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { isContainer } from './lib/container';
+import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels } from './lib/channel-config';
+import { cmpSemver } from './lib/semver';
 
 type Json = any;
 
@@ -151,17 +154,6 @@ const DEFAULT_CONFIG: Json = {
 
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
 
-/** Python-style truthiness: empty arrays/objects/strings are falsy. */
-function pyTruthy(v: Json): boolean {
-  if (Array.isArray(v)) return v.length > 0;
-  if (v && typeof v === 'object') return Object.keys(v).length > 0;
-  return Boolean(v);
-}
-
-function isDict(v: Json): boolean {
-  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-}
-
 /** Python shlex.quote: safe chars pass through, everything else single-quoted. */
 function shlexQuote(s: string): string {
   if (s === '') return "''";
@@ -248,15 +240,29 @@ function applyAlwaysOnDoctorSchedule(config: Json): void {
   }
 }
 
-/** Print a notice if the plugin version is newer than config version. */
+/** Print a notice when the loaded plugin and the applied config stamp disagree.
+ *  Which way they disagree decides the remedy, so the direction is compared, never
+ *  just equality: plugin newer means an upgrade is pending, plugin OLDER means this
+ *  boot resolved a stale copy and evolve is the wrong tool (it would no-op, or
+ *  downgrade the applied stamp). Unparseable either side stays silent.
+ *
+ *  The remedy differs from check-upgrade.sh's on purpose: that one runs from the
+ *  SessionStart hook against the installed plugin (a `claude plugin list` entry), while
+ *  bin/hermit-run resolves PLUGIN_ROOT by scanning the marketplace clone, which never
+ *  appears in that listing — so this surface points at the marketplace refresh. */
 function checkForUpgrade(config: Json): void {
   const pluginJson = path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json');
   try {
     const pluginVer = JSON.parse(fs.readFileSync(pluginJson, 'utf-8')).version ?? '0.0.0';
     const configVer = (config._hermit_versions ?? {})['claude-code-hermit'] ?? '0.0.0';
-    if (pluginVer !== configVer) {
+    const rel = cmpSemver(pluginVer, configVer);
+    if (rel > 0) {
       console.log(`[hermit] Upgrade available: v${configVer} -> v${pluginVer}`);
       console.log('[hermit] Run /claude-code-hermit:hermit-evolve inside Claude Code');
+    } else if (rel < 0) {
+      console.log(`[hermit] Stale plugin runtime: boot scripts loaded v${pluginVer} from ${PLUGIN_ROOT},`);
+      console.log(`[hermit] older than this hermit's applied state v${configVer}. hermit-evolve cannot fix this.`);
+      console.log('[hermit] Run: claude plugin marketplace update claude-code-hermit');
     }
   } catch {}
 }
@@ -318,15 +324,6 @@ function checkPrerequisites(): Json {
   }
 
   return { tmux: hasTmux, bun: hasBun };
-}
-
-/** Detect if running inside a container (Docker, Podman, LXC). */
-function isContainer(): boolean {
-  return (
-    fs.existsSync('/.dockerenv') ||
-    fs.existsSync('/run/.containerenv') ||
-    process.env.container === 'docker'
-  );
 }
 
 /** Check for stale runtime state from a previous run and warn. */
@@ -476,24 +473,6 @@ function fetchRegisteredMarketplaces(): Json[] | null {
   } catch {
     return null;
   }
-}
-
-/** Yield [name, cfg] for channels whose config is a valid dict. */
-function* iterChannelConfigs(config: Json): Generator<[string, Json]> {
-  const channels = 'channels' in config ? config.channels : {};
-  if (!isDict(channels)) return;
-  for (const [name, cfg] of Object.entries(channels)) {
-    if (isDict(cfg)) yield [name, cfg];
-  }
-}
-
-/** Return list of enabled channel names. */
-function getEnabledChannels(config: Json): string[] {
-  const names: string[] = [];
-  for (const [name, cfg] of iterChannelConfigs(config)) {
-    if (pyTruthy('enabled' in cfg ? cfg.enabled : true)) names.push(name);
-  }
-  return names;
 }
 
 /** Resolve a state_dir path (absolute pass-through, relative against cwd). */

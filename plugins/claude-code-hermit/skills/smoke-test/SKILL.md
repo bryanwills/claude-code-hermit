@@ -18,9 +18,10 @@ Track `passed`, `warnings`, `failures` counts. Collect output lines for the fina
   - If missing or invalid JSON: **FAIL** `config.json missing or invalid`
   - If valid: **PASS** `config.json parsed`
 - Read `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` to get the current plugin version
-- Compare `config._hermit_versions["claude-code-hermit"]` with the plugin version
-  - Match: **PASS** `version matches plugin (X.Y.Z)`
-  - Mismatch: **WARN** `config version X.Y.Z != plugin X.Y.Z — run /claude-code-hermit:hermit-evolve`
+- Compare `config._hermit_versions["claude-code-hermit"]` with the plugin version — the **direction** decides the remedy, not just inequality
+  - Equal: **PASS** `version matches plugin (X.Y.Z)`
+  - Plugin newer than config: **WARN** `config version X.Y.Z < plugin X.Y.Z — run /claude-code-hermit:hermit-evolve`
+  - Config newer than plugin: **WARN** `config version X.Y.Z > plugin X.Y.Z — a stale install copy is loaded; hermit-evolve cannot fix this, update the install at ${CLAUDE_PLUGIN_ROOT}` (never suggest hermit-evolve here)
 - Check required top-level keys exist: `agent_name`, `channels`, `env`, `heartbeat`
   - Each missing key: **FAIL** `missing required key: <key>`
 

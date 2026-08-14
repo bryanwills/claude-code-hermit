@@ -11,18 +11,23 @@
 //                          [--sibling=<name>=<version> ...]
 //
 // hermit-dir defaults to .claude-code-hermit (like evolve-plan.ts).
-// --plugin-root cross-checks --core against plugin.json.version to defend the
-// exact-string compare in check-upgrade.sh:24. Omit only in tests.
+// --plugin-root cross-checks --core against plugin.json.version, so the stamp written
+// here is always the loaded plugin's real version — check-upgrade.sh compares that stamp
+// against plugin.json on every session start. Omit only in tests.
+//
+// The stamp only ever moves forward: see the monotonicity guard in finalize().
 //
 // Stdout: one JSON object matching FinalizeResult.
 // Exit 0: ok:true and core confirmed on-disk.
 // Exit 1: any error (no_core_target, no_config, config_json_invalid,
 //          config_unreadable, plugin_json_unreadable, core_version_mismatch,
-//          bad_sibling_arg, write_failed, verify_failed, fatal).
+//          core_version_regression, bad_sibling_arg, write_failed, verify_failed,
+//          fatal).
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { pinStateDirOrExit } from './lib/cc-compat';
+import { cmpSemver } from './lib/semver';
 
 type Json = any;
 
@@ -95,7 +100,9 @@ export function finalize(opts: {
     }
   }
 
-  // Cross-check --core against plugin.json.version (defends check-upgrade.sh exact string compare)
+  // Cross-check --core against plugin.json.version: the stamp must be the loaded plugin's
+  // real version, which is what check-upgrade.sh compares against at session start.
+  // (Direction is a separate invariant — see the monotonicity guard below.)
   if (opts.pluginRoot) {
     let pluginVer: string | null = null;
     try {
@@ -128,17 +135,52 @@ export function finalize(opts: {
     return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
   }
 
+  // Monotonicity guard. The stamp records which migrations have been APPLIED, so moving
+  // it backwards claims migrations were reversed when nothing reversed them. That state
+  // is reachable without this guard: when the session loads a stale (older) plugin copy,
+  // the cross-check above passes (--core does equal that copy's plugin.json) and evolve
+  // can still be running for sibling work, so step 9 would stamp the older version.
+  // evolve-plan's `loaded_core_older_than_applied` blocks this upstream; this is the
+  // backstop for any caller that skips the planner. Rejecting BEFORE any mutation is what
+  // leaves config.json byte-identical and the sibling writes below unreached.
+  //
+  // Strictly-older only. Equal must pass: the documented sibling-only run re-stamps the
+  // same version by design, and so does a re-run after a crash. An absent or unparseable
+  // on-disk stamp also passes — absent is bootstrap (the object is created below), and
+  // cmpSemver reads garbage as equal, which lets this sole writer REPAIR a hand-mangled
+  // stamp instead of wedging evolve with no in-band recovery.
+  const onDiskCore = isPlainObject(config._hermit_versions)
+    ? config._hermit_versions['claude-code-hermit']
+    : undefined;
+  if (typeof onDiskCore === 'string' && cmpSemver(opts.core, onDiskCore) < 0) {
+    errors.push({
+      code: 'core_version_regression',
+      message: `--core="${opts.core}" is older than the applied version "${onDiskCore}" in _hermit_versions — refusing to downgrade the stamp (migrations are not reversed by lowering it). The loaded plugin is likely a stale install copy.`,
+    });
+    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+  }
+
   // Core is the install marker so it's safe to create the object if absent.
-  // Unconditional bump covers the step-10 deferred-migration caveat.
+  // Unconditional bump covers the step-10 deferred-migration caveat (always forward or
+  // equal — the guard above has already rejected the backward direction).
   if (!isPlainObject(config._hermit_versions)) {
     config._hermit_versions = {};
   }
   config._hermit_versions['claude-code-hermit'] = opts.core;
 
   // Never add a new sibling key — only update keys already present.
+  // Sibling versions arrive from a runner-assembled command line and get no plugin.json
+  // cross-check, so apply the same no-downgrade rule here. A bad sibling arg is a skip,
+  // never a failure: the file's existing posture (see [bad-arg:…] above) is that one
+  // malformed sibling must not report an otherwise-good core bump as blocked.
   const appliedSiblingNames: string[] = [];
   for (const s of validSiblings) {
     if (Object.prototype.hasOwnProperty.call(config._hermit_versions, s.name)) {
+      const existing = config._hermit_versions[s.name];
+      if (typeof existing === 'string' && cmpSemver(s.version, existing) < 0) {
+        siblingsSkipped.push(`[regression:${s.name}]`);
+        continue;
+      }
       config._hermit_versions[s.name] = s.version;
       appliedSiblingNames.push(s.name);
     } else {
