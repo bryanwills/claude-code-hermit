@@ -5,6 +5,9 @@
 ### Added
 - Inventory-sync test between `php/forge.php` and the write-confirm-gate hook: a subcommand added to the PHP dispatch chain without a matching entry in the hook's classifier now fails the test suite instead of silently falling through the hook's unknown-subcommand branch.
 
+### Fixed
+- Guzzle `7.15.2` hardens request-host validation, cookie-domain matching, and derived `Host` regeneration.
+
 ## [0.0.10] - 2026-07-30
 
 ### Added
