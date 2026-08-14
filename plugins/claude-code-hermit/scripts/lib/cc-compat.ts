@@ -39,11 +39,6 @@ type TriState = { state: string; count: number; entries: Json[] };
  * Fix one (env-var precedence, iteration cap, worktree-projection skip) → check
  * the other two.
  *
- * feed's projectRoot (feed-hermit/hooks/fetch-guard.ts) shares the walk but NOT
- * this invariant: it resolves which project the session is in so it can read a
- * tracked file at the root, so it deliberately keeps no projection skip. Not one
- * of the three.
- *
  * Robust to a drifted hook cwd (#384). A *relative* AGENT_DIR (the legacy
  * drift-prone default, e.g. `AGENT_DIR=".claude-code-hermit"`) is intentionally
  * NOT honored — it falls through to CLAUDE_PROJECT_DIR, then walk-up, then fail-open.
@@ -62,20 +57,19 @@ function hermitDir(): string {
  *
  * `.worktreeinclude`'s managed block copies OPERATOR.md, config.json and
  * compiled/ into a `claude --worktree` worktree so skills can Read them at the
- * relative path they expect (dev's `/dev-pr` Gate 0 reads `commands.pr_create`
- * that way), but never `state/` — hermit state is deliberately main-rooted and
- * shared across worktrees. So a dir carrying the config.json sentinel with no
- * `state/` is a projection of a real root further up, and every resolver walks
- * past it to that root.
+ * relative path they expect, but never `state/` — hermit state is deliberately
+ * main-rooted and shared across worktrees. So a dir carrying the config.json
+ * sentinel with no `state/` is a projection of a real root further up, and the
+ * resolvers walk past it to that root.
  *
  * The `state/` test stays true only because no resolver returns a projection,
  * so nothing ever creates `state/` inside one. A writer that mkdir's its own
- * state dir (dev's record-test-result) must resolve through a resolver, never
- * off cwd. Out-of-tree worktrees (`git worktree add ../wt`) are the one gap:
- * the walk can't reach main, so hermitDir() fails open to the cwd-relative
- * path — the projection — exactly as it did before this guard existed.
+ * state dir must resolve through a resolver, never off cwd. Out-of-tree
+ * worktrees (`git worktree add ../wt`) are the one gap: the walk can't reach
+ * main, so hermitDir() fails open to the cwd-relative path — the projection —
+ * exactly as it did before this guard existed.
  *
- * Mirrored in dev's find-hermit-dir.ts and HA's config.ts — fix one, fix all.
+ * Mirrored by the sibling fleet resolvers named above — fix one, fix all.
  */
 function isWorktreeProjection(cchDir: string): boolean {
   return fs.existsSync(path.join(cchDir, 'config.json')) && !fs.existsSync(path.join(cchDir, 'state'));

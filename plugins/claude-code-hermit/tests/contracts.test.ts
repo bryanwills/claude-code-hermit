@@ -3125,11 +3125,11 @@ describe('stale plugin runtime header', () => {
 });
 
 describe('worktree state-dir template contract', () => {
-  // config.json must ride into a `claude --worktree` copy: dev-hermit's /dev-pr
-  // reads commands.pr_create from it (Gate 0 hard-fails without it) and
-  // /dev-quality reads commands.test. Both resolvers' comments (dev's
-  // find-hermit-dir.ts, core's routines/event.ts) already assert this block
-  // carries it, so a regression here silently makes those comments false.
+  // config.json must ride into a `claude --worktree` copy: skills read config
+  // keys (commands.*, and anything else operator-set) at the relative path, and
+  // those reads hard-fail inside a worktree without it. The resolver comments in
+  // routines/event.ts and cc-compat.ts also assert this block carries it, so a
+  // regression here silently makes those comments false.
   const block = read(path.join(TEMPLATES, 'WORKTREEINCLUDE-APPEND.txt'));
   const CONFIG_LINE = '.claude-code-hermit/config.json';
 

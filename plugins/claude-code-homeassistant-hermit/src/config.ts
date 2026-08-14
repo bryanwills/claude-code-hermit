@@ -20,7 +20,8 @@ import { dumpFrontmatter, loadFrontmatter } from './markdown';
  *   HA   projectRoot  (homeassistant-hermit/src/config.ts)         → project root (this file)
  *   dev  findHermitDir(dev-hermit/scripts/git-push-guard.ts)       → the .cch dir or null
  * INVARIANT: hermitDir() === join(projectRoot(), '.claude-code-hermit').
- * Fix one (env-var precedence, iteration cap) → check the other two.
+ * Fix one (env-var precedence, iteration cap, worktree-projection skip) → check
+ * the other two.
  *
  * Returns the project ROOT (the dir containing .claude-code-hermit), NOT the
  * .cch dir itself — callers append paths themselves. Does NOT honor AGENT_DIR
@@ -29,7 +30,10 @@ import { dumpFrontmatter, loadFrontmatter } from './markdown';
  */
 export function projectRoot(): string {
   const proj = process.env.CLAUDE_PROJECT_DIR;
-  if (proj && existsSync(join(proj, '.claude-code-hermit')) && !isWorktreeProjection(join(proj, '.claude-code-hermit'))) return proj;
+  if (proj) {
+    const cch = join(proj, '.claude-code-hermit');
+    if (existsSync(cch) && !isWorktreeProjection(cch)) return proj;
+  }
   let dir = process.cwd();
   for (let i = 0; i < 8; i++) {
     const cch = join(dir, '.claude-code-hermit');
