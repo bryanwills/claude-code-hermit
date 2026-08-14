@@ -2830,6 +2830,40 @@ describe('routines.ts log-event', () => {
     });
   });
 
+  describe('duplicate fired guard reads fields, not bytes', () => {
+    // A workdir per test: both seed the same ledger path, so sharing one would
+    // make them race (the reason the #464 block above is marked test.serial).
+    const seeded = async (row: object, id: string) => {
+      const wd = setupWorkdir();
+      try {
+        const metrics = hermit(wd.dir, 'state', 'routine-metrics.jsonl');
+        fs.writeFileSync(metrics, JSON.stringify(row) + '\n');
+        await runScript('routines.ts', { args: ['log-event', id, 'fired'], cwd: wd.dir });
+        return fs.readFileSync(metrics, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+      } finally {
+        wd.cleanup();
+      }
+    };
+
+    test('suppresses against a prior row whose keys are in a different order', async () => {
+      // The guard used to substring-match `"event":"fired"`, which made JSON key
+      // order load-bearing for correctness. An operator-written or migrated row
+      // serialized differently would have silently disabled the guard.
+      const rows = await seeded({
+        event: 'fired', delivery: 'monitor', routine_id: 'reorder-check', ts: new Date().toISOString(),
+      }, 'reorder-check');
+      expect(rows).toHaveLength(1);
+    });
+
+    test('a routine id that prefixes another does not suppress it', async () => {
+      const rows = await seeded({
+        ts: new Date().toISOString(), routine_id: 'brief-extended', event: 'fired', delivery: 'monitor',
+      }, 'brief');
+      expect(rows).toHaveLength(2);
+      expect(rows[1]).toMatchObject({ routine_id: 'brief', event: 'fired' });
+    });
+  });
+
   describe('no hermit ancestor', () => {
     // No .claude-code-hermit/ ancestor → non-zero exit with a clear diagnostic
     let exitCode = 0;
