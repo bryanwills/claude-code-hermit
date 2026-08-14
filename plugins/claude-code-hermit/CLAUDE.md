@@ -70,6 +70,26 @@ Follow Claude Code's research-preview model: **new features ship enabled by defa
 
 Reserve opt-in defaults for features that are genuinely risky, costly, or destructive: state why in the CHANGELOG when you choose opt-in over opt-out.
 
+## Authorship layers
+
+An installed hermit belongs to its operator — they rewrite it, and the plugin's job is to keep working underneath that. Two layers, different rules:
+
+**Contracts (plugin owns — stay strict).** State-file schemas, hook exit codes and fail-open, the `hermit-run` → `hermit-exec.sh` verb path, hatch target stamping, deny patterns, the token/script-mediation boundary. Customization works *because* these are rigid. `hermit-exec.sh` resolves a bare name to `$PLUGIN_ROOT/scripts/<name>.ts` only, rejecting `*/*` and `*..*` so a permission glob spanning `/` can't drive it outside `scripts/` — that guard is load-bearing for the allow-list, not incidental. There is deliberately no local-verb fallback; `bin/hermit-run` is a resolver, not an operator-extensible table (and it's a state-template copy that `hermit-evolve` refreshes, so local edits there don't survive).
+
+**Core depends on nothing downstream.** Domain plugins depend on core; core never depends on them. Nothing in this plugin may import a sibling, hardcode a sibling slug in logic, or branch on one being installed — sibling discovery is generic (`resolve-siblings.ts` matches name-contains-`hermit`, not a list) and core consumes only what a sibling *declares* in its `hermit-meta.json` (`hermit.boot_skill`, hatch continuation). Naming a plugin as an example in a comment, doc, or `docker.recommended_plugins` entry is fine; conditioning behavior on it is not. Every new cross-plugin capability goes through a declared field or a `hermit-run` verb behind a `required_core_version` floor.
+
+**Content (operator owns — stay loose).** Extension is declarative, not code injection into core's dispatch path:
+
+| Surface | What the operator can put there |
+|---|---|
+| `routines[]`, `boot_skill`, `shutdown_skill`, `monitors[]` | any skill string, including their own local plugins' skills |
+| `config.env`, `docker.packages`, `docker.recommended_plugins` | arbitrary values |
+| `OPERATOR.md`, `HEARTBEAT.md`, `knowledge-schema.md`, the CLAUDE-APPEND block, `docker/` | free-form rewrite; on-disk beats template (see the `hermit-docker update` gotcha below) |
+
+When authoring above the contract line, give skills data + goal + voice and let the model compose — don't hardcode content, edge-case copy, checklists, or opinions about how the operator should work. Loose ≠ vague: a skill still states its goal and verdict shape precisely.
+
+**The upgrade rule.** Anything operator-editable must survive `hermit-evolve`. Adding a new operator-owned surface means saying in `### Upgrade Instructions` how existing edits are preserved, not just how the template changes.
+
 ## Development
 
 To test locally against a target project:
