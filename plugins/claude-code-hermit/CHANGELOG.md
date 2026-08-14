@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Fixed
+- The session-start and boot version checks compare version *direction* instead of string inequality. A config stamp ahead of the loaded plugin now reports `---Stale Plugin Runtime---` with the loaded path and the scoped `claude plugin update` to run, instead of demanding `hermit-evolve` — which could not clear it, so always-on hermits re-dispatched an evolve subagent every session start forever.
+- `hermit-evolve` stops before any migration when the loaded plugin is older than the applied version, and `evolve-finalize` refuses a `--core` below the on-disk stamp (`core_version_regression`, config left untouched). Previously a stale install plus any sibling gap or CLAUDE-APPEND drift ran the migrations and then silently lowered `_hermit_versions` without reversing them. Sibling stamps get the same no-downgrade rule as a skip.
 - The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
 ### Changed
 - `proposal.ts`'s write verbs (`create`, `patch`, `shell-append`, `next-task`, `routine`) return their stdout token instead of exiting, and are exported behind an `import.meta.main` guard, so the write-path grammar — header parsing, the id suffix walk, the `@now` decision-append guard — is testable in-process. Same argv, same stdout grammar, same exit codes.
