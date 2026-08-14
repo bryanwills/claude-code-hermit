@@ -16,6 +16,8 @@
 - Async subagent cost rows now advance `cost-index.json`. `subagent-cost.ts` appended and exited, and `readCostIndex` validates only the schema version, so the dashboard, telemetry export, spend-status and doctor under-reported that spend until the next Stop hook — indefinitely on a hermit that dispatches async work and then goes idle. Budget enforcement was never affected.
 - `reflect`'s routine cost-per-day summed a `cost` field filtered on `ts`; cost rows carry `estimated_cost_usd` and `timestamp`, so every routine's spend evidence resolved to ~$0.
 - `hermit-evolution` read `routine-metrics.jsonl` raw with no bound at all, pulling the whole ledger into the runner's context.
+### Changed
+- The watchdog's hygiene cascade takes an injectable view of the world (clock, tmux, filesystem, state paths) instead of reading module-level constants and shelling out directly. `rearmDamperOpen`, `passesLifecycleGuards`, the hygiene stampers and both `maybeContext*` mechanisms are exported and return their `HygieneOutcome`, so each gate's decision is testable in-process against a fake world. Watchdog behavior is unchanged — the two mechanisms still end the tick when they fire, now via their return value rather than an internal `process.exit`.
 ### Fixed
 - The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
 ### Changed
