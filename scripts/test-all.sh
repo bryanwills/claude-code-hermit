@@ -43,4 +43,24 @@ for slug in "${BUN_TEST_SLUGS[@]}" "${RUN_ALL_SLUGS[@]}"; do
   fi
 done
 
+# Repo-root guards spanning more than one plugin — nothing above runs them, since
+# they live outside every plugin's own discovery. Deliberately serial, after the
+# plugin suites: they spawn a hook subprocess per corpus case, and the parallel
+# phase is already saturated enough that HA's CPU-bound gate-corpus tests sit
+# near their 5s per-test timeout. Keeping this out of that phase leaves the
+# tuned parallelism untouched, at ~10s of extra wall time.
+cp_start=$(now)
+( cd "$ROOT" && bun test tests/cross-plugin ) >"$LOGDIR/cross-plugin.log" 2>&1
+cp_rc=$?
+cp_elapsed=$(( $(now) - cp_start ))
+if [ "$cp_rc" -eq 0 ]; then
+  printf "%-32s %-6s %5ss\n" "cross-plugin" "PASS" "$cp_elapsed"
+else
+  printf "%-32s %-6s %5ss\n" "cross-plugin" "FAIL" "$cp_elapsed"
+  overall_rc=1
+  echo "--- cross-plugin (last 20 lines) ---"
+  tail -20 "$LOGDIR/cross-plugin.log"
+  echo "---"
+fi
+
 exit "$overall_rc"

@@ -13,6 +13,9 @@ name: Cross-Plugin Guards
 # plugin.json (bumped on every release) and CLAUDE-APPEND are negated: the
 # contract never reads core's manifest or template, so those edits can't
 # change its outcome.
+# The hooks/** glob plus the three dev guard scripts cover the hook stdin
+# contract: every fleet hook keeps its own sealed stdin copy, so a drifted drain
+# or fail direction is only caught by re-running that corpus here.
 on:
   push:
     branches: [main]
@@ -25,6 +28,10 @@ on:
       - 'plugins/*/state-templates/CLAUDE-APPEND.md'
       - '!plugins/claude-code-hermit/state-templates/CLAUDE-APPEND.md'
       - 'plugins/claude-code-hermit/scripts/**'
+      - 'plugins/*/hooks/**'
+      - 'plugins/claude-code-dev-hermit/scripts/git-push-guard.ts'
+      - 'plugins/claude-code-dev-hermit/scripts/worktree-boundary-guard.ts'
+      - 'plugins/claude-code-dev-hermit/scripts/record-test-result.ts'
       - 'tests/cross-plugin/**'
       - 'tests/lib/**'
       - '.github/workflows/test-cross-plugin.yml'
@@ -41,6 +48,10 @@ on:
       - 'plugins/*/state-templates/CLAUDE-APPEND.md'
       - '!plugins/claude-code-hermit/state-templates/CLAUDE-APPEND.md'
       - 'plugins/claude-code-hermit/scripts/**'
+      - 'plugins/*/hooks/**'
+      - 'plugins/claude-code-dev-hermit/scripts/git-push-guard.ts'
+      - 'plugins/claude-code-dev-hermit/scripts/worktree-boundary-guard.ts'
+      - 'plugins/claude-code-dev-hermit/scripts/record-test-result.ts'
       - 'tests/cross-plugin/**'
       - 'tests/lib/**'
       - '.github/workflows/test-cross-plugin.yml'
