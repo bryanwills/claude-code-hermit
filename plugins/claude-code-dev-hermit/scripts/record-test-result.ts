@@ -111,18 +111,27 @@ if (argv[2] === 'write') {
 }
 
 async function main() {
+  // Past the cap we stop buffering but keep consuming to EOF — exiting
+  // mid-stream would leave the pipe half-read.
   const chunks: Buffer[] = [];
   let total = 0;
+  let oversize = false;
   for await (const chunk of process.stdin) {
     total += chunk.length;
-    if (total > MAX_STDIN) process.exit(0);
+    if (total > MAX_STDIN) { oversize = true; continue; }
     chunks.push(chunk);
   }
+  if (oversize) process.exit(0);
   const raw = Buffer.concat(chunks).toString('utf-8').trim();
   if (!raw) process.exit(0);
 
   let data: Json;
   try { data = JSON.parse(raw); } catch { process.exit(0); }
+
+  // Valid JSON that is not an object (`null`, `[]`, `"x"`) is still not a hook
+  // payload — without this the `null` case throws past the catch above and the
+  // hook exits 1 instead of failing open.
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) process.exit(0);
 
   if (data.tool_response?.interrupted === true) process.exit(0);
 

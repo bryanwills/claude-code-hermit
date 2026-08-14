@@ -84,13 +84,17 @@ function block(msg: string): void {
 async function main() {
   // Read stdin first (every hook must consume stdin), then gate on profile —
   // so a non-strict session can still surface a one-line "guard inactive" notice.
+  // Past the cap we stop buffering but keep consuming: exiting mid-stream would
+  // leave the pipe half-read (broken-pipe errors on the writer's side).
   const chunks: Buffer[] = [];
   let total = 0;
+  let oversize = false;
   for await (const chunk of process.stdin) {
     total += chunk.length;
-    if (total > MAX_STDIN) process.exit(0);
+    if (total > MAX_STDIN) { oversize = true; continue; }
     chunks.push(chunk);
   }
+  if (oversize) process.exit(0);
   const raw = Buffer.concat(chunks).toString('utf-8').trim();
   if (!raw) process.exit(0);
 
