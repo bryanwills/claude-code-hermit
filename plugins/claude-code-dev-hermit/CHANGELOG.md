@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.9] - 2026-08-14
 
 ### Fixed
 - `git-push-guard`, `worktree-boundary-guard`, and `record-test-result` exited mid-stream on stdin past their 1MB cap, leaving the pipe half-read; they now stop buffering but keep consuming to EOF before failing open.
