@@ -1,0 +1,608 @@
+$ ha_agent_lab -h
+usage: ha_agent_lab [-h] {boot,ha} ...
+
+positional arguments:
+  {boot,ha}
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab boot -h
+usage: ha_agent_lab boot [-h] {status,store} ...
+
+positional arguments:
+  {status,store}
+
+options:
+  -h, --help      show this help message and exit
+
+$ ha_agent_lab boot status -h
+usage: ha_agent_lab boot status [-h] [--probe]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab boot store -h
+usage: ha_agent_lab boot store [-h] [--language LANGUAGE] [--url URL]
+                               [--local-url LOCAL_URL]
+                               [--remote-url REMOTE_URL] [--token TOKEN]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha -h
+usage: ha_agent_lab ha [-h]
+                       {refresh-context,simulate,validate-apply,policy-check,audit-automations,audit-scripts,probe,integration-health,updates,fetch-history,list-automations,list-scripts,list-scenes,delete-automation,delete-script,delete-scene,get-automation-config,get-script-config,get-scene-config,automation-diff,snapshot-states,restore-states,list-helpers,create-helper,delete-helper,list-areas,create-area,delete-area,list-entities,rename-entity,set-entity-area,set-entity-enabled,set-entity-icon,set-entity-hidden,set-entity-labels,set-entity-categories,set-entity-aliases,list-devices,set-device-area,rename-device,list-dashboards,get-dashboard,apply-dashboard,create-dashboard,delete-dashboard,render-template,check-config,call-service,set-core-config,error-log,logbook,system-log,list-floors,create-floor,delete-floor,list-labels,create-label,delete-label,rename-area,set-area-icon,set-area-floor,set-area-labels,list-exposed-entities,expose-entity,list-backups,create-backup,list-blueprints,import-blueprint,get-energy-prefs,set-energy-prefs,reload-entry,disable-entry,trigger-automation}
+                       ...
+
+positional arguments:
+  {refresh-context,simulate,validate-apply,policy-check,audit-automations,audit-scripts,probe,integration-health,updates,fetch-history,list-automations,list-scripts,list-scenes,delete-automation,delete-script,delete-scene,get-automation-config,get-script-config,get-scene-config,automation-diff,snapshot-states,restore-states,list-helpers,create-helper,delete-helper,list-areas,create-area,delete-area,list-entities,rename-entity,set-entity-area,set-entity-enabled,set-entity-icon,set-entity-hidden,set-entity-labels,set-entity-categories,set-entity-aliases,list-devices,set-device-area,rename-device,list-dashboards,get-dashboard,apply-dashboard,create-dashboard,delete-dashboard,render-template,check-config,call-service,set-core-config,error-log,logbook,system-log,list-floors,create-floor,delete-floor,list-labels,create-label,delete-label,rename-area,set-area-icon,set-area-floor,set-area-labels,list-exposed-entities,expose-entity,list-backups,create-backup,list-blueprints,import-blueprint,get-energy-prefs,set-energy-prefs,reload-entry,disable-entry,trigger-automation}
+    audit-automations   Audit all live HA automations against the safety
+                        policy.
+    audit-scripts       Audit all live HA scripts against the safety policy.
+    probe               GET a raw HA REST path and print the JSON response.
+                        Useful for verifying endpoints.
+    integration-health  Detect degraded HA integrations and write
+                        state/integration-health-degraded-domains.json.
+    updates             List pending Home Assistant updates (update.* domain)
+                        with version deltas, tiered core/os/supervisor/addon/
+                        hacs.
+    fetch-history       Fetch and aggregate HA history into a snapshot
+                        artifact. Requires a normalized snapshot; runs
+                        `refresh-context` first if none exists.
+    list-automations    List all automation entity IDs and config IDs.
+    list-scripts        List all script entity IDs and config IDs.
+    list-scenes         List all scene entity IDs and config IDs.
+    delete-automation   Delete an automation config by ID.
+    delete-script       Delete a script config by ID.
+    delete-scene        Delete a scene config by ID.
+    get-automation-config
+                        Read an automation's stored config from HA.
+    get-script-config   Read a script's stored config from HA.
+    get-scene-config    Read a scene's stored config from HA.
+    automation-diff     Report automations added/removed/edited/disabled since
+                        the last snapshot (change memory across sessions).
+    snapshot-states     Capture entity states to a named artifact for later
+                        restore.
+    restore-states      Restore captured entity states via scene.apply
+                        (gated by ha_safety_mode).
+    list-helpers        List helpers (input_*, timer, counter, schedule) via
+                        WebSocket. Optional --type to scope to one.
+    create-helper       Create a helper from JSON via WebSocket (gated write).
+    delete-helper       Delete a helper by id via WebSocket (gated write).
+    list-areas          List areas via WebSocket.
+    create-area         Create an area by name via WebSocket (gated write).
+    delete-area         Delete an area by id via WebSocket (gated write).
+    list-entities       List the entity registry via WebSocket (--registry).
+    rename-entity       Set an entity's friendly name (gated write).
+    set-entity-area     Assign an entity to an area (gated write).
+    set-entity-enabled  Enable/disable an entity (gated write).
+    set-entity-icon     Set an entity's icon (gated write).
+    set-entity-hidden   Hide/show an entity in the UI (gated write).
+    set-entity-labels   Set an entity's labels (gated write).
+    set-entity-categories
+                        Set an entity's per-scope categories from JSON
+                        (gated write).
+    set-entity-aliases  Set an entity's Assist aliases (gated write).
+    list-devices        List the device registry via WebSocket.
+    set-device-area     Assign a device to an area (gated write).
+    rename-device       Set a device's user name (gated write).
+    list-dashboards     List Lovelace dashboards via WebSocket.
+    get-dashboard       Read a dashboard's config via WebSocket (--url-path;
+                        default dashboard if omitted).
+    apply-dashboard     Save/replace a dashboard's config from an artifact
+                        via WebSocket (gated write).
+    create-dashboard    Create a dashboard from JSON via WebSocket (gated
+                        write).
+    delete-dashboard    Delete a dashboard by id via WebSocket (gated write).
+    render-template     Render a Jinja2 template against live state
+                        (POST /api/template). Not gated (read-only against
+                        HA's template engine).
+    check-config        Validate the HA configuration
+                        (POST /api/config/core/check_config). Not gated.
+    call-service        Call any HA service (POST /api/services/...).
+                        Sensitive domains/entities gated by ha_safety_mode;
+                        non-sensitive calls proceed in both modes.
+    set-core-config     Partial update of location/unit system/currency/
+                        timezone/country via WebSocket (gated write).
+    error-log           Print the current-session HA error log
+                        (GET /api/error_log, plaintext).
+    logbook             Fetch the HA logbook (GET /api/logbook/<ts>).
+    system-log          List structured system log entries, with levels,
+                        via WebSocket (system_log/list).
+    list-floors         List floors via WebSocket.
+    create-floor        Create a floor by name via WebSocket (gated write).
+    delete-floor        Delete a floor by id via WebSocket (gated write).
+    list-labels         List labels via WebSocket.
+    create-label        Create a label by name via WebSocket (gated write).
+    delete-label        Delete a label by id via WebSocket (gated write).
+    rename-area         Set an area's friendly name (gated write).
+    set-area-icon       Set an area's icon (gated write).
+    set-area-floor      Assign an area to a floor (gated write).
+    set-area-labels     Set an area's labels (gated write).
+    list-exposed-entities
+                        List entities exposed to each Assist assistant via
+                        WebSocket.
+    expose-entity       Expose/unexpose entities to one or more Assist
+                        assistants (gated write). Sets HA's expose-to-
+                        Assist boundary; config, not control (see
+                        SAFETY.md's Assist Control section).
+    list-backups        List backups via WebSocket (backup/info).
+    create-backup       Generate a backup via WebSocket (backup/generate,
+                        gated write).
+    list-blueprints     List blueprints for a domain via WebSocket
+                        (blueprint/list).
+    import-blueprint    Import a blueprint from a URL and save it under a
+                        domain via WebSocket (gated write).
+    get-energy-prefs    Read energy dashboard preferences via WebSocket
+                        (energy/get_prefs).
+    set-energy-prefs    Replace energy dashboard preferences from JSON via
+                        WebSocket (energy/save_prefs, gated write).
+    reload-entry        Reload a config entry (REST, gated write).
+    disable-entry       Enable/disable a config entry via WebSocket
+                        (config_entries/disable, gated write).
+    trigger-automation  Fire an automation by entity_id via automation.trigger.
+
+options:
+  -h, --help            show this help message and exit
+
+$ ha_agent_lab ha refresh-context -h
+usage: ha_agent_lab ha refresh-context [-h] [--incremental]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha simulate -h
+usage: ha_agent_lab ha simulate [-h] artifact
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha validate-apply -h
+usage: ha_agent_lab ha validate-apply [-h] [--reload {automation,script,scene}]
+                                      artifact
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha policy-check -h
+usage: ha_agent_lab ha policy-check [-h] target
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha audit-automations -h
+usage: ha_agent_lab ha audit-automations [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha audit-scripts -h
+usage: ha_agent_lab ha audit-scripts [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha probe -h
+usage: ha_agent_lab ha probe [-h] path
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha integration-health -h
+usage: ha_agent_lab ha integration-health [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha updates -h
+usage: ha_agent_lab ha updates [-h] [--digest]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha fetch-history -h
+usage: ha_agent_lab ha fetch-history [-h] [--window-days WINDOW_DAYS]
+                                     [--entities ENTITY [ENTITY ...]]
+                                     [--include-transitions]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-automations -h
+usage: ha_agent_lab ha list-automations [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-scripts -h
+usage: ha_agent_lab ha list-scripts [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-scenes -h
+usage: ha_agent_lab ha list-scenes [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-automation -h
+usage: ha_agent_lab ha delete-automation [-h] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-script -h
+usage: ha_agent_lab ha delete-script [-h] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-scene -h
+usage: ha_agent_lab ha delete-scene [-h] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha get-automation-config -h
+usage: ha_agent_lab ha get-automation-config [-h] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha get-script-config -h
+usage: ha_agent_lab ha get-script-config [-h] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha get-scene-config -h
+usage: ha_agent_lab ha get-scene-config [-h] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha automation-diff -h
+usage: ha_agent_lab ha automation-diff [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha snapshot-states -h
+usage: ha_agent_lab ha snapshot-states [-h] [--name NAME]
+                                       [--domains DOMAINS]
+                                       [--entities ENTITY [ENTITY ...]]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha restore-states -h
+usage: ha_agent_lab ha restore-states [-h] [--confirm] artifact
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-helpers -h
+usage: ha_agent_lab ha list-helpers [-h] [--type {input_boolean,input_number,input_text,input_select,input_datetime,timer,counter,schedule}]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha create-helper -h
+usage: ha_agent_lab ha create-helper [-h] [--confirm] {input_boolean,input_number,input_text,input_select,input_datetime,timer,counter,schedule} json
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-helper -h
+usage: ha_agent_lab ha delete-helper [-h] [--confirm] {input_boolean,input_number,input_text,input_select,input_datetime,timer,counter,schedule} id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-areas -h
+usage: ha_agent_lab ha list-areas [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha create-area -h
+usage: ha_agent_lab ha create-area [-h] [--confirm] name
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-area -h
+usage: ha_agent_lab ha delete-area [-h] [--confirm] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-entities -h
+usage: ha_agent_lab ha list-entities [-h] --registry
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha rename-entity -h
+usage: ha_agent_lab ha rename-entity [-h] [--confirm] --name NAME entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-area -h
+usage: ha_agent_lab ha set-entity-area [-h] [--confirm] --area AREA entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-enabled -h
+usage: ha_agent_lab ha set-entity-enabled [-h] [--confirm] --enabled {true,false} entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-icon -h
+usage: ha_agent_lab ha set-entity-icon [-h] [--confirm] --icon ICON entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-hidden -h
+usage: ha_agent_lab ha set-entity-hidden [-h] [--confirm] --hidden {true,false} entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-labels -h
+usage: ha_agent_lab ha set-entity-labels [-h] [--confirm] --labels LABEL [LABEL ...] entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-categories -h
+usage: ha_agent_lab ha set-entity-categories [-h] [--confirm] --categories JSON entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-entity-aliases -h
+usage: ha_agent_lab ha set-entity-aliases [-h] [--confirm] --aliases ALIAS [ALIAS ...] entity_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-devices -h
+usage: ha_agent_lab ha list-devices [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-device-area -h
+usage: ha_agent_lab ha set-device-area [-h] [--confirm] --area AREA device_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha rename-device -h
+usage: ha_agent_lab ha rename-device [-h] [--confirm] --name NAME device_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-dashboards -h
+usage: ha_agent_lab ha list-dashboards [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha get-dashboard -h
+usage: ha_agent_lab ha get-dashboard [-h] [--url-path URL_PATH]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha apply-dashboard -h
+usage: ha_agent_lab ha apply-dashboard [-h] [--url-path URL_PATH]
+                                       [--confirm]
+                                       artifact
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha create-dashboard -h
+usage: ha_agent_lab ha create-dashboard [-h] [--confirm] json
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-dashboard -h
+usage: ha_agent_lab ha delete-dashboard [-h] [--confirm] dashboard_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha render-template -h
+usage: ha_agent_lab ha render-template [-h] template
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha check-config -h
+usage: ha_agent_lab ha check-config [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha call-service -h
+usage: ha_agent_lab ha call-service [-h] [--data DATA] [--confirm] domain.service
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-core-config -h
+usage: ha_agent_lab ha set-core-config [-h] [--latitude LATITUDE]
+                                       [--longitude LONGITUDE]
+                                       [--elevation ELEVATION]
+                                       [--unit-system {metric,us_customary}]
+                                       [--currency CURRENCY]
+                                       [--time-zone TIME_ZONE] [--country COUNTRY]
+                                       [--confirm]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha error-log -h
+usage: ha_agent_lab ha error-log [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha logbook -h
+usage: ha_agent_lab ha logbook [-h] [--window-days WINDOW_DAYS]
+                               [--entity ENTITY]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha system-log -h
+usage: ha_agent_lab ha system-log [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-floors -h
+usage: ha_agent_lab ha list-floors [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha create-floor -h
+usage: ha_agent_lab ha create-floor [-h] [--confirm] name
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-floor -h
+usage: ha_agent_lab ha delete-floor [-h] [--confirm] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-labels -h
+usage: ha_agent_lab ha list-labels [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha create-label -h
+usage: ha_agent_lab ha create-label [-h] [--confirm] name
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha delete-label -h
+usage: ha_agent_lab ha delete-label [-h] [--confirm] id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha rename-area -h
+usage: ha_agent_lab ha rename-area [-h] [--confirm] --name NAME area_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-area-icon -h
+usage: ha_agent_lab ha set-area-icon [-h] [--confirm] --icon ICON area_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-area-floor -h
+usage: ha_agent_lab ha set-area-floor [-h] [--confirm] --floor FLOOR area_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-area-labels -h
+usage: ha_agent_lab ha set-area-labels [-h] [--confirm] --labels LABEL [LABEL ...] area_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-exposed-entities -h
+usage: ha_agent_lab ha list-exposed-entities [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha expose-entity -h
+usage: ha_agent_lab ha expose-entity [-h] --entity-ids ENTITY [ENTITY ...]
+                                     --assistants ASSISTANT [ASSISTANT ...]
+                                     --expose {true,false} [--confirm]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-backups -h
+usage: ha_agent_lab ha list-backups [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha create-backup -h
+usage: ha_agent_lab ha create-backup [-h] --agent-ids AGENT [AGENT ...]
+                                     [--name NAME] [--password PASSWORD]
+                                     [--include-addons SLUG [SLUG ...]]
+                                     [--include-all-addons]
+                                     [--include-database {true,false}]
+                                     [--include-folders FOLDER [FOLDER ...]]
+                                     [--include-homeassistant {true,false}]
+                                     [--confirm]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha list-blueprints -h
+usage: ha_agent_lab ha list-blueprints [-h] domain
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha import-blueprint -h
+usage: ha_agent_lab ha import-blueprint [-h] [--confirm] domain url
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha get-energy-prefs -h
+usage: ha_agent_lab ha get-energy-prefs [-h]
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha set-energy-prefs -h
+usage: ha_agent_lab ha set-energy-prefs [-h] [--confirm] json
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha reload-entry -h
+usage: ha_agent_lab ha reload-entry [-h] [--confirm] entry_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha disable-entry -h
+usage: ha_agent_lab ha disable-entry [-h] [--confirm] --disabled {true,false} entry_id
+
+options:
+  -h, --help  show this help message and exit
+
+$ ha_agent_lab ha trigger-automation -h
+usage: ha_agent_lab ha trigger-automation [-h] automation_id
+
+options:
+  -h, --help  show this help message and exit
