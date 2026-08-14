@@ -19,7 +19,6 @@
 // break shell quoting.
 // Usage: bun heartbeat.ts alert-state <state-file-path>   # eval-json on stdin
 
-import fs from 'node:fs';
 import path from 'node:path';
 import {
   readAlertState, defaultAlertState, quarantineAlertState, writeAlertState,
@@ -27,6 +26,7 @@ import {
   MICRO_PREFIX, PROPOSAL_PREFIX, STALE_KEY, DOCTOR_PREFIX, isStructuredKey,
 } from '../alert-state';
 import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from '../time';
+import { readSettledConfig } from '../config-read';
 
 type Json = any;
 
@@ -61,11 +61,6 @@ function validateFiring(raw: Json): FiringItem[] | null {
     out.push({ key: entry.key, text: entry.text });
   }
   return out;
-}
-
-function readConfig(): Json {
-  try { return JSON.parse(fs.readFileSync(path.join(stateDir, 'config.json'), 'utf-8')); }
-  catch { return {}; }
 }
 
 function apply(payloadJson: string): void {
@@ -107,7 +102,7 @@ function apply(payloadJson: string): void {
 
   const prevAlerts: Json = state.alerts && typeof state.alerts === 'object' ? state.alerts : {};
 
-  const config = readConfig();
+  const config = readSettledConfig(stateDir);
   const timezone = config.timezone ?? 'UTC';
   const nowDate = new Date(resolveHermitNowMs());
   const nowIso = nowDate.toISOString();

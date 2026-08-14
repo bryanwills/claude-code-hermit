@@ -7,13 +7,8 @@ import { sendKeys, tmuxSessionAlive } from './tmux';
 import { applyContextReset } from './context-reset';
 import { clearPendingCommand, readPendingCommand, renderCommand } from './harness-command';
 import { currentHHMMOrUTC } from './time';
-import { readJson } from './cli';
+import { readSettledConfig } from './config-read';
 import path from 'node:path';
-
-/** Hermit timezone for breadcrumb stamps — every other Progress Log writer uses it. */
-function configTimezone(hermitRoot: string): string {
-  return readJson(path.join(hermitRoot, 'config.json'))?.timezone ?? 'UTC';
-}
 
 /**
  * Deliver a pending channel-requested harness command into the pane.
@@ -80,7 +75,7 @@ export function drainHarnessCommand(hermitRoot: string): void {
     applyContextReset(hermitRoot, runtime, {
       kind: 'cleared',
       trigger: 'channel',
-      hhmm: currentHHMMOrUTC(configTimezone(hermitRoot)),
+      hhmm: currentHHMMOrUTC(readSettledConfig(hermitRoot).timezone ?? 'UTC'),
     });
   }
   console.error(`[stop-pipeline] harness-command: delivered "${text}" (requested by ${pending.by})`);

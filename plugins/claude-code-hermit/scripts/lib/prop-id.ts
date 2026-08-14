@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { nowHHMMSS } from './time';
-import { readJson } from './cli';
+import { readSettledConfig } from './config-read';
 
 export function nextNumber(proposalsDir: string): string {
   let files: string[] = [];
@@ -44,11 +44,6 @@ export function slugify(title: string): string {
 
 export const SUFFIX_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
-export function readTimezone(stateDir: string): string {
-  const config = readJson(path.join(stateDir, 'config.json'));
-  return config?.timezone || 'UTC';
-}
-
 export interface BaseId {
   num: string;
   slug: string;
@@ -63,7 +58,7 @@ export function computeBase(
   stateDir: string,
   title: string,
   now: Date = new Date(),
-  timezone: string = readTimezone(stateDir),
+  timezone: string = readSettledConfig(stateDir).timezone ?? 'UTC',
 ): BaseId {
   const proposalsDir = path.join(stateDir, 'proposals');
   return {

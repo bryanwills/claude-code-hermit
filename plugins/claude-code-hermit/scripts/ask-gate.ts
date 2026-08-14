@@ -36,7 +36,7 @@ process.stdout.on('error', () => {});
 // exit 0 (allow) — a hook must never block Claude Code.
 
 import { hermitDir } from './lib/cc-compat';
-import { loadConfig } from './lib/channel-auth';
+import { readSettledConfig } from './lib/config-read';
 import { channelLikelyDown } from './lib/channel-health';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { runHook } from './lib/hook-input';
@@ -63,8 +63,7 @@ function main(payload: any): void {
   if (process.env.HERMIT_MANAGED !== '1') return;
 
   const dir = hermitDir();
-  const config = loadConfig(dir);
-  if (!config || typeof config !== 'object') return; // allow, fail-open
+  const config = readSettledConfig(dir); // settled: absent/malformed -> defaults (always_on false -> allow)
 
   if (config.always_on !== true) return; // interactive/terminal session — untouched
   if (config.ask_gate === false) return; // explicit config escape hatch

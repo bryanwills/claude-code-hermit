@@ -19,7 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { todayYMD, utcISOStamp } from '../time';
 import { appendJsonlLine } from '../append-jsonl';
-import { readStdin, readJson } from '../cli';
+import { readStdin } from '../cli';
+import { readSettledConfig } from '../config-read';
 import { writeFileAtomic } from '../md-write';
 import { readMicroProposals } from '../micro-proposals-io';
 
@@ -66,7 +67,7 @@ export async function run(stateDir: string): Promise<void> {
     process.exit(0);
   }
 
-  const config = readJson(path.join(stateDir, 'config.json')) ?? {};
+  const config = readSettledConfig(stateDir);
   const timezone = config.timezone || 'UTC';
   const today = todayYMD(timezone).replace(/-/g, '');
 

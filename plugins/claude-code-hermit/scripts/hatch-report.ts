@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readStdin, readJson, flagValue } from './lib/cli';
+import { readConfigRaw } from './lib/config-read';
 
 type Json = any;
 
@@ -61,7 +62,8 @@ export function observe(root: string): Observed {
 
   return {
     stateDir: exists(hermit),
-    config: readJson(path.join(hermit, 'config.json')),
+    // Raw, not settled: a null config here IS the "hatch did not complete" signal.
+    config: readConfigRaw(hermit),
     hatchOptions: readJson(path.join(hermit, 'state', 'hatch-options.json')),
     claudeBlock: has(path.join(root, 'CLAUDE.md'), CLAUDE_MARKER) ? 'CLAUDE.md'
       : has(path.join(root, 'CLAUDE.local.md'), CLAUDE_MARKER) ? 'CLAUDE.local.md'

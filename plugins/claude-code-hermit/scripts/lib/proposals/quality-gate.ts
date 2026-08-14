@@ -32,7 +32,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readFrontmatter } from '../frontmatter';
-import { readJson, flagValue } from '../cli';
+import { flagValue } from '../cli';
+import { readSettledConfig } from '../config-read';
 import { QUALITY_GATE_TIER } from '../settings/enums';
 
 type Json = any;
@@ -134,8 +135,8 @@ function isValueOnlyChange(file: string, root: string): boolean {
 }
 
 function resolveTier(stateDir: string): string {
-  const cfg = readJson(path.join(stateDir, 'config.json'));
-  const tier = cfg?.quality_gate?.tier;
+  const cfg = readSettledConfig(stateDir);
+  const tier = cfg.quality_gate.tier;
   return typeof tier === 'string' && (QUALITY_GATE_TIER as readonly string[]).includes(tier) ? tier : 'budget';
 }
 

@@ -15,6 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
+import { readConfigRaw } from './lib/config-read';
 import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -173,6 +174,9 @@ function shlexJoin(args: string[]): string {
   return args.map(shlexQuote).join(' ');
 }
 
+/** True when config.json exists but could not be parsed — gates the write-back. */
+let configReadFailed = false;
+
 /** Load config.json or return defaults. */
 function loadConfig(): Json {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -181,9 +185,18 @@ function loadConfig(): Json {
     process.exit(1);
   }
 
-  const config: Json = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  // Malformed JSON no longer aborts the boot: fail open to the defaults merge
+  // below (validate-config and doctor surface the corruption). The always-on
+  // branch writes config.json back, so record the failure — writing the merged
+  // defaults over an unparseable file would destroy the operator's config.
+  const raw = readConfigRaw(path.dirname(CONFIG_PATH));
+  configReadFailed = raw === null;
+  const config: Json = raw ?? {};
 
   // Merge with defaults — shallow for top-level, deep for nested dicts.
+  // This boot-time merge deliberately SEEDS containers (routines, env) for
+  // sparse configs — different from lib/config-read's read-path settling,
+  // which settles missing containers to empty.
   // Values in config may be null (JSON null), so fall back to {} for spreading.
   const merged: Json = { ...DEFAULT_CONFIG, ...config };
   for (const [key, def] of Object.entries(DEFAULT_CONFIG)) {
@@ -1153,9 +1166,14 @@ async function main(): Promise<void> {
   // Mark as always-on mode in config
   config.always_on = true;
   applyAlwaysOnDoctorSchedule(config);
-  try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
-  } catch {}
+  // Skipped when the on-disk config was unparseable: `config` is then pure
+  // DEFAULT_CONFIG, and writing it would silently replace the operator's
+  // identity, channels, routines and budget with template defaults.
+  if (!configReadFailed) {
+    try {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+    } catch {}
+  }
 
   // Verify the session survived the boot period
   await sleep(3); // Wait for Claude to boot — increase if on slow hardware

@@ -30,7 +30,7 @@ import {
 import { calculateCost } from './lib/pricing';
 import { resolveTurnSource, detectModel } from './cost-tracker';
 import { buildSubagentCostRow, appendCostRows, costIndexPath, updateCostIndex } from './lib/cost-log';
-import { loadConfig } from './lib/channel-auth';
+import { readSettledConfig } from './lib/config-read';
 
 const HERMIT_DIR = hermitDir();
 const COST_LOG = costLogPath(HERMIT_DIR);
@@ -155,8 +155,7 @@ process.stdin.on('end', () => {
     // double-count. Budget enforcement is unaffected either way: cost-tracker
     // checks caps against the index it just updated itself.
     try {
-      const config: any = loadConfig(HERMIT_DIR);
-      const timezone = config && typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
+      const timezone = readSettledConfig(HERMIT_DIR).timezone ?? 'UTC';
       updateCostIndex(COST_LOG, costIndexPath(HERMIT_DIR), timezone);
     } catch { /* index refresh is best-effort; the row is already durable */ }
   } catch {}
