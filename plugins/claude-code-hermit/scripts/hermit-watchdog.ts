@@ -177,8 +177,8 @@ function pushOperatorMessage(text: string): void {
 }
 
 /** Current time as "HH:MM" in `timezone`, falling back to the UTC clock if the zone is invalid. */
-function nowHHMM(timezone: string): string {
-  return currentHHMMOrUTC(timezone);
+function nowHHMM(timezone: string, ref?: Date): string {
+  return currentHHMMOrUTC(timezone, ref);
 }
 
 /** Operator-language message for a watchdog restart. */
@@ -314,11 +314,15 @@ export function hasPendingQuestion(paneContent: string): boolean {
 
 // --- Lifecycle lock ---
 
-/** Non-blocking exclusive lock. Returns true on success, false when held. */
+/** The lifecycle lock file under the world's state dir. Must resolve to the same
+ *  path as lib/runtime's LIFECYCLE_LOCK for the real world — the restart, nudge and
+ *  post-close-clear paths still lock via that constant, and the two only exclude
+ *  each other while both name the same file. */
 function lifecycleLockPath(world: World): string {
   return path.join(world.paths.stateDir, '.lifecycle.lock');
 }
 
+/** Non-blocking exclusive lock. Returns true on success, false when held. */
 function tryAcquireLifecycleLock(world: World = REAL_WORLD): boolean {
   try {
     fs.mkdirSync(world.paths.stateDir, { recursive: true });
@@ -786,22 +790,18 @@ export function passesLifecycleGuards(runtime: Json, world: World = REAL_WORLD):
 function getLastCostLogEntry(sessionId: string, world: World = REAL_WORLD): Json {
   const cached = world.memo.costLogEntry;
   if (cached && cached.sessionId === sessionId) return cached.entry;
-  let lastEntry: Json = null;
+  let lastEntry: Json = null; // stays null when the cost-log is absent — fail safe
   const raw = world.files.readText(world.paths.costLog);
-  if (raw === null) {
-    lastEntry = null; // cost-log absent — fail safe
-  } else {
-    for (const rawLine of raw.split('\n')) {
-      const line = rawLine.trim();
-      if (!line) continue;
-      try {
-        const e = JSON.parse(line);
-        // Subagent lines are appended after the dispatching turn's main line
-        // (cost-tracker.ts) and carry their own small token count — the hygiene
-        // mechanisms want the main turn's context size, not a subagent's.
-        if (e && e.session_id === sessionId && e.subagent !== true) lastEntry = e;
-      } catch {}
-    }
+  for (const rawLine of raw?.split('\n') ?? []) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    try {
+      const e = JSON.parse(line);
+      // Subagent lines are appended after the dispatching turn's main line
+      // (cost-tracker.ts) and carry their own small token count — the hygiene
+      // mechanisms want the main turn's context size, not a subagent's.
+      if (e && e.session_id === sessionId && e.subagent !== true) lastEntry = e;
+    } catch {}
   }
   world.memo.costLogEntry = { sessionId, entry: lastEntry };
   return lastEntry;
@@ -989,7 +989,7 @@ export function maybeContextClear(config: Json, world: World = REAL_WORLD): Hygi
     applyContextReset(world.paths.hermitRoot, runtime, {
       kind: 'cleared',
       trigger: `watchdog-${Math.round(threshold / 1000)}k`,
-      hhmm: nowHHMM(config.timezone ?? 'UTC'),
+      hhmm: nowHHMM(config.timezone ?? 'UTC', new Date(world.clock.nowMs())),
       tokens: prompt,
     });
     world.tmux.send(sessionName, '/clear');
