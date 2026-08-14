@@ -52,7 +52,6 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 9. **Pending work** — Scan for:
    - `Glob` `.claude-code-hermit/proposals/PROP-*.md` (reuse step 8a's glob result if its `Otherwise` branch already ran it; otherwise run the `Glob` here) — read status from each, list any `pending` proposals. Exclude a `pending` proposal whose title starts with `[ha-update]` **only when the `Updates:` section is present** (it surfaces there instead); when step 8a omitted the `Updates:` section (skipped fetch or no updates pending), keep `[ha-update]` proposals in this list so they are not lost
    - Check if `.claude-code-hermit/sessions/NEXT-TASK.md` exists (queued task)
-   - Read `.claude-code-hermit/cost-summary.md` if it exists — include yesterday's cost
 
 <!-- keep in sync with plugins/claude-code-hermit/skills/brief/SKILL.md — same MP lifecycle protocol -->
 9a. **Micro-proposals lifecycle** — age the queue in one call: `.claude-code-hermit/bin/hermit-run proposal micro .claude-code-hermit brief-cycle`. This runs core's writer through the project-resident `bin/hermit-run`, which resolves core's plugin root (a static `../claude-code-hermit/…` path can't — HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/` and the version segment isn't knowable from skill text). It performs the whole `follow_up_count` 0/1/2+ lifecycle atomically (re-nudges count-1 entries, expires count-2+ entries, records each expiry, prunes any entry whose `status` isn't `"pending"`) and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…],"dropped":[…]}`. Never hand-edit `state/micro-proposals.json`. Render from that verdict:
@@ -109,13 +108,14 @@ Awaiting decision:
 - [Omit section entirely when the step-9a verdict's `new` and `renudged` are both empty.]
 
 Cost:
-- [yesterday's cost if available; cost-spike alert if flagged by reflect]
+- [cost-spike alert if flagged by reflect]
+- [Omit section entirely when no spike is flagged.]
 
 Today's priorities:
 - [from OPERATOR.md Current Priority, filtered to actionable items]
 ```
 
-Adapt the greeting and section headers to the operator's configured language. Keep the entire brief under 25 lines — strip lower-priority lines (e.g., Cost when no spike) if the Overnight section pushes over the cap. **`Awaiting decision:` lines are final and non-droppable** — strip from `Energy`, `Cost`, `Today's priorities`, and `Updates` (in that order) before touching MP lines.
+Adapt the greeting and section headers to the operator's configured language. Keep the entire brief under 25 lines — strip lower-priority lines if the Overnight section pushes over the cap. **`Awaiting decision:` lines are final and non-droppable** — strip from `Energy`, `Cost`, `Today's priorities`, and `Updates` (in that order) before touching MP lines.
 
 ## Delivery
 

@@ -8,7 +8,7 @@ Provide a concise executive summary of recent session activity. Designed for mor
 
 ## Always-On Delivery Rule
 
-If `config.always_on` is `true`, deliver all operator-facing output per `CLAUDE-APPEND.md § Operator Notification`. The terminal is unmonitored in always-on mode. For the push-fallback branch, condense the brief to a single line (per § Operator Notification push format): include whichever of yesterday's/today's cost, open proposal count, and active heartbeat alerts are present and non-zero; omit zero or unavailable fields. Example: `Brief: 16 proposals open, yesterday $0.42, 1 alert — open CC to view`. In interactive mode, output to terminal. This applies to all flags below.
+If `config.always_on` is `true`, deliver all operator-facing output per `CLAUDE-APPEND.md § Operator Notification`. The terminal is unmonitored in always-on mode. For the push-fallback branch, condense the brief to a single line (per § Operator Notification push format): include whichever of open proposal count and active heartbeat alerts are present and non-zero; omit zero or unavailable fields. Example: `Brief: 16 proposals open, 1 alert — open CC to view`. In interactive mode, output to terminal. This applies to all flags below.
 
 ## Dispatch
 
@@ -27,9 +27,9 @@ Before composing any brief, determine the dispatch mode:
 
 For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/brief/reference.md`. Pass in the dispatch prompt: `mode` (one of the values above), `today` (current ISO date), and for `morning` only: `context_recovery` (set to `true` if auto-memory seems sparse — new instance, fresh machine — `false` otherwise).
 
-**Boundary rule:** `sessions/SHELL.md` is the live session document — it stays in main, never goes to the runner. Archived `sessions/S-*-REPORT.md` bodies, `cost-summary.md`, `proposals/*.md` frontmatter, `OPERATOR.md`, and `NEXT-TASK.md` go to the runner.
+**Boundary rule:** `sessions/SHELL.md` is the live session document — it stays in main, never goes to the runner. Archived `sessions/S-*-REPORT.md` bodies, `proposals/*.md` frontmatter, `OPERATOR.md`, and `NEXT-TASK.md` go to the runner.
 
-**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md, `cost-report.ts today` output) and skip the runner-derived lines. Note nothing fatal to the operator.
+**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md) and skip the runner-derived lines. Note nothing fatal to the operator.
 
 **Eval runner return schema** — the runner returns a JSON object conforming to this block. The schema is byte-identical in `reference.md` (producer) and here (consumer); a contract test asserts this.
 
@@ -37,12 +37,10 @@ For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at 
 ```json
 {
   "report_summary": { "date": "<ISO>", "tags": ["<tag>"], "working_on": "<one-line>",
-                       "status": "<completed|partial|blocked>", "cost_line": "<$X.XX (N tokens)>",
-                       "next_start_point": "<text>" }|null,
+                       "status": "<completed|partial|blocked>", "next_start_point": "<text>" }|null,
   "sessions_today": [ { "session": "S-NNN", "summary": "<one-line>" } ],
   "findings": ["<text>"],
   "tomorrow": ["<text>"],
-  "cost_context": { "yesterday": "<text>"|null, "week": "<text>"|null, "all_time": "<text>"|null }|null,
   "pending_proposals": ["<PROP-NNN: title>"],
   "operator_priorities": ["<text>"],
   "queued_work": ["<text>"]
@@ -57,7 +55,6 @@ For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at 
 **Delivery:** Write the full composed brief text (before any push-fallback single-line condensing) to `.claude-code-hermit/state/last-brief.json` as `{"kind":"morning","text":"<brief text>","generated_at":"<now, ISO>"}`, so the dashboard's "latest brief" section can pick it up. Then refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md`; if it returns a URL, append a final line `📎 <url>`. Then deliver the brief to the operator (see Always-On Delivery Rule above).
 
 Emphasize forward-looking content. Compose from runner JSON (see Dispatch above) and live main-session data:
-- **Cost context:** use `runner.cost_context.yesterday`
 - **Pending proposals:** use `runner.pending_proposals`
 - **Operator priorities:** use `runner.operator_priorities`
 - **Queued work:** use `runner.queued_work`
@@ -80,7 +77,6 @@ After composing the morning brief, age the micro-proposal queue in one pass: run
 
 Emphasize backward-looking content. Compose from runner JSON (see Dispatch above) and live main-session data:
 - **Sessions today:** use `runner.sessions_today`; also note any progress in the current SHELL.md progress log (read SHELL.md in main **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**).
-- **Today's cost:** run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts today"` (live, in main) — do not use `cost-summary.md` for today's figure; it is only updated once per day and will be stale in always-on deployments.
 - **Key findings:** use `runner.findings`
 - **Tomorrow:** use `runner.tomorrow`
 - After generating summary: if `runtime.json session_state` is `in_progress` or SHELL.md has progress entries since last report, note it in the brief (e.g., "Session still open — run /session-close to archive.") and let the operator close explicitly. Exception: if `config.always_on` is `true` AND `config.routines` contains an enabled entry with `id` `daily-auto-close` (the midnight routine, which invokes `/claude-code-hermit:session-close --scheduled`), suppress the note — the auto-close routine archives it at midnight. Idle transitions are owned by the `session` skill and `scripts/session-archive.ts`; brief does not trigger them.
@@ -92,13 +88,12 @@ Current behavior — general purpose summary as described below.
 ## Plan
 
 1. Use `session_state` already read in the Dispatch step:
-   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using TaskList for Done/Next lines; produce the standard 5-line output. For the cost line, read `cost_usd` and `tokens` from `.claude-code-hermit/sessions/.status.json` (live per-session totals; fall back to `0`/`0` if missing) rather than the once-daily `cost-summary.md`. Scale the token suffix by magnitude — the same K/M/B convention as `scripts/lib/format.ts`'s `formatTokens` (raw integer under 1K, `K` under 1M, `M` under 1B, `B` beyond, promoting to the next tier when rounding would otherwise overflow to 1000 — e.g. 999999 tokens is `1.0M`, not `1000K`; one decimal place if the scaled value is under 100, otherwise round) — never assume `K`. Then read `.claude-code-hermit/state/alert-state.json`; if its `active` array is non-empty, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
-   - **1b. `idle` (no dispatch):** read SHELL.md **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. For the `Cumulative:` line, read `total_cost_usd` and `total_tokens` from `.claude-code-hermit/cost-summary.md` frontmatter (fall back to `0`/`0` if missing), scaling the token suffix by magnitude as above. Format as:
+   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using TaskList for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; if its `active` array is non-empty, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
+   - **1b. `idle` (no dispatch):** read SHELL.md **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Format as:
      ```
      [Brief] YYYY-MM-DD | idle | N tasks completed
      Session: since [start date]
      Last: [latest Session Summary entry] — [status]
-     Cumulative: $X.XX (N tokens) across N tasks
      Status: Idle — ready for what's next (run /claude-code-hermit:session-start to begin)
      ```
      Then check for auto-detected proposals (step after Output Format) and return.
@@ -112,7 +107,7 @@ Keep the output to 5 lines, plus an optional 6th line for pending proposals (see
 ```
 [Brief] YYYY-MM-DD | [tags if present]
 Working on: one-line description
-Status: completed/partial/blocked (X/Y tasks) | $cost spent (N tokens)
+Status: completed/partial/blocked (X/Y tasks)
 Done: step1, step2, step3
 Next: description of next action (or "Session complete" if all done)
 ```
@@ -131,4 +126,4 @@ Next: description of next action (or "Session complete" if all done)
 
 When invoked with "brief today", "daily summary", or "what happened today":
 
-Compose from runner JSON (mode: `daily`). For today's cost and token total, run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts today"` (live, in main). Use `runner.cost_context.week` and `runner.cost_context.all_time` for aggregates from `cost-summary.md`. Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done, cost, and proposals created/resolved.
+Compose from runner JSON (mode: `daily`). Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done and proposals created/resolved.

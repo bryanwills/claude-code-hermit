@@ -209,7 +209,7 @@ You run on your own Claude subscription — no per-runtime-hour billing — and 
 - **Per-call** token usage logged to `.claude/cost-log.jsonl` (model, input/output/cache split, USD estimate, and what triggered the turn — `heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, or interactive/unattributed `other`).
 - **Per-session** running total in `.status.json`; carried into archived session reports as frontmatter `cost_usd`.
 - **Per-day** rollup in `cost-summary.md`, regenerated on every cost-tracker tick.
-- **Morning brief** (when scheduled as a routine) reads `cost-summary.md` and includes yesterday's spend.
+- **On demand** through `/cost-reflect`, `/hermit-doctor`, and the dashboard, plus a one-line spend summary in the weekly review. Routine briefs and status replies stay outcome-only; spend interrupts them only when a cap is approached or breached.
 
 Because idle always-on cost is effectively zero, one Claude subscription can run several hermits at once.
 

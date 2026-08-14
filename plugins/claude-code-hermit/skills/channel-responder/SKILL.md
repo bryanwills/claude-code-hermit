@@ -115,7 +115,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - If nothing matches, say so briefly.
 
 - **Status request** ("what are you working on?", "status", "progress")
-  - If `session_state` (runtime.json) is `idle`: respond with session summary — tasks completed, cumulative cost, "ready for what's next"
+  - If `session_state` (runtime.json) is `idle`: respond with session summary — tasks completed, "ready for what's next"
   - If `session_state` is `in_progress`: respond with a concise summary of SHELL.md: task, current step, blockers
   - Keep it short — channel messages should be brief
 

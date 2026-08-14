@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `ha-morning-brief` renders its `Cost:` section only when `reflect` flags a cost spike, and omits it otherwise.
+
 ## [0.4.9] - 2026-08-14
 
 ### Changed

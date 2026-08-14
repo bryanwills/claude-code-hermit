@@ -1083,7 +1083,7 @@ Rota body.
     expect(r.stdout.length).toBeLessThanOrEqual(1200);
     expect(r.stdout).toContain('---Compaction Pointers---');
     for (const banned of ['---Operator Context (OPERATOR.md)---', '---Active Session---', '---Compiled Knowledge---',
-      '---Schema Drift---', '---Storage Drift---', '---Session Cost---', '---Last Report---', '---Upgrade Check---']) {
+      '---Schema Drift---', '---Storage Drift---', '---Last Report---', '---Upgrade Check---']) {
       expect(r.stdout).not.toContain(banned);
     }
   }));
@@ -1185,7 +1185,22 @@ Rota body.
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain('---Last Report---');
     expect(r.stdout).toContain('---Active Session---');
-    expect(r.stdout).toContain('---Session Cost---');
+  }));
+
+  // Spend telemetry stays out of the injected context on every source: routine
+  // comms report outcomes, and cost detail is on-demand (cost-reflect, doctor,
+  // dashboard) or exception-driven (budget alerts).
+  test('startup-context (live .status.json → no Session Cost section, any source)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', '.status.json'),
+      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000,"operator_turns":3}');
+    for (const source of ['startup', 'resume']) {
+      const r = await runScript('startup-context.ts', {
+        cwd: dir, env: ENV, stdin: JSON.stringify({ source, session_id: 'x' }),
+      });
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('---Session Cost---');
+      expect(r.stdout).not.toContain('698.78');
+    }
   }));
 
   test('startup-context (source=resume, no actionable SHELL.md → Last Report still emitted)', withDir(async (dir) => {

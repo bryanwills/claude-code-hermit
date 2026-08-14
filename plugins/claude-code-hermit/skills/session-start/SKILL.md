@@ -132,7 +132,7 @@ All state lives under `.claude-code-hermit/` in the project root.
    - If the session status is `blocked`: suggest running `/debug` to diagnose tool/hook failures before re-attempting the blocked work
    - Ask the operator if they want to continue the current task or start a new one
 9b. If resuming an idle session (runtime.json `session_state` is `idle`):
-   - Show session continuity info: tasks completed, session duration, cumulative cost
+   - Show session continuity info: tasks completed, session duration
    - Ask: "What should I work on next?" (unless a NEXT-TASK.md was accepted in step 6)
    - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. After confirming the plan, create native Tasks for each step.
 10. If starting a new session:
