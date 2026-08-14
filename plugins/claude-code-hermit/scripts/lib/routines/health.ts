@@ -13,7 +13,7 @@
 import path from 'node:path';
 import { hermitDir as resolveHermitDir, costLogPath } from '../cc-compat';
 import { scanRoutineCostWindow } from '../cost-log';
-import { readRoutineHistory, type RoutineHistoryEntry } from './history';
+import { emptyEntry, readRoutineHistory, type RoutineHistoryEntry } from './history';
 
 const USAGE = 'Usage: routines.ts health [hermit-dir] [--days N]';
 const DEFAULT_DAYS = 14;
@@ -53,10 +53,7 @@ export function buildRoutineHealth(
   const ids = new Set<string>([...history.routines.map((r) => r.id), ...perRoutine.keys()]);
   const byId = new Map(history.routines.map((r) => [r.id, r]));
   const routines: RoutineHealthRow[] = [...ids].sort((a, b) => a.localeCompare(b)).map((id) => {
-    const entry = byId.get(id) || {
-      id, fires: 0, failures: {}, failure_total: 0, incomplete: 0,
-      orphan_terminals: 0, open_attempt: false, skips: 0, last_fire: null,
-    };
+    const entry = byId.get(id) || emptyEntry(id);
     return { ...entry, cost_usd: round4(perRoutine.get(id) || 0) };
   });
 

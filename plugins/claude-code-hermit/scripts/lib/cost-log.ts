@@ -24,7 +24,11 @@
 // tz-aware bucketing — bumped so a v2 index (UTC-only by_date) rebuilds cleanly rather than
 // mixing UTC and tz-local keys.
 //
-// Sole writer: cost-tracker.ts (calls updateCostIndex after every log append).
+// Writers: cost-tracker.ts (Stop hook) and subagent-cost.ts (SubagentStop hook) — each calls
+// updateCostIndex right after its own log append, so an async subagent row does not sit
+// outside the index until the next Stop turn. Both writes are offset-based folds promoted
+// via a pid-suffixed tmp + rename, so a race between them is last-writer-wins over a
+// self-consistent {byte_offset, totals} pair, never a torn file or a double count.
 // Readers: cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts.
 
 import fs from 'node:fs';

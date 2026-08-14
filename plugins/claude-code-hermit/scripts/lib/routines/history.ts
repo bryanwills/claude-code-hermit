@@ -31,7 +31,12 @@ export type RoutineHistoryEntry = {
   incomplete: number;
   /** Terminals that arrived with no attempt open — never invents a start. */
   orphan_terminals: number;
-  /** An attempt was open at the end of the window (may still be running). */
+  /**
+   * An attempt that opened *inside* the window was still open at its end (may
+   * still be running). A `started` left dangling from before the window is not
+   * reported: it is not evidence about this window, and surfacing it would put a
+   * routine whose last activity predates the window by months into the digest.
+   */
   open_attempt: boolean;
   /** `skipped-*` rows: the routine was due but gated, so no attempt was made. */
   skips: number;
@@ -47,7 +52,8 @@ export type RoutineHistory = {
 
 type ParsedRow = { ts: number; tsRaw: string; id: string; event: string; seq: number };
 
-function emptyEntry(id: string): RoutineHistoryEntry {
+/** A routine with no events yet. Also used by health.ts for a cost-only routine. */
+export function emptyEntry(id: string): RoutineHistoryEntry {
   return {
     id,
     fires: 0,
@@ -109,7 +115,9 @@ export function foldRoutineHistory(
 ): Omit<RoutineHistory, 'source'> {
   const { rows, malformed } = parseRows(lines);
   const entries = new Map<string, RoutineHistoryEntry>();
-  const open = new Map<string, boolean>();
+  // routine id → ts of the attempt currently open, so the tail below can tell an
+  // attempt that opened in-window from a `started` left dangling long before it.
+  const open = new Map<string, number>();
   const touched = new Set<string>();
 
   const entryFor = (id: string): RoutineHistoryEntry => {
@@ -128,16 +136,16 @@ export function foldRoutineHistory(
       // A second `started` with the previous attempt still open means the first
       // one never reached `finish`. That is the signal the old subtraction was
       // reaching for, measured directly.
-      if (open.get(row.id) && inWindow) entry.incomplete += 1;
-      open.set(row.id, true);
+      if (open.has(row.id) && inWindow) entry.incomplete += 1;
+      open.set(row.id, row.ts);
       continue;
     }
 
     const isFired = row.event === 'fired';
     const isFailure = row.event.startsWith('failed-');
     if (isFired || isFailure) {
-      const wasOpen = !!open.get(row.id);
-      open.set(row.id, false);
+      const wasOpen = open.has(row.id);
+      open.delete(row.id);
       if (!inWindow) continue;
       if (!wasOpen) entry.orphan_terminals += 1;
       if (isFired) {
@@ -156,8 +164,13 @@ export function foldRoutineHistory(
     if (inWindow && row.event.startsWith('skipped-')) entry.skips += 1;
   }
 
-  for (const [id, isOpen] of open) {
-    if (isOpen) { entryFor(id).open_attempt = true; touched.add(id); }
+  // Only an attempt that OPENED in-window is reported as open — see
+  // RoutineHistoryEntry.open_attempt above for why a pre-window dangling `started`
+  // is excluded.
+  for (const [id, openedAt] of open) {
+    if (openedAt < sinceMs) continue;
+    entryFor(id).open_attempt = true;
+    touched.add(id);
   }
 
   const routines = [...entries.values()]

@@ -114,6 +114,17 @@ describe('foldRoutineHistory — attempt lifecycle', () => {
     ]).routines).toHaveLength(0);
   });
 
+  test('a started left dangling before the window is not reported as open', () => {
+    // A routine that crashed months ago and was then disabled has no activity in
+    // this window at all; reporting it would assert it "may still be running".
+    expect(fold([row('brief', 'started', daysAgo(200))]).routines).toHaveLength(0);
+  });
+
+  test('a dangling pre-window started still marks the next attempt incomplete', () => {
+    const e = only([row('brief', 'started', daysAgo(20)), row('brief', 'started', daysAgo(1))]);
+    expect(e).toMatchObject({ incomplete: 1, open_attempt: true });
+  });
+
   test('future-stamped rows are ignored', () => {
     expect(fold([row('brief', 'fired', new Date(NOW + DAY).toISOString())]).routines).toHaveLength(0);
   });
