@@ -20,18 +20,23 @@ function isUnder(child: string, parent: string): boolean {
 }
 
 async function main() {
-  if ((process.env.WORKTREE_GUARD || '').trim().toLowerCase() === 'off') process.exit(0);
+  const guardOff = (process.env.WORKTREE_GUARD || '').trim().toLowerCase() === 'off';
 
   // Drain stdin to completion (avoids broken-pipe errors) with a size cap: past
-  // the cap we stop buffering but keep consuming to EOF.
+  // the cap we stop buffering but keep consuming to EOF. This runs BEFORE the
+  // WORKTREE_GUARD gate — exiting on the env switch without reading would leave
+  // the pipe half-read for any payload larger than the pipe buffer. When the
+  // guard is off the payload is never parsed, so consume without buffering.
   const chunks: Buffer[] = [];
   let total = 0;
   let oversize = false;
   for await (const chunk of process.stdin) {
+    if (guardOff) continue;
     total += chunk.length;
     if (total > MAX_STDIN) { oversize = true; continue; }
     chunks.push(chunk);
   }
+  if (guardOff) process.exit(0);
   if (oversize) process.exit(0);
   const raw = Buffer.concat(chunks).toString('utf-8').trim();
   if (!raw) process.exit(0);
@@ -73,4 +78,4 @@ async function main() {
   process.exit(0);
 }
 
-main();
+main().catch(() => process.exit(0));

@@ -161,7 +161,11 @@ afterAll(() => {
  * Clean env (PATH/HOME only) so an ambient AGENT_HOOK_PROFILE or HOMEASSISTANT_*
  * on the dev box cannot change a verdict.
  */
-async function feed(scriptRel: string, payloadFile: string): Promise<{ writer: number; hook: number }> {
+async function feed(
+  scriptRel: string,
+  payloadFile: string,
+  extraEnv: Record<string, string> = {},
+): Promise<{ writer: number; hook: number }> {
   const proc = Bun.spawn({
     cmd: [
       'bash',
@@ -172,7 +176,7 @@ async function feed(scriptRel: string, payloadFile: string): Promise<{ writer: n
       path.join(ROOT, scriptRel),
     ],
     cwd: sandbox,
-    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' },
+    env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...extraEnv },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -209,6 +213,18 @@ for (const spec of SPECS) {
   });
 }
 
+// A hook's own disable switch must not become a mid-stream exit: the guard is
+// off, but the pipe still has to be drained or the writer takes SIGPIPE.
+test('dev/worktree-boundary-guard drains stdin even with WORKTREE_GUARD=off', async () => {
+  const r = await feed(
+    'plugins/claude-code-dev-hermit/scripts/worktree-boundary-guard.ts',
+    payloadFiles.get(`oversize ${MAX_HOOK_STDIN * 2} bytes, unparseable`)!,
+    { WORKTREE_GUARD: 'off' },
+  );
+  expect(r.hook).toBe(0);
+  expect(r.writer).toBe(0);
+});
+
 test('the corpus covers every fleet hook registered in a hooks.json', () => {
   // Auto-discovery keeps SPECS honest in BOTH directions. Hardcoded plugin
   // lists went stale twice before (see domain-hatch.contract.test.ts) — derive
@@ -225,7 +241,12 @@ test('the corpus covers every fleet hook registered in a hooks.json', () => {
     }
     for (const entry of JSON.parse(raw)?.hooks?.PreToolUse ?? []) {
       for (const hook of entry.hooks ?? []) {
-        const script = (hook.args ?? []).find((a: string) => a.endsWith('.ts'));
+        // Both registration forms: `args: [".../gate.ts"]` and an inline
+        // `command: "bun .../gate.ts"` (core's hooks.json already uses the
+        // inline form elsewhere). Reading only `args` would let a gate
+        // registered the other way silently skip the corpus.
+        const candidates: string[] = [...(hook.args ?? []), ...String(hook.command ?? '').split(/\s+/)];
+        const script = candidates.find(a => a.endsWith('.ts'));
         if (script) registeredPreToolUse.add(`${slug}:${script.split('/').pop()}`);
       }
     }

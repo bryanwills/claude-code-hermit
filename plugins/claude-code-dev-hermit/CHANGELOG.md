@@ -5,6 +5,8 @@
 ### Fixed
 - `git-push-guard`, `worktree-boundary-guard`, and `record-test-result` exited mid-stream on stdin past their 1MB cap, leaving the pipe half-read; they now stop buffering but keep consuming to EOF before failing open.
 - `record-test-result` crashed with exit 1 on a valid-JSON payload that is not an object (`null`), instead of failing open.
+- `worktree-boundary-guard` exited on `WORKTREE_GUARD=off` before reading stdin, so disabling the guard broke the pipe on any payload larger than the pipe buffer; the drain now runs before the switch is honored.
+- All three hooks exited 1 on an unhandled stdin stream error; `main()` now catches and exits 0.
 
 ## [0.4.8] - 2026-07-26
 
