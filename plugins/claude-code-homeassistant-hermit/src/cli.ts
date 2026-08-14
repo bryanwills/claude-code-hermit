@@ -1730,8 +1730,7 @@ const HA_HELP = `${HA_USAGE}
 
 positional arguments:
   {${HA_COMMANDS.join(',')}}
-${Object.values(COMMANDS)
-  .map((record) => record.help)
+${HA_COMMANDS.map((cmd) => COMMANDS[`ha ${cmd}`].help)
   .filter(Boolean)
   .join('\n')}
 

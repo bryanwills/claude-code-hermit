@@ -20,6 +20,12 @@ test('every record is complete and self-consistent', () => {
     expect(typeof record.spec.flags).toBe('object');
     expect(typeof record.help).toBe('string');
     expect(typeof record.run).toBe('function');
+    // A help block, when present, must describe its own command: argparse
+    // opens the block with the command name in the description column.
+    if (record.help) {
+      const name = key.slice(key.indexOf(' ') + 1);
+      expect(record.help.split('\n')[0]!.startsWith(`    ${name}`)).toBe(true);
+    }
   }
 });
 
