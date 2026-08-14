@@ -42,6 +42,7 @@ import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
+import { lastRoutineFire } from './lib/routines/history';
 
 type Json = any;
 
@@ -317,23 +318,8 @@ function getOperatorLastActionAgeSecs(): number | null {
  * Returns null when the file is absent or no matching event exists.
  */
 function getLastRoutineFiredAgeSecs(routineId: string): number | null {
-  let lastTs: string | null = null;
-  let lines: string[];
-  try {
-    lines = fs.readFileSync(ROUTINE_METRICS_JSONL, 'utf-8').split('\n');
-  } catch {
-    return null;
-  }
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    try {
-      const e = JSON.parse(line);
-      if (e && e.routine_id === routineId && e.event === 'fired') lastTs = e.ts;
-    } catch {}
-  }
-  if (!lastTs) return null;
-  return ageSecs(lastTs);
+  const lastTs = lastRoutineFire(ROUTINE_METRICS_JSONL, routineId);
+  return lastTs ? ageSecs(lastTs) : null;
 }
 
 function checkProcessRunning(pattern: string): boolean {

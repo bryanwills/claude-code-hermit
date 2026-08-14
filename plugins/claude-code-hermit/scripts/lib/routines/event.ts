@@ -2,15 +2,17 @@
 // state/routine-metrics.jsonl. Events: fired | skipped-waiting | skipped-paused |
 // started. delivery: cron-create (default) | monitor.
 //
-// Ported from log-routine-event.sh. The emitted line is byte-identical to the
-// shell version — same key order, same UTC second-precision stamp — because
-// cost attribution, the doctor's routine-cost check, and several tests match on
-// the literal `"routine_id":"<id>","event":"<e>"` substring.
+// Ported from log-routine-event.sh, and still emitting the same four keys with
+// the same UTC second-precision stamp. The row shape is pinned (tests assert it,
+// and run-record.ts exists because of it), but only the shape — no consumer reads
+// the serialized byte order any more. Cost attribution moved to the cost log's
+// v2 rows, and the doctor's routine-cost check went with it.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { utcISOStamp } from '../time';
 import { appendJsonlLine } from '../append-jsonl';
+import { lastRoutineEvent } from './history';
 
 // Deliberately not an enum check: the shell version accepted any event string,
 // and rejecting one here would refuse input that used to be recorded.
@@ -53,14 +55,9 @@ export function logRoutineEvent(
   // second `fired` with no intervening `started`. The prompt always logs
   // `started` immediately before `fired`, so a `fired` whose latest same-routine
   // event is already `fired` can only be the spurious re-trigger.
-  if (event === 'fired') {
-    try {
-      const needle = `"routine_id":"${id}"`;
-      const matching = fs.readFileSync(metrics, 'utf8').split('\n').filter(l => l.includes(needle));
-      const last = matching[matching.length - 1];
-      if (last && last.includes('"event":"fired"')) return null; // suppressed re-trigger
-    } catch { /* no ledger yet — nothing to dedup against */ }
-  }
+  // A missing or unreadable ledger reads as "no prior event", so nothing is
+  // suppressed — same fail-open behavior as the inline scan this replaced.
+  if (event === 'fired' && lastRoutineEvent(metrics, id) === 'fired') return null;
 
   return appendJsonlLine(
     metrics,

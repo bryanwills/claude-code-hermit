@@ -15,9 +15,9 @@
 //
 // The failure reason is encoded in the event string (failed-artifact-missing, …)
 // rather than a separate column, because routine-metrics.jsonl's row shape is
-// pinned to four keys. Any non-`fired` terminal event widens reflect's existing
-// `started − fired` gap, so the errored-routine diagnostic picks these up with
-// no change to its arithmetic.
+// pinned to four keys. lib/routines/history.ts folds these into typed per-reason
+// failure counts, so a contract miss reads as its own outcome rather than as an
+// unexplained gap.
 //
 // Fail-closed on declared contracts, fail-open otherwise: a routine with no
 // artifact contract keeps the legacy unconditional `fired`, while a routine that

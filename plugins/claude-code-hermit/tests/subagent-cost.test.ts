@@ -338,3 +338,40 @@ describe('subagent-cost: routine dispatch source attribution', () => {
 
   test('source is routine:daily-brief', () => expect(rows[0].source).toBe('routine:daily-brief'));
 });
+
+describe('subagent-cost: the appended row reaches cost-index.json', () => {
+  // Regression: the hook used to append and exit, leaving the index behind the log.
+  // readCostIndex validates only the schema version, so every index reader
+  // (dashboard, report-export, spend-status, doctor) under-reported the spend
+  // until the next Stop hook happened to run — indefinitely on a hermit that
+  // dispatches async work and then goes idle.
+  let layout: Layout;
+  let index: any;
+
+  beforeAll(async () => {
+    layout = buildLayout();
+    fs.writeFileSync(layout.subagentTranscriptPath, [
+      assistantEntry('claude-sonnet-4-6', 1000, 400),
+    ].join('\n') + '\n');
+    fs.writeFileSync(layout.parentTranscriptPath, [
+      triggerPrompt('do the thing'),
+      asyncLaunchEntry(layout.agentId, 'claude-sonnet-4-6'),
+    ].join('\n') + '\n');
+    await runHookAndReadLog(layout);
+    const indexPath = path.join(layout.root, '.claude-code-hermit', 'state', 'cost-index.json');
+    index = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, 'utf-8')) : null;
+  });
+
+  afterAll(() => fs.rmSync(layout.root, { recursive: true }));
+
+  test('an index exists after the append', () => expect(index).not.toBeNull());
+
+  test('the index total covers the appended row', () => {
+    expect(index.total_cost_usd).toBeGreaterThan(0);
+    expect(index.total_tokens).toBe(1400);
+  });
+
+  test('the index byte_offset has caught up with the log', () => {
+    expect(index.byte_offset).toBe(fs.statSync(layout.logPath).size);
+  });
+});

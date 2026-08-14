@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `routines.ts health [hermit-dir] [--days N]` prints a bounded JSON routine-health digest: per-routine fires, typed `failed-*` counts, abandoned attempts, orphan terminals, skips, last fire, and windowed cost, plus a `source` status and the unattributable `routine:multi` co-fire spend. `reflect` and `hermit-evolution` consume it instead of tailing and hand-parsing the ledgers.
+- `scripts/lib/routines/history.ts` folds `routine-metrics.jsonl` into per-routine attempt state (`started` opens, `fired`/`failed-*` close, a second `started` abandons), time-windowed rather than line-capped, counting malformed rows separately.
+- Typed cost-row builders in `scripts/lib/cost-log.ts` own the main and subagent record shapes for all three writers, preserving the presence-vs-absence semantics of `observed_at`, `source_inherited`, and the subagent fields.
+
+### Changed
+- `reflect`'s errored-routine detection replaces `errored = started − fired` with the attempt fold. A crash (`incomplete`) and a missed `expect_artifact` contract (`failures`) are now separate findings with separate wording, and an attempt still running at the window edge no longer reads as a failure.
+- `reflect` no longer computes a channel-engagement ratio. `channel-replies.jsonl` records outbound hermit sends only, so the metric measured how often the hermit spoke twice, not whether the operator engaged. Routine ROI now cites the routine's measured cost instead. Restoring an engagement signal needs producer-side `routine_id` correlation that does not exist yet.
+- The `fired` dedup guard in `lib/routines/event.ts` matches parsed fields instead of a `"event":"fired"` substring, so JSON key order is no longer load-bearing for correctness. The row shape is unchanged.
+
+### Fixed
+- Async subagent cost rows now advance `cost-index.json`. `subagent-cost.ts` appended and exited, and `readCostIndex` validates only the schema version, so the dashboard, telemetry export, spend-status and doctor under-reported that spend until the next Stop hook — indefinitely on a hermit that dispatches async work and then goes idle. Budget enforcement was never affected.
+- `reflect`'s routine cost-per-day summed a `cost` field filtered on `ts`; cost rows carry `estimated_cost_usd` and `timestamp`, so every routine's spend evidence resolved to ~$0.
+- `hermit-evolution` read `routine-metrics.jsonl` raw with no bound at all, pulling the whole ledger into the runner's context.
+
 ## [1.2.38] - 2026-08-12
 
 ### Added

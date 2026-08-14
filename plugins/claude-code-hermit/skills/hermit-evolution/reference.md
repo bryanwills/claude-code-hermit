@@ -27,8 +27,9 @@ Steps are independent — read files and run scripts concurrently where possible
    gracefully if unavailable.
 6. `.claude-code-hermit/config.json` — read `routines[]` (id, schedule, enabled), `monitors[]`
    (id, enabled), `heartbeat.every`.
-7. `.claude-code-hermit/state/routine-metrics.jsonl` — count entries where `event == "fired"` per
-   `routine_id` where `ts` is within the last 30 days.
+7. Run `bun <plugin_root>/scripts/routines.ts health .claude-code-hermit --days 30` and capture
+   stdout — one JSON object with per-routine `fires`, `failures`, `incomplete`, `cost_usd` and a
+   `source` status. Skip gracefully if unavailable. Do not read `routine-metrics.jsonl` directly.
 8. `.claude-code-hermit/sessions/S-NNN-REPORT.md` files for the last 30 days — read Artifacts and
    Changed sections plus `proposals_created` and `operator_turns` frontmatter. List filenames in
    `.claude-code-hermit/compiled/` created in the last 30 days.
@@ -54,8 +55,8 @@ for proposals resolved in the last 30 days. From step 4 output, show the accepta
 table (rows with n>0 only). Note any triggered kill gates.
 
 **Routines & watches:** From config.json, list enabled routines with their `schedule` cron
-string. Cross-reference routine-metrics.jsonl to show fire counts for the last 30 days. List
-enabled monitors and heartbeat cadence. Omit disabled entries.
+string. Use the step 7 output for 30-day fire counts, and flag any routine whose `incomplete` or
+`failure_total` is non-zero. List enabled monitors and heartbeat cadence. Omit disabled entries.
 
 **Top-3 produced (inferred):** From step 8, rank outputs by operator signal — prefer: (1)
 proposals accepted or resolved, (2) compiled outputs cited in sessions with `operator_turns > 0`,

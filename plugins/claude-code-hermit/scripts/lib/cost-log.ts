@@ -341,6 +341,153 @@ function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; run
   return totals;
 }
 
+// ---------------------------------------------------------------------------
+// Row construction. The two shapes below are the record schema this module's
+// header claims to own; they used to be object literals at the three append
+// sites, and the subagent shape was spelled out twice (cost-tracker's sync path
+// and subagent-cost's async hook) with no test tying the copies together.
+//
+// Optional keys are spread, never set to a falsy default: consumers distinguish
+// "field absent" (a row written before the field existed, or a turn it does not
+// apply to) from "field present and zero". `observed_at`, `source_inherited`,
+// `model_unpriced` and `max_prompt_tokens` all carry that distinction — see
+// cost-tracker's duplicate guard and the hygiene readers.
+// ---------------------------------------------------------------------------
+
+type MainCostObservation = {
+  timestamp?: string;
+  sessionId: string;
+  source: string;
+  model: string;
+  inputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  apiCalls: number;
+  maxPromptTokens: number;
+  /** Absent on rows written before the field existed — never defaulted. */
+  observedAt?: string | null;
+  lastCallPromptTokens: number;
+  contextUsage: Json;
+  estimatedCostUsd: number;
+  modelUnpriced: boolean;
+  /** Only stamped when the source came from a dispatch hop, never as `false`. */
+  sourceInherited?: boolean;
+};
+
+type SubagentCostObservation = {
+  timestamp?: string;
+  sessionId: string;
+  source: string;
+  model: string;
+  inputTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  agentType: string;
+  /** false → the transcript carried no model; `model` is a sonnet-default guess. */
+  modelResolved: boolean;
+  estimatedCostUsd: number;
+};
+
+function buildMainCostRow(o: MainCostObservation): Json {
+  return {
+    timestamp: o.timestamp ?? new Date().toISOString(),
+    session_id: o.sessionId,
+    source: o.source,
+    model: o.model,
+    input_tokens: o.inputTokens,
+    cache_write_tokens: o.cacheWriteTokens,
+    cache_read_tokens: o.cacheReadTokens,
+    output_tokens: o.outputTokens,
+    total_tokens: o.totalTokens,
+    api_calls: o.apiCalls,
+    max_prompt_tokens: o.maxPromptTokens,
+    ...(o.observedAt ? { observed_at: o.observedAt } : {}),
+    last_call_prompt_tokens: o.lastCallPromptTokens,
+    context_usage: o.contextUsage,
+    estimated_cost_usd: o.estimatedCostUsd,
+    model_unpriced: o.modelUnpriced,
+    source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
+    ...(o.sourceInherited ? { source_inherited: true } : {}),
+  };
+}
+
+function buildSubagentCostRow(o: SubagentCostObservation): Json {
+  return {
+    timestamp: o.timestamp ?? new Date().toISOString(),
+    session_id: o.sessionId,
+    source: o.source,
+    model: o.model,
+    input_tokens: o.inputTokens,
+    cache_write_tokens: o.cacheWriteTokens,
+    cache_read_tokens: o.cacheReadTokens,
+    output_tokens: o.outputTokens,
+    total_tokens: o.totalTokens,
+    api_calls: 0,
+    subagent: true,
+    agent_type: o.agentType,
+    model_resolved: o.modelResolved,
+    context_usage: null,
+    estimated_cost_usd: o.estimatedCostUsd,
+    source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
+  };
+}
+
+/**
+ * Appends rows in one write. Order matters: a turn's main row precedes the
+ * subagent rows it dispatched, which is what the watchdog's newest-main-row
+ * lookup and cost-tracker's duplicate guard both assume.
+ */
+function appendCostRows(costLogFile: string, rows: Json[]): void {
+  if (!rows.length) return;
+  fs.appendFileSync(costLogFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+}
+
+// Per-routine cost inside a time window, for the routine-health digest.
+//
+// Distinct from scanRoutineLedger, which is lifetime-scoped and covers every source
+// for the doctor's $/run check. This one is windowed, routine-only, and keeps the
+// co-fire bucket separate: `routine:multi` is what trigger-source.ts writes when one
+// wake serves two or more routines, so that spend is real but unattributable to any
+// single routine — folding it into a per-routine total would invent an attribution
+// the ledger deliberately refused to make.
+//
+// Same v2-only population as scanRoutineLedger: earlier rows' `source` could be set
+// by any tool output that merely named a routine id.
+function scanRoutineCostWindow(costLogFile: string, sinceMs: number, asOfMs: number): {
+  perRoutine: Map<string, number>;
+  multi: number;
+} {
+  const perRoutine = new Map<string, number>();
+  let multi = 0;
+  if (!fs.existsSync(costLogFile)) return { perRoutine, multi };
+  let lines: string[];
+  try {
+    lines = fs.readFileSync(costLogFile, 'utf8').split('\n');
+  } catch {
+    return { perRoutine, multi };
+  }
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      if (e.source_attribution_version !== SOURCE_ATTRIBUTION_VERSION) continue;
+      const src = e.source;
+      if (typeof src !== 'string' || !src.startsWith('routine:')) continue;
+      const ts = typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : NaN;
+      if (isNaN(ts) || ts < sinceMs || ts > asOfMs) continue;
+      const cost = e.estimated_cost_usd || 0;
+      if (src === 'routine:multi') { multi += cost; continue; }
+      const id = src.slice('routine:'.length);
+      perRoutine.set(id, (perRoutine.get(id) || 0) + cost);
+    } catch { /* skip corrupt lines — checkCost already surfaces corruption */ }
+  }
+  return { perRoutine, multi };
+}
+
 // Counts JSONL lines flagged model_unpriced:true (cost-tracker.ts marks a turn this way
 // when the raw model string didn't match any known haiku/sonnet/opus substring — still
 // priced at sonnet rates, but flagged so the drift is auditable). Mirrors scanAutomatedOpus's
@@ -399,4 +546,5 @@ function scanCostLogWarnings(costLogFile: string, sinceDateInclusive: string, ti
   return { opusWake, unpriced };
 }
 
-export { costIndexPath, readCostIndex, computeIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanCostLogWarnings, scanRoutineLedger, SOURCE_ATTRIBUTION_VERSION };
+export { costIndexPath, readCostIndex, computeIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanCostLogWarnings, scanRoutineLedger, scanRoutineCostWindow, buildMainCostRow, buildSubagentCostRow, appendCostRows, SOURCE_ATTRIBUTION_VERSION };
+export type { MainCostObservation, SubagentCostObservation };
