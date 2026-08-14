@@ -92,9 +92,14 @@ export function run(args: string[]): void {
     }
   }
 
+  // A relative argv is NOT resolved against the process cwd: both documented
+  // callers pass the relative `.claude-code-hermit`, and a `cd` earlier in the
+  // session would silently point that at a nonexistent ledger — `source:
+  // missing`, which the skills read as "nothing to report". Same treatment as
+  // weekly-review.ts's hermit arg.
   let hermit: string;
   try {
-    hermit = dir ? path.resolve(dir) : resolveHermitDir();
+    hermit = dir && path.isAbsolute(dir) ? dir : resolveHermitDir();
   } catch {
     process.stderr.write('routines.ts health: could not resolve the hermit state dir\n');
     process.exit(1);

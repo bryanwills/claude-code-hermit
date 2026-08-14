@@ -3123,3 +3123,31 @@ describe('stale plugin runtime header', () => {
     expect(brief).toContain(HEADER);
   });
 });
+
+describe('worktree state-dir template contract', () => {
+  // config.json must ride into a `claude --worktree` copy: dev-hermit's /dev-pr
+  // reads commands.pr_create from it (Gate 0 hard-fails without it) and
+  // /dev-quality reads commands.test. Both resolvers' comments (dev's
+  // find-hermit-dir.ts, core's routines/event.ts) already assert this block
+  // carries it, so a regression here silently makes those comments false.
+  const block = read(path.join(TEMPLATES, 'WORKTREEINCLUDE-APPEND.txt'));
+  const CONFIG_LINE = '.claude-code-hermit/config.json';
+
+  test('managed block carries OPERATOR.md, config.json and compiled/, in that order', () => {
+    const operator = block.indexOf('.claude-code-hermit/OPERATOR.md');
+    const config = block.indexOf(CONFIG_LINE);
+    const compiled = block.indexOf('.claude-code-hermit/compiled/');
+    expect(operator).toBeGreaterThan(-1);
+    expect(config).toBeGreaterThan(operator);
+    expect(compiled).toBeGreaterThan(config);
+  });
+
+  test('config.json sits inside the managed markers', () => {
+    const open = block.indexOf('# >>> claude-code-hermit');
+    const close = block.indexOf('# <<< claude-code-hermit');
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(open);
+    expect(block.indexOf(CONFIG_LINE)).toBeGreaterThan(open);
+    expect(block.indexOf(CONFIG_LINE)).toBeLessThan(close);
+  });
+});

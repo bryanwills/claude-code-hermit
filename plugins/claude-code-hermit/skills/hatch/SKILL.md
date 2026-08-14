@@ -485,7 +485,7 @@ Read the template. Determine which lines are missing from the project's `.gitign
 
 Use `${CLAUDE_SKILL_DIR}/../../state-templates/WORKTREEINCLUDE-APPEND.txt`.
 
-The file contains a managed block bounded by marker comments (`# >>> claude-code-hermit ...` / `# <<< claude-code-hermit >>>`). This block carries read-only hermit context (OPERATOR.md, compiled/) into `claude --worktree` worktrees. **Write it unconditionally — no git-repo gate.** A `.worktreeinclude` in a non-git project is harmless and ready when the operator later runs `git init`.
+The file contains a managed block bounded by marker comments (`# >>> claude-code-hermit ...` / `# <<< claude-code-hermit >>>`). This block carries read-only hermit context (OPERATOR.md, config.json, compiled/) into `claude --worktree` worktrees; `config.json` is there because the dev hermit's `/dev-pr` and `/dev-quality` read `commands.*` from it inside the worktree. **Write it unconditionally — no git-repo gate.** A `.worktreeinclude` in a non-git project is harmless and ready when the operator later runs `git init`.
 
 - If `.worktreeinclude` is absent: show the operator the template that will be written, and ask with `AskUserQuestion` (header: "Create .worktreeinclude") — options: **Yes — create** (default) / **No — skip**. Create only if confirmed.
 - If `.worktreeinclude` exists and the `# >>> claude-code-hermit` marker is already present: skip silently.

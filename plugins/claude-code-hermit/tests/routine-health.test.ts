@@ -8,7 +8,7 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { withDir } from './helpers/workdir';
+import { withDir, writeConfig } from './helpers/workdir';
 import { runScript } from './helpers/run';
 import { foldRoutineHistory, readRoutineHistory, lastRoutineFire } from '../scripts/lib/routines/history';
 import { buildRoutineHealth } from '../scripts/lib/routines/health';
@@ -285,4 +285,58 @@ describe('routines.ts health — CLI', () => {
     const r = await runScript('routines.ts', { args: ['health', '--bogus'], cwd: process.cwd() });
     expect(r.exitCode).toBe(1);
   });
+});
+
+// Both documented callers (skills/reflect/reference.md, skills/hermit-evolution/
+// reference.md) pass the relative `.claude-code-hermit`, and a `cd` earlier in the
+// session moves what that resolves to. Resolving it against the process cwd made
+// the reader report `source: missing`, which both skills treat as "emit no
+// candidates" — a silent skip, not a visible failure. Same drift class as the
+// writer paths fixed in 1fc2642c.
+describe('routines.ts health — cwd drift', () => {
+  /** Fixture root with a hatched hermit, plus a nested cwd to run from. */
+  function drifted(dir: string): string {
+    writeConfig(dir, {});
+    writeMetrics(dir, [row('brief', 'started', daysAgo(1)), row('brief', 'fired', daysAgo(1))]);
+    const nested = path.join(dir, 'packages', 'app');
+    fs.mkdirSync(nested, { recursive: true });
+    return nested;
+  }
+
+  test('a relative arg from a subdirectory resolves via the walk-up, not cwd', withDir(async (dir) => {
+    const nested = drifted(dir);
+    const r = await runScript('routines.ts', {
+      args: ['health', '.claude-code-hermit'],
+      cwd: nested,
+      // Empty (not absent): runScript inherits the real session's env, and an
+      // inherited value would decide the resolution instead of the walk.
+      env: { CLAUDE_PROJECT_DIR: '', AGENT_DIR: '' },
+    });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(r.stdout);
+    expect(out.source).toBe('ok');
+    expect(out.routines[0]).toMatchObject({ id: 'brief', fires: 1 });
+  }));
+
+  test('CLAUDE_PROJECT_DIR anchors the relative arg from a subdirectory', withDir(async (dir) => {
+    const nested = drifted(dir);
+    const r = await runScript('routines.ts', {
+      args: ['health', '.claude-code-hermit'],
+      cwd: nested,
+      env: { CLAUDE_PROJECT_DIR: dir, AGENT_DIR: '' },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).source).toBe('ok');
+  }));
+
+  test('an absolute arg is still honoured as passed', withDir(async (dir) => {
+    const nested = drifted(dir);
+    const r = await runScript('routines.ts', {
+      args: ['health', hermitOf(dir)],
+      cwd: nested,
+      env: { CLAUDE_PROJECT_DIR: '', AGENT_DIR: '' },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(r.stdout).source).toBe('ok');
+  }));
 });

@@ -7,6 +7,8 @@
 - The session-start and boot version checks compare version *direction* instead of string inequality. A config stamp ahead of the loaded plugin now reports `---Stale Plugin Runtime---` with the loaded path and the scoped `claude plugin update` to run, instead of demanding `hermit-evolve` — which could not clear it, so always-on hermits re-dispatched an evolve subagent every session start forever.
 - `hermit-evolve` stops before any migration when the loaded plugin is older than the applied version, and `evolve-finalize` refuses a `--core` below the on-disk stamp (`core_version_regression`, config left untouched). Previously a stale install plus any sibling gap or CLAUDE-APPEND drift ran the migrations and then silently lowered `_hermit_versions` without reversing them. Sibling stamps get the same no-downgrade rule as a skip.
 - The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
+- The `.worktreeinclude` managed block carries `.claude-code-hermit/config.json` into `claude --worktree` worktrees. Without it a worktree session got a state dir the dev hermit could not read: `/dev-pr` failed Gate 0 with a pointer to re-run `/claude-code-dev-hermit:hatch` (a wrong diagnosis — the hatch was fine, `commands.pr_create` simply was not copied) and `/dev-quality` silently skipped its test step. Existing hermits get the line via an Upgrade Instructions step; state writes stay pinned to the main checkout as before.
+- `routines.ts health` anchors a relative `hermit-dir` argument through the same resolver as the rest of the state path instead of the process cwd. Both callers (`reflect`, `hermit-evolution`) pass the relative `.claude-code-hermit`, so any earlier `cd` made the reader report `source: missing` — which both skills read as "no candidates", turning a lost ledger into a silent skip. An absolute argument is still honoured as passed.
 ### Changed
 ### Added
 - `scripts/lib/config-read.ts` — one settled read path for `config.json`: `readSettledConfig` never throws, settles malformed values by declared shape (never vocabulary, so custom operator values survive), preserves explicit `null`s and unknown keys at every nesting level, and settles malformed containers to empty rather than template seeds. `readConfigRaw` remains for the few consumers that must distinguish an unreadable config (routines run records, the prompt pipeline's disclosure gates, `channel-send`'s `config_read_failed`).
@@ -34,6 +36,18 @@
 - The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
 - A `###` sub-heading above a real section no longer hijacks that section's body — affects session-start injection, `.status.json` task/blockers, Progress Log staleness, the Monitoring bloat check, and the `reflect --quick` hash.
 - Session-start injection and the session quality score no longer read a section as empty when its content sits below a retained `<!-- ... -->` placeholder.
+
+### Upgrade Instructions
+
+1. **Add `config.json` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/config.json` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/OPERATOR.md`, leaving every other line in the block untouched. The block should end up as:
+   ```
+   # >>> claude-code-hermit (managed block — do not edit between markers) >>>
+   .claude-code-hermit/OPERATOR.md
+   .claude-code-hermit/config.json
+   .claude-code-hermit/compiled/
+   # <<< claude-code-hermit <<<
+   ```
+   This is what lets a `claude --worktree` session read `commands.*` — without it `/claude-code-dev-hermit:dev-pr` refuses at Gate 0 and `/claude-code-dev-hermit:dev-quality` skips its test step. No `.gitignore` change is needed: `config.json` is already in the hermit's gitignore block, which is what makes it eligible to be copied. _(Opt-out: delete the line again; the rest of the block is unaffected.)_
 
 ## [1.2.38] - 2026-08-12
 
