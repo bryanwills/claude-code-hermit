@@ -24,7 +24,11 @@ PLUGIN_VER=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$PLUGIN_ROOT/.
 # same question with cmpSemver — all three surfaces must agree on the direction, so this
 # mirrors cmpSemver exactly (compare the leading X.Y.Z triple; unparseable reads as equal,
 # which keeps this advisory check silent rather than misdirecting).
-# try/catch inside the snippet: bun exits 0 on uncaught fs errors, so a shell `||` fallback alone is not enough
+# try/catch inside the snippet: bun exits 0 on uncaught fs errors, so a shell `||` fallback alone is not enough.
+# The catch (config.json present but unreadable/invalid JSON — absence already exited above) deliberately
+# reports "ahead", not "equal": the advisory banner then routes the operator to hermit-evolve, which
+# reports the real `config_json_invalid` instead of going silent on a corrupt config. Only an unparseable
+# VERSION STRING on either side reads as equal (silent).
 CONFIG_OUT=$(bun -e '
 try {
   const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -36,8 +40,8 @@ try {
   console.log(configVer);
   console.log(c.always_on === true ? "true" : "false");
   console.log(rel);
-} catch { console.log("0.0.0"); console.log("false"); console.log("equal"); }
-' "$CONFIG" "$PLUGIN_VER" 2>/dev/null || printf '0.0.0\nfalse\nequal\n')
+} catch { console.log("0.0.0"); console.log("false"); console.log("ahead"); }
+' "$CONFIG" "$PLUGIN_VER" 2>/dev/null || printf '0.0.0\nfalse\nahead\n')
 CONFIG_VER=$(printf '%s\n' "$CONFIG_OUT" | sed -n '1p')
 ALWAYS_ON=$(printf '%s\n' "$CONFIG_OUT" | sed -n '2p')
 RELATION=$(printf '%s\n' "$CONFIG_OUT" | sed -n '3p')
