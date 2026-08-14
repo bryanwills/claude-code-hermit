@@ -19,8 +19,8 @@ function currentHHMM(timezone: string, ref?: Date): string | null {
 
 // currentHHMM but guaranteed non-null: falls back to UTC 'HH:MM' on timezone error.
 // Shared by the PreCompact hook and the watchdog, which both need a definite stamp.
-function currentHHMMOrUTC(timezone: string): string {
-  return currentHHMM(timezone) ?? new Date().toISOString().slice(11, 16);
+function currentHHMMOrUTC(timezone: string, ref?: Date): string {
+  return currentHHMM(timezone, ref) ?? (ref ?? new Date()).toISOString().slice(11, 16);
 }
 
 // Returns today (or `ref`) as 'YYYY-MM-DD' in the given timezone.
@@ -138,8 +138,8 @@ function localISOStamp(d: Date = new Date()): string {
 }
 
 // UTC timestamp in Python's time.strftime('%Y-%m-%dT%H:%M:%SZ', gmtime()) shape.
-function utcISOStamp(): string {
-  return new Date().toISOString().slice(0, 19) + 'Z';
+function utcISOStamp(ref?: Date): string {
+  return (ref ?? new Date()).toISOString().slice(0, 19) + 'Z';
 }
 
 // HHMMSS (6 digits) in `timezone`, or UTC on any Intl failure. Normalises Intl's
