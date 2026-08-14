@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.3] - 2026-08-14
 
 ### Fixed
 - `fetch-guard` resolves `feed-sources.md` from the project root (`CLAUDE_PROJECT_DIR`, else a walk up to `.claude-code-hermit/config.json`) instead of the session's cwd. A `cd` earlier in the session made the allowlist unreadable, and the hook fails open — so the domain guard silently stopped enforcing.
