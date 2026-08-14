@@ -55,7 +55,7 @@ describe('drainHarnessCommand guards', () => {
   test('no marker is a no-op', withDir(async (dir) => {
     fs.writeFileSync(path.join(stateDir(dir), 'runtime.json'), JSON.stringify(LIVE_RUNTIME));
 
-    drainHarnessCommand(hermitRoot(dir), stateDir(dir));
+    drainHarnessCommand(hermitRoot(dir));
 
     expect(markerSurvives(dir)).toBe(false); // nothing was written, nothing appeared
   }));
@@ -63,7 +63,16 @@ describe('drainHarnessCommand guards', () => {
   test('marker past its TTL is left on disk, not delivered', withDir(async (dir) => {
     seed(dir, { requestedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString() });
 
-    drainHarnessCommand(hermitRoot(dir), stateDir(dir));
+    drainHarnessCommand(hermitRoot(dir));
+
+    expect(markerSurvives(dir)).toBe(true);
+  }));
+
+  test('a missing runtime.json defers delivery', withDir(async (dir) => {
+    seed(dir);
+    fs.unlinkSync(path.join(stateDir(dir), 'runtime.json'));
+
+    drainHarnessCommand(hermitRoot(dir));
 
     expect(markerSurvives(dir)).toBe(true);
   }));
@@ -72,7 +81,7 @@ describe('drainHarnessCommand guards', () => {
     seed(dir);
     fs.writeFileSync(path.join(stateDir(dir), 'runtime.json'), 'not json');
 
-    drainHarnessCommand(hermitRoot(dir), stateDir(dir));
+    drainHarnessCommand(hermitRoot(dir));
 
     expect(markerSurvives(dir)).toBe(true);
   }));
@@ -80,7 +89,7 @@ describe('drainHarnessCommand guards', () => {
   test('interactive sessions are never typed into', withDir(async (dir) => {
     seed(dir, { runtime: { ...LIVE_RUNTIME, runtime_mode: 'interactive' } });
 
-    drainHarnessCommand(hermitRoot(dir), stateDir(dir));
+    drainHarnessCommand(hermitRoot(dir));
 
     expect(markerSurvives(dir)).toBe(true);
   }));
@@ -89,7 +98,7 @@ describe('drainHarnessCommand guards', () => {
     test(`lifecycle guard: ${field} in flight defers delivery`, withDir(async (dir) => {
       seed(dir, { runtime: { ...LIVE_RUNTIME, [field]: '2026-08-14T00:00:00Z' } });
 
-      drainHarnessCommand(hermitRoot(dir), stateDir(dir));
+      drainHarnessCommand(hermitRoot(dir));
 
       expect(markerSurvives(dir)).toBe(true);
     }));
@@ -98,23 +107,7 @@ describe('drainHarnessCommand guards', () => {
   test('a runtime with no tmux_session defers delivery', withDir(async (dir) => {
     seed(dir, { runtime: { ...LIVE_RUNTIME, tmux_session: null } });
 
-    drainHarnessCommand(hermitRoot(dir), stateDir(dir));
-
-    expect(markerSurvives(dir)).toBe(true);
-  }));
-
-  test('the state dir is read from the argument, not the cwd', withDir(async (dir) => {
-    // A drain pointed at a state dir with no runtime.json must decline, even though
-    // the process cwd (this repo) has a real one — the anchored read is what lets the
-    // Stop hook run from anywhere.
-    writePendingCommand(hermitRoot(dir), {
-      command: '/compact',
-      arg: null,
-      by: 'operator',
-      requested_at: new Date().toISOString(),
-    });
-
-    drainHarnessCommand(hermitRoot(dir), stateDir(dir));
+    drainHarnessCommand(hermitRoot(dir));
 
     expect(markerSurvives(dir)).toBe(true);
   }));

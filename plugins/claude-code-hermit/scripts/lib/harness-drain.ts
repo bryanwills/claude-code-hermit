@@ -34,14 +34,16 @@ function configTimezone(hermitRoot: string): string {
  * a manual /compact and writes the breadcrumb itself (precompact-stamp.ts), and
  * context_cleared is /clear's marker alone (the watchdog's compact tier never sets it).
  *
- * `stateDir` is forwarded to readRuntimeJson only; omitted keeps the cwd-relative default
- * the Stop hook runs under.
+ * Every path here is anchored to `hermitRoot`, reads included: the runtime object read
+ * below is the same object applyContextReset writes back to `hermitRoot/state`, and a
+ * cwd-relative read would pair a drifted (or decoy) source with an anchored write — the
+ * exact split context-reset.ts already had to fix once.
  */
-export function drainHarnessCommand(hermitRoot: string, stateDir?: string): void {
+export function drainHarnessCommand(hermitRoot: string): void {
   const pending = readPendingCommand(hermitRoot);
   if (!pending) return;
 
-  const runtime = readRuntimeJson(stateDir);
+  const runtime = readRuntimeJson(path.join(hermitRoot, 'state'));
   if (!runtime || runtime.runtime_mode === 'interactive') return;
   if (runtime.transition || runtime.shutdown_requested_at || runtime.shutdown_completed_at) return;
 

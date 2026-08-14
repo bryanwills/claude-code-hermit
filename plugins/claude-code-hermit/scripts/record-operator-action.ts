@@ -97,7 +97,7 @@ function isRoutinePrompt(prompt: string): boolean {
   // way — typing /clear or /compact ends a context, it doesn't signal presence.
   if (t === '/clear' || t.startsWith('/compact')) return true;
   // Harness commands the Stop-hook drain injects on an operator's behalf
-  // (stop-pipeline.ts drainHarnessCommand). Prefix-matched, not listed in
+  // (lib/harness-drain.ts drainHarnessCommand). Prefix-matched, not listed in
   // INJECTED_EXACT, because the argument is runtime-computed: the exact string is
   // `/model <arg>` for whatever arg arrived over the channel. NOTE the drift guard in
   // tests/auto-close.test.ts only scans *quoted* literals at sendKeys call sites, so a

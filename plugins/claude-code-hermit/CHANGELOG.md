@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
+
 ## [1.2.38] - 2026-08-12
 
 ### Added

@@ -330,4 +330,22 @@ describe('Stop hook reset-command delivery', () => {
     expect(fs.existsSync(marker(dir))).toBe(true);
     expect(readRuntime(dir).context_cleared).toBeUndefined();
   }));
+
+  // hermitDir() walks up, so a drifted hook cwd still resolves the real hermit root
+  // (cc-compat.ts, #384). The runtime read has to be anchored to that root the same
+  // way the context-reset write already is — a cwd-relative read would find nothing
+  // here and silently decline every turn until the marker's TTL expired.
+  test('delivers from a drifted hook cwd', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/clear', null);
+    const sub = path.join(dir, 'nested', 'deeper');
+    fs.mkdirSync(sub, { recursive: true });
+    const { bin, log } = installFakeTmux(dir, 'Claude ready');
+
+    const result = await drain(sub, bin);
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(log, 'utf-8')).toContain('-l -- /clear');
+    expect(fs.existsSync(marker(dir))).toBe(false);
+    expect(readRuntime(dir).context_cleared).toBe(true);
+  }));
 });
