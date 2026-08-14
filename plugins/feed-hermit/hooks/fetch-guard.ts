@@ -24,6 +24,13 @@ const INFRA_ALLOWLIST = [
 // project ROOT, not the state dir: feed-sources.md is operator-owned and lives at
 // the root. A hook's cwd is the session's shell cwd and drifts with `cd`, so the
 // allowlist is never read relative to it.
+//
+// Deliberately WITHOUT the other resolvers' worktree-projection skip. They walk
+// past a worktree's projected `.claude-code-hermit/` because they want the
+// main-rooted shared STATE dir. This one wants the project the session is in,
+// and feed-sources.md is a tracked file, so a `claude --worktree` session must
+// read the worktree's copy — the branch's allowlist, not main's. Stopping at the
+// projection is the correct answer here. Do not "align" this with the others.
 export function projectRoot(): string {
   const proj = process.env.CLAUDE_PROJECT_DIR;
   if (proj && existsSync(join(proj, SENTINEL))) return proj;

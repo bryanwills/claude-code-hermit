@@ -29,7 +29,9 @@ function seedCostLog(dir: string, entries: object[]): void {
 
 function seedHermitRoot(dir: string): void {
   const hermitDir = path.join(dir, '.claude-code-hermit');
-  fs.mkdirSync(hermitDir, { recursive: true });
+  // state/ alongside config.json is what marks a real root: config.json on its
+  // own is the worktree-projection shape, which the resolver walks past.
+  fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
   fs.writeFileSync(path.join(hermitDir, 'config.json'), '{}');
 }
 

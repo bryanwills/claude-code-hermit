@@ -117,16 +117,33 @@ describe('.worktreeinclude template', () => {
     expect(skillContent).toContain('WORKTREEINCLUDE-APPEND.txt');
   });
 
-  test('template only contains the two allowed paths (safety-invariant: no runtime state)', () => {
-    const raw = fs.readFileSync(WORKTREEINCLUDE_PATH, 'utf-8');
-    const effectiveLines = raw
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && !l.startsWith('#'));
-    expect(effectiveLines).toEqual([
+  // config.json joined the allow-list once the dev hermit began reading
+  // commands.* from the worktree copy. It is not an exception to the
+  // safety-invariant below: state writes stay pinned to the main checkout by
+  // cc-compat's pinnedRoot()/mainCheckoutStateDir(), and config.json carries no
+  // credentials (channel tokens live outside it). The invariant that matters —
+  // no runtime state, no session history, no ledgers — is asserted directly.
+  // Read inside the tests, not at describe-registration time: a missing template
+  // must fail the existence test above with its own message, not throw while the
+  // file is still being collected and take every test in this file with it.
+  const effectivePaths = () => fs.readFileSync(WORKTREEINCLUDE_PATH, 'utf-8')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('#'));
+
+  test('template contains exactly the three allowed paths', () => {
+    expect(effectivePaths()).toEqual([
       '.claude-code-hermit/OPERATOR.md',
+      '.claude-code-hermit/config.json',
       '.claude-code-hermit/compiled/',
     ]);
+  });
+
+  test('safety-invariant: no runtime state, sessions, ledgers or channel data', () => {
+    const forbidden = ['state/', 'sessions/', 'proposals/', 'raw/', 'cost-log', '.jsonl', '.db'];
+    for (const entry of effectivePaths()) {
+      for (const f of forbidden) expect(entry).not.toContain(f);
+    }
   });
 });
 

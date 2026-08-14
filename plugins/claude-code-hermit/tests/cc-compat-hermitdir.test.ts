@@ -133,6 +133,19 @@ describe('hermitDir()', () => {
     }
   });
 
+  it.serial('(b3) CLAUDE_PROJECT_DIR names a worktree projection — falls to walk-up', () => {
+    // A `claude --worktree` session: CLAUDE_PROJECT_DIR is the worktree, whose
+    // .cch dir is the projected copy (config.json, no state/). Honouring it
+    // would anchor every hook-driven writer to a state dir that isn't there.
+    delete process.env.AGENT_DIR;
+    const wt = path.join(tmp, '.claude', 'worktrees', 'wt');
+    fs.mkdirSync(path.join(wt, '.claude-code-hermit'), { recursive: true });
+    fs.writeFileSync(path.join(wt, '.claude-code-hermit', 'config.json'), '{}');
+    process.env.CLAUDE_PROJECT_DIR = wt;
+    process.chdir(wt);
+    expect(hermitDir()).toBe(path.join(tmp, '.claude-code-hermit'));
+  });
+
   // findHermitDir() is hermitDir()'s walk without the env branches or the
   // fail-open tail: callers that start somewhere other than cwd (routines/event.ts)
   // need a null they can refuse on, and must not have an ambient
@@ -166,15 +179,44 @@ describe('hermitDir()', () => {
 
     it('walks past a config-less decoy to the real project above it', () => {
       // A partially-populated `.claude-code-hermit/` — OPERATOR.md but no
-      // config.json — must not capture the walk. (Not the git-worktree shape:
-      // `.worktreeinclude`'s managed block copies config.json in, so a worktree
-      // copy IS the match.)
+      // config.json — must not capture the walk.
       const root = makeTmpHermit();
       try {
         const worktree = path.join(root, '.claude', 'worktrees', 'wt');
         fs.mkdirSync(path.join(worktree, '.claude-code-hermit'), { recursive: true });
         fs.writeFileSync(path.join(worktree, '.claude-code-hermit', 'OPERATOR.md'), '');
         expect(findHermitDir(worktree)).toBe(path.join(root, '.claude-code-hermit'));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('walks past a worktree projection to the main checkout above it', () => {
+      // The real `claude --worktree` shape: `.worktreeinclude`'s managed block
+      // copies OPERATOR.md, config.json and compiled/ in, but never state/.
+      // The config.json sentinel alone would capture the walk here and route
+      // every ledger read and write into a state dir that does not exist.
+      const root = makeTmpHermit();
+      try {
+        const wt = path.join(root, '.claude', 'worktrees', 'wt', '.claude-code-hermit');
+        fs.mkdirSync(path.join(wt, 'compiled'), { recursive: true });
+        fs.writeFileSync(path.join(wt, 'OPERATOR.md'), '');
+        fs.writeFileSync(path.join(wt, 'config.json'), '{}');
+        expect(findHermitDir(path.dirname(wt))).toBe(path.join(root, '.claude-code-hermit'));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts a root once it has state/ — the projection test is state-based', () => {
+      // Guards the discriminator itself: config.json + state/ is a real root at
+      // any depth, so the skip above can never swallow a genuine nested hermit.
+      const root = makeTmpHermit();
+      try {
+        const nested = path.join(root, 'sub', 'project');
+        fs.mkdirSync(path.join(nested, '.claude-code-hermit', 'state'), { recursive: true });
+        fs.writeFileSync(path.join(nested, '.claude-code-hermit', 'config.json'), '{}');
+        expect(findHermitDir(nested)).toBe(path.join(nested, '.claude-code-hermit'));
       } finally {
         fs.rmSync(root, { recursive: true, force: true });
       }

@@ -20,7 +20,8 @@ import { dumpFrontmatter, loadFrontmatter } from './markdown';
  *   HA   projectRoot  (homeassistant-hermit/src/config.ts)         → project root (this file)
  *   dev  findHermitDir(dev-hermit/scripts/git-push-guard.ts)       → the .cch dir or null
  * INVARIANT: hermitDir() === join(projectRoot(), '.claude-code-hermit').
- * Fix one (env-var precedence, iteration cap) → check the other two.
+ * Fix one (env-var precedence, iteration cap, worktree-projection skip) → check
+ * the other two.
  *
  * Returns the project ROOT (the dir containing .claude-code-hermit), NOT the
  * .cch dir itself — callers append paths themselves. Does NOT honor AGENT_DIR
@@ -29,15 +30,30 @@ import { dumpFrontmatter, loadFrontmatter } from './markdown';
  */
 export function projectRoot(): string {
   const proj = process.env.CLAUDE_PROJECT_DIR;
-  if (proj && existsSync(join(proj, '.claude-code-hermit'))) return proj;
+  if (proj) {
+    const cch = join(proj, '.claude-code-hermit');
+    if (existsSync(cch) && !isWorktreeProjection(cch)) return proj;
+  }
   let dir = process.cwd();
   for (let i = 0; i < 8; i++) {
-    if (existsSync(join(dir, '.claude-code-hermit', 'config.json'))) return dir;
+    const cch = join(dir, '.claude-code-hermit');
+    if (existsSync(join(cch, 'config.json')) && !isWorktreeProjection(cch)) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return process.cwd(); // fail-open: preserves today's behavior
+}
+
+// A worktree's projected `.claude-code-hermit/` — never a resolution target.
+// `.worktreeinclude`'s managed block copies config.json into a `claude --worktree`
+// worktree so skills can Read it at the relative path they expect, but never
+// `state/`: hermit state is main-rooted and shared across worktrees. So the
+// sentinel without `state/` means a projection of a real root further up, and
+// the walk continues to it. Mirrored in core's cc-compat.ts and dev's
+// find-hermit-dir.ts — fix one, fix all three.
+function isWorktreeProjection(cchDir: string): boolean {
+  return existsSync(join(cchDir, 'config.json')) && !existsSync(join(cchDir, 'state'));
 }
 
 export class AppConfig {

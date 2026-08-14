@@ -36,7 +36,8 @@ type TriState = { state: string; count: number; entries: Json[] };
  *   HA   projectRoot  (homeassistant-hermit/src/config.ts)          → the project root (parent)
  *   dev  findHermitDir(dev-hermit/scripts/lib/find-hermit-dir.ts)   → the .cch dir or null
  * INVARIANT: hermitDir() === path.join(projectRoot(), '.claude-code-hermit').
- * Fix one (env-var precedence, iteration cap) → check the other two.
+ * Fix one (env-var precedence, iteration cap, worktree-projection skip) → check
+ * the other two.
  *
  * Robust to a drifted hook cwd (#384). A *relative* AGENT_DIR (the legacy
  * drift-prone default, e.g. `AGENT_DIR=".claude-code-hermit"`) is intentionally
@@ -46,15 +47,39 @@ function hermitDir(): string {
   const agent = process.env.AGENT_DIR;
   if (agent && path.isAbsolute(agent)) return path.resolve(agent);
   const proj = process.env.CLAUDE_PROJECT_DIR;
-  if (proj) { const d = path.join(proj, '.claude-code-hermit'); if (fs.existsSync(d)) return d; }
+  if (proj) { const d = path.join(proj, '.claude-code-hermit'); if (fs.existsSync(d) && !isWorktreeProjection(d)) return d; }
   return findHermitDir(process.cwd())
     ?? path.resolve('.claude-code-hermit'); // fail-open: preserves today's behavior
 }
 
 /**
+ * A worktree's *projected* `.claude-code-hermit/` — never a resolution target.
+ *
+ * `.worktreeinclude`'s managed block copies OPERATOR.md, config.json and
+ * compiled/ into a `claude --worktree` worktree so skills can Read them at the
+ * relative path they expect, but never `state/` — hermit state is deliberately
+ * main-rooted and shared across worktrees. So a dir carrying the config.json
+ * sentinel with no `state/` is a projection of a real root further up, and the
+ * resolvers walk past it to that root.
+ *
+ * The `state/` test stays true only because no resolver returns a projection,
+ * so nothing ever creates `state/` inside one. A writer that mkdir's its own
+ * state dir must resolve through a resolver, never off cwd. Out-of-tree
+ * worktrees (`git worktree add ../wt`) are the one gap: the walk can't reach
+ * main, so hermitDir() fails open to the cwd-relative path — the projection —
+ * exactly as it did before this guard existed.
+ *
+ * Mirrored by the sibling fleet resolvers named above — fix one, fix all.
+ */
+function isWorktreeProjection(cchDir: string): boolean {
+  return fs.existsSync(path.join(cchDir, 'config.json')) && !fs.existsSync(path.join(cchDir, 'state'));
+}
+
+/**
  * The bounded walk behind hermitDir(), for callers that start somewhere other than
  * cwd and need to know when nothing was found: same 8-level cap and config.json
- * sentinel, null instead of the fail-open default.
+ * sentinel, null instead of the fail-open default. Worktree projections are
+ * walked past, not returned — see isWorktreeProjection().
  *
  * Deliberately env-free. Callers like routines/event.ts pass a root their caller
  * already resolved; an ambient CLAUDE_PROJECT_DIR must not override an explicit
@@ -63,7 +88,8 @@ function hermitDir(): string {
 function findHermitDir(startDir: string): string | null {
   let dir = startDir;
   for (let i = 0; i < 8; i++) {
-    if (fs.existsSync(path.join(dir, '.claude-code-hermit', 'config.json'))) return path.join(dir, '.claude-code-hermit');
+    const cch = path.join(dir, '.claude-code-hermit');
+    if (fs.existsSync(path.join(cch, 'config.json')) && !isWorktreeProjection(cch)) return cch;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -123,9 +149,11 @@ function pinnedRoot(resolved: string, matches: (root: string) => boolean): strin
   if (matches(hermitDir())) return resolved;
   // Worktree case. Hermit state is deliberately main-rooted and shared across
   // worktrees, so a worktree session legitimately passes the main checkout's
-  // absolute path — but hermitDir()'s walk-up stops at the partial decoy state
-  // dir a worktree carries, so the two disagree. Consulted only after a
-  // mismatch, so the common path never spawns git.
+  // absolute path. For a worktree under the repo the two now agree — the walk-up
+  // skips the projection and lands on main — so this is the out-of-tree fallback
+  // (`git worktree add ../wt`), where the walk can't reach main and hermitDir()
+  // fails open to the projection. Consulted only after a mismatch, so the common
+  // path never spawns git.
   const main = mainCheckoutStateDir();
   return main !== null && matches(main) ? resolved : null;
 }

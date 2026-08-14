@@ -14,25 +14,39 @@
 // nothing and is deliberately not consulted.
 //
 // INVARIANT: mirrors core's cc-compat.ts hermitDir() shape (same 8-level cap,
-// same config.json sentinel, env checked before the walk) — if you change the walk
-// or the precedence here, check that file too. One deliberate difference: core's
-// CLAUDE_PROJECT_DIR branch accepts a bare `.claude-code-hermit/` while this one
-// requires the config.json sentinel, so a CLAUDE_PROJECT_DIR naming a scaffolded-
-// but-unhatched project resolves there for core and falls through to the walk
-// here. Not a worktree difference: `.worktreeinclude`'s managed block copies
-// config.json into the worktree, so both resolvers land on the worktree's copy.
+// same config.json sentinel, same worktree-projection skip, env checked before
+// the walk) — if you change the walk or the precedence here, check that file too.
+// One deliberate difference: core's CLAUDE_PROJECT_DIR branch accepts a bare
+// `.claude-code-hermit/` while this one requires the config.json sentinel, so a
+// CLAUDE_PROJECT_DIR naming a scaffolded-but-unhatched project resolves there for
+// core and falls through to the walk here.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
+// A worktree's projected `.claude-code-hermit/` — never a resolution target.
+// `.worktreeinclude`'s managed block copies config.json into a worktree so
+// skills can Read it at the relative path they expect (`/dev-pr` Gate 0 reads
+// `commands.pr_create` that way), but never `state/`: hermit state is
+// main-rooted and shared across worktrees. So the sentinel without `state/`
+// means a projection of a real root further up, and the walk continues to it.
+// That keeps this resolver's writers (record-test-result's `last-test.json`)
+// on main's state dir, which is also what stops `state/` from ever appearing
+// inside a projection. Mirrored in core's cc-compat.ts — fix one, fix both.
+function isWorktreeProjection(cchDir: string): boolean {
+  return fs.existsSync(path.join(cchDir, 'config.json')) && !fs.existsSync(path.join(cchDir, 'state'));
+}
+
 export function findHermitDir(startDir: string): string | null {
   const proj = process.env.CLAUDE_PROJECT_DIR;
-  if (proj && fs.existsSync(path.join(proj, '.claude-code-hermit', 'config.json'))) {
-    return path.join(proj, '.claude-code-hermit');
+  const fromEnv = proj ? path.join(proj, '.claude-code-hermit') : null;
+  if (fromEnv && fs.existsSync(path.join(fromEnv, 'config.json')) && !isWorktreeProjection(fromEnv)) {
+    return fromEnv;
   }
   let dir = startDir;
   for (let i = 0; i < 8; i++) {
-    if (fs.existsSync(path.join(dir, '.claude-code-hermit', 'config.json'))) return path.join(dir, '.claude-code-hermit');
+    const cch = path.join(dir, '.claude-code-hermit');
+    if (fs.existsSync(path.join(cch, 'config.json')) && !isWorktreeProjection(cch)) return cch;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;

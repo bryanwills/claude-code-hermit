@@ -8,6 +8,7 @@
 - `worktree-boundary-guard` exited on `WORKTREE_GUARD=off` before reading stdin, so disabling the guard broke the pipe on any payload larger than the pipe buffer; the drain now runs before the switch is honored.
 - All three hooks exited 1 on an unhandled stdin stream error; `main()` now catches and exits 0.
 - `findHermitDir` honors `CLAUDE_PROJECT_DIR` (existence-checked against `.claude-code-hermit/config.json`, falling through to the walk when it doesn't name a hatched project). A session that had `cd`-ed out of the project dropped operator-configured `protected_branches` back to the built-in `main`/`master` list and skipped `last-test.json` writes.
+- `findHermitDir` walks past a worktree's projected `.claude-code-hermit/` (the config.json sentinel with no `state/`) to the main checkout. Core now copies `config.json` into `claude --worktree` worktrees so `/dev-pr` Gate 0 can read `commands.pr_create`; without this, resolving to that copy would hand the guard an empty config and silently drop operator `protected_branches` in every worktree session. Update this plugin alongside a core that carries the copy.
 
 ## [0.4.8] - 2026-07-26
 
