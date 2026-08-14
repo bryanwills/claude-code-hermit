@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { render } from './render-append';
-import { makeReporter } from '../tests/test-utils';
+import { makeReporter } from '../../../tests/lib/skill-lint';
 
 const PLUGIN_ROOT = path.join(import.meta.dir, '..');
 const TEMPLATE = path.join(PLUGIN_ROOT, 'state-templates', 'CLAUDE-APPEND.md');
