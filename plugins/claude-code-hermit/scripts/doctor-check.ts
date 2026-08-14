@@ -450,7 +450,7 @@ function checkVersionCurrency(p: DoctorPaths = PATHS) {
     } catch {
       return { id: 'version-currency', status: 'ok', detail: 'marketplace cache unreadable — skipping' };
     }
-    const entry = (Array.isArray(marketplace.plugins) ? marketplace.plugins : []).find((p: Json) => p.name === coreName);
+    const entry = (Array.isArray(marketplace.plugins) ? marketplace.plugins : []).find((plugin: Json) => plugin.name === coreName);
     const cachedVersion: string = entry?.version;
     if (!cachedVersion || !/^\d+\.\d+\.\d+/.test(cachedVersion) || !/^\d+\.\d+\.\d+/.test(installedVersion)) {
       return { id: 'version-currency', status: 'ok', detail: 'marketplace cache has no comparable version entry — skipping' };
@@ -653,10 +653,10 @@ function checkPermissions(p: DoctorPaths = PATHS) {
     if (fs.existsSync(stateDir)) {
       for (const f of globDir(stateDir, /\.json$/)) targets.push(f);
     }
-    for (const p of targets) {
-      if (!fs.existsSync(p)) continue;
-      const mode = fs.statSync(p).mode & 0o777;
-      if (mode & 0o004) looseFiles.push(`${path.basename(p)} (${mode.toString(8)})`);
+    for (const target of targets) {
+      if (!fs.existsSync(target)) continue;
+      const mode = fs.statSync(target).mode & 0o777;
+      if (mode & 0o004) looseFiles.push(`${path.basename(target)} (${mode.toString(8)})`);
     }
     if (fs.existsSync(proposalsDir)) {
       const mode = fs.statSync(proposalsDir).mode & 0o777;
@@ -1654,7 +1654,7 @@ function checkRoutineCost(p: DoctorPaths = PATHS) {
     // genuinely expensive routine in a small fleet would never trip the gate.
     const sorted = perRun.sort((a, b) => a.costPerRun - b.costPerRun);
     const worst = sorted[sorted.length - 1];
-    const peerMedian = medianOf(sorted.slice(0, -1).map((p) => p.costPerRun));
+    const peerMedian = medianOf(sorted.slice(0, -1).map((peer) => peer.costPerRun));
     const threshold = Math.max(peerMedian * 3, floor);
 
     if (worst.costPerRun > threshold) {
@@ -1803,11 +1803,11 @@ const NO_ESCALATION = (prior_state_known: boolean): DoctorEscalation =>
 // stay isolated without reloading this module.
 function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir): DoctorEscalation {
   try {
-    const p = doctorAlertsPath(dir);
+    const ledgerPath = doctorAlertsPath(dir);
     // writeReport creates state/ too, but it runs *after* this — without the mkdir a hermit
     // whose state dir is missing gets persisted:false and the skill suppresses the whole
     // notification, exactly on the broken install where the findings matter most.
-    try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch { /* write below reports the failure */ }
+    try { fs.mkdirSync(path.dirname(ledgerPath), { recursive: true }); } catch { /* write below reports the failure */ }
     const failing = new Map<string, Json>();
     for (const c of checks) {
       if (c?.status === 'warn' || c?.status === 'fail') failing.set(DOCTOR_PREFIX + c.id, c);
@@ -1817,13 +1817,13 @@ function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir)
     // corrupt file and rebuilds from empty, which is indistinguishable downstream
     // from a first run and would re-notify every standing finding. `missing` is a
     // genuine first run: an empty ledger is a trustworthy prior (nothing was sent).
-    const prior = readAlertState(p);
+    const prior = readAlertState(ledgerPath);
     if (prior.kind === 'ioerror') return NO_ESCALATION(false); // healthy file we couldn't read — touch nothing
     const priorStateKnown = prior.kind !== 'corrupt';
 
     const pending: { id: string; status: string; detail: string }[] = [];
     const resolved: string[] = [];
-    const applied = mutateOwnedAlerts(p, (alerts) => {
+    const applied = mutateOwnedAlerts(ledgerPath, (alerts) => {
       for (const [key, c] of failing) {
         const prev = alerts[key];
         alerts[key] = prev
@@ -1861,12 +1861,12 @@ function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir)
 // Flip `notified` on findings the caller confirmed reached the operator. Mirrors
 // cost-tracker.ts's `--mark-budget-notified` verb. Unknown ids are ignored.
 function markNotified(ids: string[], dir: string = PATHS.hermitDir): boolean {
-  const p = doctorAlertsPath(dir);
+  const ledgerPath = doctorAlertsPath(dir);
   // Only confirm against a ledger we could actually read. mutateOwnedAlerts would happily
   // quarantine a corrupt file, rebuild it empty and report success — dropping the episodes
   // just announced, so the next run reads them as new and re-notifies. Report false instead.
-  if (readAlertState(p).kind !== 'ok') return false;
-  return mutateOwnedAlerts(p, (alerts) => {
+  if (readAlertState(ledgerPath).kind !== 'ok') return false;
+  return mutateOwnedAlerts(ledgerPath, (alerts) => {
     for (const id of ids) {
       const entry = alerts[DOCTOR_PREFIX + id];
       if (entry && entry.notified !== true) entry.notified = true;

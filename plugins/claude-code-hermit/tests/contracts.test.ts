@@ -1981,9 +1981,8 @@ describe('doctor per-check seam', () => {
   test('one check, two scratch dirs, one process — each reads the dir it was handed',
     withTmpdir(async (seeded) => {
       writeConfig(seeded, {});                              // config.json exists (contents irrelevant here)
-      const empty = makeTmpdir();
+      const empty = makeTmpdir();                             // .claude-code-hermit/ exists, no config.json in it
       try {
-        fs.mkdirSync(path.join(empty, '.claude-code-hermit'), { recursive: true });  // no config.json
         const at = (d: string) => checkConfig(resolvePaths(path.join(d, '.claude-code-hermit'), PLUGIN_ROOT));
 
         expect(at(seeded).detail).not.toContain('not found');

@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Changed
-- `doctor-check.ts` takes its paths per call instead of binding them from `process.argv` at import, so a single check can be exercised against its own directory without a subprocess; `getEnabledChannels`/`isContainer` move to `scripts/lib/`, and doctor no longer imports the `hermit-start` booter. No check logic, status, or ordering changed.
+- `doctor-check.ts` takes its paths per call instead of binding them from `process.argv` at import. `getEnabledChannels`/`isContainer` move to `scripts/lib/`, so doctor no longer imports the `hermit-start` booter. No check logic, status, or ordering changed.
 
 ## [1.2.38] - 2026-08-12
 
