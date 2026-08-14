@@ -15,7 +15,7 @@ import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, setupGitWorkdir, fixturesDir, type Workdir } from './helpers/workdir';
-import { cidrOverlap, checkHeartbeat } from '../scripts/doctor-check';
+import { cidrOverlap } from '../scripts/doctor-check';
 import { decide } from '../scripts/enforce-deny-patterns';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
 

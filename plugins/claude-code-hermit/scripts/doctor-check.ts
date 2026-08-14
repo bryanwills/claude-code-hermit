@@ -13,7 +13,8 @@ import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } fr
 import { costLogPath } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
-import { getEnabledChannels, isContainer } from './hermit-start';
+import { getEnabledChannels } from './lib/channel-config';
+import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
@@ -23,17 +24,41 @@ import { readContextSurface } from './lib/context-surface';
 
 type Json = any;
 
-const hermitDir = path.resolve(process.argv[2] || '.claude-code-hermit');
-const configPath = path.join(hermitDir, 'config.json');
-const stateDir = path.join(hermitDir, 'state');
-const proposalsDir = path.join(hermitDir, 'proposals');
-const reportPath = path.join(stateDir, 'doctor-report.json');
+// Every check takes its paths as an argument defaulting to PATHS (the argv-derived
+// set the CLI runs on), so a test can drive one check against its own scratch dir
+// without reloading this module — the seam escalate()/markNotified() already had.
+export interface DoctorPaths {
+  hermitDir: string;
+  configPath: string;
+  stateDir: string;
+  proposalsDir: string;
+  reportPath: string;
+  pluginRoot: string;
+  hooksPath: string;
+  costLog: string;
+}
 
-const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
-const hooksPath = path.join(pluginRoot, 'hooks', 'hooks.json');
-// Resolve the cost log relative to the hermit dir (from argv), not the CWD —
-// doctor is often run from a different directory than the project root.
-const costLog = costLogPath(hermitDir);
+function resolvePaths(dir: string, root: string): DoctorPaths {
+  const hermitDir = path.resolve(dir);
+  const stateDir = path.join(hermitDir, 'state');
+  return {
+    hermitDir,
+    configPath: path.join(hermitDir, 'config.json'),
+    stateDir,
+    proposalsDir: path.join(hermitDir, 'proposals'),
+    reportPath: path.join(stateDir, 'doctor-report.json'),
+    pluginRoot: root,
+    hooksPath: path.join(root, 'hooks', 'hooks.json'),
+    // Resolve the cost log relative to the hermit dir (from argv), not the CWD —
+    // doctor is often run from a different directory than the project root.
+    costLog: costLogPath(hermitDir),
+  };
+}
+
+const PATHS = resolvePaths(
+  process.argv[2] || '.claude-code-hermit',
+  process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..'),
+);
 
 // State files expected to exist after a healthy hatch.
 const EXPECTED_STATE_FILES = [
@@ -46,7 +71,8 @@ const EXPECTED_STATE_FILES = [
 
 // ----------------- Checks -----------------
 
-function checkRuntime() {
+function checkRuntime(p: DoctorPaths = PATHS) {
+  const { pluginRoot } = p;
   try {
     const required: string | null = readHermitMeta(pluginRoot).required_bun_version || null;
     let version: string;
@@ -67,7 +93,8 @@ function checkRuntime() {
   }
 }
 
-function checkConfig() {
+function checkConfig(p: DoctorPaths = PATHS) {
+  const { configPath } = p;
   try {
     if (!fs.existsSync(configPath)) {
       return { id: 'config', status: 'fail', detail: 'config.json not found' };
@@ -86,7 +113,8 @@ function checkConfig() {
   }
 }
 
-function checkHooks() {
+function checkHooks(p: DoctorPaths = PATHS) {
+  const { pluginRoot, hooksPath } = p;
   try {
     if (!fs.existsSync(hooksPath)) {
       return { id: 'hooks', status: 'fail', detail: `hooks.json not found at ${hooksPath}` };
@@ -121,7 +149,8 @@ function checkHooks() {
   }
 }
 
-function checkStateFiles() {
+function checkStateFiles(p: DoctorPaths = PATHS) {
+  const { hermitDir, stateDir } = p;
   try {
     if (!fs.existsSync(stateDir)) {
       return { id: 'state', status: 'warn', detail: 'state/ directory does not exist' };
@@ -182,7 +211,8 @@ function checkStateFiles() {
   }
 }
 
-function checkCost() {
+function checkCost(p: DoctorPaths = PATHS) {
+  const { hermitDir, costLog } = p;
   try {
     if (!fs.existsSync(costLog)) {
       return { id: 'cost', status: 'warn', detail: 'no cost data yet (.claude/cost-log.jsonl absent)' };
@@ -225,7 +255,8 @@ function checkCost() {
   }
 }
 
-function checkProposals() {
+function checkProposals(p: DoctorPaths = PATHS) {
+  const { proposalsDir } = p;
   try {
     if (!fs.existsSync(proposalsDir)) {
       return { id: 'proposals', status: 'ok', detail: 'proposals/ empty (fresh install)' };
@@ -264,7 +295,8 @@ function satisfiesRange(version: any, range: any): boolean {
   return Bun.semver.satisfies(version, range);
 }
 
-function checkDependencies() {
+function checkDependencies(p: DoctorPaths = PATHS) {
+  const { pluginRoot } = p;
   try {
     // Read core version + name from this plugin's own manifest.
     const corePj = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
@@ -329,7 +361,8 @@ function checkDependencies() {
  *  in the monorepo/flat-layout branch (dev checkout — nothing to compare against) or when
  *  the tree/file isn't present. HERMIT_DOCTOR_MARKETPLACE_FILE overrides for tests, since
  *  the real path depends on machine-local install layout the test harness doesn't control. */
-function marketplaceCacheFile(coreName: string): string | null {
+function marketplaceCacheFile(coreName: string, p: DoctorPaths): string | null {
+  const { pluginRoot } = p;
   const override = process.env.HERMIT_DOCTOR_MARKETPLACE_FILE;
   if (override) return fs.existsSync(override) ? override : null;
   const coreDir = versionedCacheCoreDir(pluginRoot, coreName);
@@ -360,7 +393,8 @@ function marketplaceRepoChangelogPath(mpFile: string, entry: Json): string | nul
 /** CHANGELOG.md for a cached-but-not-yet-installed version in the versioned install cache
  *  (.claude/plugins/cache/<mp>/<coreName>/<version>/), used only when `/plugin update` has
  *  already pulled the version's files but hermit-evolve hasn't run yet. */
-function cachedVersionChangelogPath(coreName: string, version: string): string | null {
+function cachedVersionChangelogPath(coreName: string, version: string, p: DoctorPaths): string | null {
+  const { pluginRoot } = p;
   const coreDir = versionedCacheCoreDir(pluginRoot, coreName);
   if (!coreDir) return null;
   const file = path.join(coreDir, version, 'CHANGELOG.md');
@@ -388,7 +422,8 @@ function changelogRangeHasFixed(from: string, to: string, file: string): boolean
   }
 }
 
-function checkVersionCurrency() {
+function checkVersionCurrency(p: DoctorPaths = PATHS) {
+  const { pluginRoot } = p;
   try {
     const corePj = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
     if (!fs.existsSync(corePj)) {
@@ -406,7 +441,7 @@ function checkVersionCurrency() {
       return { id: 'version-currency', status: 'ok', detail: 'core name/version not set — skipping' };
     }
 
-    const mpFile = marketplaceCacheFile(coreName);
+    const mpFile = marketplaceCacheFile(coreName, p);
     if (!mpFile) {
       return { id: 'version-currency', status: 'ok', detail: 'no marketplace cache to compare against (dev checkout, or marketplace never added)' };
     }
@@ -416,7 +451,7 @@ function checkVersionCurrency() {
     } catch {
       return { id: 'version-currency', status: 'ok', detail: 'marketplace cache unreadable — skipping' };
     }
-    const entry = (Array.isArray(marketplace.plugins) ? marketplace.plugins : []).find((p: Json) => p.name === coreName);
+    const entry = (Array.isArray(marketplace.plugins) ? marketplace.plugins : []).find((plugin: Json) => plugin.name === coreName);
     const cachedVersion: string = entry?.version;
     if (!cachedVersion || !/^\d+\.\d+\.\d+/.test(cachedVersion) || !/^\d+\.\d+\.\d+/.test(installedVersion)) {
       return { id: 'version-currency', status: 'ok', detail: 'marketplace cache has no comparable version entry — skipping' };
@@ -438,7 +473,7 @@ function checkVersionCurrency() {
     // source is resolvable the escalation is simply omitted rather than faked.
     const cachedChangelog =
       marketplaceRepoChangelogPath(mpFile, entry)
-      || cachedVersionChangelogPath(coreName, cachedVersion)
+      || cachedVersionChangelogPath(coreName, cachedVersion, p)
       || process.env.HERMIT_DOCTOR_CHANGELOG_PATH
       || null;
     const escalation = cachedChangelog && changelogRangeHasFixed(installedVersion, cachedVersion, cachedChangelog) ? ' — includes Fixed entries' : '';
@@ -470,7 +505,8 @@ function cidrOverlap(a: string, b: string): boolean {
   } catch { return false; }
 }
 
-function checkDockerSecurity() {
+function checkDockerSecurity(p: DoctorPaths = PATHS) {
+  const { hermitDir } = p;
   // Presence check between docker.security.* in config.json and the rendered
   // docker-compose.security.yml overlay. When both are present, also shells out
   // to `docker compose config --format json` (timeout 10s) to detect:
@@ -609,17 +645,18 @@ function checkDockerSecurity() {
   }
 }
 
-function checkPermissions() {
+function checkPermissions(p: DoctorPaths = PATHS) {
+  const { configPath, stateDir, proposalsDir } = p;
   try {
     const looseFiles: string[] = [];
     const targets: string[] = [configPath];
     if (fs.existsSync(stateDir)) {
       for (const f of globDir(stateDir, /\.json$/)) targets.push(f);
     }
-    for (const p of targets) {
-      if (!fs.existsSync(p)) continue;
-      const mode = fs.statSync(p).mode & 0o777;
-      if (mode & 0o004) looseFiles.push(`${path.basename(p)} (${mode.toString(8)})`);
+    for (const target of targets) {
+      if (!fs.existsSync(target)) continue;
+      const mode = fs.statSync(target).mode & 0o777;
+      if (mode & 0o004) looseFiles.push(`${path.basename(target)} (${mode.toString(8)})`);
     }
     if (fs.existsSync(proposalsDir)) {
       const mode = fs.statSync(proposalsDir).mode & 0o777;
@@ -646,7 +683,8 @@ function daysSince(iso: any): any {
   return (Date.now() - t) / MS_PER_DAY;
 }
 
-function checkArchival() {
+function checkArchival(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
   try {
     const runtimePath = path.join(stateDir, 'runtime.json');
     if (!fs.existsSync(runtimePath)) {
@@ -682,7 +720,8 @@ function checkArchival() {
 // Informational only — never warns. A high empty rate is a legitimate steady state, and the
 // counters are caller-blind (routine, session finalization, session-close, manual /reflect all
 // increment total_runs identically), so no warn could name a knob to turn.
-function checkReflectLoop() {
+function checkReflectLoop(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
   try {
     const reflectPath = path.join(stateDir, 'reflection-state.json');
     if (!fs.existsSync(reflectPath)) {
@@ -733,7 +772,8 @@ function checkReflectLoop() {
   }
 }
 
-function checkScheduler() {
+function checkScheduler(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
   // Reads state/cc-stop-snapshot.json written by stop-pipeline.ts on each Stop.
   // The snapshot is point-in-time at last Stop, not live — the captured_at
   // timestamp is always surfaced so staleness is visible rather than silently trusted.
@@ -789,7 +829,8 @@ function checkScheduler() {
 
 // ----------------- Watchdog -----------------
 
-function checkWatchdog() {
+function checkWatchdog(p: DoctorPaths = PATHS) {
+  const { hermitDir, stateDir } = p;
   try {
     const config = readSettledConfig(hermitDir);
     const wCfg = config.watchdog;
@@ -964,7 +1005,8 @@ function checkWatchdog() {
  *  harness id in sessions/.status.json for idle-phase wakes (heartbeat/routines/channel
  *  messages) — the same fallback hermit-watchdog.ts's hygiene tiers use, so this check
  *  can't be blind to exactly the accumulation they exist to catch. */
-function resolveContextSessionId(runtime: Json): string {
+function resolveContextSessionId(runtime: Json, p: DoctorPaths): string {
+  const { hermitDir } = p;
   const sid = runtime?.session_id;
   if (typeof sid === 'string' && sid) return sid;
   try {
@@ -977,9 +1019,10 @@ function resolveContextSessionId(runtime: Json): string {
 
 const CONTEXT_AGE_STALE_HOURS = 24;
 
-function checkContextAge() {
+function checkContextAge(p: DoctorPaths = PATHS) {
+  const { hermitDir, stateDir, costLog } = p;
   try {
-    const read = readConfigOrCovered('context-age');
+    const read = readConfigOrCovered('context-age', p);
     if ('covered' in read) return read.covered;
     const config = read.config;
 
@@ -996,7 +1039,7 @@ function checkContextAge() {
       return { id: 'context-age', status: 'ok', detail: 'no active session' };
     }
 
-    const sessionId = resolveContextSessionId(runtime);
+    const sessionId = resolveContextSessionId(runtime, p);
     if (!sessionId) {
       return { id: 'context-age', status: 'ok', detail: 'active session but no session id resolvable — skipping' };
     }
@@ -1061,7 +1104,8 @@ function checkContextAge() {
   }
 }
 
-function checkOpusWake() {
+function checkOpusWake(p: DoctorPaths = PATHS) {
+  const { costLog } = p;
   try {
     const since = new Date(Date.now() - 7 * MS_PER_DAY).toISOString().slice(0, 10);
     const { count, cost } = scanAutomatedOpus(costLog, since);
@@ -1075,7 +1119,8 @@ function checkOpusWake() {
   }
 }
 
-function checkHeartbeat() {
+function checkHeartbeat(p: DoctorPaths = PATHS) {
+  const { hermitDir, stateDir } = p;
   try {
     const config = readSettledConfig(hermitDir);
     const hbCfg = config.heartbeat;
@@ -1161,9 +1206,10 @@ function checkHeartbeat() {
 // (1) enabled/scope is derived from config.routines (any non-anchor enabled entry),
 // not a single heartbeat.enabled flag; (2) a croncreate-fallback mode (Monitor tool
 // unavailable) is reported ok rather than evaluated for liveness at all.
-function checkRoutineMonitor() {
+function checkRoutineMonitor(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
   try {
-    const read = readConfigOrCovered('routine-monitor');
+    const read = readConfigOrCovered('routine-monitor', p);
     if ('covered' in read) return read.covered;
     const config = read.config;
 
@@ -1244,7 +1290,8 @@ function checkRoutineMonitor() {
   }
 }
 
-function checkRawSize() {
+function checkRawSize(p: DoctorPaths = PATHS) {
+  const { hermitDir, stateDir } = p;
   try {
     const rawDir = path.join(hermitDir, 'raw');
     if (!fs.existsSync(rawDir)) {
@@ -1361,7 +1408,8 @@ function runExpiryProbe(cmd: string, pluginDir: string): ProbeResult {
 // Core is probed first and deliberately: siblingPluginDirs() excludes core's own
 // dir in both cache layouts, so core's setup-token credential would otherwise be
 // invisible to the very check that exists to catch expiring credentials.
-function probeDeclaredCredentials(): { okCount: number; badNotes: string[] } {
+function probeDeclaredCredentials(p: DoctorPaths): { okCount: number; badNotes: string[] } {
+  const { pluginRoot } = p;
   const coreName = readCoreName(pluginRoot);
 
   let okCount = 0;
@@ -1429,9 +1477,9 @@ function shadowingCredentialNote(): string | null {
   return `stored ${CREDENTIALS_FILENAME} will shadow the login token in interactive sessions — park it (mv ${credentialsFilePath(configDir)} ${parkedCredentialsFilePath(configDir)}) and restart`;
 }
 
-function checkCredentialExpiry() {
+function checkCredentialExpiry(p: DoctorPaths = PATHS) {
   try {
-    const sib = probeDeclaredCredentials();
+    const sib = probeDeclaredCredentials(p);
     const shadow = shadowingCredentialNote();
     const parts = [...sib.badNotes];
     if (shadow) parts.push(shadow);
@@ -1449,7 +1497,8 @@ function checkCredentialExpiry() {
 // Shared by the two config-reading checks below: config.json's own validity is
 // checkConfig()'s job, so a missing/unreadable file here is 'ok', not a second
 // failure for the same root cause.
-function readConfigOrCovered(id: string): { config: Json } | { covered: { id: string; status: string; detail: string } } {
+function readConfigOrCovered(id: string, p: DoctorPaths): { config: Json } | { covered: { id: string; status: string; detail: string } } {
+  const { hermitDir } = p;
   if (!configExists(hermitDir)) {
     return { covered: { id, status: 'ok', detail: 'config.json absent (covered by config check)' } };
   }
@@ -1460,9 +1509,10 @@ function readConfigOrCovered(id: string): { config: Json } | { covered: { id: st
   return { config };
 }
 
-function checkModelPricingKnown() {
+function checkModelPricingKnown(p: DoctorPaths = PATHS) {
+  const { costLog } = p;
   try {
-    const read = readConfigOrCovered('model-pricing-known');
+    const read = readConfigOrCovered('model-pricing-known', p);
     if ('covered' in read) return read.covered;
     const config = read.config;
 
@@ -1527,13 +1577,14 @@ function checkModelPricingKnown() {
 // excerpts, last report) tripped the injection-marker scan and were blocked.
 // The scan itself never mutates files — this check just surfaces its verdict.
 
-function checkContextScan() {
+function checkContextScan(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
   try {
-    const p = path.join(stateDir, 'context-scan.json');
-    if (!fs.existsSync(p)) {
+    const scanPath = path.join(stateDir, 'context-scan.json');
+    if (!fs.existsSync(scanPath)) {
       return { id: 'context-scan', status: 'ok', detail: 'no scan record yet (written on next session start)' };
     }
-    const d = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    const d = JSON.parse(fs.readFileSync(scanPath, 'utf-8'));
     const hits = Array.isArray(d.hits) ? d.hits : [];
     if (hits.length === 0) {
       return { id: 'context-scan', status: 'ok', detail: 'startup injection clean' };
@@ -1560,9 +1611,10 @@ function medianOf(nums: number[]): number {
   return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
 }
 
-function checkRoutineCost() {
+function checkRoutineCost(p: DoctorPaths = PATHS) {
+  const { costLog } = p;
   try {
-    const read = readConfigOrCovered('routine-cost');
+    const read = readConfigOrCovered('routine-cost', p);
     if ('covered' in read) return read.covered;
     const config = read.config;
 
@@ -1602,7 +1654,7 @@ function checkRoutineCost() {
     // genuinely expensive routine in a small fleet would never trip the gate.
     const sorted = perRun.sort((a, b) => a.costPerRun - b.costPerRun);
     const worst = sorted[sorted.length - 1];
-    const peerMedian = medianOf(sorted.slice(0, -1).map((p) => p.costPerRun));
+    const peerMedian = medianOf(sorted.slice(0, -1).map((peer) => peer.costPerRun));
     const threshold = Math.max(peerMedian * 3, floor);
 
     if (worst.costPerRun > threshold) {
@@ -1636,14 +1688,15 @@ const LIVENESS_PROBES: Record<string, (token: string) => LivenessProbe> = {
   }),
 };
 
-async function checkChannelLiveness() {
+async function checkChannelLiveness(p: DoctorPaths = PATHS) {
+  const { hermitDir } = p;
   try {
-    const read = readConfigOrCovered('channel-liveness');
+    const read = readConfigOrCovered('channel-liveness', p);
     if ('covered' in read) return read.covered;
     const config = read.config;
 
     const channels = config.channels && typeof config.channels === 'object' ? config.channels : {};
-    // Reuse hermit-start's canonical enumeration: it iterates dict-valued
+    // Reuse lib/channel-config's canonical enumeration: it iterates dict-valued
     // channel entries only (so the `channels.primary` string pointer is skipped
     // generically, no name hardcoding) and applies the same pyTruthy default-on
     // `enabled` semantics used everywhere else.
@@ -1695,32 +1748,32 @@ async function checkChannelLiveness() {
 
 // ----------------- Orchestration -----------------
 
-async function runAllChecks() {
+async function runAllChecks(p: DoctorPaths = PATHS) {
   return [
-    checkRuntime(),
-    checkConfig(),
-    checkHooks(),
-    checkStateFiles(),
-    checkCost(),
-    checkProposals(),
-    checkDependencies(),
-    checkVersionCurrency(),
-    checkPermissions(),
-    checkDockerSecurity(),
-    checkArchival(),
-    checkReflectLoop(),
-    checkScheduler(),
-    checkWatchdog(),
-    checkContextAge(),
-    checkOpusWake(),
-    checkRoutineCost(),
-    checkHeartbeat(),
-    checkRoutineMonitor(),
-    checkRawSize(),
-    checkCredentialExpiry(),
-    checkModelPricingKnown(),
-    checkContextScan(),
-    await checkChannelLiveness(),
+    checkRuntime(p),
+    checkConfig(p),
+    checkHooks(p),
+    checkStateFiles(p),
+    checkCost(p),
+    checkProposals(p),
+    checkDependencies(p),
+    checkVersionCurrency(p),
+    checkPermissions(p),
+    checkDockerSecurity(p),
+    checkArchival(p),
+    checkReflectLoop(p),
+    checkScheduler(p),
+    checkWatchdog(p),
+    checkContextAge(p),
+    checkOpusWake(p),
+    checkRoutineCost(p),
+    checkHeartbeat(p),
+    checkRoutineMonitor(p),
+    checkRawSize(p),
+    checkCredentialExpiry(p),
+    checkModelPricingKnown(p),
+    checkContextScan(p),
+    await checkChannelLiveness(p),
   ];
 }
 
@@ -1748,13 +1801,13 @@ const NO_ESCALATION = (prior_state_known: boolean): DoctorEscalation =>
 
 // `dir` defaults to the argv-derived hermitDir; tests pass their own so cases
 // stay isolated without reloading this module.
-function escalate(checks: Json[], nowIso: string, dir: string = hermitDir): DoctorEscalation {
+function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir): DoctorEscalation {
   try {
-    const p = doctorAlertsPath(dir);
+    const ledgerPath = doctorAlertsPath(dir);
     // writeReport creates state/ too, but it runs *after* this — without the mkdir a hermit
     // whose state dir is missing gets persisted:false and the skill suppresses the whole
     // notification, exactly on the broken install where the findings matter most.
-    try { fs.mkdirSync(path.dirname(p), { recursive: true }); } catch { /* write below reports the failure */ }
+    try { fs.mkdirSync(path.dirname(ledgerPath), { recursive: true }); } catch { /* write below reports the failure */ }
     const failing = new Map<string, Json>();
     for (const c of checks) {
       if (c?.status === 'warn' || c?.status === 'fail') failing.set(DOCTOR_PREFIX + c.id, c);
@@ -1764,13 +1817,13 @@ function escalate(checks: Json[], nowIso: string, dir: string = hermitDir): Doct
     // corrupt file and rebuilds from empty, which is indistinguishable downstream
     // from a first run and would re-notify every standing finding. `missing` is a
     // genuine first run: an empty ledger is a trustworthy prior (nothing was sent).
-    const prior = readAlertState(p);
+    const prior = readAlertState(ledgerPath);
     if (prior.kind === 'ioerror') return NO_ESCALATION(false); // healthy file we couldn't read — touch nothing
     const priorStateKnown = prior.kind !== 'corrupt';
 
     const pending: { id: string; status: string; detail: string }[] = [];
     const resolved: string[] = [];
-    const applied = mutateOwnedAlerts(p, (alerts) => {
+    const applied = mutateOwnedAlerts(ledgerPath, (alerts) => {
       for (const [key, c] of failing) {
         const prev = alerts[key];
         alerts[key] = prev
@@ -1807,13 +1860,13 @@ function escalate(checks: Json[], nowIso: string, dir: string = hermitDir): Doct
 
 // Flip `notified` on findings the caller confirmed reached the operator. Mirrors
 // cost-tracker.ts's `--mark-budget-notified` verb. Unknown ids are ignored.
-function markNotified(ids: string[], dir: string = hermitDir): boolean {
-  const p = doctorAlertsPath(dir);
+function markNotified(ids: string[], dir: string = PATHS.hermitDir): boolean {
+  const ledgerPath = doctorAlertsPath(dir);
   // Only confirm against a ledger we could actually read. mutateOwnedAlerts would happily
   // quarantine a corrupt file, rebuild it empty and report success — dropping the episodes
   // just announced, so the next run reads them as new and re-notifies. Report false instead.
-  if (readAlertState(p).kind !== 'ok') return false;
-  return mutateOwnedAlerts(p, (alerts) => {
+  if (readAlertState(ledgerPath).kind !== 'ok') return false;
+  return mutateOwnedAlerts(ledgerPath, (alerts) => {
     for (const id of ids) {
       const entry = alerts[DOCTOR_PREFIX + id];
       if (entry && entry.notified !== true) entry.notified = true;
@@ -1821,7 +1874,8 @@ function markNotified(ids: string[], dir: string = hermitDir): boolean {
   });
 }
 
-function writeReport(checks: Json[], escalation?: DoctorEscalation) {
+function writeReport(checks: Json[], escalation?: DoctorEscalation, p: DoctorPaths = PATHS) {
+  const { stateDir, reportPath } = p;
   try {
     if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
     const report = { ts: new Date().toISOString(), checks, ...(escalation ? { escalation } : {}) };
@@ -1844,6 +1898,8 @@ export {
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor, checkRawSize,
   checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
+  // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
+  resolvePaths,
   // runAllChecks is async (checkChannelLiveness performs network I/O) — callers must await it.
   runAllChecks, writeReport, escalate, markNotified,
 };
