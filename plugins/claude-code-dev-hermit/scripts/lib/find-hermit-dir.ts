@@ -17,9 +17,10 @@
 // same config.json sentinel, env checked before the walk) — if you change the walk
 // or the precedence here, check that file too. One deliberate difference: core's
 // CLAUDE_PROJECT_DIR branch accepts a bare `.claude-code-hermit/` while this one
-// requires the config.json sentinel, so in a git worktree (whose partial copy
-// carries no config.json) core resolves to the worktree and this resolves to the
-// main checkout.
+// requires the config.json sentinel, so a CLAUDE_PROJECT_DIR naming a scaffolded-
+// but-unhatched project resolves there for core and falls through to the walk
+// here. Not a worktree difference: `.worktreeinclude`'s managed block copies
+// config.json into the worktree, so both resolvers land on the worktree's copy.
 
 import fs from 'node:fs';
 import path from 'node:path';

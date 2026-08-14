@@ -165,8 +165,10 @@ describe('hermitDir()', () => {
     });
 
     it('walks past a config-less decoy to the real project above it', () => {
-      // The shape `.worktreeinclude` ships into a git worktree: a
-      // `.claude-code-hermit/` carrying OPERATOR.md but no config.json.
+      // A partially-populated `.claude-code-hermit/` — OPERATOR.md but no
+      // config.json — must not capture the walk. (Not the git-worktree shape:
+      // `.worktreeinclude`'s managed block copies config.json in, so a worktree
+      // copy IS the match.)
       const root = makeTmpHermit();
       try {
         const worktree = path.join(root, '.claude', 'worktrees', 'wt');
