@@ -7,7 +7,7 @@
 
 ### Changed
 - Read-only consumers (watchdog, cost-tracker, doctor, heartbeat, dashboard, routines, channel send, ~30 scripts) read `config.json` through the settled reader, so a malformed field has one answer everywhere: `timezone: ""` now behaves as unset (UTC) in every consumer, an absent key means the template default (notably `heartbeat.active_hours` and `post_close_clear`), and an explicit `null` disables a knob (`watchdog.context_clear_tokens`, `heartbeat.clean_recheck_cooldown`). Writer paths (`settings-edit`, `hatch-config`, `evolve-finalize`, `channel-hook`) keep their strict reads.
-- `hermit-start`/`hermit-stop` and the watchdog no longer abort on a malformed `config.json` — they proceed on settled defaults (a missing config still exits as before); validate-config and `hermit-doctor` keep surfacing the corruption.
+- `hermit-start`/`hermit-stop` and the watchdog no longer abort on a malformed `config.json` — they proceed on settled defaults (a missing config still exits as before); validate-config and `hermit-doctor` keep surfacing the corruption. Tolerating it never rewrites it: both scripts skip their `always_on` write-back when the file could not be parsed, and `hermit-stop` patches `always_on` onto the raw on-disk object, so settling stays on the read path and a stop can't persist `routines: []` over a malformed one.
 
 ## [1.2.38] - 2026-08-12
 

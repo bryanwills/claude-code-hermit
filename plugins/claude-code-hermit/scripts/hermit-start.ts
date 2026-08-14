@@ -174,6 +174,9 @@ function shlexJoin(args: string[]): string {
   return args.map(shlexQuote).join(' ');
 }
 
+/** True when config.json exists but could not be parsed — gates the write-back. */
+let configReadFailed = false;
+
 /** Load config.json or return defaults. */
 function loadConfig(): Json {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -183,8 +186,12 @@ function loadConfig(): Json {
   }
 
   // Malformed JSON no longer aborts the boot: fail open to the defaults merge
-  // below (validate-config and doctor surface the corruption).
-  const config: Json = readConfigRaw(path.dirname(CONFIG_PATH)) ?? {};
+  // below (validate-config and doctor surface the corruption). The always-on
+  // branch writes config.json back, so record the failure — writing the merged
+  // defaults over an unparseable file would destroy the operator's config.
+  const raw = readConfigRaw(path.dirname(CONFIG_PATH));
+  configReadFailed = raw === null;
+  const config: Json = raw ?? {};
 
   // Merge with defaults — shallow for top-level, deep for nested dicts.
   // This boot-time merge deliberately SEEDS containers (routines, env) for
@@ -1159,9 +1166,14 @@ async function main(): Promise<void> {
   // Mark as always-on mode in config
   config.always_on = true;
   applyAlwaysOnDoctorSchedule(config);
-  try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
-  } catch {}
+  // Skipped when the on-disk config was unparseable: `config` is then pure
+  // DEFAULT_CONFIG, and writing it would silently replace the operator's
+  // identity, channels, routines and budget with template defaults.
+  if (!configReadFailed) {
+    try {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+    } catch {}
+  }
 
   // Verify the session survived the boot period
   await sleep(3); // Wait for Claude to boot — increase if on slow hardware

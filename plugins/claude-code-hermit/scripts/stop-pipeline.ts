@@ -22,7 +22,6 @@ const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const SNAPSHOT_FILE = path.join(HERMIT_DIR, 'state', 'cc-stop-snapshot.json');
 const TURN_FILE = path.join(HERMIT_DIR, 'state', 'operator-turn-open.json');
 
-/** Hermit timezone for breadcrumb stamps — every other Progress Log writer uses it. */
 /**
  * Deliver a pending channel-requested harness command into the pane.
  *
