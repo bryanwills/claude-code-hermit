@@ -47,7 +47,9 @@ function runWithConfig(command: string, protectedBranches: string[], env: Json =
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-test-'));
   try {
     const hermitDir = path.join(tmpDir, '.claude-code-hermit');
-    fs.mkdirSync(hermitDir);
+    // state/ alongside config.json is what marks a real root: config.json on its
+    // own is the worktree-projection shape, which findHermitDir walks past.
+    fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
     fs.writeFileSync(
       path.join(hermitDir, 'config.json'),
       JSON.stringify({ 'claude-code-dev-hermit': { protected_branches: protectedBranches } })
@@ -101,7 +103,7 @@ function runInGitRepo(
     }
     if (opts.protectedBranches) {
       const hermitDir = path.join(repo, '.claude-code-hermit');
-      fs.mkdirSync(hermitDir);
+      fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
       fs.writeFileSync(
         path.join(hermitDir, 'config.json'),
         JSON.stringify({ 'claude-code-dev-hermit': { protected_branches: opts.protectedBranches } })
@@ -285,7 +287,7 @@ console.log('\nCLAUDE_PROJECT_DIR precedence:');
   const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-proj-'));
   const drifted = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-drift-'));
   const hermitDir = path.join(proj, '.claude-code-hermit');
-  fs.mkdirSync(hermitDir);
+  fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
   fs.writeFileSync(
     path.join(hermitDir, 'config.json'),
     JSON.stringify({ 'claude-code-dev-hermit': { protected_branches: ['release/prod'] } })
@@ -317,6 +319,43 @@ console.log('\nCLAUDE_PROJECT_DIR precedence:');
   } finally {
     fs.rmSync(proj, { recursive: true, force: true });
     fs.rmSync(drifted, { recursive: true, force: true });
+  }
+}
+
+// --- Worktree projection ---
+// `.worktreeinclude` copies config.json (never state/) into a `claude --worktree`
+// worktree so skills can Read it at the relative path. Resolving THERE would hand
+// the guard an empty config and silently drop the operator's protected_branches.
+console.log('\nWorktree projection:');
+{
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-wtproj-'));
+  const hermitDir = path.join(proj, '.claude-code-hermit');
+  fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
+  fs.writeFileSync(
+    path.join(hermitDir, 'config.json'),
+    JSON.stringify({ 'claude-code-dev-hermit': { protected_branches: ['release/prod'] } })
+  );
+  const wt = path.join(proj, '.claude', 'worktrees', 'wt');
+  fs.mkdirSync(path.join(wt, '.claude-code-hermit'), { recursive: true });
+  fs.writeFileSync(path.join(wt, '.claude-code-hermit', 'config.json'), JSON.stringify({}));
+
+  const guardFrom = (cwd: string, env: Json) =>
+    spawnSync(process.execPath, [GUARD], {
+      input: makeInput('git push origin release/prod'),
+      env: { ...process.env, AGENT_HOOK_PROFILE: 'strict', ...env },
+      encoding: 'utf-8',
+      cwd,
+    }).status;
+
+  try {
+    assert('walk-up from a worktree reaches the main checkout config', guardFrom(wt, {}), 2);
+    assert(
+      'CLAUDE_PROJECT_DIR naming the worktree still reaches it',
+      guardFrom(wt, { CLAUDE_PROJECT_DIR: wt }),
+      2
+    );
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
   }
 }
 

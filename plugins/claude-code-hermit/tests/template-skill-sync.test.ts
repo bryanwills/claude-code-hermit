@@ -123,13 +123,16 @@ describe('.worktreeinclude template', () => {
   // cc-compat's pinnedRoot()/mainCheckoutStateDir(), and config.json carries no
   // credentials (channel tokens live outside it). The invariant that matters —
   // no runtime state, no session history, no ledgers — is asserted directly.
-  const effectivePaths = fs.readFileSync(WORKTREEINCLUDE_PATH, 'utf-8')
+  // Read inside the tests, not at describe-registration time: a missing template
+  // must fail the existence test above with its own message, not throw while the
+  // file is still being collected and take every test in this file with it.
+  const effectivePaths = () => fs.readFileSync(WORKTREEINCLUDE_PATH, 'utf-8')
     .split('\n')
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('#'));
 
   test('template contains exactly the three allowed paths', () => {
-    expect(effectivePaths).toEqual([
+    expect(effectivePaths()).toEqual([
       '.claude-code-hermit/OPERATOR.md',
       '.claude-code-hermit/config.json',
       '.claude-code-hermit/compiled/',
@@ -138,7 +141,7 @@ describe('.worktreeinclude template', () => {
 
   test('safety-invariant: no runtime state, sessions, ledgers or channel data', () => {
     const forbidden = ['state/', 'sessions/', 'proposals/', 'raw/', 'cost-log', '.jsonl', '.db'];
-    for (const entry of effectivePaths) {
+    for (const entry of effectivePaths()) {
       for (const f of forbidden) expect(entry).not.toContain(f);
     }
   });

@@ -519,8 +519,10 @@ describe('proposal.ts state-dir pin', () => {
     fs.mkdirSync(path.join(wt, '.claude-code-hermit'), { recursive: true });
     fs.writeFileSync(path.join(wt, '.claude-code-hermit', 'config.json'), '{}');
 
-    // No AGENT_DIR: hermitDir() must walk up into the decoy for this to be a
-    // real reproduction of the worktree layout.
+    // No AGENT_DIR: hermitDir() must resolve off the worktree cwd for this to
+    // be a real reproduction. The walk skips the projection (config.json, no
+    // state/) and lands on main, so argv and hermitDir() agree here; the
+    // mainCheckoutStateDir() fallback covers the out-of-tree worktree instead.
     const r = await runScript('proposal.ts', {
       args: ['create', path.join(main, '.claude-code-hermit')],
       cwd: wt,
@@ -544,7 +546,7 @@ describe('proposal.ts state-dir pin', () => {
     // walks up into it and never reaches the root one.
     seedState(dir);
     const sub = path.join(dir, 'sub');
-    fs.mkdirSync(path.join(sub, '.claude-code-hermit'), { recursive: true });
+    fs.mkdirSync(path.join(sub, '.claude-code-hermit', 'state'), { recursive: true });
     fs.writeFileSync(path.join(sub, '.claude-code-hermit', 'config.json'), '{}');
 
     const created = await runScript('proposal.ts', {

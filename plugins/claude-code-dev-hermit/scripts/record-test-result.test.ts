@@ -20,7 +20,9 @@ let failed = 0;
 function setupProject(testCmd: string | null): string {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-test-'));
   const hermit = path.join(tmp, '.claude-code-hermit');
-  fs.mkdirSync(hermit, { recursive: true });
+  // state/ alongside config.json is what marks a real root: config.json on its
+  // own is the worktree-projection shape, which findHermitDir walks past.
+  fs.mkdirSync(path.join(hermit, 'state'), { recursive: true });
   const cfg = testCmd !== null
     ? { 'claude-code-dev-hermit': { commands: { test: testCmd } } }
     : {};
@@ -93,7 +95,7 @@ cleanup(proj);
 
 const tmpNoGit = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-test-nogit-'));
 const hermitNoGit = path.join(tmpNoGit, '.claude-code-hermit');
-fs.mkdirSync(hermitNoGit);
+fs.mkdirSync(path.join(hermitNoGit, 'state'), { recursive: true });
 fs.writeFileSync(path.join(hermitNoGit, 'config.json'), JSON.stringify({ 'claude-code-dev-hermit': { commands: { test: 'npm test' } } }));
 runHook(tmpNoGit, { tool_input: { command: 'npm test' }, tool_response: { exit_code: 0 } });
 assert('does not write last-test.json when not in a git repo', !fs.existsSync(path.join(hermitNoGit, 'state', 'last-test.json')));
@@ -105,7 +107,7 @@ assert('exits 0 cleanly when no .claude-code-hermit/ found', rc === 0);
 fs.rmSync(tmp, { recursive: true, force: true });
 
 const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'rec-test-notestcmd-'));
-fs.mkdirSync(path.join(tmp2, '.claude-code-hermit'));
+fs.mkdirSync(path.join(tmp2, '.claude-code-hermit', 'state'), { recursive: true });
 fs.writeFileSync(path.join(tmp2, '.claude-code-hermit', 'config.json'), JSON.stringify({}));
 const rc2 = runHook(tmp2, { tool_input: { command: 'anything' }, tool_response: { exit_code: 0 } });
 assert('exits 0 when commands.test is not configured', rc2 === 0);

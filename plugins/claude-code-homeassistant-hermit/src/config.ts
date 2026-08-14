@@ -29,15 +29,27 @@ import { dumpFrontmatter, loadFrontmatter } from './markdown';
  */
 export function projectRoot(): string {
   const proj = process.env.CLAUDE_PROJECT_DIR;
-  if (proj && existsSync(join(proj, '.claude-code-hermit'))) return proj;
+  if (proj && existsSync(join(proj, '.claude-code-hermit')) && !isWorktreeProjection(join(proj, '.claude-code-hermit'))) return proj;
   let dir = process.cwd();
   for (let i = 0; i < 8; i++) {
-    if (existsSync(join(dir, '.claude-code-hermit', 'config.json'))) return dir;
+    const cch = join(dir, '.claude-code-hermit');
+    if (existsSync(join(cch, 'config.json')) && !isWorktreeProjection(cch)) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return process.cwd(); // fail-open: preserves today's behavior
+}
+
+// A worktree's projected `.claude-code-hermit/` — never a resolution target.
+// `.worktreeinclude`'s managed block copies config.json into a `claude --worktree`
+// worktree so skills can Read it at the relative path they expect, but never
+// `state/`: hermit state is main-rooted and shared across worktrees. So the
+// sentinel without `state/` means a projection of a real root further up, and
+// the walk continues to it. Mirrored in core's cc-compat.ts and dev's
+// find-hermit-dir.ts — fix one, fix all three.
+function isWorktreeProjection(cchDir: string): boolean {
+  return existsSync(join(cchDir, 'config.json')) && !existsSync(join(cchDir, 'state'));
 }
 
 export class AppConfig {

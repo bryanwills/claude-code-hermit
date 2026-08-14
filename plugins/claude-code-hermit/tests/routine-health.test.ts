@@ -256,9 +256,15 @@ describe('buildRoutineHealth — cost join', () => {
 });
 
 describe('routines.ts health — CLI', () => {
+  // The relative arg anchors through resolveHermitDir(), which honours an
+  // absolute AGENT_DIR and CLAUDE_PROJECT_DIR before it walks. runScript
+  // inherits the real session's env, so both are pinned empty here — an
+  // inherited value would point these fixtures at this repo's own state dir.
+  const ANCHOR_ENV = { CLAUDE_PROJECT_DIR: '', AGENT_DIR: '' };
+
   test('prints parseable JSON with the documented top-level keys', withDir(async (dir) => {
     writeMetrics(dir, [row('brief', 'started', daysAgo(1)), row('brief', 'fired', daysAgo(1))]);
-    const r = await runScript('routines.ts', { args: ['health', '.claude-code-hermit'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['health', '.claude-code-hermit'], cwd: dir, env: ANCHOR_ENV });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(Object.keys(out).sort()).toEqual([
@@ -270,7 +276,7 @@ describe('routines.ts health — CLI', () => {
 
   test('--days is honoured', withDir(async (dir) => {
     writeMetrics(dir, [row('brief', 'fired', daysAgo(10))]);
-    const r = await runScript('routines.ts', { args: ['health', '.claude-code-hermit', '--days', '7'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['health', '.claude-code-hermit', '--days', '7'], cwd: dir, env: ANCHOR_ENV });
     const out = JSON.parse(r.stdout);
     expect(out.window_days).toBe(7);
     expect(out.routines).toEqual([]);

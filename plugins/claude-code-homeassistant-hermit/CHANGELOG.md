@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- `projectRoot()` walks past a worktree's projected `.claude-code-hermit/` (the `config.json` sentinel with no `state/`) to the main checkout, matching core and dev. Core now copies `config.json` into `claude --worktree` worktrees, which would otherwise have anchored HA snapshots, audits and staged YAML to the partial copy in a worktree session.
+
 ### Changed
 - `ha-agent-lab` keeps one record per command in `src/cli.ts` — parser spec, `--help` block and handler together. The command list, the `ha --help` body and the dispatch all derive from that table, so a command can no longer be declared without a spec (previously a runtime crash rather than a type error). No command behavior changed and `--help` output is byte-identical, now pinned by a fixture test.
 
