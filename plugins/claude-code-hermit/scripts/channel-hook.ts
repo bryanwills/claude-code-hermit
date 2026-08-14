@@ -16,7 +16,9 @@ type Json = any;
  *   below so replies on not-yet-configured channels are still captured.
  * - Persisting dm_channel_id from chat_id in tool input (config.json)
  * - Updating last_reply_at timestamp (state/channel-activity.json)
- * - Appending a reply event to state/channel-replies.jsonl (routine-ROI source)
+ * - Appending an outbound-send event to state/channel-replies.jsonl. The ledger has no
+ *   reader today: reflect's routine-ROI engagement join was removed because these rows
+ *   record the hermit's own sends, so they cannot measure operator engagement.
  *
  * The config-persistence steps below only act once the channel is already
  * configured in config.json — episodic capture is the one exception.

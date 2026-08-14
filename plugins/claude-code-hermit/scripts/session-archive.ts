@@ -36,6 +36,7 @@ import { costLogPath, pinStateDirOrExit } from './lib/cc-compat';
 import { computeSessionCost } from './lib/session-cost';
 import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
 import { readSettledConfig } from './lib/config-read';
+import { extractSection as sectionBody, firstContentLine, replaceSectionInPlace, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
@@ -241,30 +242,16 @@ function readFileSafe(p: string): string | null {
   try { return fs.readFileSync(p, 'utf-8'); } catch { return null; }
 }
 
+// Trimmed, missing-section-is-empty flavour of md-write's section read — the
+// shape this file's callers expect.
 function extractSection(shell: string, heading: string): string {
-  const re = new RegExp(`^## ${heading}[ \\t]*$`, 'm');
-  const m = re.exec(shell);
-  if (!m) return '';
-  const bodyStart = m.index + m[0].length;
-  const after = shell.slice(bodyStart);
-  const next = /\n## /.exec(after);
-  const bodyEnd = next ? bodyStart + next.index : shell.length;
-  return shell.slice(bodyStart, bodyEnd).trim();
-}
-
-function firstContentLine(section: string, maxLen?: number): string {
-  for (const line of section.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('<!--')) continue;
-    return maxLen ? trimmed.slice(0, maxLen) : trimmed;
-  }
-  return '';
+  return (sectionBody(shell, heading) ?? '').trim();
 }
 
 function extractTags(shell: string): string[] {
   const m = /\*\*Tags:\*\*\s*(.*)/.exec(shell);
   if (!m) return [];
-  const raw = m[1].replace(/<!--.*?-->/g, '').trim();
+  const raw = stripPlaceholders(m[1]);
   if (!raw) return [];
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 }
@@ -555,21 +542,6 @@ function buildReport(opts: {
 // ---------------------------------------------------------------------------
 // SHELL.md reset (mode-dependent).
 // ---------------------------------------------------------------------------
-
-function replaceSectionInPlace(shell: string, heading: string, newBody: string): string {
-  // Mirrors extractSection's index math exactly — a single regex with a `$`
-  // lookahead under the 'm' flag matches trivially at every line boundary,
-  // not just the next heading or end-of-string, which truncates the match
-  // after the first line and leaves old content behind. Manual slicing avoids it.
-  const re = new RegExp(`^## ${heading}[ \\t]*$`, 'm');
-  const m = re.exec(shell);
-  if (!m) return shell;
-  const headingLineEnd = m.index + m[0].length;
-  const after = shell.slice(headingLineEnd);
-  const next = /\n## /.exec(after);
-  const bodyEnd = next ? headingLineEnd + next.index : shell.length;
-  return shell.slice(0, headingLineEnd) + newBody + shell.slice(bodyEnd);
-}
 
 // `mode` isn't needed here — both call sites only invoke this when mode is
 // already known to be 'idle', so the cost the caller already has (computed once

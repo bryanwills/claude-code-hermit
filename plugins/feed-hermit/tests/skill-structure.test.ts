@@ -1,10 +1,11 @@
 import { test, expect } from "bun:test";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { parseFrontmatter, lintSkills } from "../../../tests/lib/skill-lint";
 
 const ROOT = join(import.meta.dir, "..");
 
-// Every skill shipped by this plugin. `name:` frontmatter must equal the dir.
+// Every skill shipped by this plugin. None is gate-shaped.
 const SKILLS = [
   "hatch",
   "feed-brief",
@@ -14,39 +15,15 @@ const SKILLS = [
   "source-health",
   "story-arcs",
   "deep-dive",
-];
+].map((name) => ({ name, gates: 0 }));
 
 function frontmatter(md: string): Record<string, string> {
-  const m = md.match(/^---\n([\s\S]*?)\n---/);
-  if (!m) return {};
-  const out: Record<string, string> = {};
-  const lines = m[1].split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const kv = lines[i].match(/^([A-Za-z_]+):\s*(.*)$/);
-    if (!kv) continue;
-    let value = kv[2].trim();
-    // Fold YAML block scalars (`>`, `>-`, `|`, `|-`): collect the following indented lines.
-    if (/^[|>][+-]?$/.test(value)) {
-      const folded: string[] = [];
-      while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) {
-        folded.push(lines[++i].trim());
-      }
-      value = folded.join(" ");
-    }
-    out[kv[1]] = value.replace(/^["']|["']$/g, "");
-  }
-  return out;
+  return parseFrontmatter(md)?.fields ?? {};
 }
 
-for (const name of SKILLS) {
-  test(`skill ${name} has valid frontmatter`, () => {
-    const path = join(ROOT, "skills", name, "SKILL.md");
-    expect(existsSync(path)).toBe(true);
-    const fm = frontmatter(readFileSync(path, "utf8"));
-    expect(fm.name).toBe(name);
-    expect((fm.description ?? "").length).toBeGreaterThanOrEqual(10);
-  });
-}
+test("every skill passes the shared structural lint", () => {
+  expect(lintSkills(ROOT, SKILLS)).toEqual([]);
+});
 
 test("source-fetcher agent has name/model frontmatter", () => {
   const path = join(ROOT, "agents", "source-fetcher.md");

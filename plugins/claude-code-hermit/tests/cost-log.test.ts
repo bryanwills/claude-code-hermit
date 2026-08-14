@@ -8,7 +8,10 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { updateCostIndex, readCostIndex, computeIndex, scanUnpricedModels, scanRoutineLedger } from '../scripts/lib/cost-log';
+import {
+  updateCostIndex, readCostIndex, computeIndex, scanUnpricedModels, scanRoutineLedger,
+  scanRoutineCostWindow, buildMainCostRow, buildSubagentCostRow, appendCostRows,
+} from '../scripts/lib/cost-log';
 
 function withTmpdir(fn: (dir: string) => void) {
   return () => {
@@ -243,4 +246,145 @@ describe('scanRoutineLedger — single-population cost and runs', () => {
   test('returns an empty map on an absent log file', () => {
     expect(scanRoutineLedger('/nonexistent/path/cost-log.jsonl').size).toBe(0);
   });
+});
+
+describe('cost row builders', () => {
+  const mainBase = {
+    sessionId: 's-1', source: 'other', model: 'sonnet',
+    inputTokens: 10, cacheWriteTokens: 20, cacheReadTokens: 30, outputTokens: 40,
+    totalTokens: 100, apiCalls: 3, maxPromptTokens: 5000,
+    lastCallPromptTokens: 4000, contextUsage: null,
+    estimatedCostUsd: 0.1234, modelUnpriced: false,
+  };
+  const subBase = {
+    sessionId: 's-1', source: 'heartbeat', model: 'haiku',
+    inputTokens: 1, cacheWriteTokens: 2, cacheReadTokens: 3, outputTokens: 4,
+    totalTokens: 10, agentType: 'claude-code-hermit:skill-eval-runner',
+    modelResolved: true, estimatedCostUsd: 0.005,
+  };
+
+  // Consumers branch on presence, not truthiness (cost-tracker's duplicate guard
+  // reads `typeof observed_at === 'string'`; scanRoutineLedger tests
+  // `source_inherited !== true`). A builder that defaulted these to false/null
+  // would silently change what a legacy row means.
+  test('optional keys are absent, not falsy, when they do not apply', () => {
+    const row = buildMainCostRow(mainBase);
+    expect('observed_at' in row).toBe(false);
+    expect('source_inherited' in row).toBe(false);
+  });
+
+  test('optional keys are present when they do apply', () => {
+    const row = buildMainCostRow({ ...mainBase, observedAt: '2026-08-01T00:00:00.000Z', sourceInherited: true });
+    expect(row.observed_at).toBe('2026-08-01T00:00:00.000Z');
+    expect(row.source_inherited).toBe(true);
+  });
+
+  test('a null observedAt stays absent rather than serializing null', () => {
+    expect('observed_at' in buildMainCostRow({ ...mainBase, observedAt: null })).toBe(false);
+  });
+
+  test('model_unpriced is always present, including when false', () => {
+    // Distinct from the optional keys above: its absence means "written before the
+    // field existed", so a false must serialize.
+    const row = buildMainCostRow(mainBase);
+    expect('model_unpriced' in row).toBe(true);
+    expect(row.model_unpriced).toBe(false);
+  });
+
+  test('main row key set is stable', () => {
+    expect(Object.keys(buildMainCostRow(mainBase)).sort()).toEqual([
+      'api_calls', 'cache_read_tokens', 'cache_write_tokens', 'context_usage',
+      'estimated_cost_usd', 'input_tokens', 'last_call_prompt_tokens', 'max_prompt_tokens',
+      'model', 'model_unpriced', 'output_tokens', 'session_id', 'source',
+      'source_attribution_version', 'timestamp', 'total_tokens',
+    ]);
+  });
+
+  test('subagent row key set is stable and marks subagent:true', () => {
+    const row = buildSubagentCostRow(subBase);
+    expect(Object.keys(row).sort()).toEqual([
+      'agent_type', 'api_calls', 'cache_read_tokens', 'cache_write_tokens', 'context_usage',
+      'estimated_cost_usd', 'input_tokens', 'model', 'model_resolved', 'output_tokens',
+      'session_id', 'source', 'source_attribution_version', 'subagent', 'timestamp', 'total_tokens',
+    ]);
+    expect(row).toMatchObject({ subagent: true, api_calls: 0, context_usage: null });
+  });
+
+  test('model_resolved:false survives as false (a sonnet-default guess, not a fact)', () => {
+    expect(buildSubagentCostRow({ ...subBase, modelResolved: false }).model_resolved).toBe(false);
+  });
+
+  test('both writers of the subagent shape agree', () => {
+    // The sync path (cost-tracker) and the async hook (subagent-cost) used to spell
+    // this object out separately, with nothing pinning the copies together.
+    const a = buildSubagentCostRow({ ...subBase, timestamp: 'T' });
+    const b = buildSubagentCostRow({ ...subBase, timestamp: 'T' });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+
+  test('appendCostRows writes one line per row and keeps order', withTmpdir((dir) => {
+    const logPath = path.join(dir, 'cost-log.jsonl');
+    const main = buildMainCostRow(mainBase);
+    const sub = buildSubagentCostRow(subBase);
+    appendCostRows(logPath, [main, sub]);
+    appendCostRows(logPath, []);   // no-op, must not write a stray newline
+    const lines = fs.readFileSync(logPath, 'utf-8').trim().split('\n');
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[0]).subagent).toBeUndefined();
+    expect(JSON.parse(lines[1]).subagent).toBe(true);
+  }));
+});
+
+describe('scanRoutineCostWindow', () => {
+  // `version: null` omits the stamp entirely (a legacy row). A default parameter
+  // cannot express that — JS resolves an explicitly-passed `undefined` to the default.
+  const row = (source: string, timestamp: string, cost: number, version: number | null = 2) => ({
+    source, timestamp, estimated_cost_usd: cost,
+    ...(version === null ? {} : { source_attribution_version: version }),
+  });
+  const since = Date.parse('2026-08-01T00:00:00.000Z');
+  const asOf = Date.parse('2026-08-15T00:00:00.000Z');
+
+  test('sums in-window v2 routine rows per id', withTmpdir((dir) => {
+    const logPath = writeLog(dir, [
+      row('routine:brief', '2026-08-02T00:00:00.000Z', 1),
+      row('routine:brief', '2026-08-03T00:00:00.000Z', 2),
+      row('routine:digest', '2026-08-03T00:00:00.000Z', 5),
+    ]);
+    const { perRoutine } = scanRoutineCostWindow(logPath, since, asOf);
+    expect(perRoutine.get('brief')).toBe(3);
+    expect(perRoutine.get('digest')).toBe(5);
+  }));
+
+  test('excludes out-of-window, v1, and non-routine rows', withTmpdir((dir) => {
+    const logPath = writeLog(dir, [
+      row('routine:brief', '2026-07-01T00:00:00.000Z', 100),   // before the window
+      row('routine:brief', '2026-09-01T00:00:00.000Z', 100),   // after it
+      row('routine:brief', '2026-08-02T00:00:00.000Z', 100, 1), // v1 attribution
+      row('routine:brief', '2026-08-02T00:00:00.000Z', 100, null), // legacy, unstamped
+      row('other', '2026-08-02T00:00:00.000Z', 100),
+      row('heartbeat', '2026-08-02T00:00:00.000Z', 100),
+    ]);
+    const { perRoutine, multi } = scanRoutineCostWindow(logPath, since, asOf);
+    expect(perRoutine.size).toBe(0);
+    expect(multi).toBe(0);
+  }));
+
+  test('routine:multi is bucketed separately, never as a routine named multi', withTmpdir((dir) => {
+    const logPath = writeLog(dir, [
+      row('routine:multi', '2026-08-02T00:00:00.000Z', 4),
+      row('routine:brief', '2026-08-02T00:00:00.000Z', 1),
+    ]);
+    const { perRoutine, multi } = scanRoutineCostWindow(logPath, since, asOf);
+    expect(multi).toBe(4);
+    expect(perRoutine.has('multi')).toBe(false);
+    expect(perRoutine.get('brief')).toBe(1);
+  }));
+
+  test('corrupt lines and an absent log are survivable', withTmpdir((dir) => {
+    const logPath = path.join(dir, 'cost-log.jsonl');
+    fs.writeFileSync(logPath, '{bad\n' + JSON.stringify(row('routine:brief', '2026-08-02T00:00:00.000Z', 2)) + '\n');
+    expect(scanRoutineCostWindow(logPath, since, asOf).perRoutine.get('brief')).toBe(2);
+    expect(scanRoutineCostWindow('/nonexistent/cost-log.jsonl', since, asOf).perRoutine.size).toBe(0);
+  }));
 });

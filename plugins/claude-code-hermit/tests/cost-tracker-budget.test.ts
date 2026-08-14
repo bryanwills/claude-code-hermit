@@ -10,21 +10,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-
-function assistantEntry(model: string, inputTokens: number, outputTokens: number): string {
-  return JSON.stringify({
-    type: 'assistant',
-    message: {
-      model,
-      usage: { input_tokens: inputTokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: outputTokens },
-      content: [{ type: 'text', text: 'ok' }],
-    },
-  });
-}
-
-function triggerPrompt(text: string): string {
-  return JSON.stringify({ type: 'user', message: { content: text } });
-}
+import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
+import { writeConfig } from './helpers/workdir';
 
 interface Setup {
   dir: string;
@@ -39,7 +26,7 @@ function setup(config: object): Setup {
   const cchDir = path.join(dir, '.claude-code-hermit');
   fs.mkdirSync(path.join(cchDir, 'state'), { recursive: true });
   fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
-  fs.writeFileSync(path.join(cchDir, 'config.json'), JSON.stringify(config));
+  writeConfig(dir, config);
   return { dir, logPath, cchDir };
 }
 

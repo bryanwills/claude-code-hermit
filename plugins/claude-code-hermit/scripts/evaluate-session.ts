@@ -12,6 +12,7 @@ import { readTasks } from './lib/tasks';
 import { hermitDir } from './lib/cc-compat';
 import { currentHHMM, elapsedSinceHHMM, resolveHermitNowMs } from './lib/time';
 import { readSettledConfig } from './lib/config-read';
+import { extractSection, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
@@ -61,9 +62,9 @@ function evaluateSession(content: Json, tasks: Json[]): Json {
 
   // Helper: check if a markdown section exists and has non-comment content
   function checkSection(sectionName: string): { exists: boolean; hasContent: Json } {
-    const section = content.match(new RegExp(`## ${sectionName}\n([\\s\\S]*?)(?=\n## |$)`));
-    const text = section ? section[1].trim() : '';
-    return { exists: !!section, hasContent: text && !text.startsWith('<!--') };
+    const section = extractSection(content, sectionName);
+    // stripPlaceholders, not startsWith('<!--') — see its doc comment in md-write.ts.
+    return { exists: section !== null, hasContent: stripPlaceholders(section ?? '').length > 0 };
   }
 
   // Criterion 3: Blockers section
@@ -168,8 +169,7 @@ async function _evaluate(): Promise<string | null> {
         // Progress Log timestamps are date-less [HH:MM]. Use the bottom-most entry
         // (append-ordered) and resolve it as its most recent past occurrence, so a
         // session spanning midnight doesn't backdate today's entries.
-        const progressSection = content.match(/## Progress Log\n([\s\S]*?)(?=\n## |$)/);
-        const progressText = progressSection ? progressSection[1].trim() : '';
+        const progressText = (extractSection(content, 'Progress Log') ?? '').trim();
         const timeEntries = progressText.match(/\[(\d{1,2}:\d{2})\]/g);
         if (timeEntries && timeEntries.length > 0) {
           const lastTime = timeEntries[timeEntries.length - 1].replace(/[\[\]]/g, '');
@@ -185,9 +185,9 @@ async function _evaluate(): Promise<string | null> {
     }
 
     // Monitoring bloat check (any status)
-    const monitoringSection = content.match(/## Monitoring\n([\s\S]*?)(?=\n## |$)/);
-    if (monitoringSection) {
-      const monitoringLines = (monitoringSection[1].match(/\n/g) || []).length;
+    const monitoringSection = extractSection(content, 'Monitoring');
+    if (monitoringSection !== null) {
+      const monitoringLines = (monitoringSection.match(/\n/g) || []).length;
       if (monitoringLines > 40) {
         console.error('Monitoring section too large. Alert dedup should prevent this — check if dedup is working.');
       }

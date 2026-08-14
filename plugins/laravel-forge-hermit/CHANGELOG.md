@@ -1,5 +1,10 @@
 # Changelog — laravel-forge-hermit
 
+## [Unreleased]
+
+### Added
+- Inventory-sync test between `php/forge.php` and the write-confirm-gate hook: a subcommand added to the PHP dispatch chain without a matching entry in the hook's classifier now fails the test suite instead of silently falling through the hook's unknown-subcommand branch.
+
 ## [0.0.10] - 2026-07-30
 
 ### Added

@@ -29,7 +29,8 @@ import {
 } from './lib/cc-compat';
 import { calculateCost } from './lib/pricing';
 import { resolveTurnSource, detectModel } from './cost-tracker';
-import { SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
+import { buildSubagentCostRow, appendCostRows, costIndexPath, updateCostIndex } from './lib/cost-log';
+import { readSettledConfig } from './lib/config-read';
 
 const HERMIT_DIR = hermitDir();
 const COST_LOG = costLogPath(HERMIT_DIR);
@@ -128,26 +129,35 @@ process.stdin.on('end', () => {
       calculateCost(model, inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens) * 10000
     ) / 10000;
 
-    const entry = {
-      timestamp: new Date().toISOString(),
-      session_id: payloadSessionId(payload) || readRuntimeSessionId() || 'unknown',
+    const entry = buildSubagentCostRow({
+      sessionId: payloadSessionId(payload) || readRuntimeSessionId() || 'unknown',
       source,
       model,
-      input_tokens:       inputTokens,
-      cache_write_tokens: cacheWriteTokens,
-      cache_read_tokens:  cacheReadTokens,
-      output_tokens:      outputTokens,
-      total_tokens:       totalTokens,
-      api_calls:          0,
-      subagent:           true,
-      agent_type:         payload.agent_type || '',
-      model_resolved:     !!rawModel,   // subagent transcript always carries a model → effectively always true
-      context_usage:      null,
-      estimated_cost_usd: estimatedCost,
-      source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
-    };
+      inputTokens,
+      cacheWriteTokens,
+      cacheReadTokens,
+      outputTokens,
+      totalTokens,
+      agentType: payload.agent_type || '',
+      modelResolved: !!rawModel,   // subagent transcript always carries a model → effectively always true
+      estimatedCostUsd: estimatedCost,
+    });
 
-    try { fs.appendFileSync(COST_LOG, JSON.stringify(entry) + '\n', 'utf-8'); } catch {}
+    try { appendCostRows(COST_LOG, [entry]); } catch { process.exit(0); return; }
+
+    // Fold the row into cost-index.json here rather than leaving it for the next
+    // Stop hook. readCostIndex validates only the schema version, so a present-but-
+    // lagging index is trusted verbatim by the dashboard, the telemetry export,
+    // spend-status and the doctor — and an async dispatch that finishes as the
+    // hermit goes idle can leave it lagging indefinitely. updateCostIndex folds
+    // only the bytes past its own offset and rebuilds if the log shrank, so racing
+    // the Stop hook here is last-writer-wins over the same derived total, not a
+    // double-count. Budget enforcement is unaffected either way: cost-tracker
+    // checks caps against the index it just updated itself.
+    try {
+      const timezone = readSettledConfig(HERMIT_DIR).timezone ?? 'UTC';
+      updateCostIndex(COST_LOG, costIndexPath(HERMIT_DIR), timezone);
+    } catch { /* index refresh is best-effort; the row is already durable */ }
   } catch {}
   process.exit(0);
 });

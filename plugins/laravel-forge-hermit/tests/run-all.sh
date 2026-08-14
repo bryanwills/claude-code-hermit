@@ -26,11 +26,8 @@ if ! bun test tests/hook.test.ts; then
 fi
 
 echo ""
-echo "--- structural lints (skill-structure + hatch-skill) ---"
+echo "--- structural lints (skill-structure) ---"
 if ! bun tests/skill-structure.test.ts; then
-  EXIT=1
-fi
-if ! bun tests/hatch-skill.test.ts; then
   EXIT=1
 fi
 
