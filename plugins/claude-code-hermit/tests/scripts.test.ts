@@ -127,6 +127,34 @@ describe('check-upgrade.sh always_on banner', () => {
     const out = await run({ always_on: true, _hermit_versions: { 'claude-code-hermit': pluginVer } });
     expect(out).not.toContain('---Upgrade Available---');
   });
+
+  // Config ahead of the loaded plugin = a stale install copy is loaded. evolve cannot
+  // fix that state (it reads as up-to-date, and finalizing would downgrade the stamp),
+  // so this branch must never emit the evolve directive — under any always_on value.
+  test('config ahead of plugin -> stale-runtime notice, never an evolve directive', async () => {
+    for (const always_on of [true, false]) {
+      const out = await run({ always_on, _hermit_versions: { 'claude-code-hermit': '99.0.0' } });
+      expect(out).toContain('---Stale Plugin Runtime---');
+      expect(out).not.toContain('---Upgrade Available---');
+      expect(out).not.toContain('REQUIRED');
+      expect(out).not.toContain('/claude-code-hermit:hermit-evolve');
+      expect(out).toContain(`v${pluginVer}`);
+      expect(out).toContain('v99.0.0');
+      expect(out).toContain(PLUGIN_ROOT); // the loaded root identifies the stale entry
+    }
+  });
+
+  // startup-context.ts slices this section to BUDGETS.upgrade (500). The install path is
+  // machine-dependent and printed last, so only the fixed prose is budgeted here.
+  test('stale-runtime prose leaves room for the path within the 500-char budget', async () => {
+    const out = await run({ always_on: true, _hermit_versions: { 'claude-code-hermit': '99.0.0' } });
+    const prose = out.split('Loaded from:')[0];
+    expect(prose.length).toBeLessThanOrEqual(350);
+  });
+
+  test('unparseable version on either side -> silent', async () => {
+    expect(await run({ _hermit_versions: { 'claude-code-hermit': 'garbage' } })).toBe('');
+  });
 });
 
 // -------------------------------------------------------

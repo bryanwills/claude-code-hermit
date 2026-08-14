@@ -96,7 +96,10 @@ Deferred for operator: <none | one or more verbatim blocks, each:>
 ```
 
 If a hard gate (step 0 CLI version, step 0b bun) stops the upgrade, return `Upgrade: blocked: <reason>`
-with the gate's exact message and omit the rest. If `plan.work_pending` is `false` (core current AND
+with the gate's exact message and omit the rest. If the plan's `loaded_core_older_than_applied` is
+`true`, return `Upgrade: blocked: stale plugin runtime — <the Step 1 message>` and omit the rest; that
+check runs in Step 1, **before** the `work_pending` rule below ever applies.
+Never report that state as `already up to date`. If `plan.work_pending` is `false` (core current AND
 no sibling gap AND no CLAUDE-APPEND drift), return `Upgrade: already up to date` alone.
 When core is current but `work_pending` is `true` (sibling-only work), use `Upgrade: core current v<to>`
 and still process Steps 3, 4, 7, 8, 9.

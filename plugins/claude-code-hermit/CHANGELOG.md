@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- The session-start and boot version checks compare version *direction* instead of string inequality. A config stamp ahead of the loaded plugin now reports `---Stale Plugin Runtime---` with the loaded path and the scoped `claude plugin update` to run, instead of demanding `hermit-evolve` — which could not clear it, so always-on hermits re-dispatched an evolve subagent every session start forever.
+- `hermit-evolve` stops before any migration when the loaded plugin is older than the applied version, and `evolve-finalize` refuses a `--core` below the on-disk stamp (`core_version_regression`, config left untouched). Previously a stale install plus any sibling gap or CLAUDE-APPEND drift ran the migrations and then silently lowered `_hermit_versions` without reversing them. Sibling stamps get the same no-downgrade rule as a skip.
+- The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
+### Changed
 ### Added
 - `scripts/lib/config-read.ts` — one settled read path for `config.json`: `readSettledConfig` never throws, settles malformed values by declared shape (never vocabulary, so custom operator values survive), preserves explicit `null`s and unknown keys at every nesting level, and settles malformed containers to empty rather than template seeds. `readConfigRaw` remains for the few consumers that must distinguish an unreadable config (routines run records, the prompt pipeline's disclosure gates, `channel-send`'s `config_read_failed`).
 

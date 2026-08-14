@@ -167,6 +167,41 @@ test('up_to_date true when config == plugin version', withProj(async (proj) => {
   const d = await runPlan(proj, 'local');
   expect(d.up_to_date).toBe(true);
   expect(d.changelog_versions).toEqual([]);
+  expect(d.loaded_core_older_than_applied).toBe(false);
+}));
+
+// -------------------------------------------------------
+// 2b. Config stamped AHEAD of the loaded plugin = stale install, not an upgrade
+// -------------------------------------------------------
+
+// up_to_date collapses "ahead" into "current", so it cannot carry this state. The
+// separate field is what lets the skill stop before Step 2/7 instead of running
+// migrations and then stamping the OLDER loaded version over the applied one.
+test('config ahead of loaded plugin -> loaded_core_older_than_applied', withProj(async (proj) => {
+  writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.2.0"}}');
+  const d = await runPlan(proj, 'local');
+  expect(d.from).toBe('1.2.0');
+  expect(d.to).toBe('1.1.7');
+  expect(d.loaded_core_older_than_applied).toBe(true);
+  expect(d.errors).toEqual([]);
+}));
+
+test('behind (normal upgrade) does NOT set loaded_core_older_than_applied', withProj(async (proj) => {
+  writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
+  const d = await runPlan(proj, 'local');
+  expect(d.loaded_core_older_than_applied).toBe(false);
+}));
+
+// The destructive path: sibling drift keeps work_pending true, which is what walked the
+// runner into Step 7 + Step 9 and the stamp downgrade. The verdict must fire anyway.
+test('REGRESSION: config ahead + sibling gap -> still flagged, despite work_pending', withProj(async (proj) => {
+  writeConfig(proj, JSON.stringify({
+    _hermit_versions: { 'claude-code-hermit': '1.2.0', 'claude-code-dev-hermit': '0.4.1' },
+  }));
+  const pl = writePluginList([siblingEntry(proj)]);
+  const d = await runPlan(proj, 'local', pl);
+  expect(d.loaded_core_older_than_applied).toBe(true);
+  expect(d.work_pending).toBe(true); // sibling work would otherwise carry the run forward
 }));
 
 // -------------------------------------------------------
