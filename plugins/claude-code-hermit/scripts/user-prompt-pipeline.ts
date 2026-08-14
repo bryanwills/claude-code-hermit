@@ -31,7 +31,7 @@ process.stdout.on('error', () => {});
 
 import { hermitDir } from './lib/cc-compat';
 import { parseChannelEnvelope } from './lib/channel-envelope';
-import { loadConfig } from './lib/channel-auth';
+import { readConfigRaw } from './lib/config-read';
 import { readRuntimeJson } from './lib/runtime';
 import type { StageContext, StageResult } from './lib/prompt-stages/types';
 
@@ -94,7 +94,9 @@ async function main(raw: string): Promise<void> {
     prompt,
     envelope: parseChannelEnvelope(prompt),
     config() {
-      if (!configRead) { configRead = true; try { configCache = loadConfig(dir); } catch { configCache = null; } }
+      // Raw, not settled: shutdown-gate and channel-status-responder treat a
+      // null config as a disclosure gate (silent no-op); settling would loosen it.
+      if (!configRead) { configRead = true; try { configCache = readConfigRaw(dir); } catch { configCache = null; } }
       return configCache;
     },
     runtime() {

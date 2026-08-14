@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { safe } from './lib/sanitize';
 import { hermitDir } from './lib/cc-compat';
+import { readConfigRaw } from './lib/config-read';
 import { logMessage, isLoggingEnabled } from './lib/channel-log';
 
 type Json = any;
@@ -44,11 +45,7 @@ function resolveChannel(toolName: string): string | null {
 }
 
 function readConfig(): Json | null {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readConfigRaw(HERMIT_DIR);
 }
 
 function writeConfig(config: Json): void {

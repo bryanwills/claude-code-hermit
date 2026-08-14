@@ -47,7 +47,7 @@ import {
 import { sendToChannel } from './lib/channel-send';
 import { inboundSince } from './lib/channel-log';
 import { tmuxSessionAlive } from './lib/tmux';
-import { loadConfig } from './lib/channel-auth';
+import { readSettledConfig } from './lib/config-read';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { resolveLocale, MINT, dates } from './lib/messages';
 
@@ -76,9 +76,9 @@ const POLL_MS = 2_000;
 // chat the bot can see must never be accepted — matching the physical chat_id is
 // the strong pin. Null route = no channel configured (terminal/attended flow), so
 // no filtering.
-const MINT_CONFIG: any = (() => { try { return loadConfig(HERMIT_DIR); } catch { return null; } })();
-const OPERATOR_LOCALE = resolveLocale(MINT_CONFIG?.language);
-const REPLY_ROUTE = MINT_CONFIG?.channels ? resolveOutboundChannel(MINT_CONFIG.channels) : null;
+const MINT_CONFIG: any = readSettledConfig(HERMIT_DIR);
+const OPERATOR_LOCALE = resolveLocale(MINT_CONFIG.language);
+const REPLY_ROUTE = resolveOutboundChannel(MINT_CONFIG.channels);
 
 function rowMatchesReplyRoute(r: any): boolean {
   if (!REPLY_ROUTE) return true;

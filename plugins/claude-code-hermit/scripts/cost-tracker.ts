@@ -15,6 +15,7 @@ import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, SOURCE_ATTRIBUTION_VERSION } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
+import { readSettledConfig } from './lib/config-read';
 import { setPause, isPaused } from './lib/pause';
 import { evaluateBudget, pauseBoundary } from './lib/budget';
 import { sendOperatorNotice } from './lib/channel-send';
@@ -38,7 +39,6 @@ const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
 const TASK_SNAPSHOT = path.join(HERMIT_DIR, 'tasks-snapshot.md');
-const CONFIG_JSON = path.join(HERMIT_DIR, 'config.json');
 const BUDGET_ALERTS = budgetAlertsPath(HERMIT_DIR);
 
 let _runtimeCache: Json;
@@ -911,8 +911,7 @@ async function run(data: Json): Promise<string | null> {
 
     // Read config once per turn — timezone drives by_date/by_week/by_month bucketing and
     // budget-window boundaries (PROP-016); budgetConfig drives the breach check below.
-    let config: Json = {};
-    try { config = JSON.parse(fs.readFileSync(CONFIG_JSON, 'utf-8')); } catch {}
+    const config: Json = readSettledConfig(HERMIT_DIR);
     const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
 
     // Unknown model string → still priced at sonnet rates (refusing would zero the log),

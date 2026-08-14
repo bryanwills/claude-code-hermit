@@ -1,0 +1,203 @@
+// Settled config read path — the one tolerant reader for `.claude-code-hermit/config.json`.
+//
+// Every read-only consumer goes through readSettledConfig() so a malformed field
+// has ONE answer everywhere (previously: timezone "" was "" to the watchdog,
+// 'UTC' to the cost ledger, and null to routines). Settling is by declared
+// SHAPE only, never vocabulary:
+//
+//   - missing file / unreadable / malformed JSON / non-object  -> all defaults
+//   - nullable scalar (template value null): malformed or ""    -> null
+//   - non-nullable scalar: malformed                            -> template default
+//   - enum-ish strings (escalation, idle_behavior, ...): any non-empty string
+//     passes through — membership stays advisory in validate-config.ts, so
+//     custom operator modes are never erased
+//   - nested blocks: wrong-typed block -> default block; well-typed block is
+//     spread first, then known sub-keys settled — operator-added keys survive
+//     at every nesting level (never allowlist-project)
+//   - containers (routines, channels, monitors, env, ...): malformed -> EMPTY,
+//     never the template's seed values (settling a broken `routines` to the
+//     template's seeded routines would resurrect routines the operator deleted);
+//     item contents are not normalized here
+//
+// This module never writes, never throws, and never rejects unknown keys.
+// Writer paths (settings-edit, hatch-config, evolve-finalize) deliberately do
+// NOT use it — an existing-but-malformed file must abort there, never fall
+// through to defaults (see settings-edit.ts). Schema *validation* stays in
+// validate-config.ts (advisory PostToolUse hook); defaults live here. The
+// defaults table below mirrors state-templates/config.json.template —
+// tests/config-read.test.ts enforces top-level key parity.
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+type Json = any;
+
+// Deliberately Json, not a 40-key interface: consumers use untyped dotted
+// access throughout the codebase; the reader's contract is behavioral.
+export type SettledConfig = Json;
+
+type Spec =
+  | { kind: 'string'; def: string | null }
+  | { kind: 'boolean'; def: boolean | null }
+  | { kind: 'number'; def: number | null }
+  | { kind: 'array' }
+  | { kind: 'map' }
+  | { kind: 'shape'; sub: Record<string, Spec> };
+
+const str = (def: string | null): Spec => ({ kind: 'string', def });
+const bool = (def: boolean | null): Spec => ({ kind: 'boolean', def });
+const num = (def: number | null): Spec => ({ kind: 'number', def });
+const arr: Spec = { kind: 'array' };
+const map: Spec = { kind: 'map' };
+const shape = (sub: Record<string, Spec>): Spec => ({ kind: 'shape', sub });
+
+// One row per top-level template key. Adding a key to the template without a
+// row here fails the template-parity test.
+const TABLE: Record<string, Spec> = {
+  _hermit_versions: map,
+  agent_name: str(null),
+  language: str(null),
+  timezone: str(null),
+  escalation: str('balanced'),
+  operator_profile: str('technical'),
+  sign_off: str(null),
+  channels: map,
+  remote: bool(true),
+  model: str('sonnet'),
+  effort: str(null),
+  permission_mode: str('auto'),
+  tmux_session_name: str('hermit-{project_name}'),
+  auto_session: bool(true),
+  always_on: bool(false),
+  chrome: bool(false),
+  push_notifications: bool(true),
+  ask_gate: bool(true),
+  idle_behavior: str('discover'),
+  routines: arr,
+  monitors: arr,
+  env: map,
+  boot_skill: str(null),
+  shutdown_skill: str(null),
+  scheduled_checks: arr,
+  docker: shape({ packages: arr, recommended_plugins: arr }),
+  compact: shape({
+    monitoring_threshold: num(30),
+    monitoring_keep: num(20),
+    summary_threshold: num(30),
+    summary_keep: num(15),
+  }),
+  heartbeat: shape({
+    enabled: bool(true),
+    every: str('2h'),
+    active_hours: shape({ start: str('08:00'), end: str('23:00') }),
+    stale_threshold: str('2h'),
+    waiting_timeout: str(null),
+    clean_recheck_cooldown: str('6h'),
+    model: str('haiku'),
+  }),
+  quality_gate: shape({ tier: str('budget') }),
+  knowledge: shape({
+    raw_retention_days: num(14),
+    compiled_budget_chars: num(2500),
+    working_set_warn: num(20),
+    archive_retention_days: num(null),
+    channel_log_enabled: bool(true),
+    channel_log_retention_days: num(90),
+  }),
+  watchdog: shape({
+    enabled: bool(false),
+    stale_factor: num(2),
+    escalate_after: num(3),
+    operator_grace: str('15m'),
+    context_clear_tokens: num(700000),
+  }),
+  budget: shape({
+    daily_usd: num(null),
+    weekly_usd: num(null),
+    monthly_usd: num(null),
+    action: str('alert'),
+  }),
+  telemetry_export: shape({
+    enabled: bool(false),
+    destination: shape({ type: str('webhook'), url: str(null), bearer_env: str('HERMIT_TELEMETRY_TOKEN') }),
+    interval_hours: num(24),
+    redact_operator_text: bool(true),
+  }),
+  artifacts: shape({
+    dashboard: bool(true),
+    proposals: bool(true),
+    weekly_review: bool(true),
+    publish_authorized: bool(null),
+    backend: str('claude'),
+  }),
+  context_hygiene: shape({
+    compact: shape({ enabled: bool(true), min_context_tokens: num(100000), min_interval: str('4h') }),
+  }),
+  reflection: shape({ graduation_min_sessions: num(1) }),
+  routine_wake_lint: shape({ max_windows: num(6) }),
+  doctor: shape({ routine_cost_floor_usd: num(2) }),
+  storage_drift: shape({ ignore: arr }),
+  post_close_clear: bool(true),
+};
+
+// For the template-parity test.
+export const SETTLED_KEYS = Object.keys(TABLE);
+
+function isPlainObject(v: unknown): v is Record<string, Json> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function settleValue(spec: Spec, raw: Json): Json {
+  // Explicit null on a scalar is a deliberate operator value (disable
+  // semantics, e.g. heartbeat.clean_recheck_cooldown: null turns the damper
+  // off) — preserve it; only wrong types and "" settle to the default.
+  if (raw === null && spec.kind !== 'shape' && spec.kind !== 'map' && spec.kind !== 'array') return null;
+  switch (spec.kind) {
+    case 'string':
+      return typeof raw === 'string' && raw !== '' ? raw : spec.def;
+    case 'boolean':
+      return typeof raw === 'boolean' ? raw : spec.def;
+    case 'number':
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : spec.def;
+    case 'array':
+      return Array.isArray(raw) ? raw : [];
+    case 'map':
+      return isPlainObject(raw) ? raw : {};
+    case 'shape': {
+      const base: Record<string, Json> = isPlainObject(raw) ? { ...raw } : {};
+      for (const [k, sub] of Object.entries(spec.sub)) base[k] = settleValue(sub, base[k]);
+      return base;
+    }
+  }
+}
+
+/** Pure and total: any input settles to a full config (unknown keys preserved). */
+export function settleConfig(raw: unknown): SettledConfig {
+  const settled: Record<string, Json> = isPlainObject(raw) ? { ...raw } : {};
+  for (const [key, spec] of Object.entries(TABLE)) settled[key] = settleValue(spec, settled[key]);
+  return settled;
+}
+
+/** True when `<dir>/config.json` exists — for callers whose absence-gate is behavioral. */
+export function configExists(dir: string): boolean {
+  return fs.existsSync(path.join(dir, 'config.json'));
+}
+
+/** Never throws: unreadable or malformed config settles to full defaults. */
+export function readSettledConfig(dir: string): SettledConfig {
+  const raw = readConfigRaw(dir);
+  return settleConfig(raw ?? undefined);
+}
+
+// Escape hatch for the few consumers whose semantics deliberately distinguish
+// "config unreadable" from "config empty" (routines run-record tri-state, the
+// prompt pipeline's disclosure gates, channel-send's config_read_failed error).
+// Everything else uses readSettledConfig — do not reach for this to skip
+// settling.
+export function readConfigRaw(dir: string): Json | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}

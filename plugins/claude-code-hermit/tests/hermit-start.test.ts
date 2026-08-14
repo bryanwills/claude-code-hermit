@@ -927,9 +927,11 @@ describe('writeSettingsEnv sandbox overlay', () => {
 // ============================================================
 
 describe('negative paths', () => {
-  test('invalid JSON in config.json throws', () => {
+  test('invalid JSON in config.json falls open to the defaults merge', () => {
     fs.writeFileSync('.claude-code-hermit/config.json', '{bad json');
-    expect(() => loadConfig()).toThrow(SyntaxError);
+    const merged = loadConfig();
+    expect(merged.escalation).toBe('balanced');
+    expect(merged.model).toBe('sonnet');
   });
 
   test('non-dict channels does not crash iterChannelConfigs', () => {

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, globDir } from './frontmatter';
+import { readSettledConfig } from './config-read';
 import { parseSchema } from '../knowledge-lint';
 
 export function findStorageDrift(hermitDir: string): string[] {
@@ -11,14 +12,8 @@ export function findStorageDrift(hermitDir: string): string[] {
     'memory', 'bin', 'docker']);
 
   // Fail-open: any parse error → no exemptions applied.
-  let ignoreDirs = new Set<string>();
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(hermitDir, 'config.json'), 'utf-8'));
-    const listed = cfg?.storage_drift?.ignore;
-    if (Array.isArray(listed)) {
-      ignoreDirs = new Set(listed.filter((d: unknown) => typeof d === 'string'));
-    }
-  } catch {}
+  const listed = readSettledConfig(hermitDir).storage_drift.ignore;
+  const ignoreDirs = new Set<string>(listed.filter((d: unknown): d is string => typeof d === 'string'));
 
   const hits: string[] = [];
 

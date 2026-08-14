@@ -29,6 +29,10 @@ function makeDir(): Tmp {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-alertdur-'));
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
   fs.writeFileSync(hermit(dir, 'HEARTBEAT.md'), HEARTBEAT_MD);
+  // Full-day active hours: without a config.json the settled defaults
+  // (08:00-23:00) would gate the tick by the real wall clock.
+  fs.writeFileSync(hermit(dir, 'config.json'),
+    '{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"24:00"}}}');
   return { dir, cleanup: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} } };
 }
 

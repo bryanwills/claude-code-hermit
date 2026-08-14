@@ -17,6 +17,7 @@ import { formatTokens } from './format';
 import { sha256 } from './hash';
 import { readMergedAlerts, PROPOSAL_PREFIX } from './alert-state';
 import { todayYMD } from './time';
+import { readSettledConfig } from './config-read';
 import { costIndexPath, readCostIndex } from './cost-log';
 import { rebuildIndex, type ProposalsIndex } from './proposals/index-rebuild';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
@@ -282,11 +283,11 @@ function agentNameFromConfig(config: Json): string {
 /** The hermit's own name, used to lead both page titles. Shared with
  *  proposals-page.ts, which has no other reason to read config.json. */
 export function loadAgentName(hermitDir: string): string {
-  return agentNameFromConfig(readJsonSafe(path.join(hermitDir, 'config.json')));
+  return agentNameFromConfig(readSettledConfig(hermitDir));
 }
 
 export function loadDashboardState(hermitDir: string): DashboardState {
-  const config = readJsonSafe(path.join(hermitDir, 'config.json')) ?? {};
+  const config = readSettledConfig(hermitDir);
   const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
   const strings = loadStrings(hermitDir);
   const runtime = readJsonSafe(path.join(hermitDir, 'state', 'runtime.json'));

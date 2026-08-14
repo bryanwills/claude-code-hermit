@@ -15,6 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
+import { readConfigRaw } from './lib/config-read';
 import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -181,9 +182,14 @@ function loadConfig(): Json {
     process.exit(1);
   }
 
-  const config: Json = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  // Malformed JSON no longer aborts the boot: fail open to the defaults merge
+  // below (validate-config and doctor surface the corruption).
+  const config: Json = readConfigRaw(path.dirname(CONFIG_PATH)) ?? {};
 
   // Merge with defaults — shallow for top-level, deep for nested dicts.
+  // This boot-time merge deliberately SEEDS containers (routines, env) for
+  // sparse configs — different from lib/config-read's read-path settling,
+  // which settles missing containers to empty.
   // Values in config may be null (JSON null), so fall back to {} for spreading.
   const merged: Json = { ...DEFAULT_CONFIG, ...config };
   for (const [key, def] of Object.entries(DEFAULT_CONFIG)) {

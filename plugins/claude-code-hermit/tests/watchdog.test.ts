@@ -1010,8 +1010,13 @@ function writeDoctorConfig(h: Hermit, enabled = true): void {
 }
 
 test('doctor checkWatchdog: disabled → ok', withHermit(async (h) => {
+  // post_close_clear and context_hygiene are explicitly off: absent keys now
+  // settle to template defaults (on), which would mean the tick is needed.
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
-    JSON.stringify({ watchdog: { enabled: false }, ...DOCTOR_BASE }, null, 2) + '\n');
+    JSON.stringify({
+      watchdog: { enabled: false, context_clear_tokens: null }, post_close_clear: false,
+      context_hygiene: { compact: { enabled: false } }, ...DOCTOR_BASE,
+    }, null, 2) + '\n');
   const w = await doctorWatchdogCheck(h);
   expect(w.status).toBe('ok');
   expect(w.detail).toContain('disabled');
@@ -1037,8 +1042,10 @@ test('doctor checkWatchdog: restart in last 7d → warn', withHermit(async (h) =
 // -------------------------------------------------------
 
 test('run stamps last_run before the enabled gate (enabled:false)', withHermit(async (h) => {
+  // Hygiene tiers explicitly off: absent keys now settle to template defaults
+  // (on), which would send this minimal fixture down tmux-dependent paths.
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
-    '{"watchdog": {"enabled": false}}\n');
+    '{"watchdog": {"enabled": false, "context_clear_tokens": null}, "post_close_clear": false, "context_hygiene": {"compact": {"enabled": false}}}\n');
   const r = await watchdog(h, 'run');
   expect(r.exitCode).toBe(0);
   const ws = readWatchdogStateFile(h);
@@ -1317,7 +1324,13 @@ test('post_close_clear: no marker → no send',
 
 test('post_close_clear: flag false → no send even with marker',
   withHermit(async (h) => {
-    writeConfig(h); // standard config: watchdog.enabled true, no post_close_clear
+    writeConfig(h);
+    // Explicit false: an absent post_close_clear now settles to the template
+    // default (true), so the fixture must actually carry the flag.
+    const cfgPath = path.join(h.dir, '.claude-code-hermit', 'config.json');
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    cfg.post_close_clear = false;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
     patchRuntime(h, { session_state: 'idle' });
     writeClearMarker(h);
     writeFakeTmux(h, 0);
@@ -1678,7 +1691,9 @@ function writeContextCompactConfig(h: Hermit, opts: {
   routines?: unknown[]; timezone?: string;
 } = {}): void {
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
-    watchdog: { enabled: false, ...(opts.clearTokens ? { context_clear_tokens: opts.clearTokens } : {}) },
+    // Explicit null when unconfigured: an absent context_clear_tokens now
+    // settles to the template default (700000).
+    watchdog: { enabled: false, context_clear_tokens: opts.clearTokens ?? null },
     context_hygiene: {
       compact: {
         enabled: true,
@@ -1821,8 +1836,14 @@ test('context_compact: under threshold → no compact', withHermit(async (h) => 
   expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
 }));
 
-test('context_compact: disabled (no context_hygiene block) → no-op even if bloated', withHermit(async (h) => {
-  writeContextClearConfig(h, 0); // watchdog.enabled:false, no context_hygiene block at all
+test('context_compact: disabled (context_hygiene.compact.enabled false) → no-op even if bloated', withHermit(async (h) => {
+  writeContextClearConfig(h, 0); // watchdog.enabled:false
+  // Explicit disable: an absent context_hygiene block now settles to the
+  // template default (enabled).
+  const cfgPath = path.join(h.dir, '.claude-code-hermit', 'config.json');
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+  cfg.context_hygiene = { compact: { enabled: false } };
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg));
   writeAlwaysOnRuntime(h, 'idle');
   writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000 }]);
   fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');

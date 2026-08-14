@@ -564,7 +564,9 @@ describe('knowledge-lint', () => {
       const dir = wd.dir;
       fs.mkdirSync(hermit(dir, 'raw'), { recursive: true });
       fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
-      write(hermit(dir, 'config.json'), '{}');
+      // Pin the budget below the 1500-char fixtures: an absent knowledge block
+      // now settles to the template default (2500), which would exempt them.
+      write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":1000}}');
       write(hermit(dir, 'raw', 'old-snap.md'),
         '---\ntitle: old\ncreated: 2025-01-01T00:00:00+00:00\n---\ndata');
       write(hermit(dir, 'compiled', 'note.md'),
@@ -599,7 +601,8 @@ describe('knowledge-lint', () => {
       wd = setupWorkdir();
       const dir = wd.dir;
       fs.mkdirSync(hermit(dir, 'compiled'), { recursive: true });
-      write(hermit(dir, 'config.json'), '{}');
+      // Pin the budget below the 1500-char fixtures (see findings suite above).
+      write(hermit(dir, 'config.json'), '{"knowledge":{"compiled_budget_chars":1000}}');
       write(hermit(dir, 'compiled', 'context-stubbed.md'),
         `---\ntitle: stubbed\ntype: context\ncreated: 2026-06-01T00:00:00+00:00\ntags: [foundational]\ninjection_stub: House profile stub\n---\n${'x'.repeat(1500)}`);
       write(hermit(dir, 'compiled', 'briefing-big.md'),

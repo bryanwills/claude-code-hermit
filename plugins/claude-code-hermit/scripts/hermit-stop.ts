@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
+import { readSettledConfig } from './lib/config-read';
 import { localISOStamp } from './lib/time';
 import { readRuntimeJson, updateRuntimeField, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -34,7 +35,9 @@ function loadConfig(): Json {
     console.log('[hermit] No config found. Is this a hermit project?');
     process.exit(1);
   }
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+  // Malformed JSON no longer aborts the stop — settle to defaults so a broken
+  // config can't strand a running session.
+  return readSettledConfig(path.dirname(CONFIG_PATH));
 }
 
 function findLatestReport(): string | null {

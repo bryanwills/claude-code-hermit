@@ -81,7 +81,8 @@ import { readStdin, readJson, flagValue } from './lib/cli';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, PATCH_KEY_RE } from './lib/md-write';
-import { computeBase, readTimezone, SUFFIX_LETTERS } from './lib/prop-id';
+import { computeBase, SUFFIX_LETTERS } from './lib/prop-id';
+import { readSettledConfig } from './lib/config-read';
 import { zonedISOStamp, utcISOStamp } from './lib/time';
 import { rebuildIndex, run as runIndex } from './lib/proposals/index-rebuild';
 import { run as regenerateSummary } from './generate-summary';
@@ -181,7 +182,7 @@ async function verbCreate(stateDir: string): Promise<void> {
   }
 
   const now = new Date();
-  const timezone = readTimezone(stateDir);
+  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
   const created = zonedISOStamp(timezone, now);
   const base = computeBase(stateDir, title, now, timezone);
 
@@ -325,7 +326,7 @@ async function verbPatch(stateDir: string, args: string[]): Promise<void> {
   catch { fail('no-such-proposal'); }
 
   const now = new Date();
-  const timezone = readTimezone(stateDir);
+  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
   const nowStamp = zonedISOStamp(timezone, now);
   const expand = (v: string) => v.replaceAll('@now', nowStamp);
 
