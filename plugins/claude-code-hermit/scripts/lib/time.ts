@@ -138,8 +138,8 @@ function localISOStamp(d: Date = new Date()): string {
 }
 
 // UTC timestamp in Python's time.strftime('%Y-%m-%dT%H:%M:%SZ', gmtime()) shape.
-function utcISOStamp(): string {
-  return new Date().toISOString().slice(0, 19) + 'Z';
+function utcISOStamp(ref?: Date): string {
+  return (ref ?? new Date()).toISOString().slice(0, 19) + 'Z';
 }
 
 // HHMMSS (6 digits) in `timezone`, or UTC on any Intl failure. Normalises Intl's

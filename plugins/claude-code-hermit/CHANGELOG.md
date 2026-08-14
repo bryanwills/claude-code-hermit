@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The watchdog's hygiene cascade takes an injectable view of the world (clock, tmux, filesystem, state paths) instead of reading module-level constants and shelling out directly. `rearmDamperOpen`, `passesLifecycleGuards`, the hygiene stampers and both `maybeContext*` mechanisms are exported and return their `HygieneOutcome`, so each gate's decision is testable in-process against a fake world. Watchdog behavior is unchanged — the two mechanisms still end the tick when they fire, now via their return value rather than an internal `process.exit`.
+
 ## [1.2.38] - 2026-08-12
 
 ### Added
