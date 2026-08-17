@@ -567,14 +567,17 @@ describe('classifyQueueTail', () => {
   });
 });
 
-/** Seed a transcript for `sessionId` under a sandboxed HOME, and point runtime.json at it. */
-function seedTranscript(h: Hermit, sessionId: string, lines: string[]): Record<string, string> {
+/** Seed a transcript for CC transcript id `transcriptId` under a sandboxed HOME, and point
+ *  runtime.json's `opened_transcript` at it. That field — not `session_id`, which holds the
+ *  logical S-NNN arc id — is what names the `<uuid>.jsonl` file CC writes. */
+function seedTranscript(h: Hermit, transcriptId: string, lines: string[]): Record<string, string> {
   const home = path.join(h.dir, 'fake-home');
   const dir = path.join(home, '.claude', 'projects', h.dir.replace(/[^a-zA-Z0-9]/g, '-'));
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), lines.join('\n') + '\n');
+  fs.writeFileSync(path.join(dir, `${transcriptId}.jsonl`), lines.join('\n') + '\n');
   const runtimePath = state(h, 'runtime.json');
-  fs.writeFileSync(runtimePath, JSON.stringify({ ...readJson(runtimePath), session_id: sessionId }, null, 2) + '\n');
+  fs.writeFileSync(runtimePath, JSON.stringify(
+    { ...readJson(runtimePath), session_id: 'S-001', opened_transcript: transcriptId }, null, 2) + '\n');
   return { HOME: home };
 }
 

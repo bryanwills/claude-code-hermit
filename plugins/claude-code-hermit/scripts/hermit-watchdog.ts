@@ -341,7 +341,9 @@ const QUEUE_TAIL_BYTES = 64 * 1024;
 /**
  * Verdict on the newest queue-operation in a transcript tail.
  * 'wedged' — the last queue record is an enqueue older than the threshold.
- * 'draining' — the last queue record is a dequeue, or a newer non-queue record exists.
+ * 'draining' — the last queue record is a dequeue/remove, or an enqueue still inside
+ *   the threshold. Only queue records are read: measured enqueue→drain gaps top out
+ *   around 5 minutes, so the 30-minute threshold already absorbs a long turn.
  * 'unknown' — no queue records at all (fail-open: a fresh or quiet session).
  */
 export function classifyQueueTail(tailText: string, nowMs: number, staleSecs = WEDGE_QUEUE_STALE_SECS): 'wedged' | 'draining' | 'unknown' {
@@ -361,14 +363,16 @@ export function classifyQueueTail(tailText: string, nowMs: number, staleSecs = W
 }
 
 /** Tail of the active session's transcript, or null when it can't be located/read.
- *  The session id is passed in from the runtime.json main() already read this tick —
- *  re-deriving it here would re-read the same file a second time on every tick. */
-function readTranscriptTail(sessionId: string | null, world: World = REAL_WORLD): string | null {
-  if (!sessionId) return null; // no session between runs — nothing to judge
+ *  Takes the CC transcript UUID (runtime.json's `opened_transcript`, maintained by
+ *  cost-tracker.ts:maintainOpenedAt) — NOT `session_id`, which is the logical S-NNN
+ *  arc id and never names a transcript file. It is passed in from the runtime.json
+ *  main() already read this tick, so this doesn't re-read the same file every tick. */
+function readTranscriptTail(transcriptId: string | null, world: World = REAL_WORLD): string | null {
+  if (!transcriptId) return null; // no transcript recorded yet — nothing to judge
   // hermitRoot is repo-relative ('.claude-code-hermit'), and CC keys transcript dirs by
   // ABSOLUTE project path — resolve against cwd rather than path.dirname (which yields '.').
   const projectRoot = path.resolve(world.paths.hermitRoot, '..');
-  const file = path.join(transcriptDirFor(projectRoot), `${sessionId}.jsonl`);
+  const file = path.join(transcriptDirFor(projectRoot), `${transcriptId}.jsonl`);
   try {
     const size = fs.statSync(file).size;
     const fd = fs.openSync(file, 'r');
@@ -1427,8 +1431,10 @@ async function main(): Promise<void> {
   // Alert-only, deduped like 3b: the operator decides how to clear it, and sending keys
   // into an unknown blocker is exactly the auto-answer 3b refuses to do.
   {
-    const sessionId = typeof runtime.session_id === 'string' ? runtime.session_id : null;
-    const tail = readTranscriptTail(sessionId);
+    // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
+    // `session_id` is the logical S-NNN arc id and resolves to a path that never exists.
+    const transcriptId = typeof runtime.opened_transcript === 'string' ? runtime.opened_transcript : null;
+    const tail = readTranscriptTail(transcriptId);
     const verdict = tail === null ? 'unknown' : classifyQueueTail(tail, Date.now());
     const watchdogState = readWatchdogState();
     if (verdict === 'wedged') {
