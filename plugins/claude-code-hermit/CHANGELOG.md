@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.40] - 2026-08-17
 
 ### Added
 - The watchdog alerts you when the session stops draining its queued notifications — a stale `enqueue` with no `dequeue` for 30 minutes while tmux is alive raises a `session-wedged` event and one deduped message. Catches any blocker, including dialog shapes the pane scanner doesn't recognise.
