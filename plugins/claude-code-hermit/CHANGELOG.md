@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- The watchdog alerts you when the session stops draining its queued notifications — a stale `enqueue` with no `dequeue` for 30 minutes while tmux is alive raises a `session-wedged` event and one deduped message. Catches any blocker, including dialog shapes the pane scanner doesn't recognise.
+
 ### Changed
 - Routine operator messages report outcomes. `/brief` (every mode, including the single-line push fallback), the idle status reply, and the session-start resume line carry work status; the brief runner contract returns work fields only. Spend detail lives in `/cost-reflect`, `/hermit-doctor`, the dashboard, the weekly review's `Spend:` line, and budget alerts when a cap is configured.
 - Session-start injection carries operator, session, knowledge, and report context. Spend reaches the operator on request (`/cost-reflect`, the deterministic `status` reply) or when a budget cap fires.
@@ -20,6 +23,7 @@
 4. **Report leftovers** — any `~/.claude/tasks/hermit-*` directory is now inert. Name it in the step-10 report so the operator can delete it by hand; do not delete it automatically.
 
 ### Fixed
+- Stalled-dialog detection recognises selector-style prompts. It required a numbered option (`❯ 1.`), so Claude Code 2.1.233's `❯ Continue` setup wizard went unseen and left a hermit blocked for days with no alert; a dialog whose only footer is `Enter to continue` is now caught too.
 - Generated watchdog units no longer crash-loop on a missing `bun`. `bin/hermit-watchdog install` bakes the installing shell's own PATH into the systemd unit, launchd plist, and cron line, so `bun`, `claude`, and `tmux` all resolve on every tick.
 - The cron fallback line applies its PATH to the watchdog rather than to `cd`, which left cron installs running on cron's default PATH.
 - `scripts/hermit-exec.sh` resolves `bun` from `$BUN_INSTALL`, `~/.bun/bin`, `/usr/local/bin`, or `/opt/homebrew/bin` when it is off PATH, repairing units baked before this fix without operator action.

@@ -237,6 +237,7 @@ export interface WatchdogMessages {
   pauseUntilResume(label: string): string;
   pauseUntilDate(label: string, boundary: string): string;
   stallQuestion(hhmm: string): string;
+  sessionWedged(hhmm: string): string;
   orphan(hhmm: string): string;
 }
 
@@ -250,6 +251,8 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
     pauseUntilDate: (label, boundary) => `Your hermit is paused (${label}) until ${boundary}.`,
     stallQuestion: (hhmm) =>
       `Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer (${hhmm}).`,
+    sessionWedged: (hhmm) =>
+      `Your hermit has stopped picking up its scheduled work — something on screen is holding it. Open the terminal or Claude app and clear whatever is waiting there (${hhmm}).`,
     orphan: (hhmm) =>
       `Your hermit's session ended but a process may still be running (${hhmm}). If it keeps replying, stop it from the terminal: run \`pgrep -af "claude --channels"\` and kill that PID.`,
   },
@@ -262,6 +265,8 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
     pauseUntilDate: (label, boundary) => `O seu hermit está em pausa (${label}) até ${boundary}.`,
     stallQuestion: (hhmm) =>
       `O seu hermit está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder (${hhmm}).`,
+    sessionWedged: (hhmm) =>
+      `O seu hermit deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo. Abra o terminal ou a app Claude e resolva o que está à espera (${hhmm}).`,
     orphan: (hhmm) =>
       `A sessão do seu hermit terminou mas pode haver um processo ainda a correr (${hhmm}). Se continuar a responder, pare-o no terminal: corra \`pgrep -af "claude --channels"\` e faça kill desse PID.`,
   },
