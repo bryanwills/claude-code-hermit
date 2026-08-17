@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.10] - 2026-08-17
 
 ### Changed
 - `ha-morning-brief` renders its `Cost:` section only when `reflect` flags a cost spike, and omits it otherwise. The spike line is no longer droppable under the 25-line cap.
