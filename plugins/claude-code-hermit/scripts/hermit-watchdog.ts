@@ -32,7 +32,7 @@ import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './
 import { anchoredPaneTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
-import { costLogPath } from './lib/cc-compat';
+import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
@@ -202,6 +202,11 @@ export function composeStallQuestionMessage(timezone: string, locale: Locale = O
   return WATCHDOG[locale].stallQuestion(nowHHMM(timezone));
 }
 
+/** Operator-language message for a session that stopped consuming its queued notifications. */
+export function composeSessionWedgedMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
+  return WATCHDOG[locale].sessionWedged(nowHHMM(timezone));
+}
+
 /** Operator-language message for a likely orphan (tmux gone, state still fresh). */
 export function composeOrphanMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
   return WATCHDOG[locale].orphan(nowHHMM(timezone));
@@ -287,14 +292,25 @@ function getPaneHash(sessionName: string, world: World = REAL_WORLD): string | n
   return content === null ? null : crypto.createHash('sha256').update(content).digest('hex');
 }
 
-// A blocking modal (AskUserQuestion widget or a native permission prompt) renders
-// a pointer-marked numbered option plus an "Esc to cancel" footer — verified against
-// real captures in compiled/spike-ask-gate-probe-2026-07-05.md. Neither token appears
-// in ordinary session output (tool calls, prose, status bar), so requiring both is a
-// conservative, low-false-positive signal that the pane is stalled on an unanswerable
-// dialog. Over-detection costs one deduped push; under-detection is a silent stall.
-const PENDING_OPTION_RE = /❯\s*\d+\./;
-const PENDING_FOOTER = 'Esc to cancel';
+// A blocking modal (AskUserQuestion widget, a native permission prompt, or a
+// harness-shipped setup wizard) renders a pointer-marked option plus a dialog footer
+// — verified against real captures in compiled/spike-ask-gate-probe-2026-07-05.md and
+// against the CC 2.1.233 "Set up auto mode for your environment?" wizard that wedged a
+// live hermit for ~2.5 days. Neither token appears in ordinary session output (tool
+// calls, prose, status bar), so requiring both is a conservative, low-false-positive
+// signal that the pane is stalled on an unanswerable dialog. Over-detection costs one
+// deduped push; under-detection is a silent stall.
+//
+// The option label is deliberately NOT constrained to a number: the wizard's selector
+// reads "❯ Continue", and requiring `\d+\.` is exactly why the live wedge went
+// undetected. The pointer glyph also starts the composer prompt ("❯ Try ..."), but a
+// modal replaces the composer rather than rendering above it, so the footer anchor
+// below keeps the composer out of every match.
+const PENDING_OPTION_RE = /❯\s+\S/;
+// A dialog footer must terminate the visible pane. Both spellings are load-bearing:
+// AskUserQuestion and permission prompts end "· Esc to cancel", while a wizard step
+// that cannot be cancelled offers only "Enter to continue".
+const PENDING_FOOTERS = ['Esc to cancel', 'Enter to continue'];
 
 // Only the pane TAIL counts: a live blocking modal renders at the bottom of the
 // pane, whereas the same tokens appearing in scrollback or quoted tool output
@@ -307,8 +323,68 @@ const PENDING_TAIL_LINES = 15;
 
 /** True when the pane TAIL looks stalled on an interactive dialog nobody can answer. */
 export function hasPendingQuestion(paneContent: string): boolean {
-  const tail = anchoredPaneTail(paneContent, PENDING_TAIL_LINES, PENDING_FOOTER);
-  return tail !== null && PENDING_OPTION_RE.test(tail);
+  return PENDING_FOOTERS.some((footer) => {
+    const tail = anchoredPaneTail(paneContent, PENDING_TAIL_LINES, footer);
+    return tail !== null && PENDING_OPTION_RE.test(tail);
+  });
+}
+
+// A wedged session is shape-independent: whatever holds stdin (a dialog the pane
+// scanner above doesn't recognise, a modal from a future CC release, a hung render),
+// the harness keeps ENQUEUEING monitor notifications it never DEQUEUES. On the live
+// 2026-08-17 incident that signal ran for ~2.5 days — 16 straight enqueues, zero
+// dequeues — while every pane-shaped check stayed silent. Reading only the tail of
+// the transcript keeps this cheap; transcripts reach megabytes.
+const WEDGE_QUEUE_STALE_SECS = 30 * 60;
+const QUEUE_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Verdict on the newest queue-operation in a transcript tail.
+ * 'wedged' — the last queue record is an enqueue older than the threshold.
+ * 'draining' — the last queue record is a dequeue, or a newer non-queue record exists.
+ * 'unknown' — no queue records at all (fail-open: a fresh or quiet session).
+ */
+export function classifyQueueTail(tailText: string, nowMs: number, staleSecs = WEDGE_QUEUE_STALE_SECS): 'wedged' | 'draining' | 'unknown' {
+  let last: { op: string; ts: number } | null = null;
+  for (const line of tailText.split('\n')) {
+    if (!line.includes('"queue-operation"')) continue;
+    let rec: Json;
+    try { rec = JSON.parse(line); } catch { continue; } // a truncated first line is expected
+    if (rec?.type !== 'queue-operation' || typeof rec.operation !== 'string') continue;
+    const ts = Date.parse(String(rec.timestamp ?? ''));
+    if (Number.isNaN(ts)) continue;
+    if (last === null || ts >= last.ts) last = { op: rec.operation, ts };
+  }
+  if (last === null) return 'unknown';
+  if (last.op !== 'enqueue') return 'draining';
+  return nowMs - last.ts > staleSecs * 1000 ? 'wedged' : 'draining';
+}
+
+/** Tail of the active session's transcript, or null when it can't be located/read.
+ *  The session id is passed in from the runtime.json main() already read this tick —
+ *  re-deriving it here would re-read the same file a second time on every tick. */
+function readTranscriptTail(sessionId: string | null, world: World = REAL_WORLD): string | null {
+  if (!sessionId) return null; // no session between runs — nothing to judge
+  // hermitRoot is repo-relative ('.claude-code-hermit'), and CC keys transcript dirs by
+  // ABSOLUTE project path — resolve against cwd rather than path.dirname (which yields '.').
+  const projectRoot = path.resolve(world.paths.hermitRoot, '..');
+  const file = path.join(transcriptDirFor(projectRoot), `${sessionId}.jsonl`);
+  try {
+    const size = fs.statSync(file).size;
+    const fd = fs.openSync(file, 'r');
+    try {
+      const start = Math.max(0, size - QUEUE_TAIL_BYTES);
+      const len = size - start;
+      const buf = Buffer.alloc(len);
+      // readSync may return a short read; slice to what was actually read so a
+      // zero-filled remainder can't inject NUL bytes into the newest lines — the
+      // same guard report-export.ts's bounded tail read carries.
+      const bytesRead = fs.readSync(fd, buf, 0, len, start);
+      return buf.subarray(0, bytesRead).toString('utf-8');
+    } finally { fs.closeSync(fd); }
+  } catch {
+    return null; // absent/unreadable transcript is not evidence of a wedge
+  }
 }
 
 // sendKeys now lives in lib/tmux.ts so the harness-command drain shares one
@@ -1341,6 +1417,32 @@ async function main(): Promise<void> {
       }
     } else if (watchdogState.stall_question_notified) {
       watchdogState.stall_question_notified = false;
+      writeWatchdogState(watchdogState);
+    }
+  }
+
+  // 3c. Queue-liveness wedge detection — the shape-independent net behind 3b. Whatever
+  // holds stdin (a dialog 3b's pane scanner doesn't recognise, a modal from a future CC
+  // release), the harness keeps enqueueing monitor notifications it never dequeues.
+  // Alert-only, deduped like 3b: the operator decides how to clear it, and sending keys
+  // into an unknown blocker is exactly the auto-answer 3b refuses to do.
+  {
+    const sessionId = typeof runtime.session_id === 'string' ? runtime.session_id : null;
+    const tail = readTranscriptTail(sessionId);
+    const verdict = tail === null ? 'unknown' : classifyQueueTail(tail, Date.now());
+    const watchdogState = readWatchdogState();
+    if (verdict === 'wedged') {
+      if (!watchdogState.session_wedged_notified) {
+        pushOperatorMessage(composeSessionWedgedMessage(timezone));
+        appendEvent('session-wedged', 'queued notifications not draining, session alive');
+        watchdogState.session_wedged_notified = true;
+        writeWatchdogState(watchdogState);
+      }
+    } else if (watchdogState.session_wedged_notified) {
+      // Re-arm on ANY non-wedged verdict, 'unknown' included: a restart starts a fresh
+      // transcript with no queue records yet, and holding the flag through that would
+      // suppress the NEXT genuine wedge — the silent stall this check exists to prevent.
+      watchdogState.session_wedged_notified = false;
       writeWatchdogState(watchdogState);
     }
   }

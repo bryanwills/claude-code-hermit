@@ -14,7 +14,7 @@ import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
 import {
-  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composePauseMessage, hasPendingQuestion, composeCompactSteeringMessage,
+  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, classifyQueueTail, composeCompactSteeringMessage,
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
   maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
@@ -461,9 +461,46 @@ describe('dead session with channel configured', () => {
 const PENDING_QUESTION_PANE =
   ' Which color do you prefer?\n\n❯ 1. Red\n  2. Green\n  3. Blue\n\nEnter to select · Esc to cancel';
 
+// Verbatim from the live capture of claude-code-paulinho-hermit on 2026-08-17, wedged
+// ~2.5 days by CC 2.1.233's first-run wizard. The selector is "❯ Continue" — no digit,
+// which is precisely what the old numbered-option regex could not see.
+const AUTO_MODE_WIZARD_PANE = [
+  '   Set up auto mode for your environment?',
+  '',
+  '   Claude Code reads this project, your recent Claude sessions, and optionally your shell history and other repositories.',
+  '',
+  '     How you use Claude here    ◀ Mixed ▶',
+  '     Also scan shell history    [✔]',
+  '     Also scan your other repos [ ]',
+  '',
+  '   ❯ Continue',
+  '',
+  '   ←/→ to change usage · Enter to continue · Esc to cancel',
+].join('\n');
+
 describe('hasPendingQuestion tail-scan (#8 false-positive guard)', () => {
   test('a genuine modal at the bottom of the pane matches', () => {
     expect(hasPendingQuestion(PENDING_QUESTION_PANE)).toBe(true);
+  });
+
+  test('the CC 2.1.233 auto-mode setup wizard matches (live wedge regression)', () => {
+    expect(hasPendingQuestion(AUTO_MODE_WIZARD_PANE)).toBe(true);
+  });
+
+  test('the wizard still matches with blank terminal rows below it', () => {
+    expect(hasPendingQuestion(`${AUTO_MODE_WIZARD_PANE}${'\n'.repeat(20)}`)).toBe(true);
+  });
+
+  test('a dialog whose only footer is "Enter to continue" matches', () => {
+    // A wizard step that cannot be cancelled omits the Esc affordance entirely.
+    expect(hasPendingQuestion('   Set up something?\n\n   ❯ Continue\n\n   Enter to continue')).toBe(true);
+  });
+
+  test('an idle composer prompt does NOT match', () => {
+    // The pointer glyph also opens the composer; the status bar, not a dialog footer,
+    // terminates the pane there.
+    const idle = 'Boot summary\n  - Session: idle\n\n❯ Try "how does <filepath> work?"\n\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents';
+    expect(hasPendingQuestion(idle)).toBe(false);
   });
 
   test('a genuine modal still matches with blank terminal rows below it', () => {
@@ -487,6 +524,151 @@ describe('hasPendingQuestion tail-scan (#8 false-positive guard)', () => {
     expect(hasPendingQuestion('the docs say to press Esc to cancel a running task\nall done')).toBe(false);
   });
 });
+
+// -------------------------------------------------------
+// 3c. Queue-liveness wedge detection — the shape-independent net behind 3b.
+//     Fixture shape is the live 2026-08-17 incident: monitor notifications
+//     enqueued and never dequeued while the session sat behind a dialog.
+// -------------------------------------------------------
+
+const NOW = Date.parse('2026-08-17T14:00:00Z');
+const queueRec = (operation: string, iso: string) =>
+  JSON.stringify({ type: 'queue-operation', operation, timestamp: iso, sessionId: 'sess-1' });
+
+describe('classifyQueueTail', () => {
+  test('enqueue older than the threshold with no dequeue → wedged', () => {
+    const tail = [
+      queueRec('enqueue', '2026-08-17T07:30:00Z'),
+      queueRec('enqueue', '2026-08-17T08:00:00Z'),
+    ].join('\n');
+    expect(classifyQueueTail(tail, NOW)).toBe('wedged');
+  });
+
+  test('a dequeue after the last enqueue → draining', () => {
+    const tail = [
+      queueRec('enqueue', '2026-08-17T07:30:00Z'),
+      queueRec('dequeue', '2026-08-17T07:30:01Z'),
+    ].join('\n');
+    expect(classifyQueueTail(tail, NOW)).toBe('draining');
+  });
+
+  test('a recent enqueue still within the threshold → draining (not yet a wedge)', () => {
+    expect(classifyQueueTail(queueRec('enqueue', '2026-08-17T13:50:00Z'), NOW)).toBe('draining');
+  });
+
+  test('a transcript with no queue records → unknown (fail-open)', () => {
+    const tail = '{"type":"assistant","timestamp":"2026-08-17T13:00:00Z"}\n{"type":"mode","mode":"normal"}';
+    expect(classifyQueueTail(tail, NOW)).toBe('unknown');
+  });
+
+  test('a truncated leading line (byte-offset tail read) is skipped, not fatal', () => {
+    const tail = `p":"2026-08-17T06:00:00Z"}\n${queueRec('enqueue', '2026-08-17T08:00:00Z')}`;
+    expect(classifyQueueTail(tail, NOW)).toBe('wedged');
+  });
+});
+
+/** Seed a transcript for `sessionId` under a sandboxed HOME, and point runtime.json at it. */
+function seedTranscript(h: Hermit, sessionId: string, lines: string[]): Record<string, string> {
+  const home = path.join(h.dir, 'fake-home');
+  const dir = path.join(home, '.claude', 'projects', h.dir.replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), lines.join('\n') + '\n');
+  const runtimePath = state(h, 'runtime.json');
+  fs.writeFileSync(runtimePath, JSON.stringify({ ...readJson(runtimePath), session_id: sessionId }, null, 2) + '\n');
+  return { HOME: home };
+}
+
+describe('session-wedged detection (queued notifications not draining)', () => {
+  let h: Hermit;
+  let stub: Stub;
+  let exitCode: number;
+
+  beforeAll(async () => {
+    h = setupHermit();
+    writeConfig(h);
+    configureChannel(h);
+    writeFakeTmux(h, 0, 'ordinary pane output\nno dialog here');
+    writeFakePgrep(h, 1);
+    stub = startHttpStub();
+    const env = seedTranscript(h, 'sess-wedged', [
+      queueRec('enqueue', isoAgoSeconds(50)),
+      queueRec('enqueue', isoAgoSeconds(2)),
+    ]);
+    ({ exitCode } = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } }));
+  });
+
+  afterAll(() => { stub.stop(); h.cleanup(); });
+
+  test('stale enqueue tail → session-wedged event', () => {
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('session-wedged');
+  });
+
+  test('stale enqueue tail → watchdog-state flags session_wedged_notified', () => {
+    expect(readJson(state(h, 'watchdog-state.json')).session_wedged_notified).toBe(true);
+  });
+
+  test('stale enqueue tail → exactly one operator push', () => {
+    expect(stub.requests.length).toBe(1);
+    expect(stub.requests[0].body.text).toContain('scheduled work');
+  });
+
+  test('alert-only: no keystrokes and no kill were sent to the pane', () => {
+    const calls = fs.existsSync(path.join(h.dir, 'tmux-calls.log'))
+      ? fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')
+      : '';
+    expect(calls).not.toContain('send-keys');
+    expect(calls).not.toContain('kill-session');
+  });
+});
+
+test('draining transcript → no wedge event, sticky flag clears', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({ session_wedged_notified: true }) + '\n');
+  const stub = startHttpStub();
+  try {
+    const env = seedTranscript(h, 'sess-ok', [
+      queueRec('enqueue', isoAgoSeconds(50)),
+      queueRec('dequeue', isoAgoSeconds(49)),
+    ]);
+    await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(readJson(state(h, 'watchdog-state.json')).session_wedged_notified).toBe(false);
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('session-wedged');
+  } finally { stub.stop(); }
+}));
+
+test('unknown verdict (fresh transcript after restart) re-arms the sticky flag', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({ session_wedged_notified: true }) + '\n');
+  const stub = startHttpStub();
+  try {
+    // A brand-new session's transcript carries no queue records yet → 'unknown'.
+    // Holding the flag through that would mute the NEXT real wedge.
+    const env = seedTranscript(h, 'sess-fresh', ['{"type":"mode","mode":"normal"}']);
+    await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(readJson(state(h, 'watchdog-state.json')).session_wedged_notified).toBe(false);
+  } finally { stub.stop(); }
+}));
+
+test('missing transcript → no wedge event (fail-open)', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    await watchdog(h, 'run', { env: { HOME: path.join(h.dir, 'empty-home'), HERMIT_TELEGRAM_API_URL: stub.url } });
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('session-wedged');
+  } finally { stub.stop(); }
+}));
 
 describe('stall-question detection', () => {
   let h: Hermit;
@@ -2449,6 +2631,13 @@ describe('watchdog message localization', () => {
       /^Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer \(\d{2}:\d{2}\)\.$/);
     expect(composeStallQuestionMessage('UTC', 'pt-PT')).toMatch(
       /^O seu hermit está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder \(\d{2}:\d{2}\)\.$/);
+  });
+
+  test('composeSessionWedgedMessage en / pt-PT', () => {
+    expect(composeSessionWedgedMessage('UTC', 'en')).toMatch(
+      /^Your hermit has stopped picking up its scheduled work — something on screen is holding it\. Open the terminal or Claude app and clear whatever is waiting there \(\d{2}:\d{2}\)\.$/);
+    expect(composeSessionWedgedMessage('UTC', 'pt-PT')).toMatch(
+      /^O seu hermit deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo\. Abra o terminal ou a app Claude e resolva o que está à espera \(\d{2}:\d{2}\)\.$/);
   });
 
   test('composePauseMessage indefinite form is deterministic and localized', () => {
