@@ -62,18 +62,18 @@ Sessions provide bounded, task-scoped work with durable handoff artifacts.
 START -> WORK -> CLOSE -> ARCHIVE
   |       |       |        |
   v       v       v        v
-Create   Update  Finalize  Copy to
-SHELL.md tasks,  status,   S-NNN-REPORT.md,
-         log     lessons   reset SHELL.md
+Create   Update   Finalize  Copy to
+SHELL.md progress status,   S-NNN-REPORT.md,
+         log      lessons   reset SHELL.md
 ```
 
-**Start:** Checks for existing SHELL.md. Resumes if `in_progress` or `waiting`, creates fresh if not. Loads OPERATOR.md. Calls `TaskList` to see plan steps. Runs morning routine if it hasn't fired today.
+**Start:** Checks for existing SHELL.md. Resumes if `in_progress` or `waiting`, creates fresh if not. Loads OPERATOR.md. Reads the SHELL.md Progress Log to see plan steps. Runs morning routine if it hasn't fired today.
 
-**Work:** Plan items tracked as native Claude Code Tasks (`pending` -> `in_progress` -> `completed`). Timestamped progress log in SHELL.md. Blockers recorded with cold-start context. `tasks-snapshot.md` auto-updated by cost-tracker hook.
+**Work:** Plan steps and their progress live in SHELL.md's timestamped Progress Log — one plan surface, durable across compaction and restart. Blockers recorded with cold-start context.
 
 **Close:** Defaults to idle transition at every task boundary — your hermit says "What's next?" and waits. Reflection fires. Full shutdown only via `/session-close`. See [Always-On Lifecycle](always-on-ops.md#2-always-on-lifecycle).
 
-**Archive:** SHELL.md + task table -> `S-NNN-REPORT.md`, written by `scripts/session-archive.ts` (a deterministic script, not an agent — session lifecycle needs no model judgment given the payload main already compiled). Fresh template with carry-forward. Monitoring and Session Summary sections are compacted if over threshold (configurable via `compact` in config.json). On full close, unfinished tasks persist in the task list for the next session.
+**Archive:** SHELL.md -> `S-NNN-REPORT.md`, written by `scripts/session-archive.ts` (a deterministic script, not an agent — session lifecycle needs no model judgment given the payload main already compiled). Fresh template with carry-forward. Monitoring and Session Summary sections are compacted if over threshold (configurable via `compact` in config.json).
 
 ---
 

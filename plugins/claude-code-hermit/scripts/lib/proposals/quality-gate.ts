@@ -57,7 +57,6 @@ const BOOKKEEPING: RegExp[] = [
   /(^|\/)state\/state-summary\.md$/,
   /(^|\/)state\/[^/]+\.jsonl$/,
   /(^|\/)HEARTBEAT\.md$/,
-  /(^|\/)tasks-snapshot\.md$/,
   /(^|\/)proposals\/PROP-[^/]*\.md$/,
 ];
 

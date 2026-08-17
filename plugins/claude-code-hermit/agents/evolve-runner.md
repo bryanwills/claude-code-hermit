@@ -41,7 +41,7 @@ never block:
   report ("adjust via /hermit-settings").
 - **Template conflicts (step 5):** always park upstream as `<name>.new` and keep the operator's copy
   live. Never overwrite a conflicted non-boot template.
-- **Legacy `## Plan` strip (step 4-task):** warn only, never strip.
+- **Legacy `## Plan` strip (step 4b):** warn only, never strip.
 - **Boot-critical conflicts (steps 5b bin/, 5c docker entrypoint):** follow `reference.md` as written —
   replace with upstream and save the operator's copy as `.bak` / timestamped backup. These never prompt.
 - **`### Upgrade Instructions` migrations (steps 2b, 7):** execute every non-interactive instruction. If a

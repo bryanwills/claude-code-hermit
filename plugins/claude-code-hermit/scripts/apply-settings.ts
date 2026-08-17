@@ -4,7 +4,6 @@
  * Usage: bun apply-settings.ts <target-file> <op> [args...]
  *
  * Operations:
- *   task-id <id>             Merge env.CLAUDE_CODE_TASK_LIST_ID
  *   allow                    Merge hermit's fixed permissions.allow list
  *   permissions-plan         Print {"missing":[],"obsolete":[]} for the target — read-only,
  *                            writes nothing. `missing` is the sealed HERMIT_ALLOW entries the
@@ -289,14 +288,6 @@ const settings = readTargetJson(targetFile);
 let readOnly = false;
 
 switch (op) {
-  case 'task-id': {
-    const id = rest[0];
-    if (!id) { console.error('task-id requires an id argument'); process.exit(1); }
-    settings.env ??= {};
-    settings.env['CLAUDE_CODE_TASK_LIST_ID'] = id;
-    break;
-  }
-
   // Legacy alias for permissions-sync's additive half. No in-repo caller since
   // hatch and hermit-evolve moved to the verbs — kept for already-hatched hermits
   // still running older skill text.

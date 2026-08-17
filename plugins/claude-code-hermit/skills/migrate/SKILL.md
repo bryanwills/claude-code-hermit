@@ -11,7 +11,7 @@ Git is the source of truth. Migration should be minimal. This skill is read-only
 ## Scoping
 
 - `.claude/settings.json` — **project-scoped** (committed). Tracked in git. Migrates with git clone.
-- `.claude/settings.local.json` — **machine/user-scoped** (gitignored). Contains task list ID (always) and hook permissions + deny patterns (when plugin was installed at local or user scope). Must be recreated on destination — never migrated by git clone. Check `.claude-code-hermit/state/hatch-options.json` `"target"` field: if `"local"`, this file contains hermit's hook permissions and deny patterns; the operator must re-run `/hatch` or `/hermit-evolve` on the destination to restore them.
+- `.claude/settings.local.json` — **machine/user-scoped** (gitignored). Contains hook permissions + deny patterns (when plugin was installed at local or user scope). Must be recreated on destination — never migrated by git clone. Check `.claude-code-hermit/state/hatch-options.json` `"target"` field: if `"local"`, this file contains hermit's hook permissions and deny patterns; the operator must re-run `/hatch` or `/hermit-evolve` on the destination to restore them.
 - `.claude.local/` — **machine/user-scoped** (channel state dirs, local overrides). Needs recreation on destination. Never migrated.
 
 ## Rules

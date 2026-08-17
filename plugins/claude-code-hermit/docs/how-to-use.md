@@ -60,14 +60,14 @@ Behavioral "when X, do Y" rules belong in `CLAUDE.md`, not here — see [the FAQ
 /claude-code-hermit:session
 ```
 
-Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, creates native Tasks for each step, and waits for your go-ahead. As it works, `SHELL.md` tracks the narrative — progress log, blockers, findings — while Tasks tracks the plan steps. Cost is tracked separately in `.status.json` and injected into context at session start.
+Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, records its steps in the Progress Log, and waits for your go-ahead. As it works, `SHELL.md` tracks everything — the plan, progress log, blockers, findings. Cost is tracked separately in `.status.json` and injected into context at session start.
 
 Check status anytime — just type "status":
 
 ```
 Session S-001 | in_progress | feature, api
 Working on: Add input validation to the API endpoints
-Progress: 2/4 tasks | Current: Step 3 - Add request body validation
+Progress: Step 3 - Add request body validation
 Blockers: none
 ```
 

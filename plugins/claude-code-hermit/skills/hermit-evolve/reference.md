@@ -101,14 +101,9 @@ Special-default keys (apply the noted default when the key is in `new_config_key
 
 The actual write happens in step 9 (merge into config, missing-only); this step just records which keys to set.
 
-### 4-task. Write task list ID to settings.local.json
+### 4b. Legacy plan-table check
 
-If `CLAUDE_CODE_TASK_LIST_ID` is not already set in `.claude/settings.local.json`:
-
-1. Derive: `hermit-{project_basename}` (lowercase, alphanumeric + hyphens)
-2. Read `.claude/settings.local.json`, merge into `env` block, write back
-
-Also: if an active SHELL.md has a `## Plan` section (legacy plan table), note it for the step-10 report: "Close active sessions before upgrading, or the old plan table will be orphaned." **Delegated mode: warn only — never strip** (stripping needs operator confirmation, which the subagent can't get).
+If an active SHELL.md has a `## Plan` section (legacy plan table), note it for the step-10 report: "Close active sessions before upgrading, or the old plan table will be orphaned." **Delegated mode: warn only — never strip** (stripping needs operator confirmation, which the subagent can't get).
 
 ### 5. Update templates
 
@@ -132,7 +127,7 @@ Only update files in `templates/`:
 - `SESSION-REPORT.md.template`
 - `PROPOSAL.md.template`
 
-Note: SHELL.md.template no longer has a `## Plan` section — plan tracking is now handled by native Claude Code Tasks.
+Note: SHELL.md.template has no `## Plan` section — plan steps live in the `## Progress Log`.
 
 ### 5a. Migrate obsidian/ surface
 

@@ -179,7 +179,7 @@ To queue work for the hermit to pick up next, use `/claude-code-hermit:proposal-
 One-liner, no tokens burned:
 
 ```
-atlas (myproject) | in_progress | "Add input validation" | 2/4 steps | $1.80/$5.00 | no blockers | docker:up
+atlas (myproject) | in_progress | "Add input validation" | $1.80 | no blockers | docker:up
   attach: .claude-code-hermit/bin/hermit-docker attach
 ```
 

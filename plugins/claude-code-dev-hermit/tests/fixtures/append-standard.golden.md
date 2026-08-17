@@ -48,7 +48,7 @@ Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev wo
 
 ## Dev Session Hygiene
 
-Serialize and delete all Tasks at task boundaries; skip `TaskCreate` for trivial single-step work. Keep the Progress Log compact — summarize older entries once it grows long.
+Record multi-step work as ordered steps in the Progress Log, one timestamped entry per step; trivial single-step work needs none. Keep the Progress Log compact — summarize older entries once it grows long.
 
 ## Dev Knowledge
 

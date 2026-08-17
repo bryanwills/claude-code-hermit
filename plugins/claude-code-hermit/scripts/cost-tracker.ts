@@ -2,14 +2,12 @@
 // Original: scripts/hooks/cost-tracker.js — MIT License
 // Changes: Added SHELL.md cost injection for session tracking,
 //          simplified pricing model, removed ECC-specific metric paths,
-//          added cumulative cost tracking,
-//          plan progress sourced from native Claude Code Tasks (via lib/tasks.ts).
+//          added cumulative cost tracking.
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { calculateCost, PRICING } from './lib/pricing';
-import { readTasks, taskProgress } from './lib/tasks';
 import { kStr, formatTokens } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
@@ -39,7 +37,6 @@ const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
 const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
 const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
-const TASK_SNAPSHOT = path.join(HERMIT_DIR, 'tasks-snapshot.md');
 const BUDGET_ALERTS = budgetAlertsPath(HERMIT_DIR);
 
 let _runtimeCache: Json;
@@ -521,13 +518,6 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
 
   const task = stripPlaceholders(taskSection ?? '');
 
-  // Plan progress from native Claude Code Tasks
-  const tasks = readTasks();
-  const progress = taskProgress(tasks);
-
-  // Write tasks-snapshot.md
-  writeTaskSnapshot(tasks, progress);
-
   const blockersText = stripPlaceholders(blockersSection ?? '');
   const hasBlockers = blockersText.length > 0 && !/^none$/i.test(blockersText);
 
@@ -536,8 +526,6 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
     session_id: sessionId,
     status: readRuntimeSessionState(),
     task: task.split('\n')[0].substring(0, MAX_SUMMARY_LEN),
-    plan_done: progress.done,
-    plan_total: progress.total,
     tasks_completed: tasksMatch ? parseInt(tasksMatch[1], 10) : 0,
     cost_usd: Math.round(cumulativeCost * 10000) / 10000,
     tokens: cumulativeTokens,
@@ -548,36 +536,6 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
   // Atomic write: write to tmp, then rename
   fs.writeFileSync(STATUS_JSON_TMP, JSON.stringify(statusData, null, 2) + '\n', 'utf-8');
   fs.renameSync(STATUS_JSON_TMP, STATUS_JSON);
-}
-
-function writeTaskSnapshot(tasks: Json[], progress: { done: number; total: number }): void {
-  const { done, total } = progress;
-
-  let content = `---\nupdated: ${new Date().toISOString()}\nprogress: ${done}/${total}\n---\n# Active Tasks\n\n`;
-  if (tasks.length === 0) {
-    content += 'No active tasks.\n';
-  } else {
-    content += '| # | Task | Status |\n|---|------|--------|\n';
-    for (const t of tasks) {
-      let status = t.status;
-      if (t.blockedBy && t.blockedBy.length > 0) {
-        status += ` (blocked by ${t.blockedBy.join(', ')})`;
-      }
-      const subject = (t.subject || '').replace(/\|/g, '\\|');
-      status = status.replace(/\|/g, '\\|');
-      content += `| ${t.id} | ${subject} | ${status} |\n`;
-    }
-  }
-
-  // Skip write if content unchanged
-  try {
-    const existing = fs.readFileSync(TASK_SNAPSHOT, 'utf-8');
-    // Compare everything after the frontmatter (updated timestamp always differs)
-    const body = content.indexOf('\n---\n');
-    const existingBody = existing.indexOf('\n---\n');
-    if (body >= 0 && existingBody >= 0 && content.slice(body) === existing.slice(existingBody)) return;
-  } catch {}
-  try { fs.writeFileSync(TASK_SNAPSHOT, content, 'utf-8'); } catch {}
 }
 
 function writeCostSummary(index: Json, timezone: string = 'UTC'): void {

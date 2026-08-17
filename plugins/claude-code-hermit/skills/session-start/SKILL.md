@@ -68,7 +68,7 @@ All state lives under `.claude-code-hermit/` in the project root.
    - This is a session between tasks — do NOT create a new session or SHELL.md
    - Present: session start date, tasks completed count, latest entry from Session Summary (strip its trailing `($X.XX)` spend figure — spend is on request via `/cost-reflect`)
    - Skip to step 5 (NEXT-TASK.md check) to determine the task source
-   - When a task is provided: pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to update runtime.json `session_state` to `in_progress` and fill in Task. After confirming the plan with the operator, create native Tasks (`TaskCreate`) for each step.
+   - When a task is provided: pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to update runtime.json `session_state` to `in_progress` and fill in Task. After confirming the plan with the operator, record its ordered steps in the SHELL.md Progress Log.
    - The session ID is pre-computed in runtime.json (set by the previous idle transition's `archive --mode=idle`)
    - If heartbeat is running, it continues
 5. Read `.claude-code-hermit/OPERATOR.md` for project context and constraints
@@ -116,7 +116,7 @@ All state lives under `.claude-code-hermit/` in the project root.
    **Note for maintainers:** `md-audit` and `automation-recommender` are already scheduled on 7-day intervals via `scheduled_checks`. This step pulls the first run forward to day 1 with operator consent — it is not an independent execution path.
 
 6. Check if `.claude-code-hermit/sessions/NEXT-TASK.md` exists. If it does:
-   - **Autonomous drain** (`config.always_on` is `true` AND `escalation` is `balanced` or `autonomous`): there is no operator to present to — auto-accept the prepared task. Use its `## Task` line as this session's task (as if the operator had accepted it), then delete `NEXT-TASK.md`. This is the deterministic path the `session` Work-done flow (§8) and heartbeat Idle Agency invoke with a bare `session-start`.
+   - **Autonomous drain** (`config.always_on` is `true` AND `escalation` is `balanced` or `autonomous`): there is no operator to present to — auto-accept the prepared task. Use its `## Task` line as this session's task (as if the operator had accepted it), then delete `NEXT-TASK.md`. This is the deterministic path the `session` Work-done flow (§6 step 7) and heartbeat Idle Agency invoke with a bare `session-start`.
    - **Conservative** (`config.always_on` is `true` AND `escalation` is `conservative`): do **not** auto-start. Leave `NEXT-TASK.md` in place — the heartbeat conservative branch owns pickup (notify + set `waiting`). Continue without adopting a task from it.
    - **Interactive** (`config.always_on` is `false`): present the prepared task to the operator as the suggested task for this session.
      - If the operator accepts it: use it as the task (skip asking "What should I help with?").
@@ -128,16 +128,16 @@ All state lives under `.claude-code-hermit/` in the project root.
 8. If `agent_name` is set, use it in the greeting (e.g., "Atlas reporting in." or "{name} a reportar." if language is `pt`).
    In always-on mode: if no recovery message was sent in step 3, notify the operator via channel with a startup ping (1 line): "[name or 'Hermit'] online. Reviewing session state." Skip this ping if a recovery question was already sent — the recovery message is the boot signal. Also skip if `suppress_startup_ping` is `true` (set in step 3) — this invocation follows a watchdog context-clear, not a genuine restart.
 9. If resuming an existing session (runtime.json `session_state` is `in_progress` or `waiting`):
-   - Call `TaskList` to see current plan steps. Present the current task, progress (completed/remaining tasks), and blockers.
+   - Read the SHELL.md Progress Log for the plan and how far it got. Present the current task, the most recent Progress Log entries, and blockers.
    - If the session status is `blocked`: suggest running `/debug` to diagnose tool/hook failures before re-attempting the blocked work
    - Ask the operator if they want to continue the current task or start a new one
 9b. If resuming an idle session (runtime.json `session_state` is `idle`):
    - Show session continuity info: tasks completed, session duration
    - Ask: "What should I work on next?" (unless a NEXT-TASK.md was accepted in step 6)
-   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. After confirming the plan, create native Tasks for each step.
+   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. After confirming the plan, record its ordered steps in the SHELL.md Progress Log.
 10. If starting a new session:
    - Ask the operator: "What should I help with?" (unless a NEXT-TASK.md was accepted in step 6)
-   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to create the session with the task. After confirming the plan, create native Tasks (`TaskCreate`) for each step.
+   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to create the session with the task. After confirming the plan, record its ordered steps in the SHELL.md Progress Log.
 11. Once I know what to work on (new session only):
     - **Tags:** Ask "Any tags for this session? (e.g., refactor, frontend, urgent) Enter to skip." Write the answer to the `Tags:` field in SHELL.md. If skipped, leave blank.
 11b. **Watch registration.** If `config.monitors` exists and has enabled entries, invoke

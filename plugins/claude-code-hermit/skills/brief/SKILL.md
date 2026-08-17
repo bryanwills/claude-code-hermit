@@ -29,7 +29,7 @@ For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at 
 
 **Boundary rule:** `sessions/SHELL.md` is the live session document — it stays in main, never goes to the runner. Archived `sessions/S-*-REPORT.md` bodies, `proposals/*.md` frontmatter, `OPERATOR.md`, and `NEXT-TASK.md` go to the runner.
 
-**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (TaskList, SHELL.md) and skip the runner-derived lines. Note nothing fatal to the operator.
+**Failure policy:** if the runner returns null or malformed JSON, fail-open — compose the brief from whatever live data main holds (SHELL.md) and skip the runner-derived lines. Note nothing fatal to the operator.
 
 **Eval runner return schema** — the runner returns a JSON object conforming to this block. The schema is byte-identical in `reference.md` (producer) and here (consumer); a contract test asserts this.
 
@@ -88,7 +88,7 @@ Current behavior — general purpose summary as described below.
 ## Plan
 
 1. Use `session_state` already read in the Dispatch step:
-   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using TaskList for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; if its `active` array is non-empty, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
+   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using its Progress Log for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; if its `active` array is non-empty, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
    - **1b. `idle` (no dispatch):** read SHELL.md **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Format as:
      ```
      [Brief] YYYY-MM-DD | idle | N tasks completed
@@ -107,7 +107,7 @@ Keep the output to 5 lines, plus an optional 6th line for pending proposals (see
 ```
 [Brief] YYYY-MM-DD | [tags if present]
 Working on: one-line description
-Status: completed/partial/blocked (X/Y tasks)
+Status: completed/partial/blocked
 Done: step1, step2, step3
 Next: description of next action (or "Session complete" if all done)
 ```
@@ -117,8 +117,8 @@ Next: description of next action (or "Session complete" if all done)
 - Never exceed 6 lines total (5 content lines + optional proposal line) — this is designed for phone/channel consumption
 - Use the session's date, not today's date
 - Include tags in the header only if they exist
-- For the "Done" line: list completed task subjects from `TaskList`, comma-separated. If too many, show first 3 and "+ N more"
-- For the "Next" line: show the first pending or in_progress task from `TaskList`. If blocked, show "Blocked: reason — run /debug to diagnose, or /claude-code-hermit:session for a fresh session" (keeps the actionable pointers on the existing line, no extra line)
+- For the "Done" line: list the completed steps from the SHELL.md Progress Log, comma-separated. If too many, show first 3 and "+ N more"
+- For the "Next" line: show the step in flight, or the next one the plan implies if none is. If blocked, show "Blocked: reason — run /debug to diagnose, or /claude-code-hermit:session for a fresh session" (keeps the actionable pointers on the existing line, no extra line)
 - If summarizing a completed report: "Next" becomes the report's "Next Start Point" content
 - After composing the 5-line output: scan `.claude-code-hermit/proposals/` for files with `source: auto-detected` and `status: proposed` (read `status:` and `source:` from the **leading `---` YAML frontmatter block only** — do not count files where those phrases appear in the proposal body text; skip files with no frontmatter block). **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction).** If any exist, append a 6th line: `Proposals: N auto-detected proposal(s) pending review`
 

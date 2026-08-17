@@ -125,7 +125,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 
 - **Task assignment** (only when `session_state` is `idle`: "work on X", "next task: Z", "start Y", or any message describing work to be done)
   - Invoke `/claude-code-hermit:session-start` to begin the new task (idle → in_progress)
-  - The session-start skill handles filling Task and setting `session_state`; plan items are created as native Tasks
+  - The session-start skill handles filling Task and setting `session_state`; plan steps go in the SHELL.md Progress Log
   - Confirm via channel: "On it: [summary]."
 
 - **Micro-approval response** ("yes", "no", "MP-… yes/no", "MP-… <number>", "MP-… <label>", a bare number, or a bare label while any pending micro-proposal exists)
