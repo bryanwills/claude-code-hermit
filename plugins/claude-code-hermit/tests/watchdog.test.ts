@@ -1217,6 +1217,133 @@ test.if(isLinux)('uninstall without systemctl → exit 0, no traceback', withHer
 }));
 
 // -------------------------------------------------------
+// Unit PATH baking. A generated unit runs without ~/.bun/bin on PATH, so the
+// shim's bare `bun` exits 127 on every tick — silently, forever. These assert on
+// the PATH the unit actually ends up running with, not on the text of the line
+// that sets it: a substring match on `PATH=` passes happily for a cron line whose
+// assignment never reaches the command.
+// -------------------------------------------------------
+
+/** Fake systemctl: succeeds at everything, so install can render real units. */
+function writeFakeSystemctl(h: Hermit): void {
+  const stub = path.join(h.fakeBin, 'systemctl');
+  fs.writeFileSync(stub, '#!/usr/bin/env bash\nexit 0\n');
+  fs.chmodSync(stub, 0o755);
+}
+
+// The five-minute schedule line install prints for the cron fallback.
+function cronLineFrom(output: string): string | undefined {
+  return output.split('\n').map((s) => s.trim()).find((s) => s.startsWith('*/5 * * * *'));
+}
+
+test.if(isLinux)('cron fallback line applies its PATH to the watchdog, not just to cd', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  // Stand in for the binary cron would invoke; it reports the PATH it received.
+  // Absolute interpreter on purpose: the baked PATH under restrictPath holds only
+  // bun's dir and the fake bin, so a `/usr/bin/env bash` shebang could not resolve.
+  const wd = path.join(h.dir, '.claude-code-hermit', 'bin', 'hermit-watchdog');
+  fs.writeFileSync(wd, '#!/bin/sh\necho "$PATH"\n');
+  fs.chmodSync(wd, 0o755);
+
+  const r = await watchdog(h, 'install', { restrictPath: true });
+  expect(r.exitCode).toBe(0);
+  const line = cronLineFrom(r.stdout + r.stderr);
+  expect(line).toBeDefined();
+
+  // Run exactly what cron hands to /bin/sh: the line minus its five schedule
+  // fields. The ambient PATH deliberately lacks bun's dir, so anything the
+  // command sees must have come from the baked assignment.
+  const command = line!.split(/\s+/).slice(5).join(' ');
+  const proc = Bun.spawn({
+    cmd: ['sh', '-c', command],
+    cwd: h.dir,
+    env: { PATH: '/usr/bin:/bin' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const seenPath = await new Response(proc.stdout).text();
+  await proc.exited;
+  expect(seenPath.trim().split(':')).toContain(path.dirname(process.execPath));
+}));
+
+test.if(isLinux)('systemd unit keeps every inherited PATH entry and adds bun\'s dir', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-'));
+  try {
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+
+    const unitDir = path.join(fakeHome, '.config', 'systemd', 'user');
+    const serviceFile = fs.readdirSync(unitDir).find((f) => f.endsWith('.service'));
+    expect(serviceFile).toBeDefined();
+    const unit = fs.readFileSync(path.join(unitDir, serviceFile!), 'utf-8');
+
+    const baked = unit.match(/^Environment="PATH=(.*)"$/m)?.[1];
+    expect(baked).toBeDefined();
+    expect(unit).not.toContain('{{UNIT_PATH}}');
+
+    // bun resolves — the 127 this fixes.
+    expect(baked!.split(':')).toContain(path.dirname(process.execPath));
+    // And nothing already working was dropped: Environment= replaces the unit's
+    // PATH rather than extending it, and the restart path needs claude and tmux,
+    // which live on the inherited PATH and not in any hardcodable list.
+    // Relative entries are dropped on purpose — they would resolve against the
+    // unit's WorkingDirectory rather than against the installer's shell.
+    for (const entry of `${h.fakeBin}:${process.env.PATH}`.split(':').filter((e) => e && path.isAbsolute(e))) {
+      expect(baked!.split(':')).toContain(entry);
+    }
+    // systemd applies Environment= to the ExecStart that follows it.
+    expect(unit.indexOf('Environment=')).toBeLessThan(unit.indexOf('ExecStart='));
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+}));
+
+test.if(isLinux)('a PATH entry with % survives per-target escaping', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const oddEntry = '/opt/we%ird dir';
+
+  // cron: an unescaped % ends the command and sends the rest to stdin (crontab(5)).
+  const cron = await watchdog(h, 'install', { env: { PATH: `${oddEntry}:${h.fakeBin}` } });
+  expect(cronLineFrom(cron.stdout + cron.stderr)).toContain('/opt/we\\%ird dir');
+
+  // systemd: % introduces a specifier, so a literal one is %% (systemd.unit(5)).
+  writeFakeSystemctl(h);
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-'));
+  try {
+    await watchdog(h, 'install', { env: { PATH: `${oddEntry}:${h.fakeBin}`, HOME: fakeHome } });
+    const unitDir = path.join(fakeHome, '.config', 'systemd', 'user');
+    const serviceFile = fs.readdirSync(unitDir).find((f) => f.endsWith('.service'))!;
+    const unit = fs.readFileSync(path.join(unitDir, serviceFile), 'utf-8');
+    expect(unit).toContain('/opt/we%%ird dir');
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+}));
+
+// A source-level assertion, not a behavioral one: cmdInstall's darwin branch is
+// selected by process.platform inside a spawned subprocess, and this suite has no
+// darwin-gated coverage at all — there is no way to reach it from a Linux CI host.
+// The ordering is what matters (load is a no-op on an already-loaded label, so
+// re-running install would silently keep the stale plist).
+test('cmdInstall unloads the launchd label before loading it', () => {
+  const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'hermit-watchdog.ts'), 'utf-8');
+  const install = src.slice(src.indexOf('function cmdInstall'), src.indexOf('function cmdUninstall'));
+  const unloadIdx = install.indexOf("'unload'");
+  const loadIdx = install.indexOf("'load'");
+  expect(unloadIdx).toBeGreaterThan(-1);
+  expect(loadIdx).toBeGreaterThan(-1);
+  expect(unloadIdx).toBeLessThan(loadIdx);
+});
+
+// -------------------------------------------------------
 // post-close clear tests
 // -------------------------------------------------------
 

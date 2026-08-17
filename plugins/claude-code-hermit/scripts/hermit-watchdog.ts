@@ -1454,9 +1454,54 @@ function findTemplatesDir(): string | null {
   return null;
 }
 
-function printCronFallback(root: string): void {
+/**
+ * The PATH to bake into generated units.
+ *
+ * systemd user services, launchd agents and cron all run with an environment
+ * that does not carry ~/.bun/bin, so the bare `bun` at the end of the
+ * hermit-watchdog shim exits 127 on every tick — silently, forever. Baking a
+ * PATH fixes that, but a hardcoded directory list cannot: it varies by OS, by
+ * architecture (Intel vs Apple Silicon homebrew prefixes) and by how the
+ * operator installed each tool. Snapshotting the installer's own environment is
+ * correct by construction — cmdInstall runs under bun in the operator's shell,
+ * so process.execPath is exactly the bun being used and process.env.PATH is an
+ * environment where claude and tmux resolve too. The restart path needs those:
+ * hermit-start's preflight hard-fails without them.
+ */
+function resolveUnitPath(): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // Absolute entries only: a relative one (npm/bun script wrappers prepend
+  // `node_modules/.bin`) would resolve against the unit's WorkingDirectory —
+  // the project root — turning a repo-writable dir into a lookup path the
+  // watchdog consults every five minutes.
+  for (const entry of [path.dirname(process.execPath), ...(process.env.PATH ?? '').split(path.delimiter)]) {
+    if (!entry || !path.isAbsolute(entry) || seen.has(entry)) continue;
+    seen.add(entry);
+    out.push(entry);
+  }
+  return out.join(path.delimiter);
+}
+
+// One value, three renderers, three escaping grammars. systemd expands
+// %-specifiers in unit files, so a literal percent must be doubled
+// (systemd.unit(5)). cron converts an unescaped % to a newline and feeds
+// everything after it to the command as stdin, truncating the line
+// (crontab(5)). The plist value sits inside an XML <string>. Applied to every
+// substituted value, not just PATH — a project path can carry the same
+// characters.
+const escapeSystemd = (v: string) => v.replaceAll('%', '%%');
+const escapeCron = (v: string) => v.replaceAll('%', '\\%');
+const escapeXml = (v: string) =>
+  v.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+
+function printCronFallback(root: string, unitPath: string): void {
+  // The assignment must sit on the watchdog invocation itself: a shell
+  // assignment prefix applies only to the single command it precedes, and `cd`
+  // is a builtin, so `PATH=... cd x && cmd` leaves cmd on cron's default PATH.
   const cronLine =
-    `*/5 * * * * cd ${root} && .claude-code-hermit/bin/hermit-watchdog run ` +
+    `*/5 * * * * cd "${escapeCron(root)}" && PATH="${escapeCron(unitPath)}" ` +
+    `.claude-code-hermit/bin/hermit-watchdog run ` +
     `2>>.claude-code-hermit/state/watchdog.log`;
   console.log('[watchdog] Add the following line via `crontab -e`:');
   console.log(`  ${cronLine}`);
@@ -1469,9 +1514,13 @@ function cmdInstall(): void {
   const root = fs.realpathSync(process.cwd());
   const name = getSessionName();
   const templates = findTemplatesDir();
+  const unitPath = resolveUnitPath();
 
-  const render = (templateText: string) =>
-    templateText.replaceAll('{{NAME}}', name).replaceAll('{{ROOT}}', root);
+  const render = (templateText: string, escape: (v: string) => string) =>
+    templateText
+      .replaceAll('{{NAME}}', escape(name))
+      .replaceAll('{{ROOT}}', escape(root))
+      .replaceAll('{{UNIT_PATH}}', escape(unitPath));
 
   if (process.platform === 'linux') {
     if (!Bun.which('systemctl')) {
@@ -1480,7 +1529,7 @@ function cmdInstall(): void {
         '[watchdog] In the hermit Docker container the entrypoint already runs the ' +
           'watchdog on a ~5 min cycle; no install is needed there.'
       );
-      printCronFallback(root);
+      printCronFallback(root, unitPath);
       return;
     }
 
@@ -1494,7 +1543,7 @@ function cmdInstall(): void {
     ]) {
       if (templates) {
         const tpl = fs.readFileSync(path.join(templates, tplName), 'utf-8');
-        fs.writeFileSync(path.join(systemdDir, outName), render(tpl));
+        fs.writeFileSync(path.join(systemdDir, outName), render(tpl, escapeSystemd));
       } else {
         process.stderr.write(`[watchdog] template ${tplName} not found; skipping\n`);
       }
@@ -1512,7 +1561,7 @@ function cmdInstall(): void {
 
     if (templates) {
       const tpl = fs.readFileSync(path.join(templates, 'com.hermit.watchdog.plist'), 'utf-8');
-      fs.writeFileSync(plistPath, render(tpl));
+      fs.writeFileSync(plistPath, render(tpl, escapeXml));
     } else {
       process.stderr.write('[watchdog] plist template not found; using inline fallback\n');
       fs.writeFileSync(
@@ -1527,17 +1576,25 @@ function cmdInstall(): void {
             '<string>{{ROOT}}/.claude-code-hermit/bin/hermit-watchdog</string>' +
             '<string>run</string></array>' +
             '<key>WorkingDirectory</key><string>{{ROOT}}</string>' +
+            '<key>EnvironmentVariables</key><dict>' +
+            '<key>PATH</key><string>{{UNIT_PATH}}</string>' +
+            '</dict>' +
             '<key>StartInterval</key><integer>300</integer>' +
             '<key>RunAtLoad</key><false/>' +
-            '</dict></plist>\n'
+            '</dict></plist>\n',
+          escapeXml
         )
       );
     }
+    // load is a no-op when the label is already loaded, so re-running install —
+    // the documented remedy for a bad unit — would silently keep the old plist.
+    // Ignore output: on a first install there is nothing to unload.
+    spawnSync('launchctl', ['unload', plistPath], { stdio: 'ignore' });
     run('launchctl', ['load', plistPath]);
     console.log(`[watchdog] Installed LaunchAgent: ${plistName}`);
   } else {
     console.log('[watchdog] systemd and launchd not available on this platform.');
-    printCronFallback(root);
+    printCronFallback(root, unitPath);
   }
 }
 

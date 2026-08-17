@@ -19,6 +19,25 @@
 3. **Delete the snapshot file** — remove `.claude-code-hermit/tasks-snapshot.md` if it exists, and drop the `.claude-code-hermit/tasks-snapshot.md` line from `.gitignore` (local-scope hermits only — project scope never had it). If the file was tracked, run `git rm --cached .claude-code-hermit/tasks-snapshot.md`.
 4. **Report leftovers** — any `~/.claude/tasks/hermit-*` directory is now inert. Name it in the step-10 report so the operator can delete it by hand; do not delete it automatically.
 
+### Fixed
+- Generated watchdog units no longer crash-loop on a missing `bun`. `bin/hermit-watchdog install` bakes the installing shell's own PATH into the systemd unit, launchd plist, and cron line, so `bun`, `claude`, and `tmux` all resolve on every tick.
+- The cron fallback line applies its PATH to the watchdog rather than to `cd`, which left cron installs running on cron's default PATH.
+- `scripts/hermit-exec.sh` resolves `bun` from `$BUN_INSTALL`, `~/.bun/bin`, `/usr/local/bin`, or `/opt/homebrew/bin` when it is off PATH, repairing units baked before this fix without operator action.
+- `/hermit-doctor`'s watchdog check reads the systemd unit's own `ExecMainStatus`/`Result` and reports `fail` on a failing unit, naming exit 127 specifically instead of waiting ~20 minutes to report "enabled but not firing". The unit name derives from the hermit dir, so the check still works when doctor runs from another directory.
+- Re-running install on macOS unloads the launchd label before loading it, so the regenerated plist actually takes effect.
+- `/hermit-doctor` warns when the generated unit carries no `Environment=PATH`. Such a unit now ticks (the shim resolves `bun` by absolute path) but still cannot restart the hermit, so neither the exit-status probe nor the staleness gate would catch it.
+- The baked PATH drops relative entries, which would otherwise resolve against the unit's `WorkingDirectory`, and the cron line quotes its `cd` target.
+- `hermit-start`'s preflight names PATH instead of a missing install when `claude` or `bun` is unreachable, and points at `bin/hermit-watchdog install` — the failure a stale unit actually produces.
+
+### Upgrade Instructions
+
+Existing hermits keep whatever unit was written at install time — the generated units live outside `.claude-code-hermit/` and no upgrade path refreshes them. For a hermit running in tmux mode on a host with systemd or launchd, re-bake the unit:
+
+1. Run `.claude-code-hermit/bin/hermit-watchdog install` from the project root. This rewrites the unit with the current PATH and reloads it.
+2. Confirm with `/claude-code-hermit:hermit-doctor` — the watchdog check now reports a failing unit directly, including its exit status.
+
+Docker-mode hermits need nothing: the container entrypoint runs the watchdog loop directly and never used a generated unit.
+
 ## [1.2.39] - 2026-08-14
 
 ### Added

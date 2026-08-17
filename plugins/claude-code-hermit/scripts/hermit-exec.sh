@@ -23,8 +23,35 @@ case "$NAME" in
     ;;
 esac
 
+# Resolve bun explicitly rather than trusting PATH. Generated watchdog units
+# (systemd user service, launchd agent, cron) run with an environment that need
+# not carry bun's install dir, and a bare `exec bun` there exits 127 on every
+# tick with nothing to distinguish it from any other failure. This file ships via
+# /plugin update, so the probe repairs installs whose unit was baked before the
+# PATH fix landed — the case that needs it most is a dead hermit whose watchdog is
+# also dead, where there is no live session to run a repair in.
+resolve_bun() {
+  if command -v bun >/dev/null 2>&1; then
+    command -v bun
+    return 0
+  fi
+  if [ -n "${BUN_INSTALL:-}" ] && [ -x "$BUN_INSTALL/bin/bun" ]; then
+    echo "$BUN_INSTALL/bin/bun"
+    return 0
+  fi
+  for candidate in "${HOME:-}/.bun/bin/bun" /usr/local/bin/bun /opt/homebrew/bin/bun; do
+    [ -x "$candidate" ] && { echo "$candidate"; return 0; }
+  done
+  return 1
+}
+
 if [ -f "$SCRIPT_DIR/$NAME.ts" ]; then
-  exec bun "$SCRIPT_DIR/$NAME.ts" "$@"
+  BUN_BIN="$(resolve_bun)" || {
+    echo "[hermit] bun not found on PATH or in the usual install locations." >&2
+    echo "[hermit] Install: curl -fsSL https://bun.sh/install | bash" >&2
+    exit 127
+  }
+  exec "$BUN_BIN" "$SCRIPT_DIR/$NAME.ts" "$@"
 fi
 
 # A missing script is far more often a stale plugin clone (this dispatcher predates

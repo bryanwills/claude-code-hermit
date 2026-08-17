@@ -289,9 +289,16 @@ function versionLess(a: number[], b: number[]): boolean {
 function checkPrerequisites(): Json {
   const errors: string[] = [];
 
+  // PATH, not a missing install, is the usual culprit here: a watchdog systemd
+  // unit baked before the Environment=PATH fix starts us with a near-empty PATH,
+  // so both probes below miss tools that are demonstrably present.
+
   // Claude Code
   if (!Bun.which('claude')) {
-    errors.push('claude: Claude Code CLI not found. Install from https://claude.ai/download');
+    errors.push(
+      'claude: Claude Code CLI not on PATH. Install from https://claude.ai/download, ' +
+        'or re-run `bin/hermit-watchdog install` if this started from a systemd unit.',
+    );
   }
 
   // tmux (optional but recommended)
@@ -300,7 +307,10 @@ function checkPrerequisites(): Json {
   // bun (required runtime for hooks/scripts since the bun migration)
   const hasBun = Bun.which('bun') !== null;
   if (!hasBun) {
-    errors.push('bun: required runtime not found. Install: curl -fsSL https://bun.sh/install | bash');
+    errors.push(
+      'bun: required runtime not on PATH. Install with `curl -fsSL https://bun.sh/install | bash`, ' +
+        'or re-run `bin/hermit-watchdog install` if this started from a systemd unit.',
+    );
   } else {
     // Already running under bun, so Bun.version is a free in-process probe.
     const bunVersion = Bun.version.trim();
