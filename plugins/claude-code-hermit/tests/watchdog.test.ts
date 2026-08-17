@@ -1292,7 +1292,9 @@ test.if(isLinux)('systemd unit keeps every inherited PATH entry and adds bun\'s 
     // And nothing already working was dropped: Environment= replaces the unit's
     // PATH rather than extending it, and the restart path needs claude and tmux,
     // which live on the inherited PATH and not in any hardcodable list.
-    for (const entry of `${h.fakeBin}:${process.env.PATH}`.split(':').filter(Boolean)) {
+    // Relative entries are dropped on purpose — they would resolve against the
+    // unit's WorkingDirectory rather than against the installer's shell.
+    for (const entry of `${h.fakeBin}:${process.env.PATH}`.split(':').filter((e) => e && path.isAbsolute(e))) {
       expect(baked!.split(':')).toContain(entry);
     }
     // systemd applies Environment= to the ExecStart that follows it.

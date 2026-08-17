@@ -2,6 +2,7 @@
 // never crashes and the process always exits 0.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -891,6 +892,32 @@ function checkWatchdogUnitStatus(serviceName: string): { status: 'fail'; detail:
   }
 }
 
+/**
+ * A unit generated before the PATH fix carries no `Environment="PATH="` line.
+ *
+ * The exit-status probe above cannot see that case any more: hermit-exec.sh now
+ * resolves `bun` by absolute path, so such a unit exits 0 and stamps `last_run`,
+ * and both the probe and the staleness gate read as healthy. The restart tier is
+ * still broken — hermit-start's preflight hard-fails when `bun` and `claude`
+ * aren't on the unit's own PATH — so the unit file itself is the only remaining
+ * evidence. Checked after liveness and the shutdown stamp: those are the
+ * higher-severity signals and must win when several hold.
+ */
+function checkWatchdogUnitPathBaked(serviceName: string): { status: 'warn'; detail: string } | null {
+  if (process.platform !== 'linux') return null;
+  const unitFile = path.join(os.homedir(), '.config', 'systemd', 'user', `${serviceName}.service`);
+  let unit: string;
+  try { unit = fs.readFileSync(unitFile, 'utf-8'); } catch { return null; }
+  if (/^Environment="?PATH=/m.test(unit)) return null;
+  return {
+    status: 'warn',
+    detail:
+      `watchdog: systemd unit ${serviceName}.service predates the PATH fix (no Environment=PATH) — ` +
+      'the tick survives via the shim\'s bun fallback, but a restart dies in hermit-start\'s ' +
+      'preflight because `bun`/`claude` are off the unit PATH — re-run `bin/hermit-watchdog install`',
+  };
+}
+
 function checkWatchdog(p: DoctorPaths = PATHS) {
   const { hermitDir, stateDir } = p;
   try {
@@ -916,8 +943,10 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
     // more specific diagnosis than "not firing", and waiting out STALE_MS to say
     // something vaguer helps nobody. Docker mode runs the loop from the container
     // entrypoint, not a systemd user unit, so it is not in scope here.
-    if (runtime?.runtime_mode === 'tmux' || runtime?.runtime_mode == null) {
-      const unitStatus = checkWatchdogUnitStatus(watchdogUnitName(config, hermitDir));
+    const unitInScope = runtime?.runtime_mode === 'tmux' || runtime?.runtime_mode == null;
+    const unitName = unitInScope ? watchdogUnitName(config, hermitDir) : null;
+    if (unitName) {
+      const unitStatus = checkWatchdogUnitStatus(unitName);
       if (unitStatus) return { id: 'watchdog', ...unitStatus };
     }
 
@@ -978,6 +1007,11 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
           detail: `watchdog: session alive (${runtime.session_state}) but runtime.json carries a stale shutdown stamp (${stamp}) — blocks context hygiene and watchdog restart until the next hermit-start clears it`,
         };
       }
+    }
+
+    if (unitName) {
+      const stalePath = checkWatchdogUnitPathBaked(unitName);
+      if (stalePath) return { id: 'watchdog', ...stalePath };
     }
 
     const eventsPath = path.join(stateDir, 'watchdog-events.jsonl');

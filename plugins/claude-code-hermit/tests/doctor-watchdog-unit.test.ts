@@ -68,11 +68,14 @@ exit 0
 }
 
 /** Run the doctor and return its watchdog check. `cwd` defaults to the project. */
-async function watchdogCheck(cwd = dir): Promise<{ status: string; detail: string }> {
+async function watchdogCheck(
+  cwd = dir,
+  env: Record<string, string> = {},
+): Promise<{ status: string; detail: string }> {
   const r = await runScript('doctor-check.ts', {
     args: [hermit],
     cwd,
-    env: { PATH: `${fakeBin}:${process.env.PATH}` },
+    env: { PATH: `${fakeBin}:${process.env.PATH}`, ...env },
   });
   const checks = JSON.parse(r.stdout).checks;
   return checks.find((c: any) => c.id === 'watchdog');
@@ -107,6 +110,53 @@ describe('watchdog unit status', () => {
     expect(check.status).not.toBe('fail');
     // No last_run was ever stamped in this fixture, so staleness still reports.
     expect(check.detail).toContain('not firing');
+  });
+
+  // A unit written before the PATH fix still ticks — hermit-exec.sh resolves bun
+  // by absolute path — so neither the exit-status probe nor staleness sees it,
+  // while every restart dies in hermit-start's preflight. The unit file is the
+  // only remaining evidence, so the doctor reads it once liveness is satisfied.
+  function writeUnit(home: string, body: string): void {
+    const unitDir = path.join(home, '.config', 'systemd', 'user');
+    fs.mkdirSync(unitDir, { recursive: true });
+    fs.writeFileSync(path.join(unitDir, `${unitFor(dir)}.service`), body);
+  }
+
+  /** A firing watchdog: fresh last_run, so the staleness gate stays quiet. */
+  function stampFreshRun(): void {
+    fs.writeFileSync(
+      path.join(hermit, 'state', 'watchdog-state.json'),
+      JSON.stringify({ last_run: new Date().toISOString() }),
+    );
+  }
+
+  test.if(isLinux)('firing unit with no baked PATH → warn pointing at re-install', async () => {
+    writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '0', Result: 'success' });
+    stampFreshRun();
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-wd-home-'));
+    try {
+      writeUnit(home, '[Service]\nType=oneshot\nExecStart=/x/hermit-watchdog run\n');
+      const check = await watchdogCheck(dir, { HOME: home });
+      expect(check.status).toBe('warn');
+      // Not the staleness warn, which also names install — this is the unit-file read.
+      expect(check.detail).toContain('no Environment=PATH');
+      expect(check.detail).toContain('hermit-watchdog install');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test.if(isLinux)('firing unit with a baked PATH → no PATH warning', async () => {
+    writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '0', Result: 'success' });
+    stampFreshRun();
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-wd-home-'));
+    try {
+      writeUnit(home, '[Service]\nType=oneshot\nEnvironment="PATH=/usr/bin"\nExecStart=/x/w run\n');
+      const check = await watchdogCheck(dir, { HOME: home });
+      expect(check.detail).not.toContain('Environment=PATH');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   test.if(isLinux)('the unit name comes from the hermit dir, not the working directory', async () => {

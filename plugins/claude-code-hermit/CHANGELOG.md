@@ -12,6 +12,9 @@
 - `scripts/hermit-exec.sh` resolves `bun` from `$BUN_INSTALL`, `~/.bun/bin`, `/usr/local/bin`, or `/opt/homebrew/bin` when it is off PATH, repairing units baked before this fix without operator action.
 - `/hermit-doctor`'s watchdog check reads the systemd unit's own `ExecMainStatus`/`Result` and reports `fail` on a failing unit, naming exit 127 specifically instead of waiting ~20 minutes to report "enabled but not firing". The unit name derives from the hermit dir, so the check still works when doctor runs from another directory.
 - Re-running install on macOS unloads the launchd label before loading it, so the regenerated plist actually takes effect.
+- `/hermit-doctor` warns when the generated unit carries no `Environment=PATH`. Such a unit now ticks (the shim resolves `bun` by absolute path) but still cannot restart the hermit, so neither the exit-status probe nor the staleness gate would catch it.
+- The baked PATH drops relative entries, which would otherwise resolve against the unit's `WorkingDirectory`, and the cron line quotes its `cd` target.
+- `hermit-start`'s preflight names PATH instead of a missing install when `claude` or `bun` is unreachable, and points at `bin/hermit-watchdog install` — the failure a stale unit actually produces.
 
 ### Upgrade Instructions
 

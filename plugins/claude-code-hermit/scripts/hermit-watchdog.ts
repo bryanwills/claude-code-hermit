@@ -1471,8 +1471,12 @@ function findTemplatesDir(): string | null {
 function resolveUnitPath(): string {
   const seen = new Set<string>();
   const out: string[] = [];
+  // Absolute entries only: a relative one (npm/bun script wrappers prepend
+  // `node_modules/.bin`) would resolve against the unit's WorkingDirectory —
+  // the project root — turning a repo-writable dir into a lookup path the
+  // watchdog consults every five minutes.
   for (const entry of [path.dirname(process.execPath), ...(process.env.PATH ?? '').split(path.delimiter)]) {
-    if (!entry || seen.has(entry)) continue;
+    if (!entry || !path.isAbsolute(entry) || seen.has(entry)) continue;
     seen.add(entry);
     out.push(entry);
   }
@@ -1496,7 +1500,7 @@ function printCronFallback(root: string, unitPath: string): void {
   // assignment prefix applies only to the single command it precedes, and `cd`
   // is a builtin, so `PATH=... cd x && cmd` leaves cmd on cron's default PATH.
   const cronLine =
-    `*/5 * * * * cd ${escapeCron(root)} && PATH="${escapeCron(unitPath)}" ` +
+    `*/5 * * * * cd "${escapeCron(root)}" && PATH="${escapeCron(unitPath)}" ` +
     `.claude-code-hermit/bin/hermit-watchdog run ` +
     `2>>.claude-code-hermit/state/watchdog.log`;
   console.log('[watchdog] Add the following line via `crontab -e`:');
