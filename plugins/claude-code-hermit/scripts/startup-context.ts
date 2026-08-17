@@ -177,7 +177,7 @@ function buildCompactionPointers(agentDir: string): string {
 
   if (parts.length === 0) return '';
 
-  parts.push('Full state: SHELL.md + runtime.json. Task list: native Tasks. Don\'t re-read large files to reconstruct context.');
+  parts.push('Full state: SHELL.md + runtime.json. Plan: SHELL.md Progress Log. Don\'t re-read large files to reconstruct context.');
   return parts.join('\n');
 }
 

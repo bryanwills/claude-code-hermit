@@ -3,12 +3,11 @@
 // Changes: Replaced ECC quality criteria with session-specific criteria
 //          (task status, SHELL.md current, blockers documented, next-start-point clear).
 //          Outputs structured quality score for session reports.
-//          Plan tracking criterion reads native Claude Code Tasks (via lib/tasks.ts).
+//          Plan tracking criterion reads Progress Log granularity from SHELL.md.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readTasks } from './lib/tasks';
 import { hermitDir } from './lib/cc-compat';
 import { currentHHMM, elapsedSinceHHMM, resolveHermitNowMs } from './lib/time';
 import { readSettledConfig } from './lib/config-read';
@@ -22,7 +21,14 @@ const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const HASH_FILE = path.join(HERMIT_DIR, 'sessions', '.eval-hash');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
 
-function evaluateSession(content: Json, tasks: Json[]): Json {
+// Progress Log [HH:MM] stamps in append order. Single parser shared by the plan-tracking
+// criterion and the staleness nudge in _evaluate.
+function progressStamps(content: Json): string[] {
+  const text = (extractSection(content, 'Progress Log') ?? '').trim();
+  return (text.match(/\[(\d{1,2}:\d{2})\]/g) ?? []).map(s => s.replace(/[\[\]]/g, ''));
+}
+
+function evaluateSession(content: Json): Json {
   const results: Json = {
     criteria: [],
     overall: 'pass',
@@ -52,12 +58,15 @@ function evaluateSession(content: Json, tasks: Json[]): Json {
   });
   results.status = sessionState;
 
-  // Criterion 2: Plan tracked (via native Claude Code Tasks)
-  const hasSteps = tasks.length > 0;
+  // Criterion 2: Plan tracked. The native task store was withdrawn on newer models, so
+  // decomposition is only observable as Progress Log granularity.
+  const distinct = new Set(progressStamps(content)).size;
+  const hasSteps = distinct >= 2;
+  const stampLabel = `${distinct} timestamped Progress Log ${distinct === 1 ? 'entry' : 'entries'}`;
   results.criteria.push({
     name: 'Plan tracked',
     status: hasSteps ? 'pass' : 'warn',
-    detail: hasSteps ? `${tasks.length} task(s) in native Tasks` : 'No tasks found (OK for quick single-step work)',
+    detail: hasSteps ? stampLabel : `${stampLabel} (OK for quick single-step work)`,
   });
 
   // Helper: check if a markdown section exists and has non-comment content
@@ -126,10 +135,8 @@ async function _evaluate(): Promise<string | null> {
     content = null;
   }
 
-  // Read tasks once — used for hash salt and passed to evaluateSession
-  const tasks = readTasks();
   const hash = content !== null
-    ? crypto.createHash('md5').update(content + '\0tasks:' + tasks.length).digest('hex')
+    ? crypto.createHash('md5').update(content).digest('hex')
     : null;
 
   // Short-circuit if SHELL.md hasn't changed since last eval
@@ -144,7 +151,7 @@ async function _evaluate(): Promise<string | null> {
     }
   }
 
-  const results = evaluateSession(content, tasks);
+  const results = evaluateSession(content);
 
   // Write hash after successful eval
   if (hash !== null) {
@@ -169,10 +176,9 @@ async function _evaluate(): Promise<string | null> {
         // Progress Log timestamps are date-less [HH:MM]. Use the bottom-most entry
         // (append-ordered) and resolve it as its most recent past occurrence, so a
         // session spanning midnight doesn't backdate today's entries.
-        const progressText = (extractSection(content, 'Progress Log') ?? '').trim();
-        const timeEntries = progressText.match(/\[(\d{1,2}:\d{2})\]/g);
-        if (timeEntries && timeEntries.length > 0) {
-          const lastTime = timeEntries[timeEntries.length - 1].replace(/[\[\]]/g, '');
+        const timeEntries = progressStamps(content);
+        if (timeEntries.length > 0) {
+          const lastTime = timeEntries[timeEntries.length - 1];
           const nowDate = new Date(now);
           // config.timezone is the zone Progress Log [HH:MM] stamps are written in.
           const nowHHMM = currentHHMM(readSettledConfig(HERMIT_DIR).timezone ?? 'UTC', nowDate) ?? nowDate.toISOString().slice(11, 16);

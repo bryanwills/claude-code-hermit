@@ -97,7 +97,6 @@ describe('bookkeeping exclusions (each dropped individually)', () => {
     '.claude-code-hermit/state/state-summary.md',
     '.claude-code-hermit/state/proposal-metrics.jsonl',
     '.claude-code-hermit/HEARTBEAT.md',
-    '.claude-code-hermit/tasks-snapshot.md',
     '.claude-code-hermit/proposals/PROP-042-thing-101112.md',
   ];
 

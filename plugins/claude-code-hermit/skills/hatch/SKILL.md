@@ -331,16 +331,6 @@ with the answers payload as JSON on stdin. The script reads the template (or, on
 
 `tmux_session_name` is derived from `project_name` on fresh hatch only (`hermit-<project_name>`) — re-init never re-substitutes it.
 
-### 5-task. Write task list ID to settings.local.json
-
-Set `CLAUDE_CODE_TASK_LIST_ID` in `.claude/settings.local.json` so native Claude Code Tasks are persistent and hooks can read task files.
-
-1. Derive the task list ID: `hermit-{project_basename}` where `{project_basename}` is the current directory name (lowercase, alphanumeric + hyphens)
-2. Run: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json task-id hermit-{project_basename}`
-   (Creates the file if absent; merges the value into `env`, preserving all other keys.)
-
-This enables native Tasks for plan tracking. The cost-tracker hook reads task files from `~/.claude/tasks/{task_list_id}/` to generate `tasks-snapshot.md`.
-
 ### 5b. Localize artifact chrome (non-`en` operators only)
 
 The script-rendered Artifact pages (dashboard, proposals) read their fixed UI chrome from `.claude-code-hermit/state/artifact-strings.json` when present, overlaying it per key over the English defaults (a missing key or an absent file falls back to English). Model-authored content already follows `language`; this closes the gap for the ~35 hardcoded chrome labels so a non-`en` dashboard isn't half-English.

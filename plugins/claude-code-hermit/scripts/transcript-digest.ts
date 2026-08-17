@@ -60,7 +60,7 @@ const DAY_MS = 86_400_000;
 // call would peg productive_wakes/wakes at 100% and kill the defer-loop signal.
 // Undercount (a wake that only mutates state through a hermit script reads as
 // unproductive) is accepted for v1; a hermit-script allowlist is a v1.1 option.
-const PRODUCTIVE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'TaskCreate', 'TaskUpdate']);
+const PRODUCTIVE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit']);
 
 function isProductiveTool(name: string): boolean {
   return PRODUCTIVE_TOOLS.has(name) || /^mcp__.+__reply$/.test(name);

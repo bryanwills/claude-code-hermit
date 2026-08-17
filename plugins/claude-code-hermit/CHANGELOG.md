@@ -5,6 +5,19 @@
 ### Changed
 - Routine operator messages report outcomes. `/brief` (every mode, including the single-line push fallback), the idle status reply, and the session-start resume line carry work status; the brief runner contract returns work fields only. Spend detail lives in `/cost-reflect`, `/hermit-doctor`, the dashboard, the weekly review's `Spend:` line, and budget alerts when a cap is configured.
 - Session-start injection carries operator, session, knowledge, and report context. Spend reaches the operator on request (`/cost-reflect`, the deterministic `status` reply) or when a budget cap fires.
+- Plan tracking lives in the SHELL.md Progress Log. `session`, `session-start`, `session-close` and `brief` no longer call the native task tools — Claude Code 2.1.233 withdrew them on Opus 4.8, Sonnet 5, Fable 5 and newer — so plan steps and `/brief`'s Done/Next lines read the Progress Log, which behaves the same on every model tier and survives compaction and restart.
+- The `Plan tracked` session-quality criterion measures Progress Log granularity (two or more timestamped entries) instead of native-task existence. With the task store gone it could only ever `warn`, biasing every session toward a degraded overall verdict.
+- `.status.json` no longer carries `plan_done`/`plan_total`, `tasks-snapshot.md` is no longer written every turn, and `hermit-status` drops the plan-progress figure. Nothing read that file.
+- `TaskCreate`/`TaskUpdate` no longer count as productive tool calls in wake digests.
+- Removed `scripts/lib/tasks.ts`, the `task-id` verb in `apply-settings.ts`, and the `hatch`/`hermit-evolve` steps that wrote `CLAUDE_CODE_TASK_LIST_ID` into `.claude/settings.local.json`.
+- The heartbeat and routine monitor sweeps document only the persisted `task_id` → `TaskStop` path. The `TaskList` orphan fallback never worked: `TaskList` never listed Monitor tasks.
+
+### Upgrade Instructions
+
+1. **Session-discipline block** — no manual edit. The `**Tasks:**` rule now points at the Progress Log and is replaced by the CLAUDE-APPEND block refresh in Step 6.
+2. **Drop the task-list env var** — if `.claude/settings.local.json` has `CLAUDE_CODE_TASK_LIST_ID` in its `env` block, remove that key and leave every other key untouched.
+3. **Delete the snapshot file** — remove `.claude-code-hermit/tasks-snapshot.md` if it exists, and drop the `.claude-code-hermit/tasks-snapshot.md` line from `.gitignore` (local-scope hermits only — project scope never had it). If the file was tracked, run `git rm --cached .claude-code-hermit/tasks-snapshot.md`.
+4. **Report leftovers** — any `~/.claude/tasks/hermit-*` directory is now inert. Name it in the step-10 report so the operator can delete it by hand; do not delete it automatically.
 
 ## [1.2.39] - 2026-08-14
 

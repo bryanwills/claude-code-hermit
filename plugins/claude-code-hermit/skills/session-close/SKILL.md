@@ -27,7 +27,7 @@ A pre-existing `shutdown_requested_at` is the caller's stamp — `hermit-stop` s
 
 ### Auto-close path (`--auto`)
 
-When invoked with `--auto` by heartbeat, skip steps 1–5 and jump directly to step 6 (shutdown_skill), step 7 (Tasks cleanup), and step 8 (session-archive.ts archive — the script itself performs the step 9/10 marker bookkeeping on success). Pipe this templated payload on stdin to `session-archive.ts archive --mode=auto`:
+When invoked with `--auto` by heartbeat, skip steps 1–5 and jump directly to step 6 (shutdown_skill) and step 7 (session-archive.ts archive — the script itself performs the step 8/9 marker bookkeeping on success). Pipe this templated payload on stdin to `session-archive.ts archive --mode=auto`:
 
 ```
 Status: completed
@@ -41,7 +41,7 @@ Next Start Point: Fresh start.
 
 Write `Auto-closed by heartbeat.` as the first line of `## Overview` in the session report.
 
-If step 8 returns `ok === false`, no markers were written and `pending-close.json` is left in place automatically, so the next heartbeat tick retries the drain.
+If step 7 returns `ok === false`, no markers were written and `pending-close.json` is left in place automatically, so the next heartbeat tick retries the drain.
 
 ### Scheduled decision path (`--scheduled`)
 
@@ -82,14 +82,13 @@ This path is intentionally silent: no operator notification on queue or drain �
      - **Evolving subject** the hermit will touch again (a monitored domain, a recurring decision area, accumulated know-how): **update or create** `compiled/topic-<slug>.md`. Merge new findings into the existing sections rather than appending a dated copy; bump `updated`, refresh the one-line `summary`, keep the page under 150 lines (compact older material when merging), and cross-link related pages with `[[wikilinks]]`.
      - **One-off output** (point-in-time research note, decision doc, audit summary): write `compiled/<type>-<slug>-<date>.md` as before.
      Either way include `session: S-NNN` in the frontmatter and list the wikilink here. Don't leave domain output wedged in SHELL.md Findings or a proposal body.
-2. Ensure all native Tasks reflect their correct status (`completed`, `pending`)
+2. Ensure the Progress Log reflects each step's final state (done, partial, blocked)
 3. Confirm the "Next Start Point" is clear enough for a fresh session to resume without questions
 4. If any high-leverage improvements were discovered during work, create proposals via the `claude-code-hermit:proposal-create` skill
 5. Invoke the `claude-code-hermit:reflect` skill to reflect on accumulated experience. Reflect no longer requires archived reports — it uses memory. This runs before archiving so any findings are included in the archived report. **Skip on `--auto`** — during auto-close, `session_state` is still `in_progress`, which forces reflect-precheck into compute phase before the `closed_via: auto` filter can run; there is no operator-curated session content to reflect on anyway.
    If reflect returns `reflect: no candidates`, scan this session's `## Findings` and `## Progress Log` for non-obvious discoveries not already in memory and issue the standard "remember it" reflection for any that clear the auto-memory threshold. Apply WHAT_NOT_TO_SAVE as normal.
 6. **Stop always-on services (`shutdown_skill`).** Read `shutdown_skill` from `.claude-code-hermit/config.json`. If non-null, invoke it as a skill command (the value may include arguments, e.g. `/serve stop`) via the Skill tool. **Best-effort:** on error or if the skill does not return, log a Monitoring line and continue to archival — never abort the close. Runs on both operator and `--auto` paths.
-7. If native Tasks exist: call `TaskList`, format as a markdown table. Then `TaskUpdate(status=deleted)` for completed tasks only — pending/in_progress tasks persist for next session.
-8. Archive the session via `scripts/session-archive.ts archive --mode=close` (full close — finalize SHELL.md and replace with fresh template in one operation). `session-archive.ts` derives cost itself from the cost-log window — no `Cost:` line to compute or pass.
+7. Archive the session via `scripts/session-archive.ts archive --mode=close` (full close — finalize SHELL.md and replace with fresh template in one operation). `session-archive.ts` derives cost itself from the cost-log window — no `Cost:` line to compute or pass.
    Pipe the following compact structured payload on stdin — keep it brief, no freeform prose:
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts archive --mode=close --state-dir=.claude-code-hermit <<'HERMIT_PAYLOAD'
@@ -100,13 +99,11 @@ This path is intentionally silent: no operator notification on queue or drain �
    Artifacts: <wikilinks to compiled/ outputs produced this session, or none>
    Closed Via: <operator|auto>
    Next Start Point: <one line>
-   ## Plan
-   <task table, if native Tasks were created>
    HERMIT_PAYLOAD
    ```
    Parse the single line of JSON printed to stdout. **`ok === false`** means the archive did NOT happen — no markers were written; surface the returned `reason` to the operator and retry once before giving up.
-9. **Pending-close cleanup** *(now automatic)*. `session-archive.ts` deletes `state/pending-close.json` itself on close/auto archive success (reported in its `markers` output field) — any pending midnight-drain flag is invalidated by a successful close, regardless of trigger. Nothing to do here.
-10. **Context-reset marker** *(now automatic, `--auto` only)*. On auto archive success the script writes `state/clear-requested.json` itself. The watchdog reads it on the next tick and sends `/clear` when the session is still alive + idle + unattended, resetting stale conversation context before the next scheduled wake incurs a cold cache-write. `/clear` preserves CronCreate routines and Monitor tasks; no re-arm is needed.
+8. **Pending-close cleanup** *(now automatic)*. `session-archive.ts` deletes `state/pending-close.json` itself on close/auto archive success (reported in its `markers` output field) — any pending midnight-drain flag is invalidated by a successful close, regardless of trigger. Nothing to do here.
+9. **Context-reset marker** *(now automatic, `--auto` only)*. On auto archive success the script writes `state/clear-requested.json` itself. The watchdog reads it on the next tick and sends `/clear` when the session is still alive + idle + unattended, resetting stale conversation context before the next scheduled wake incurs a cold cache-write. `/clear` preserves CronCreate routines and Monitor tasks; no re-arm is needed.
 
 ---
 

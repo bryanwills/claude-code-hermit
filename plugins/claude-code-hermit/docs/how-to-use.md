@@ -60,7 +60,7 @@ Behavioral "when X, do Y" rules belong in `CLAUDE.md`, not here — see [the FAQ
 /claude-code-hermit:session
 ```
 
-Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, creates native Tasks for each step, and waits for your go-ahead. As it works, `SHELL.md` tracks the narrative — progress log, blockers, findings — while Tasks tracks the plan steps. Cost is tracked separately in `.status.json` and injected into context at session start.
+Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, records its steps in the Progress Log, and waits for your go-ahead. As it works, `SHELL.md` tracks everything — the plan, progress log, blockers, findings. Cost is tracked separately in `.status.json` and injected into context at session start.
 
 Check status anytime — just type "status":
 

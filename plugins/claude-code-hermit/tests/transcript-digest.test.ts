@@ -424,11 +424,11 @@ describe('readTailWindow', () => {
 });
 
 describe('helpers', () => {
-  test('isProductiveTool includes edit/task tools and mcp reply, excludes Bash/Read', () => {
-    for (const t of ['Write', 'Edit', 'NotebookEdit', 'TaskCreate', 'TaskUpdate', 'mcp__plugin_x__reply']) {
+  test('isProductiveTool includes edit tools and mcp reply, excludes Bash/Read and the withdrawn task tools', () => {
+    for (const t of ['Write', 'Edit', 'NotebookEdit', 'mcp__plugin_x__reply']) {
       expect(isProductiveTool(t)).toBe(true);
     }
-    for (const t of ['Bash', 'Read', 'Grep', 'Agent']) {
+    for (const t of ['Bash', 'Read', 'Grep', 'Agent', 'TaskCreate', 'TaskUpdate']) {
       expect(isProductiveTool(t)).toBe(false);
     }
   });
