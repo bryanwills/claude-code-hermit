@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.10] - 2026-08-17
 
 ### Changed
 - Dev session hygiene tracks multi-step work in the SHELL.md Progress Log instead of the native task tools, which Claude Code 2.1.233 withdrew on Opus 4.8, Sonnet 5, Fable 5 and newer.
