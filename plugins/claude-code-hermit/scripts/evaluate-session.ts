@@ -60,9 +60,11 @@ function evaluateSession(content: Json): Json {
 
   // Criterion 2: Plan tracked. The native task store was withdrawn on newer models, so
   // decomposition is only observable as Progress Log granularity.
-  const distinct = new Set(progressStamps(content)).size;
-  const hasSteps = distinct >= 2;
-  const stampLabel = `${distinct} timestamped Progress Log ${distinct === 1 ? 'entry' : 'entries'}`;
+  // Count entries, not distinct clock values — two steps landing in the same minute
+  // are still two steps, and deduping them would warn on a correctly tracked session.
+  const stamped = progressStamps(content).length;
+  const hasSteps = stamped >= 2;
+  const stampLabel = `${stamped} timestamped Progress Log ${stamped === 1 ? 'entry' : 'entries'}`;
   results.criteria.push({
     name: 'Plan tracked',
     status: hasSteps ? 'pass' : 'warn',

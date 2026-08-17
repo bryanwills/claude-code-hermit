@@ -107,7 +107,7 @@ Keep the output to 5 lines, plus an optional 6th line for pending proposals (see
 ```
 [Brief] YYYY-MM-DD | [tags if present]
 Working on: one-line description
-Status: completed/partial/blocked (X/Y tasks)
+Status: completed/partial/blocked
 Done: step1, step2, step3
 Next: description of next action (or "Session complete" if all done)
 ```

@@ -67,7 +67,7 @@ Check status anytime — just type "status":
 ```
 Session S-001 | in_progress | feature, api
 Working on: Add input validation to the API endpoints
-Progress: 2/4 tasks | Current: Step 3 - Add request body validation
+Progress: Step 3 - Add request body validation
 Blockers: none
 ```
 

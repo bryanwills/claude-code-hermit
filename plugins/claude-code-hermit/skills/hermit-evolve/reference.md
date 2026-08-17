@@ -127,7 +127,7 @@ Only update files in `templates/`:
 - `SESSION-REPORT.md.template`
 - `PROPOSAL.md.template`
 
-Note: SHELL.md.template no longer has a `## Plan` section — plan tracking is now handled by native Claude Code Tasks.
+Note: SHELL.md.template has no `## Plan` section — plan steps live in the `## Progress Log`.
 
 ### 5a. Migrate obsidian/ surface
 

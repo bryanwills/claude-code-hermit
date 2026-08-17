@@ -62,9 +62,9 @@ Sessions provide bounded, task-scoped work with durable handoff artifacts.
 START -> WORK -> CLOSE -> ARCHIVE
   |       |       |        |
   v       v       v        v
-Create   Update  Finalize  Copy to
-SHELL.md tasks,  status,   S-NNN-REPORT.md,
-         log     lessons   reset SHELL.md
+Create   Update   Finalize  Copy to
+SHELL.md progress status,   S-NNN-REPORT.md,
+         log      lessons   reset SHELL.md
 ```
 
 **Start:** Checks for existing SHELL.md. Resumes if `in_progress` or `waiting`, creates fresh if not. Loads OPERATOR.md. Reads the SHELL.md Progress Log to see plan steps. Runs morning routine if it hasn't fired today.

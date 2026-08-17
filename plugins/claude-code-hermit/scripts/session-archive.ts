@@ -129,7 +129,9 @@ function resolveRunContext(flags: Record<string, string | true>): { stateDir: st
 // already composed the free text) — the script never invents prose, it only
 // extracts and writes. "none" (case-insensitive) collapses to empty. A
 // literal "## Plan" line switches into verbatim capture mode for the rest of
-// stdin (the native-Tasks table skills already append after the fixed block).
+// stdin. No shipped skill emits it any more (plan tracking moved to the SHELL.md
+// Progress Log); the branch stays so a session still holding pre-upgrade skill
+// text in context can't spill a plan table into the Next Start Point field.
 // ---------------------------------------------------------------------------
 
 const PAYLOAD_KEYS = [

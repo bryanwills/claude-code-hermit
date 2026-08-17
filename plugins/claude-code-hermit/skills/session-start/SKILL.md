@@ -116,7 +116,7 @@ All state lives under `.claude-code-hermit/` in the project root.
    **Note for maintainers:** `md-audit` and `automation-recommender` are already scheduled on 7-day intervals via `scheduled_checks`. This step pulls the first run forward to day 1 with operator consent — it is not an independent execution path.
 
 6. Check if `.claude-code-hermit/sessions/NEXT-TASK.md` exists. If it does:
-   - **Autonomous drain** (`config.always_on` is `true` AND `escalation` is `balanced` or `autonomous`): there is no operator to present to — auto-accept the prepared task. Use its `## Task` line as this session's task (as if the operator had accepted it), then delete `NEXT-TASK.md`. This is the deterministic path the `session` Work-done flow (§8) and heartbeat Idle Agency invoke with a bare `session-start`.
+   - **Autonomous drain** (`config.always_on` is `true` AND `escalation` is `balanced` or `autonomous`): there is no operator to present to — auto-accept the prepared task. Use its `## Task` line as this session's task (as if the operator had accepted it), then delete `NEXT-TASK.md`. This is the deterministic path the `session` Work-done flow (§6 step 7) and heartbeat Idle Agency invoke with a bare `session-start`.
    - **Conservative** (`config.always_on` is `true` AND `escalation` is `conservative`): do **not** auto-start. Leave `NEXT-TASK.md` in place — the heartbeat conservative branch owns pickup (notify + set `waiting`). Continue without adopting a task from it.
    - **Interactive** (`config.always_on` is `false`): present the prepared task to the operator as the suggested task for this session.
      - If the operator accepts it: use it as the task (skip asking "What should I help with?").
