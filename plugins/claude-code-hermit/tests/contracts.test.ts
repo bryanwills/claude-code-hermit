@@ -23,6 +23,7 @@ import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
+import { triggerPrompt } from './helpers/transcript';
 import { validateCronSchedule, validate } from '../scripts/validate-config';
 import { resolve } from '../scripts/resolve-outbound-channel';
 import { resolvePaths, checkConfig } from '../scripts/doctor-check';
@@ -315,10 +316,17 @@ describe('stderr sanitization', () => {
 
   test('channel hook strips chat_id control chars', withTmpdir(async (dir) => {
     writeConfig(dir, { channels: { discord: { enabled: true, dm_channel_id: null } } });
+    const chatId = 'abc\n\x1b[31mFAKE\x1b[0m';
+    // The save path is only reached when a matching inbound envelope opened the
+    // turn, so the hostile id has to arrive on both legs to reach the log line
+    // under test.
+    const transcript = path.join(dir, 'inbound.jsonl');
+    fs.writeFileSync(transcript, triggerPrompt(`<channel source="plugin:discord:discord" chat_id="${chatId}">hi</channel>`) + '\n');
     const r = await runScript('channel-hook.ts', {
       stdin: JSON.stringify({
         tool_name: 'mcp__discord__reply',
-        tool_input: { chat_id: 'abc\n\x1b[31mFAKE\x1b[0m' },
+        tool_input: { chat_id: chatId },
+        transcript_path: transcript,
       }),
       cwd: dir,
       env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT },

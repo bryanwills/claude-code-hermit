@@ -15,6 +15,7 @@ import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, setupGitWorkdir, fixturesDir, type Workdir } from './helpers/workdir';
+import { triggerPrompt } from './helpers/transcript';
 import { cidrOverlap } from '../scripts/doctor-check';
 import { decide } from '../scripts/enforce-deny-patterns';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
@@ -451,13 +452,38 @@ describe('enforce-deny-patterns (hook wiring)', () => {
 // -------------------------------------------------------
 
 describe('channel-hook', () => {
+  /**
+   * dm_channel_id is only learned from a reply sent during a turn an inbound
+   * message from that same chat opened, so a persist case has to supply the
+   * transcript the hook derives that from.
+   */
+  function inboundReply(dir: string, tool: string, source: string, chatId: string): string {
+    const transcript = path.join(dir, '.claude', 'inbound.jsonl');
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    write(transcript, triggerPrompt(`<channel source="${source}" chat_id="${chatId}">hi</channel>`) + '\n');
+    return JSON.stringify({
+      tool_name: tool,
+      tool_input: { chat_id: chatId },
+      transcript_path: transcript,
+    });
+  }
+
   test('channel-hook (persist dm_channel_id)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"enabled":true,"dm_channel_id":null}}}');
     const r = await runScript('channel-hook.ts', {
-      stdin: '{"tool_name":"mcp__discord__reply","tool_input":{"chat_id":"123456"}}', cwd: dir,
+      stdin: inboundReply(dir, 'mcp__discord__reply', 'plugin:discord:discord', '123456'), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
     expect(readJson(hermit(dir, 'config.json')).channels.discord.dm_channel_id).toBe('123456');
+  }));
+
+  test('channel-hook (proactive reply does not learn dm_channel_id)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"channels":{"discord":{"enabled":true,"dm_channel_id":"D1"}}}');
+    const r = await runScript('channel-hook.ts', {
+      stdin: '{"tool_name":"mcp__discord__reply","tool_input":{"chat_id":"briefs-chat"}}', cwd: dir,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(readJson(hermit(dir, 'config.json')).channels.discord.dm_channel_id).toBe('D1');
   }));
 
   test('channel-hook (skip unconfigured)', withDir(async (dir) => {
@@ -482,7 +508,7 @@ describe('channel-hook', () => {
   test('channel-hook (plugin_ prefix)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"enabled":true,"dm_channel_id":null}}}');
     const r = await runScript('channel-hook.ts', {
-      stdin: '{"tool_name":"plugin_discord_discord_reply","tool_input":{"chat_id":"789"}}', cwd: dir,
+      stdin: inboundReply(dir, 'plugin_discord_discord_reply', 'plugin:discord:discord', '789'), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
     expect(readJson(hermit(dir, 'config.json')).channels.discord.dm_channel_id).toBe('789');
@@ -496,7 +522,7 @@ describe('channel-hook', () => {
   test('channel-hook (iMessage persist dm_channel_id)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"imessage":{"enabled":true,"dm_channel_id":null}}}');
     const r = await runScript('channel-hook.ts', {
-      stdin: '{"tool_name":"mcp__imessage__reply","tool_input":{"chat_id":"+15550001234"}}', cwd: dir,
+      stdin: inboundReply(dir, 'mcp__imessage__reply', 'plugin:imessage:imessage', '+15550001234'), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
     expect(readJson(hermit(dir, 'config.json')).channels.imessage.dm_channel_id).toBe('+15550001234');

@@ -148,8 +148,11 @@ export function isEligibleInboundReply(event: Json, channelKey: string, chatId: 
     const readFrom = Math.max(0, stat.size - TAIL_BYTES);
     const fd = fs.openSync(tPath, 'r');
     const buf = Buffer.alloc(Math.min(TAIL_BYTES, stat.size));
-    fs.readSync(fd, buf, 0, buf.length, readFrom);
-    fs.closeSync(fd);
+    try {
+      fs.readSync(fd, buf, 0, buf.length, readFrom);
+    } finally {
+      fs.closeSync(fd);
+    }
 
     const lines = buf.toString('utf-8').split('\n');
     // Drop the first line when mid-file (it's a partial line).

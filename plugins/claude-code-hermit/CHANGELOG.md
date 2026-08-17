@@ -12,6 +12,9 @@
 - Removed `scripts/lib/tasks.ts`, the `task-id` verb in `apply-settings.ts`, and the `hatch`/`hermit-evolve` steps that wrote `CLAUDE_CODE_TASK_LIST_ID` into `.claude/settings.local.json`.
 - The heartbeat and routine monitor sweeps document only the persisted `task_id` → `TaskStop` path. The `TaskList` orphan fallback never worked: `TaskList` never listed Monitor tasks.
 
+### Fixed
+- `dm_channel_id` is learned only from a reply sent during a turn an inbound message from that same chat opened. A proactive send (routine wake, heartbeat, a timed brief) into a second chat no longer overwrites the operator's primary DM, which also carries the controller trust binding.
+
 ### Upgrade Instructions
 
 1. **Session-discipline block** — no manual edit. The `**Tasks:**` rule now points at the Progress Log and is replaced by the CLAUDE-APPEND block refresh in Step 6.
