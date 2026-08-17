@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import { calculateCost, PRICING } from './lib/pricing';
 import { kStr, formatTokens } from './lib/format';
-import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
+import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, readTailLines, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { extractSection, stripPlaceholders } from './lib/md-write';
@@ -242,24 +242,6 @@ function peakPromptTokensSinceCompaction(lines: string[], billedIndex: number, s
     if (prompt > peak) peak = prompt;
   }
   return peak;
-}
-
-// Trailing `tailBytes` of a file as whole lines, dropping the partial leading line when
-// the read started mid-file. Throws on any fs error — callers already run inside a
-// try/catch that turns that into "no usable data".
-function readTailLines(filePath: string, tailBytes: number): { lines: string[]; readFrom: number } {
-  const stat = fs.statSync(filePath);
-  const readFrom = Math.max(0, stat.size - tailBytes);
-  const fd = fs.openSync(filePath, 'r');
-  const buf = Buffer.alloc(Math.min(tailBytes, stat.size));
-  try {
-    fs.readSync(fd, buf, 0, buf.length, readFrom);
-  } finally {
-    fs.closeSync(fd);
-  }
-  const lines = buf.toString('utf-8').split('\n');
-  if (readFrom > 0) lines.shift();
-  return { lines, readFrom };
 }
 
 function readLastTurnUsage(transcriptPath: string): Json {

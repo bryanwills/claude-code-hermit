@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { safe } from './lib/sanitize';
-import { hermitDir, transcriptPath, turnPromptText } from './lib/cc-compat';
+import { hermitDir, transcriptPath, readTailLines, turnPromptText } from './lib/cc-compat';
 import { readConfigRaw } from './lib/config-read';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { logMessage, isLoggingEnabled } from './lib/channel-log';
@@ -35,12 +35,13 @@ const CONFIG_PATH = path.join(HERMIT_DIR, 'config.json');
 const ACTIVITY_PATH = path.join(HERMIT_DIR, 'state', 'channel-activity.json');
 const REPLIES_PATH = path.join(HERMIT_DIR, 'state', 'channel-replies.jsonl');
 const MAX_STDIN = 64 * 1024;
-// Tail window for the transcript read below — only the boundary prompt that
-// opened the CURRENT turn is needed (mirrors cost-tracker.ts's TAIL_BYTES
-// pattern), so this stays far smaller than a whole-session read. 128KB
-// comfortably covers a turn's leading envelope/prompt plus some preceding
-// tool_result noise without doing O(session-size) I/O on every single reply.
-const TAIL_BYTES = 128 * 1024;
+// 512KB matches cost-tracker's calibrated window for the same walk-back-to-the-
+// turn-boundary job. A channel reply lands at the END of a channel-responder
+// turn that already absorbed a skill body and several tool results; a window
+// that doesn't reach that turn's opening envelope fails the gate — and since
+// this hook is the only writer of dm_channel_id, that silently leaves proactive
+// outbound unconfigured.
+const TAIL_BYTES = 512 * 1024;
 
 const SERVER_TO_CHANNEL: Record<string, string> = {
   discord: 'discord',
@@ -144,22 +145,18 @@ export function isEligibleInboundReply(event: Json, channelKey: string, chatId: 
     const tPath = transcriptPath(event);
     if (!tPath) return false;
 
-    const stat = fs.statSync(tPath);
-    const readFrom = Math.max(0, stat.size - TAIL_BYTES);
-    const fd = fs.openSync(tPath, 'r');
-    const buf = Buffer.alloc(Math.min(TAIL_BYTES, stat.size));
-    try {
-      fs.readSync(fd, buf, 0, buf.length, readFrom);
-    } finally {
-      fs.closeSync(fd);
-    }
-
-    const lines = buf.toString('utf-8').split('\n');
-    // Drop the first line when mid-file (it's a partial line).
-    if (readFrom > 0) lines.shift();
+    const { lines } = readTailLines(tPath, TAIL_BYTES);
 
     const prompt = turnPromptText(lines, lines.length);
-    if (!prompt.boundaryFound) return false;
+    // No boundary in the window means "couldn't tell", not "wasn't inbound" —
+    // still fail closed, but say so, or a turn too large for TAIL_BYTES looks
+    // identical to a proactive send in the log.
+    if (!prompt.boundaryFound) {
+      process.stderr.write(
+        `[channel-hook] undetermined ${channelKey}.dm_channel_id — ${safe(chatId)} found no turn boundary in the last ${TAIL_BYTES} transcript bytes\n`
+      );
+      return false;
+    }
 
     const envelope = parseChannelEnvelope(prompt.text);
     if (!envelope) return false;
