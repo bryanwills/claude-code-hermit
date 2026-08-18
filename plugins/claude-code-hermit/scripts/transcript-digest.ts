@@ -22,8 +22,8 @@ process.stdout.on('error', () => {});
 // (--days), not file-count-based; --sessions is only a safety cap on how many
 // files a single run reads.
 //
-// BOUNDED READ: per transcript we read only a TAIL_BYTES tail (same fd/tail
-// mechanism as cost-tracker.ts readLastTurnUsage), never the whole corpus. A
+// BOUNDED READ: per transcript we read only a TAIL_BYTES tail (via cc-compat's
+// shared readTailLines helper), never the whole corpus. A
 // truncated tail is reported via window.truncated; because the tail may not
 // reach back a full D days, an entry-level timestamp cutoff in digestLines keeps
 // the counters honest (window.from tells you how far coverage actually reached).
@@ -43,6 +43,7 @@ import {
   transcriptDirFor,
   hermitDir as resolveHermitRoot,
   pinStateDirOrExit,
+  readTailLines,
 } from './lib/cc-compat';
 import { classifySource } from './lib/trigger-source';
 import { resolveHermitNowMs } from './lib/time';
@@ -60,7 +61,7 @@ const DAY_MS = 86_400_000;
 // call would peg productive_wakes/wakes at 100% and kill the defer-loop signal.
 // Undercount (a wake that only mutates state through a hermit script reads as
 // unproductive) is accepted for v1; a hermit-script allowlist is a v1.1 option.
-const PRODUCTIVE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'TaskCreate', 'TaskUpdate']);
+const PRODUCTIVE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit']);
 
 function isProductiveTool(name: string): boolean {
   return PRODUCTIVE_TOOLS.has(name) || /^mcp__.+__reply$/.test(name);
@@ -110,20 +111,11 @@ function pickTranscripts(dir: string, days: number, n: number, now: number): str
   return files.slice(0, n).map(f => f.p);
 }
 
-// Read the last `tailBytes` of a transcript as lines, dropping the partial first
-// line when the read started mid-file. `truncated` means the window did not
-// reach the file's start. Returns null on any read error (caller counts it as
-// skipped). Mirrors cost-tracker.ts readLastTurnUsage.
+// `truncated` means the window did not reach the file's start. Returns null on
+// any read error (caller counts it as skipped).
 function readTailWindow(file: string, tailBytes: number = TAIL_BYTES): { lines: string[]; truncated: boolean } | null {
   try {
-    const stat = fs.statSync(file);
-    const readFrom = Math.max(0, stat.size - tailBytes);
-    const fd = fs.openSync(file, 'r');
-    const buf = Buffer.alloc(Math.min(tailBytes, stat.size));
-    fs.readSync(fd, buf, 0, buf.length, readFrom);
-    fs.closeSync(fd);
-    const lines = buf.toString('utf-8').split('\n');
-    if (readFrom > 0) lines.shift();
+    const { lines, readFrom } = readTailLines(file, tailBytes);
     return { lines, truncated: readFrom > 0 };
   } catch {
     return null;

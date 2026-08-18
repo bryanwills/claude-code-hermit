@@ -15,6 +15,7 @@ import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, setupGitWorkdir, fixturesDir, type Workdir } from './helpers/workdir';
+import { triggerPrompt } from './helpers/transcript';
 import { cidrOverlap } from '../scripts/doctor-check';
 import { decide } from '../scripts/enforce-deny-patterns';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
@@ -451,13 +452,38 @@ describe('enforce-deny-patterns (hook wiring)', () => {
 // -------------------------------------------------------
 
 describe('channel-hook', () => {
+  /**
+   * dm_channel_id is only learned from a reply sent during a turn an inbound
+   * message from that same chat opened, so a persist case has to supply the
+   * transcript the hook derives that from.
+   */
+  function inboundReply(dir: string, tool: string, source: string, chatId: string): string {
+    const transcript = path.join(dir, '.claude', 'inbound.jsonl');
+    fs.mkdirSync(path.dirname(transcript), { recursive: true });
+    write(transcript, triggerPrompt(`<channel source="${source}" chat_id="${chatId}">hi</channel>`) + '\n');
+    return JSON.stringify({
+      tool_name: tool,
+      tool_input: { chat_id: chatId },
+      transcript_path: transcript,
+    });
+  }
+
   test('channel-hook (persist dm_channel_id)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"enabled":true,"dm_channel_id":null}}}');
     const r = await runScript('channel-hook.ts', {
-      stdin: '{"tool_name":"mcp__discord__reply","tool_input":{"chat_id":"123456"}}', cwd: dir,
+      stdin: inboundReply(dir, 'mcp__discord__reply', 'plugin:discord:discord', '123456'), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
     expect(readJson(hermit(dir, 'config.json')).channels.discord.dm_channel_id).toBe('123456');
+  }));
+
+  test('channel-hook (proactive reply does not learn dm_channel_id)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"channels":{"discord":{"enabled":true,"dm_channel_id":"D1"}}}');
+    const r = await runScript('channel-hook.ts', {
+      stdin: '{"tool_name":"mcp__discord__reply","tool_input":{"chat_id":"briefs-chat"}}', cwd: dir,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(readJson(hermit(dir, 'config.json')).channels.discord.dm_channel_id).toBe('D1');
   }));
 
   test('channel-hook (skip unconfigured)', withDir(async (dir) => {
@@ -482,7 +508,7 @@ describe('channel-hook', () => {
   test('channel-hook (plugin_ prefix)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"enabled":true,"dm_channel_id":null}}}');
     const r = await runScript('channel-hook.ts', {
-      stdin: '{"tool_name":"plugin_discord_discord_reply","tool_input":{"chat_id":"789"}}', cwd: dir,
+      stdin: inboundReply(dir, 'plugin_discord_discord_reply', 'plugin:discord:discord', '789'), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
     expect(readJson(hermit(dir, 'config.json')).channels.discord.dm_channel_id).toBe('789');
@@ -496,7 +522,7 @@ describe('channel-hook', () => {
   test('channel-hook (iMessage persist dm_channel_id)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"imessage":{"enabled":true,"dm_channel_id":null}}}');
     const r = await runScript('channel-hook.ts', {
-      stdin: '{"tool_name":"mcp__imessage__reply","tool_input":{"chat_id":"+15550001234"}}', cwd: dir,
+      stdin: inboundReply(dir, 'mcp__imessage__reply', 'plugin:imessage:imessage', '+15550001234'), cwd: dir,
     });
     expect(r.exitCode).toBe(0);
     expect(readJson(hermit(dir, 'config.json')).channels.imessage.dm_channel_id).toBe('+15550001234');
@@ -1083,7 +1109,7 @@ Rota body.
     expect(r.stdout.length).toBeLessThanOrEqual(1200);
     expect(r.stdout).toContain('---Compaction Pointers---');
     for (const banned of ['---Operator Context (OPERATOR.md)---', '---Active Session---', '---Compiled Knowledge---',
-      '---Schema Drift---', '---Storage Drift---', '---Session Cost---', '---Last Report---', '---Upgrade Check---']) {
+      '---Schema Drift---', '---Storage Drift---', '---Last Report---', '---Upgrade Check---']) {
       expect(r.stdout).not.toContain(banned);
     }
   }));
@@ -1185,7 +1211,22 @@ Rota body.
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain('---Last Report---');
     expect(r.stdout).toContain('---Active Session---');
-    expect(r.stdout).toContain('---Session Cost---');
+  }));
+
+  // Spend telemetry stays out of the injected context on every source: routine
+  // comms report outcomes, and cost detail is on-demand (cost-reflect, doctor,
+  // dashboard) or exception-driven (budget alerts).
+  test('startup-context (live .status.json → no Session Cost section, any source)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', '.status.json'),
+      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000,"operator_turns":3}');
+    for (const source of ['startup', 'resume']) {
+      const r = await runScript('startup-context.ts', {
+        cwd: dir, env: ENV, stdin: JSON.stringify({ source, session_id: 'x' }),
+      });
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('---Session Cost---');
+      expect(r.stdout).not.toContain('698.78');
+    }
   }));
 
   test('startup-context (source=resume, no actionable SHELL.md → Last Report still emitted)', withDir(async (dir) => {
@@ -1539,6 +1580,23 @@ describe('channel-reply-reminder', () => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
     await run('<channel source="discord" chat_id="123" user="ALLOWED_ID">yep</channel>', dir);
     expect(unconsolidated(hermit(dir)).rows.length).toBe(1);
+  }));
+
+  test('channel-reply-reminder (capture: allowed_users holds platform ids, envelope carries user_id -> logged, sender keeps the display name)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
+    await run('<channel source="discord" chat_id="123" message_id="M1" user="display-name" user_id="ALLOWED_ID" ts="2024-01-01T00:00:00.000Z">yep</channel>', dir);
+    const rows = unconsolidated(hermit(dir)).rows;
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({
+      source: 'discord', chat_id: '123', direction: 'in', sender: 'display-name', message_id: 'M1',
+      text: 'yep', ts: '2024-01-01T00:00:00.000Z',
+    });
+  }));
+
+  test('channel-reply-reminder (capture: display name mimics an allowlisted id, user_id does not match -> no log)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
+    await run('<channel source="discord" chat_id="123" user="ALLOWED_ID" user_id="INTRUDER">nope</channel>', dir);
+    expect(unconsolidated(hermit(dir)).rows.length).toBe(0);
   }));
 
   test('channel-reply-reminder (capture: allowed_users=[] lockdown -> never logged, even with a user id)', withDir(async (dir) => {

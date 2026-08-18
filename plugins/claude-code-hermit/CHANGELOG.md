@@ -3,14 +3,65 @@
 ## [Unreleased]
 
 ### Fixed
-- Routine events are recorded under the hermit dir the caller already resolved instead of a second one re-derived from its parent. The round trip could only lose information: with the two resolvers disagreeing it could append to a *different* project's `routine-metrics.jsonl`, and in `routines.ts finish` it split the run record and the ledger row across two roots. The walk-up survives only in the `log-event` CLI verb, which has no caller-supplied anchor, capped at 8 levels like every other resolver. An append into a hermit dir with no `state/` now returns its documented error string instead of throwing a stack trace.
-- The session-start and boot version checks compare version *direction* instead of string inequality. A config stamp ahead of the loaded plugin now reports `---Stale Plugin Runtime---` with the loaded path and the scoped `claude plugin update` to run, instead of demanding `hermit-evolve` — which could not clear it, so always-on hermits re-dispatched an evolve subagent every session start forever.
-- `hermit-evolve` stops before any migration when the loaded plugin is older than the applied version, and `evolve-finalize` refuses a `--core` below the on-disk stamp (`core_version_regression`, config left untouched). Previously a stale install plus any sibling gap or CLAUDE-APPEND drift ran the migrations and then silently lowered `_hermit_versions` without reversing them. Sibling stamps get the same no-downgrade rule as a skip.
-- The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
-- The `.worktreeinclude` managed block carries `.claude-code-hermit/config.json` into `claude --worktree` worktrees. Without it a worktree session got a state dir with no readable config, so anything that reads a config key at the relative path failed or silently skipped, and the resulting error pointed at a re-hatch that was never the problem. Existing hermits get the line via an Upgrade Instructions step; state writes stay pinned to the main checkout, which the resolver change below is what keeps true.
-- The state-dir resolver walks past a worktree's projected `.claude-code-hermit/` instead of resolving to it. `config.json` doubles as the resolver sentinel, so copying it into a worktree (above) would have made the projection its own hermit root — every ledger read and write from a `claude --worktree` session anchored to a dir with no `state/`, which is the same silent skip the `routines.ts health` fix below repairs. A projection is identified by the sentinel without `state/`, which `.worktreeinclude` never copies; nothing creates `state/` there because no resolver returns it. Also closes the pre-existing case where an ambient `CLAUDE_PROJECT_DIR` naming the worktree anchored hook-driven writers to the partial copy.
-- `routines.ts health` anchors a relative `hermit-dir` argument through the same resolver as the rest of the state path instead of the process cwd. Both callers (`reflect`, `hermit-evolution`) pass the relative `.claude-code-hermit`, so any earlier `cd` made the reader report `source: missing` — which both skills read as "no candidates", turning a lost ledger into a silent skip. An absolute argument is still honoured as passed.
+- Channel `allowed_users` matches the envelope's `user_id` (platform id) instead of `user` (display name). Id-based allowlists, the documented setup, rejected every message, so inbound capture, `pause`/`stop`/`resume`/`snooze`, harness commands, and `status` were silent no-ops. Channels that send only `user` are unaffected.
+- `user_id` wins over `user` when both are present, and a duplicated `user`/`user_id` voids the sender identity rather than trusting the first copy — a display name can neither mimic nor inject an allowlisted id. Operators whose `allowed_users` holds a display name must switch it to the platform id.
+
+### Upgrade Instructions
+
+1. Read `.claude-code-hermit/config.json`. For every entry under `channels` that has an `allowed_users` array, check each value.
+2. If a value is not the sender's platform user ID (on Discord: the 17-19 digit numeric id; on Telegram: the numeric account id) — for example a display name or `@handle` — that entry no longer matches. Before this release the allowlist was compared against the envelope's `user` (display name) attribute, so a display name could have been working.
+3. Tell the operator which entries look like display names, ask them for the matching platform IDs, and replace the values. Do not guess an ID. If no entry looks like a display name, say so and change nothing.
+4. Leaving a stale display name in `allowed_users` silently blocks that sender: inbound messages stop being captured and `pause`/`stop`/`resume`/`snooze`/`status` become no-ops with no error.
 ### Changed
+- `/recall` now triggers on history questions it previously missed ("did we ever discuss X", "have we seen this error before", "yesterday I asked you to X"): the skill description explains why its search beats hand-grepping state files (channel-log coverage, relevance+recency ranking, bounded output), and the session-discipline block routes past-work questions to `/recall` instead of direct `.claude-code-hermit/` reads.
+
+## [1.2.40] - 2026-08-17
+
+### Added
+- The watchdog alerts you when the session stops draining its queued notifications — a stale `enqueue` with no `dequeue` for 30 minutes while tmux is alive raises a `session-wedged` event and one deduped message. Catches any blocker, including dialog shapes the pane scanner doesn't recognise.
+
+### Changed
+- Routine operator messages report outcomes. `/brief` (every mode, including the single-line push fallback), the idle status reply, and the session-start resume line carry work status; the brief runner contract returns work fields only. Spend detail lives in `/cost-reflect`, `/hermit-doctor`, the dashboard, the weekly review's `Spend:` line, and budget alerts when a cap is configured.
+- Session-start injection carries operator, session, knowledge, and report context. Spend reaches the operator on request (`/cost-reflect`, the deterministic `status` reply) or when a budget cap fires.
+- Plan tracking lives in the SHELL.md Progress Log. `session`, `session-start`, `session-close` and `brief` no longer call the native task tools — Claude Code 2.1.233 withdrew them on Opus 4.8, Sonnet 5, Fable 5 and newer — so plan steps and `/brief`'s Done/Next lines read the Progress Log, which behaves the same on every model tier and survives compaction and restart.
+- The `Plan tracked` session-quality criterion measures Progress Log granularity (two or more timestamped entries) instead of native-task existence. With the task store gone it could only ever `warn`, biasing every session toward a degraded overall verdict.
+- `.status.json` no longer carries `plan_done`/`plan_total`, `tasks-snapshot.md` is no longer written every turn, and `hermit-status` drops the plan-progress figure. Nothing read that file.
+- `TaskCreate`/`TaskUpdate` no longer count as productive tool calls in wake digests.
+- Removed `scripts/lib/tasks.ts`, the `task-id` verb in `apply-settings.ts`, and the `hatch`/`hermit-evolve` steps that wrote `CLAUDE_CODE_TASK_LIST_ID` into `.claude/settings.local.json`.
+- The heartbeat and routine monitor sweeps document only the persisted `task_id` → `TaskStop` path. The `TaskList` orphan fallback never worked: `TaskList` never listed Monitor tasks.
+
+### Fixed
+- `dm_channel_id` is learned only from a reply sent during a turn an inbound message from that same chat opened. A proactive send (routine wake, heartbeat, a timed brief) into a second chat no longer overwrites the operator's primary DM, which also carries the controller trust binding.
+
+### Upgrade Instructions
+
+1. **Session-discipline block** — no manual edit. The `**Tasks:**` rule now points at the Progress Log and is replaced by the CLAUDE-APPEND block refresh in Step 6.
+2. **Drop the task-list env var** — if `.claude/settings.local.json` has `CLAUDE_CODE_TASK_LIST_ID` in its `env` block, remove that key and leave every other key untouched.
+3. **Delete the snapshot file** — remove `.claude-code-hermit/tasks-snapshot.md` if it exists, and drop the `.claude-code-hermit/tasks-snapshot.md` line from `.gitignore` (local-scope hermits only — project scope never had it). If the file was tracked, run `git rm --cached .claude-code-hermit/tasks-snapshot.md`.
+4. **Report leftovers** — any `~/.claude/tasks/hermit-*` directory is now inert. Name it in the step-10 report so the operator can delete it by hand; do not delete it automatically.
+
+### Fixed
+- Stalled-dialog detection recognises selector-style prompts. It required a numbered option (`❯ 1.`), so Claude Code 2.1.233's `❯ Continue` setup wizard went unseen and left a hermit blocked for days with no alert; a dialog whose only footer is `Enter to continue` is now caught too.
+- Generated watchdog units no longer crash-loop on a missing `bun`. `bin/hermit-watchdog install` bakes the installing shell's own PATH into the systemd unit, launchd plist, and cron line, so `bun`, `claude`, and `tmux` all resolve on every tick.
+- The cron fallback line applies its PATH to the watchdog rather than to `cd`, which left cron installs running on cron's default PATH.
+- `scripts/hermit-exec.sh` resolves `bun` from `$BUN_INSTALL`, `~/.bun/bin`, `/usr/local/bin`, or `/opt/homebrew/bin` when it is off PATH, repairing units baked before this fix without operator action.
+- `/hermit-doctor`'s watchdog check reads the systemd unit's own `ExecMainStatus`/`Result` and reports `fail` on a failing unit, naming exit 127 specifically instead of waiting ~20 minutes to report "enabled but not firing". The unit name derives from the hermit dir, so the check still works when doctor runs from another directory.
+- Re-running install on macOS unloads the launchd label before loading it, so the regenerated plist actually takes effect.
+- `/hermit-doctor` warns when the generated unit carries no `Environment=PATH`. Such a unit now ticks (the shim resolves `bun` by absolute path) but still cannot restart the hermit, so neither the exit-status probe nor the staleness gate would catch it.
+- The baked PATH drops relative entries, which would otherwise resolve against the unit's `WorkingDirectory`, and the cron line quotes its `cd` target.
+- `hermit-start`'s preflight names PATH instead of a missing install when `claude` or `bun` is unreachable, and points at `bin/hermit-watchdog install` — the failure a stale unit actually produces.
+
+### Upgrade Instructions
+
+Existing hermits keep whatever unit was written at install time — the generated units live outside `.claude-code-hermit/` and no upgrade path refreshes them. For a hermit running in tmux mode on a host with systemd or launchd, re-bake the unit:
+
+1. Run `.claude-code-hermit/bin/hermit-watchdog install` from the project root. This rewrites the unit with the current PATH and reloads it.
+2. Confirm with `/claude-code-hermit:hermit-doctor` — the watchdog check now reports a failing unit directly, including its exit status.
+
+Docker-mode hermits need nothing: the container entrypoint runs the watchdog loop directly and never used a generated unit.
+
+## [1.2.39] - 2026-08-14
+
 ### Added
 - `scripts/lib/config-read.ts` — one settled read path for `config.json`: `readSettledConfig` never throws, settles malformed values by declared shape (never vocabulary, so custom operator values survive), preserves explicit `null`s and unknown keys at every nesting level, and settles malformed containers to empty rather than template seeds. `readConfigRaw` remains for the few consumers that must distinguish an unreadable config (routines run records, the prompt pipeline's disclosure gates, `channel-send`'s `config_read_failed`).
 
@@ -31,10 +82,16 @@
 - `scripts/lib/md-write.ts` now owns the whole `## <heading>` grammar for SHELL.md (locate, read, append, replace, placeholder-stripping); the ten local parsers are gone. Operator-added custom sections still pass through untouched.
 
 ### Fixed
+- Routine events are recorded under the hermit dir the caller already resolved instead of a second one re-derived from its parent. The round trip could only lose information: with the two resolvers disagreeing it could append to a *different* project's `routine-metrics.jsonl`, and in `routines.ts finish` it split the run record and the ledger row across two roots. The walk-up survives only in the `log-event` CLI verb, which has no caller-supplied anchor, capped at 8 levels like every other resolver. An append into a hermit dir with no `state/` now returns its documented error string instead of throwing a stack trace.
+- The session-start and boot version checks compare version *direction* instead of string inequality. A config stamp ahead of the loaded plugin now reports `---Stale Plugin Runtime---` with the loaded path and the scoped `claude plugin update` to run, instead of demanding `hermit-evolve` — which could not clear it, so always-on hermits re-dispatched an evolve subagent every session start forever.
+- `hermit-evolve` stops before any migration when the loaded plugin is older than the applied version, and `evolve-finalize` refuses a `--core` below the on-disk stamp (`core_version_regression`, config left untouched). Previously a stale install plus any sibling gap or CLAUDE-APPEND drift ran the migrations and then silently lowered `_hermit_versions` without reversing them. Sibling stamps get the same no-downgrade rule as a skip.
+- The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
+- The `.worktreeinclude` managed block carries `.claude-code-hermit/config.json` into `claude --worktree` worktrees. Without it a worktree session got a state dir with no readable config, so anything that reads a config key at the relative path failed or silently skipped, and the resulting error pointed at a re-hatch that was never the problem. Existing hermits get the line via an Upgrade Instructions step; state writes stay pinned to the main checkout, which the resolver change below is what keeps true.
+- The state-dir resolver walks past a worktree's projected `.claude-code-hermit/` instead of resolving to it. `config.json` doubles as the resolver sentinel, so copying it into a worktree (above) would have made the projection its own hermit root — every ledger read and write from a `claude --worktree` session anchored to a dir with no `state/`, which is the same silent skip the `routines.ts health` fix below repairs. A projection is identified by the sentinel without `state/`, which `.worktreeinclude` never copies; nothing creates `state/` there because no resolver returns it. Also closes the pre-existing case where an ambient `CLAUDE_PROJECT_DIR` naming the worktree anchored hook-driven writers to the partial copy.
+- `routines.ts health` anchors a relative `hermit-dir` argument through the same resolver as the rest of the state path instead of the process cwd. Both callers (`reflect`, `hermit-evolution`) pass the relative `.claude-code-hermit`, so any earlier `cd` made the reader report `source: missing` — which both skills read as "no candidates", turning a lost ledger into a silent skip. An absolute argument is still honoured as passed.
 - Async subagent cost rows now advance `cost-index.json`. `subagent-cost.ts` appended and exited, and `readCostIndex` validates only the schema version, so the dashboard, telemetry export, spend-status and doctor under-reported that spend until the next Stop hook — indefinitely on a hermit that dispatches async work and then goes idle. Budget enforcement was never affected.
 - `reflect`'s routine cost-per-day summed a `cost` field filtered on `ts`; cost rows carry `estimated_cost_usd` and `timestamp`, so every routine's spend evidence resolved to ~$0.
 - `hermit-evolution` read `routine-metrics.jsonl` raw with no bound at all, pulling the whole ledger into the runner's context.
-- The Stop hook's harness-command drain reads `state/runtime.json` anchored to the hermit root instead of the process cwd. A drifted hook cwd made the read miss, so an operator's channel-requested `/clear` or `/model` was silently declined on every turn until it expired at its one-hour TTL, while the matching `context_cleared` write stayed anchored (the same read/write split `applyContextReset` fixed in 1.2.38).
 - A `###` sub-heading above a real section no longer hijacks that section's body — affects session-start injection, `.status.json` task/blockers, Progress Log staleness, the Monitoring bloat check, and the `reflect --quick` hash.
 - Session-start injection and the session quality score no longer read a section as empty when its content sits below a retained `<!-- ... -->` placeholder.
 

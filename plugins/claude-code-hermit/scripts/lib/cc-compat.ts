@@ -230,7 +230,11 @@ function sessionId(payload: Json): string | null {
 }
 
 /**
- * Extract transcript_path from a Stop hook payload.
+ * Extract transcript_path from a hook payload. A common field rather than a
+ * Stop-only one — Stop (cost-tracker) and PostToolUse (channel-hook's
+ * turn-boundary lookup) both read it; PostToolUse carrying it was confirmed
+ * live (tmux probe, CC v2.1.232). CC still documents it as present on most,
+ * not all, events, so callers treat null as "can't tell" and fail closed.
  * @param {object} payload
  * @returns {string|null}
  */
@@ -306,6 +310,36 @@ function backgroundTasks(payload: Json): TriState {
 // ---------------------------------------------------------------------------
 // Transcript parsing (CC-owned JSONL shape)
 // ---------------------------------------------------------------------------
+
+/**
+ * Trailing `tailBytes` of a JSONL file as whole lines, dropping the partial leading
+ * line when the read started mid-file. The one copy every tail-window reader uses
+ * (cost-tracker's usage scan, channel-hook's turn-boundary lookup) so the
+ * partial-line and short-read handling can't drift between them.
+ *
+ * Throws on any fs error — callers already run inside a try/catch that turns that
+ * into "no usable data".
+ * @param {string} filePath
+ * @param {number} tailBytes
+ * @returns {{ lines: string[], readFrom: number }}
+ */
+function readTailLines(filePath: string, tailBytes: number): { lines: string[]; readFrom: number } {
+  const stat = fs.statSync(filePath);
+  const readFrom = Math.max(0, stat.size - tailBytes);
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(Math.min(tailBytes, stat.size));
+  let bytesRead = 0;
+  try {
+    bytesRead = fs.readSync(fd, buf, 0, buf.length, readFrom);
+  } finally {
+    fs.closeSync(fd);
+  }
+  // A short read must not leave the zero-fill tail in the string — those NUL bytes
+  // would corrupt the last line instead of simply truncating the window.
+  const lines = buf.subarray(0, bytesRead).toString('utf-8').split('\n');
+  if (readFrom > 0) lines.shift();
+  return { lines, readFrom };
+}
 
 /**
  * Stringify an entry's message.content regardless of whether it is a string
@@ -577,6 +611,7 @@ export {
   sessionCrons,
   backgroundTasks,
   // Transcript parsing
+  readTailLines,
   entryText,
   isToolResult,
   extractUsage,

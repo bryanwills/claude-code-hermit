@@ -4,11 +4,11 @@
 
 These are non-negotiable. Read them before making any changes.
 
-- **No dependencies.** No `package.json`, no `node_modules`. Hook scripts use Bun stdlib only.
+- **No runtime dependencies.** Nothing under `plugins/` may import from `node_modules` outside `*.test.ts` — shipped code uses Bun built-ins and `node:*` stdlib only. The repo-root `package.json` exists for the dev toolchain (`bunx tsc`, test-only fuzzing); it is not an opening to add runtime deps.
 - **No build step.** Skills are plain markdown. Hooks are standalone `.ts` / `.sh` scripts.
 - **Hooks fail open.** A hook must never block Claude Code. Catch errors, `process.exit(0)`. Never exit non-zero on transient failures.
 - **Consume stdin.** Every hook must read stdin to completion even if unused, to avoid broken pipe errors from Claude Code.
-- **No test framework.** Tests are a shell script. Don't add Jest, Vitest, or anything else.
+- **No third-party test framework.** Tests run on Bun's built-in runner (`bun test`) or a plain bash script. Don't add Jest, Vitest, or anything else.
 
 ## Repo Layout Note
 
@@ -61,13 +61,28 @@ See [Testing](docs/testing.md) for hook test details, fixtures, manual testing, 
 
 ### Steps
 
-1. Create a feature branch off `main` (`fix/<N>-<slug>`, `feat/<N>-<slug>`, or `chore/<slug>`)
+1. Create a feature branch off **fresh** `origin/main`: `git fetch origin && git switch -c fix/<N>-<slug> origin/main`. A stale local `main` is the usual cause of a conflicting PR. If `main` moves while your PR is open, rebase onto it.
 2. Run `/release-status` for a read-only pipeline snapshot (flags stale `required_core_version`, shows what's awaiting tag)
-3. Make changes
-4. Run `( cd plugins/claude-code-hermit && bun test )` locally (and the HA `bun test` suite if HA code changed)
-5. Add a bullet to the affected plugin's `CHANGELOG.md` under `## [Unreleased]` — the maintainer promotes it to a real version at release time. (If you're using Claude Code with the repo's local skills, `/commit` does this automatically.)
+3. Make changes — one concern per PR. An unrelated fix riding along turns a clean merge into a conflict resolution.
+4. Run the affected plugin's suite to completion and `bunx tsc --noEmit` from the repo root. Both green before you push. If you couldn't finish a run, say so in the PR rather than leaving it out.
+5. Add a bullet to the affected plugin's `CHANGELOG.md` under `## [Unreleased]` — the maintainer promotes it to a real version at release time. See [Changelog Entries](#changelog-entries). (If you're using Claude Code with the repo's local skills, `/commit` does this automatically.)
 6. Push — CI runs the same tests
-7. Keep commits focused — one concern per PR
+
+### Changelog Entries
+
+Terse, like [Claude Code's own CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md).
+
+- Keep the `### Added` / `### Changed` / `### Fixed` headers. The header supplies the category, so the bullet doesn't repeat it — no leading "Fixed", no `- **component:**` prefix.
+- One or two lines, sentence case, describing what changed for an operator. Backticks for commands, paths, and flags.
+- Rationale, debugging notes, and design tradeoffs go in the commit message and PR description, not the bullet. No "Files affected" tables.
+- **Docs-only changes get no bullet.** README, `docs/`, `CLAUDE.md`, and comment edits aren't something an operator experiences as a shipped change. When a PR bundles a code fix with a docs correction, only the code fix earns a bullet.
+- Root-scope edits (CI, root README, `.claude/`, the marketplace manifest) skip the changelog entirely — they don't ship to operators.
+
+### Stale and Conflicting PRs
+
+- **A PR that goes conflicting gets a rebase request.** Rebase onto current `main` rather than merging `main` into your branch, so the PR stays a clean set of commits.
+- **A conflicting PR with no movement may be closed.** That isn't a rejection of the change. If the work is still wanted, a maintainer opens a superseding PR that preserves your commits and authorship, and both PRs link to each other.
+- **Check that your base didn't drift under you.** A PR branched weeks ago can merge cleanly and still revert newer work. Rebasing surfaces that; a green CI run on a stale base does not.
 
 ## Adding a New Hermit
 

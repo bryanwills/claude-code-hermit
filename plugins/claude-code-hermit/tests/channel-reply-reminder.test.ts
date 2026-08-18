@@ -22,13 +22,15 @@ import { unconsolidated } from '../scripts/lib/channel-log';
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
 
-function withDir(fn: (dir: string) => Promise<void> | void) {
+function withDir(fn: (dir: string) => Promise<void> | void, config?: string) {
   return async () => {
     const wd: Workdir = setupWorkdir();
-    write(hermit(wd.dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["U1"]}}}');
+    write(hermit(wd.dir, 'config.json'), config ?? '{"channels":{"discord":{"allowed_users":["U1"]}}}');
     try { await fn(wd.dir); } finally { wd.cleanup(); }
   };
 }
+
+const ID_ALLOWLIST = '{"channels":{"discord":{"allowed_users":["123456789012345678"]}}}';
 
 const run = (prompt: string, dir: string) =>
   runScript('user-prompt-pipeline.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
@@ -74,4 +76,29 @@ describe('channel-reply-reminder', () => {
     const { rows } = unconsolidated(hermit(dir));
     expect(rows.length).toBe(0); // capture is gated by isAllowedSender
   }));
+
+  // Discord puts the display name in `user` and the numeric id in `user_id`.
+  // allowed_users holds ids (what every doc instructs), so matching `user`
+  // rejected the operator on every inbound message and nothing was ever logged.
+  test('id-based allowlist, real wire shape — captured, sender keeps the display name', withDir(async (dir) => {
+    const r = await run(
+      '<channel source="plugin:discord:discord" chat_id="1" user="display-name" user_id="123456789012345678">hello there</channel>',
+      dir,
+    );
+    expect(r.exitCode).toBe(0);
+    const { rows } = unconsolidated(hermit(dir));
+    expect(rows.length).toBe(1);
+    expect(rows[0].text).toBe('hello there');
+    expect(rows[0].sender).toBe('display-name');
+  }, ID_ALLOWLIST));
+
+  test('display name mimicking an allowlisted id — not captured', withDir(async (dir) => {
+    const r = await run(
+      '<channel source="plugin:discord:discord" chat_id="1" user="123456789012345678" user_id="EVIL">hello there</channel>',
+      dir,
+    );
+    expect(r.exitCode).toBe(0);
+    const { rows } = unconsolidated(hermit(dir));
+    expect(rows.length).toBe(0);
+  }, ID_ALLOWLIST));
 });

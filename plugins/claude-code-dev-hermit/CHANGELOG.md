@@ -1,6 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.10] - 2026-08-17
+
+### Changed
+- Dev session hygiene tracks multi-step work in the SHELL.md Progress Log instead of the native task tools, which Claude Code 2.1.233 withdrew on Opus 4.8, Sonnet 5, Fable 5 and newer.
+
+### Upgrade Instructions
+
+1. **Session-discipline block** — no manual edit. The `§Dev Session Hygiene` rule is replaced by the CLAUDE-APPEND block refresh that `hermit-evolve` performs for this plugin's block.
+
+## [0.4.9] - 2026-08-14
 
 ### Fixed
 - `git-push-guard`, `worktree-boundary-guard`, and `record-test-result` exited mid-stream on stdin past their 1MB cap, leaving the pipe half-read; they now stop buffering but keep consuming to EOF before failing open.

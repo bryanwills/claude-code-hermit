@@ -39,6 +39,7 @@ Auto-memory handles all learning; `compiled/` is for durable domain outputs, not
 - **`type` in frontmatter is the discriminator — never a folder.** No subdirectories inside `raw/`/`compiled/`, no new top-level dirs inside `.claude-code-hermit/`. Artifacts outside `raw/`/`compiled/` are invisible to injection and retention.
 - Domain inputs → `raw/<type>-<slug>-<date>.md`; one-off outputs → `compiled/<type>-<slug>-<date>.md`; evolving subjects → `compiled/topic-<slug>.md` updated in place. All require frontmatter (`title`, `type`, `created`, `tags`).
 - Naming and retention are script-enforced; `.claude-code-hermit/knowledge-schema.md` defines what this hermit produces.
+- **Recall-first for history questions:** when the operator asks about past work — what was decided, learned, discussed, or done in earlier sessions ("did we ever…", "what did we decide about…", "have we seen this before", "yesterday I asked you to…") — invoke `/claude-code-hermit:recall` instead of grepping or Reading `.claude-code-hermit/` files directly: its search also covers channel message history that file reads miss, ranks by relevance and recency, and returns a bounded `file:line` digest. Current status, briefings, cost, and open-proposal listings stay with their own skills.
 
 ## Rules
 
@@ -50,7 +51,7 @@ Auto-memory handles all learning; `compiled/` is for durable domain outputs, not
 - **Secrets:** Never log API keys, tokens, passwords, or credentials to SHELL.md, reports, or proposals. Session files may be committed to git.
 - **OPERATOR.md:** Operator-curated context (focus, constraints, approvals, comms style); behavior lives in this plugin-owned block, refreshed on upgrade, so improvement ideas go to proposals, not edits. Never edit autonomously. If you notice stale or contradictory context, draft the minimal change, show a diff, and apply only after the operator confirms. In always-on mode, flag it via channel instead — the operator edits directly.
 - **Proposals mandatory:** Every improvement goes through `/proposal-create` → operator accepts → implement. Trivial fixes (typos, one-liners) exempt. **Never hand-write `proposals/PROP-*.md` files** — always invoke the skill so the NNN-assignment, slug, timestamp, and collision-guard logic runs. Manually-assigned ids reuse NNNs across parallel sessions and produce short-form ids that violate the canonical `PROP-NNN-<slug>-HHMMSS` schema.
-- **Tasks:** Use `TaskCreate`/`TaskUpdate` for multi-step work. `tasks-snapshot.md` is auto-generated — don't edit.
+- **Tasks:** Multi-step work: ordered steps in the SHELL.md Progress Log, one timestamped entry per step. It is the only plan surface.
 - **Artifact frontmatter:** Any `.md` file you create outside `.claude-code-hermit/` must include YAML frontmatter with at least `title` (string) and `created` (ISO 8601 with timezone). If inside a hermit session, add `session: S-NNN`.
 - **Tag discipline:** Tag every session report, proposal, and artifact you create; reuse the existing lowercase-hyphenated vocabulary rather than inventing new tags.
 <!-- /claude-code-hermit: Session Discipline -->

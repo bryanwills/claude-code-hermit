@@ -18,7 +18,6 @@ import { safe, safeForLLMMultiline, scanInjected } from './lib/sanitize';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { readSettledConfig } from './lib/config-read';
-import { formatTokens } from './lib/format';
 import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
@@ -37,7 +36,6 @@ const BUDGETS = {
   knowledge:     2500, // compiled/ artifacts — read from config, 2500 default
   schemaDrift:    400, // only emitted when compiled/ types are undeclared in knowledge-schema.md
   storageDrift:   500, // only emitted when misplaced files are found
-  cost:           500,
   report:        1500,
   upgrade:        500,
 };
@@ -179,7 +177,7 @@ function buildCompactionPointers(agentDir: string): string {
 
   if (parts.length === 0) return '';
 
-  parts.push('Full state: SHELL.md + runtime.json. Task list: native Tasks. Don\'t re-read large files to reconstruct context.');
+  parts.push('Full state: SHELL.md + runtime.json. Plan: SHELL.md Progress Log. Don\'t re-read large files to reconstruct context.');
   return parts.join('\n');
 }
 
@@ -426,24 +424,7 @@ function emitFullContext(source: string | null) {
   }
 
   // -------------------------------------------------------
-  // 6. Session cost (priority 3, budget 500) — was 5
-  // -------------------------------------------------------
-  try {
-    const statusPath = path.resolve(AGENT_DIR, 'sessions', '.status.json');
-    let out = 'No cost data';
-    try {
-      const d = JSON.parse(fs.readFileSync(statusPath, 'utf-8'));
-      out = `$${d.cost_usd.toFixed(4)} (${formatTokens(d.tokens)})`;
-    } catch {
-      // missing/malformed status — keep the placeholder, same as read-cost.py did
-    }
-    emit('Session Cost', out.slice(0, BUDGETS.cost));
-  } catch {
-    // Non-fatal
-  }
-
-  // -------------------------------------------------------
-  // 7. Last report (priority 4, budget 1500) — skipped on resume with an
+  // 6. Last report (priority 4, budget 1500) — skipped on resume with an
   //    active SHELL.md: the resumed transcript already contains the report.
   // -------------------------------------------------------
   if (totalChars < HARD_CAP && !(source === 'resume' && hasActiveSession)) {
@@ -492,7 +473,7 @@ function emitFullContext(source: string | null) {
   }
 
   // -------------------------------------------------------
-  // 8. Upgrade check (priority 5, budget 500)
+  // 7. Upgrade check (priority 5, budget 500)
   // -------------------------------------------------------
   if (totalChars < HARD_CAP) {
     try {

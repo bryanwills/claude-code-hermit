@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { safe } from './lib/sanitize';
-import { hermitDir } from './lib/cc-compat';
+import { hermitDir, transcriptPath, readTailLines, turnPromptText } from './lib/cc-compat';
 import { readConfigRaw } from './lib/config-read';
+import { parseChannelEnvelope } from './lib/channel-envelope';
 import { logMessage, isLoggingEnabled } from './lib/channel-log';
 
 type Json = any;
@@ -14,7 +15,12 @@ type Json = any;
  * - Episodic capture of the outbound reply text (PROP-010, best-effort — see
  *   scripts/lib/channel-log.ts). Runs before the "channel configured" gate
  *   below so replies on not-yet-configured channels are still captured.
- * - Persisting dm_channel_id from chat_id in tool input (config.json)
+ * - Persisting dm_channel_id from chat_id in tool input (config.json) — but
+ *   ONLY when the reply was sent during a turn that a matching inbound
+ *   envelope actually opened (see isEligibleInboundReply). A proactive send
+ *   (routine wake, heartbeat, scheduled brief) carries no inbound envelope at
+ *   all, or one from a different chat, and must never be mistaken for the
+ *   operator having moved their primary DM.
  * - Updating last_reply_at timestamp (state/channel-activity.json)
  * - Appending an outbound-send event to state/channel-replies.jsonl. The ledger has no
  *   reader today: reflect's routine-ROI engagement join was removed because these rows
@@ -29,6 +35,13 @@ const CONFIG_PATH = path.join(HERMIT_DIR, 'config.json');
 const ACTIVITY_PATH = path.join(HERMIT_DIR, 'state', 'channel-activity.json');
 const REPLIES_PATH = path.join(HERMIT_DIR, 'state', 'channel-replies.jsonl');
 const MAX_STDIN = 64 * 1024;
+// 512KB matches cost-tracker's calibrated window for the same walk-back-to-the-
+// turn-boundary job. A channel reply lands at the END of a channel-responder
+// turn that already absorbed a skill body and several tool results; a window
+// that doesn't reach that turn's opening envelope fails the gate — and since
+// this hook is the only writer of dm_channel_id, that silently leaves proactive
+// outbound unconfigured.
+const TAIL_BYTES = 512 * 1024;
 
 const SERVER_TO_CHANNEL: Record<string, string> = {
   discord: 'discord',
@@ -54,7 +67,7 @@ function writeConfig(config: Json): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
 }
 
-export function persistDmChannelId(config: Json, channelKey: string, chatId: Json): boolean {
+export function persistDmChannelId(config: Json, channelKey: string, chatId: Json, isInboundReply: boolean): boolean {
   if (!chatId) return false;
 
   // Coerce to string (mirrors the log path's String() at the outbound-capture
@@ -64,6 +77,19 @@ export function persistDmChannelId(config: Json, channelKey: string, chatId: Jso
   const id = String(chatId);
   const channel = config.channels[channelKey];
   if (channel.dm_channel_id === id) return false;
+
+  // A proactive/scheduled send (routine wake, heartbeat, a brief fired on a
+  // timer) opens its own turn with no matching inbound envelope — replying
+  // there is not evidence the operator moved their primary DM. Generalizes
+  // the maintainer_channel_id exemption below: any outbound chat_id reached
+  // without a same-chat inbound trigger is a known, deliberate second
+  // destination, not a relocation signal. See main()'s isEligibleInboundReply.
+  if (!isInboundReply) {
+    process.stderr.write(
+      `[channel-hook] skipped ${channelKey}.dm_channel_id — ${safe(id)} reply wasn't opened by a matching inbound message\n`
+    );
+    return false;
+  }
 
   // The maintainer chat is an outbound-only second destination
   // (docs/security.md § tiered disclosure) and must never be adopted as the
@@ -104,6 +130,41 @@ function appendReplyEvent(channelKey: string, ts: string): void {
     const entry = JSON.stringify({ ts, channel: channelKey, event: 'reply' });
     fs.appendFileSync(REPLIES_PATH, entry + '\n', 'utf8');
   } catch {}
+}
+
+// Was this reply sent during a turn that a matching inbound envelope actually
+// opened? Reads only a tail window of the transcript (TAIL_BYTES) — cheap
+// enough to run on every reply, unlike a whole-session read — finds the
+// boundary prompt that started the CURRENT turn (mirrors cost-tracker.ts's
+// resolveTurnSource/turnPromptText usage), and requires that prompt to be a
+// <channel> envelope from the SAME chat this reply is going to. A routine
+// wake, heartbeat, or scheduled brief opens its turn on something else
+// entirely (or nothing at all within the window) and is correctly ineligible.
+export function isEligibleInboundReply(event: Json, channelKey: string, chatId: Json): boolean {
+  try {
+    const tPath = transcriptPath(event);
+    if (!tPath) return false;
+
+    const { lines } = readTailLines(tPath, TAIL_BYTES);
+
+    const prompt = turnPromptText(lines, lines.length);
+    // No boundary in the window means "couldn't tell", not "wasn't inbound" —
+    // still fail closed, but say so, or a turn too large for TAIL_BYTES looks
+    // identical to a proactive send in the log.
+    if (!prompt.boundaryFound) {
+      process.stderr.write(
+        `[channel-hook] undetermined ${channelKey}.dm_channel_id — ${safe(chatId)} found no turn boundary in the last ${TAIL_BYTES} transcript bytes\n`
+      );
+      return false;
+    }
+
+    const envelope = parseChannelEnvelope(prompt.text);
+    if (!envelope) return false;
+
+    return envelope.sourceKey === channelKey && envelope.chatId === String(chatId ?? '');
+  } catch {
+    return false;
+  }
 }
 
 function main() {
@@ -148,7 +209,8 @@ function main() {
 
       let dirty = false;
 
-      dirty = persistDmChannelId(config, channelKey, input.chat_id) || dirty;
+      const isInboundReply = isEligibleInboundReply(event, channelKey, input.chat_id);
+      dirty = persistDmChannelId(config, channelKey, input.chat_id, isInboundReply) || dirty;
       if (dirty) writeConfig(config);
 
       const ts = new Date().toISOString();
@@ -160,6 +222,7 @@ function main() {
   });
 }
 
-// Guard so importing this module (e.g. a unit test of persistDmChannelId)
-// doesn't run the hook. Direct execution as a hook keeps import.meta.main true.
+// Guard so importing this module (e.g. a unit test of persistDmChannelId or
+// isEligibleInboundReply) doesn't run the hook. Direct execution as a hook
+// keeps import.meta.main true.
 if (import.meta.main) main();

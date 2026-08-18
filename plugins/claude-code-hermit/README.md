@@ -1,7 +1,7 @@
 <p align="center">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.38-green.svg" alt="Version 1.2.38" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.40-green.svg" alt="Version 1.2.40" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -44,7 +44,7 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 - **Pause it from your phone — and it actually stops.** Ask for status, pause, resume, or snooze over Discord or Telegram. The pause is enforced at the tool boundary, not merely treated as a conversational request.
 - **Native Claude Code Artifacts integration** publishes a live Hermit Dashboard, open proposals, weekly reviews, and any compiled document you request as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs, with organization sharing where supported. Point `artifacts.backend` at your own MCP artifact server to publish there instead.
 - **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget on fresh and resumed starts. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
-- **Task snapshots** persist native `Tasks` past session end, so the plan survives archives.
+- **Plan tracking** lives in the SHELL.md Progress Log — timestamped steps that survive compaction, restart, and every model tier.
 - **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context.
 - **Orchestrator** instructed to delegate tasks & exploration to other agents, main context stays clean for token efficiency.
 
@@ -209,7 +209,7 @@ You run on your own Claude subscription — no per-runtime-hour billing — and 
 - **Per-call** token usage logged to `.claude/cost-log.jsonl` (model, input/output/cache split, USD estimate, and what triggered the turn — `heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, or interactive/unattributed `other`).
 - **Per-session** running total in `.status.json`; carried into archived session reports as frontmatter `cost_usd`.
 - **Per-day** rollup in `cost-summary.md`, regenerated on every cost-tracker tick.
-- **Morning brief** (when scheduled as a routine) reads `cost-summary.md` and includes yesterday's spend.
+- **On demand** through `/cost-reflect`, `/hermit-doctor`, and the dashboard, plus a one-line spend summary in the weekly review. Routine briefs and status replies stay outcome-only; spend interrupts them only when a cap is approached or breached.
 
 Because idle always-on cost is effectively zero, one Claude subscription can run several hermits at once.
 

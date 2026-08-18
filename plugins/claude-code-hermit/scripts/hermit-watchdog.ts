@@ -32,7 +32,7 @@ import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './
 import { anchoredPaneTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
-import { costLogPath } from './lib/cc-compat';
+import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
@@ -202,6 +202,11 @@ export function composeStallQuestionMessage(timezone: string, locale: Locale = O
   return WATCHDOG[locale].stallQuestion(nowHHMM(timezone));
 }
 
+/** Operator-language message for a session that stopped consuming its queued notifications. */
+export function composeSessionWedgedMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
+  return WATCHDOG[locale].sessionWedged(nowHHMM(timezone));
+}
+
 /** Operator-language message for a likely orphan (tmux gone, state still fresh). */
 export function composeOrphanMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
   return WATCHDOG[locale].orphan(nowHHMM(timezone));
@@ -287,14 +292,25 @@ function getPaneHash(sessionName: string, world: World = REAL_WORLD): string | n
   return content === null ? null : crypto.createHash('sha256').update(content).digest('hex');
 }
 
-// A blocking modal (AskUserQuestion widget or a native permission prompt) renders
-// a pointer-marked numbered option plus an "Esc to cancel" footer — verified against
-// real captures in compiled/spike-ask-gate-probe-2026-07-05.md. Neither token appears
-// in ordinary session output (tool calls, prose, status bar), so requiring both is a
-// conservative, low-false-positive signal that the pane is stalled on an unanswerable
-// dialog. Over-detection costs one deduped push; under-detection is a silent stall.
-const PENDING_OPTION_RE = /❯\s*\d+\./;
-const PENDING_FOOTER = 'Esc to cancel';
+// A blocking modal (AskUserQuestion widget, a native permission prompt, or a
+// harness-shipped setup wizard) renders a pointer-marked option plus a dialog footer
+// — verified against real captures in compiled/spike-ask-gate-probe-2026-07-05.md and
+// against the CC 2.1.233 "Set up auto mode for your environment?" wizard that wedged a
+// live hermit for ~2.5 days. Neither token appears in ordinary session output (tool
+// calls, prose, status bar), so requiring both is a conservative, low-false-positive
+// signal that the pane is stalled on an unanswerable dialog. Over-detection costs one
+// deduped push; under-detection is a silent stall.
+//
+// The option label is deliberately NOT constrained to a number: the wizard's selector
+// reads "❯ Continue", and requiring `\d+\.` is exactly why the live wedge went
+// undetected. The pointer glyph also starts the composer prompt ("❯ Try ..."), but a
+// modal replaces the composer rather than rendering above it, so the footer anchor
+// below keeps the composer out of every match.
+const PENDING_OPTION_RE = /❯\s+\S/;
+// A dialog footer must terminate the visible pane. Both spellings are load-bearing:
+// AskUserQuestion and permission prompts end "· Esc to cancel", while a wizard step
+// that cannot be cancelled offers only "Enter to continue".
+const PENDING_FOOTERS = ['Esc to cancel', 'Enter to continue'];
 
 // Only the pane TAIL counts: a live blocking modal renders at the bottom of the
 // pane, whereas the same tokens appearing in scrollback or quoted tool output
@@ -307,8 +323,72 @@ const PENDING_TAIL_LINES = 15;
 
 /** True when the pane TAIL looks stalled on an interactive dialog nobody can answer. */
 export function hasPendingQuestion(paneContent: string): boolean {
-  const tail = anchoredPaneTail(paneContent, PENDING_TAIL_LINES, PENDING_FOOTER);
-  return tail !== null && PENDING_OPTION_RE.test(tail);
+  return PENDING_FOOTERS.some((footer) => {
+    const tail = anchoredPaneTail(paneContent, PENDING_TAIL_LINES, footer);
+    return tail !== null && PENDING_OPTION_RE.test(tail);
+  });
+}
+
+// A wedged session is shape-independent: whatever holds stdin (a dialog the pane
+// scanner above doesn't recognise, a modal from a future CC release, a hung render),
+// the harness keeps ENQUEUEING monitor notifications it never DEQUEUES. On the live
+// 2026-08-17 incident that signal ran for ~2.5 days — 16 straight enqueues, zero
+// dequeues — while every pane-shaped check stayed silent. Reading only the tail of
+// the transcript keeps this cheap; transcripts reach megabytes.
+const WEDGE_QUEUE_STALE_SECS = 30 * 60;
+const QUEUE_TAIL_BYTES = 64 * 1024;
+
+/**
+ * Verdict on the newest queue-operation in a transcript tail.
+ * 'wedged' — the last queue record is an enqueue older than the threshold.
+ * 'draining' — the last queue record is a dequeue/remove, or an enqueue still inside
+ *   the threshold. Only queue records are read: measured enqueue→drain gaps top out
+ *   around 5 minutes, so the 30-minute threshold already absorbs a long turn.
+ * 'unknown' — no queue records at all (fail-open: a fresh or quiet session).
+ */
+export function classifyQueueTail(tailText: string, nowMs: number, staleSecs = WEDGE_QUEUE_STALE_SECS): 'wedged' | 'draining' | 'unknown' {
+  let last: { op: string; ts: number } | null = null;
+  for (const line of tailText.split('\n')) {
+    if (!line.includes('"queue-operation"')) continue;
+    let rec: Json;
+    try { rec = JSON.parse(line); } catch { continue; } // a truncated first line is expected
+    if (rec?.type !== 'queue-operation' || typeof rec.operation !== 'string') continue;
+    const ts = Date.parse(String(rec.timestamp ?? ''));
+    if (Number.isNaN(ts)) continue;
+    if (last === null || ts >= last.ts) last = { op: rec.operation, ts };
+  }
+  if (last === null) return 'unknown';
+  if (last.op !== 'enqueue') return 'draining';
+  return nowMs - last.ts > staleSecs * 1000 ? 'wedged' : 'draining';
+}
+
+/** Tail of the active session's transcript, or null when it can't be located/read.
+ *  Takes the CC transcript UUID (runtime.json's `opened_transcript`, maintained by
+ *  cost-tracker.ts:maintainOpenedAt) — NOT `session_id`, which is the logical S-NNN
+ *  arc id and never names a transcript file. It is passed in from the runtime.json
+ *  main() already read this tick, so this doesn't re-read the same file every tick. */
+function readTranscriptTail(transcriptId: string | null, world: World = REAL_WORLD): string | null {
+  if (!transcriptId) return null; // no transcript recorded yet — nothing to judge
+  // hermitRoot is repo-relative ('.claude-code-hermit'), and CC keys transcript dirs by
+  // ABSOLUTE project path — resolve against cwd rather than path.dirname (which yields '.').
+  const projectRoot = path.resolve(world.paths.hermitRoot, '..');
+  const file = path.join(transcriptDirFor(projectRoot), `${transcriptId}.jsonl`);
+  try {
+    const size = fs.statSync(file).size;
+    const fd = fs.openSync(file, 'r');
+    try {
+      const start = Math.max(0, size - QUEUE_TAIL_BYTES);
+      const len = size - start;
+      const buf = Buffer.alloc(len);
+      // readSync may return a short read; slice to what was actually read so a
+      // zero-filled remainder can't inject NUL bytes into the newest lines — the
+      // same guard report-export.ts's bounded tail read carries.
+      const bytesRead = fs.readSync(fd, buf, 0, len, start);
+      return buf.subarray(0, bytesRead).toString('utf-8');
+    } finally { fs.closeSync(fd); }
+  } catch {
+    return null; // absent/unreadable transcript is not evidence of a wedge
+  }
 }
 
 // sendKeys now lives in lib/tmux.ts so the harness-command drain shares one
@@ -1345,6 +1425,34 @@ async function main(): Promise<void> {
     }
   }
 
+  // 3c. Queue-liveness wedge detection — the shape-independent net behind 3b. Whatever
+  // holds stdin (a dialog 3b's pane scanner doesn't recognise, a modal from a future CC
+  // release), the harness keeps enqueueing monitor notifications it never dequeues.
+  // Alert-only, deduped like 3b: the operator decides how to clear it, and sending keys
+  // into an unknown blocker is exactly the auto-answer 3b refuses to do.
+  {
+    // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
+    // `session_id` is the logical S-NNN arc id and resolves to a path that never exists.
+    const transcriptId = typeof runtime.opened_transcript === 'string' ? runtime.opened_transcript : null;
+    const tail = readTranscriptTail(transcriptId);
+    const verdict = tail === null ? 'unknown' : classifyQueueTail(tail, Date.now());
+    const watchdogState = readWatchdogState();
+    if (verdict === 'wedged') {
+      if (!watchdogState.session_wedged_notified) {
+        pushOperatorMessage(composeSessionWedgedMessage(timezone));
+        appendEvent('session-wedged', 'queued notifications not draining, session alive');
+        watchdogState.session_wedged_notified = true;
+        writeWatchdogState(watchdogState);
+      }
+    } else if (watchdogState.session_wedged_notified) {
+      // Re-arm on ANY non-wedged verdict, 'unknown' included: a restart starts a fresh
+      // transcript with no queue records yet, and holding the flag through that would
+      // suppress the NEXT genuine wedge — the silent stall this check exists to prevent.
+      watchdogState.session_wedged_notified = false;
+      writeWatchdogState(watchdogState);
+    }
+  }
+
   // A pane stalled on a pending prompt is not a wedge — the operator has just been
   // notified above (once per episode). Stop here: never fall through to the wedge
   // nudge (step 4) or the re-arm fallback (step 5), both of which send keystrokes
@@ -1454,9 +1562,54 @@ function findTemplatesDir(): string | null {
   return null;
 }
 
-function printCronFallback(root: string): void {
+/**
+ * The PATH to bake into generated units.
+ *
+ * systemd user services, launchd agents and cron all run with an environment
+ * that does not carry ~/.bun/bin, so the bare `bun` at the end of the
+ * hermit-watchdog shim exits 127 on every tick — silently, forever. Baking a
+ * PATH fixes that, but a hardcoded directory list cannot: it varies by OS, by
+ * architecture (Intel vs Apple Silicon homebrew prefixes) and by how the
+ * operator installed each tool. Snapshotting the installer's own environment is
+ * correct by construction — cmdInstall runs under bun in the operator's shell,
+ * so process.execPath is exactly the bun being used and process.env.PATH is an
+ * environment where claude and tmux resolve too. The restart path needs those:
+ * hermit-start's preflight hard-fails without them.
+ */
+function resolveUnitPath(): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // Absolute entries only: a relative one (npm/bun script wrappers prepend
+  // `node_modules/.bin`) would resolve against the unit's WorkingDirectory —
+  // the project root — turning a repo-writable dir into a lookup path the
+  // watchdog consults every five minutes.
+  for (const entry of [path.dirname(process.execPath), ...(process.env.PATH ?? '').split(path.delimiter)]) {
+    if (!entry || !path.isAbsolute(entry) || seen.has(entry)) continue;
+    seen.add(entry);
+    out.push(entry);
+  }
+  return out.join(path.delimiter);
+}
+
+// One value, three renderers, three escaping grammars. systemd expands
+// %-specifiers in unit files, so a literal percent must be doubled
+// (systemd.unit(5)). cron converts an unescaped % to a newline and feeds
+// everything after it to the command as stdin, truncating the line
+// (crontab(5)). The plist value sits inside an XML <string>. Applied to every
+// substituted value, not just PATH — a project path can carry the same
+// characters.
+const escapeSystemd = (v: string) => v.replaceAll('%', '%%');
+const escapeCron = (v: string) => v.replaceAll('%', '\\%');
+const escapeXml = (v: string) =>
+  v.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+
+function printCronFallback(root: string, unitPath: string): void {
+  // The assignment must sit on the watchdog invocation itself: a shell
+  // assignment prefix applies only to the single command it precedes, and `cd`
+  // is a builtin, so `PATH=... cd x && cmd` leaves cmd on cron's default PATH.
   const cronLine =
-    `*/5 * * * * cd ${root} && .claude-code-hermit/bin/hermit-watchdog run ` +
+    `*/5 * * * * cd "${escapeCron(root)}" && PATH="${escapeCron(unitPath)}" ` +
+    `.claude-code-hermit/bin/hermit-watchdog run ` +
     `2>>.claude-code-hermit/state/watchdog.log`;
   console.log('[watchdog] Add the following line via `crontab -e`:');
   console.log(`  ${cronLine}`);
@@ -1469,9 +1622,13 @@ function cmdInstall(): void {
   const root = fs.realpathSync(process.cwd());
   const name = getSessionName();
   const templates = findTemplatesDir();
+  const unitPath = resolveUnitPath();
 
-  const render = (templateText: string) =>
-    templateText.replaceAll('{{NAME}}', name).replaceAll('{{ROOT}}', root);
+  const render = (templateText: string, escape: (v: string) => string) =>
+    templateText
+      .replaceAll('{{NAME}}', escape(name))
+      .replaceAll('{{ROOT}}', escape(root))
+      .replaceAll('{{UNIT_PATH}}', escape(unitPath));
 
   if (process.platform === 'linux') {
     if (!Bun.which('systemctl')) {
@@ -1480,7 +1637,7 @@ function cmdInstall(): void {
         '[watchdog] In the hermit Docker container the entrypoint already runs the ' +
           'watchdog on a ~5 min cycle; no install is needed there.'
       );
-      printCronFallback(root);
+      printCronFallback(root, unitPath);
       return;
     }
 
@@ -1494,7 +1651,7 @@ function cmdInstall(): void {
     ]) {
       if (templates) {
         const tpl = fs.readFileSync(path.join(templates, tplName), 'utf-8');
-        fs.writeFileSync(path.join(systemdDir, outName), render(tpl));
+        fs.writeFileSync(path.join(systemdDir, outName), render(tpl, escapeSystemd));
       } else {
         process.stderr.write(`[watchdog] template ${tplName} not found; skipping\n`);
       }
@@ -1512,7 +1669,7 @@ function cmdInstall(): void {
 
     if (templates) {
       const tpl = fs.readFileSync(path.join(templates, 'com.hermit.watchdog.plist'), 'utf-8');
-      fs.writeFileSync(plistPath, render(tpl));
+      fs.writeFileSync(plistPath, render(tpl, escapeXml));
     } else {
       process.stderr.write('[watchdog] plist template not found; using inline fallback\n');
       fs.writeFileSync(
@@ -1527,17 +1684,25 @@ function cmdInstall(): void {
             '<string>{{ROOT}}/.claude-code-hermit/bin/hermit-watchdog</string>' +
             '<string>run</string></array>' +
             '<key>WorkingDirectory</key><string>{{ROOT}}</string>' +
+            '<key>EnvironmentVariables</key><dict>' +
+            '<key>PATH</key><string>{{UNIT_PATH}}</string>' +
+            '</dict>' +
             '<key>StartInterval</key><integer>300</integer>' +
             '<key>RunAtLoad</key><false/>' +
-            '</dict></plist>\n'
+            '</dict></plist>\n',
+          escapeXml
         )
       );
     }
+    // load is a no-op when the label is already loaded, so re-running install —
+    // the documented remedy for a bad unit — would silently keep the old plist.
+    // Ignore output: on a first install there is nothing to unload.
+    spawnSync('launchctl', ['unload', plistPath], { stdio: 'ignore' });
     run('launchctl', ['load', plistPath]);
     console.log(`[watchdog] Installed LaunchAgent: ${plistName}`);
   } else {
     console.log('[watchdog] systemd and launchd not available on this platform.');
-    printCronFallback(root);
+    printCronFallback(root, unitPath);
   }
 }
 

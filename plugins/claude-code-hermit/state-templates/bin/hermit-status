@@ -17,14 +17,12 @@ const fs = require('fs');
 const [configPath, statusPath] = [process.argv[1], process.argv[2]];
 let agent = '';
 try { agent = JSON.parse(fs.readFileSync(configPath, 'utf8')).agent_name || ''; } catch {}
-let fields = ['', '', '', '', '', ''];
+let fields = ['', '', '', ''];
 try {
   const s = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
   fields = [
     String(s.status ?? ''),
     String(s.task ?? ''),
-    String(s.plan_done ?? '0'),
-    String(s.plan_total ?? '0'),
     String(s.cost_usd ?? ''),
     String(s.blockers ?? ''),
   ];
@@ -32,7 +30,7 @@ try {
 console.log(agent + '\t' + fields.join('\t'));
 " "$CONFIG_FILE" "$STATUS_FILE" 2>/dev/null || echo "")
 
-IFS=$'\t' read -r AGENT_NAME STATUS TASK PLAN_DONE PLAN_TOTAL COST BLOCKERS <<< "$FIELDS"
+IFS=$'\t' read -r AGENT_NAME STATUS TASK COST BLOCKERS <<< "$FIELDS"
 [ -z "$AGENT_NAME" ] && AGENT_NAME="hermit"
 
 # Docker container status
@@ -70,11 +68,6 @@ fi
 # Format fields
 [ -n "$TASK" ] && TASK="\"$TASK\"" || TASK="—"
 
-PROGRESS="—"
-if [ "$PLAN_TOTAL" != "0" ] && [ -n "$PLAN_TOTAL" ]; then
-  PROGRESS="${PLAN_DONE}/${PLAN_TOTAL} steps"
-fi
-
 COST_STR="—"
 if [ -n "$COST" ]; then
   COST_STR="\$${COST}"
@@ -83,7 +76,7 @@ fi
 BLOCKER_STR="no blockers"
 [ -n "$BLOCKERS" ] && BLOCKER_STR="BLOCKED: $BLOCKERS"
 
-echo "$AGENT_NAME ($PROJECT_NAME) | ${STATUS} | $TASK | $PROGRESS | $COST_STR | $BLOCKER_STR${DOCKER_STATE:+ | $DOCKER_STATE}"
+echo "$AGENT_NAME ($PROJECT_NAME) | ${STATUS} | $TASK | $COST_STR | $BLOCKER_STR${DOCKER_STATE:+ | $DOCKER_STATE}"
 
 if [ "$DOCKER_STATE" = "docker:up" ]; then
   echo "  attach: .claude-code-hermit/bin/hermit-docker attach"

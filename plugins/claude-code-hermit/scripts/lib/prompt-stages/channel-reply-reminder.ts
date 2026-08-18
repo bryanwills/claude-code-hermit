@@ -44,7 +44,7 @@ function capture(ctx: StageContext, envelope: ChannelEnvelope): void {
     source: envelope.sourceKey,
     chat_id: envelope.chatId,
     direction: 'in',
-    sender: envelope.userId,
+    sender: envelope.userName ?? envelope.userId,
     message_id: envelope.messageId,
     text: envelope.body,
     ts: envelope.ts ?? undefined,

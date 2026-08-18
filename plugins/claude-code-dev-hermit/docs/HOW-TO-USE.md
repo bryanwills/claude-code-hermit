@@ -32,7 +32,7 @@ After `/hatch`, every code-writing agent in the project reads the rules in your 
 
 ### 1. Plan
 
-Break the task into steps via `TaskCreate`. Skip for trivial single-step work.
+Break the task into ordered steps in the Progress Log. Skip for trivial single-step work.
 
 If `/feature-dev:feature-dev` is installed and the code path is unfamiliar (framework lifecycle hooks, ORM internals, build-tool plugins, auth middleware) — run it first. The trigger is **unfamiliarity, not urgency**.
 

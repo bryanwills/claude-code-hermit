@@ -2,6 +2,7 @@
 // never crashes and the process always exits 0.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -21,6 +22,7 @@ import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentia
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
 import { promptTokensOf, compactibleTokens } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
+import { expandSessionName } from './lib/tmux';
 
 type Json = any;
 
@@ -829,6 +831,93 @@ function checkScheduler(p: DoctorPaths = PATHS) {
 
 // ----------------- Watchdog -----------------
 
+/**
+ * The unit name `hermit-watchdog install` generated for this project.
+ *
+ * Expanded against the hermit dir, never lib/tmux's cwd-bound getSessionName:
+ * doctor is routinely run from somewhere other than the project root, and a
+ * wrong name here fails silently rather than loudly — systemd answers `show`
+ * for a nonexistent unit with ExecMainStatus=0/Result=success, which reads as
+ * a healthy watchdog.
+ */
+function watchdogUnitName(config: Json, hermitDir: string): string {
+  // cmdInstall templates the session name into the instance unit.
+  return `hermit-watchdog@${expandSessionName(config, path.dirname(hermitDir))}`;
+}
+
+/**
+ * Ask systemd how the unit's last run actually ended.
+ *
+ * A unit whose ExecStart cannot resolve its interpreter exits 127 before the
+ * watchdog stamps last_run, so the staleness gate below does eventually notice —
+ * but only after STALE_MS, and it reports the generic "enabled but not firing"
+ * remedy for what is really a broken unit environment. Reading the unit's own
+ * exit status names that case immediately and specifically.
+ *
+ * Best-effort by construction: not Linux, no systemctl, no bus, or no such unit
+ * all mean "nothing to diagnose here", never a doctor failure.
+ */
+function checkWatchdogUnitStatus(serviceName: string): { status: 'fail'; detail: string } | null {
+  if (process.platform !== 'linux' || !Bun.which('systemctl')) return null;
+  try {
+    const out = execFileSync(
+      'systemctl',
+      ['--user', 'show', `${serviceName}.service`, '-p', 'ExecMainStatus', '-p', 'Result'],
+      // stdio pipes stdout only — systemctl's "Failed to connect to bus" would
+      // otherwise leak into doctor output (same pattern as runExpiryProbe).
+      { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    const props: Record<string, string> = {};
+    for (const line of out.split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      props[line.slice(0, eq)] = line.slice(eq + 1).trim();
+    }
+    const execStatus = Number(props.ExecMainStatus);
+    const result = props.Result;
+    const failed = (Number.isFinite(execStatus) && execStatus !== 0) || (!!result && result !== 'success');
+    if (!failed) return null;
+    const remedy =
+      execStatus === 127
+        ? "the unit cannot resolve `bun` on its environment PATH — re-run `bin/hermit-watchdog install` to bake the installing shell's PATH, then `systemctl --user daemon-reload`"
+        : `inspect with \`journalctl --user -u ${serviceName}\``;
+    return {
+      status: 'fail',
+      detail:
+        `watchdog: systemd unit ${serviceName}.service last run failed ` +
+        `(ExecMainStatus=${props.ExecMainStatus ?? '?'}, Result=${result ?? '?'}) — ${remedy}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A unit generated before the PATH fix carries no `Environment="PATH="` line.
+ *
+ * The exit-status probe above cannot see that case any more: hermit-exec.sh now
+ * resolves `bun` by absolute path, so such a unit exits 0 and stamps `last_run`,
+ * and both the probe and the staleness gate read as healthy. The restart tier is
+ * still broken — hermit-start's preflight hard-fails when `bun` and `claude`
+ * aren't on the unit's own PATH — so the unit file itself is the only remaining
+ * evidence. Checked after liveness and the shutdown stamp: those are the
+ * higher-severity signals and must win when several hold.
+ */
+function checkWatchdogUnitPathBaked(serviceName: string): { status: 'warn'; detail: string } | null {
+  if (process.platform !== 'linux') return null;
+  const unitFile = path.join(os.homedir(), '.config', 'systemd', 'user', `${serviceName}.service`);
+  let unit: string;
+  try { unit = fs.readFileSync(unitFile, 'utf-8'); } catch { return null; }
+  if (/^Environment="?PATH=/m.test(unit)) return null;
+  return {
+    status: 'warn',
+    detail:
+      `watchdog: systemd unit ${serviceName}.service predates the PATH fix (no Environment=PATH) — ` +
+      'the tick survives via the shim\'s bun fallback, but a restart dies in hermit-start\'s ' +
+      'preflight because `bun`/`claude` are off the unit PATH — re-run `bin/hermit-watchdog install`',
+  };
+}
+
 function checkWatchdog(p: DoctorPaths = PATHS) {
   const { hermitDir, stateDir } = p;
   try {
@@ -849,6 +938,17 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
 
     let runtime: Json = null;
     try { runtime = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf-8')); } catch {}
+
+    // Ahead of the staleness gate: a unit that fails on every invocation is a
+    // more specific diagnosis than "not firing", and waiting out STALE_MS to say
+    // something vaguer helps nobody. Docker mode runs the loop from the container
+    // entrypoint, not a systemd user unit, so it is not in scope here.
+    const unitInScope = runtime?.runtime_mode === 'tmux' || runtime?.runtime_mode == null;
+    const unitName = unitInScope ? watchdogUnitName(config, hermitDir) : null;
+    if (unitName) {
+      const unitStatus = checkWatchdogUnitStatus(unitName);
+      if (unitStatus) return { id: 'watchdog', ...unitStatus };
+    }
 
     const statePath = path.join(stateDir, 'watchdog-state.json');
     let consecutive = 0;
@@ -907,6 +1007,11 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
           detail: `watchdog: session alive (${runtime.session_state}) but runtime.json carries a stale shutdown stamp (${stamp}) — blocks context hygiene and watchdog restart until the next hermit-start clears it`,
         };
       }
+    }
+
+    if (unitName) {
+      const stalePath = checkWatchdogUnitPathBaked(unitName);
+      if (stalePath) return { id: 'watchdog', ...stalePath };
     }
 
     const eventsPath = path.join(stateDir, 'watchdog-events.jsonl');

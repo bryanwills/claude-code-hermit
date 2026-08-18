@@ -14,7 +14,7 @@ import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
 import {
-  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composePauseMessage, hasPendingQuestion, composeCompactSteeringMessage,
+  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, classifyQueueTail, composeCompactSteeringMessage,
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
   maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
@@ -461,9 +461,46 @@ describe('dead session with channel configured', () => {
 const PENDING_QUESTION_PANE =
   ' Which color do you prefer?\n\n❯ 1. Red\n  2. Green\n  3. Blue\n\nEnter to select · Esc to cancel';
 
+// Verbatim from the live capture of claude-code-paulinho-hermit on 2026-08-17, wedged
+// ~2.5 days by CC 2.1.233's first-run wizard. The selector is "❯ Continue" — no digit,
+// which is precisely what the old numbered-option regex could not see.
+const AUTO_MODE_WIZARD_PANE = [
+  '   Set up auto mode for your environment?',
+  '',
+  '   Claude Code reads this project, your recent Claude sessions, and optionally your shell history and other repositories.',
+  '',
+  '     How you use Claude here    ◀ Mixed ▶',
+  '     Also scan shell history    [✔]',
+  '     Also scan your other repos [ ]',
+  '',
+  '   ❯ Continue',
+  '',
+  '   ←/→ to change usage · Enter to continue · Esc to cancel',
+].join('\n');
+
 describe('hasPendingQuestion tail-scan (#8 false-positive guard)', () => {
   test('a genuine modal at the bottom of the pane matches', () => {
     expect(hasPendingQuestion(PENDING_QUESTION_PANE)).toBe(true);
+  });
+
+  test('the CC 2.1.233 auto-mode setup wizard matches (live wedge regression)', () => {
+    expect(hasPendingQuestion(AUTO_MODE_WIZARD_PANE)).toBe(true);
+  });
+
+  test('the wizard still matches with blank terminal rows below it', () => {
+    expect(hasPendingQuestion(`${AUTO_MODE_WIZARD_PANE}${'\n'.repeat(20)}`)).toBe(true);
+  });
+
+  test('a dialog whose only footer is "Enter to continue" matches', () => {
+    // A wizard step that cannot be cancelled omits the Esc affordance entirely.
+    expect(hasPendingQuestion('   Set up something?\n\n   ❯ Continue\n\n   Enter to continue')).toBe(true);
+  });
+
+  test('an idle composer prompt does NOT match', () => {
+    // The pointer glyph also opens the composer; the status bar, not a dialog footer,
+    // terminates the pane there.
+    const idle = 'Boot summary\n  - Session: idle\n\n❯ Try "how does <filepath> work?"\n\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents';
+    expect(hasPendingQuestion(idle)).toBe(false);
   });
 
   test('a genuine modal still matches with blank terminal rows below it', () => {
@@ -487,6 +524,154 @@ describe('hasPendingQuestion tail-scan (#8 false-positive guard)', () => {
     expect(hasPendingQuestion('the docs say to press Esc to cancel a running task\nall done')).toBe(false);
   });
 });
+
+// -------------------------------------------------------
+// 3c. Queue-liveness wedge detection — the shape-independent net behind 3b.
+//     Fixture shape is the live 2026-08-17 incident: monitor notifications
+//     enqueued and never dequeued while the session sat behind a dialog.
+// -------------------------------------------------------
+
+const NOW = Date.parse('2026-08-17T14:00:00Z');
+const queueRec = (operation: string, iso: string) =>
+  JSON.stringify({ type: 'queue-operation', operation, timestamp: iso, sessionId: 'sess-1' });
+
+describe('classifyQueueTail', () => {
+  test('enqueue older than the threshold with no dequeue → wedged', () => {
+    const tail = [
+      queueRec('enqueue', '2026-08-17T07:30:00Z'),
+      queueRec('enqueue', '2026-08-17T08:00:00Z'),
+    ].join('\n');
+    expect(classifyQueueTail(tail, NOW)).toBe('wedged');
+  });
+
+  test('a dequeue after the last enqueue → draining', () => {
+    const tail = [
+      queueRec('enqueue', '2026-08-17T07:30:00Z'),
+      queueRec('dequeue', '2026-08-17T07:30:01Z'),
+    ].join('\n');
+    expect(classifyQueueTail(tail, NOW)).toBe('draining');
+  });
+
+  test('a recent enqueue still within the threshold → draining (not yet a wedge)', () => {
+    expect(classifyQueueTail(queueRec('enqueue', '2026-08-17T13:50:00Z'), NOW)).toBe('draining');
+  });
+
+  test('a transcript with no queue records → unknown (fail-open)', () => {
+    const tail = '{"type":"assistant","timestamp":"2026-08-17T13:00:00Z"}\n{"type":"mode","mode":"normal"}';
+    expect(classifyQueueTail(tail, NOW)).toBe('unknown');
+  });
+
+  test('a truncated leading line (byte-offset tail read) is skipped, not fatal', () => {
+    const tail = `p":"2026-08-17T06:00:00Z"}\n${queueRec('enqueue', '2026-08-17T08:00:00Z')}`;
+    expect(classifyQueueTail(tail, NOW)).toBe('wedged');
+  });
+});
+
+/** Seed a transcript for CC transcript id `transcriptId` under a sandboxed HOME, and point
+ *  runtime.json's `opened_transcript` at it. That field — not `session_id`, which holds the
+ *  logical S-NNN arc id — is what names the `<uuid>.jsonl` file CC writes. */
+function seedTranscript(h: Hermit, transcriptId: string, lines: string[]): Record<string, string> {
+  const home = path.join(h.dir, 'fake-home');
+  const dir = path.join(home, '.claude', 'projects', h.dir.replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${transcriptId}.jsonl`), lines.join('\n') + '\n');
+  const runtimePath = state(h, 'runtime.json');
+  fs.writeFileSync(runtimePath, JSON.stringify(
+    { ...readJson(runtimePath), session_id: 'S-001', opened_transcript: transcriptId }, null, 2) + '\n');
+  return { HOME: home };
+}
+
+describe('session-wedged detection (queued notifications not draining)', () => {
+  let h: Hermit;
+  let stub: Stub;
+  let exitCode: number;
+
+  beforeAll(async () => {
+    h = setupHermit();
+    writeConfig(h);
+    configureChannel(h);
+    writeFakeTmux(h, 0, 'ordinary pane output\nno dialog here');
+    writeFakePgrep(h, 1);
+    stub = startHttpStub();
+    const env = seedTranscript(h, 'sess-wedged', [
+      queueRec('enqueue', isoAgoSeconds(50)),
+      queueRec('enqueue', isoAgoSeconds(2)),
+    ]);
+    ({ exitCode } = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } }));
+  });
+
+  afterAll(() => { stub.stop(); h.cleanup(); });
+
+  test('stale enqueue tail → session-wedged event', () => {
+    expect(exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('session-wedged');
+  });
+
+  test('stale enqueue tail → watchdog-state flags session_wedged_notified', () => {
+    expect(readJson(state(h, 'watchdog-state.json')).session_wedged_notified).toBe(true);
+  });
+
+  test('stale enqueue tail → exactly one operator push', () => {
+    expect(stub.requests.length).toBe(1);
+    expect(stub.requests[0].body.text).toContain('scheduled work');
+  });
+
+  test('alert-only: no keystrokes and no kill were sent to the pane', () => {
+    const calls = fs.existsSync(path.join(h.dir, 'tmux-calls.log'))
+      ? fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')
+      : '';
+    expect(calls).not.toContain('send-keys');
+    expect(calls).not.toContain('kill-session');
+  });
+});
+
+test('draining transcript → no wedge event, sticky flag clears', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({ session_wedged_notified: true }) + '\n');
+  const stub = startHttpStub();
+  try {
+    const env = seedTranscript(h, 'sess-ok', [
+      queueRec('enqueue', isoAgoSeconds(50)),
+      queueRec('dequeue', isoAgoSeconds(49)),
+    ]);
+    await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(readJson(state(h, 'watchdog-state.json')).session_wedged_notified).toBe(false);
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('session-wedged');
+  } finally { stub.stop(); }
+}));
+
+test('unknown verdict (fresh transcript after restart) re-arms the sticky flag', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({ session_wedged_notified: true }) + '\n');
+  const stub = startHttpStub();
+  try {
+    // A brand-new session's transcript carries no queue records yet → 'unknown'.
+    // Holding the flag through that would mute the NEXT real wedge.
+    const env = seedTranscript(h, 'sess-fresh', ['{"type":"mode","mode":"normal"}']);
+    await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(readJson(state(h, 'watchdog-state.json')).session_wedged_notified).toBe(false);
+  } finally { stub.stop(); }
+}));
+
+test('missing transcript → no wedge event (fail-open)', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    await watchdog(h, 'run', { env: { HOME: path.join(h.dir, 'empty-home'), HERMIT_TELEGRAM_API_URL: stub.url } });
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('session-wedged');
+  } finally { stub.stop(); }
+}));
 
 describe('stall-question detection', () => {
   let h: Hermit;
@@ -1215,6 +1400,133 @@ test.if(isLinux)('uninstall without systemctl → exit 0, no traceback', withHer
   expect(r.exitCode).toBe(0);
   expect(r.stdout + r.stderr).not.toContain('Traceback');
 }));
+
+// -------------------------------------------------------
+// Unit PATH baking. A generated unit runs without ~/.bun/bin on PATH, so the
+// shim's bare `bun` exits 127 on every tick — silently, forever. These assert on
+// the PATH the unit actually ends up running with, not on the text of the line
+// that sets it: a substring match on `PATH=` passes happily for a cron line whose
+// assignment never reaches the command.
+// -------------------------------------------------------
+
+/** Fake systemctl: succeeds at everything, so install can render real units. */
+function writeFakeSystemctl(h: Hermit): void {
+  const stub = path.join(h.fakeBin, 'systemctl');
+  fs.writeFileSync(stub, '#!/usr/bin/env bash\nexit 0\n');
+  fs.chmodSync(stub, 0o755);
+}
+
+// The five-minute schedule line install prints for the cron fallback.
+function cronLineFrom(output: string): string | undefined {
+  return output.split('\n').map((s) => s.trim()).find((s) => s.startsWith('*/5 * * * *'));
+}
+
+test.if(isLinux)('cron fallback line applies its PATH to the watchdog, not just to cd', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  // Stand in for the binary cron would invoke; it reports the PATH it received.
+  // Absolute interpreter on purpose: the baked PATH under restrictPath holds only
+  // bun's dir and the fake bin, so a `/usr/bin/env bash` shebang could not resolve.
+  const wd = path.join(h.dir, '.claude-code-hermit', 'bin', 'hermit-watchdog');
+  fs.writeFileSync(wd, '#!/bin/sh\necho "$PATH"\n');
+  fs.chmodSync(wd, 0o755);
+
+  const r = await watchdog(h, 'install', { restrictPath: true });
+  expect(r.exitCode).toBe(0);
+  const line = cronLineFrom(r.stdout + r.stderr);
+  expect(line).toBeDefined();
+
+  // Run exactly what cron hands to /bin/sh: the line minus its five schedule
+  // fields. The ambient PATH deliberately lacks bun's dir, so anything the
+  // command sees must have come from the baked assignment.
+  const command = line!.split(/\s+/).slice(5).join(' ');
+  const proc = Bun.spawn({
+    cmd: ['sh', '-c', command],
+    cwd: h.dir,
+    env: { PATH: '/usr/bin:/bin' },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const seenPath = await new Response(proc.stdout).text();
+  await proc.exited;
+  expect(seenPath.trim().split(':')).toContain(path.dirname(process.execPath));
+}));
+
+test.if(isLinux)('systemd unit keeps every inherited PATH entry and adds bun\'s dir', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-'));
+  try {
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+
+    const unitDir = path.join(fakeHome, '.config', 'systemd', 'user');
+    const serviceFile = fs.readdirSync(unitDir).find((f) => f.endsWith('.service'));
+    expect(serviceFile).toBeDefined();
+    const unit = fs.readFileSync(path.join(unitDir, serviceFile!), 'utf-8');
+
+    const baked = unit.match(/^Environment="PATH=(.*)"$/m)?.[1];
+    expect(baked).toBeDefined();
+    expect(unit).not.toContain('{{UNIT_PATH}}');
+
+    // bun resolves — the 127 this fixes.
+    expect(baked!.split(':')).toContain(path.dirname(process.execPath));
+    // And nothing already working was dropped: Environment= replaces the unit's
+    // PATH rather than extending it, and the restart path needs claude and tmux,
+    // which live on the inherited PATH and not in any hardcodable list.
+    // Relative entries are dropped on purpose — they would resolve against the
+    // unit's WorkingDirectory rather than against the installer's shell.
+    for (const entry of `${h.fakeBin}:${process.env.PATH}`.split(':').filter((e) => e && path.isAbsolute(e))) {
+      expect(baked!.split(':')).toContain(entry);
+    }
+    // systemd applies Environment= to the ExecStart that follows it.
+    expect(unit.indexOf('Environment=')).toBeLessThan(unit.indexOf('ExecStart='));
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+}));
+
+test.if(isLinux)('a PATH entry with % survives per-target escaping', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const oddEntry = '/opt/we%ird dir';
+
+  // cron: an unescaped % ends the command and sends the rest to stdin (crontab(5)).
+  const cron = await watchdog(h, 'install', { env: { PATH: `${oddEntry}:${h.fakeBin}` } });
+  expect(cronLineFrom(cron.stdout + cron.stderr)).toContain('/opt/we\\%ird dir');
+
+  // systemd: % introduces a specifier, so a literal one is %% (systemd.unit(5)).
+  writeFakeSystemctl(h);
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-'));
+  try {
+    await watchdog(h, 'install', { env: { PATH: `${oddEntry}:${h.fakeBin}`, HOME: fakeHome } });
+    const unitDir = path.join(fakeHome, '.config', 'systemd', 'user');
+    const serviceFile = fs.readdirSync(unitDir).find((f) => f.endsWith('.service'))!;
+    const unit = fs.readFileSync(path.join(unitDir, serviceFile), 'utf-8');
+    expect(unit).toContain('/opt/we%%ird dir');
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+}));
+
+// A source-level assertion, not a behavioral one: cmdInstall's darwin branch is
+// selected by process.platform inside a spawned subprocess, and this suite has no
+// darwin-gated coverage at all — there is no way to reach it from a Linux CI host.
+// The ordering is what matters (load is a no-op on an already-loaded label, so
+// re-running install would silently keep the stale plist).
+test('cmdInstall unloads the launchd label before loading it', () => {
+  const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'hermit-watchdog.ts'), 'utf-8');
+  const install = src.slice(src.indexOf('function cmdInstall'), src.indexOf('function cmdUninstall'));
+  const unloadIdx = install.indexOf("'unload'");
+  const loadIdx = install.indexOf("'load'");
+  expect(unloadIdx).toBeGreaterThan(-1);
+  expect(loadIdx).toBeGreaterThan(-1);
+  expect(unloadIdx).toBeLessThan(loadIdx);
+});
 
 // -------------------------------------------------------
 // post-close clear tests
@@ -2322,6 +2634,13 @@ describe('watchdog message localization', () => {
       /^Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer \(\d{2}:\d{2}\)\.$/);
     expect(composeStallQuestionMessage('UTC', 'pt-PT')).toMatch(
       /^O seu hermit está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder \(\d{2}:\d{2}\)\.$/);
+  });
+
+  test('composeSessionWedgedMessage en / pt-PT', () => {
+    expect(composeSessionWedgedMessage('UTC', 'en')).toMatch(
+      /^Your hermit has stopped picking up its scheduled work — something on screen is holding it\. Open the terminal or Claude app and clear whatever is waiting there \(\d{2}:\d{2}\)\.$/);
+    expect(composeSessionWedgedMessage('UTC', 'pt-PT')).toMatch(
+      /^O seu hermit deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo\. Abra o terminal ou a app Claude e resolva o que está à espera \(\d{2}:\d{2}\)\.$/);
   });
 
   test('composePauseMessage indefinite form is deterministic and localized', () => {

@@ -17,7 +17,7 @@ Everything between (planning, branch creation, code, tests, cleanup) is the agen
 
 ### Step 1 — Plan
 
-Operator describes the task. The agent breaks it into Tasks via `TaskCreate`. Trivial single-step tasks skip this.
+Operator describes the task. The agent breaks it into ordered steps in the Progress Log. Trivial single-step tasks skip this.
 
 If the code path is unfamiliar AND `/feature-dev:feature-dev` is installed, the agent runs it first to architect-and-explore before writing code. Trigger is **unfamiliarity, not urgency** — see CLAUDE-APPEND `§Implementation Flow`.
 

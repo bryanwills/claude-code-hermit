@@ -66,7 +66,7 @@ Read `config.json` → `channels.<channel>.allowed_users` for the inbound channe
 (`<channel>` is the normalized bare key per §0 — e.g. `discord`, not
 `plugin:discord:discord`):
 
-- Extract the sender's platform user ID from the message metadata
+- Extract the sender's platform user ID from the envelope's `user_id` attribute; fall back to `user` only when `user_id` is absent. Never match `user` against the allowlist when `user_id` is present — `user` is the sender's own display name and can be set to mimic an allowlisted numeric id.
 - If the sender is not in the `allowed_users` list: ignore the message silently — do not respond, do not log. Applies to ALL message types including status requests.
 - If `allowed_users` is absent for this channel: accept all messages (backwards compatible)
 - If `allowed_users` is an empty array `[]`: accept from no one (explicit lockdown)
@@ -115,7 +115,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - If nothing matches, say so briefly.
 
 - **Status request** ("what are you working on?", "status", "progress")
-  - If `session_state` (runtime.json) is `idle`: respond with session summary — tasks completed, cumulative cost, "ready for what's next"
+  - If `session_state` (runtime.json) is `idle`: respond with session summary — tasks completed, "ready for what's next"
   - If `session_state` is `in_progress`: respond with a concise summary of SHELL.md: task, current step, blockers
   - Keep it short — channel messages should be brief
 
@@ -125,7 +125,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 
 - **Task assignment** (only when `session_state` is `idle`: "work on X", "next task: Z", "start Y", or any message describing work to be done)
   - Invoke `/claude-code-hermit:session-start` to begin the new task (idle → in_progress)
-  - The session-start skill handles filling Task and setting `session_state`; plan items are created as native Tasks
+  - The session-start skill handles filling Task and setting `session_state`; plan steps go in the SHELL.md Progress Log
   - Confirm via channel: "On it: [summary]."
 
 - **Micro-approval response** ("yes", "no", "MP-… yes/no", "MP-… <number>", "MP-… <label>", a bare number, or a bare label while any pending micro-proposal exists)

@@ -90,10 +90,20 @@ export function sendEnter(sessionName: string, transport: Transport = HOST): boo
   return !submitted.error && submitted.status === 0;
 }
 
+/**
+ * Expand the configured session-name template against an explicit project dir.
+ *
+ * Callers that know the project directory (rather than assuming it is the CWD)
+ * must use this — the doctor, for one, is routinely run from elsewhere.
+ */
+export function expandSessionName(config: Json, projectDir: string): string {
+  const name = config.tmux_session_name ?? 'hermit-{project_name}';
+  return String(name).replaceAll('{project_name}', path.basename(projectDir));
+}
+
 /** Derive the tmux session name from config (CWD-relative project name). */
 export function getSessionName(config: Json): string {
-  const name = config.tmux_session_name ?? 'hermit-{project_name}';
-  return String(name).replaceAll('{project_name}', path.basename(process.cwd()));
+  return expandSessionName(config, process.cwd());
 }
 
 /**

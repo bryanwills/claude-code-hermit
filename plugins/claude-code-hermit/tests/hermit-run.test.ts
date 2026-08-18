@@ -135,3 +135,55 @@ describe('hermit-exec.sh name guard', () => {
     expect(r.stdout + r.stderr).toContain('proposal.ts');
   });
 });
+
+// Generated watchdog units run with an environment that need not carry bun's
+// install dir; a bare `exec bun` there exits 127 on every tick. This file ships
+// via /plugin update, so the probe is what repairs installs whose unit was baked
+// before the PATH fix — there is no live session to run a repair in when both the
+// hermit and its watchdog are down.
+describe('hermit-exec bun resolution', () => {
+  // A copy of the shipped dispatcher beside a trivial script, so the test can
+  // control PATH without running a real hermit script.
+  function mkExecFixture(): { script: string; dir: string } {
+    const dir = tmp('hx-');
+    const script = path.join(dir, 'hermit-exec.sh');
+    fs.copyFileSync(HERMIT_EXEC, script);
+    fs.writeFileSync(path.join(dir, 'ping.ts'), 'console.log("PONG");\n');
+    return { script, dir };
+  }
+
+  test('bun absent from PATH → resolved via BUN_INSTALL', async () => {
+    const { script } = mkExecFixture();
+    const bunHome = tmp('hx-bun-');
+    fs.mkdirSync(path.join(bunHome, 'bin'));
+    fs.symlinkSync(process.execPath, path.join(bunHome, 'bin', 'bun'));
+
+    const r = await bash(script, ['ping'], {
+      PATH: '/usr/bin:/bin',
+      BUN_INSTALL: bunHome,
+      HOME: tmp('hx-home-'), // no ~/.bun here, so BUN_INSTALL is what resolves
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('PONG');
+  });
+
+  test('bun absent from PATH → resolved via ~/.bun/bin', async () => {
+    const { script } = mkExecFixture();
+    const home = tmp('hx-home-');
+    fs.mkdirSync(path.join(home, '.bun', 'bin'), { recursive: true });
+    fs.symlinkSync(process.execPath, path.join(home, '.bun', 'bin', 'bun'));
+
+    const r = await bash(script, ['ping'], { PATH: '/usr/bin:/bin', HOME: home });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('PONG');
+  });
+
+  // Only meaningful where the last-resort candidates are genuinely absent.
+  const noSystemBun = !['/usr/local/bin/bun', '/opt/homebrew/bin/bun'].some((p) => fs.existsSync(p));
+  test.if(noSystemBun)('bun nowhere → names bun instead of a bare 127', async () => {
+    const { script } = mkExecFixture();
+    const r = await bash(script, ['ping'], { PATH: '/usr/bin:/bin', HOME: tmp('hx-home-') });
+    expect(r.exitCode).toBe(127);
+    expect(r.stderr).toContain('bun not found');
+  });
+});
