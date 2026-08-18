@@ -10,7 +10,8 @@
 
 import { safeForLLM } from '../sanitize';
 import { logMessage, isLoggingEnabled } from '../channel-log';
-import { isAllowedSender } from '../channel-auth';
+import { isAllowedSender, channelEntry } from '../channel-auth';
+import { escapeRegExp } from '../md-write';
 import type { ChannelEnvelope, StageContext, StageResult } from './types';
 
 // Known channel sources → exact MCP reply tool name.
@@ -24,6 +25,38 @@ const REPLY_TOOLS: Record<string, string> = {
 
 const MAX_SOURCE_LEN = 32;
 const MAX_CHAT_ID_LEN = 128;
+const MAX_BOT_REF_LEN = 64;
+
+// Self-mention identity — captured at pairing by scripts/channel-bot-id.ts.
+// A mention-gated channel guarantees the inbound message mentions the bot, but
+// the envelope names only the *sender*, so a hermit reading `<@its-own-id>` can
+// conclude the request is addressed to somebody else and drop it silently.
+//
+// The clause renders only when the body actually carries the id (Discord) or
+// `@username` (Telegram, whose mentions never use the numeric id): on every
+// other message the reminder stays byte-identical to its pre-identity form, so
+// an always-on hermit pays nothing per message for a capability it needs only
+// when it is mentioned.
+function selfMentionClause(ctx: StageContext, envelope: ChannelEnvelope): string {
+  const entry = channelEntry(ctx.config(), envelope.source);
+  const id = entry?.bot_user_id == null ? null : String(entry.bot_user_id);
+  const username = typeof entry?.bot_username === 'string' ? entry.bot_username : null;
+
+  let matched: string | null = null;
+  // Digit-delimited, not a bare substring: a platform id is a long digit run, so
+  // an unanchored `includes` also fires on any longer number that happens to
+  // contain it (a 13-digit epoch ms, an order number), which would tell the
+  // model a third party's message is addressed to it.
+  if (id && new RegExp(`(?<!\\d)${escapeRegExp(id)}(?!\\d)`).test(envelope.body)) matched = id;
+  else if (username && envelope.body.toLowerCase().includes(`@${username.toLowerCase()}`)) {
+    matched = `@${username}`;
+  }
+  if (!matched) return '';
+
+  const ref = safeForLLM(matched.slice(0, MAX_BOT_REF_LEN));
+  return ` This message mentions \`${ref}\` — that is your own account on this channel,` +
+    ` so the mention is addressed to you, not to a third party.`;
+}
 
 // Episodic capture — best-effort, never affects the reminder. Its guards are
 // early returns from this helper, so none of them can swallow the reminder the
@@ -72,7 +105,8 @@ export function run(ctx: StageContext): StageResult | void {
   const reminder =
     `[channel reply reminder] Inbound message arrived on the \`${source || 'unknown'}\` channel` +
     ` (chat_id=\`${chatId}\`). Substantive reply must go through ${toolLine}.` +
-    ` Transcript/terminal output does not reach the operator.\n`;
+    ` Transcript/terminal output does not reach the operator.` +
+    selfMentionClause(ctx, envelope) + '\n';
 
   try {
     capture(ctx, envelope);

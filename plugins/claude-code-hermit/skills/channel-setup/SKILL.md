@@ -112,7 +112,13 @@ Operator pastes the token via Other, or selects Skip.
    ```
    This sets `env.<CHANNEL_UPPERCASE>_STATE_DIR` (creating the file if missing) and strips any stale `*_BOT_TOKEN` from the `env` block — tokens must live only in `.env`. Same naming convention as token vars (step 4), suffix `_STATE_DIR` instead of `_BOT_TOKEN`. Confirm: "Wired `<CHANNEL_UPPERCASE>_STATE_DIR` → `<absolute_state_dir>` in `.claude/settings.local.json` (takes effect on next restart)."
 
-**If token already configured:** also run step 6 before proceeding to step 5.
+7. Capture the bot's own identity so the hermit recognizes mentions of itself:
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-bot-id.ts .claude-code-hermit <channel> --write
+   ```
+   Writes `bot_user_id` (and `bot_username`) into the channel's `config.json` entry, overwriting a stale value from a previous bot. A `SKIP …` line is a non-event — report it and continue; setup never fails on it.
+
+**If token already configured:** also run steps 6 and 7 before proceeding to step 5.
 
 **If Skip:** print the manual command:
 ```

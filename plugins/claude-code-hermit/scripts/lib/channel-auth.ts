@@ -16,7 +16,7 @@ type Json = any;
  * bare server name is the convention (see normalizeChannelSource); this is the
  * one place both gate functions below resolve it, so they can't drift apart.
  */
-function channelEntry(config: Json, source: string): Json {
+export function channelEntry(config: Json, source: string): Json {
   const channels = config?.channels;
   if (!channels || typeof channels !== 'object') return undefined;
   const key = normalizeChannelSource(source);

@@ -515,7 +515,12 @@ If the token is present, ask if already paired. If not:
       c. Confirm (text only): "Sent `group add` for `<channelId>`. Will verify after all channels are added."
       d. Ask with `AskUserQuestion` (header: `"Add another?"`) — `"Yes — add another"` with the next ID via `Other`; `"Done — continue"`. On `"Done — continue"`: exit the loop.
    4. **Verify all added channels** (one `Read` after the loop): open `<project_path>/.claude.local/channels/<plugin>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: run `docker compose exec -T hermit tmux capture-pane -t <session> -p`, surface the output, and warn — do not fail the whole setup. Then proceed to sub-step 8.
-8. Confirm: "Paired and locked down. If the bot doesn't respond to your first message, give it up to 2 minutes — the hermit may still be booting or running initial checks (plugin installs, workspace trust, auto-memory seeding)."
+8. **Capture the bot's own identity** (host-side, like `channel-pair.ts` — `config.json` and the channel `.env` are both on the host):
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-bot-id.ts <project_path>/.claude-code-hermit <plugin> --write
+   ```
+   Records `bot_user_id` (and `bot_username`) so the hermit reads a mention of itself as addressed to it, rather than as third-party traffic. A `SKIP …` line is a non-event — report it and continue.
+9. Confirm: "Paired and locked down. If the bot doesn't respond to your first message, give it up to 2 minutes — the hermit may still be booting or running initial checks (plugin installs, workspace trust, auto-memory seeding)."
 
 If "skip": tell them to DM the bot later and run the commands manually.
 
