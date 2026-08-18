@@ -1,6 +1,6 @@
 ---
 name: recall
-description: "Full-text retrieval over session reports, compiled artifacts, and proposals by keyword. Activates on messages like 'recall X', 'what did I learn about X', 'when did we last touch X', 'what did we decide about X'."
+description: "Full-text search over the recorded past: session reports, compiled notes, proposals, and the channel log. Use it whenever the operator asks what already happened — 'recall X', 'what did I learn/decide/figure out about X', 'when did we last touch X', 'did we ever discuss X', 'have we seen this error before', 'find that proposal about X', 'yesterday I asked you to X' — even when you could grep or Read .claude-code-hermit/ yourself: this search also covers the channel-message database that file greps miss, ranks hits by relevance and recency, and returns a bounded file:line digest instead of raw dumps. Not for current file contents (reading OPERATOR.md or listing open proposals), live status, or forward-looking briefings."
 ---
 # Recall
 
