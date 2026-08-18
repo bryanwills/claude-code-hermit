@@ -52,7 +52,15 @@ describe('CLAUDE-APPEND size budget', () => {
     // mid-conversation with no skill loaded, and an on-demand pointer proved a
     // two-hop reliability risk in review. Includes the exact observations.ts
     // call form because the fallback row is written outside any skill context.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(8350);
+    // Raised to 8,650 for the auto-mode denial-alert amendment (landing at
+    // ~8,607 B): the channel-send carve-out folded into the Sanctioned egress
+    // bullet's enumeration, plus the one-shot bound with a Progress-Log/
+    // terminal fallback (deliberately not PushNotification — it needs Remote
+    // Control, absent under setup-token auth) and the managed-session
+    // hook-dedup note. This entry also covers the interim +87 B "sanctioned
+    // even when the blocked call was a channel send" clause (8,337 B), which
+    // shipped without a ledger line.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(8650);
   });
 });
 
