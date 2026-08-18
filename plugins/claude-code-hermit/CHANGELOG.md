@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+- New `/claude-code-hermit:hermit-dashboard-design` skill designs a dashboard around what this hermit actually tracks and writes `.claude-code-hermit/dashboard-render.ts` to rebuild it. Refreshes stay a script run, so a custom page costs nothing per publish. Say "design my dashboard"; delete the renderer to return to the default page.
+- `artifact.ts render dashboard` hands off to `dashboard-render.ts` when it exists, and a new `artifact.ts state dashboard` verb returns the dashboard's render inputs (`state`, `themeCss`, `coreSections`, `updatedToken`) for that renderer to compose from.
+
+### Upgrade Instructions
+
+1. No migration is needed for the dashboard-design skill — a hermit with no `.claude-code-hermit/dashboard-render.ts` keeps rendering exactly the page it renders today.
+2. Mention to the operator, once, that their dashboard can now be designed around what this hermit actually tracks, and that they can ask for it in their own words ("design my dashboard"). Do not run the design yourself: it is an attended, operator-initiated session.
+
 ### Fixed
 - The dashboard session tile no longer shows "Idle" for an alive hermit between sessions — a fresh shared-liveness signal now renders it as "On watch".
 
