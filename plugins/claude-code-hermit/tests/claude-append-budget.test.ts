@@ -40,7 +40,13 @@ describe('CLAUDE-APPEND size budget', () => {
     // the channel-send exit-code walkthrough, the delegation-economics tutorial,
     // the suggestion-path enumeration, and the numeric micro-rules, landing at
     // ~6,199 B. Keep a small margin without reopening the door to re-bloat.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(6500);
+    // Raised to 7,200 for the Recall-first routing rule: a 601 B bullet against
+    // 9 B of remaining headroom, landing at ~7,092 B. Its trigger list and its
+    // three justifications (channel-DB coverage, relevance+recency ranking,
+    // bounded file:line digest) are also stated in recall's own frontmatter
+    // description — that duplication is accepted, not overlooked, so don't
+    // "fix" it by deleting either copy without checking the other.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(7200);
   });
 });
 
@@ -142,6 +148,12 @@ describe('per-skill description tax (creep guard)', () => {
     }
     // Current post-trim total ~7,586 B. Ceiling guards against re-bloating
     // descriptions (which are always-loaded and inherited by every subagent).
-    expect(total).toBeLessThanOrEqual(7800);
+    // Raised to 8,100 when recall's description grew 214 B -> 734 B to carry
+    // its use-this-instead-of-grep triggers, taking the total to ~7,879 B.
+    // Reverting that one description would put the total back at ~7,359 B and
+    // need no raise; keeping it (and the overlapping APPEND bullet above) is a
+    // deliberate call to state the recall-first rule in both always-loaded
+    // surfaces rather than rely on either alone.
+    expect(total).toBeLessThanOrEqual(8100);
   });
 });
