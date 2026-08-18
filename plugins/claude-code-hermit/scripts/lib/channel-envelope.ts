@@ -20,7 +20,9 @@ export interface ChannelEnvelope {
    * wire carries one, else `user`. Never match `user` when `user_id` is present:
    * `user` is an attacker-chosen display name (a Discord username can be all
    * digits), so accepting either would let a stranger impersonate an
-   * allowlisted numeric id.
+   * allowlisted numeric id. Null when neither attribute carries a value, and
+   * also when `user_id` is duplicated — both fail closed against a configured
+   * allowlist.
    */
   userId: string | null;
   /** Raw `user` attribute — human-readable display name, never an auth input. */
@@ -52,6 +54,12 @@ export function normalizeChannelSource(source: string): string {
   return m ? m[1] : source;
 }
 
+/** Every value of a quoted attribute, in source order (`[]` when absent). */
+function attrValues(attrs: string, name: string): string[] {
+  const all = attrs.match(new RegExp(`\\b${name}="[^"]*"`, 'g')) ?? [];
+  return all.map(a => a.slice(name.length + 2, -1));
+}
+
 /**
  * Parses a prompt that starts with a <channel source="..." chat_id="..." ...>
  * opening tag. Returns null when the prompt doesn't start with such a tag, or
@@ -69,8 +77,17 @@ export function parseChannelEnvelope(prompt: string): ChannelEnvelope | null {
   if (!chatIdMatch) return null;
 
   const sourceMatch = attrs.match(/\bsource="([^"]*)"/);
-  const userMatch = attrs.match(/\buser="([^"]*)"/);
-  const userIdMatch = attrs.match(/\buser_id="([^"]*)"/);
+  // `user` is an attacker-chosen display name, so on a channel that doesn't
+  // escape it a name containing a quote can close its own attribute and inject a
+  // second `user_id="<allowlisted id>"`. A duplicated attribute therefore voids
+  // that identity outright — first-match-wins would hand the gate the injected
+  // copy, and falling back to `user` would hand it the very name that smuggled
+  // it in. An empty (not duplicated) `user_id` is just a missing id, so it still
+  // falls back.
+  const userIds = attrValues(attrs, 'user_id');
+  const users = attrValues(attrs, 'user');
+  const userName = users.length === 1 ? users[0] || null : null;
+  const userId = userIds.length > 1 ? null : userIds[0] || userName;
   const messageIdMatch = attrs.match(/\bmessage_id="([^"]*)"/);
   const tsMatch = attrs.match(/\bts="([^"]*)"/);
 
@@ -84,8 +101,8 @@ export function parseChannelEnvelope(prompt: string): ChannelEnvelope | null {
     source,
     sourceKey: normalizeChannelSource(source),
     chatId: chatIdMatch[1],
-    userId: userIdMatch?.[1] ?? userMatch?.[1] ?? null,
-    userName: userMatch ? userMatch[1] : null,
+    userId,
+    userName,
     messageId: messageIdMatch ? messageIdMatch[1] : null,
     ts: tsMatch ? tsMatch[1] : null,
     body: body.trim(),
@@ -98,5 +115,7 @@ export function parseChannelEnvelope(prompt: string): ChannelEnvelope | null {
  * input (see `userId` above); callers apply their own sanitize/length-clamp.
  */
 export function senderLabel(env: ChannelEnvelope): string {
-  return env.userName ?? env.userId ?? env.source ?? 'channel';
+  // `source` is '' (not null) when the attribute is absent, so the last leg has
+  // to be `||` — `??` would hand callers an empty label.
+  return env.userName ?? env.userId ?? (env.source || 'channel');
 }

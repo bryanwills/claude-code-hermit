@@ -66,7 +66,7 @@ Read `config.json` → `channels.<channel>.allowed_users` for the inbound channe
 (`<channel>` is the normalized bare key per §0 — e.g. `discord`, not
 `plugin:discord:discord`):
 
-- Extract the sender's platform user ID from the message metadata
+- Extract the sender's platform user ID from the envelope's `user_id` attribute; fall back to `user` only when `user_id` is absent. Never match `user` against the allowlist when `user_id` is present — `user` is the sender's own display name and can be set to mimic an allowlisted numeric id.
 - If the sender is not in the `allowed_users` list: ignore the message silently — do not respond, do not log. Applies to ALL message types including status requests.
 - If `allowed_users` is absent for this channel: accept all messages (backwards compatible)
 - If `allowed_users` is an empty array `[]`: accept from no one (explicit lockdown)
