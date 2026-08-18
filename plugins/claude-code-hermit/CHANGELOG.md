@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.41] - 2026-08-18
 
 ### Added
 - Settled operator knowledge gets one authoritative home: on an explicit endpoint for a task-scoped output ("from now on, always X"), the hermit folds the settled content into the owning skill immediately — memory keeps a pointer, the reply names the change and offers revert — instead of leaving copies drifting across prose surfaces.
@@ -8,6 +8,12 @@
 - Reflect's eval runner sweeps MEMORY.md for settled endpoints whose content never reached an owning skill (`settled-memory` evidence class — recurrence-skipping, quote-verified by `reflection-judge`).
 - Channel setup records the bot's own platform id (`channels.<name>.bot_user_id`, plus `bot_username` where the platform has one) via `scripts/channel-bot-id.ts`, so a mention-gated hermit reads `<@its-own-id>` as addressed to itself instead of as third-party traffic. The reply reminder names the identity only on messages that actually carry it.
 - `hermit-doctor`'s channel-liveness check warns when the stored bot identity no longer matches the token's bot — a swapped token or a renamed bot — using the probe response it already makes.
+
+### Changed
+- The CLAUDE-APPEND auto-mode denial alert no longer reads as a permission workaround when the blocked call was itself a channel send: the Sanctioned egress bullet now covers it, the send is bounded to one attempt with a Progress-Log/terminal fallback, and managed sessions defer to the `PermissionDenied` hook's existing channel alert instead of duplicating it.
+- `proposal-triage` and `reflection-judge` no longer suppress consolidation candidates as `covered-by-memory` — relocating a settled preference into its owning skill is distinct from re-proposing the preference.
+- `proposal-create`'s Do-NOT list routes style preferences to memory (OPERATOR.md is never a proposal destination) and admits relocation proposals; session-close's defect debrief points settled calibrations at the placement rule.
+- `/recall` now triggers on history questions it previously missed ("did we ever discuss X", "have we seen this error before", "yesterday I asked you to X"): the skill description explains why its search beats hand-grepping state files (channel-log coverage, relevance+recency ranking, bounded output), and the session-discipline block routes past-work questions to `/recall` instead of direct `.claude-code-hermit/` reads.
 
 ### Fixed
 - Channel `allowed_users` matches the envelope's `user_id` (platform id) instead of `user` (display name). Id-based allowlists, the documented setup, rejected every message, so inbound capture, `pause`/`stop`/`resume`/`snooze`, harness commands, and `status` were silent no-ops. Channels that send only `user` are unaffected.
@@ -26,12 +32,6 @@
    A `SKIP …` line means the identity could not be captured (no token, unknown platform, probe unreachable) — report it and continue to the next channel; never fail the upgrade on it. Operators who don't want the identity stored can delete `bot_user_id`/`bot_username` from the channel entry; the reminder then behaves as it did before.
 
 The placement rule needs no migration step: the Knowledge Discipline addition rides the CLAUDE-APPEND block refresh in Step 6, which preserves operator edits to the block via its append/replace plan.
-
-### Changed
-- The CLAUDE-APPEND auto-mode denial alert no longer reads as a permission workaround when the blocked call was itself a channel send: the Sanctioned egress bullet now covers it, the send is bounded to one attempt with a Progress-Log/terminal fallback, and managed sessions defer to the `PermissionDenied` hook's existing channel alert instead of duplicating it.
-- `proposal-triage` and `reflection-judge` no longer suppress consolidation candidates as `covered-by-memory` — relocating a settled preference into its owning skill is distinct from re-proposing the preference.
-- `proposal-create`'s Do-NOT list routes style preferences to memory (OPERATOR.md is never a proposal destination) and admits relocation proposals; session-close's defect debrief points settled calibrations at the placement rule.
-- `/recall` now triggers on history questions it previously missed ("did we ever discuss X", "have we seen this error before", "yesterday I asked you to X"): the skill description explains why its search beats hand-grepping state files (channel-log coverage, relevance+recency ranking, bounded output), and the session-discipline block routes past-work questions to `/recall` instead of direct `.claude-code-hermit/` reads.
 
 ## [1.2.40] - 2026-08-17
 
