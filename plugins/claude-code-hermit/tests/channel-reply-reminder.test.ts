@@ -36,6 +36,33 @@ const run = (prompt: string, dir: string) =>
   runScript('user-prompt-pipeline.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
 
 describe('channel-reply-reminder', () => {
+  const SELF_ID = '987654321098765432';
+  const withBotId = (extra = '') =>
+    `{"channels":{"discord":{"allowed_users":["U1"],"bot_user_id":"${SELF_ID}"${extra}}}}`;
+
+  test('self-mention — names the bot id as the agent itself', withDir(async (dir) => {
+    const r = await run(`<channel source="discord" chat_id="1" user="U1"><@${SELF_ID}> ping</channel>`, dir);
+    expect(r.stdout).toContain(SELF_ID);
+    expect(r.stdout).toContain('your own account on this channel');
+  }, withBotId()));
+
+  test('configured but not mentioned — reminder is unchanged', withDir(async (dir) => {
+    const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
+    expect(r.stdout).not.toContain('your own account on this channel');
+    expect(r.stdout).toContain('[channel reply reminder]');
+  }, withBotId()));
+
+  test('bot_username — an @handle mention matches case-insensitively (telegram shape)', withDir(async (dir) => {
+    const r = await run('<channel source="telegram" chat_id="1" user="U1">hey @HermitBot status?</channel>', dir);
+    expect(r.stdout).toContain('@hermitbot');
+    expect(r.stdout).toContain('your own account on this channel');
+  }, '{"channels":{"telegram":{"allowed_users":["U1"],"bot_username":"hermitbot"}}}'));
+
+  test('no bot identity configured — reminder is unchanged', withDir(async (dir) => {
+    const r = await run(`<channel source="discord" chat_id="1" user="U1"><@${SELF_ID}> ping</channel>`, dir);
+    expect(r.stdout).not.toContain('your own account on this channel');
+  }));
+
   test('bare source — names the exact reply tool', withDir(async (dir) => {
     const r = await run('<channel source="discord" chat_id="1" user="U1">hi</channel>', dir);
     expect(r.exitCode).toBe(0);

@@ -17,6 +17,7 @@ import { PRICING } from './lib/pricing';
 import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
+import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
@@ -1781,18 +1782,6 @@ function checkRoutineCost(p: DoctorPaths = PATHS) {
 
 const LIVENESS_TIMEOUT_MS = Number(process.env.HERMIT_DOCTOR_LIVENESS_TIMEOUT_MS) || 5000;
 
-type LivenessProbe = { url: string; headers?: Record<string, string> };
-
-const LIVENESS_PROBES: Record<string, (token: string) => LivenessProbe> = {
-  telegram: (token) => ({
-    url: `${process.env.HERMIT_DOCTOR_TELEGRAM_API || 'https://api.telegram.org'}/bot${token}/getMe`,
-  }),
-  discord: (token) => ({
-    url: `${process.env.HERMIT_DOCTOR_DISCORD_API || 'https://discord.com/api/v10'}/users/@me`,
-    headers: { Authorization: `Bot ${token}` },
-  }),
-};
-
 async function checkChannelLiveness(p: DoctorPaths = PATHS) {
   const { hermitDir } = p;
   try {
@@ -1815,7 +1804,7 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
     // own URL, own timeout), so serializing them would add up to N × timeout
     // of dead wall-clock time to every doctor run for no correctness benefit.
     const results = await Promise.all(enabled.map(async (name): Promise<{ note: string; severity: 'warn' | 'fail' | null }> => {
-      const buildProbe = LIVENESS_PROBES[name];
+      const buildProbe = CHANNEL_PROBES[name];
       if (!buildProbe) {
         return { note: `${name}: unknown platform, not probed`, severity: null };
       }
@@ -1827,6 +1816,21 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
       try {
         const resp = await fetch(probe.url, { headers: probe.headers, signal: AbortSignal.timeout(LIVENESS_TIMEOUT_MS) });
         if (resp.ok) {
+          // The probe response already carries the bot's own account, so the
+          // stored self-mention identity (channel-bot-id.ts) can be validated
+          // here for free. A mismatch means the token now belongs to a
+          // different bot — the stored id would label mentions of a
+          // decommissioned account as "you".
+          const stored = channels[name]?.bot_user_id;
+          if (stored != null) {
+            const live = extractBotIdentity(name, await resp.json().catch(() => null)).id;
+            if (live && String(stored) !== live) {
+              return {
+                note: `${name}: reachable, but stored bot identity is stale (token belongs to a different bot) — re-run /channel-setup`,
+                severity: 'warn',
+              };
+            }
+          }
           return { note: `${name}: reachable`, severity: null };
         } else if (resp.status === 401 || resp.status === 403) {
           return { note: `${name}: auth rejected (HTTP ${resp.status}) — bot token invalid or revoked`, severity: 'fail' };

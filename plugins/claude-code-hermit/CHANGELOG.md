@@ -6,6 +6,8 @@
 - Settled operator knowledge gets one authoritative home: on an explicit endpoint for a task-scoped output ("from now on, always X"), the hermit folds the settled content into the owning skill immediately — memory keeps a pointer, the reply names the change and offers revert — instead of leaving copies drifting across prose surfaces.
 - New `skill-preference` / `skill-preference-applied` observation sources record pending and applied settlements; pending rows graduate through reflect into placement proposals, with plugin-owned or missing owners routed to override-skill or new-skill candidates.
 - Reflect's eval runner sweeps MEMORY.md for settled endpoints whose content never reached an owning skill (`settled-memory` evidence class — recurrence-skipping, quote-verified by `reflection-judge`).
+- Channel setup records the bot's own platform id (`channels.<name>.bot_user_id`, plus `bot_username` where the platform has one) via `scripts/channel-bot-id.ts`, so a mention-gated hermit reads `<@its-own-id>` as addressed to itself instead of as third-party traffic. The reply reminder names the identity only on messages that actually carry it.
+- `hermit-doctor`'s channel-liveness check warns when the stored bot identity no longer matches the token's bot, using the probe response it already makes.
 
 ### Fixed
 - Channel `allowed_users` matches the envelope's `user_id` (platform id) instead of `user` (display name). Id-based allowlists, the documented setup, rejected every message, so inbound capture, `pause`/`stop`/`resume`/`snooze`, harness commands, and `status` were silent no-ops. Channels that send only `user` are unaffected.
@@ -17,6 +19,11 @@
 2. If a value is not the sender's platform user ID (on Discord: the 17-19 digit numeric id; on Telegram: the numeric account id) — for example a display name or `@handle` — that entry no longer matches. Before this release the allowlist was compared against the envelope's `user` (display name) attribute, so a display name could have been working.
 3. Tell the operator which entries look like display names, ask them for the matching platform IDs, and replace the values. Do not guess an ID. If no entry looks like a display name, say so and change nothing.
 4. Leaving a stale display name in `allowed_users` silently blocks that sender: inbound messages stop being captured and `pause`/`stop`/`resume`/`snooze`/`status` become no-ops with no error.
+5. Backfill the bot identity for every already-paired channel. Read `.claude-code-hermit/config.json`; for each key under `channels` whose value is an object (skip the `primary` string pointer), run:
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-bot-id.ts .claude-code-hermit <name> --write
+   ```
+   A `SKIP …` line means the identity could not be captured (no token, unknown platform, probe unreachable) — report it and continue to the next channel; never fail the upgrade on it. Operators who don't want the identity stored can delete `bot_user_id`/`bot_username` from the channel entry; the reminder then behaves as it did before.
 
 The placement rule needs no migration step: the Knowledge Discipline addition rides the CLAUDE-APPEND block refresh in Step 6, which preserves operator edits to the block via its append/replace plan.
 

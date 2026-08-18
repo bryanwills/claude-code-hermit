@@ -2735,6 +2735,58 @@ describe('doctor channel-liveness check', () => {
     }
   }), 20000);
 
+  // Self-mention identity drift (scripts/channel-bot-id.ts writes bot_user_id).
+  // The liveness probe response already carries the bot's own account, so the
+  // stored id is validated here without a second request.
+  function seedWithBotId(dir: string, port: number | undefined, botId: string) {
+    writeConfig(dir, {
+      ...BASE_CONFIG,
+      channels: { telegram: { enabled: true, dm_channel_id: '1', state_dir: 'chan', bot_user_id: botId } },
+    });
+    const chanDir = path.join(dir, 'chan');
+    fs.mkdirSync(chanDir, { recursive: true });
+    fs.writeFileSync(path.join(chanDir, '.env'), 'TELEGRAM_BOT_TOKEN=dummy\n');
+    return { HERMIT_DOCTOR_TELEGRAM_API: `http://127.0.0.1:${port}` };
+  }
+
+  const getMeServer = () => Bun.serve({
+    port: 0,
+    fetch: () => Response.json({ ok: true, result: { id: 111222333, username: 'hermitbot' } }),
+  });
+
+  test('stored bot id matches the live bot → ok, reachable', withTmpdir(async (dir) => {
+    const server = getMeServer();
+    try {
+      const env = seedWithBotId(dir, server.port, '111222333');
+      const r = await runScript('doctor-check.ts', {
+        args: ['.claude-code-hermit'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, ...env },
+      });
+      const c = liveCheck(JSON.parse(r.stdout));
+      expect(c.status).toBe('ok');
+      expect(c.detail).toContain('reachable');
+      expect(c.detail).not.toContain('stale');
+    } finally {
+      server.stop(true);
+    }
+  }), 20000);
+
+  test('stored bot id from a different bot → warn, stale identity', withTmpdir(async (dir) => {
+    const server = getMeServer();
+    try {
+      const env = seedWithBotId(dir, server.port, '999999999');
+      const r = await runScript('doctor-check.ts', {
+        args: ['.claude-code-hermit'], cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, ...env },
+      });
+      const c = liveCheck(JSON.parse(r.stdout));
+      expect(c.status).toBe('warn');
+      expect(c.detail).toContain('stale');
+      expect(c.detail).toContain('/channel-setup');
+      expect(c.detail).not.toContain('dummy');
+    } finally {
+      server.stop(true);
+    }
+  }), 20000);
+
   test('timeout → warn, unreachable', withTmpdir(async (dir) => {
     const server = Bun.serve({ port: 0, fetch: () => new Promise(() => {}) });
     try {
