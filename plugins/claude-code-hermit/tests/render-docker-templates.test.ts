@@ -18,7 +18,6 @@ const BASE_INPUT = {
   auth: 'oauth-token' as const,
   channels: { envLines: [] as string[], volumeLines: [] as string[] },
   agentHookProfile: 'strict',
-  tmuxSessionName: 'hermit-myproj',
   networkMode: 'bridge' as const,
   gitIdentityMount: true,
 };
@@ -40,6 +39,35 @@ describe('render-docker-templates.ts', () => {
     expect(dockerfile(dir)).not.toMatch(/\{\{[A-Z][A-Z0-9_]*\}\}/);
     expect(compose(dir)).not.toMatch(/\{\{[A-Z][A-Z0-9_]*\}\}/);
     expect(fs.existsSync(path.join(dir, 'docker-entrypoint.hermit.sh'))).toBe(true);
+  });
+
+  // The healthcheck must READ config.tmux_session_name at check time, never bake a copy.
+  // A baked name is a second source of truth that silently desyncs from the entrypoint's
+  // (a rename re-renders this file but leaves the already-written config value alone),
+  // leaving the container permanently "unhealthy" against a session that never existed.
+  test('healthcheck resolves the session name at runtime, with no name baked in', async () => {
+    const dir = freshDir();
+    await render(dir);
+    const yml = compose(dir);
+    expect(yml).toContain('.claude-code-hermit/config.json');
+    expect(yml).toContain('tmux has-session');
+    // No literal session name anywhere in the file — not the default prefix, not a project name.
+    expect(yml).not.toMatch(/has-session -t ["']?hermit-[a-z]/);
+  });
+
+  // `hermit-` is only the DEFAULT (lib/tmux.ts expandSessionName); tmux_session_name is an
+  // operator-editable setting with no enforced prefix, so the check must not reconstruct it.
+  test('healthcheck carries no assumption that the name starts with hermit-', async () => {
+    const dir = freshDir();
+    await render(dir);
+    // Anchor on the `test:` key, not on a substring of the command — a nearby COMMENT
+    // mentioning the same token would otherwise be picked up instead, and every assertion
+    // below would pass vacuously against prose.
+    const line = compose(dir).split('\n').find((l) => l.trim().startsWith('test:')) ?? '';
+    expect(line).toContain('has-session');
+    // The only permitted occurrence of the default is jq's fallback for an absent key.
+    const hermitLiterals = (line.match(/hermit-\{project_name\}|hermit-[a-z]/g) ?? []);
+    expect(hermitLiterals).toEqual(['hermit-{project_name}']);
   });
 
   test('entrypoint is byte-identical to the template (cp, not regenerate)', async () => {
