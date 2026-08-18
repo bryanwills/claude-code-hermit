@@ -612,7 +612,12 @@ function renderCompiledIndex(state: DashboardState): string {
 
 /** Renders the full artifact fragment plus a content hash stable across
  *  identical underlying state (the "last updated" stamp is excluded from the hash
- *  via a placeholder token, so the publish gate can skip no-op republishes). */
+ *  via a placeholder token, so the publish gate can skip no-op republishes).
+ *  One caveat: `state.aliveNow` is derived from file mtimes at load time, so a
+ *  render that straddles the liveness freshness window can flip the session tile
+ *  (and therefore the hash) with no persisted state change. That costs at most one
+ *  extra republish per flip, and only on a hermit whose liveness signal goes stale
+ *  between refreshes. */
 export function renderDashboard(state: DashboardState, opts?: { now?: string }): { html: string; hash: string } {
   const s = state.strings;
   const title = fmt(s.dashboard_title, { name: escapeHtml(state.agentName) });
