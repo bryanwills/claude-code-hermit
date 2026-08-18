@@ -324,6 +324,40 @@ describe('reflect-precheck: freshness RUN gate', () => {
     }
   });
 
+  test('EMPTY when the only fresh row is skill-preference-applied telemetry', async () => {
+    const lastRunAt = new Date(Date.now() - 3600_000).toISOString(); // 1h ago
+    const freshTs = new Date().toISOString();
+
+    const hermitDir = makeTmpHermit({
+      lastRunAt,
+      observations: [JSON.stringify({ ts: freshTs, pattern: 'skill-preference:task-report', session_id: 'S-001', source: 'skill-preference-applied', origin: 'own-work' })],
+    });
+    try {
+      const verdict = await runPrecheck(hermitDir);
+      expect(verdict).toBe('EMPTY');
+    } finally {
+      fs.rmSync(hermitDir, { recursive: true, force: true });
+    }
+  });
+
+  test('pending skill-preference rows still trigger observations_fresh', async () => {
+    const lastRunAt = new Date(Date.now() - 3600_000).toISOString(); // 1h ago
+    const freshTs = new Date().toISOString();
+
+    const hermitDir = makeTmpHermit({
+      lastRunAt,
+      observations: [JSON.stringify({ ts: freshTs, pattern: 'skill-preference:weekly-digest', session_id: 'S-001', source: 'skill-preference', origin: 'own-work' })],
+    });
+    try {
+      const verdict = await runPrecheck(hermitDir);
+      expect(verdict).toMatch(/^RUN\|/);
+      const phases = JSON.parse(verdict.slice(4));
+      expect(phases.observations_fresh).toBe(true);
+    } finally {
+      fs.rmSync(hermitDir, { recursive: true, force: true });
+    }
+  });
+
   test('startup-drift rows written in same run trigger observations_fresh on that run', async () => {
     // Fresh hermit with an unknown dir — precheck writes drift rows AND triggers freshness
     const hermitDir = makeTmpHermit({ lastRunAt: null });

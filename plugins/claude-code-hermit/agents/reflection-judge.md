@@ -60,6 +60,11 @@ Check `Evidence Source:` first — it overrides the session-based flow.
 - Run § 1.5 (Memory cross-check), then go to § 2 Tier check.
 - Emit the verdict with the appropriate source tag: `(scheduled-check)` or `(operator-request)`.
 
+**If `Evidence Source: settled-memory`** (eval-runner ownership-signal candidate — a settled operator endpoint recorded in memory):
+- Skip §§ 0.5 and 1 (recurrence is not required; the recorded endpoint declaration is the human initiation).
+- **Quote check (required):** the evidence must cite a memory topic filename and the verbatim endpoint line. Grep that file for the quoted line (bounded — never Read the memory dir whole). Found → run § 1.5, then § 2. Missing file or line → `SUPPRESS: <title> — no-evidence: quoted endpoint not found in cited memory file`.
+- Emit the verdict tagged `(settled-memory)`.
+
 **Otherwise** (`archived-session` or `current-session`, or field absent): continue to § 0.5.
 
 ### 0.5. Sessions: none check
@@ -100,7 +105,7 @@ A session "confirms" the pattern if:
 
 Read the operator's `MEMORY.md` (the operator-facing index of `- [title](file) — description` entries — distinct from your own private memory, which is auto-injected). Read each topic file whose title or description keyword-matches the candidate. Match against the file's `name`, `description`, body, `Why:`, and `How to apply:` fields. If memory already records the operator decision, preference, or pattern this candidate would surface, suppress with code `covered-by-memory`, quote the matching memory line in the reason, and include the source filename (e.g. `[memory: feedback_simplify_no_bypass.md]`) so the operator can locate and revise it if stale.
 
-**Exemption:** a candidate carrying an `Artifact:` reference to `state/observations.jsonl` is never suppressed `covered-by-memory`. The ledger is the recurrence store these candidates graduate from, not operator memory — recording there is how graduation works, not evidence the pattern is already handled. Candidates on the §0.5 efficiency path (`Artifact:` citing `cost-log.jsonl` or `proposal-metrics.jsonl`) are **not** exempt: the normal `covered-by-memory` check applies and may suppress them when memory already records the operator's decision about the cited costs.
+**Exemption:** a candidate carrying an `Artifact:` reference to `state/observations.jsonl` is never suppressed `covered-by-memory`. The ledger is the recurrence store these candidates graduate from, not operator memory — recording there is how graduation works, not evidence the pattern is already handled. Likewise a consolidation candidate — one relocating operator-endpoint content from memory or duplicated prose into the skill owning the task (`settled-memory` source, or a `skill-preference:*` ledger graduation) — is not covered by the memory recording that content: the memory is the decision record; the candidate targets the operative home. Candidates on the §0.5 efficiency path (`Artifact:` citing `cost-log.jsonl` or `proposal-metrics.jsonl`) are **not** exempt: the normal `covered-by-memory` check applies and may suppress them when memory already records the operator's decision about the cited costs.
 
 ### 1.6 Provenance weighting
 
@@ -146,6 +151,7 @@ ACCEPT: <title>
 ACCEPT (current-session): <title>
 ACCEPT (scheduled-check): <title>
 ACCEPT (operator-request): <title>
+ACCEPT (settled-memory): <title>
 DOWNGRADE:2: <title> — <reason>
 DOWNGRADE:1: <title> — <reason>
 DOWNGRADE:3 (current-session): <title> — quarantine: external origin

@@ -52,6 +52,20 @@ Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-co
 - **Brief found (self-authored, strong signal):** read the `## Lessons` section from each session listed in the graduated ledger rows' `session_id` fields to recover the correction what/why (the ledger row is a bare counter; the Lessons line carries the reason). If a cited session report is missing or unreadable, proceed with the behaviors recovered from the sessions that are available — the candidate still stands on its component name plus whatever Lessons survive. Build a candidate with a `## Skill Improvement` section listing the component name, those corrected behaviors, and `source_artifact: <brief path>` as a body line. The candidate carries `Artifact: state/observations.jsonl` (judge §1.4 validates recurrence) and is Tier 2 (Component Health finding, meaningful but non-critical). Proceed via § Candidate processing — Tier 2 routes through triage then micro-approval queue, not directly to proposal-create.
 - **No brief found (human/plugin or brief fully gone, moderate signal):** proceed via § Candidate processing as a plain Tier 2 improvement proposal (no `## Skill Improvement`, no skill-creator). The candidate carries `Artifact: state/observations.jsonl`.
 
+## `skill-preference:*` routing
+
+Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-preference:<name>`, and from § Candidate processing for a runner `procedure_candidates` entry carrying `evidence_source: "settled-memory"`. On the ledger path only rows with source `skill-preference` reach this section — they are **pending placements**: operator settlements ("from now on, always X") recorded when no editable owning skill existed or the in-conversation edit failed. (`skill-preference-applied` rows are telemetry of settlements already applied and are excluded at step 3b.) `<name>` is the owning skill's canonical bare name when one exists, otherwise the settled output's slug.
+
+**Resolution check (ledger path only, before anything else):** if the pattern also carries a `skill-preference-applied` row whose `ts` is newer than the newest remaining `skill-preference` row, the settlement has since been placed — drop the candidate and stop. Nothing retracts a pending row, and `prune-observations` keeps a pattern's whole history alive as long as any row in it is fresh, so without this check a resolved placement re-proposes on every reflect run (the § 1.5 consolidation exemption means the judge will not suppress it either).
+
+Recover the settled content from the pointer memory: read the operator's MEMORY.md index and the topic file whose title or body matches `<name>`. Derive the candidate title from that memory topic filename — a pending row and a sweep-emitted candidate for the same settlement then dedup by title-slug in § Candidate processing. Branch:
+
+- **`<name>` is an installed plugin skill (read-only):** plain Tier 2 improvement candidate recommending an operator-space override skill in `.claude/skills/` or an upstream request — never an edit candidate for a file under the plugin cache. Carries `Artifact: state/observations.jsonl`.
+- **No skill covers the output:** follow § Procedure capture's Preference ladder — extend an adjacent skill as a Tier 2 `## Skill Improvement` candidate, or the Tier-3 `## Skill Draft` path when nothing can absorb it.
+- **An editable owning skill exists** (created after the row, or the edit failed): Tier 2 `## Skill Improvement` candidate for that skill listing the settled content recovered from the memory. Carries `Artifact: state/observations.jsonl`.
+
+All branches proceed via § Candidate processing.
+
 ## Candidate processing
 
 Invoked from SKILL.md (quick mode and scheduled reflect) whenever ≥1 candidate exists. The Three-Condition Rule, evidence integrity rule, gate sequence, tier routing, and queuing procedures below are normative.
@@ -62,7 +76,7 @@ Only create a proposal if all three are true:
 1. **Repeated pattern** — tier-aware recurrence:
    - **Tier 1 + `Evidence Source: current-session`**: 1+ session acceptable. Cite `Sessions: current` when the pattern is present in the live SHELL.md `## Findings` / `## Blockers` (judge returns `ACCEPT (current-session)`). Phase is irrelevant for this path.
    - **Tier 1 + `Evidence Source: archived-session`**: requires 2+ archived sessions, identical to Tier 2/3. The loosening above is specific to the `current-session` path, not to Tier 1 generally.
-   - **Tier 2 / Tier 3**: 2+ archived sessions required at every phase (baseline: observed more than once, across archived sessions).
+   - **Tier 2 / Tier 3**: 2+ archived sessions required at every phase (baseline: observed more than once, across archived sessions). Ledger-graduated candidates (step 3b's mechanical promotion at `graduation_min_sessions`) satisfy recurrence via the `Artifact: state/observations.jsonl` rule (triage's condition-1 ledger clause; judge §1.4) regardless of this baseline.
    - **Artifact-cited efficiency/cost candidates**: recurrence is satisfied by the cited measurements themselves — the same waste measured ≥2 times in a machine-written state file (`Sessions: none` + `Artifact:` line; the judge verifies the file contains the cited values).
    - **Procedure-capture ephemerality exception**: a procedure-capture candidate with ephemeral artifacts and quantified cost satisfies recurrence at 1 current session — see § Procedure capture.
 2. **Meaningful consequence** — something goes wrong without fixing it
@@ -87,7 +101,7 @@ If the pattern is only visible to reflect via inference (cost log, token counter
 - **Artifact-cited (efficiency/cost-class only):** when a machine-written state file already contains the measurement, raise the candidate immediately with `Sessions: none` plus an `Artifact:` line citing the file and the value — the judge verifies the artifact directly (judge §0.5/§1.4) instead of suppressing `no-sessions`.
 - **No qualifying artifact:** keep it sub-threshold — append it to the observations ledger and let it graduate by recurrence (SKILL.md step 3b).
 
-Reflect-generated inferences **never** use bypass Evidence Sources (`scheduled-check/*` or `operator-request`).
+Reflect-generated inferences **never** use bypass Evidence Sources (`scheduled-check/*` or `operator-request`). **One sanctioned exception:** eval-runner ownership-signal candidates carry `Evidence Source: settled-memory` — recurrence-skipping like `operator-request`, but the judge accepts only after verifying the quoted endpoint line exists in the cited memory file (judge § settled-memory quote check).
 
 ### Evidence Validation
 
@@ -170,7 +184,7 @@ HERMIT_GATE
 After validating with `claude-code-hermit:reflection-judge`, choose exactly one outcome per observation:
 
 1. **No action** — pattern not strong enough, already handled, or already addressed by the Resolution Check.
-2. **Memory update** — for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked. Issue the standard "remember it" reflection — the trained auto-memory flow handles the write, with its own discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE). Save nothing if nothing rises above noise. Sub-threshold *patterns* do NOT go to memory — they go to the observations ledger; keeping the recurrence store separate from operator memory is what prevents the judge's `covered-by-memory` check from suppressing a pattern at the moment it graduates.
+2. **Memory update** — for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked (subject to the placement rule — settled task-scoped or multi-step content belongs to the skill owning the task, with memory as the pointer). Issue the standard "remember it" reflection — the trained auto-memory flow handles the write, with its own discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE). Save nothing if nothing rises above noise. Sub-threshold *patterns* do NOT go to memory — they go to the observations ledger; keeping the recurrence store separate from operator memory is what prevents the judge's `covered-by-memory` check from suppressing a pattern at the moment it graduates.
 3. **Proposal candidate** — classify tier (§ Proposal Tier Classification) for every candidate reaching this outcome, batch them all through the Proposal triage gate together, then per candidate on its own token: Tier 1/2 `PROCEED|CREATE` → queue micro-approval in `state/micro-proposals.json`; Tier 3 `PROCEED|CREATE` → call `/claude-code-hermit:proposal-create` (exception: procedure-capture candidates skip the separate pre-gate — see § Procedure capture).
 
 Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label — the label goes on stdin, so apostrophes in it are safe:
@@ -222,7 +236,7 @@ Triage-survival < 25% or acceptance < 30% → disable procedure capture rather t
 
 **Detection — when to trigger:**
 
-The eval runner (SKILL.md step 6) reads MEMORY.md and archived `## Lessons` sections and returns recurring procedures as `procedure_candidates`. Each entry already carries `slug`, `title`, `evidence`, `sessions`, `evidence_source`, and `evidence_origin`. Process each entry through the dedup guard and write-brief steps below.
+The eval runner (SKILL.md step 6) reads MEMORY.md and archived `## Lessons` sections and returns recurring procedures as `procedure_candidates`. Each entry already carries `slug`, `title`, `evidence`, `sessions`, `evidence_source`, and `evidence_origin`. Process each entry through the dedup guard and write-brief steps below — **except** entries carrying `evidence_source: "settled-memory"`: those are the ownership signal, not procedures, and route to § `skill-preference:*` routing instead (they name an existing owning skill, which this section's dedup guard would read as full coverage and suppress; they also take no brief, no forced Tier 3, and no place in the kill-criteria sample above).
 
 Recurrence signal (as evaluated by the runner): the same multi-step procedure appears as a Lesson or memory workflow-pattern in **≥ `graduation_min_sessions` distinct archived sessions** (read from `config.json` at `reflection.graduation_min_sessions`; default 1 if absent) and no existing skill covers it.
 

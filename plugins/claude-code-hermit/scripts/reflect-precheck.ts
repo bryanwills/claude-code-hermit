@@ -406,6 +406,9 @@ try {
 // drift or a spike day forces exactly one RUN, not one per tick. Rows written *during* a
 // run (reflect-noticed, quick-deferral, skill-correction, behavior-digest) have
 // ts ≤ last_run_at on the next tick and do NOT self-trigger — they surface opportunistically.
+// skill-preference-applied rows are written mid-conversation (settlement telemetry, never a
+// candidate), so they're excluded explicitly — a run they trigger would have nothing to do.
+// Pending skill-preference rows are NOT excluded: they graduate, so their run is productive.
 if (wroteNewRows) {
   // Rows just appended carry ts = now > last_run_at by construction — skip the re-read.
   phases.observations_fresh = true;
@@ -418,7 +421,7 @@ if (wroteNewRows) {
       try {
         const row = JSON.parse(line);
         const rowTime = new Date(row.ts).getTime();
-        return !isNaN(rowTime) && rowTime > cutoff;
+        return !isNaN(rowTime) && rowTime > cutoff && row.source !== 'skill-preference-applied';
       } catch { return false; }
     });
     if (hasFresh) phases.observations_fresh = true;

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- Settled operator knowledge gets one authoritative home: on an explicit endpoint for a task-scoped output ("from now on, always X"), the hermit folds the settled content into the owning skill immediately — memory keeps a pointer, the reply names the change and offers revert — instead of leaving copies drifting across prose surfaces.
+- New `skill-preference` / `skill-preference-applied` observation sources record pending and applied settlements; pending rows graduate through reflect into placement proposals, with plugin-owned or missing owners routed to override-skill or new-skill candidates.
+- Reflect's eval runner sweeps MEMORY.md for settled endpoints whose content never reached an owning skill (`settled-memory` evidence class — recurrence-skipping, quote-verified by `reflection-judge`).
+
 ### Fixed
 - Channel `allowed_users` matches the envelope's `user_id` (platform id) instead of `user` (display name). Id-based allowlists, the documented setup, rejected every message, so inbound capture, `pause`/`stop`/`resume`/`snooze`, harness commands, and `status` were silent no-ops. Channels that send only `user` are unaffected.
 - `user_id` wins over `user` when both are present, and a duplicated `user`/`user_id` voids the sender identity rather than trusting the first copy — a display name can neither mimic nor inject an allowlisted id. Operators whose `allowed_users` holds a display name must switch it to the platform id.
@@ -12,7 +17,12 @@
 2. If a value is not the sender's platform user ID (on Discord: the 17-19 digit numeric id; on Telegram: the numeric account id) — for example a display name or `@handle` — that entry no longer matches. Before this release the allowlist was compared against the envelope's `user` (display name) attribute, so a display name could have been working.
 3. Tell the operator which entries look like display names, ask them for the matching platform IDs, and replace the values. Do not guess an ID. If no entry looks like a display name, say so and change nothing.
 4. Leaving a stale display name in `allowed_users` silently blocks that sender: inbound messages stop being captured and `pause`/`stop`/`resume`/`snooze`/`status` become no-ops with no error.
+
+The placement rule needs no migration step: the Knowledge Discipline addition rides the CLAUDE-APPEND block refresh in Step 6, which preserves operator edits to the block via its append/replace plan.
+
 ### Changed
+- `proposal-triage` and `reflection-judge` no longer suppress consolidation candidates as `covered-by-memory` — relocating a settled preference into its owning skill is distinct from re-proposing the preference.
+- `proposal-create`'s Do-NOT list routes style preferences to memory (OPERATOR.md is never a proposal destination) and admits relocation proposals; session-close's defect debrief points settled calibrations at the placement rule.
 - `/recall` now triggers on history questions it previously missed ("did we ever discuss X", "have we seen this error before", "yesterday I asked you to X"): the skill description explains why its search beats hand-grepping state files (channel-log coverage, relevance+recency ranking, bounded output), and the session-discipline block routes past-work questions to `/recall` instead of direct `.claude-code-hermit/` reads.
 
 ## [1.2.40] - 2026-08-17
