@@ -1355,8 +1355,19 @@ async function main(): Promise<void> {
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
 
-  // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit
-  if (runtime.session_state === 'idle') process.exit(0);
+  // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
+  //
+  // `session_state: 'idle'` used to exit here outright. It cannot: 'in_progress' is written
+  // only by the model-driven /session-start open path (session-archive.ts), and session-close
+  // returns it to 'idle', so a healthy hermit rests at 'idle' between arcs. Exiting on it
+  // disabled the alert tiers (3b/3c) on every hermit, permanently — and self-sealingly, since
+  // leaving 'idle' requires the model to take a turn, which is exactly what a blocking dialog
+  // prevents. A session blocked that way stayed blocked indefinitely, in silence.
+  //
+  // So 'idle' now demotes the tick to supervision-only: the alert-only tiers still run and
+  // still notify, while every tier that sends keystrokes or restarts stays suppressed. The
+  // explicit stop markers below remain hard exits — those DO carry operator intent.
+  const supervisionOnly = runtime.session_state === 'idle';
   if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) process.exit(0);
   if (runtime.runtime_mode === 'interactive') process.exit(0);
 
@@ -1370,8 +1381,15 @@ async function main(): Promise<void> {
   // lives inside the session, so a dead+paused session can't hear "resume" —
   // restart must stay live. The PreToolUse gate (pause-gate.ts) keeps the
   // restarted session inert until resumed.
+  //
+  // The verdict is cached: step 3c below asks the identical `tmux has-session` question
+  // about the same session moments later, and nothing in between mutates tmux state
+  // (evaluateReauth only spawns a detached relay, capturePane is a read-only subcommand).
+  // Recomputing it there would spawn tmux twice per tick on the common alive path.
+  let sessionAlive: boolean | null = null;
   if (['in_progress', 'waiting', 'suspect_process'].includes(sessionState)) {
-    if (!tmuxSessionAlive(sessionName)) {
+    sessionAlive = tmuxSessionAlive(sessionName);
+    if (!sessionAlive) {
       // A gone tmux session with FRESH shared-state activity is the orphan shape
       // (process survived, tmux didn't) — restarting would spawn a second claude
       // beside the live one. Abort and alert instead; only restart when the
@@ -1430,7 +1448,16 @@ async function main(): Promise<void> {
   // release), the harness keeps enqueueing monitor notifications it never dequeues.
   // Alert-only, deduped like 3b: the operator decides how to clear it, and sending keys
   // into an unknown blocker is exactly the auto-answer 3b refuses to do.
-  {
+  //
+  // The tmux check is load-bearing, not decorative: a wedge means "the session is UP but not
+  // draining". A stopped hermit's last transcript record is often a trailing enqueue that was
+  // never drained, which classifies as 'wedged' forever. This tier used to reach that case
+  // only because the idle gate above exited first; now that it doesn't, the aliveness
+  // condition this tier always documented has to actually be tested. 3b needs no equivalent —
+  // capturePane returns null on a dead session and the `paneContent !== null` check catches it.
+  // Reuses step 3's verdict when it ran; falls back to a fresh check when it didn't —
+  // 'idle' (the path this fix enables) and any other unlisted session_state.
+  if (sessionAlive ?? tmuxSessionAlive(sessionName)) {
     // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
     // `session_id` is the logical S-NNN arc id and resolves to a path that never exists.
     const transcriptId = typeof runtime.opened_transcript === 'string' ? runtime.opened_transcript : null;
@@ -1461,6 +1488,16 @@ async function main(): Promise<void> {
   // the pane-frozen restart path would kill the session outright — either way
   // auto-answering a decision that is always the operator's to make.
   if (pendingQuestion) process.exit(0);
+
+  // Supervision-only boundary. Everything above this line observes and notifies; everything
+  // below sends keystrokes into the pane (steps 4 and 5) or restarts the session (the
+  // pane-frozen path inside step 4, and the monitor re-arm in step 6). An idle session arc
+  // gets the former and never the latter, which is what keeps "never resurrect a
+  // deliberately-stopped hermit" true now that step 2 no longer exits on it.
+  //
+  // Step 3's dead-session restart needs no equivalent guard: its state whitelist
+  // (in_progress / waiting / suspect_process) already excludes 'idle'.
+  if (supervisionOnly) process.exit(0);
 
   // 4. Wedge detection (only when heartbeat is enabled + within active hours)
   const heartbeatCfg = config?.heartbeat ?? {};
