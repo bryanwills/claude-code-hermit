@@ -21,7 +21,7 @@
 The placement rule needs no migration step: the Knowledge Discipline addition rides the CLAUDE-APPEND block refresh in Step 6, which preserves operator edits to the block via its append/replace plan.
 
 ### Changed
-- The CLAUDE-APPEND auto-mode denial alert is now sanctioned egress even when the blocked call was itself a channel send, so a denied outbound reply no longer strands the alert in the terminal.
+- The CLAUDE-APPEND auto-mode denial alert no longer reads as a permission workaround when the blocked call was itself a channel send: the Sanctioned egress bullet now covers it, the send is bounded to one attempt with a Progress-Log/terminal fallback, and managed sessions defer to the `PermissionDenied` hook's existing channel alert instead of duplicating it.
 - `proposal-triage` and `reflection-judge` no longer suppress consolidation candidates as `covered-by-memory` — relocating a settled preference into its owning skill is distinct from re-proposing the preference.
 - `proposal-create`'s Do-NOT list routes style preferences to memory (OPERATOR.md is never a proposal destination) and admits relocation proposals; session-close's defect debrief points settled calibrations at the placement rule.
 - `/recall` now triggers on history questions it previously missed ("did we ever discuss X", "have we seen this error before", "yesterday I asked you to X"): the skill description explains why its search beats hand-grepping state files (channel-log coverage, relevance+recency ranking, bounded output), and the session-discipline block routes past-work questions to `/recall` instead of direct `.claude-code-hermit/` reads.
