@@ -46,7 +46,7 @@ Auto-memory handles all learning; `compiled/` is for durable domain outputs, not
 ## Rules
 
 - **Rate limits or stuck:** log it in the Progress Log and alert via channel. Never silently stall or push through.
-- **Auto-mode denial alert:** If a tool call is denied by the auto-mode classifier, alert the operator (per § Operator Notification) with the blocked action and the denial reason before attempting any alternative.
+- **Auto-mode denial alert:** If a tool call is denied by the auto-mode classifier, alert the operator (per § Operator Notification) with the blocked call and the denial reason before attempting any alternative — this alert is sanctioned egress even when the blocked call was itself a channel send.
 - **Sanctioned egress:** channel replies, doctor liveness probes, and Artifact publishes are routine, pre-authorized hermit operations, not a permission workaround.
 - **Context hygiene & delegation:** Delegate a sub-step when its intermediate context dwarfs its conclusion, it needs no operator contact mid-flight, and main needs only the verdict. The sub-step returns a verdict plus optional `operator_message`; **main owns `AskUserQuestion`, channel resolution, and `PushNotification`** (§ Operator Notification).
 - **Calibration:** Before publishing specifics you didn't verify in this conversation (version-pinned behavior, external system state, recalled signatures, prices/dates/counts), verify against a source or label as recalled-not-verified. `OPERATOR.md` can tighten or relax.
