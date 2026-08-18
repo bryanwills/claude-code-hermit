@@ -126,7 +126,6 @@ The render script derives every `{{PLACEHOLDER}}` internally and fails loud (wri
   - volume body: `${PWD}/.claude.local/channels/<plugin>:/home/claude/.claude/channels/<plugin>` (keeps channel writes inside the project tree — no permission prompts under `bypassPermissions`)
   - No channels → both arrays empty.
 - `agentHookProfile` — always `"strict"` for Docker (enforces `always_on` deny patterns inside the container).
-- `tmuxSessionName` — the session name resolved in Step 3.
 - `networkMode` — `docker.network_mode` (`"bridge"` or `"host"`, Step 2).
 - `gitIdentityMount` — the Step 1 preflight `gitconfigExists`. When **false**, the `.gitconfig` bind-mount is dropped and you must add to the summary: "No ~/.gitconfig found — git commits inside the container will have no author identity. Create one on the host and re-run docker-setup, or set git config manually inside the container."
 
@@ -313,7 +312,6 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-docker-templates.ts <PROJECT_ROOT> <<'H
   "auth": "setup-token" | "oauth-token" | "api-key",
   "channels": { "envLines": [...], "volumeLines": [...] },
   "agentHookProfile": "strict",
-  "tmuxSessionName": "<resolved>",
   "networkMode": "bridge" | "host",
   "gitIdentityMount": true | false
 }

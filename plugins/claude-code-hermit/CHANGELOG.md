@@ -10,6 +10,17 @@
 1. Read `.claude-code-hermit/config.json`. If `language` is unset or `en`, or `.claude-code-hermit/state/artifact-strings.json` does not exist, this hermit renders the dashboard in English by default — no change needed, stop here.
 2. Otherwise read `.claude-code-hermit/state/artifact-strings.json`. If it already has a `strings.session_on_watch` key, leave it alone.
 3. If it does not, translate the English phrase "On watch" into the configured `language`, keeping the meaning "alive and monitoring, no active work session" (the same tone as the file's existing `session_idle`/`session_waiting` translations), and add it as `strings.session_on_watch` in that file. Leave every other key and the file's shape untouched.
+- Stalled-dialog and session-wedged alerts reach you when the session is blocked. Both tiers sat behind a `session_state: 'idle'` exit, and `idle` is where a hermit rests between session arcs — so on most hermits neither detector ever ran, and a session blocked on any prompt stayed blocked indefinitely with no notification. `idle` now demotes the tick to supervision-only: the alert tiers run, while every tier that sends keystrokes or restarts stays suppressed, so a deliberately-stopped hermit is still never resurrected.
+- Queue-liveness wedge detection checks that tmux is alive, the condition it always documented. It previously relied on the idle exit above to never reach a stopped session, whose last transcript record is often an undrained `enqueue` that classifies as wedged forever.
+- The Docker healthcheck resolves `tmux_session_name` from `config.json` at check time instead of baking a copy at render time. The baked name was a second source of truth: renaming a project re-renders the compose file but leaves the name already written in `config.json`, so the check hunted a session that was never created and the container reported `unhealthy` indefinitely.
+
+### Upgrade Instructions
+
+Docker-mode hermits only — skip entirely if `docker-compose.hermit.yml` does not exist in the project root.
+
+1. The healthcheck fix lives in the compose file, which is generated per-install and is not refreshed by a plugin update. Re-render it with `/claude-code-hermit:docker-setup`, then apply it with `hermit-docker update`. Run them in that order: `update` rebuilds from the on-disk files, so rebuilding first would bake the stale healthcheck back in.
+2. If the operator declines the re-render, say that the container's health status stays advisory-only and may read `unhealthy` even while the hermit is working normally. Nothing consumes that verdict, so the hermit itself is unaffected.
+3. No action is needed for the watchdog fix — it ships in the plugin's own scripts.
 
 ## [1.2.41] - 2026-08-18
 

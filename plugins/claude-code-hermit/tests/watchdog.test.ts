@@ -461,8 +461,7 @@ describe('dead session with channel configured', () => {
 const PENDING_QUESTION_PANE =
   ' Which color do you prefer?\n\n❯ 1. Red\n  2. Green\n  3. Blue\n\nEnter to select · Esc to cancel';
 
-// Verbatim from the live capture of claude-code-paulinho-hermit on 2026-08-17, wedged
-// ~2.5 days by CC 2.1.233's first-run wizard. The selector is "❯ Continue" — no digit,
+// CC 2.1.233's first-run wizard, captured verbatim. The selector is "❯ Continue" — no digit,
 // which is precisely what the old numbered-option regex could not see.
 const AUTO_MODE_WIZARD_PANE = [
   '   Set up auto mode for your environment?',
@@ -789,6 +788,198 @@ test('stale dialog scrollback + stale heartbeat → normal nudge recovery contin
   expect(events).not.toContain('stall-question-detected');
   expect(events).toContain('nudge');
   expect(fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')).toContain('send-keys');
+}));
+
+// -------------------------------------------------------
+// 5b. Supervision on an idle session arc
+//
+// The contract under test is about the GATE, not about any one dialog: whatever holds
+// stdin — a permission prompt, an AskUserQuestion modal, a first-run wizard, a shape no
+// released Claude Code has shown yet — an idle session arc must still raise exactly one
+// alert. The tests below therefore cover a generic modal, a real captured wizard, and a
+// dialog the pane scanner deliberately does NOT recognise (caught by the queue-liveness
+// net instead). Nothing here keys off the wizard that exposed the bug.
+//
+// The failure this pins: both detectors return the correct verdict, but the step-2 shutdown
+// gate exited on `session_state: 'idle'` before either could run — so a blocked session
+// stayed blocked indefinitely with no alert.
+//
+// `idle` is not a stop signal: 'in_progress' is written only by the model-driven
+// /session-start open path, and session-close returns it to 'idle', so every hermit rests
+// there between arcs. Worse, the state is self-sealing — leaving `idle` needs the model to
+// take a turn, which is exactly what a blocking dialog prevents.
+//
+// Every pre-existing test above runs at setupHermit's hardcoded 'in_progress', which no
+// wedged hermit is ever in. That is why this shipped green. These tests pin the real state.
+// -------------------------------------------------------
+
+/** A wizard step whose pointer rests on a CHECKBOX row while "Continue" sits unmarked below
+ *  it — unlike AUTO_MODE_WIZARD_PANE, where the pointer is on "❯ Continue" itself. The
+ *  detector must match a pointer on any row, not only on the confirming one. */
+const CHECKBOX_ROW_WIZARD_PANE = [
+  '  Ran 1 shell command',
+  '▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔',
+  '   Set up auto mode for your environment?',
+  '',
+  '   Claude Code reads this project, your recent Claude sessions, and',
+  '   optionally your shell history and other repositories.',
+  '',
+  '     How you use Claude here    ◀ Mixed ▶',
+  '   ❯ Also scan shell history    [✔]',
+  '     Also scan your other repos [ ]',
+  '',
+  '     Continue',
+  '',
+  '   ←/→ to change usage · Enter to continue · Esc to cancel',
+].join('\n');
+
+test('wizard pane with the pointer on a checkbox row matches', () => {
+  expect(hasPendingQuestion(CHECKBOX_ROW_WIZARD_PANE)).toBe(true);
+});
+
+test('idle arc + pending dialog → stall-question-detected and one push', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeFakeTmux(h, 0, CHECKBOX_ROW_WIZARD_PANE);
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('stall-question-detected');
+    expect(stub.requests.length).toBe(1);
+  } finally { stub.stop(); }
+}));
+
+// Not wizard-specific: a plain AskUserQuestion/permission-shaped modal on an idle arc
+// must alert identically. The gate never inspected the dialog, and neither does the fix.
+test('idle arc + generic modal (not the wizard) → stall-question-detected and one push', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeFakeTmux(h, 0, PENDING_QUESTION_PANE);
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('stall-question-detected');
+    expect(stub.requests.length).toBe(1);
+  } finally { stub.stop(); }
+}));
+
+// The generic net, and the reason 3c exists at all: a blocker the pane scanner cannot
+// recognise (no pointer glyph, no dialog footer) still gets caught, because a blocked
+// session stops draining its notification queue whatever is holding stdin. This is the
+// case that must keep working for dialog shapes no released Claude Code has shipped yet.
+test('idle arc + UNRECOGNISED blocker shape → still alerts via queue liveness', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  const novelBlocker = 'Some future modal\n\n  [ Accept ]   [ Decline ]\n\npress a key';
+  expect(hasPendingQuestion(novelBlocker)).toBe(false);   // 3b is blind to it, by design
+  writeFakeTmux(h, 0, novelBlocker);
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    const env = seedTranscript(h, 'sess-novel', [
+      queueRec('dequeue', isoAgoSeconds(9)),
+      queueRec('enqueue', isoAgoSeconds(8)),
+    ]);
+    const r = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('session-wedged');
+    expect(stub.requests.length).toBe(1);
+  } finally { stub.stop(); }
+}));
+
+test('idle arc + stale enqueue tail → session-wedged and one push', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeFakeTmux(h, 0, 'ordinary pane output\nno dialog here');
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    // The captured production shape: a drain that stopped, then enqueues that never drained.
+    const env = seedTranscript(h, 'sess-idle-wedged', [
+      queueRec('dequeue', isoAgoSeconds(14)),
+      queueRec('enqueue', isoAgoSeconds(13)),
+      queueRec('enqueue', isoAgoSeconds(1.3)),
+    ]);
+    const r = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('session-wedged');
+    expect(stub.requests.length).toBe(1);
+  } finally { stub.stop(); }
+}));
+
+test('idle arc + clean pane + draining queue → still no events', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    const env = seedTranscript(h, 'sess-idle-ok', [
+      queueRec('enqueue', isoAgoSeconds(2)),
+      queueRec('dequeue', isoAgoSeconds(1.9)),
+    ]);
+    const r = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('session-wedged');
+    expect(events).not.toContain('stall-question-detected');
+    expect(stub.requests.length).toBe(0);
+  } finally { stub.stop(); }
+}));
+
+// The guard 3c's own contract always claimed ("while tmux is alive") but never implemented
+// — it relied on the idle gate that no longer exits here. Without it, a deliberately-stopped
+// hermit whose last transcript record happens to be an enqueue would alert forever.
+test('idle arc + DEAD tmux + stale enqueue tail → no wedge event', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeFakeTmux(h, 1, 'irrelevant');   // 1 = session gone
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    const env = seedTranscript(h, 'sess-stopped', [
+      queueRec('enqueue', isoAgoSeconds(30)),
+    ]);
+    const r = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('session-wedged');
+    expect(stub.requests.length).toBe(0);
+  } finally { stub.stop(); }
+}));
+
+// The other half of the contract: reaching the alert tiers must NOT hand an idle arc back
+// to the keystroke tiers. "Never resurrect a deliberately-stopped hermit" still holds.
+test('idle arc + stale heartbeat + monitor down → no nudge, no restart, no keystrokes', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeFakeTmux(h, 0, 'ordinary pane output');
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('nudge');
+    expect(events).not.toContain('restart');
+    const tmuxCalls = fs.existsSync(path.join(h.dir, 'tmux-calls.log'))
+      ? fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')
+      : '';
+    expect(tmuxCalls).not.toContain('send-keys');
+    expect(tmuxCalls).not.toContain('kill-session');
+  } finally { stub.stop(); }
 }));
 
 // -------------------------------------------------------

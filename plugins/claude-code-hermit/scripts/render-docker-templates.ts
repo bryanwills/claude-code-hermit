@@ -21,7 +21,6 @@
  *         "volumeLines": ["${PWD}/.claude.local/channels/discord:/home/claude/.claude/channels/discord", ...]
  *       },
  *       "agentHookProfile": "strict",
- *       "tmuxSessionName": "hermit-myproject",
  *       "networkMode": "bridge" | "host",
  *       "gitIdentityMount": true
  *     }
@@ -57,7 +56,6 @@ interface Inputs {
   auth: 'setup-token' | 'oauth-token' | 'api-key';
   channels?: Channels;
   agentHookProfile: string;
-  tmuxSessionName: string;
   networkMode: 'bridge' | 'host';
   gitIdentityMount: boolean;
 }
@@ -121,7 +119,6 @@ export function render(inputs: Inputs): { dockerfile: string; compose: string } 
     CHANNEL_ENV_LINES: indentedLines(envLines),
     CHANNEL_VOLUME_LINES: indentedLines(volumeLines),
     AGENT_HOOK_PROFILE: inputs.agentHookProfile,
-    TMUX_SESSION_NAME: inputs.tmuxSessionName,
     NETWORK_MODE_LINE: networkModeLine,
   });
 
