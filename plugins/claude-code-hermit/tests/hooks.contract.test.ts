@@ -1582,6 +1582,23 @@ describe('channel-reply-reminder', () => {
     expect(unconsolidated(hermit(dir)).rows.length).toBe(1);
   }));
 
+  test('channel-reply-reminder (capture: allowed_users holds platform ids, envelope carries user_id -> logged, sender keeps the display name)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
+    await run('<channel source="discord" chat_id="123" message_id="M1" user="display-name" user_id="ALLOWED_ID" ts="2024-01-01T00:00:00.000Z">yep</channel>', dir);
+    const rows = unconsolidated(hermit(dir)).rows;
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({
+      source: 'discord', chat_id: '123', direction: 'in', sender: 'display-name', message_id: 'M1',
+      text: 'yep', ts: '2024-01-01T00:00:00.000Z',
+    });
+  }));
+
+  test('channel-reply-reminder (capture: display name mimics an allowlisted id, user_id does not match -> no log)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":["ALLOWED_ID"]}}}');
+    await run('<channel source="discord" chat_id="123" user="ALLOWED_ID" user_id="INTRUDER">nope</channel>', dir);
+    expect(unconsolidated(hermit(dir)).rows.length).toBe(0);
+  }));
+
   test('channel-reply-reminder (capture: allowed_users=[] lockdown -> never logged, even with a user id)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), '{"channels":{"discord":{"allowed_users":[]}}}');
     await run('<channel source="discord" chat_id="123" user="ANYONE">no</channel>', dir);

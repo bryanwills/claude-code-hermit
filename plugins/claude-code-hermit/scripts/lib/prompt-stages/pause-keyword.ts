@@ -15,6 +15,7 @@
 // by an unauthorized prompt.
 
 import { safeForLLM } from '../sanitize';
+import { senderLabel } from '../channel-envelope';
 import { setPause, clearPause, parseSnoozeDuration } from '../pause';
 import { isTrustedController } from '../channel-auth';
 import type { StageContext, StageResult } from './types';
@@ -52,7 +53,7 @@ export function run(ctx: StageContext): StageResult | void {
   // channel trusts only the operator's DM (chat_id === dm_channel_id), not accept-all.
   if (!isTrustedController(config, sourceRaw, userId, env.chatId)) return; // unauthorized — silent no-op
 
-  const by = safeForLLM((userId ?? sourceRaw ?? 'channel').slice(0, MAX_BY_LEN));
+  const by = safeForLLM(senderLabel(env).slice(0, MAX_BY_LEN));
 
   if (action === 'pause') {
     setPause(dir, { reason: 'operator', by });

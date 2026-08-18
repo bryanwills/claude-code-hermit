@@ -28,6 +28,10 @@ function channelEntry(config: Json, source: string): Json {
  * (backwards compatible); [] → lockdown; otherwise the sender's user id must
  * be present in the list. Callers that can't respond to the operator on
  * failure (hooks) can only choose not to act — never throw or block.
+ *
+ * `userId` arrives canonicalized by parseChannelEnvelope (the envelope's
+ * `user_id` when present, else `user`) — this gate never sees the display name
+ * separately, so an allowlist can only ever be matched against the platform id.
  */
 export function isAllowedSender(config: Json, source: string, userId: string | null): boolean {
   const allowedUsers = channelEntry(config, source)?.allowed_users;
