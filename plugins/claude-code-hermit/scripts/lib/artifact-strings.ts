@@ -41,6 +41,9 @@ export const DEFAULT_STRINGS = {
   session_waiting: 'Waiting on you',
   session_dead_process: 'Process died',
   session_suspect_process: 'Process suspect',
+  // Not a stored enum: a derived presence verdict shown instead of "Idle" when
+  // session_state is idle but a shared liveness signal is still fresh.
+  session_on_watch: 'On watch',
 
   // Budget-alert synthesis (message-less budget alerts)
   budget_text: '{period} budget {state}{amounts}',

@@ -118,6 +118,7 @@ body { margin: 0; background: var(--bg); color: var(--fg); }
 .stat-value.tone-acc { color: var(--accent); }
 .stat-value.tone-warn { color: var(--warn); }
 .stat-value.tone-crit { color: var(--crit); }
+.stat-value.tone-good { color: var(--good); }
 .muted { color: var(--muted); font-size: 13.5px; }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .chip-proposed { background: var(--chip-warn-bg); color: var(--chip-warn-fg); }
@@ -190,7 +191,7 @@ export function card(heading: string, body: string): string {
 }
 
 /** One stat tile inside a `.stat-row` grid. */
-export function statTile(label: string, value: string, tone?: 'acc' | 'warn' | 'crit'): string {
+export function statTile(label: string, value: string, tone?: 'acc' | 'warn' | 'crit' | 'good'): string {
   const cls = tone ? ` tone-${tone}` : '';
   return `<div class="stat"><span class="stat-label">${label}</span><span class="stat-value${cls}">${value}</span></div>`;
 }

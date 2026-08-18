@@ -38,6 +38,15 @@ function writeTodayCost(hermitDir: string, cost: number, tokens: number): void {
   writeJson(hermitDir, 'state/cost-index.json', { version: 3, by_date: { [TODAY_UTC]: { cost, tokens, session_ids: [] } } });
 }
 
+// A shared-liveness signal is just a fresh mtime on one of liveness.ts's watched
+// files; `state/.heartbeat` is the simplest of the set. ageSecs backdates it.
+function writeLivenessFile(hermitDir: string, ageSecs: number): void {
+  const file = path.join(hermitDir, 'state', '.heartbeat');
+  fs.writeFileSync(file, '');
+  const stamp = new Date(Date.now() - ageSecs * 1000);
+  fs.utimesSync(file, stamp, stamp);
+}
+
 function writeProposal(hermitDir: string, file: string, fm: Record<string, string>, body: string): void {
   const yaml = Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n');
   fs.writeFileSync(path.join(hermitDir, 'proposals', file), `---\n${yaml}\n---\n${body}\n`);
@@ -129,6 +138,7 @@ describe('loadDashboardState', () => {
     const state = loadDashboardState(hermitDir);
     expect(state.agentName).toBe('Hermit');
     expect(state.sessionState).toBeNull();
+    expect(state.aliveNow).toBe(false); // no liveness files -> unknown, never "alive"
     expect(state.todayCostUsd).toBe(0);
     expect(state.todayTokens).toBe(0);
     expect(state.alerts).toEqual([]);
@@ -153,6 +163,18 @@ describe('loadDashboardState', () => {
     expect(state.todayTokens).toBe(125000);
     expect(state.alerts).toHaveLength(1);
     expect(state.alerts[0].message).toBe('Daily budget at 92%');
+  }));
+
+  test('aliveNow is true when a shared liveness file is fresh', withHermitDir((hermitDir) => {
+    writeLivenessFile(hermitDir, 30); // 30s old, well under the 600s threshold
+    const state = loadDashboardState(hermitDir);
+    expect(state.aliveNow).toBe(true);
+  }));
+
+  test('aliveNow is false when the shared liveness file is stale', withHermitDir((hermitDir) => {
+    writeLivenessFile(hermitDir, 900); // past the 600s freshness threshold
+    const state = loadDashboardState(hermitDir);
+    expect(state.aliveNow).toBe(false); // stale proves nothing, never "alive"
   }));
 
   test('skips suppressed alerts and reads a readable message for message-less budget alerts', withHermitDir((hermitDir) => {
@@ -354,6 +376,28 @@ describe('loadDashboardState', () => {
 // ---------- renderDashboard ----------
 
 describe('renderDashboard', () => {
+  test('idle + fresh liveness renders "On watch", not "Idle"', withHermitDir((hermitDir) => {
+    writeLivenessFile(hermitDir, 30);
+    const { html } = renderDashboard(loadDashboardState(hermitDir));
+    expect(html).toContain('On watch');
+    expect(html).not.toContain('>Idle<');
+  }));
+
+  test('idle + stale liveness still renders "Idle" (stale proves nothing)', withHermitDir((hermitDir) => {
+    writeLivenessFile(hermitDir, 900);
+    const { html } = renderDashboard(loadDashboardState(hermitDir));
+    expect(html).toContain('>Idle<');
+    expect(html).not.toContain('On watch');
+  }));
+
+  test('in_progress + fresh liveness still renders "Working", not "On watch"', withHermitDir((hermitDir) => {
+    writeJson(hermitDir, 'state/runtime.json', { session_state: 'in_progress' });
+    writeLivenessFile(hermitDir, 30);
+    const { html } = renderDashboard(loadDashboardState(hermitDir));
+    expect(html).toContain('Working');
+    expect(html).not.toContain('On watch');
+  }));
+
   test('is a self-contained fragment with no doctype/html/head/body wrapper', withHermitDir((hermitDir) => {
     const state = loadDashboardState(hermitDir);
     const { html } = renderDashboard(state, { now: '2026-07-05T09:00:00Z' });

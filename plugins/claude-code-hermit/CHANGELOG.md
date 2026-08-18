@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The dashboard session tile no longer shows "Idle" for an alive hermit between sessions — a fresh shared-liveness signal now renders it as "On watch".
+
+### Upgrade Instructions
+
+1. Read `.claude-code-hermit/config.json`. If `language` is unset or `en`, or `.claude-code-hermit/state/artifact-strings.json` does not exist, this hermit renders the dashboard in English by default — no change needed, stop here.
+2. Otherwise read `.claude-code-hermit/state/artifact-strings.json`. If it already has a `strings.session_on_watch` key, leave it alone.
+3. If it does not, translate the English phrase "On watch" into the configured `language`, keeping the meaning "alive and monitoring, no active work session" (the same tone as the file's existing `session_idle`/`session_waiting` translations), and add it as `strings.session_on_watch` in that file. Leave every other key and the file's shape untouched.
+
 ## [1.2.41] - 2026-08-18
 
 ### Added
