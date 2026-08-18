@@ -46,6 +46,11 @@ describe('channel-reply-reminder', () => {
     expect(r.stdout).toContain('your own account on this channel');
   }, withBotId()));
 
+  test('id embedded in a longer number — not a self-mention', withDir(async (dir) => {
+    const r = await run(`<channel source="discord" chat_id="1" user="U1">order 5${SELF_ID}7 shipped</channel>`, dir);
+    expect(r.stdout).not.toContain('your own account on this channel');
+  }, withBotId()));
+
   test('configured but not mentioned — reminder is unchanged', withDir(async (dir) => {
     const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
     expect(r.stdout).not.toContain('your own account on this channel');

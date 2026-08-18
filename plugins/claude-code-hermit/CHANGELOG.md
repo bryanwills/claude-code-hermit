@@ -7,7 +7,7 @@
 - New `skill-preference` / `skill-preference-applied` observation sources record pending and applied settlements; pending rows graduate through reflect into placement proposals, with plugin-owned or missing owners routed to override-skill or new-skill candidates.
 - Reflect's eval runner sweeps MEMORY.md for settled endpoints whose content never reached an owning skill (`settled-memory` evidence class — recurrence-skipping, quote-verified by `reflection-judge`).
 - Channel setup records the bot's own platform id (`channels.<name>.bot_user_id`, plus `bot_username` where the platform has one) via `scripts/channel-bot-id.ts`, so a mention-gated hermit reads `<@its-own-id>` as addressed to itself instead of as third-party traffic. The reply reminder names the identity only on messages that actually carry it.
-- `hermit-doctor`'s channel-liveness check warns when the stored bot identity no longer matches the token's bot, using the probe response it already makes.
+- `hermit-doctor`'s channel-liveness check warns when the stored bot identity no longer matches the token's bot — a swapped token or a renamed bot — using the probe response it already makes.
 
 ### Fixed
 - Channel `allowed_users` matches the envelope's `user_id` (platform id) instead of `user` (display name). Id-based allowlists, the documented setup, rejected every message, so inbound capture, `pause`/`stop`/`resume`/`snooze`, harness commands, and `status` were silent no-ops. Channels that send only `user` are unaffected.

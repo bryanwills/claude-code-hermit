@@ -1806,7 +1806,7 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
     const results = await Promise.all(enabled.map(async (name): Promise<{ note: string; severity: 'warn' | 'fail' | null }> => {
       const buildProbe = CHANNEL_PROBES[name];
       if (!buildProbe) {
-        return { note: `${name}: unknown platform, not probed`, severity: null };
+        return { note: `${name}: no liveness probe for this platform — not checked`, severity: null };
       }
       const token = readChannelToken(hermitDir, name, channels[name]);
       if (!token) {
@@ -1822,11 +1822,23 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
           // different bot — the stored id would label mentions of a
           // decommissioned account as "you".
           const stored = channels[name]?.bot_user_id;
-          if (stored != null) {
-            const live = extractBotIdentity(name, await resp.json().catch(() => null)).id;
-            if (live && String(stored) !== live) {
+          const storedName = channels[name]?.bot_username;
+          if (stored != null || storedName != null) {
+            const live = extractBotIdentity(name, await resp.json().catch(() => null));
+            if (stored != null && live.id && String(stored) !== live.id) {
               return {
                 note: `${name}: reachable, but stored bot identity is stale (token belongs to a different bot) — re-run /channel-setup`,
+                severity: 'warn',
+              };
+            }
+            // The handle is mutable while the id is not (a Telegram bot can be
+            // renamed in BotFather), and Telegram mentions carry only the
+            // handle — a stale one silently stops matching self-mentions, and
+            // can start matching whoever claimed the freed name.
+            if (storedName != null && live.username &&
+                String(storedName).toLowerCase() !== live.username.toLowerCase()) {
+              return {
+                note: `${name}: reachable, but stored bot_username is stale (the bot was renamed) — re-run /channel-setup`,
                 severity: 'warn',
               };
             }

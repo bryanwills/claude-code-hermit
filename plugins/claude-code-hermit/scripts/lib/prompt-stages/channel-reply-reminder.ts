@@ -11,6 +11,7 @@
 import { safeForLLM } from '../sanitize';
 import { logMessage, isLoggingEnabled } from '../channel-log';
 import { isAllowedSender, channelEntry } from '../channel-auth';
+import { escapeRegExp } from '../md-write';
 import type { ChannelEnvelope, StageContext, StageResult } from './types';
 
 // Known channel sources → exact MCP reply tool name.
@@ -42,7 +43,11 @@ function selfMentionClause(ctx: StageContext, envelope: ChannelEnvelope): string
   const username = typeof entry?.bot_username === 'string' ? entry.bot_username : null;
 
   let matched: string | null = null;
-  if (id && envelope.body.includes(id)) matched = id;
+  // Digit-delimited, not a bare substring: a platform id is a long digit run, so
+  // an unanchored `includes` also fires on any longer number that happens to
+  // contain it (a 13-digit epoch ms, an order number), which would tell the
+  // model a third party's message is addressed to it.
+  if (id && new RegExp(`(?<!\\d)${escapeRegExp(id)}(?!\\d)`).test(envelope.body)) matched = id;
   else if (username && envelope.body.toLowerCase().includes(`@${username.toLowerCase()}`)) {
     matched = `@${username}`;
   }

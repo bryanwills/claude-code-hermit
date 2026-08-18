@@ -28,7 +28,9 @@ import { emit } from './lib/cli';
 const TIMEOUT_MS = Number(process.env.HERMIT_DOCTOR_LIVENESS_TIMEOUT_MS) || 5000;
 
 async function main(): Promise<void> {
-  const [hermitDirArg, channel] = process.argv.slice(2);
+  // Positionals only — a `--write` written before them (the natural flag order)
+  // must not be read as the hermit dir.
+  const [hermitDirArg, channel] = process.argv.slice(2).filter(a => !a.startsWith('--'));
   const write = process.argv.includes('--write');
   if (!hermitDirArg || !channel) emit('SKIP usage: channel-bot-id.ts <hermit-dir> <channel> [--write]');
 
@@ -38,7 +40,10 @@ async function main(): Promise<void> {
   if (!entry || typeof entry !== 'object') emit(`SKIP ${channel}: no channel entry in config.json`);
 
   const buildProbe = CHANNEL_PROBES[channel];
-  if (!buildProbe) emit(`SKIP ${channel}: unknown platform, identity not probed`);
+  // Not an error: iMessage has no bot account to ask about, and a third-party
+  // channel has no probe here. Both still work — the reminder matches whatever
+  // the entry carries, so the operator can set the keys by hand.
+  if (!buildProbe) emit(`SKIP ${channel}: no identity probe for this platform — set bot_user_id manually if its mentions need recognizing`);
 
   const token = readChannelToken(hermitDir, channel, entry);
   if (!token) emit(`SKIP ${channel}: no token configured — run /channel-setup`);
@@ -71,8 +76,15 @@ async function main(): Promise<void> {
     // file unparseable for every later run.
     const configPath = path.join(hermitDir, 'config.json');
     const tmp = configPath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', 'utf8');
-    fs.renameSync(tmp, configPath);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', 'utf8');
+      fs.renameSync(tmp, configPath);
+    } catch (e: any) {
+      // Same cleanup the sibling writers do: a failed write must not leave a
+      // half-written config.json.tmp behind in the state dir.
+      try { fs.unlinkSync(tmp); } catch {}
+      emit(`SKIP ${channel}: config write failed (${e?.code || e?.message || 'error'})`);
+    }
     written = ' written';
   }
 

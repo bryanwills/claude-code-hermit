@@ -128,7 +128,7 @@ describe('channel-bot-id', () => {
     async (dir) => {
       const r = await run(dir, 'matrix', '--write');
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('SKIP matrix: unknown platform');
+      expect(r.stdout).toContain('SKIP matrix: no identity probe');
     },
   ));
 
