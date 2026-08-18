@@ -22,7 +22,7 @@ You are a proposal gate. You receive one or more candidate proposals (each: titl
 The caller passes one or more candidate blocks, separated by a blank line:
 ```
 Title: <title>
-Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request | capability-brainstorm
+Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request | capability-brainstorm | settled-memory
 Evidence Origin: own-work | external-content
 Evidence: <one-paragraph evidence summary>
 ```
@@ -66,6 +66,8 @@ Read the operator's `MEMORY.md` (the operator-facing index of `- [title](file) �
 - Emit `memory_ref: <filename>` as metadata so the operator can locate and revise the source if it has gone stale.
 - Stop evaluating this candidate. Continue with any remaining candidates in the batch.
 
+**Consolidation exception:** a candidate proposing to *relocate* operator-endpoint content — a settled procedure, format, or quality bar moving from memory or duplicated prose into the skill that owns the task — is not covered by the memory that records it: the memory records the decision; the candidate targets where the operative content lives. Do not suppress it as `covered-by-memory`; continue to Step 2. A candidate whose evidence cites no explicit operator endpoint, or that removes no duplicate or misplaced copy, does not receive this exception — apply the normal Step 1.5 test.
+
 ## Step 2 — Session cross-reference
 
 Glob `.claude-code-hermit/sessions/S-*-REPORT.md`. Sort descending by filename. Read the 3 most recent. Scan for discussion of the candidate's title or problem keywords. If a session contains a relevant decision, deferral, or counter-evidence, capture the session id and a one-line excerpt for the `prior_discussion` metadata field. If nothing relevant, omit.
@@ -88,6 +90,7 @@ Only if no duplicate found and no memory match, check applicable conditions:
      - `operator-request`: human-initiated; recurrence is not required.
      - `current-session`: recurrence was validated upstream by `reflection-judge`; do not re-check here.
      - `capability-brainstorm`: the brainstorm pass establishes the candidate; cross-session recurrence is not required.
+     - `settled-memory`: the operator's recorded endpoint declaration is the pattern, quote-verified upstream by `reflection-judge`; recurrence is not required.
    - **Required for `archived-session`** (or absent field): a single incident does not qualify.
    - **Artifact-cited `state/observations.jsonl` candidates**: any judge-verified candidate whose `Artifact:` line cites `state/observations.jsonl` satisfies condition 1 — the ledger graduation is the recurrence evidence; `reflection-judge` verified the ledger entries; do not re-check here.
    - **Artifact-cited efficiency/cost-class candidates**: evidence citing a machine-written state file with the measured values (e.g. `cost-log.jsonl`, `proposal-metrics.jsonl`) counts as concrete recurrence — `reflection-judge` verified the file; do not re-check here.

@@ -1407,6 +1407,17 @@ describe('observations.ts observe', () => {
     expect(fs.existsSync(ledgerOf(dir))).toBe(false);
   }));
 
+  test('observations (skill-preference sources accepted: pending and applied)', withDir(async (dir) => {
+    for (const source of ['skill-preference', 'skill-preference-applied']) {
+      const r = await observe(hermit(dir), source, 'skill-preference:email-draft', '--origin=own-work');
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe('OK');
+    }
+    const lines = fs.readFileSync(ledgerOf(dir), 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.source)).toEqual(['skill-preference', 'skill-preference-applied']);
+    expect(lines.every((l) => l.pattern === 'skill-preference:email-draft')).toBe(true);
+  }));
+
   test('observations (invalid origin value rejected)', withDir(async (dir) => {
     const r = await observe(hermit(dir), 'skill-correction', 'skill-correction:reflect', '--origin=elsewhere');
     expect(r.stdout.trim()).toBe('ERROR|invalid-origin:elsewhere');
