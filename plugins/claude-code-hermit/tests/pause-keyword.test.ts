@@ -194,4 +194,35 @@ describe('pause-keyword', () => {
       expect(isPaused(hermit(dir)).paused).toBe(true);
     }));
   });
+
+  // Discord's wire envelope carries the display name in `user` and the numeric
+  // platform id in `user_id`. allowed_users holds ids, so matching `user` made
+  // every control keyword a silent no-op on allowlist-configured hermits.
+  describe('user_id identity attribute', () => {
+    const ID = '123456789012345678';
+    const idConfig = `{"channels":{"discord":{"allowed_users":["${ID}"]}}}`;
+
+    test('id-based allowlist, real wire shape — pauses, attributed to the display name', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), idConfig);
+      const r = await run(
+        `<channel source="plugin:discord:discord" chat_id="1" user="display-name" user_id="${ID}">pause</channel>`,
+        dir,
+      );
+      expect(r.exitCode).toBe(0);
+      const status = isPaused(hermit(dir));
+      expect(status.paused).toBe(true);
+      expect(status.by).toBe('display-name');
+    }));
+
+    test('display name mimicking an allowlisted id — silent no-op', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), idConfig);
+      const r = await run(
+        `<channel source="plugin:discord:discord" chat_id="1" user="${ID}" user_id="EVIL">pause</channel>`,
+        dir,
+      );
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[pause]');
+      expect(isPaused(hermit(dir)).paused).toBe(false);
+    }));
+  });
 });

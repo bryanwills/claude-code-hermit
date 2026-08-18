@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Inbound channel auth reads the envelope's `user_id` (platform id) instead of `user` (display name) — allowlists built from ids, the documented setup, rejected everything, so inbound messages were never captured to the channel log and `pause`/`stop`/`resume`/`snooze`, harness commands, and `status` were silent no-ops. Channels that send only `user` are unaffected.
+- `user_id` wins over `user` when both are present, since `user` is an attacker-chosen display name that could mimic an allowlisted id. Operators whose `allowed_users` holds a display name must switch it to the platform id.
+- `lib/prompt-stages/types.ts` re-exports `ChannelEnvelope` instead of redeclaring a structurally-identical copy, which had silently drifted from the parser.
+
 ## [1.2.40] - 2026-08-17
 
 ### Added

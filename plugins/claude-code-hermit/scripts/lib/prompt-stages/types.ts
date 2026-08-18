@@ -5,15 +5,11 @@
 // let user-prompt-pipeline.ts decide — which is what makes the "a block emits
 // JSON alone" rule enforceable in one place instead of seven.
 
-export interface ChannelEnvelope {
-  source: string;
-  sourceKey: string;
-  chatId: string;
-  userId: string | null;
-  messageId?: string | null;
-  body: string;
-  ts?: string | null;
-}
+// Re-exported, never redeclared: parseChannelEnvelope is the only producer, and
+// a structurally-compatible copy here silently drifts from it (a field added to
+// the parser stayed invisible to every stage until a typecheck caught it).
+import type { ChannelEnvelope } from '../channel-envelope';
+export type { ChannelEnvelope };
 
 export interface StageContext {
   /** Resolved hermit state dir — computed once for the whole pipeline. */

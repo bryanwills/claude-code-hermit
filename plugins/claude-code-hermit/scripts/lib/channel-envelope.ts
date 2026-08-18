@@ -15,7 +15,16 @@ export interface ChannelEnvelope {
   /** `source` normalized to the config-key form — see normalizeChannelSource(). */
   sourceKey: string;
   chatId: string;
+  /**
+   * Canonical sender identity for auth gates — the `user_id` attribute when the
+   * wire carries one, else `user`. Never match `user` when `user_id` is present:
+   * `user` is an attacker-chosen display name (a Discord username can be all
+   * digits), so accepting either would let a stranger impersonate an
+   * allowlisted numeric id.
+   */
   userId: string | null;
+  /** Raw `user` attribute — human-readable display name, never an auth input. */
+  userName: string | null;
   messageId: string | null;
   ts: string | null;
   body: string;
@@ -61,6 +70,7 @@ export function parseChannelEnvelope(prompt: string): ChannelEnvelope | null {
 
   const sourceMatch = attrs.match(/\bsource="([^"]*)"/);
   const userMatch = attrs.match(/\buser="([^"]*)"/);
+  const userIdMatch = attrs.match(/\buser_id="([^"]*)"/);
   const messageIdMatch = attrs.match(/\bmessage_id="([^"]*)"/);
   const tsMatch = attrs.match(/\bts="([^"]*)"/);
 
@@ -74,9 +84,19 @@ export function parseChannelEnvelope(prompt: string): ChannelEnvelope | null {
     source,
     sourceKey: normalizeChannelSource(source),
     chatId: chatIdMatch[1],
-    userId: userMatch ? userMatch[1] : null,
+    userId: userIdMatch?.[1] ?? userMatch?.[1] ?? null,
+    userName: userMatch ? userMatch[1] : null,
     messageId: messageIdMatch ? messageIdMatch[1] : null,
     ts: tsMatch ? tsMatch[1] : null,
     body: body.trim(),
   };
+}
+
+/**
+ * Best-effort human-readable sender label for display/logging — display name,
+ * else the raw id, else the channel source, else 'channel'. Never an auth
+ * input (see `userId` above); callers apply their own sanitize/length-clamp.
+ */
+export function senderLabel(env: ChannelEnvelope): string {
+  return env.userName ?? env.userId ?? env.source ?? 'channel';
 }

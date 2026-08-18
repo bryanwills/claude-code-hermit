@@ -22,6 +22,7 @@
 // no marker, no stdout, so the mechanism can't be probed by an unauthorized prompt.
 
 import { safeForLLM } from '../sanitize';
+import { senderLabel } from '../channel-envelope';
 import { isTrustedController } from '../channel-auth';
 import { parseHarnessCommand, writePendingCommand, renderCommand } from '../harness-command';
 import type { StageContext, StageResult } from './types';
@@ -45,7 +46,7 @@ export function run(ctx: StageContext): StageResult | void {
   const runtime = ctx.runtime();
   if (!runtime || runtime.runtime_mode === 'interactive' || !runtime.tmux_session) return;
 
-  const by = safeForLLM((env.userId ?? env.source ?? 'channel').slice(0, 64));
+  const by = safeForLLM(senderLabel(env).slice(0, 64));
   const ok = writePendingCommand(dir, {
     command: parsed.command,
     arg: parsed.arg,
