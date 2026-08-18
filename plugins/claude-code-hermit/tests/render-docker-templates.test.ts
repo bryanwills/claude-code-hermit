@@ -60,7 +60,11 @@ describe('render-docker-templates.ts', () => {
   test('healthcheck carries no assumption that the name starts with hermit-', async () => {
     const dir = freshDir();
     await render(dir);
-    const line = compose(dir).split('\n').find((l) => l.includes('has-session')) ?? '';
+    // Anchor on the `test:` key, not on a substring of the command — a nearby COMMENT
+    // mentioning the same token would otherwise be picked up instead, and every assertion
+    // below would pass vacuously against prose.
+    const line = compose(dir).split('\n').find((l) => l.trim().startsWith('test:')) ?? '';
+    expect(line).toContain('has-session');
     // The only permitted occurrence of the default is jq's fallback for an absent key.
     const hermitLiterals = (line.match(/hermit-\{project_name\}|hermit-[a-z]/g) ?? []);
     expect(hermitLiterals).toEqual(['hermit-{project_name}']);

@@ -1489,14 +1489,22 @@ async function main(): Promise<void> {
   // auto-answering a decision that is always the operator's to make.
   if (pendingQuestion) process.exit(0);
 
-  // Supervision-only boundary. Everything above this line observes and notifies; everything
-  // below sends keystrokes into the pane (steps 4 and 5) or restarts the session (the
-  // pane-frozen path inside step 4, and the monitor re-arm in step 6). An idle session arc
-  // gets the former and never the latter, which is what keeps "never resurrect a
-  // deliberately-stopped hermit" true now that step 2 no longer exits on it.
+  // Supervision-only boundary. Everything below this line sends keystrokes into the pane
+  // (steps 4 and 5) or restarts the session (the pane-frozen path inside step 4, and the
+  // monitor re-arm in step 6) on the watchdog's own initiative. An idle session arc gets
+  // the observe/notify tiers above and never these, which is what keeps "never resurrect a
+  // deliberately-stopped hermit" true now that step 2 no longer exits on it — and a
+  // deliberately-stopped hermit is not merely 'idle' anyway: hermit-stop always stamps
+  // shutdown_completed_at, which step 2 still hard-exits on.
   //
   // Step 3's dead-session restart needs no equivalent guard: its state whitelist
   // (in_progress / waiting / suspect_process) already excludes 'idle'.
+  //
+  // Step 3a is the one tier above this line that can eventually reach a restart: the
+  // re-auth relay's `finish` verb calls requestRestart() once the operator has completed
+  // the browser sign-in. That is deliberate — an expired setup-token strands a RESTING
+  // hermit just as hard as a working one, and the restart only happens after the operator
+  // acts on the relay's message, so it is operator-initiated, not watchdog-initiated.
   if (supervisionOnly) process.exit(0);
 
   // 4. Wedge detection (only when heartbeat is enabled + within active hours)
