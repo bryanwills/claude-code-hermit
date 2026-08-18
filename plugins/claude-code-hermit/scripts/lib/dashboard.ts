@@ -20,6 +20,7 @@ import { todayYMD } from './time';
 import { readSettledConfig } from './config-read';
 import { costIndexPath, readCostIndex } from './cost-log';
 import { rebuildIndex, type ProposalsIndex } from './proposals/index-rebuild';
+import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './liveness';
 import { loadStrings, fmt, type ArtifactStrings } from './artifact-strings';
 import { chipHtml, card, statTile, railRow, pageShell, META_SEP } from './artifact-theme';
 
@@ -79,6 +80,7 @@ export interface CompiledDocRow {
 export interface DashboardState {
   agentName: string;
   sessionState: string | null;
+  aliveNow: boolean;
   todayCostUsd: number;
   todayTokens: number;
   alerts: AlertRow[];
@@ -291,6 +293,8 @@ export function loadDashboardState(hermitDir: string): DashboardState {
   const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
   const strings = loadStrings(hermitDir);
   const runtime = readJsonSafe(path.join(hermitDir, 'state', 'runtime.json'));
+  const liveAge = sharedLivenessAgeSecs(hermitDir);
+  const aliveNow = liveAge !== null && liveAge < LIVENESS_FRESH_SECS;
   const today = loadTodayCost(hermitDir, timezone);
   // Union alerts across the per-writer files (skill/checklist + budget + telemetry).
   const alerts: AlertRow[] = [];
@@ -306,6 +310,7 @@ export function loadDashboardState(hermitDir: string): DashboardState {
   return {
     agentName: agentNameFromConfig(config),
     sessionState: typeof runtime?.session_state === 'string' ? runtime.session_state : null,
+    aliveNow,
     todayCostUsd: today.costUsd,
     todayTokens: today.tokens,
     alerts,
@@ -480,18 +485,27 @@ function renderAlerts(state: DashboardState): string {
   return `<div class="alerts">${rows.join('')}</div>`;
 }
 
-// runtime.json stores a machine enum (`in_progress`); show the operator-facing
-// label when one exists, and the raw value rather than a blank when it doesn't.
-function sessionLabel(state: DashboardState): string {
+// runtime.json's `idle` means "no formal work session open", which is the normal
+// state of a healthy always-on hermit between sessions — but read alone it looks
+// indistinguishable from a dead process. A fresh shared-liveness signal (see
+// liveness.ts) proves some instance of this project is alive right now, so idle
+// renders as the presence verdict "On watch" instead. Stale/absent liveness proves
+// nothing, so it falls back to today's "Idle" rather than ever claiming dead.
+// runtime.json otherwise stores a machine enum (`in_progress`); show the
+// operator-facing label when one exists, and the raw value rather than a blank
+// when it doesn't.
+function sessionDisplay(state: DashboardState): { label: string; tone: 'acc' | 'good' } {
   const raw = state.sessionState ?? 'idle';
+  if (raw === 'idle' && state.aliveNow) return { label: state.strings.session_on_watch, tone: 'good' };
   const label = state.strings[`session_${raw}` as keyof ArtifactStrings];
-  return typeof label === 'string' ? label : escapeHtml(raw);
+  return { label: typeof label === 'string' ? label : escapeHtml(raw), tone: 'acc' };
 }
 
 function renderStatus(state: DashboardState): string {
   const s = state.strings;
+  const session = sessionDisplay(state);
   const tiles = [
-    statTile(s.status_session, sessionLabel(state), 'acc'),
+    statTile(s.status_session, session.label, session.tone),
     statTile(s.status_today, `$${state.todayCostUsd.toFixed(2)}`),
     statTile(s.status_tokens, escapeHtml(formatTokens(state.todayTokens))),
     statTile(s.status_alerts, String(state.alerts.length), state.alerts.length ? 'warn' : undefined),
@@ -598,7 +612,12 @@ function renderCompiledIndex(state: DashboardState): string {
 
 /** Renders the full artifact fragment plus a content hash stable across
  *  identical underlying state (the "last updated" stamp is excluded from the hash
- *  via a placeholder token, so the publish gate can skip no-op republishes). */
+ *  via a placeholder token, so the publish gate can skip no-op republishes).
+ *  One caveat: `state.aliveNow` is derived from file mtimes at load time, so a
+ *  render that straddles the liveness freshness window can flip the session tile
+ *  (and therefore the hash) with no persisted state change. That costs at most one
+ *  extra republish per flip, and only on a hermit whose liveness signal goes stale
+ *  between refreshes. */
 export function renderDashboard(state: DashboardState, opts?: { now?: string }): { html: string; hash: string } {
   const s = state.strings;
   const title = fmt(s.dashboard_title, { name: escapeHtml(state.agentName) });
