@@ -211,7 +211,8 @@ Emit `procedure_candidates: []` if no recurring procedures are found.
 operator endpoint for a task-scoped output ("from now on, always X" — a settled voice, template,
 format, decision rule, or quality bar). Use the same entry shape with `evidence_source: "settled-memory"`
 (the override for this signal only — recurrence is not required; the recorded endpoint declaration is
-the human-initiated evidence). `evidence` must cite the memory topic **filename** plus the **verbatim
+the human-initiated evidence; the shape's `tier` is ignored for these — the main session's
+`skill-preference:*` routing sets it). `evidence` must cite the memory topic **filename** plus the **verbatim
 endpoint line** (the main session's judge greps for it; the filename doubles as the dedup key — derive
 `title` from it). Emit nothing for session-wide one-liners (memory is their correct home) and nothing
 for pointer-form memories that already name the skill or surface holding the content (already placed).

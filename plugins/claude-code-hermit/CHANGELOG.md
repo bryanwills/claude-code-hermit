@@ -17,7 +17,9 @@
 2. If a value is not the sender's platform user ID (on Discord: the 17-19 digit numeric id; on Telegram: the numeric account id) — for example a display name or `@handle` — that entry no longer matches. Before this release the allowlist was compared against the envelope's `user` (display name) attribute, so a display name could have been working.
 3. Tell the operator which entries look like display names, ask them for the matching platform IDs, and replace the values. Do not guess an ID. If no entry looks like a display name, say so and change nothing.
 4. Leaving a stale display name in `allowed_users` silently blocks that sender: inbound messages stop being captured and `pause`/`stop`/`resume`/`snooze`/`status` become no-ops with no error.
-5. **Placement rule** — no manual edit. The Knowledge Discipline addition ships in the CLAUDE-APPEND block refresh (evolve Step 6), which preserves operator edits to the block via its append/replace plan; no per-hermit migration.
+
+The placement rule needs no migration step: the Knowledge Discipline addition rides the CLAUDE-APPEND block refresh in Step 6, which preserves operator edits to the block via its append/replace plan.
+
 ### Changed
 - `proposal-triage` and `reflection-judge` no longer suppress consolidation candidates as `covered-by-memory` — relocating a settled preference into its owning skill is distinct from re-proposing the preference.
 - `proposal-create`'s Do-NOT list routes style preferences to memory (OPERATOR.md is never a proposal destination) and admits relocation proposals; session-close's defect debrief points settled calibrations at the placement rule.

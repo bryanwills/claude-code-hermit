@@ -54,7 +54,9 @@ Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-co
 
 ## `skill-preference:*` routing
 
-Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-preference:<name>`. Only rows with source `skill-preference` reach this section — they are **pending placements**: operator settlements ("from now on, always X") recorded when no editable owning skill existed or the in-conversation edit failed. (`skill-preference-applied` rows are telemetry of settlements already applied and are excluded at step 3b.)
+Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-preference:<name>`, and from § Candidate processing for a runner `procedure_candidates` entry carrying `evidence_source: "settled-memory"`. On the ledger path only rows with source `skill-preference` reach this section — they are **pending placements**: operator settlements ("from now on, always X") recorded when no editable owning skill existed or the in-conversation edit failed. (`skill-preference-applied` rows are telemetry of settlements already applied and are excluded at step 3b.) `<name>` is the owning skill's canonical bare name when one exists, otherwise the settled output's slug.
+
+**Resolution check (ledger path only, before anything else):** if the pattern also carries a `skill-preference-applied` row whose `ts` is newer than the newest remaining `skill-preference` row, the settlement has since been placed — drop the candidate and stop. Nothing retracts a pending row, and `prune-observations` keeps a pattern's whole history alive as long as any row in it is fresh, so without this check a resolved placement re-proposes on every reflect run (the § 1.5 consolidation exemption means the judge will not suppress it either).
 
 Recover the settled content from the pointer memory: read the operator's MEMORY.md index and the topic file whose title or body matches `<name>`. Derive the candidate title from that memory topic filename — a pending row and a sweep-emitted candidate for the same settlement then dedup by title-slug in § Candidate processing. Branch:
 
@@ -234,7 +236,7 @@ Triage-survival < 25% or acceptance < 30% → disable procedure capture rather t
 
 **Detection — when to trigger:**
 
-The eval runner (SKILL.md step 6) reads MEMORY.md and archived `## Lessons` sections and returns recurring procedures as `procedure_candidates`. Each entry already carries `slug`, `title`, `evidence`, `sessions`, `evidence_source`, and `evidence_origin`. Process each entry through the dedup guard and write-brief steps below.
+The eval runner (SKILL.md step 6) reads MEMORY.md and archived `## Lessons` sections and returns recurring procedures as `procedure_candidates`. Each entry already carries `slug`, `title`, `evidence`, `sessions`, `evidence_source`, and `evidence_origin`. Process each entry through the dedup guard and write-brief steps below — **except** entries carrying `evidence_source: "settled-memory"`: those are the ownership signal, not procedures, and route to § `skill-preference:*` routing instead (they name an existing owning skill, which this section's dedup guard would read as full coverage and suppress; they also take no brief, no forced Tier 3, and no place in the kill-criteria sample above).
 
 Recurrence signal (as evaluated by the runner): the same multi-step procedure appears as a Lesson or memory workflow-pattern in **≥ `graduation_min_sessions` distinct archived sessions** (read from `config.json` at `reflection.graduation_min_sessions`; default 1 if absent) and no existing skill covers it.
 

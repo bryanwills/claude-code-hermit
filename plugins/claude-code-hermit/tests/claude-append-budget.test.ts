@@ -47,7 +47,7 @@ describe('CLAUDE-APPEND size budget', () => {
     // description — that duplication is accepted, not overlooked, so don't
     // "fix" it by deleting either copy without checking the other.
     // Raised to 8,350 for the knowledge-placement rule (settled knowledge gets
-    // one authoritative home): a 1,081 B paragraph landing at ~8,173 B. It must
+    // one authoritative home): a ~1,160 B paragraph landing at ~8,250 B. It must
     // be always-loaded — the settlement moment ("from now on, always X") happens
     // mid-conversation with no skill loaded, and an on-demand pointer proved a
     // two-hop reliability risk in review. Includes the exact observations.ts
