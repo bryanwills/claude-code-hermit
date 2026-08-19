@@ -2304,13 +2304,33 @@ describe('doctor-check archival + reflect loop', () => {
     expect(a.detail).toContain('pending');
   }));
 
-  test('checkAutoClose (flag but no runtime.json → warn, the most diagnostic case)', withDir(async (dir) => {
+  test('checkAutoClose (flag but no runtime.json → ok, auto-close-decision reaps it like any non-closeable state)', withDir(async (dir) => {
     seedDoctor(dir);
     try { fs.rmSync(hermit(dir, 'state', 'runtime.json')); } catch {}
     pending(dir, staleTs());
+    const report = await doctorReport(dir);
+    const a = checkById(report, 'auto-close');
+    expect(a.status).toBe('ok');
+    expect(a.detail).toContain('reaped at next fire');
+    // The absent file itself is the state check's finding, not this one's.
+    expect(checkById(report, 'state').status).toBe('warn');
+  }));
+
+  test('checkAutoClose (corrupt pending-close.json → ok, file integrity is the state check)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'idle');
+    write(hermit(dir, 'state', 'pending-close.json'), '{not json');
+    const report = await doctorReport(dir);
+    expect(checkById(report, 'auto-close').status).toBe('ok');
+    expect(checkById(report, 'state').status).toBe('fail');
+  }));
+
+  test('checkAutoClose (pending-close.json is literal null → ok, no queued_at to judge)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'idle');
+    write(hermit(dir, 'state', 'pending-close.json'), 'null');
     const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('warn');
-    expect(a.detail).toContain('runtime.json is missing');
+    expect(a.status).toBe('ok');
   }));
 
   test('checkAutoClose (malformed queued_at → ok, matches the drain fail-open stance)', withDir(async (dir) => {

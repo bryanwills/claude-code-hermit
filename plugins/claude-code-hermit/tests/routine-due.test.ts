@@ -456,6 +456,11 @@ describe('routine-due: pending-close drain', () => {
     writePending(dir);
     const r = await run(dir, '2026-07-15T00:30:00Z'); // 0 0 mark is in window
     expect(r.stdout.trim()).toBe(DRAIN_LINE);
+    // The suppressed drain must still stamp the cooldown — otherwise the dedup
+    // lasts one poll and the next one emits a second close into the running one.
+    expect(fs.existsSync(drainMarker(dir))).toBe(true);
+    const next = await run(dir, '2026-07-15T00:31:00Z'); // flag still on disk mid-close
+    expect(next.stdout.trim()).toBe('');
   }));
 
   test('another routine due + drain → both ids on one line', withDir(async (dir) => {

@@ -273,11 +273,16 @@ if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
   // in-flight work. The heartbeat drainer does not check this — its 2h cadence
   // made the window negligible — so the divergence is deliberate and lives here
   // at the call site rather than inside the shared predicate.
-  if (configured && !operatorTurnOpen && !dueIds.includes(DRAIN_ID) && drainCooldownExpired()) {
+  if (configured && !operatorTurnOpen && drainCooldownExpired()) {
     // Write-before-emit, mirroring the persist-before-emit contract above: if the
     // cooldown stamp fails we must not emit, or a read-only state dir turns a
-    // failing close into a wake every 60 seconds.
-    if (writeJSONAtomic(drainMarkerPath, { last_emitted_at: nowDate.toISOString() })) {
+    // failing close into a wake every 60 seconds. Stamped unconditionally (even
+    // when the natural midnight fire already added DRAIN_ID this poll) because
+    // otherwise the same-poll dedup lasts exactly one poll, and with the flag
+    // still on disk mid-close the next poll would emit a second close into the
+    // one still running.
+    const stamped = writeJSONAtomic(drainMarkerPath, { last_emitted_at: nowDate.toISOString() });
+    if (stamped && !dueIds.includes(DRAIN_ID)) {
       dueIds.push(DRAIN_ID);
     }
   }

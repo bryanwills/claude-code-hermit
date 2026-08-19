@@ -25,6 +25,7 @@ import { isCloseableSessionState } from './lib/auto-close';
 import { promptTokensOf, compactibleTokens } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
+import { readJson } from './lib/cli';
 
 type Json = any;
 
@@ -735,15 +736,20 @@ function checkAutoClose(p: DoctorPaths = PATHS) {
     if (!fs.existsSync(pendingPath)) {
       return { id: 'auto-close', status: 'ok', detail: 'no queued close' };
     }
-    const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+    const pending = readJson(pendingPath);
+    if (!pending || typeof pending !== 'object') {
+      // File integrity is checkStateFiles' finding; don't double-report the same
+      // root cause under a second ledger id. A non-object payload carries no
+      // queued_at either way, and the drain's readJSON treats it as no flag.
+      return { id: 'auto-close', status: 'ok', detail: 'pending-close.json unreadable or malformed (file integrity is the state check)' };
+    }
 
     const runtimePath = path.join(stateDir, 'runtime.json');
     if (!fs.existsSync(runtimePath)) {
-      return {
-        id: 'auto-close',
-        status: 'warn',
-        detail: 'close queued but runtime.json is missing — nothing can drain it',
-      };
+      // auto-close-decision treats a missing runtime exactly like a non-closeable
+      // session_state: the next fire reaps the flag. The absent file itself is
+      // already the state check's finding.
+      return { id: 'auto-close', status: 'ok', detail: 'queued close, runtime.json absent (stale flag is reaped at next fire)' };
     }
     let state: any;
     try {

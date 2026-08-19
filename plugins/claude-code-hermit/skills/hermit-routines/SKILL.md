@@ -4,7 +4,7 @@ description: Schedules routines via one persistent Monitor subprocess (zero-toke
 ---
 # Routines
 
-Register and manage scheduled routines. Where the Monitor tool is available, all enabled routines except `heartbeat-restart` run from ONE persistent Monitor subprocess that decides eligibility outside the session — a skipped fire costs zero model tokens. `heartbeat-restart` stays a CronCreate **re-arm anchor**: its skill IS `load`, so its daily fire re-arms the monitor and the anchor CronCreate. It does not touch the heartbeat — `heartbeat.enabled` is the only switch for that. Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`/`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`), `load` falls back to per-routine CronCreates.
+Register and manage scheduled routines. Where the Monitor tool is available, all enabled routines except `heartbeat-restart` run from ONE persistent Monitor subprocess that decides eligibility outside the session — a skipped fire costs zero model tokens. `heartbeat-restart` stays a CronCreate **re-arm anchor**: its skill IS `load`, so its daily fire re-arms the monitor and the anchor CronCreate — and, unless `heartbeat.enabled` is explicitly false, restores the heartbeat monitor too (the only heartbeat recovery that reaches a resting session; the watchdog is supervision-only at `idle`). Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`/`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`), `load` falls back to per-routine CronCreates.
 
 ## Usage
 
@@ -69,7 +69,11 @@ Replace `<pluginRoot>`, `<id>`, `<rdw>` (`true`/`false`; default `false`), and `
 
 **`finish` is unconditional and owns the ledger row** — call it whether or not the skill looked successful, and never decide the outcome yourself. It prints `fired`, or `failed|<reason>|<detail>` when the routine declared an `expect_artifact` contract that its run did not satisfy (`artifact-missing`, `artifact-unchanged`, `verification-error`). **On a `failed|…` line, notify the operator** per § Operator Notification, naming the routine and the expected path. Do not retry the skill: routines include channel sends, session closure and archival, none of them guaranteed idempotent.
 
-**Special case — `heartbeat-restart`:** no append. Its `skill` is `claude-code-hermit:hermit-routines load`, so the daily fire *is* the re-arm — that is what keeps the monitor and, in fallback mode, the routine CronCreates from reaching the 7-day auto-expiry. The anchor deliberately does **not** start the heartbeat: `heartbeat.enabled` is the only switch for that (bootstrap honours it, and so does the watchdog's liveness re-arm), and an operator who wants the heartbeat for just the current session types `/claude-code-hermit:heartbeat start` themselves.
+**Special case — `heartbeat-restart`:** its `skill` is `claude-code-hermit:hermit-routines load`, so the daily fire *is* the re-arm — that is what keeps the monitor and, in fallback mode, the routine CronCreates from reaching the 7-day auto-expiry. Append after the trailing `finish` call:
+```
+Then read heartbeat.enabled from .claude-code-hermit/config.json: unless it is explicitly false, invoke /claude-code-hermit:heartbeat start to re-register the heartbeat monitor.
+```
+The condition is checked at fire time, never baked in at registration, so flipping `heartbeat.enabled` takes effect at the next 4am fire. It keeps `false` meaning off (bootstrap and the watchdog's re-arms honour it the same way — see `doRearm` in `hermit-watchdog.ts`), while the daily fire stays the only heartbeat-monitor recovery that reaches a resting session: the watchdog goes supervision-only at `session_state: idle` and never re-arms there, and a healthy hermit rests at `idle` between arcs. An operator with `heartbeat.enabled: false` who wants one for just the current session types `/claude-code-hermit:heartbeat start` themselves.
 
 **`reflect_after: true`:** append after the trailing `finish` call (and after the `heartbeat-restart` append if both apply). Skip when `skill` is `claude-code-hermit:reflect` — chaining reflect after reflect is a config foot-gun.
 ```
