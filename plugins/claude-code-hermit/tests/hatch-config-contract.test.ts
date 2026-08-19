@@ -279,6 +279,60 @@ describe('hatch-config.ts', () => {
     expect(out.channels.discord.dm_channel_id).toBe('D1');
   });
 
+  // /channel-setup writes a channels-only payload through --reinit to add a channel
+  // to a hermit hatched with `channels: {}`. Creation (as opposed to merging onto an
+  // existing entry) is the path that skill depends on.
+  test('re-init: a channels-only payload creates an absent channel with full defaults', async () => {
+    const dir = freshDir();
+    const seed = {
+      ...JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8')),
+      agent_name: 'Keeper',
+      foo_custom: true,
+      channels: {},
+    };
+    seedConfig(dir, seed);
+
+    const r = await runHatchConfig(dir, { channels: { telegram: { enabled: true } } }, true);
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+
+    expect(out.channels.telegram).toEqual({
+      enabled: true,
+      dm_channel_id: null,
+      state_dir: '.claude.local/channels/telegram',
+    });
+    // nothing else moved
+    expect(out.agent_name).toBe('Keeper');
+    expect(out.foo_custom).toBe(true);
+    expect(Object.keys(out.channels)).toEqual(['telegram']);
+  });
+
+  // Re-enabling a disabled channel must not clear state learned at pairing time.
+  test('re-init: enabling a disabled channel preserves its learned state', async () => {
+    const dir = freshDir();
+    const seed = {
+      ...JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8')),
+      channels: {
+        telegram: {
+          enabled: false,
+          dm_channel_id: 'T42',
+          state_dir: '.claude.local/channels/telegram',
+          allowed_users: ['777'],
+        },
+      },
+    };
+    seedConfig(dir, seed);
+
+    const r = await runHatchConfig(dir, { channels: { telegram: { enabled: true } } }, true);
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+
+    expect(out.channels.telegram.enabled).toBe(true);
+    expect(out.channels.telegram.dm_channel_id).toBe('T42');
+    expect(out.channels.telegram.allowed_users).toEqual(['777']);
+    expect(out.channels.telegram.state_dir).toBe('.claude.local/channels/telegram');
+  });
+
   test('duplicate plugin in scheduled_checks_plugins does not produce duplicate check ids', async () => {
     const dir = freshDir();
     const r = await runHatchConfig(dir, {
