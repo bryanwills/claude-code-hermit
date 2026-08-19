@@ -315,3 +315,180 @@ describe('routine-due', () => {
     expect(r.stdout.trim()).toBe('');
   }));
 });
+
+// -------------------------------------------------------
+// pending-close drain (second drainer alongside the heartbeat tick)
+// -------------------------------------------------------
+
+describe('routine-due: pending-close drain', () => {
+  const AUTO_CLOSE = { id: 'daily-auto-close', skill: 'claude-code-hermit:session-close --scheduled', schedule: '0 0 * * *', enabled: true, run_during_waiting: true };
+  const DRAIN_LINE = 'ROUTINE_DUE [hermit-routine:daily-auto-close]';
+  // Mid-afternoon: no cron mark for daily-auto-close (0 0) or test-routine (0 9),
+  // so anything emitted here came from the drain and nothing else.
+  const NOW = '2026-07-15T15:00:00Z';
+  const drainMarker = (dir: string) => hermit(dir, 'state', 'pending-close-drain.json');
+
+  const writePending = (dir: string, queuedAt = '2026-07-15T00:00:00+00:00') =>
+    fs.writeFileSync(hermit(dir, 'state', 'pending-close.json'),
+      JSON.stringify({ queued_at: queuedAt, queued_by: 'daily-auto-close' }));
+  // Cursor already at "now" so the routine's own schedule never fires this poll.
+  const seed = (dir: string, routines: any[] = [AUTO_CLOSE]) => {
+    writeConfig(dir, routines);
+    writeSchedule(dir, Object.fromEntries(routines.map(r => [r.id, { last_consumed_mark: NOW }])));
+  };
+
+  test('flag + lull + in_progress → emits the drain id', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe(DRAIN_LINE);
+  }));
+
+  test('no flag → silent (an ordinary poll must not emit)', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  test('operator active inside the lull → no emission', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'idle');
+    writePending(dir);
+    fs.writeFileSync(hermit(dir, 'state', 'last-operator-action.json'),
+      JSON.stringify({ at: '2026-07-15T14:55:00Z' })); // 5 min before NOW
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  test('session_state waiting → no emission', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'waiting');
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  test('runtime.json absent → no emission', withDir(async (dir) => {
+    seed(dir);
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  // An open operator turn outranks the lull: someone watching a long agent turn is
+  // present, and closing under them would destroy in-flight work.
+  test('fresh operator-turn marker → no emission', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    writeTurnMarker(dir, '2026-07-15T14:50:00Z'); // inside the 60-min TTL
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  test('operator-turn marker past its TTL → emits', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    writeTurnMarker(dir, '2026-07-15T13:00:00Z'); // 2h — beyond the 60-min TTL
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe(DRAIN_LINE);
+  }));
+
+  test('paused → no emission, no ledger row, no schedule key', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    setPause(hermit(dir), { reason: 'operator', by: 'test' } as any);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+    expect(readMetricsRows(dir).some((row) => row.routine_id === 'daily-auto-close')).toBe(false);
+  }));
+
+  test('cooldown suppresses the second consecutive poll, then expires', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+
+    expect((await run(dir, NOW)).stdout.trim()).toBe(DRAIN_LINE);
+    expect(fs.existsSync(drainMarker(dir))).toBe(true);
+
+    // One minute later — inside the cooldown.
+    expect((await run(dir, '2026-07-15T15:01:00Z')).stdout.trim()).toBe('');
+    // Past the cooldown window.
+    expect((await run(dir, '2026-07-15T16:30:00Z')).stdout.trim()).toBe(DRAIN_LINE);
+  }));
+
+  test('malformed cooldown marker → treated as expired, still drains', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    fs.writeFileSync(drainMarker(dir), 'not json');
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe(DRAIN_LINE);
+  }));
+
+  test('daily-auto-close absent from config → no emission (nothing could handle it)', withDir(async (dir) => {
+    seed(dir, [ROUTINE()]);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  // The operator disabled the schedule, not a close that is already queued.
+  test('daily-auto-close present but disabled → still emits', withDir(async (dir) => {
+    seed(dir, [{ ...AUTO_CLOSE, enabled: false }]);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe(DRAIN_LINE);
+  }));
+
+  // A stale flag plus this midnight's cron mark can collide on one poll; a double
+  // bracket would dispatch the close twice and session-archive is not idempotent.
+  test('natural fire + drain on the same poll → exactly one bracketed id', withDir(async (dir) => {
+    writeConfig(dir, [AUTO_CLOSE]);
+    writeSchedule(dir, { 'daily-auto-close': { last_consumed_mark: '2026-07-14T23:00:00Z' } });
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await run(dir, '2026-07-15T00:30:00Z'); // 0 0 mark is in window
+    expect(r.stdout.trim()).toBe(DRAIN_LINE);
+  }));
+
+  test('another routine due + drain → both ids on one line', withDir(async (dir) => {
+    writeConfig(dir, [AUTO_CLOSE, ROUTINE()]);
+    writeSchedule(dir, {
+      'daily-auto-close': { last_consumed_mark: NOW },
+      'test-routine': { last_consumed_mark: '2026-07-15T08:00:00Z' }, // 0 9 mark in window
+    });
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim().split('\n')).toHaveLength(1);
+    expect(r.stdout).toContain('[hermit-routine:test-routine]');
+    expect(r.stdout).toContain('[hermit-routine:daily-auto-close]');
+  }));
+
+  test('schedule persist failure → no drain emission', withDir(async (dir) => {
+    writeConfig(dir, [AUTO_CLOSE, ROUTINE()]);
+    writeSchedule(dir, { 'test-routine': { last_consumed_mark: '2026-07-15T08:00:00Z' } });
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await runScript('routines.ts', {
+      args: ['due', hermit(dir)],
+      env: { HERMIT_NOW: NOW, HERMIT_DUE_FORCE_PERSIST_FAIL: '1' },
+    });
+    expect(r.stdout.trim()).toBe('');
+  }));
+
+  test('liveness is still written on a drain-only poll', withDir(async (dir) => {
+    seed(dir);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    await run(dir, NOW);
+    expect(fs.existsSync(livenessPath(dir))).toBe(true);
+  }));
+});

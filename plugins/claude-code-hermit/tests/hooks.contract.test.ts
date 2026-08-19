@@ -1631,7 +1631,7 @@ describe('doctor-check', () => {
     const report = await doctorReport(dir);
     expect(report.checks.map((c: any) => c.id)).toEqual([
       'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
-      'permissions', 'docker-security', 'archive', 'reflect', 'scheduler', 'watchdog', 'context-age', 'opus-wake', 'routine-cost', 'heartbeat',
+      'permissions', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age', 'opus-wake', 'routine-cost', 'heartbeat',
       'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known', 'context-scan', 'channel-liveness',
     ]);
   }));
@@ -2266,6 +2266,78 @@ describe('doctor-check archival + reflect loop', () => {
     const a = checkById(await doctorReport(dir), 'archive');
     expect(a.status).toBe('warn');
     expect(a.detail).toContain('stale active session');
+  }));
+
+  // checkAutoClose is a SEPARATE id from `archive` on purpose: a check returns one
+  // {id,status,detail} and the alert ledger keys on id, so folding queue health into
+  // `archive` would force a priority call between two independent failures.
+  const pending = (dir: string, queuedAt: string) =>
+    write(hermit(dir, 'state', 'pending-close.json'),
+      `{"queued_at":"${queuedAt}","queued_by":"daily-auto-close"}`);
+  const runtime = (dir: string, state: string) =>
+    write(hermit(dir, 'state', 'runtime.json'),
+      `{"version":1,"session_state":"${state}","updated_at":"${new Date().toISOString()}"}`);
+
+  test('checkAutoClose (no queued close → ok)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'idle');
+    const a = checkById(await doctorReport(dir), 'auto-close');
+    expect(a.status).toBe('ok');
+    expect(a.detail).toBe('no queued close');
+  }));
+
+  test('checkAutoClose (queued >1d while idle → warn)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'idle');
+    pending(dir, staleTs());
+    const a = checkById(await doctorReport(dir), 'auto-close');
+    expect(a.status).toBe('warn');
+    expect(a.detail).toContain('not drained');
+  }));
+
+  test('checkAutoClose (queued an hour ago → ok)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'in_progress');
+    pending(dir, new Date(Date.now() - 3600000).toISOString());
+    const a = checkById(await doctorReport(dir), 'auto-close');
+    expect(a.status).toBe('ok');
+    expect(a.detail).toContain('pending');
+  }));
+
+  test('checkAutoClose (flag but no runtime.json → warn, the most diagnostic case)', withDir(async (dir) => {
+    seedDoctor(dir);
+    try { fs.rmSync(hermit(dir, 'state', 'runtime.json')); } catch {}
+    pending(dir, staleTs());
+    const a = checkById(await doctorReport(dir), 'auto-close');
+    expect(a.status).toBe('warn');
+    expect(a.detail).toContain('runtime.json is missing');
+  }));
+
+  test('checkAutoClose (malformed queued_at → ok, matches the drain fail-open stance)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'idle');
+    write(hermit(dir, 'state', 'pending-close.json'), '{"queued_by":"daily-auto-close"}');
+    const a = checkById(await doctorReport(dir), 'auto-close');
+    expect(a.status).toBe('ok');
+  }));
+
+  test('checkAutoClose (session not closeable → ok, flag is reaped at next fire)', withDir(async (dir) => {
+    seedDoctor(dir);
+    runtime(dir, 'closed');
+    pending(dir, staleTs());
+    const a = checkById(await doctorReport(dir), 'auto-close');
+    expect(a.status).toBe('ok');
+  }));
+
+  // The whole reason auto-close is its own id: both can be true at once.
+  test('a stale session and a stranded queued close surface as two findings', withDir(async (dir) => {
+    seedDoctor(dir);
+    write(hermit(dir, 'state', 'runtime.json'),
+      `{"version":1,"session_state":"in_progress","session_id":"S-042","updated_at":"${staleTs()}"}`);
+    pending(dir, staleTs());
+    const report = await doctorReport(dir);
+    expect(checkById(report, 'archive').status).toBe('warn');
+    expect(checkById(report, 'auto-close').status).toBe('warn');
   }));
 
   async function reflectCheck(dir: string, counters: string) {

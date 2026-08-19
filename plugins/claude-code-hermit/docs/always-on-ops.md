@@ -165,7 +165,7 @@ Routines live in `config.json` as a `routines` array:
 "routines": [
   {"id": "morning", "schedule": "30 8 * * *", "skill": "claude-code-hermit:brief --morning", "run_during_waiting": true, "enabled": true},
   {"id": "evening", "schedule": "30 22 * * *", "skill": "claude-code-hermit:brief --evening", "run_during_waiting": true, "enabled": true},
-  {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:heartbeat start", "run_during_waiting": true, "enabled": true},
+  {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:hermit-routines load", "run_during_waiting": true, "enabled": true},
   {"id": "weekly-deps", "schedule": "0 9 * * 1", "skill": "claude-code-hermit:session-start --task 'dependency audit'", "enabled": false}
 ]
 ```

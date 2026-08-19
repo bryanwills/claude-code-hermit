@@ -1128,6 +1128,28 @@ test('heartbeat-restart missed > 26h → re-arm-fallback event', withHermit(asyn
   expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('re-arm-fallback');
 }));
 
+// The re-arm fallback used to send `/heartbeat start` unconditionally — the second
+// ungated heartbeat-start path (the routine anchor was the first). An automated
+// re-arm is not an operator override, so it honours heartbeat.enabled; the routine
+// reload stays unconditional because it is what keeps the scheduler itself alive.
+test('heartbeat-restart missed > 26h + heartbeat disabled → routines reloaded, heartbeat NOT started', withHermit(async (h) => {
+  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
+    watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' },
+    heartbeat: { enabled: false, every: '2h', active_hours: { start: '00:00', end: '23:59' }, stale_threshold: '2h' },
+  }, null, 2) + '\n');
+  touchAgo(state(h, '.heartbeat'), 1800);
+  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
+    ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
+  }) + '\n');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 0);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  const calls = tmuxCalls(h);
+  expect(calls).toContain('/claude-code-hermit:hermit-routines load');
+  expect(calls).not.toContain('/claude-code-hermit:heartbeat start');
+}));
+
 // -------------------------------------------------------
 // 11. Re-arm suppressed: heartbeat-restart fired < 26h ago
 // -------------------------------------------------------

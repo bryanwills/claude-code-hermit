@@ -1,11 +1,11 @@
 ---
 name: hermit-doctor
-description: Returns a twenty-four-check health report on the hermit installation (runtime, config, hooks, state-file integrity, cost, proposals, deps, version currency, permissions, docker, archival, reflect loop, scheduler, watchdog, context age, opus-wake spend, routine cost, heartbeat, routine monitor, raw storage size, plugin credential expiry, model pricing, channel liveness, context scan). Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
+description: Returns a twenty-five-check health report on the hermit installation (runtime, config, hooks, state-file integrity, cost, proposals, deps, version currency, permissions, docker, archival, auto-close queue, reflect loop, scheduler, watchdog, context age, opus-wake spend, routine cost, heartbeat, routine monitor, raw storage size, plugin credential expiry, model pricing, channel liveness, context scan). Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
 ---
 
 # Hermit Doctor
 
-Runs twenty-four read-only health checks against the current hermit install (`channel-liveness`
+Runs twenty-five read-only health checks against the current hermit install (`channel-liveness`
 is the only one that performs outbound API calls — see Notes) and surfaces the summary. Safe
 to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
@@ -35,7 +35,7 @@ The optional flag changes its destination, not whether doctor notifies:
    JSON to stdout. It exits 0 unconditionally — on any internal failure the failing
    check reports `status: "fail"` in its own entry rather than crashing the report.
 
-2. Parse the JSON. For each of the twenty-four checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
+2. Parse the JSON. For each of the twenty-five checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
    `proposals`, `dependencies`, `version-currency`, `permissions`, `docker-security`, `archive`, `reflect`, `scheduler`, `watchdog`,
    `context-age`, `opus-wake`, `routine-cost`, `heartbeat`, `routine-monitor`, `raw-size`, `credential-expiry`, `model-pricing-known`, `context-scan`, `channel-liveness`), emit one line using this format:
    - `✓ <id> — <detail>` when `status: ok`
@@ -43,11 +43,11 @@ The optional flag changes its destination, not whether doctor notifies:
    - `✗ <id> — <detail>` when `status: fail`
 
 3. Append a summary section to `.claude-code-hermit/sessions/SHELL.md` under a new
-   `## Doctor Report (<ts>)` heading. Use the same twenty-four lines from step 2. Place it
+   `## Doctor Report (<ts>)` heading. Use the same twenty-five lines from step 2. Place it
    above the `## Monitoring` section so it sits with session-level context, not
    with monitoring chatter.
 
-4. Return the twenty-four lines to the caller. Cap total output at 30 lines.
+4. Return the twenty-five lines to the caller. Cap total output at 30 lines.
 
 5. **Escalation.** The script already computed this — do not recompute it, and do not write alert
    state yourself. Read the `escalation` object from the step-1 JSON:
@@ -84,10 +84,10 @@ The optional flag changes its destination, not whether doctor notifies:
 
 ## Silence policy
 
-- If every check is `ok`, return only: `All twenty-four checks passed.` Do not notify via
+- If every check is `ok`, return only: `All twenty-five checks passed.` Do not notify via
   channel (Tier 0). Still append to SHELL.md so the run is traceable. Clearing the stale
   `doctor:*` entries is the script's job, not yours — it happens on every run.
-- If any check is `warn` or `fail`, return the full twenty-four-line summary. Notification is
+- If any check is `warn` or `fail`, return the full twenty-five-line summary. Notification is
   governed by `escalation.new` (step 5), not a blanket per-run ping: only findings not yet
   confirmed delivered notify the selected route.
 
@@ -106,6 +106,7 @@ The optional flag changes its destination, not whether doctor notifies:
 | `permissions` | `fs.statSync(p).mode & 0o777` on `config.json`, `state/*.json`, and `proposals/`. | `warn` if any world-readable (`mode & 0o004 ≠ 0`). |
 | `docker-security` | Cross-references `docker.security.*` in `config.json` against the presence of `docker-compose.security.yml` at the project root. When both are present and the check runs on the host, also merges the base + overlay compose files via `docker compose config` to inspect ports, `network_mode`, and subnets. | `warn` on a posture/overlay mismatch either way (re-run `/docker-security`), when the overlay subnet overlaps another Docker network, or when the `docker` subprocess fails (daemon down / CLI missing — transient, never escalated to `fail`). `fail` when the `hermit` service publishes ports while joining netguard's network namespace. `ok` when both match, neither is configured, when `docker-compose.hermit.yml` is absent (nothing to merge), or when the check runs inside the container (no docker CLI there — compose verification runs on the host). |
 | `archive` | Reads `state/runtime.json`. Detects sessions that should have been archived but weren't. | `warn` if `session_state ∈ {in_progress, waiting}` with `updated_at` >2 days old (stale active session) or `session_state: idle` with non-null `session_id` >2 days old (orphaned). `ok` when runtime missing (covered by `state` check) or all timestamps fresh. |
+| `auto-close` | Reads `state/pending-close.json` + `state/runtime.json`. Detects a queued midnight close that never drained. | `warn` if `queued_at` >1 day old while `session_state ∈ {in_progress, idle}`, or if the flag exists with `runtime.json` missing/unreadable. `ok` when no flag, a young flag, an unreadable `queued_at`, or a session state that is not closeable. |
 | `reflect` | Reads `state/reflection-state.json` counters. Reports the loop's shape: run count, empty rate, output (proposals + micro-proposals), and the judge suppress mix by code. | Always `ok` — informational, never warns. A high empty rate is not a fault: a hermit with nothing left to evolve is a legitimate steady state, and the counters can't tell which caller (routine, session finalization, `session-close`, manual) produced the empties. `fail` only on unreadable state. `/hermit-health` carries the same numbers in more detail. |
 | `scheduler` | Reads `state/cc-stop-snapshot.json` (written by stop-pipeline.ts at each Stop). Reports armed cron count, background-task count, and snapshot age. | `ok` if snapshot present with counts and `captured_at`; `ok` (not yet captured) if snapshot absent (first run post-upgrade); `warn` if `session_crons` or `background_tasks` state is `unsupported_or_unreachable` (old CC build or registry unreachable — never reported as "0 crons"). |
 | `watchdog` | Reads `config.watchdog`, `config.post_close_clear`, `config.context_hygiene.compact.enabled`, `state/watchdog-state.json` (`last_run` liveness + `consecutive_stale` + `last_hygiene_eval` + the durable `hygiene_eval_counts` outcome tallies), `state/context-surface.json` (the recorded fixed-surface upper bound, printed alongside the hygiene line), `state/runtime.json` (`runtime_mode`, `session_state`, shutdown stamps), `state/watchdog-events.jsonl`, and — on Linux in tmux/unknown mode — the generated systemd unit's own `ExecMainStatus`/`Result` via `systemctl --user show` (unit name derived from the hermit dir, not the working directory, since systemd answers `show` for a nonexistent unit with `ExecMainStatus=0`/`Result=success`). Steps 0a-0c (post-close clear, emergency clear, routine-hygiene compact) run independent of `watchdog.enabled`, so the check treats any of those as "active" even when the restart tier is off. First checks for a shutdown stamp on a still-alive session (bricks both hygiene and restart recovery until the next `hermit-start`), then liveness: the watchdog stamps `last_run` on every invocation before any gate, so a fresh stamp proves the scheduler/loop is firing. The unit probe runs ahead of everything, including the shutdown-stamp check: a unit failing on every invocation is a more specific diagnosis than "not firing", and waiting out the stale window to say something vaguer helps nobody. After liveness and the shutdown stamp, the generated unit file is read once more for a baked `Environment=PATH` line — a unit written before that fix now ticks anyway (the shim resolves `bun` by absolute path) so neither the exit-status probe nor staleness notices, while the restart tier stays broken. If stale (>20m) or missing, summarizes restarts/nudges/re-arms/clears/compacts over the last 7 days plus the most recent hygiene skip/fire reason otherwise. | `fail` when the systemd unit's last run failed — exit 127 (the unit cannot resolve `bun` on its PATH) points at re-running `bin/hermit-watchdog install`; any other failure points at `journalctl --user -u <unit>`. `ok` when nothing is active (restart tier off and no hygiene feature on), or firing and quiet (appends "last tick Nm ago", or "restart tier disabled, hygiene tier active" when only hygiene runs); `warn` if a stamp is stuck on an alive session, if `last_run` is stale/missing — "enabled but not firing" with remediation keyed to `runtime_mode` (`tmux` → `bin/hermit-watchdog install`; `docker` → recreate the container; unknown → both hints) — if the generated unit carries no `Environment=PATH` (ticking but unable to restart — re-run `bin/hermit-watchdog install`) — or, when firing, if any restart in the last 7 days or a stale cycle is in progress. |

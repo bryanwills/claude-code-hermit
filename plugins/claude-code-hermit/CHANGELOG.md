@@ -12,6 +12,18 @@
 2. Mention to the operator, once, that their dashboard can now be designed around what this hermit actually tracks, and that they can ask for it in their own words ("design my dashboard"). Do not run the design yourself: it is an attended, operator-initiated session.
 
 ### Fixed
+- Scheduler wakes no longer count as operator presence. Claude Code delivers Monitor events and subagent completions wrapped in a `<task-notification>` envelope, which defeated the anchored matching in `record-operator-action.ts` — so every routine wake reset the operator clock and `daily-auto-close` queued a close it could never drain.
+- The queued midnight close now also drains from the 60-second routine poll, not only from a heartbeat tick. A hermit with `heartbeat.enabled: false` had no drainer at all and stranded the flag indefinitely.
+- The `heartbeat-restart` anchor no longer starts the heartbeat — its skill is now `hermit-routines load`, so it re-arms the scheduler only. The watchdog's missed-anchor re-arm honours `heartbeat.enabled` too. A hermit with the heartbeat switched off was re-arming one daily anyway.
+- New `auto-close` doctor check warns when a queued close has sat undrained for more than a day, or when the flag exists with no readable `runtime.json`.
+
+### Upgrade Instructions
+
+1. Read `.claude-code-hermit/config.json` and find the routine with `"id": "heartbeat-restart"`. If its `skill` is `claude-code-hermit:heartbeat start`, change it to `claude-code-hermit:hermit-routines load`, leaving every other field untouched. A plugin update does not rewrite an installed `config.json`, so this is the one manual edit.
+2. If that hermit has `heartbeat.enabled: true`, nothing else changes — the heartbeat still starts at boot and is still re-armed by the watchdog when its monitor dies. If it has `heartbeat.enabled: false`, the daily heartbeat it was starting against that setting now stops; run `/claude-code-hermit:heartbeat start` yourself any time you want one for the current session only.
+3. Tell the operator, once, that a close which had been stuck in the queue will now go through: if this hermit was holding one, it archives the session shortly after the upgrade and writes a session report. That is the backlog clearing, not a new problem.
+
+### Fixed
 - The dashboard session tile no longer shows "Idle" for an alive hermit between sessions — a fresh shared-liveness signal now renders it as "On watch".
 
 ### Upgrade Instructions

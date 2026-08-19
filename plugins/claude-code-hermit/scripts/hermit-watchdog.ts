@@ -638,12 +638,22 @@ function doNudge(sessionName: string, watchdogState: Json, consecutive: number, 
   if (shouldNotify) pushOperatorMessage(composeWedgeMessage(timezone));
 }
 
-/** Re-arm heartbeat when the in-session routine missed its window. */
-function doRearm(sessionName: string): void {
+/** Re-arm the routine monitor when the in-session anchor missed its window.
+ *  The routine reload is unconditional — it is what keeps the Monitor subprocess
+ *  and the anchor CronCreate from expiring. The heartbeat leg honours
+ *  heartbeat.enabled: an automated re-arm is not an operator override, and
+ *  re-arming a monitor the config switched off is what let a heartbeat-disabled
+ *  hermit keep waking every day. An operator can still start it for one session
+ *  by typing /claude-code-hermit:heartbeat start themselves. */
+function doRearm(sessionName: string, config: Json): void {
   sendKeys(sessionName, '/claude-code-hermit:hermit-routines load');
-  Bun.sleepSync(2000);
-  sendKeys(sessionName, '/claude-code-hermit:heartbeat start');
-  appendEvent('re-arm-fallback', 'heartbeat-restart routine missed ~26h window');
+  // Absent means enabled (config-read's settled default) — skip only on explicit false.
+  const hbEnabled = config?.heartbeat?.enabled !== false;
+  if (hbEnabled) {
+    Bun.sleepSync(2000);
+    sendKeys(sessionName, '/claude-code-hermit:heartbeat start');
+  }
+  appendEvent('re-arm-fallback', `heartbeat-restart routine missed ~26h window${hbEnabled ? '' : ' (heartbeat disabled — routines only)'}`);
   process.stderr.write(`[watchdog] re-armed "${sessionName}"\n`);
 }
 
@@ -1576,7 +1586,7 @@ async function main(): Promise<void> {
     if (opAge === null || opAge >= operatorGraceSecs) {
       const watchdogState = readWatchdogState();
       if (rearmDamperOpen(watchdogState.last_rearm_fallback) && tmuxSessionAlive(sessionName)) {
-        doRearm(sessionName);
+        doRearm(sessionName, config);
         watchdogState.last_rearm_fallback = utcStamp();
         writeWatchdogState(watchdogState);
         rearmedThisTick = true;
