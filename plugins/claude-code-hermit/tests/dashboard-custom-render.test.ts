@@ -109,6 +109,40 @@ process.stdout.write(JSON.stringify({ path: out, bytes: html.length, hash: 'x' }
     expect(r.exitCode).toBe(1);
   }));
 
+  // The receipt is core's protocol, not the child's: step 1 of the refresh procedure
+  // JSON.parses this stdout, so an exit-0 renderer that printed something else has to
+  // land on the same silent skip rather than throwing inside the calling skill.
+  test('an exit-0 renderer without a receipt still exits 1', withHermitDir(async (hermitDir) => {
+    writeRenderer(hermitDir, 'console.log("rendered ok");');
+    const r = await runScript('artifact.ts', { args: ['render', 'dashboard', hermitDir] });
+    expect(r.exitCode).toBe(1);
+  }));
+
+  test('an explicit outPath is rejected, not silently ignored', withHermitDir(async (hermitDir) => {
+    writeRenderer(hermitDir, RECEIPT_RENDERER);
+    const out = path.join(hermitDir, 'state', 'elsewhere.html');
+    const r = await runScript('artifact.ts', { args: ['render', 'dashboard', hermitDir, out] });
+    expect(r.exitCode).toBe(1);
+    expect(fs.existsSync(out)).toBe(false);
+    // and the live page was not overwritten behind the caller's back
+    expect(fs.existsSync(path.join(hermitDir, 'state', 'dashboard.html'))).toBe(false);
+  }));
+
+  // A generated renderer that calls back into `render dashboard` would otherwise
+  // re-enter the hand-off forever; the guard env var bottoms it out at the built-in.
+  test('a renderer that re-enters render dashboard does not recurse', withHermitDir(async (hermitDir) => {
+    writeRenderer(hermitDir, `
+import { spawnSync } from 'node:child_process';
+const artifactTs = ${JSON.stringify(path.resolve(import.meta.dir, '..', 'scripts', 'artifact.ts'))};
+const res = spawnSync(process.execPath, [artifactTs, 'render', 'dashboard', process.argv[2]], { encoding: 'utf8' });
+process.stdout.write(res.stdout);
+process.exit(res.status ?? 1);
+`);
+    const r = await runScript('artifact.ts', { args: ['render', 'dashboard', hermitDir] });
+    expect(r.exitCode).toBe(0);
+    expect(typeof JSON.parse(r.stdout).hash).toBe('string');
+  }));
+
   test('without a renderer the built-in dashboard is unchanged', withHermitDir(async (hermitDir) => {
     const before = await runScript('artifact.ts', { args: ['render', 'dashboard', hermitDir] });
     const builtIn = fs.readFileSync(path.join(hermitDir, 'state', 'dashboard.html'), 'utf8');

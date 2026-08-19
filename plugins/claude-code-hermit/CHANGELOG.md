@@ -4,7 +4,7 @@
 
 ### Added
 - New `/claude-code-hermit:hermit-dashboard-design` skill designs a dashboard around what this hermit actually tracks and writes `.claude-code-hermit/dashboard-render.ts` to rebuild it. Refreshes stay a script run, so a custom page costs nothing per publish. Say "design my dashboard"; delete the renderer to return to the default page.
-- `artifact.ts render dashboard` hands off to `dashboard-render.ts` when it exists, and a new `artifact.ts state dashboard` verb returns the dashboard's render inputs (`state`, `themeCss`, `coreSections`, `updatedToken`) for that renderer to compose from.
+- `artifact.ts render dashboard` hands off to `dashboard-render.ts` when it exists, and a new `artifact.ts state dashboard` verb returns the dashboard's render inputs (`state`, `themeCss`, `coreSections`, `updatedToken`) for that renderer to compose from. The hand-off fails the render (silent skip, no publish) when the renderer exits 0 without a `{path,hash}` receipt, rejects an explicit `outPath` rather than ignoring it, and runs the child with `HERMIT_DASHBOARD_RENDER=1` so a renderer that re-enters `render dashboard` cannot recurse.
 
 ### Upgrade Instructions
 

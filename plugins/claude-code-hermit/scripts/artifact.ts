@@ -38,6 +38,11 @@ interface Rendered { content: string; hash: string }
  *  of the file is the switch — no config gate. */
 const CUSTOM_RENDERER = 'dashboard-render.ts';
 
+/** Set on the child's env so a renderer that calls back into `render dashboard` (instead
+ *  of the `state dashboard` verb it is meant to use) gets the built-in render once rather
+ *  than re-entering the hand-off forever — a routine-path fork bomb otherwise. */
+const RENDER_GUARD = 'HERMIT_DASHBOARD_RENDER';
+
 // Each page contributes only what actually differs between them: where it lands
 // by default, and how its bytes are produced.
 const PAGES: Record<string, { defaultOut: (dir: string) => string; render: (dir: string) => Rendered }> = {
@@ -73,17 +78,39 @@ function usage(): never {
 
 /** Runs the hermit's own dashboard renderer and relays its receipt verbatim. The
  *  child owns the whole render — layout, data, hash — so nothing here inspects or
- *  rewrites its output; a non-zero exit propagates as this script's exit 1, which the
- *  refresh protocol already treats as "skip silently". */
+ *  rewrites its *page*; a non-zero exit propagates as this script's exit 1, which the
+ *  refresh protocol already treats as "skip silently". The `{path,bytes,hash}` receipt
+ *  is core's protocol rather than the child's, though, and step 1 of that protocol
+ *  JSON.parses this stdout — so a renderer that exits 0 without one is failed here,
+ *  landing on the same silent skip instead of throwing inside the calling skill. */
 function renderCustomDashboard(rendererPath: string, hermitDir: string): never {
-  const r = spawnSync(process.execPath, [rendererPath, hermitDir], { encoding: 'utf8', timeout: 60_000 });
+  const r = spawnSync(process.execPath, [rendererPath, hermitDir], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, [RENDER_GUARD]: '1' },
+  });
   if (r.stdout) process.stdout.write(r.stdout);
   if (r.stderr) process.stderr.write(r.stderr);
   if (r.error) {
-    console.error(`artifact render dashboard: custom renderer failed to start: ${r.error.message}`);
+    const what = (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT' ? 'timed out' : 'failed to start';
+    console.error(`artifact render dashboard: custom renderer ${what}: ${r.error.message}`);
     process.exit(1);
   }
-  process.exit(r.status === 0 ? 0 : 1);
+  if (r.status !== 0) process.exit(1);
+  if (!parsesAsReceipt(r.stdout)) {
+    console.error('artifact render dashboard: custom renderer exited 0 without a {path,hash} receipt on stdout');
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+function parsesAsReceipt(stdout: string): boolean {
+  try {
+    const receipt = JSON.parse(stdout);
+    return !!receipt && typeof receipt.path === 'string' && typeof receipt.hash === 'string';
+  } catch {
+    return false;
+  }
 }
 
 function verbRender(page: string | undefined, hermitDir: string | undefined, outArg: string | undefined): void {
@@ -93,9 +120,18 @@ function verbRender(page: string | undefined, hermitDir: string | undefined, out
     console.error(`artifact render: unknown page "${page}" (expected ${PAGE_NAMES})`);
     process.exit(1);
   }
-  if (page === 'dashboard') {
+  if (page === 'dashboard' && !process.env[RENDER_GUARD]) {
     const custom = path.join(hermitDir, CUSTOM_RENDERER);
-    if (fs.existsSync(custom)) renderCustomDashboard(custom, hermitDir);
+    if (fs.existsSync(custom)) {
+      // The renderer's contract fixes its own out path (<hermitDir>/state/dashboard.html),
+      // so honoring an explicit one is impossible — fail loudly instead of writing over
+      // the live page while the caller believes it asked for a copy elsewhere.
+      if (outArg) {
+        console.error(`artifact render dashboard: ${CUSTOM_RENDERER} owns the out path; drop the explicit outPath argument`);
+        process.exit(1);
+      }
+      renderCustomDashboard(custom, hermitDir);
+    }
   }
   const outPath = outArg || spec.defaultOut(hermitDir);
   try {

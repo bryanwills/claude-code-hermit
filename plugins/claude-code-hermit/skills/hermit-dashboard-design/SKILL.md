@@ -54,8 +54,8 @@ Write it to `.claude-code-hermit/dashboard-render.ts`. Its presence is the switc
 
 - Takes the hermit state dir as `argv[2]`.
 - Writes the page to `<hermitDir>/state/dashboard.html`.
-- Prints one line of JSON to stdout: `{"path":…,"bytes":…,"hash":…}`.
-- Exits 0 on success, non-zero on failure (core turns that into a silent skip, so a broken renderer never publishes a broken page).
+- Prints one line of JSON to stdout: `{"path":…,"bytes":…,"hash":…}` — **and nothing else**. Core fails an exit-0 run whose stdout doesn't parse as that receipt, so a stray debug `console.log` costs the refresh.
+- Exits 0 on success, non-zero on failure (core turns that into a silent skip, so a broken renderer never publishes a broken page). Core also kills it at 60s.
 - **Outputs a fragment, not a document** — no `<!DOCTYPE>`, `<html>`, `<head>` or `<body>`; the Artifact tool supplies the shell. A `<style>` block and inline `<script>` are fine.
 - **No imports from the plugin.** The plugin lives at a version-stamped cache path that changes on every update — an import would break the next time the operator updates. Node/Bun built-ins only.
 
@@ -89,7 +89,7 @@ const page = `<style>/* … */</style>
 <footer><span class="updated">updated ${STAMP}</span></footer></main>`;
 
 const hash = new Bun.CryptoHasher('sha256').update(page).digest('hex');
-const html = page.replace(STAMP, esc(new Date().toISOString()));
+const html = page.replaceAll(STAMP, esc(new Date().toISOString()));
 const out = path.join(hermitDir, 'state', 'dashboard.html');
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, html);
