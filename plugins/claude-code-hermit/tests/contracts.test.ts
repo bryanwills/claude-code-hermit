@@ -1218,8 +1218,10 @@ describe('channel-setup empty-channels branch', () => {
   const text = read(path.join(SKILLS, 'channel-setup', 'SKILL.md'));
 
   test('does not send the operator to hermit-settings to add a channel', () => {
-    expect(text).not.toContain('to add one first');
-    expect(text).not.toContain('hermit-settings channels');
+    // Match the dead-end redirect specifically — a bare 'hermit-settings channels'
+    // or 'to add one first' would also fire on unrelated future prose.
+    expect(text).not.toContain('No channels in config.json');
+    expect(text).not.toMatch(/hermit-settings channels`? to add one first/);
   });
 
   test('creates the entry through hatch-config.ts --reinit, discarding stdout', () => {
