@@ -1947,13 +1947,13 @@ describe('reflect routine gating contract (token efficiency)', () => {
 
 const DOCTOR_CHECK_IDS = [
   'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
-  'permissions', 'docker-security', 'archive', 'reflect', 'scheduler', 'watchdog', 'context-age',
+  'permissions', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age',
   'opus-wake', 'routine-cost', 'heartbeat', 'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known',
   'context-scan', 'channel-liveness',
 ];
 
 describe('doctor report contract (PROP-018 count pin)', () => {
-  test('report emits exactly the 24 pinned check ids, in order', withTmpdir(async (dir) => {
+  test('report emits exactly the 25 pinned check ids, in order', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     const report = await runDoctorCheck(dir);
     expect((report.checks ?? []).map((c: any) => c.id)).toEqual(DOCTOR_CHECK_IDS);
@@ -1973,9 +1973,9 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
     expect(missing).toEqual([]);
   });
 
-  test('counts read twenty-four, not fifteen', () => {
+  test('counts read twenty-five, not fifteen', () => {
     expect(skill).not.toContain('fifteen');
-    expect(skill.toLowerCase()).toContain('twenty-four');
+    expect(skill.toLowerCase()).toContain('twenty-five');
   });
 });
 

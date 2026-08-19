@@ -30,10 +30,12 @@ import { makeTzFormatter, partsFromFormatter, compileCron, cronMatchesCompiled }
 import { readJson as readJSON } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { logRoutineEvent } from './event';
+import { pendingCloseDrainDue, PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES } from '../auto-close';
 
 type Json = any;
 
 const ANCHOR_ID = 'heartbeat-restart';
+const DRAIN_ID = 'daily-auto-close'; // routine the pending-close drain re-fires
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 const TURN_TTL_MS = 60 * 60 * 1000; // orphaned-marker backstop; see gate comment below
@@ -44,6 +46,14 @@ if (!hermitDir) process.exit(0);
 const stateDir = path.join(hermitDir, 'state');
 const schedulePath = path.join(stateDir, 'routine-schedule.json');
 const livenessPath = path.join(stateDir, 'routine-monitor-liveness.json');
+// Backoff marker for the pending-close drain below. Deliberately its own file and
+// NOT a key inside pending-close.json: that file today has exactly one atomic
+// writer and one deleter with singleton semantics, so adding attempt metadata
+// would introduce the first read-modify-write on it — and a delete landing inside
+// that window would resurrect a flag session-archive.ts had just cleared, which
+// can auto-close a freshly-started session. A separate file only ever suppresses,
+// so its worst failure is one delayed drain, and TTL expiry self-heals.
+const drainMarkerPath = path.join(stateDir, 'pending-close-drain.json');
 
 function now(): Date {
   if (process.env.HERMIT_NOW) {
@@ -75,6 +85,18 @@ function writeJSONAtomic(p: string, value: Json): boolean {
 
 function writeLiveness(): void {
   writeJSONAtomic(livenessPath, { last_peek_at: new Date().toISOString() });
+}
+
+// True when no drain has been emitted recently. Absent/malformed/future-dated all
+// read as expired (fail-open) — a broken marker must never strand a queued close,
+// which is the failure this whole change exists to remove.
+function drainCooldownExpired(): boolean {
+  const marker: Json = readJSON(drainMarkerPath);
+  const at = marker && typeof marker.last_emitted_at === 'string'
+    ? new Date(marker.last_emitted_at).getTime() : NaN;
+  if (isNaN(at)) return true;
+  const ageMin = (nowDate.getTime() - at) / MINUTE_MS;
+  return ageMin < 0 || ageMin > PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES;
 }
 
 function stamp(id: string, event: string): void {
@@ -229,5 +251,41 @@ if (scheduleChanged) {
 
 // Persist succeeded (or nothing changed) — now flush the deferred skip stamps.
 for (const [id, event] of pendingStamps) stamp(id, event);
+
+// Pending-close drain. The daily-auto-close routine queues a close when the
+// operator is active at midnight; historically only the heartbeat tick drained
+// that flag, so a hermit with heartbeat.enabled=false stranded it indefinitely.
+// This poll is the second drainer — see lib/auto-close.ts for why two is correct.
+//
+// Placed after the persist block on purpose: the dedup gate needs dueIds in its
+// final state, and a failed schedule write has already finish([])ed above, so the
+// drain inherits that short-circuit for free rather than restating it.
+if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
+  // NOT gated on the flag's own routine being `eligible`: an operator who
+  // disabled the daily-auto-close *schedule* did not thereby decline a close
+  // that is already queued. But it must exist in config at all — hermit-routines
+  // skips unknown ids silently, so emitting one would be a paid wake that can
+  // never clear the flag (hermit-doctor's auto-close check surfaces that case).
+  const configured = routines.some((r: Json) => r && r.id === DRAIN_ID);
+  // An open operator turn suppresses the drain even when the 10-min lull has
+  // passed: someone who typed 11 minutes ago and is now watching a long agent
+  // turn is present, and closing under them at 60s granularity would destroy
+  // in-flight work. The heartbeat drainer does not check this — its 2h cadence
+  // made the window negligible — so the divergence is deliberate and lives here
+  // at the call site rather than inside the shared predicate.
+  if (configured && !operatorTurnOpen && drainCooldownExpired()) {
+    // Write-before-emit, mirroring the persist-before-emit contract above: if the
+    // cooldown stamp fails we must not emit, or a read-only state dir turns a
+    // failing close into a wake every 60 seconds. Stamped unconditionally (even
+    // when the natural midnight fire already added DRAIN_ID this poll) because
+    // otherwise the same-poll dedup lasts exactly one poll, and with the flag
+    // still on disk mid-close the next poll would emit a second close into the
+    // one still running.
+    const stamped = writeJSONAtomic(drainMarkerPath, { last_emitted_at: nowDate.toISOString() });
+    if (stamped && !dueIds.includes(DRAIN_ID)) {
+      dueIds.push(DRAIN_ID);
+    }
+  }
+}
 
 finish(dueIds.length ? [`ROUTINE_DUE ${dueIds.map(id => `[hermit-routine:${id}]`).join(' ')}`] : []);

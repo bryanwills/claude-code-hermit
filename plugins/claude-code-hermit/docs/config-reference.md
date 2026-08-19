@@ -505,7 +505,7 @@ A realistic `config.json` for an always-on Docker hermit with Discord:
   "routines": [
     {"id": "morning-brief", "schedule": "0 8 * * *", "skill": "claude-code-hermit:brief --morning", "run_during_waiting": true, "enabled": true},
     {"id": "evening-summary", "schedule": "0 22 * * *", "skill": "claude-code-hermit:brief --evening", "run_during_waiting": true, "enabled": true},
-    {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:heartbeat start", "run_during_waiting": true, "enabled": true}
+    {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:hermit-routines load", "run_during_waiting": true, "enabled": true}
   ],
   "env": {
     "AGENT_HOOK_PROFILE": "strict",

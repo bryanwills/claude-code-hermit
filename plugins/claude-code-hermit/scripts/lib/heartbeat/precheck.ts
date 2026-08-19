@@ -18,7 +18,7 @@ import { isProposalScanItem } from '../heartbeat-items';
 import { isPaused } from '../pause';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
-import { AUTO_CLOSE_LULL_MINUTES } from '../auto-close';
+import { pendingCloseDrainDue } from '../auto-close';
 
 type Json = any;
 
@@ -157,32 +157,10 @@ if (process.env.HERMIT_NOW) {
 // Runs BEFORE every other gate (HEARTBEAT.md presence, active-hours, 20-tick,
 // micro-proposal) — the close is the signal, not a notification, and must not
 // depend on operator-editable HEARTBEAT.md being present.
-{
-  const pendingClose = readJSON(path.join(stateDir, 'state', 'pending-close.json'));
-  if (pendingClose !== null) {
-    const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
-    if (runtime.session_state === 'in_progress' || runtime.session_state === 'idle') {
-      const lastAction = readJSON(path.join(stateDir, 'state', 'last-operator-action.json'));
-      const tStr = lastAction && typeof lastAction.at === 'string' ? lastAction.at : null;
-      const t = tStr ? new Date(tStr).getTime() : NaN;
-      if (!isNaN(t)) {
-        // Valid last-operator-action → standard 10-min lull check.
-        if ((now - t) / (1000 * 60) > AUTO_CLOSE_LULL_MINUTES) emit('AUTO_CLOSE');
-      } else {
-        // Absent/malformed last-operator-action → fail-open per daily-auto-close
-        // SKILL.md step 5, BUT only when the flag itself is recent. A stale flag
-        // left over from a crashed prior session must not auto-close a fresh
-        // session whose last-op clock has not yet been seeded. The routine fires
-        // every 24h and overwrites or cleans up the flag, so a queued_at older
-        // than 24h means the routine has stopped firing and the flag cannot be
-        // trusted.
-        const qStr = typeof pendingClose.queued_at === 'string' ? pendingClose.queued_at : null;
-        const q = qStr ? new Date(qStr).getTime() : NaN;
-        if (!isNaN(q) && (now - q) / (1000 * 60 * 60) <= 24) emit('AUTO_CLOSE');
-      }
-    }
-  }
-}
+// The verdict itself lives in lib/auto-close.ts so the routine poll (lib/routines/
+// due.ts) drains on the same terms — this tick is not the only drainer, and is
+// absent entirely when heartbeat.enabled is false.
+if (pendingCloseDrainDue(stateDir, now)) emit('AUTO_CLOSE');
 
 let heartbeatContent: string;
 try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }

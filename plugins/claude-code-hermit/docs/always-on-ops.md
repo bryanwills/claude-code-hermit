@@ -165,7 +165,7 @@ Routines live in `config.json` as a `routines` array:
 "routines": [
   {"id": "morning", "schedule": "30 8 * * *", "skill": "claude-code-hermit:brief --morning", "run_during_waiting": true, "enabled": true},
   {"id": "evening", "schedule": "30 22 * * *", "skill": "claude-code-hermit:brief --evening", "run_during_waiting": true, "enabled": true},
-  {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:heartbeat start", "run_during_waiting": true, "enabled": true},
+  {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:hermit-routines load", "run_during_waiting": true, "enabled": true},
   {"id": "weekly-deps", "schedule": "0 9 * * 1", "skill": "claude-code-hermit:session-start --task 'dependency audit'", "enabled": false}
 ]
 ```
@@ -191,7 +191,7 @@ Manage with `/claude-code-hermit:hermit-settings routines`. Changes take effect 
 
 `routines.ts precheck` gates every fire regardless of delivery mechanism: it suppresses `run_during_waiting: false` routines with a `skipped-waiting` event when `session_state == "waiting"`, and any routine with a `skipped-paused` event when the binding pause flag is set; otherwise it stamps `started` and returns `PROCEED`. When the routine declares `expect_artifact`, `precheck` also freezes that fire's contract into `state/routine-run.json` — the `{date}` token resolved in `config.timezone` at start, plus the target's filesystem identity — which `routines.ts finish` compares against afterwards. In monitor mode, `routines.ts due` applies the same two gates itself before ever waking the session, plus an operator-turn defer (Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) approximating the idle gate CronCreate gets for free from the harness.
 
-**`heartbeat-restart`** fires at 4am daily and re-invokes `load`, which re-registers the heartbeat Monitor and re-arms the routine monitor (or, in fallback mode, the routine CronCreates — which expire after 7 days without this daily re-arm).
+**`heartbeat-restart`** fires at 4am daily and re-invokes `load`, re-arming the routine monitor (or, in fallback mode, the routine CronCreates — which expire after 7 days without this daily re-arm); unless `heartbeat.enabled` is explicitly false, the same fire re-registers the heartbeat Monitor.
 
 Inspect live state with `/claude-code-hermit:hermit-routines status` (monitor liveness + anchor, or the full CronCreate list in fallback mode). Inspect fire history with `tail .claude-code-hermit/state/routine-metrics.jsonl` — each row's `delivery` field is `monitor` or `cron-create`.
 

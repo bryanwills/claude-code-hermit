@@ -78,16 +78,30 @@ function isRoutinePrompt(prompt: string): boolean {
   const t = prompt.trim();
   if (t.startsWith('<channel')) return true;
   if (INJECTED_EXACT.has(t)) return true;
-  // Monitor-delivered scheduler notifications — not operator activity. Grammar
-  // must match the emitters exactly (verified against source, NOT live-probed —
-  // a 2026-07-15 probe attempt hit an unrelated harness setup issue where no
-  // UserPromptSubmit hook fired at all in scratch tmux sessions; revisit if a
-  // future probe contradicts this):
-  //   heartbeat-monitor.sh:26-34 → "HEARTBEAT_EVALUATE" (bare) | "HEARTBEAT_ERROR: <detail>"
-  //   lib/routines/due.ts             → "ROUTINE_DUE [hermit-routine:<id>] ..."
-  //   routine-monitor.sh:26      → "ROUTINE_MONITOR_ERROR: <detail>"
+  // Harness task notifications — Monitor events AND subagent/background-task
+  // completions. Live-probed 2026-08-19 (CC 2.1.235): the harness wraps the
+  // emitter's stdout in an envelope before it reaches this hook —
+  //   <task-notification>\n<task-id>…</task-id>
+  //   \n<summary>Monitor event: "routine-monitor"</summary>
+  //   \n<event>ROUTINE_DUE [hermit-routine:daily-auto-close]</event>\n…</task-notification>
+  // — so the anchored sentinel rules below never match a delivered one. This is
+  // also the ONLY coverage for subagent/background completions, which carry no
+  // hermit sentinel at all. (A notification delivered mid-turn arrives as an
+  // array-content attachment and never reaches this hook; only idle-session
+  // delivery does — which is exactly when auto-close decisions are made.)
+  if (t.startsWith('<task-notification')) return true;
+  // Monitor emissions in bare form. Deliberately anchored, NOT containment: this
+  // is a live input boundary where a false positive silences an AUTO_CLOSE, so an
+  // operator prompt that merely quotes a sentinel must still count as activity
+  // (pinned in tests/auto-close.test.ts). lib/trigger-source.ts matches the same
+  // grammar by containment — that is retrospective cost attribution over stored
+  // transcripts, a different boundary with a different failure cost, and is not
+  // precedent here.
+  //   heartbeat-monitor.sh:38-43 → "HEARTBEAT_EVALUATE" (bare) | "HEARTBEAT_ERROR: <detail>"
+  //   lib/routines/due.ts        → "ROUTINE_DUE [hermit-routine:<id>] ..."
+  //   routine-monitor.sh:36      → "ROUTINE_MONITOR_ERROR: <detail>"
   // tests/auto-close.test.ts monitor-emission drift guard re-derives this list
-  // from the emitters' source — extend both together.
+  // from the emitters' source, bare AND envelope-wrapped — extend both together.
   if (t === 'HEARTBEAT_EVALUATE') return true;
   if (t.startsWith('HEARTBEAT_ERROR: ')) return true;
   if (t.startsWith('ROUTINE_DUE [hermit-routine:')) return true;

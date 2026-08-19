@@ -581,6 +581,52 @@ describe('record-operator-action: monitor emission strings stay in sync', () => 
       expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(false);
     }));
   }
+
+  // Delivery-shape matrix. The emitters above are correct and always were — what
+  // broke in production was the ENVELOPE the harness wraps them in before the
+  // prompt reaches this hook. Captured live 2026-08-19 on CC 2.1.235; a guard that
+  // only feeds bare literals is structurally blind to that class of drift.
+  const envelope = (event: string) =>
+    `<task-notification>\n<task-id>bc568nhi2</task-id>\n<summary>Monitor event: "routine-monitor"</summary>\n<event>${event}</event>\nIf this event is something the user would act on now, send a PushNotification.\n</task-notification>`;
+
+  for (const literal of [...new Set([...literals, 'ROUTINE_DUE [hermit-routine:x]'])]) {
+    test(`task-notification-wrapped "${literal}" is dropped by record-operator-action.ts`, withTmp(async (dir) => {
+      const r = await runScript('record-operator-action.ts', {
+        stdin: JSON.stringify({ prompt: envelope(literal) }),
+        cwd: dir,
+      });
+      expect(r.exitCode).toBe(0);
+      expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(false);
+    }));
+  }
+
+  // Subagent / background-task completions carry NO hermit sentinel at all, so the
+  // emitter-derived list above can never cover them. This is the second half of the
+  // production bug: such a completion stamped the operator clock 40ms after arriving.
+  test('subagent-completion notification (no hermit grammar) is dropped', withTmp(async (dir) => {
+    const prompt = '<task-notification>\n<task-id>a22f60f</task-id>\n<tool-use-id>toolu_abc</tool-use-id>\n<status>completed</status>\n<summary>Agent "daily-auto-close routine" came to rest</summary>\n</task-notification>';
+    const r = await runScript('record-operator-action.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(false);
+  }));
+
+  // The envelope rule is anchored, NOT containment, and the sentinel rules stay
+  // anchored too. A real operator asking about a sentinel is an operator: dropping
+  // their prompt would silence the very AUTO_CLOSE this clock gates. Deliberate
+  // trade — see the comment block in record-operator-action.ts.
+  test('operator prose quoting a sentinel still counts as operator activity', withTmp(async (dir) => {
+    const prompt = 'why did ROUTINE_DUE [hermit-routine:reflect] fire twice last night?';
+    const r = await runScript('record-operator-action.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(true);
+  }));
+
+  test('operator prose mentioning task-notification still counts as operator activity', withTmp(async (dir) => {
+    const prompt = 'the task-notification envelope is what broke the filter — can you explain it?';
+    const r = await runScript('record-operator-action.ts', { stdin: JSON.stringify({ prompt }), cwd: dir });
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(dir, 'state', 'last-operator-action.json'))).toBe(true);
+  }));
 });
 
 // -------------------------------------------------------
@@ -1165,15 +1211,30 @@ describe('auto-close-decision verb', () => {
   }));
 
   // Constants-sync pin: the 10-minute lull threshold must stay a single shared
-  // constant — both the precheck drain and the decision verb import it from
-  // lib/auto-close, so they can never disagree on the boundary.
-  test('heartbeat-precheck and session-archive both import the lull from lib/auto-close', () => {
+  // constant so no caller can disagree on the boundary. The drain predicate now
+  // lives in lib/auto-close too, so precheck and due.ts consume the lull through
+  // pendingCloseDrainDue rather than naming the constant — the invariant is that
+  // every consumer reaches lib/auto-close and none hardcodes the threshold.
+  test('every auto-close consumer reaches lib/auto-close and none hardcodes the lull', () => {
+    const autoCloseSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib', 'auto-close.ts'), 'utf-8');
     const precheckSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib', 'heartbeat', 'precheck.ts'), 'utf-8');
     const archiveSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'session-archive.ts'), 'utf-8');
-    // Assert the imported symbol, not the import path: precheck.ts now lives in
-    // lib/heartbeat/ and reaches the same module as '../auto-close'. The
-    // invariant is that neither hardcodes the lull.
-    expect(precheckSrc).toContain('AUTO_CLOSE_LULL_MINUTES');
+    const dueSrc = fs.readFileSync(path.join(SCRIPTS_DIR, 'lib', 'routines', 'due.ts'), 'utf-8');
+
+    // The constant is defined exactly once, here.
+    expect(autoCloseSrc).toContain('export const AUTO_CLOSE_LULL_MINUTES = 10');
+
+    // Direct consumer of the threshold.
     expect(archiveSrc).toContain('AUTO_CLOSE_LULL_MINUTES');
+    // Consumers of the shared drain predicate, which applies the threshold for them.
+    expect(precheckSrc).toContain("from '../auto-close'");
+    expect(precheckSrc).toContain('pendingCloseDrainDue');
+    expect(dueSrc).toContain("from '../auto-close'");
+    expect(dueSrc).toContain('pendingCloseDrainDue');
+
+    // Nobody re-derives the boundary from a bare literal.
+    for (const [name, src] of [['precheck', precheckSrc], ['due', dueSrc]] as const) {
+      expect(src, `${name} must not hardcode the lull`).not.toContain('1000 * 60) > 10');
+    }
   });
 });

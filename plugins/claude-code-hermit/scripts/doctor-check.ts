@@ -21,9 +21,11 @@ import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
+import { isCloseableSessionState } from './lib/auto-close';
 import { promptTokensOf, compactibleTokens } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
+import { readJson } from './lib/cli';
 
 type Json = any;
 
@@ -717,6 +719,69 @@ function checkArchival(p: DoctorPaths = PATHS) {
     return { id: 'archive', status: 'ok', detail: `session_state=${state || 'unset'}, ${ageDetail}` };
   } catch (e: any) {
     return { id: 'archive', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
+// Queue health for the midnight auto-close, kept separate from `archive` on purpose:
+// a check returns exactly one {id,status,detail}, and the alert ledger keys on id, so
+// folding this into checkArchival would force a priority call between two independent
+// failures (and silently drop one). Cause-agnostic by design — it fires whenever a
+// queued close stops draining, whether the cause is a dead monitor, a hermit with no
+// in-session poller at all (heartbeat off AND CronCreate fallback), or a close that
+// keeps failing. Corrupt JSON is already checkStateFiles' job; this is semantic only.
+function checkAutoClose(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
+  try {
+    const pendingPath = path.join(stateDir, 'pending-close.json');
+    if (!fs.existsSync(pendingPath)) {
+      return { id: 'auto-close', status: 'ok', detail: 'no queued close' };
+    }
+    const pending = readJson(pendingPath);
+    if (!pending || typeof pending !== 'object') {
+      // File integrity is checkStateFiles' finding; don't double-report the same
+      // root cause under a second ledger id. A non-object payload carries no
+      // queued_at either way, and the drain's readJSON treats it as no flag.
+      return { id: 'auto-close', status: 'ok', detail: 'pending-close.json unreadable or malformed (file integrity is the state check)' };
+    }
+
+    const runtimePath = path.join(stateDir, 'runtime.json');
+    if (!fs.existsSync(runtimePath)) {
+      // auto-close-decision treats a missing runtime exactly like a non-closeable
+      // session_state: the next fire reaps the flag. The absent file itself is
+      // already the state check's finding.
+      return { id: 'auto-close', status: 'ok', detail: 'queued close, runtime.json absent (stale flag is reaped at next fire)' };
+    }
+    let state: any;
+    try {
+      state = JSON.parse(fs.readFileSync(runtimePath, 'utf8')).session_state;
+    } catch {
+      return {
+        id: 'auto-close',
+        status: 'warn',
+        detail: 'close queued but runtime.json is unreadable — nothing can drain it',
+      };
+    }
+    if (!isCloseableSessionState(state)) {
+      // Not closeable; the next auto-close-decision reaps the flag itself.
+      return { id: 'auto-close', status: 'ok', detail: `queued close, session_state=${state || 'unset'} (stale flag is reaped at next fire)` };
+    }
+
+    const age = daysSince(pending.queued_at);
+    if (age == null) {
+      // Malformed queued_at: the drain's own fail-open path declines to trust it,
+      // so don't escalate on it either — checkStateFiles owns malformed state.
+      return { id: 'auto-close', status: 'ok', detail: 'queued close, no readable queued_at' };
+    }
+    if (age > 1) {
+      return {
+        id: 'auto-close',
+        status: 'warn',
+        detail: `queued close not drained for ${age.toFixed(1)}d — check heartbeat.enabled and the routine monitor`,
+      };
+    }
+    return { id: 'auto-close', status: 'ok', detail: `queued close pending ${(age * 24).toFixed(1)}h` };
+  } catch (e: any) {
+    return { id: 'auto-close', status: 'fail', detail: `check failed: ${e.message}` };
   }
 }
 
@@ -1882,6 +1947,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkPermissions(p),
     checkDockerSecurity(p),
     checkArchival(p),
+    checkAutoClose(p),
     checkReflectLoop(p),
     checkScheduler(p),
     checkWatchdog(p),
@@ -2015,7 +2081,7 @@ function writeReport(checks: Json[], escalation?: DoctorEscalation, p: DoctorPat
 export {
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
   checkCost, checkProposals, checkDependencies, checkVersionCurrency, checkPermissions,
-  checkDockerSecurity, checkArchival, checkReflectLoop, checkScheduler,
+  checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor, checkRawSize,
   checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
