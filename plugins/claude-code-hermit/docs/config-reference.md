@@ -129,12 +129,17 @@ Steps 1–3 are **scheduler-owned context-hygiene** — the watchdog script runs
 2. If context-clear conditions met (prompt tokens over `watchdog.context_clear_tokens`, always-on, quiescent, operator silent) → send `/clear`, exit.
 3. If routine-hygiene compact conditions met (see `context_hygiene.compact` below) → send `/compact`, exit.
 4. If `enabled: false` → exit (restart/nudge machinery disabled).
-5. Read `runtime.json` shutdown fields. If operator stopped the hermit intentionally (`shutdown_requested_at`/`shutdown_completed_at` set or `session_state == idle`) → exit.
-6. If the tmux session is gone → restart.
-7. If the heartbeat is stale and the operator is quiet and the pane is frozen for `escalate_after` cycles → restart. Before that threshold: nudge (`/claude-code-hermit:heartbeat run`).
-8. If the in-session 4am `heartbeat-restart` routine missed its fire (last fired > 26h ago) → send-keys re-arm fallback.
+5. Read `runtime.json`. If explicit shutdown markers are set, the runtime is interactive, or no tmux session is named → exit. `session_state == idle` is supervision-only, not an immediate exit: the alert tiers below still run.
+6. If an active session's tmux session is gone → restart, unless fresh shared-liveness says the process survived without tmux; in that orphan shape, alert and exit instead of starting a duplicate.
+7. If a re-auth relay was spawned or remains active → exit while it owns recovery.
+8. If the captured pane shows a stalled dialog → send one deduplicated operator alert for the episode.
+9. If the transcript ends with an `enqueue` that has not drained for 30 minutes while tmux is alive → send one deduplicated `session-wedged` alert for the episode.
+10. If a dialog is pending, or the session is supervision-only (`idle`) → exit before any tier that sends keystrokes or restarts the session.
+11. If the heartbeat is stale and the operator is quiet and the pane is frozen for `escalate_after` cycles → restart. Before that threshold: nudge (`/claude-code-hermit:heartbeat run`).
+12. If the in-session 4am `heartbeat-restart` routine missed its fire (last fired > 26h ago) → send-keys re-arm fallback.
+13. If heartbeat or routine Monitor liveness is stale → re-arm the missing monitor.
 
-Every context-clear, context-compact, post-close-clear, nudge, restart, and re-arm is appended to `state/watchdog-events.jsonl`. Restarts also set `runtime.json.watchdog_restart_reason`; `session-start` announces the restart to the operator channel.
+Recovery actions and alerts — including context resets, nudges, restarts, re-arms, `stall-question-detected`, and `session-wedged` — are appended to `state/watchdog-events.jsonl`. Restarts also set `runtime.json.watchdog_restart_reason`; `session-start` announces the restart to the operator channel.
 
 **Install:** `bin/hermit-watchdog install` — systemd user timer on Linux/WSL2, LaunchAgent on macOS, cron line printed as fallback. Docker hermits don't need `install` — the entrypoint already runs the watchdog on its own ~5 min cycle.
 

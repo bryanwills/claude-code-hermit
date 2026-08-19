@@ -84,6 +84,7 @@ The native Hermit Dashboard, proposals page, and weekly review stay current as C
 
 On-demand skills — pullable from the Claude app, your terminal, or a DM:
 
+- **`/hermit-dashboard-design`** — designs the Dashboard around what this hermit actually tracks; delete `.claude-code-hermit/dashboard-render.ts` to restore the built-in page
 - **`/recall`** — full-text search over past sessions, compiled knowledge, proposals, and your channel DM history ("what did I decide about X?")
 - **`/hermit-evolution`** — cost trend and behavior drift over weeks
 - **`/hermit-health`** — alerts, routines, channels, heartbeat state, plus fragile zones, stale proposals, and recent learnings

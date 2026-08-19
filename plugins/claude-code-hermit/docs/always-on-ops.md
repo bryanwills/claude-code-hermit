@@ -94,7 +94,7 @@ hermit-start -> [in_progress] -> task done -> [idle] -> new task -> [in_progress
 | **SHELL.md**        | Reset in-place, Monitoring & Summary compacted if over threshold           | Unchanged (state in runtime.json) | Replaced with fresh template                | Replaced with fresh template     |
 | **Applies to**      | Both interactive and always-on                                             | Both interactive and always-on | Both interactive and always-on                 | Both interactive and always-on   |
 
-Default: idle transition when work finishes. Waiting when blocked on operator input (configurable `waiting_timeout` auto-transitions to idle). Auto-close on either 12h operator inactivity OR the daily midnight routine once the operator is idle ≥10 min (both heartbeat-driven, no configuration). Full shutdown only via explicit `/session-close` or `hermit-stop`.
+Default: idle transition when work finishes. Waiting when blocked on operator input (configurable `waiting_timeout` auto-transitions to idle). Auto-close on either 12h operator inactivity OR the daily midnight routine once the operator is idle ≥10 min; a queued midnight close can be drained by either heartbeat or the Monitor-mode routine poll. Neither threshold is configurable. Full shutdown only via explicit `/session-close` or `hermit-stop`.
 
 ### How sessions compound
 

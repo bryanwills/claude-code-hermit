@@ -200,15 +200,15 @@ This means even a raw `docker compose down` (without `hermit-docker down`) will 
 
 ## Auto-Close
 
-Heartbeat archives the current session via two triggers:
+Hermit archives the current session via two triggers:
 
 - **12h inactivity** — `heartbeat.ts precheck` checks `last-operator-action.json` on each tick. If the operator has not acted for >12h, it returns the `AUTO_CLOSE` verdict.
-- **Daily midnight with lull** — the `daily-auto-close` routine fires at `0 0 * * *` (local). If the operator is currently active (last action ≤10 min), the routine writes `state/pending-close.json`. The next heartbeat tick where the operator has been idle >10 min drains the flag and emits `AUTO_CLOSE`. If the operator was already idle when the routine fired, it closes directly without queueing.
+- **Daily midnight with lull** — the `daily-auto-close` routine fires at `0 0 * * *` (local). If the operator is currently active (last action ≤10 min), the routine writes `state/pending-close.json`. The next eligible Monitor-mode 60-second routine poll or heartbeat tick after the operator has been idle >10 min drains the flag. If the operator was already idle when the routine fired, it closes directly without queueing.
 
 On either trigger:
 
-1. Heartbeat appends `[HH:MM] Heartbeat: auto-closed.` to SHELL.md Monitoring (so the trace lands in the archived report, not the next session).
-2. Invokes `/session-close --auto` — bypasses the operator-summary prompt and skips reflect; the heartbeat tick continues.
+1. The main-session auto-close path appends `[HH:MM] Heartbeat: auto-closed.` to SHELL.md Monitoring (so the trace lands in the archived report, not the next session).
+2. Invokes `/session-close --auto` — bypasses the operator-summary prompt and skips reflect; the always-on monitors continue.
 3. The report is archived with frontmatter `closed_via: auto`.
 4. `state/pending-close.json` (if present) is removed after archive success.
 
