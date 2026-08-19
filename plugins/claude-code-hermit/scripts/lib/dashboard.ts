@@ -28,7 +28,10 @@ type Json = any;
 
 const OPEN_STATUSES = new Set(['proposed', 'accepted']);
 const OTHER_CAP = 20;
-const UPDATED_TOKEN = '__DASHBOARD_UPDATED__';
+/** Placeholder standing in for the "last updated" stamp while the content hash is
+ *  computed, so an unchanged page hashes identically across renders. Exported for
+ *  hermit-local renderers, which must reproduce the same hash-then-swap order. */
+export const UPDATED_TOKEN = '__DASHBOARD_UPDATED__';
 
 export interface AlertRow {
   key: string;
@@ -610,6 +613,20 @@ function renderCompiledIndex(state: DashboardState): string {
       <ul class="proposal-history">${items}${omittedLine}</ul>`);
 }
 
+/** The default page's five cards, each as a standalone HTML fragment. Exported so a
+ *  hermit-local dashboard renderer (see docs/artifacts.md § Custom renderer) can embed
+ *  any of them verbatim instead of reimplementing them; `renderDashboard` composes the
+ *  same map, so the two cannot drift. `weekly` is empty when there is no review yet. */
+export function renderCoreSections(state: DashboardState): Record<string, string> {
+  return {
+    status: renderStatus(state),
+    brief: renderBrief(state),
+    proposals: renderProposals(state),
+    weekly: renderWeekly(state),
+    compiledIndex: renderCompiledIndex(state),
+  };
+}
+
 /** Renders the full artifact fragment plus a content hash stable across
  *  identical underlying state (the "last updated" stamp is excluded from the hash
  *  via a placeholder token, so the publish gate can skip no-op republishes).
@@ -621,17 +638,18 @@ function renderCompiledIndex(state: DashboardState): string {
 export function renderDashboard(state: DashboardState, opts?: { now?: string }): { html: string; hash: string } {
   const s = state.strings;
   const title = fmt(s.dashboard_title, { name: escapeHtml(state.agentName) });
+  const sections = renderCoreSections(state);
   const templated = pageShell({
     title,
     heading: title,
     updatedLabel: s.label_updated,
     updatedToken: UPDATED_TOKEN,
     body: [
-      renderStatus(state),
-      renderBrief(state),
-      renderProposals(state),
-      renderWeekly(state),
-      renderCompiledIndex(state),
+      sections.status,
+      sections.brief,
+      sections.proposals,
+      sections.weekly,
+      sections.compiledIndex,
     ].filter(Boolean).join('\n  '),
   });
 

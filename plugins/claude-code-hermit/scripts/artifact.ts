@@ -16,15 +16,32 @@
 //     translate the *values* in place and write to state/artifact-strings.json.
 //     Keeps DEFAULT_STRINGS the single source of keys — the model never
 //     hand-transcribes the key set.
+//
+//   bun artifact.ts state dashboard <hermit-state-dir>
+//     Prints the dashboard's render inputs as JSON, for a hermit-local renderer
+//     (see docs/artifacts.md § Custom renderer) to compose its own page from:
+//     {state, themeCss, coreSections, updatedToken}. Read-only; writes nothing.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadDashboardState, renderDashboard } from './lib/dashboard';
+import { spawnSync } from 'node:child_process';
+import { loadDashboardState, renderDashboard, renderCoreSections, UPDATED_TOKEN } from './lib/dashboard';
 import { loadProposalsPageState, renderProposalsPage } from './lib/proposals-page';
 import { renderWeeklyArtifact } from './lib/weekly-artifact';
 import { DEFAULT_STRINGS } from './lib/artifact-strings';
+import { CSS } from './lib/artifact-theme';
 
 interface Rendered { content: string; hash: string }
+
+/** A hermit that has run `/hermit-dashboard-design` owns its dashboard render: this
+ *  script hands off to that script and passes its receipt through untouched. Presence
+ *  of the file is the switch — no config gate. */
+const CUSTOM_RENDERER = 'dashboard-render.ts';
+
+/** Set on the child's env so a renderer that calls back into `render dashboard` (instead
+ *  of the `state dashboard` verb it is meant to use) gets the built-in render once rather
+ *  than re-entering the hand-off forever — a routine-path fork bomb otherwise. */
+const RENDER_GUARD = 'HERMIT_DASHBOARD_RENDER';
 
 // Each page contributes only what actually differs between them: where it lands
 // by default, and how its bytes are produced.
@@ -51,11 +68,49 @@ const PAGES: Record<string, { defaultOut: (dir: string) => string; render: (dir:
 
 const PAGE_NAMES = Object.keys(PAGES).join('|');
 const USAGE = `Usage: bun artifact.ts render <${PAGE_NAMES}> <hermit-state-dir> [outPath]\n` +
+              `       bun artifact.ts state dashboard <hermit-state-dir>\n` +
               `       bun artifact.ts scaffold-strings <language> [generatedISO]`;
 
 function usage(): never {
   console.error(USAGE);
   process.exit(1);
+}
+
+/** Runs the hermit's own dashboard renderer and relays its receipt verbatim. The
+ *  child owns the whole render — layout, data, hash — so nothing here inspects or
+ *  rewrites its *page*; a non-zero exit propagates as this script's exit 1, which the
+ *  refresh protocol already treats as "skip silently". The `{path,bytes,hash}` receipt
+ *  is core's protocol rather than the child's, though, and step 1 of that protocol
+ *  JSON.parses this stdout — so a renderer that exits 0 without one is failed here,
+ *  landing on the same silent skip instead of throwing inside the calling skill. */
+function renderCustomDashboard(rendererPath: string, hermitDir: string): never {
+  const r = spawnSync(process.execPath, [rendererPath, hermitDir], {
+    encoding: 'utf8',
+    timeout: 60_000,
+    env: { ...process.env, [RENDER_GUARD]: '1' },
+  });
+  if (r.stdout) process.stdout.write(r.stdout);
+  if (r.stderr) process.stderr.write(r.stderr);
+  if (r.error) {
+    const what = (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT' ? 'timed out' : 'failed to start';
+    console.error(`artifact render dashboard: custom renderer ${what}: ${r.error.message}`);
+    process.exit(1);
+  }
+  if (r.status !== 0) process.exit(1);
+  if (!parsesAsReceipt(r.stdout)) {
+    console.error('artifact render dashboard: custom renderer exited 0 without a {path,hash} receipt on stdout');
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+function parsesAsReceipt(stdout: string): boolean {
+  try {
+    const receipt = JSON.parse(stdout);
+    return !!receipt && typeof receipt.path === 'string' && typeof receipt.hash === 'string';
+  } catch {
+    return false;
+  }
 }
 
 function verbRender(page: string | undefined, hermitDir: string | undefined, outArg: string | undefined): void {
@@ -65,6 +120,19 @@ function verbRender(page: string | undefined, hermitDir: string | undefined, out
     console.error(`artifact render: unknown page "${page}" (expected ${PAGE_NAMES})`);
     process.exit(1);
   }
+  if (page === 'dashboard' && !process.env[RENDER_GUARD]) {
+    const custom = path.join(hermitDir, CUSTOM_RENDERER);
+    if (fs.existsSync(custom)) {
+      // The renderer's contract fixes its own out path (<hermitDir>/state/dashboard.html),
+      // so honoring an explicit one is impossible — fail loudly instead of writing over
+      // the live page while the caller believes it asked for a copy elsewhere.
+      if (outArg) {
+        console.error(`artifact render dashboard: ${CUSTOM_RENDERER} owns the out path; drop the explicit outPath argument`);
+        process.exit(1);
+      }
+      renderCustomDashboard(custom, hermitDir);
+    }
+  }
   const outPath = outArg || spec.defaultOut(hermitDir);
   try {
     const { content, hash } = spec.render(hermitDir);
@@ -73,6 +141,25 @@ function verbRender(page: string | undefined, hermitDir: string | undefined, out
     process.stdout.write(JSON.stringify({ path: outPath, bytes: Buffer.byteLength(content), hash }) + '\n');
   } catch (err: any) {
     console.error(`artifact render ${page}: failed: ${err?.message ?? err}`);
+    process.exit(1);
+  }
+}
+
+/** Render inputs for a hermit-local dashboard renderer. `coreSections` lets a custom
+ *  page keep any default card verbatim, and `themeCss` comes from the live stylesheet
+ *  so core-side theme fixes reach custom pages without them being rebuilt. */
+function verbState(page: string | undefined, hermitDir: string | undefined): void {
+  if (page !== 'dashboard' || !hermitDir) usage();
+  try {
+    const state = loadDashboardState(hermitDir);
+    process.stdout.write(JSON.stringify({
+      state,
+      themeCss: CSS,
+      coreSections: renderCoreSections(state),
+      updatedToken: UPDATED_TOKEN,
+    }) + '\n');
+  } catch (err: any) {
+    console.error(`artifact state dashboard: failed: ${err?.message ?? err}`);
     process.exit(1);
   }
 }
@@ -87,6 +174,7 @@ const verb = process.argv[2];
 const rest = process.argv.slice(3);
 switch (verb) {
   case 'render': verbRender(rest[0], rest[1], rest[2]); break;
+  case 'state': verbState(rest[0], rest[1]); break;
   case 'scaffold-strings': verbScaffoldStrings(rest[0], rest[1]); break;
   default: usage();
 }

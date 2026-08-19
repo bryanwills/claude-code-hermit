@@ -125,6 +125,36 @@ URL re-post.
 See `docs/config-reference.md#artifacts` for the config flag and privacy/entitlement
 notes.
 
+### Custom renderer
+
+A hermit that has run `/hermit-dashboard-design` owns its dashboard render outright.
+The skill writes `.claude-code-hermit/dashboard-render.ts`; **the file's presence is the
+switch** (no config flag), and `artifact.ts render dashboard` then hands the whole render
+to it — `spawnSync`, 60s timeout, the child's stdout receipt relayed verbatim, a non-zero
+child exit surfaced as exit 1 so step 5's skip-silently rule applies unchanged. An exit-0
+run whose stdout doesn't parse as a `{path,hash}` receipt is failed the same way, since
+step 1 parses that stdout — the *page* is unvalidated, the *receipt* is core's protocol.
+An explicit `outPath` is rejected rather than ignored (the renderer's contract fixes its
+own out path), and the child runs with `HERMIT_DASHBOARD_RENDER=1` so a renderer that
+mistakenly calls `render dashboard` gets the built-in render instead of recursing. Delete
+the file and the built-in render returns, byte-identically, at the same URL. Everything
+downstream (state key, hash gate, five-step procedure, refresh triggers) is untouched, so
+no calling skill knows the difference.
+
+Core deliberately validates nothing about the generated page: no structural check, no
+theme injection, no escaping pass over the child's output. The renderer is operator
+property — hand-editable, and left alone by `hermit-evolve`. The discipline that keeps a
+generated renderer correct (fragment-only output, hash-then-swap so the updated stamp
+stays out of the hash, escaping everything file-derived, no imports from the plugin's
+version-stamped cache path) lives in the skill that writes it, not in a core gate.
+
+`bun scripts/artifact.ts state dashboard <hermit-dir>` is the read-only companion verb a
+renderer composes from: `{state, themeCss, coreSections, updatedToken}` — the same
+`DashboardState` the built-in page renders from, the live `artifact-theme.ts` stylesheet
+(so core theme fixes reach custom pages without regenerating them), the five default cards
+as ready-to-embed HTML, and the hash placeholder. A custom page may use all of it, some of
+it, or none.
+
 ## Proposals page
 
 `config.artifacts.proposals`, state key `proposals`. Every open (`proposed`/`accepted`)
@@ -174,12 +204,16 @@ is not localized — format, not language.
 
 ## Design contract
 
-The two HTML pages share one stylesheet and one set of markup helpers, both in
-`scripts/lib/artifact-theme.ts`. That file is the **only** place a re-sync against
+The two core-rendered HTML pages share one stylesheet and one set of markup helpers, both
+in `scripts/lib/artifact-theme.ts`. That file is the **only** place a re-sync against
 Claude Code's `artifact-design` skill needs to touch — `dashboard.ts` and
-`proposals-page.ts` contribute content, not styling. `artifact-design` is prose
-guidance with nothing importable, so the sync mechanism is deliberate: keep every
-decision in one module, and encode the checkable rules as
+`proposals-page.ts` contribute content, not styling. A hermit-local custom renderer
+(§ Custom renderer) is outside that guarantee by design: it owns its own layout and may
+style the page however its operator wants. It is not cut off from core's design work,
+though — the `state dashboard` verb hands it the current stylesheet on every render, so a
+renderer that uses `themeCss` picks up theme fixes without being regenerated.
+`artifact-design` is prose guidance with nothing importable, so the sync mechanism is
+deliberate: keep every decision in one module, and encode the checkable rules as
 `tests/artifact-theme.test.ts`. When that skill gains a mechanically-checkable
 rule, add an assertion there rather than trusting a re-read.
 

@@ -168,6 +168,10 @@ describe('per-skill description tax (creep guard)', () => {
     // need no raise; keeping it (and the overlapping APPEND bullet above) is a
     // deliberate call to state the recall-first rule in both always-loaded
     // surfaces rather than rely on either alone.
-    expect(total).toBeLessThanOrEqual(8100);
+    // Raised to 8,200 when hermit-dashboard-design shipped: a new skill adds a
+    // new always-loaded description (225 B, already among the leanest here), and
+    // the guard is aimed at existing descriptions re-bloating, not at pricing out
+    // new skills. Trim an existing description before raising this again.
+    expect(total).toBeLessThanOrEqual(8200);
   });
 });
