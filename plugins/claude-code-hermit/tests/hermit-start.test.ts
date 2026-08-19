@@ -797,6 +797,8 @@ describe('writeSettingsEnv', () => {
     captureLog(() => writeSettingsEnv(config));
     expect(stateDirEnv('MS-TEAMS')).toBeUndefined();
     expect(stateDirEnv('X; TOUCH /TMP/HERMIT-PWNED')).toBeUndefined();
+    // Nor persisted to settings.local.json, which Claude Code also exports.
+    expect(readSettings().env['MS-TEAMS_STATE_DIR']).toBeUndefined();
   });
 
   test('existing *_STATE_DIR in env wins over config (Docker sets it via compose)', () => {

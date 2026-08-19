@@ -718,18 +718,20 @@ function writeSettingsEnv(config: Json): void {
   for (const [chName, chCfg] of iterChannelConfigs(config)) {
     const stateDir = chCfg.state_dir;
     if (pyTruthy(stateDir)) {
-      // Relative paths resolved against project root (cwd at boot).
       const key = `${chName.toUpperCase()}_STATE_DIR`;
+      // Skip a name that isn't a valid shell identifier — the tmux env file is
+      // sourced as `export <key>=...`, where the key cannot be quoted, so an
+      // invalid one aborts the boot and a hostile one could inject a command.
+      // The forwardVars loop in main() drops the same names for that reason.
+      if (!ENV_VAR_RE.test(key)) {
+        console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${key} not exported.`);
+        continue;
+      }
+      // Relative paths resolved against project root (cwd at boot).
       settings.env[key] = resolveStateDir(stateDir);
       // Both bare-host launches read the value from here: the tmux path copies
       // it into the env file it sources, the no-tmux path inherits it via execvp.
-      //
-      // Skip a name that isn't a valid shell identifier — that env file is
-      // sourced as `export <key>=...`, where the key cannot be quoted, so an
-      // invalid one aborts the boot and a hostile one could inject a command.
-      if (!ENV_VAR_RE.test(key)) {
-        console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${key} not exported.`);
-      } else if (process.env[key] === undefined) {
+      if (process.env[key] === undefined) {
         process.env[key] = settings.env[key]; // already-set (Docker/compose) wins
       }
     }
@@ -1066,9 +1068,14 @@ async function main(): Promise<void> {
   // inherit shell env but don't read settings.local.json.
   const forwardVars = ['CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY', TOKEN_ENV_VAR, 'AGENT_HOOK_PROFILE'];
   // *_STATE_DIR vars must reach MCP servers via OS env — see writeSettingsEnv.
+  // The same identifier guard applies here: these become unquotable
+  // `export <key>=...` lines below, so an ambient var under an invalid name
+  // (compose `environment:`, an `env NAME=... hermit-start` wrapper) must not
+  // slip through and break the sourcing — or inject a command.
   for (const [chName, chCfg] of iterChannelConfigs(config)) {
-    if (pyTruthy(chCfg.state_dir)) {
-      forwardVars.push(`${chName.toUpperCase()}_STATE_DIR`);
+    const key = `${chName.toUpperCase()}_STATE_DIR`;
+    if (pyTruthy(chCfg.state_dir) && ENV_VAR_RE.test(key)) {
+      forwardVars.push(key);
     }
   }
   const envFile = path.join('/tmp', `.hermit-env-${sessionName}`);
