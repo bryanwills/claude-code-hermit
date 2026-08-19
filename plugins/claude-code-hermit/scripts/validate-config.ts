@@ -648,7 +648,7 @@ function main() {
 }
 
 // Allow tests to import individual functions
-export { parseCronField, validateCronSchedule, validate, isLoopbackUrl, ROUTINE_ID_RE };
+export { parseCronField, validateCronSchedule, validate, isLoopbackUrl, ROUTINE_ID_RE, ENV_VAR_RE };
 
 if (import.meta.main) {
   main();

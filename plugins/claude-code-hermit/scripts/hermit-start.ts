@@ -24,6 +24,7 @@ import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-tok
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels } from './lib/channel-config';
+import { ENV_VAR_RE } from './validate-config';
 import { cmpSemver } from './lib/semver';
 
 type Json = any;
@@ -658,8 +659,9 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
  * Write config env vars to .claude/settings.local.json.
  *
  * Claude Code reads the `env` key from settings.json and exports those
- * values to all subprocesses (hooks, MCP servers, Bash tool calls).
- * This is the canonical way to set env vars per the official docs.
+ * values to hooks and Bash tool calls. It does NOT reach plugin MCP servers
+ * (anthropics/claude-code#11927, open), so anything a channel plugin needs is
+ * also hydrated into process.env here — see the channel loop below.
  *
  * Auth vars (ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR) are NOT written here —
  * they must be in the shell env before claude launches. OAuth credentials
@@ -717,9 +719,19 @@ function writeSettingsEnv(config: Json): void {
     const stateDir = chCfg.state_dir;
     if (pyTruthy(stateDir)) {
       // Relative paths resolved against project root (cwd at boot).
-      // In Docker, compose sets *_STATE_DIR via ${PWD} (host-side);
-      // this expansion covers the non-Docker (tmux) boot path.
-      settings.env[`${chName.toUpperCase()}_STATE_DIR`] = resolveStateDir(stateDir);
+      const key = `${chName.toUpperCase()}_STATE_DIR`;
+      settings.env[key] = resolveStateDir(stateDir);
+      // Both bare-host launches read the value from here: the tmux path copies
+      // it into the env file it sources, the no-tmux path inherits it via execvp.
+      //
+      // Skip a name that isn't a valid shell identifier — that env file is
+      // sourced as `export <key>=...`, where the key cannot be quoted, so an
+      // invalid one aborts the boot and a hostile one could inject a command.
+      if (!ENV_VAR_RE.test(key)) {
+        console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${key} not exported.`);
+      } else if (process.env[key] === undefined) {
+        process.env[key] = settings.env[key]; // already-set (Docker/compose) wins
+      }
     }
   }
 

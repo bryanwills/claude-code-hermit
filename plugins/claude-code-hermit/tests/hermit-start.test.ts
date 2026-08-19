@@ -66,12 +66,21 @@ let origCwd = '';
 let origProfile: string | undefined;
 let origContainer: string | undefined;
 let origPath: string | undefined;
+// writeSettingsEnv hydrates <CHANNEL>_STATE_DIR into process.env, so any test
+// that configures a channel state_dir leaks it into the next one without this.
+// Swept generically: the hydration is per-channel, not a fixed set of names.
+let origStateDirs: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   origCwd = process.cwd();
   origProfile = process.env.AGENT_HOOK_PROFILE;
   origContainer = process.env.container;
   origPath = process.env.PATH;
+  origStateDirs = Object.fromEntries(
+    Object.keys(process.env)
+      .filter((k) => k.endsWith('_STATE_DIR'))
+      .map((k) => [k, process.env[k]]),
+  );
   tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-start-test-'));
   process.chdir(tmpdir);
   fs.mkdirSync('.claude-code-hermit/state', { recursive: true });
@@ -88,12 +97,18 @@ afterEach(() => {
   restore('AGENT_HOOK_PROFILE', origProfile);
   restore('container', origContainer);
   restore('PATH', origPath);
+  const stateDirKeys = new Set([
+    ...Object.keys(process.env).filter((k) => k.endsWith('_STATE_DIR')),
+    ...Object.keys(origStateDirs),
+  ]);
+  for (const k of stateDirKeys) restore(k, origStateDirs[k]);
 });
 
 // ---------- small helpers ----------
 
 // Accessor defeats TS control-flow narrowing after `delete process.env...`.
 const profileEnv = (): string | undefined => process.env.AGENT_HOOK_PROFILE;
+const stateDirEnv = (channel: string): string | undefined => process.env[`${channel}_STATE_DIR`];
 
 const writeConfig = (config: any) =>
   fs.writeFileSync('.claude-code-hermit/config.json', JSON.stringify(config));
@@ -744,6 +759,54 @@ describe('writeSettingsEnv', () => {
     captureLog(() => writeSettingsEnv(config));
     const expected = path.join(process.cwd(), '.claude.local/channels/discord');
     expect(readSettings().env.DISCORD_STATE_DIR).toBe(expected);
+  });
+
+  // Claude Code does not pass settings env to plugin MCP servers
+  // (anthropics/claude-code#11927), so the bare-host boot paths depend on this
+  // hydration to get the value into the tmux env file / execvp'd process.
+  test('every channel state_dir is hydrated into process env for MCP servers', () => {
+    writeConfig({
+      channels: {
+        discord: { enabled: true, state_dir: '.claude.local/channels/discord' },
+        telegram: { enabled: true, state_dir: '.claude.local/channels/telegram' },
+      },
+    });
+    const config = loadConfig();
+    delete process.env.DISCORD_STATE_DIR;
+    delete process.env.TELEGRAM_STATE_DIR;
+    captureLog(() => writeSettingsEnv(config));
+    expect(stateDirEnv('DISCORD')).toBe(
+      path.join(process.cwd(), '.claude.local/channels/discord'),
+    );
+    expect(stateDirEnv('TELEGRAM')).toBe(
+      path.join(process.cwd(), '.claude.local/channels/telegram'),
+    );
+  });
+
+  // The tmux boot writes `export <key>=...` into a file it sources, and the key
+  // is not quotable there: an invalid identifier fails the sourcing and kills
+  // the boot, a hostile one injects a command.
+  test('channel name that is not a valid env identifier is not hydrated', () => {
+    writeConfig({
+      channels: {
+        'ms-teams': { enabled: true, state_dir: '/tmp/teams' },
+        'x; touch /tmp/hermit-pwned': { enabled: true, state_dir: '/tmp/evil' },
+      },
+    });
+    const config = loadConfig();
+    captureLog(() => writeSettingsEnv(config));
+    expect(stateDirEnv('MS-TEAMS')).toBeUndefined();
+    expect(stateDirEnv('X; TOUCH /TMP/HERMIT-PWNED')).toBeUndefined();
+  });
+
+  test('existing *_STATE_DIR in env wins over config (Docker sets it via compose)', () => {
+    writeConfig({
+      channels: { discord: { enabled: true, state_dir: '/tmp/from-config' } },
+    });
+    const config = loadConfig();
+    process.env.DISCORD_STATE_DIR = '/container/state/discord';
+    captureLog(() => writeSettingsEnv(config));
+    expect(stateDirEnv('DISCORD')).toBe('/container/state/discord');
   });
 
   test('invalid AGENT_HOOK_PROFILE defaults to standard in process env', () => {
