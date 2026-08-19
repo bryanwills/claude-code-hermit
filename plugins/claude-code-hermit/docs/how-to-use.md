@@ -127,7 +127,7 @@ See [Always-On Setup](always-on.md) for the full guide — auth, channels, pausi
 .claude-code-hermit/bin/hermit-stop
 ```
 
-To activate a channel in tmux mode, run `/claude-code-hermit:channel-setup` — it installs the plugin, configures the token, and guides pairing. `hermit-start` passes `--channels` automatically on boot.
+To activate a channel in tmux mode, run `/claude-code-hermit:channel-setup` — it adds the channel to `config.json` if you skipped that at hatch, installs the plugin, configures the token, and guides pairing. `hermit-start` passes `--channels` automatically on boot.
 
 See [Always-On Operations](always-on-ops.md) for tmux setup and operational details.
 

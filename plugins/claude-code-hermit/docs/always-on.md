@@ -146,13 +146,13 @@ The docker-setup wizard walks you through token setup, state dir configuration, 
 
 ### Local / tmux
 
-After `hatch` configures your channel preference, run the guided activation wizard:
+Run the guided activation wizard — it picks up the channel preference from `hatch`, or adds one if you skipped that step:
 
 ```
 /claude-code-hermit:channel-setup
 ```
 
-It installs the plugin (requires [Bun](https://bun.sh)), writes the bot token to `.claude.local/channels/<plugin>/.env`, and walks through pairing. `hermit-start` passes `--channels` automatically — no manual flag needed. If bun is missing or the token file isn't present, `hermit-start` prints a clear warning and skips the channel.
+It installs the plugin (requires [Bun](https://bun.sh)), writes the bot token to `.claude.local/channels/<plugin>/.env`, and walks through pairing. It can also re-enable a channel you previously turned off. `hermit-start` passes `--channels` automatically — no manual flag needed. If bun is missing or the token file isn't present, `hermit-start` prints a clear warning and skips the channel.
 
 ---
 

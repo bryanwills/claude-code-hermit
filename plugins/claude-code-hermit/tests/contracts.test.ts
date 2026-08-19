@@ -1202,6 +1202,48 @@ describe('bootstrap skills', () => {
 });
 
 // ============================================================
+// channel-setup empty-channels branch (TestChannelSetupEmptyChannels)
+//
+// channel-setup used to hard-stop on `channels: {}` and point at
+// /hermit-settings, which carries disable-model-invocation and therefore
+// cannot be reached from a skill — leaving the operator to type it. The
+// skill now creates the entry itself via hatch-config.ts --reinit.
+//
+// Coverage note: this is a static text scan of SKILL.md. It proves the
+// dead-end prose is gone and the writer is named, not that the model
+// follows the branch — that needs a live probe.
+// ============================================================
+
+describe('channel-setup empty-channels branch', () => {
+  const text = read(path.join(SKILLS, 'channel-setup', 'SKILL.md'));
+
+  test('does not send the operator to hermit-settings to add a channel', () => {
+    expect(text).not.toContain('to add one first');
+    expect(text).not.toContain('hermit-settings channels');
+  });
+
+  test('creates the entry through hatch-config.ts --reinit, discarding stdout', () => {
+    expect(text).toContain('hatch-config.ts');
+    expect(text).toContain('--reinit');
+    // hatch-config prints the whole config on success; skills must not ingest it.
+    expect(text).toContain('--reinit >/dev/null');
+  });
+
+  test('offers Discord and Telegram only — step 4 has no iMessage token branch', () => {
+    const start = text.indexOf('If no channels configured');
+    const end = text.indexOf('If entries exist but all are disabled');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const firstBranch = text.slice(start, end);
+    expect(firstBranch).toContain('**Discord**');
+    expect(firstBranch).toContain('**Telegram**');
+    expect(firstBranch).toContain('**Cancel**');
+    // iMessage may be named in the rationale, but never as a selectable option.
+    expect(firstBranch).not.toContain('**iMessage**');
+  });
+});
+
+// ============================================================
 // Stop payload snapshot (TestStopPayloadSnapshot)
 //
 // stop-pipeline.ts writes state/cc-stop-snapshot.json from the Stop payload.

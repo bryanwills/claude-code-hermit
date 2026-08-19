@@ -1,10 +1,10 @@
 ---
 name: channel-setup
-description: Guided channel activation for local/tmux users — installs the plugin, configures the bot token in the project-local state dir, and walks through pairing. Run after hatch or hermit-settings to activate a configured channel.
+description: Guided channel activation for local/tmux users — adds a channel entry when none is configured, installs the plugin, configures the bot token in the project-local state dir, and walks through pairing. Run after hatch, or any time to add or re-enable a channel.
 ---
 # Channel Setup
 
-Activate a channel configured in `config.json` for local/tmux operation. This mirrors what `docker-setup` does for Docker users but targets the local environment.
+Activate a channel for local/tmux operation, adding the `config.json` entry first when there isn't one. This mirrors what `docker-setup` does for Docker users but targets the local environment.
 
 ## Plan
 
@@ -19,11 +19,20 @@ Activate a channel configured in `config.json` for local/tmux operation. This mi
 - If `runtime.json` is missing AND `.claude-code-hermit/docker/Dockerfile.hermit` exists (Docker scaffolded but not yet booted): same redirect.
 - Otherwise: proceed.
 
-Read `.claude-code-hermit/config.json`. Collect all entries under `channels` that are valid objects.
+Read `.claude-code-hermit/config.json`. Collect all entries under `channels` that are valid objects, tracking which are disabled (`enabled: false`).
 
-- If no channels configured: tell the operator — "No channels in config.json. Run `/claude-code-hermit:hatch` or `/claude-code-hermit:hermit-settings channels` to add one first." Stop.
-- If exactly one channel: use it automatically.
-- If multiple channels: ask with `AskUserQuestion` (header: "Channel") — list channel names as options plus **All** — which to set up.
+**Adding an entry.** Where a branch below says *create the entry*, run:
+
+```
+echo '{"channels":{"<name>":{"enabled":true}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "$(pwd)" --reinit >/dev/null
+```
+
+The script fills `enabled`, `dm_channel_id: null`, and `state_dir` (`.claude.local/channels/<name>`), validates the whole config, preserves every other key, and merges onto an existing entry rather than replacing it. Discard stdout — it prints the full config.
+
+- If no channels configured: offer to add one — `AskUserQuestion` (header: "Channel") with options **Discord**, **Telegram**, **Cancel**. On **Cancel**, stop without writing. Otherwise create the entry and continue with that channel selected. Do not offer iMessage here: step 4 defines token vars for Discord and Telegram only.
+- If entries exist but all are disabled: name them, then ask with `AskUserQuestion` (header: "Channel") — the disabled channel names plus **Cancel** — which to re-enable. On **Cancel**, stop without writing. Otherwise create the entry for the chosen name (this flips `enabled` and leaves `dm_channel_id`, `state_dir`, and `allowed_users` intact) and continue with it selected.
+- If exactly one enabled channel: use it automatically.
+- If multiple enabled channels: ask with `AskUserQuestion` (header: "Channel") — list the enabled channel names as options plus **All** — which to set up.
 
 Run steps 2–6 for each selected channel.
 
