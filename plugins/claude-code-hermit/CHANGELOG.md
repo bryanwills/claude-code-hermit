@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.42] - 2026-08-19
 
 ### Added
 - New `/claude-code-hermit:hermit-dashboard-design` skill designs a dashboard around what this hermit actually tracks and writes `.claude-code-hermit/dashboard-render.ts` to rebuild it. Refreshes stay a script run, so a custom page costs nothing per publish. Say "design my dashboard"; delete the renderer to return to the default page.
