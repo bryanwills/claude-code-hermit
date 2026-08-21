@@ -57,7 +57,8 @@ never block:
 - **Version bump (step 9):** run `evolve-finalize.ts` and parse its stdout JSON. Use `core.confirmed` as
   `vNEW` in the report — NOT `plan.to`. If the script exits non-zero, `core.matched` is false, or `errors`
   is non-empty, return `Upgrade: blocked: config version bump failed — <joined error messages>` and omit
-  the rest of the report.
+  the rest of the report. Copy the finalizer's `audit_scope` into the report's `Audit scope:` line —
+  `version-only` is not a failure and never blocks.
 
 Everything else (version gates 0/0b, the plan pre-pass, classification, copies, manifest write, config
 write in step 9 — the `new_config_keys` merge by hand then the `_hermit_versions` bump via
@@ -85,6 +86,7 @@ Sibling hermits: <one or more of the following per sibling, space-separated, or 
 Siblings detected but not activated: <name ... | none>
 Siblings warnings: <one line per siblings_warnings entry | none>
 Permissions added: <entries | none>
+Audit scope: <whole-run | version-only>
 Deferred for operator: <none | one or more verbatim blocks, each:>
   --- deferred-migration ---
   source: <plugin>@<version>

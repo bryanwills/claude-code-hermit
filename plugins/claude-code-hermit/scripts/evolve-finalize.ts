@@ -9,6 +9,13 @@
 // Usage:
 //   bun evolve-finalize.ts [hermit-dir] --core=<version> --plugin-root=<abs>
 //                          [--sibling=<name>=<version> ...]
+//   bun evolve-finalize.ts [hermit-dir] snapshot --core=<version>
+//
+// The `snapshot` mode runs at evolve step 1, before any migration touches
+// config.json, and records the config the finalizer later diffs against. It is
+// fail-open (always exit 0) — a missing snapshot only costs attribution detail,
+// reported back as audit_scope. This script owns both ends of that lifecycle so
+// evolve-plan.ts stays read-only and no second script needs sealing.
 //
 // hermit-dir defaults to .claude-code-hermit (like evolve-plan.ts).
 // --plugin-root cross-checks --core against plugin.json.version, so the stamp written
@@ -29,6 +36,7 @@ import path from 'node:path';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { auditConfigChange } from './lib/config-audit';
 import { cmpSemver } from './lib/semver';
+import { utcISOStamp } from './lib/time';
 
 type Json = any;
 
@@ -37,7 +45,78 @@ export interface FinalizeResult {
   core: { requested: string; confirmed: string | null; matched: boolean };
   siblings_confirmed: Record<string, string>;
   siblings_skipped: string[];
+  /** whole-run: `before` came from a step-1 snapshot, so migration writes are attributed.
+   *  version-only: no usable snapshot, so the ledger sees just what finalize() itself wrote. */
+  audit_scope: 'whole-run' | 'version-only';
   errors: { code: string; message: string }[];
+}
+
+// Pre-migration config snapshot, written at evolve step 1 and consumed here.
+// hermit-evolve's step 2b migrations and step 9 merge write config.json by hand,
+// long before this script reads it, so a `before` taken here can only ever show
+// the version stamp. The snapshot moves `before` ahead of those writes, which is
+// what lets the ledger answer "why did this setting change during the upgrade?".
+const SNAPSHOT_FILE = 'evolve-config-snapshot.json';
+
+// A snapshot older than this is not trusted. The window it closes: a prior run
+// wrote one and aborted before step 9, the operator then edited config by hand,
+// and a later run drops the (model-performed) step-1 snapshot — the stale file
+// would attribute the operator's own edits to the upgrade. Degrading to
+// version-only is honest; a wrong row is not.
+const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function snapshotPath(hermitDir: string): string {
+  return path.join(hermitDir, 'state', SNAPSHOT_FILE);
+}
+
+/**
+ * Write the pre-migration snapshot. Fail-open by contract: a snapshot that can't
+ * be written degrades the audit to version-only, and must never block an upgrade.
+ * Returns a human-readable status line for stdout.
+ */
+export function writeSnapshot(hermitDir: string, core: string | null): string {
+  if (!core || core.trim() === '') return 'SKIP|--core=<version> is required';
+  try {
+    const config = JSON.parse(fs.readFileSync(path.join(hermitDir, 'config.json'), 'utf8'));
+    const file = snapshotPath(hermitDir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // Config carries channel tokens and an env block — same 0600 care the ledger
+    // itself takes (lib/config-audit.ts). mode is only honored on create, so chmod
+    // the tmp path too in case a previous run left one behind.
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ ts: utcISOStamp(), to: core, config }, null, 2) + '\n', {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, file);
+    return `OK|${file}`;
+  } catch (e: any) {
+    try { fs.unlinkSync(snapshotPath(hermitDir) + '.tmp'); } catch {}
+    return `SKIP|${e.message}`;
+  }
+}
+
+/**
+ * Read the snapshot for this upgrade and remove it. Returns the snapshotted config
+ * only when it is parseable, was taken for this same `--core` target, and is recent.
+ * Always unlinks: a snapshot is single-use, and leaving a stale one behind is the
+ * exact condition SNAPSHOT_MAX_AGE_MS exists to contain.
+ */
+function consumeSnapshot(hermitDir: string, core: string): Json | undefined {
+  const file = snapshotPath(hermitDir);
+  let snap: Json;
+  try {
+    snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    try { fs.unlinkSync(file); } catch {}
+    return undefined;
+  }
+  try { fs.unlinkSync(file); } catch {}
+  if (!isPlainObject(snap) || snap.to !== core || snap.config === undefined) return undefined;
+  const taken = new Date(snap.ts).getTime();
+  if (Number.isNaN(taken) || Date.now() - taken > SNAPSHOT_MAX_AGE_MS) return undefined;
+  return snap.config;
 }
 
 function parseArgs(argv: string[]): {
@@ -86,7 +165,7 @@ export function finalize(opts: {
 
   if (!opts.core || opts.core.trim() === '') {
     errors.push({ code: 'no_core_target', message: '--core=<version> is required' });
-    return { ok: false, core: { requested: opts.core ?? '', confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: [], errors };
+    return { ok: false, core: { requested: opts.core ?? '', confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: [], audit_scope: 'version-only', errors };
   }
 
   // Validate sibling args. Malformed entries go to siblings_skipped (not errors) —
@@ -111,15 +190,15 @@ export function finalize(opts: {
       pluginVer = typeof pj.version === 'string' ? pj.version : null;
     } catch (e: any) {
       errors.push({ code: 'plugin_json_unreadable', message: e.message });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
     }
     if (pluginVer === null) {
       errors.push({ code: 'plugin_json_unreadable', message: 'plugin.json missing .version field' });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
     }
     if (pluginVer !== opts.core) {
       errors.push({ code: 'core_version_mismatch', message: `--core="${opts.core}" does not match plugin.json version="${pluginVer}"` });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
     }
   }
 
@@ -133,11 +212,17 @@ export function finalize(opts: {
       : e && e.name === 'SyntaxError' ? 'config_json_invalid'
       : 'config_unreadable';
     errors.push({ code, message: e.message });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
   }
-  // Snapshot before the version merge below — the audit ledger must show the
-  // migration's before/after, and `config` is mutated in place from here on.
-  const configBefore = structuredClone(config);
+  // The audit `before`. Prefer the step-1 snapshot: it predates hermit-evolve's
+  // step 2b migrations and step 9 merge, so one diff covers everything the upgrade
+  // did to config.json. Without it, fall back to the live read — which by then
+  // already contains those writes, so the ledger can only show the version stamp.
+  // Either way `config` is mutated in place from here on, hence the clone.
+  const snapshotBefore = consumeSnapshot(opts.hermitDir, opts.core);
+  const hasSnapshot = snapshotBefore !== undefined;
+  const auditScope: 'whole-run' | 'version-only' = hasSnapshot ? 'whole-run' : 'version-only';
+  const configBefore = hasSnapshot ? snapshotBefore : structuredClone(config);
 
   // Monotonicity guard. The stamp records which migrations have been APPLIED, so moving
   // it backwards claims migrations were reversed when nothing reversed them. That state
@@ -161,7 +246,7 @@ export function finalize(opts: {
       code: 'core_version_regression',
       message: `--core="${opts.core}" is older than the applied version "${onDiskCore}" in _hermit_versions — refusing to downgrade the stamp (migrations are not reversed by lowering it). The loaded plugin is likely a stale install copy.`,
     });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
   }
 
   // Core is the install marker so it's safe to create the object if absent.
@@ -200,7 +285,7 @@ export function finalize(opts: {
   } catch (e: any) {
     try { fs.unlinkSync(tmp); } catch {}
     errors.push({ code: 'write_failed', message: e.message });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
   }
   // Re-read from disk to confirm (the fix's whole point — catches a write that didn't land)
   let onDisk: Json;
@@ -208,7 +293,7 @@ export function finalize(opts: {
     onDisk = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (e: any) {
     errors.push({ code: 'verify_failed', message: `re-read after write failed: ${e.message}` });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
+    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
   }
 
   const coreOnDisk: string = (isPlainObject(onDisk._hermit_versions) ? onDisk._hermit_versions['claude-code-hermit'] : null) ?? '';
@@ -217,10 +302,19 @@ export function finalize(opts: {
     errors.push({ code: 'verify_failed', message: `on-disk _hermit_versions["claude-code-hermit"]="${coreOnDisk}" but expected "${opts.core}"` });
   }
 
-  // Audit only what the re-read confirms is on disk. Auditing before this point
-  // would record the bump in the ledger even in the exact case this verification
-  // exists to catch — a write that reported success but did not land.
-  if (coreMatched) auditConfigChange(opts.hermitDir, configBefore, onDisk, 'evolve-finalize');
+  // Audit against `onDisk` — the re-read — not the in-memory object. That is what
+  // keeps the ledger honest in the exact case this verification exists to catch: a
+  // write that reported success but did not land leaves the old value in `onDisk`,
+  // so the diff emits no _hermit_versions row on its own. Gating the whole call on
+  // coreMatched would be wrong under a whole-run snapshot — it would suppress the
+  // upgrade's real migration rows whenever the version bump failed, which is
+  // backwards. The re-read succeeding is the only precondition.
+  auditConfigChange(
+    opts.hermitDir,
+    configBefore,
+    onDisk,
+    auditScope === 'whole-run' ? 'hermit-evolve' : 'evolve-finalize',
+  );
 
   const siblingsConfirmed: Record<string, string> = {};
   for (const name of appliedSiblingNames) {
@@ -232,12 +326,26 @@ export function finalize(opts: {
     core: { requested: opts.core, confirmed: coreOnDisk, matched: coreMatched },
     siblings_confirmed: siblingsConfirmed,
     siblings_skipped: siblingsSkipped,
+    audit_scope: auditScope,
     errors,
   };
 }
 
 if (import.meta.main) {
-  const { hermitDir, core, pluginRoot, siblings } = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  // `snapshot` is a bare word, so strip it before parseArgs — which treats any
+  // non-`--` argument as the hermit dir.
+  const snapshotMode = argv.includes('snapshot');
+  const { hermitDir, core, pluginRoot, siblings } = parseArgs(argv.filter((a) => a !== 'snapshot'));
+
+  if (snapshotMode) {
+    // Fail-open, unlike the finalize path below: a missing snapshot degrades the
+    // audit to version-only (reported as audit_scope), and must never stop an upgrade.
+    // Same state-dir pin — the sealed grant covers every argument to this script.
+    process.stdout.write(writeSnapshot(pinStateDirOrExit(hermitDir, 'evolve-finalize'), core) + '\n');
+    process.exit(0);
+  }
+
   let result: FinalizeResult;
   try {
     // The hermit dir is not caller-chosen. Reachable through a pre-approved
@@ -252,6 +360,7 @@ if (import.meta.main) {
       core: { requested: core ?? '', confirmed: null, matched: false },
       siblings_confirmed: {},
       siblings_skipped: [],
+      audit_scope: 'version-only',
       errors: [{ code: 'fatal', message: e.message }],
     };
   }

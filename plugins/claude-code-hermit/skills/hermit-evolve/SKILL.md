@@ -56,6 +56,7 @@ Sibling hermits: <one or more of the following per sibling, space-separated, or 
 Siblings detected but not activated: <name ... | none>
 Siblings warnings: <one line per siblings_warnings entry | none>
 Permissions added: <entries | none>
+Audit scope: <whole-run | version-only>
 Deferred for operator: <none | one or more verbatim blocks, each:>
   --- deferred-migration ---
   source: <plugin>@<version>
@@ -65,6 +66,8 @@ Deferred for operator: <none | one or more verbatim blocks, each:>
   skipped: <the safe/no-op branch taken, or "skipped pending operator">
   --- end ---
 ```
+
+**Audit scope.** `whole-run` needs no mention — say nothing. On `version-only`, tell the operator once that this upgrade's config changes were not recorded in the settings history (the upgrade itself succeeded; only the attribution is missing), so a later "why did this setting change?" gets an honest answer instead of a confident wrong one.
 
 **Sibling report integrity:** parse the finalizer JSON `siblings_confirmed` and `siblings_skipped`. Only names in `siblings_confirmed` may be reported as `vOLD->vNEW`. Any name in `siblings_skipped` must be reported as `SKIPPED-by-finalizer` — never as upgraded, even if Step 7 said it ran.
 
