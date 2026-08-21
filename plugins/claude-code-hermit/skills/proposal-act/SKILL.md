@@ -48,7 +48,7 @@ All timestamps in frontmatter and Operator Decision text use ISO 8601 with timez
 
 ## Dashboard Refresh
 
-Every flow below (accept, defer, dismiss, resolve) changes a proposal's status. After its final "Respond" step, refresh the dashboard and the proposals page (`config.artifacts.proposals`) per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md` — both silently, no URL re-post (unlike `proposal-create`'s initial announcement, these status-change confirmations don't carry a deep link).
+Every flow below (accept, defer, dismiss, resolve) changes a proposal's status. After its final "Respond" step, refresh the dashboard and the proposals page (`config.artifacts.proposals`) per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md` — both silently, no URL re-post (unlike `proposal-create`'s initial announcement, these status-change confirmations don't append the proposals-page URL).
 
 ## Accept Flow
 

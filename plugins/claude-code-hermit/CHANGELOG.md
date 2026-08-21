@@ -10,6 +10,7 @@
 - `/claude-code-hermit:channel-setup` now treats a channel with `enabled: false` as disabled rather than configured, and offers to re-enable it instead of proceeding as though it were live.
 - Bare-host (non-Docker) boots now export each channel's `<CHANNEL>_STATE_DIR` into the session environment, so channel plugin servers find their state dir instead of failing with `CONNECTION_CLOSED`.
 - A channel-requested `/model` or `/effort` switch is now reported back from the transcript's serving-model stamp instead of the session's stale session-start self-perception, with the report held until an assistant entry newer than the delivery exists.
+- Creating several proposals in one run now appends at most one bare proposals-page link to the announcement message, instead of a separate `#prop-nnn` deep link per proposal that the claude.ai artifact viewer couldn't resolve anyway.
 
 ## [1.2.42] - 2026-08-19
 

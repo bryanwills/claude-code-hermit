@@ -78,7 +78,7 @@ export const SETTINGS: readonly Setting[] = [
   { arg: 'artifact-dashboard', path: 'artifacts.dashboard', kind: 'boolean', group: 'Artifacts',
     label: 'Dashboard page', hint: 'status, proposal queue, weekly evolution' },
   { arg: 'artifact-proposals', path: 'artifacts.proposals', kind: 'boolean', group: 'Artifacts',
-    label: 'Proposals page', hint: 'full text of open proposals, deep-linked' },
+    label: 'Proposals page', hint: 'full text of open proposals' },
   { arg: 'artifact-weekly-review', path: 'artifacts.weekly_review', kind: 'boolean', group: 'Artifacts',
     label: 'Weekly-review page', hint: 'the compiled weekly report at a stable URL' },
   { arg: 'artifact-backend', path: 'artifacts.backend', kind: 'string', group: 'Artifacts',

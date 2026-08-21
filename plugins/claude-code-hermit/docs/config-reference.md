@@ -240,7 +240,7 @@ Publishing of hermit-generated pages to Claude Code's [Artifacts](https://code.c
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `dashboard` | boolean | `true` | Publish the Hermit Dashboard (status, latest brief, proposal queue, weekly evolution, compiled-docs index), refreshed by `brief`, `weekly-review`, `proposal-create`, and `proposal-act`. |
-| `proposals` | boolean | `true` | Publish the full text of open proposals, each anchored for deep-linking, refreshed by `proposal-create` and `proposal-act`. |
+| `proposals` | boolean | `true` | Publish the full text of open proposals, refreshed by `proposal-create` and `proposal-act`. |
 | `weekly_review` | boolean | `true` | Publish the latest compiled weekly review as a stable-URL page, refreshed by `weekly-review`. |
 | `publish_authorized` | boolean \| `null` | `null` | Whether unattended sessions may publish without a permission prompt. `null` = undecided, `true` = authorized (grant applied at next boot), `false` = declined (attended banking instead). See below. Set via `/hermit-settings artifact-authorization`, never edited directly. |
 | `backend` | string | `"claude"` | Where pages publish. `"claude"` is Claude Code's native Artifacts. Any other value names a connected MCP artifact server. See below. |

@@ -92,6 +92,8 @@ Send one message following the Operator Notification protocol in CLAUDE.md (empt
    PROP-NNN created  ·  (or: suppressed — <code>  ·  or: duplicate of PROP-NNN)
 
 2. **<short title>** — ...
+
+📎 <proposals page URL>   (omit this line entirely if `proposal-create` returned no URL)
 ```
 
 If zero ideas were generated or all were suppressed/duplicated, the message is:
