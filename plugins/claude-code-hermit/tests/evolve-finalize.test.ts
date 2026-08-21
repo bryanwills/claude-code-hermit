@@ -513,6 +513,43 @@ test('a write that never lands records nothing at all', withProj(async (dir) => 
   expect(result.errors.map((e: any) => e.code)).toContain('write_failed');
   expect(result.audit_scope).toBe('version-only');
   expect(ledgerRows(dir)).toEqual([]);
+  // The migration write is on disk with nothing to explain it — keep the snapshot
+  // so the retry below can still attribute it.
+  expect(fs.existsSync(snapFile(dir))).toBe(true);
+}));
+
+test('a failed run keeps the snapshot, so the retry still attributes the migration', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  writeSnapshot(dir, '1.2.6');
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  fs.mkdirSync(path.join(dir, 'config.json.tmp'));
+
+  expect(finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] }).ok).toBe(false);
+
+  fs.rmdirSync(path.join(dir, 'config.json.tmp'));
+  const retry = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(retry.ok).toBe(true);
+  expect(retry.audit_scope).toBe('whole-run');
+  expect(rowFor(dir, 'heartbeat.every').old).toBe('2h');
+  expect(rowFor(dir, 'heartbeat.every').actor).toBe('hermit-evolve');
+  expect(fs.existsSync(snapFile(dir))).toBe(false);
+}));
+
+test('snapshot mode SKIPs a foreign state dir instead of exiting non-zero', withProj(async (dir) => {
+  writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-foreign-'));
+  try {
+    // Readable config, so the only reason to SKIP is the pin.
+    writeConfig(foreign, '{"_hermit_versions":{"claude-code-hermit":"9.9.9"}}');
+    const r = await runPinnedScript('evolve-finalize.ts', dir, [foreign, 'snapshot', '--core=1.2.6']);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.startsWith('SKIP|')).toBe(true);
+    expect(fs.existsSync(snapFile(foreign))).toBe(false);
+  } finally {
+    try { fs.rmSync(foreign, { recursive: true, force: true }); } catch {}
+  }
 }));
 
 test('secrets stay redacted through a whole-run diff', withProj(async (dir) => {

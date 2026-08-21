@@ -33,7 +33,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { pinStateDirOrExit } from './lib/cc-compat';
+import { assertStateDir, pinStateDirOrExit } from './lib/cc-compat';
 import { auditConfigChange } from './lib/config-audit';
 import { cmpSemver } from './lib/semver';
 import { utcISOStamp } from './lib/time';
@@ -98,24 +98,35 @@ export function writeSnapshot(hermitDir: string, core: string | null): string {
 }
 
 /**
- * Read the snapshot for this upgrade and remove it. Returns the snapshotted config
- * only when it is parseable, was taken for this same `--core` target, and is recent.
- * Always unlinks: a snapshot is single-use, and leaving a stale one behind is the
- * exact condition SNAPSHOT_MAX_AGE_MS exists to contain.
+ * Read the snapshot for this upgrade. Returns the snapshotted config only when it
+ * is parseable, was taken for this same `--core` target, and is recent.
+ *
+ * An unusable snapshot is removed on the spot. A usable one is left on disk until
+ * the ledger row is actually written (see the unlink after auditConfigChange) —
+ * every early return between here and there leaves config.json carrying step-2b's
+ * migration writes with no row to explain them, and consuming the snapshot first
+ * would make the retry that fixes the failure unable to attribute them either.
+ * SNAPSHOT_MAX_AGE_MS contains the case where the retry never comes.
  */
-function consumeSnapshot(hermitDir: string, core: string): Json | undefined {
+function readSnapshot(hermitDir: string, core: string): Json | undefined {
   const file = snapshotPath(hermitDir);
+  const discard = () => { try { fs.unlinkSync(file); } catch {} };
   let snap: Json;
   try {
     snap = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
-    try { fs.unlinkSync(file); } catch {}
+    discard();
     return undefined;
   }
-  try { fs.unlinkSync(file); } catch {}
-  if (!isPlainObject(snap) || snap.to !== core || snap.config === undefined) return undefined;
+  if (!isPlainObject(snap) || snap.to !== core || snap.config === undefined) {
+    discard();
+    return undefined;
+  }
   const taken = new Date(snap.ts).getTime();
-  if (Number.isNaN(taken) || Date.now() - taken > SNAPSHOT_MAX_AGE_MS) return undefined;
+  if (Number.isNaN(taken) || Date.now() - taken > SNAPSHOT_MAX_AGE_MS) {
+    discard();
+    return undefined;
+  }
   return snap.config;
 }
 
@@ -219,7 +230,7 @@ export function finalize(opts: {
   // did to config.json. Without it, fall back to the live read — which by then
   // already contains those writes, so the ledger can only show the version stamp.
   // Either way `config` is mutated in place from here on, hence the clone.
-  const snapshotBefore = consumeSnapshot(opts.hermitDir, opts.core);
+  const snapshotBefore = readSnapshot(opts.hermitDir, opts.core);
   const hasSnapshot = snapshotBefore !== undefined;
   const auditScope: 'whole-run' | 'version-only' = hasSnapshot ? 'whole-run' : 'version-only';
   const configBefore = hasSnapshot ? snapshotBefore : structuredClone(config);
@@ -315,6 +326,9 @@ export function finalize(opts: {
     onDisk,
     auditScope === 'whole-run' ? 'hermit-evolve' : 'evolve-finalize',
   );
+  // Single-use, consumed only now that the row it feeds exists. Retained above so a
+  // run that dies before this point can be retried with attribution intact.
+  if (hasSnapshot) { try { fs.unlinkSync(snapshotPath(opts.hermitDir)); } catch {} }
 
   const siblingsConfirmed: Record<string, string> = {};
   for (const name of appliedSiblingNames) {
@@ -341,8 +355,16 @@ if (import.meta.main) {
   if (snapshotMode) {
     // Fail-open, unlike the finalize path below: a missing snapshot degrades the
     // audit to version-only (reported as audit_scope), and must never stop an upgrade.
-    // Same state-dir pin — the sealed grant covers every argument to this script.
-    process.stdout.write(writeSnapshot(pinStateDirOrExit(hermitDir, 'evolve-finalize'), core) + '\n');
+    // Same state-dir pin — the sealed grant covers every argument to this script —
+    // but a foreign dir SKIPs instead of exiting 1: declining to write is already the
+    // outcome the pin exists to force, and a non-zero exit here would read to the
+    // runner as an upgrade failure.
+    const pinned = assertStateDir(hermitDir);
+    process.stdout.write(
+      (pinned
+        ? writeSnapshot(pinned, core)
+        : `SKIP|state dir must be this project's; got ${hermitDir}`) + '\n',
+    );
     process.exit(0);
   }
 
