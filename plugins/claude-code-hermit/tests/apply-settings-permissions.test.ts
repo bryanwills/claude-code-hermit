@@ -178,3 +178,59 @@ describe('sealed registries', () => {
     expect(skill).not.toContain('log-event <id> fired');
   });
 });
+
+// The ad-hoc model-invoked routes. Their `bun */scripts/<name>.ts` twins are
+// wildcarded-interpreter rules, which auto mode suspends — so on the fleet's
+// default permission mode these literal-prefix entries are the only pre-resolved
+// path to the three scripts a model reaches for mid-session rather than from a
+// skill's verbatim command block.
+describe('ad-hoc hermit-run grants', () => {
+  const AD_HOC = [
+    'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
+    'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
+    'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
+  ];
+
+  for (const entry of AD_HOC) {
+    test(`sealed: ${entry}`, () => {
+      expect(HERMIT_ALLOW).toContain(entry);
+    });
+  }
+
+  test('the allow op lands them in an operator target', withTarget(async (target) => {
+    const r = await runScript('apply-settings.ts', { args: [target, 'allow'] });
+    expect(r.exitCode).toBe(0);
+    for (const entry of AD_HOC) expect(readAllow(target)).toContain(entry);
+  }));
+
+  // Narrowness is why these are enumerated rather than blanket: `proposal *` would
+  // also hand out create/patch/next-task/routine. `observations *` is moot today
+  // (one verb) but pinning keeps the grant from widening if it ever grows one.
+  test('neither proposal nor observations is granted blanket', () => {
+    expect(HERMIT_ALLOW).not.toContain('Bash(.claude-code-hermit/bin/hermit-run proposal *)');
+    expect(HERMIT_ALLOW).not.toContain('Bash(.claude-code-hermit/bin/hermit-run observations *)');
+  });
+
+  // channel-send is the one mode-less grant, which is safe only because
+  // channel-send.ts pins its own state dir. Without that pin this entry would be a
+  // second unvalidated route into an egress script — fail loudly if the pin goes
+  // while the grant stays.
+  test('the mode-less channel-send grant is backed by an in-script state-dir pin', () => {
+    const src = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'channel-send.ts'), 'utf8');
+    expect(src).toContain('assertStateDir');
+  });
+});
+
+// hermit-exec.sh resolves a bare name to $PLUGIN_ROOT/scripts/<name>.ts and
+// nothing else. A grant naming a script that isn't there is a dead entry that
+// only shows up as a permission prompt on the call it was meant to pre-approve.
+test('every hermit-run grant names a script that exists', () => {
+  const names = HERMIT_ALLOW
+    .map((e) => e.match(/^Bash\(\.claude-code-hermit\/bin\/hermit-run ([a-z0-9-]+) /)?.[1])
+    .filter((n): n is string => !!n);
+  expect(names.length).toBeGreaterThan(0);
+  for (const name of [...new Set(names)]) {
+    const target = path.join(import.meta.dir, '..', 'scripts', `${name}.ts`);
+    expect(fs.existsSync(target)).toBe(true);
+  }
+});

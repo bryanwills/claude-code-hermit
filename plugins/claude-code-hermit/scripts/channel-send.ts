@@ -23,7 +23,25 @@
 //     2  the payload/usage was rejected (caller error — fix and retry; no JSON,
 //        nothing was sent, and this is *not* evidence the channel is broken)
 
+import { assertStateDir, hermitDir as ownStateDir } from './lib/cc-compat';
 import { sendToChannel, sendOperatorNotice, type SendResult } from './lib/channel-send';
+
+// The state dir is not caller-chosen. Reachable through a pre-approved
+// `Bash(bun */scripts/channel-send.ts*)` grant that covers every argument, so an
+// unvalidated root let one such call send with *another* project's bot token to
+// *that* project's configured chat — the worst shape of this defect class, since
+// this script is an egress path. See cc-compat.ts.
+//
+// Exits 2, not the shared pinStateDirOrExit()'s 1: this script documents 1 as
+// "a leg failed to land" and 2 as "the caller got it wrong, nothing was sent".
+// A foreign state dir is the latter, and reporting it as the former would read
+// as a broken channel.
+function pinOrExit(argvValue: string): string {
+  const pinned = assertStateDir(argvValue);
+  if (pinned) return pinned;
+  process.stderr.write(`channel-send: state dir must be this project's (${ownStateDir()}); got ${argvValue}\n`);
+  process.exit(2);
+}
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -164,7 +182,9 @@ async function main(): Promise<void> {
       process.stderr.write('Usage: bun channel-send.ts <hermit-dir> --notice   (JSON payload on stdin)\n');
       process.exit(2);
     }
-    await runNotice(hermitDir);
+    // Pinned after the arity check so a missing positional still prints this
+    // mode's usage rather than the pin error.
+    await runNotice(pinOrExit(hermitDir));
     return;
   }
 
@@ -173,6 +193,7 @@ async function main(): Promise<void> {
     process.stderr.write('Usage: bun channel-send.ts <hermit-dir> [--tier client|maintainer] <text|->\n');
     process.exit(2);
   }
+  const stateDir = pinOrExit(hermitDir);
 
   const text = textArg === '-' ? (await readStdin()).trim() : textArg;
   if (!text) {
@@ -181,7 +202,7 @@ async function main(): Promise<void> {
   }
 
   if (parsed.tier === 'maintainer') {
-    const res = await sendOperatorNotice(hermitDir, { maintainer: { text, fallback: 'client' } });
+    const res = await sendOperatorNotice(stateDir, { maintainer: { text, fallback: 'client' } });
     const m = res.maintainer;
     if (!m || !m.ok) {
       process.stderr.write(`channel-send: ${m?.error ?? 'no_delivery'}\n`);
@@ -190,7 +211,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const result = await sendToChannel(hermitDir, text);
+  const result = await sendToChannel(stateDir, text);
   if (!result.ok) {
     process.stderr.write(`channel-send: ${result.error}\n`);
     process.exit(1);

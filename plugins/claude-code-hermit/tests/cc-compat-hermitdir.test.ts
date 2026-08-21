@@ -41,7 +41,18 @@ function restoreEnv() {
 
 // hermitDir() reads process.env at call time (not module load time), so we can
 // import once and control env per-call.
-const { hermitDir, findHermitDir } = await import('../scripts/lib/cc-compat');
+const { hermitDir, findHermitDir, assertStateDir } = await import('../scripts/lib/cc-compat');
+
+// A `claude --worktree` worktree: the `.worktreeinclude` managed block's copies
+// (config.json, never state/) under <root>/.claude/worktrees/wt. Returns the
+// projected `.claude-code-hermit`, i.e. what the relative argv resolves to from
+// inside that worktree.
+function makeProjection(root: string): string {
+  const wt = path.join(root, '.claude', 'worktrees', 'wt', '.claude-code-hermit');
+  fs.mkdirSync(path.join(wt, 'compiled'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'config.json'), '{}');
+  return wt;
+}
 
 // -------------------------------------------------------------------------
 // Tests
@@ -231,5 +242,47 @@ describe('hermitDir()', () => {
         fs.rmSync(elsewhere, { recursive: true, force: true });
       }
     });
+  });
+});
+
+// -------------------------------------------------------------------------
+// assertStateDir() — worktree projections
+//
+// The CLAUDE-APPEND commands pass the relative `.claude-code-hermit`. From a
+// worktree that resolves to the projection while every accepted root is main's,
+// so the pin has to normalize it or refuse the spelling the hermit itself ships.
+// AGENT_DIR pins hermitDir() to a known root so these assert the argv side only.
+// -------------------------------------------------------------------------
+
+describe('assertStateDir() with a worktree projection', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = makeTmpHermit();
+    saveEnv('AGENT_DIR', 'CLAUDE_PROJECT_DIR');
+    delete process.env.CLAUDE_PROJECT_DIR;
+    process.env.AGENT_DIR = path.join(tmp, '.claude-code-hermit');
+  });
+
+  afterEach(() => {
+    restoreEnv();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('normalizes a projection of the accepted root to that root', () => {
+    expect(assertStateDir(makeProjection(tmp))).toBe(path.join(tmp, '.claude-code-hermit'));
+  });
+
+  it('still refuses a projection belonging to another project', () => {
+    const foreign = makeTmpHermit();
+    try {
+      expect(assertStateDir(makeProjection(foreign))).toBeNull();
+    } finally {
+      fs.rmSync(foreign, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a real root untouched', () => {
+    expect(assertStateDir(path.join(tmp, '.claude-code-hermit'))).toBe(path.join(tmp, '.claude-code-hermit'));
   });
 });

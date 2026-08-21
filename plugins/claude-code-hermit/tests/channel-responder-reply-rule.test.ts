@@ -63,3 +63,29 @@ test('on_resolve resolution path present', () => {
   expect(skill).toContain('on_resolve');
   expect(skill).toContain('"action":"answered"');
 });
+
+// default_chat_id pin: chat-id persistence is hook-owned. §1e used to hand the
+// model a config.json write recipe, which bypassed the hook's transcript-verified
+// inbound gate and its maintainer-chat exclusion. A future SKILL.md rewrite must
+// not reintroduce it.
+test('§1e delegates chat-id persistence to the hook — no model-side write recipe', () => {
+  expect(skill).toContain('hook-owned');
+  expect(skill).toMatch(/never edit either field by hand/i);
+  expect(skill).not.toMatch(/store the inbound `chat_id`/i);
+});
+
+test('§1e names the pinned proactive home', () => {
+  expect(skill).toContain('default_chat_id');
+});
+
+// The pin is what keeps unattended sends (and no-allowlist control authority)
+// from following whoever wrote last, so nothing reachable from a chat may move
+// it — including this settings item.
+test('hermit-settings fences the briefing chat to the terminal', () => {
+  const settings = fs.readFileSync(
+    path.join(PLUGIN_ROOT, 'skills', 'hermit-settings', 'SKILL.md'), 'utf-8',
+  );
+  expect(settings).toContain('briefing_chat');
+  expect(settings).toContain('default_chat_id');
+  expect(settings).toMatch(/terminal only/i);
+});

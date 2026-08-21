@@ -87,7 +87,7 @@ describe('renderProposalsPage', () => {
     expect(html).toContain('<title>Hermit — Proposals</title>');
   }));
 
-  test('renders each open proposal as a collapsed <details> anchored for deep-linking', withHermitDir((hermitDir) => {
+  test('renders each open proposal as a collapsed <details> carrying a prop-nnn id', withHermitDir((hermitDir) => {
     writeProposal(hermitDir, 'PROP-025-hub-spoke-100000.md',
       { id: 'PROP-025-hub-spoke-100000', title: '"Hub and spoke"', status: 'proposed', created: '2026-07-01T10:00:00Z' },
       'Full text of the proposal.');

@@ -25,7 +25,7 @@ import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { triggerPrompt } from './helpers/transcript';
 import { validateCronSchedule, validate } from '../scripts/validate-config';
-import { resolve } from '../scripts/resolve-outbound-channel';
+import { resolve, resolveMaintainerTarget } from '../scripts/resolve-outbound-channel';
 import { resolvePaths, checkConfig } from '../scripts/doctor-check';
 
 const SCRIPTS = path.join(PLUGIN_ROOT, 'scripts');
@@ -872,6 +872,43 @@ describe('channel resolver contract', () => {
     } });
     expect(code).toBe(0);
     expect(result.id).toBe('telegram');
+  });
+
+  // The pin is the whole point of default_chat_id: dm_channel_id keeps tracking
+  // the operator's last inbound chat, but unattended sends must not follow it.
+  test('default_chat_id pins the proactive target — a moved dm_channel_id does not', () => {
+    const { code, result } = runResolver({ channels: {
+      discord: { enabled: true, dm_channel_id: 'MOVED', default_chat_id: 'HOME' },
+    } });
+    expect(code).toBe(0);
+    expect(result.chat_id).toBe('HOME');
+  });
+
+  test('no pin — resolution falls back to the learned dm_channel_id (pre-pin installs)', () => {
+    const { code, result } = runResolver({ channels: {
+      discord: { enabled: true, dm_channel_id: 'D1' },
+    } });
+    expect(code).toBe(0);
+    expect(result.chat_id).toBe('D1');
+  });
+
+  test('a pin alone makes a channel eligible — eligibility reads the same fallback chain', () => {
+    const { code, result } = runResolver({ channels: {
+      discord: { enabled: true, dm_channel_id: null, default_chat_id: 'HOME' },
+    } });
+    expect(code).toBe(0);
+    expect(result.chat_id).toBe('HOME');
+  });
+
+  // resolveTarget's third argument became an extractor function so the proactive
+  // target could express a fallback chain. Maintainer routing shares that helper
+  // and must keep resolving its own single field.
+  test('maintainer routing is unaffected by the proactive pin', () => {
+    const channels = {
+      discord: { enabled: true, dm_channel_id: 'MOVED', default_chat_id: 'HOME', maintainer_channel_id: 'M1' },
+    };
+    expect(resolveMaintainerTarget(channels)?.chat_id).toBe('M1');
+    expect(resolve(channels)?.chat_id).toBe('HOME');
   });
 
   test('validator rejects channels.primary referencing a missing channel', () => {
@@ -3044,7 +3081,11 @@ describe('proactive-notify unification contract', () => {
     const append = read(path.join(TEMPLATES, 'CLAUDE-APPEND.md'));
     expect(responder).toContain('channel-send.ts');
     expect(responder).toContain('--notice');
-    expect(append).toContain('channel-send.ts');
+    // The APPEND names the same script through bin/hermit-run rather than the
+    // `bun ${CLAUDE_PLUGIN_ROOT}/scripts/…` spelling the skill uses: the token
+    // is substituted at skill load and never in the operator's CLAUDE.md, which
+    // this file is copied verbatim into.
+    expect(append).toContain('hermit-run channel-send');
     expect(append).toContain('--notice');
   });
 });

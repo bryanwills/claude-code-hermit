@@ -131,12 +131,23 @@ describe('.worktreeinclude template', () => {
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('#'));
 
-  test('template contains exactly the three allowed paths', () => {
+  test('template contains exactly the four allowed paths', () => {
     expect(effectivePaths()).toEqual([
       '.claude-code-hermit/OPERATOR.md',
       '.claude-code-hermit/config.json',
+      '.claude-code-hermit/bin/hermit-run',
       '.claude-code-hermit/compiled/',
     ]);
+  });
+
+  // bin/hermit-run is the one executable in the block — the CLAUDE-APPEND
+  // commands need it at the relative path inside a worktree. The rest of bin/
+  // are lifecycle wrappers (start/stop/update/docker) that act on the main
+  // hermit; a worktree copy of those is a footgun, so the whole dir must not
+  // creep in.
+  test('safety-invariant: only hermit-run from bin/, never the whole dir', () => {
+    const binEntries = effectivePaths().filter((e) => e.includes('/bin'));
+    expect(binEntries).toEqual(['.claude-code-hermit/bin/hermit-run']);
   });
 
   test('safety-invariant: no runtime state, sessions, ledgers or channel data', () => {

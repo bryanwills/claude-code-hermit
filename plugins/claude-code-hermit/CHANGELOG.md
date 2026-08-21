@@ -9,12 +9,49 @@
 ### Changed
 - `/claude-code-hermit:hermit-settings` now persists every branch through `settings-edit` verbs, including channels, routines, env, docker and scheduled-checks, which previously wrote `config.json` directly. Writes that would leave the config invalid (bad cron, unknown enum, dangling `channels.primary`) are refused instead of landing.
 - `settings-edit.ts` gains `unset <dotted.path>` and `history`, and validates `set`/`unset` before writing.
+- Three narrow `Bash(.claude-code-hermit/bin/hermit-run …)` grants — `channel-send *`, `observations observe *`, `proposal shell-append *` — covering the scripts the model invokes ad hoc mid-session rather than from a skill's command block. Their `bun */scripts/*.ts` twins are wildcarded-interpreter rules, which auto mode suspends.
+- New `channels.<name>.default_chat_id` pins where unattended sends (briefings, notices, weekly review) go. It is seeded once at first pairing and never moved by an inbound message, so messaging the hermit from a second chat no longer redirects the operator's briefings there. Change it from the terminal with `/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`; the item is read-only on a channel-tagged turn.
+
+### Changed
+- Pause/resume/snooze and full status on a channel with no `allowed_users` now trust the pinned `default_chat_id` instead of the last-learned `dm_channel_id`, so control authority can no longer be acquired by messaging from a new chat. An explicit `allowed_users` list still wins, and a group/server home still trusts every member of that chat — set `allowed_users` there.
+- Chat-ID persistence is now solely the `PostToolUse` hook's job: `channel-responder` §1e no longer instructs a model-side `config.json` write, which had bypassed the hook's transcript-verified inbound gate and its maintainer-chat exclusion.
+
+### Upgrade Instructions
+
+1. Read `.claude-code-hermit/config.json`. For each entry under `channels` (skip the `primary` key — it is a string pointer, not a channel), if the entry has a non-null `dm_channel_id` and no `default_chat_id`, set `default_chat_id` to that same value — **unless that `dm_channel_id` equals the same entry's `maintainer_channel_id`**, in which case leave `default_chat_id` absent and say so in your report (that chat is outbound-only; pinning it would send every briefing there permanently, since nothing re-learns this field). Leave every other field untouched. Re-runnable: an entry that already has the key is skipped.
+2. In your report, name the chat id you copied for each channel. Proactive sends are pinned to it from now on, and the copy cannot tell an operator's normal chat from one they happened to message from last — so this is the operator's chance to spot a wrong home.
+3. Tell the operator, once, that briefings and notices are now pinned to that chat: messaging from another chat gets answered there but no longer moves them, and moving them is a terminal setting (`/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`).
+4. Nothing breaks if this migration is skipped — resolution falls back to `dm_channel_id` until the key exists.
+- `/permission-mode <mode>` from a trusted channel switches the running session's permission mode, joining `/model`, `/effort`, `/compact` and `/clear`. Accepts `default`, `acceptEdits` and `auto`; `plan`, `bypassPermissions` and `dontAsk` are refused with a reason. Applied by driving Claude Code's Shift+Tab cycle and reading the status bar back, so the next prompt reports the mode the session actually landed in. Session-scoped — a restart re-asserts `config.permission_mode`.
 
 ### Fixed
+- `channel-send.ts` pins its state-dir argument to this project's, so a call reaching it through the pre-approved `Bash(bun */scripts/channel-send.ts*)` grant can no longer send with another project's bot token to that project's chat. A mismatch exits 2 (caller error, nothing sent), not 1.
+- The proactive-notify and settled-knowledge commands in `CLAUDE-APPEND.md` now use `.claude-code-hermit/bin/hermit-run`. They named `bun ${CLAUDE_PLUGIN_ROOT}/scripts/<name>.ts`, but that token is only substituted at skill load and never in the operator's `CLAUDE.md`, so the model had to hand-derive a versioned plugin-cache path — and the shortenings it improvised drew auto-mode classifier denials.
 - `/claude-code-hermit:channel-setup` adds the channel entry itself when `channels` is empty, instead of stopping and pointing at `/claude-code-hermit:hermit-settings` — that skill carries `disable-model-invocation`, so nothing could reach it and the operator was left to type the command.
 - `/claude-code-hermit:channel-setup` now treats a channel with `enabled: false` as disabled rather than configured, and offers to re-enable it instead of proceeding as though it were live.
 - Bare-host (non-Docker) boots now export each channel's `<CHANNEL>_STATE_DIR` into the session environment, so channel plugin servers find their state dir instead of failing with `CONNECTION_CLOSED`.
 - A channel-requested `/model` or `/effort` switch is now reported back from the transcript's serving-model stamp instead of the session's stale session-start self-perception, with the report held until an assistant entry newer than the delivery exists.
+- The `.worktreeinclude` managed block carries `.claude-code-hermit/bin/hermit-run` into `claude --worktree` worktrees. The commands above name that path, and a worktree session has Write/Edit blocked outside the worktree, so Bash was their only route — proactive operator notification and settled-knowledge recording both died there with a shell `No such file or directory`. Only the resolver is copied; the rest of `bin/` are lifecycle wrappers that act on the main hermit.
+- The state-dir pin normalizes a worktree's projected `.claude-code-hermit/` to the main checkout's state dir instead of refusing it. `.claude-code-hermit` is the argv those same commands pass, and from a worktree it resolves to the projection while every accepted root is main's — so the pin rejected the one spelling the hermit ships. Not a widening: a projection can only normalize to the root its own walk-up finds, and that root still has to be an accepted one.
+
+### Upgrade Instructions
+
+1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file> permissions-sync` against this hermit's resolved settings file to add the three new `hermit-run` grants. This is the only thing that adds them — `hermit-start`'s boot-time grant covers `artifact-allow`/`automode-seed` only, so a restart will not pick these up. Do not skip this step.
+2. The two rewritten commands live in the plugin-owned CLAUDE-APPEND block, which Step 7 already replaces wholesale, so no manual edit is needed. If this operator hand-edited either of those two lines inside the block, their edit is overwritten — tell them once, and note the new form is `.claude-code-hermit/bin/hermit-run <name> …` run from the project root.
+3. Nothing to do for the `channel-send.ts` pin: every shipped caller already passes this project's own state dir.
+4. **Add `bin/hermit-run` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/bin/hermit-run` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/config.json`, leaving every other line in the block untouched. The block should end up as:
+
+   ```
+   # >>> claude-code-hermit (managed block — do not edit between markers) >>>
+   .claude-code-hermit/OPERATOR.md
+   .claude-code-hermit/config.json
+   .claude-code-hermit/bin/hermit-run
+   .claude-code-hermit/compiled/
+   # <<< claude-code-hermit <<<
+   ```
+
+   Then check the project's `.gitignore` for a `.claude-code-hermit/bin/` line and append it if absent — Claude Code only copies gitignored paths into a worktree, so without it the new line is inert.
+- Creating several proposals in one run now appends at most one bare proposals-page link to the announcement message, instead of a separate `#prop-nnn` deep link per proposal that the claude.ai artifact viewer couldn't resolve anyway.
 
 ## [1.2.42] - 2026-08-19
 

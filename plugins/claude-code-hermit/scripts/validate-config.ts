@@ -291,6 +291,19 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       if (ch.maintainer_channel_id !== undefined && ch.maintainer_channel_id !== null && typeof ch.maintainer_channel_id !== 'string') {
         errors.push(`channels.${name}.maintainer_channel_id: must be string or null`);
       }
+      if (ch.default_chat_id !== undefined && ch.default_chat_id !== null && typeof ch.default_chat_id !== 'string') {
+        errors.push(`channels.${name}.default_chat_id: must be string or null`);
+      }
+      // The pinned proactive home must not be the outbound-only maintainer chat:
+      // unlike dm_channel_id, nothing re-learns this field, so a collision here
+      // sends every briefing to the maintainer chat until the operator rebinds
+      // from the terminal. Warn (like the dm collision below) so doctor reports it.
+      if (ch.default_chat_id != null && ch.maintainer_channel_id != null &&
+          String(ch.default_chat_id) === String(ch.maintainer_channel_id)) {
+        warnings.push(
+          `channels.${name}.default_chat_id equals maintainer_channel_id — proactive sends are pinned to the outbound-only maintainer chat; re-point it with /claude-code-hermit:hermit-settings at the terminal`,
+        );
+      }
       // The maintainer chat is outbound-only. If it also sits in dm_channel_id the
       // primary DM binding was clobbered (fixed in channel-hook's persistDmChannelId)
       // or was configured to the same chat — either way, that chat now satisfies the
