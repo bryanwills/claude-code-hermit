@@ -135,6 +135,7 @@ describe('read-path gate', () => {
     'resolve-outbound-channel.ts', // CLI: config_read_failed error output carries the parse message
     'lib/cc-compat.ts', // hermitDir(): existence walk, never parses
     'docker-preflight.ts', // existence check, never parses
+    'lib/config-audit.ts', // audit ledger: the literal is a row's target label, never a path it reads
   ]);
 
   test('no config.json literal outside config-read importers and the allowlist', () => {

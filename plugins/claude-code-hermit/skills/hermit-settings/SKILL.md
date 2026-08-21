@@ -44,6 +44,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings artifact-weekly-review — toggle the Weekly-review artifact (stable-URL passthrough of the compiled weekly report)
 /claude-code-hermit:hermit-settings artifact-authorization — record the unattended Artifact publish decision (applied by hermit-start at boot, not from this session)
 /claude-code-hermit:hermit-settings artifact-backend — where pages publish: `claude` (default), or the name of a connected MCP artifact server you registered yourself
+/claude-code-hermit:hermit-settings history [path] — recent recorded settings changes (who changed what, when)
 ```
 
 ## Plan
@@ -59,7 +60,11 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.js
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json get [dotted.path]      # dump whole config, or one value
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json set <dotted.path> <value>   # 'none'/'clear' → null; value is JSON-parsed then falls back to raw string
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json toggle <dotted.path>       # boolean flip (absent → true)
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json unset <dotted.path>        # delete a key (siblings and parents untouched)
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json history [dotted.path] [--limit N]   # recent audited changes
 ```
+
+**Every write goes through these verbs — never edit `config.json` with Edit/Write.** The script preserves siblings, refuses a change that would make the config invalid, and records the change in the audit ledger that `history` reads. A hand-edit bypasses all three.
 
 ### 2. Show or modify
 
@@ -125,14 +130,14 @@ Channels:
 ```
 Ask: "Add, remove, edit, or set primary? (add discord / add telegram / remove <name> / edit <name> / primary <name> / primary clear / done) [done]"
 Loop until operator says "done":
-- **add <name>:** Create entry `channels.<name>: { "enabled": true, "dm_channel_id": null }`. Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`). Set `state_dir` in the channel entry. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`."
-- **remove <name>:** Delete `channels.<name>` from config.json. If `channels.primary === <name>`, also delete `channels.primary` (a dangling pointer would fail validation) and tell the operator: "Also cleared `channels.primary` (was pointing at the removed channel)."
+- **add <name>:** Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`), then write the whole entry in one call: `set channels.<name> '{"enabled":true,"dm_channel_id":null,"allowed_users":[...],"state_dir":"..."}'`. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`."
+- **remove <name>:** `unset channels.<name>`. If `channels.primary === <name>`, run `unset channels.primary` **first** (a dangling pointer fails validation and the write would be refused) and tell the operator: "Also cleared `channels.primary` (was pointing at the removed channel)."
 - **edit <name>:** Sub-menu — "What to change? (allowed_users / morning_brief / enabled / done)"
-  - **allowed_users:** "Paste user IDs (space-separated), or 'clear' to allow everyone, or 'block' for empty array." Update `channels.<name>.allowed_users`.
-  - **morning_brief:** "Enable morning brief for this channel? (yes <time> / no) [current]". If yes: `channels.<name>.morning_brief = { "enabled": true, "time": "<HH:MM>" }`. If no: set to `null`.
-  - **enabled:** Toggle `channels.<name>.enabled`.
-- **primary <name>:** Validate `<name>` exists as a key in `channels` (and is not `primary` itself). If valid, set `channels.primary = "<name>"`. If invalid, reject: "No channel named `<name>` configured. Add it first with `add <name>`."
-- **primary clear:** Delete `channels.primary`. Outbound sends will fall back to the default `discord` → `telegram` → `imessage` order.
+  - **allowed_users:** "Paste user IDs (space-separated), or 'clear' to allow everyone, or 'block' for empty array." → `set channels.<name>.allowed_users '["id",...]'` (clear ⇒ `unset channels.<name>.allowed_users`).
+  - **morning_brief:** "Enable morning brief for this channel? (yes <time> / no) [current]". Yes ⇒ `set channels.<name>.morning_brief '{"enabled":true,"time":"<HH:MM>"}'`; no ⇒ `set channels.<name>.morning_brief none`.
+  - **enabled:** `toggle channels.<name>.enabled`.
+- **primary <name>:** Validate `<name>` exists as a key in `channels` (and is not `primary` itself). If valid, `set channels.primary <name>`. If invalid, reject: "No channel named `<name>` configured. Add it first with `add <name>`."
+- **primary clear:** `unset channels.primary`. Outbound sends will fall back to the default `discord` → `telegram` → `imessage` order.
 Note: "Channel changes take effect on next `hermit-start` run. `channels.primary` is consulted live by `scripts/resolve-outbound-channel.ts` on every proactive send — no restart needed for that key alone."
 
 **If argument is "brief":**
@@ -141,7 +146,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   - Show current morning_brief setting per channel: `channels.<name>.morning_brief`
   - Ask: "Enable morning brief delivery? (yes / no) [current value]"
   - If yes: Ask "What time? (e.g., 07:00) [current or 07:00]" and "Which channel? [current or first enabled channel]"
-  - Update `channels.<selected-channel>.morning_brief: { "enabled": true, "time": "<HH:MM>" }` in config.json. If no, set to `null`.
+  - Yes ⇒ `set channels.<selected-channel>.morning_brief '{"enabled":true,"time":"<HH:MM>"}'`; no ⇒ `set channels.<selected-channel>.morning_brief none`.
 
 **If argument is "heartbeat":**
 - Show current heartbeat config (including `stale_threshold`)
@@ -221,10 +226,10 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     - Custom → operator types raw cron
   - Skill to run (full slash-command name, e.g. `claude-code-hermit:brief` for plugin skills, `ha-refresh-context` for local project skills)
   - Enabled (yes/no, default yes)
-  - Write to `config.json` routines array.
-- **Edit:** select by number, change any field.
-- **Remove:** select by number, delete from array.
-- **Enable/disable:** select by number, toggle `enabled` field.
+  - Read the current array (`get routines`), append the new entry, and write it back with `set routines '<whole array as JSON>'`. An invalid cron or a duplicate id is refused by the script — relay its error rather than retrying.
+- **Edit:** select by number, then `set routines.<index>.<field> <value>` (one call per changed field; siblings are preserved).
+- **Remove:** select by number, then read the array, drop that element, and `set routines '<remaining array>'` (array indices shift, so a whole-array write is safer than `unset routines.<index>`).
+- **Enable/disable:** select by number, `set routines.<index>.enabled true|false`.
 - Loop until operator says "done".
 - **After all edits are written**, invoke `/claude-code-hermit:hermit-routines load` via the Skill tool to apply the new schedule live (no restart). Surface the result inline:
   - Success: "Routines reloaded: <id1>, <id2> (<N> total). Active immediately."
@@ -243,8 +248,8 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 - Ask: "Set, change, or remove an env var? (e.g., 'MAX_THINKING_TOKENS 20000', 'remove MAX_THINKING_TOKENS', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - If input targets a protected key: reject with the message above
-  - If input is `remove <KEY>`: delete the key from `env`
-  - If input is `<KEY> <VALUE>`: set `env[KEY] = VALUE`
+  - If input is `remove <KEY>`: `unset env.<KEY>`
+  - If input is `<KEY> <VALUE>`: `set env.<KEY> <VALUE>`
 - Note: "Env changes are written to `.claude/settings.local.json` on next `hermit-start`. To apply now, restart the hermit session."
 
 **If argument is "compact":**
@@ -261,7 +266,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 - Loop until operator says "done", "skip", or presses Enter:
   - Validate: value must be a positive integer
   - Validate: `*_keep` must not exceed its corresponding `*_threshold` (setting keep equal to threshold effectively disables compaction for that section)
-  - Update `compact[key]` in config.json
+  - `set compact.<key> <value>`
 - Note: "Compaction runs at each idle transition (task completion). No restart needed."
 
 **If argument is "docker":**
@@ -276,9 +281,10 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
 - Ask: "Add or remove packages? (e.g., 'add ffmpeg imagemagick', 'remove ffmpeg', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
-  - If input is `remove <PKG> [<PKG>...]`: remove the packages from `docker.packages`
-  - If input is `add <PKG> [<PKG>...]`: add the packages to `docker.packages` (deduplicate)
-  - If input is just package names without add/remove prefix: treat as add
+  - Compute the new list, then write it whole: `set docker.packages '["pkg", ...]'`
+  - `remove <PKG> [<PKG>...]`: drop those packages from the list
+  - `add <PKG> [<PKG>...]`: append (deduplicate)
+  - Bare package names without add/remove prefix: treat as add
 - After changes, note: "Rebuild your container to apply: `docker compose -f docker-compose.hermit.yml build`"
 
 - Then show current `docker.recommended_plugins`:
@@ -293,10 +299,10 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   Display each entry as `[enabled/disabled]  <plugin> (<marketplace>)` — show the `org/repo` (the `marketplace` field) in parens.
 - Ask: "Enable, disable, add, or remove recommended plugins? (e.g., 'enable claude-code-setup', 'add claude-code-setup', 'add superpowers obra/superpowers-marketplace', 'remove superpowers', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
-  - `enable <PLUGIN>`: set `enabled: true` on matching entry
-  - `disable <PLUGIN>`: set `enabled: false` on matching entry
-  - `remove <PLUGIN>`: remove the entry entirely
-  - `add <PLUGIN> [<MARKETPLACE>]`: add new entry with `scope: "project"`, `enabled: true`. `<MARKETPLACE>` is an `org/repo` (e.g. `obra/superpowers-marketplace`) or omitted (defaults to `anthropics/claude-plugins-official`). If `<MARKETPLACE>` is provided but not registered locally, prompt: "Marketplace `<MARKETPLACE>` is not registered locally. Add it with `claude plugin marketplace add <MARKETPLACE>` first, then re-try." Abort the add. **Dedupe rule:** refuse the add if an existing entry has the same `(plugin, marketplace)` pair (scope is NOT part of the key) — operator should `enable` or `remove` first.
+  - `enable <PLUGIN>`: `set docker.recommended_plugins.<index>.enabled true`
+  - `disable <PLUGIN>`: `set docker.recommended_plugins.<index>.enabled false`
+  - `remove <PLUGIN>`: read the list, drop that entry, `set docker.recommended_plugins '<remaining array>'`
+  - `add <PLUGIN> [<MARKETPLACE>]`: append an entry with `scope: "project"`, `enabled: true` and write the whole list back with `set docker.recommended_plugins '<array>'`. `<MARKETPLACE>` is an `org/repo` (e.g. `obra/superpowers-marketplace`) or omitted (defaults to `anthropics/claude-plugins-official`). If `<MARKETPLACE>` is provided but not registered locally, prompt: "Marketplace `<MARKETPLACE>` is not registered locally. Add it with `claude plugin marketplace add <MARKETPLACE>` first, then re-try." Abort the add. **Dedupe rule:** refuse the add if an existing entry has the same `(plugin, marketplace)` pair (scope is NOT part of the key) — operator should `enable` or `remove` first.
   - If input is just a plugin name without a verb: treat as `enable` if it exists, `add` if it doesn't
 - After changes, note: "Restart container to install new plugins: `.claude-code-hermit/bin/hermit-docker restart`"
 
@@ -315,12 +321,11 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
 - Ask: "Enable, disable, add, remove, or change interval? (e.g., 'disable md-audit', 'interval automation-recommender 14', 'add my-check my-plugin /my-plugin:my-skill interval 7', 'add my-check my-plugin /my-plugin:my-skill session', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
-  - `enable <id>`: set `enabled: true` on matching entry
-  - `disable <id>`: set `enabled: false` on matching entry
-  - `interval <id> <days>`: update `interval_days` on matching entry (only valid for `trigger: "interval"`)
-  - `add <id> <plugin> <skill> interval [days]`: add interval-triggered entry with `enabled: true`, `interval_days` (default: 7). Deduplicate by id.
-  - `add <id> <plugin> <skill> session`: add session-triggered entry with `enabled: true`. Deduplicate by id.
-  - `remove <id>`: delete the entry from config and its state from `state/reflection-state.json`
+  - `enable <id>` / `disable <id>`: `set scheduled_checks.<index>.enabled true|false`
+  - `interval <id> <days>`: `set scheduled_checks.<index>.interval_days <days>` (only valid for `trigger: "interval"`)
+  - `add <id> <plugin> <skill> interval [days]`: append an interval-triggered entry with `enabled: true`, `interval_days` (default: 7), then `set scheduled_checks '<whole array>'`. Deduplicate by id.
+  - `add <id> <plugin> <skill> session`: same, session-triggered. Deduplicate by id.
+  - `remove <id>`: drop the entry and `set scheduled_checks '<remaining array>'`, then remove its state from `state/reflection-state.json`
 - Note: "Interval checks run during idle reflection. Session checks run at task completion. Changes take effect on the next cycle."
 
 **If argument is "quality-gate":**
@@ -340,6 +345,9 @@ Run `settings-edit ... set quality_gate.tier <chosen>` (creates the `quality_gat
 
 Note: if you commit autonomous-implementation diffs through a skill that already runs `/claude-code-hermit:simplify` before committing, consider **Budget** — any non-Budget tier here would double-fire the cleanup pass (~$0.40-$0.70 of duplicated spend per committed implementation).
 
+**If argument is "history":**
+Run `settings-edit ... history [dotted.path] [--limit N]` (the operator may name a setting: "history heartbeat"). Relay the rows in the operator's language, naming who made each change — `settings-edit` is an operator edit, `evolve-finalize` an upgrade migration, `channel-hook` a channel the hermit learned, `hermit-start`/`hermit-stop` a boot flip. In a channel reply, drop the dotted paths and script names for plain language ("the heartbeat interval went from 2h to 30m during an upgrade on the 18th"). An empty ledger means nothing has changed since the audit trail started, not that the setting is unset.
+
 **If argument is "artifact-authorization":**
 This records a decision only — it never runs `apply-settings.ts` and never touches a settings file from this session. A channel reply may only flip hermit config, never permissions (auto-mode classifier invariant); the actual grant is applied by `hermit-start`'s boot-time `applyArtifactGrant`, outside any session.
 Ask: "This hermit publishes status/proposal/weekly-review pages via Claude Code's Artifact tool. Unattended sessions can't answer a permission prompt, so authorize publishes now, or bank the first publish of each enabled page yourself instead?
@@ -352,5 +360,6 @@ On answer "Bank first publishes" (or "off"/"no"/"decline"): run `settings-edit .
 
 ### 3. Write config
 
-Scalar/enum branches already persisted their change via `settings-edit` (see step 2). For the branches that manipulate arrays or delete keys (`channels`, `routines`, `env`, `compact`, `docker`, `scheduled-checks`, `brief`) — which `settings-edit` can't express — write the updated config back to `.claude-code-hermit/config.json` directly.
+Every branch persists through `settings-edit` verbs — `apply-known` for the registry table, `set`/`unset`/`toggle` everywhere else (arrays and objects are expressible: the value is JSON-parsed). Nothing in this skill edits `config.json` with the Edit/Write tools: the script preserves siblings, refuses a change that would leave the config invalid, and records every mutation in the audit ledger. If a verb refuses a write, relay its error to the operator instead of falling back to a direct edit.
+
 Confirm the change to the operator.

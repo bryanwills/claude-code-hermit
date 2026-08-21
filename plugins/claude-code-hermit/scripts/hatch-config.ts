@@ -37,6 +37,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { validate } from './validate-config';
+import { auditConfigChange } from './lib/config-audit';
+import { readConfigRaw } from './lib/config-read';
 
 type Json = any;
 
@@ -259,6 +261,7 @@ if (errors.length > 0) {
 // --- atomic write: serialize -> .tmp -> rename (mirrors evolve-finalize.ts) ---
 fs.mkdirSync(hermitDir, { recursive: true });
 const tmp = configPath + '.tmp';
+const preExisting = readConfigRaw(hermitDir) ?? undefined;
 try {
   fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, configPath);
@@ -266,6 +269,7 @@ try {
   try { fs.unlinkSync(tmp); } catch {}
   die(`write failed: ${e.message}`);
 }
+auditConfigChange(hermitDir, preExisting, config, 'hatch-config');
 
 console.log(JSON.stringify(config));
 process.exit(0);

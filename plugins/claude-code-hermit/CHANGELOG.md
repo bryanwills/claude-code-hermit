@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- Settings changes are now recorded in `state/settings-audit.jsonl` — one redacted row per changed value, with who changed it (operator edit, upgrade migration, learned channel id, boot flip, permissions sync) and when. Credential-bearing keys and everything under `env.` record presence only, never values.
+- `/claude-code-hermit:hermit-settings history [setting]` prints recent recorded changes; `/claude-code-hermit:recall` answers "did something change my settings?" from the same ledger.
+
+### Changed
+- `/claude-code-hermit:hermit-settings` now persists every branch through `settings-edit` verbs, including channels, routines, env, docker and scheduled-checks, which previously wrote `config.json` directly. Writes that would leave the config invalid (bad cron, unknown enum, dangling `channels.primary`) are refused instead of landing.
+- `settings-edit.ts` gains `unset <dotted.path>` and `history`, and validates `set`/`unset` before writing.
+
 ### Fixed
 - `/claude-code-hermit:channel-setup` adds the channel entry itself when `channels` is empty, instead of stopping and pointing at `/claude-code-hermit:hermit-settings` — that skill carries `disable-model-invocation`, so nothing could reach it and the operator was left to type the command.
 - `/claude-code-hermit:channel-setup` now treats a channel with `enabled: false` as disabled rather than configured, and offers to re-enable it instead of proceeding as though it were live.

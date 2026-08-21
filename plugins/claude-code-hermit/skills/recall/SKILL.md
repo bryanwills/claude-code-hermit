@@ -12,6 +12,18 @@ Retrieve relevant history from session reports, compiled artifacts, and proposal
 
 If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), deliver the response via that channel's reply tool. Otherwise emit to conversation.
 
+## Step 1a — Settings-history questions go to the ledger, not to search
+
+When the question is about a **configuration change** rather than past work — "did something change my settings", "when did the heartbeat interval change", "why is my model different", "who turned that off" — the answer lives in the settings audit ledger, which `search.ts` does not index. Run:
+
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json history [dotted.path] [--limit N]
+```
+
+Pass a dotted path when the operator named a specific setting (`heartbeat`, `model`, `channels`); omit it for "did anything change". Each row names the actor: `settings-edit` is an operator edit, `evolve-finalize` an upgrade migration, `channel-hook` a channel the hermit learned on its own, `hermit-start`/`hermit-stop` a boot flip, `apply-settings` a permissions sync. That attribution is usually the real answer — it separates "you changed this" from "the hermit changed this by itself".
+
+Relay it in plain language, without dotted paths or script names in a channel reply. An empty ledger means nothing has changed since the audit trail began. Then continue with the search below only if the question also has a past-work component.
+
 ## Step 1 — Run search
 
 Extract the search query from the operator's message — the topic or phrase after "recall", "what did I learn about", "when did we last touch", "what did we decide about", or similar phrasing. Then run:

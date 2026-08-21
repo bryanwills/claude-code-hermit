@@ -6,9 +6,11 @@
  * Operations:
  *   get [dotted.path]        Print the JSON value at path (whole config if path omitted)
  *   set <dotted.path> <val>  Set a nested leaf, creating parent objects as needed
+ *   unset <dotted.path>      Delete a nested leaf (parents are left in place)
  *   toggle <dotted.path>     Boolean flip (absent → true; errors if current isn't boolean)
  *   show                     Render the operator-facing settings summary from live values
  *   apply-known <arg> <val>  Write one registry-backed setting, validated by kind/enum
+ *   history [path] [--limit N]  Print recent audited changes, newest last
  *
  * Value parsing for `set`: 'none'/'clear' → null; otherwise JSON.parse first
  * (so true, 42, "x", {...} work), falling back to the raw string on parse failure.
@@ -17,12 +19,16 @@
  * - Changes only the target leaf; all sibling keys are preserved (read-modify-write).
  * - Refuses to overwrite an existing-but-malformed config.json (never falls through to {}).
  * - Safe under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
+ * - Every successful mutation is recorded in state/settings-audit.jsonl.
  * - Zero runtime deps.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { SETTINGS, READ_ONLY, byArg, type Setting } from './lib/settings/registry';
+import { auditConfigChange, readHistory } from './lib/config-audit';
+import { validate } from './validate-config';
+import { flagValue } from './lib/cli';
 
 type Json = any;
 
@@ -89,6 +95,20 @@ export function setPath(obj: Json, dotted: string, value: Json): Json {
   }
   cur[leaf] = value;
   return obj;
+}
+
+/** Delete a leaf. Parent objects stay — an empty `channels` is still a valid config. */
+export function unsetPath(obj: Json, dotted: string): boolean {
+  const keys = dotted.split('.');
+  const leaf = keys.pop()!;
+  let cur = obj;
+  for (const key of keys) {
+    if (typeof cur[key] !== 'object' || cur[key] === null) return false;
+    cur = cur[key];
+  }
+  if (!(leaf in cur)) return false;
+  delete cur[leaf];
+  return true;
 }
 
 export function togglePath(obj: Json, dotted: string): Json {
@@ -263,6 +283,35 @@ if (import.meta.main) {
   }
 
   const config = readTargetJson(targetFile);
+  // The state dir is the config's own directory (.claude-code-hermit/), where the
+  // audit ledger lives under state/.
+  const stateDir = path.dirname(path.resolve(targetFile));
+  // Snapshot before any mutation — setPath and friends mutate in place, so a
+  // reference would diff against itself and report nothing.
+  const before: Json = structuredClone(config);
+  // A file that doesn't exist yet reads as {}; tell the audit ledger so it records
+  // one "config created" row instead of a row per template default.
+  const existedBefore = fs.existsSync(targetFile);
+
+  /**
+   * Persist a mutation: refuse it if it would introduce NEW validation errors,
+   * then write and audit. Pre-existing errors in the operator's config are not
+   * this command's business — blocking on them would lock the operator out of
+   * the very edits that fix them. Rerouting the hermit-settings array branches
+   * through this path removes the validate-config PostToolUse hook (fs writes
+   * never trip it), which is why the check lives here.
+   */
+  const persist = (actor = 'settings-edit'): void => {
+    const beforeErrors = validate(before).errors;
+    const newErrors = validate(config).errors.filter((e) => !beforeErrors.includes(e));
+    if (newErrors.length > 0) {
+      console.error(`Refusing to write ${targetFile} — the change is invalid:`);
+      newErrors.forEach((e) => console.error(`  ${e}`));
+      process.exit(1);
+    }
+    writeJson(targetFile, config);
+    auditConfigChange(stateDir, existedBefore ? before : undefined, config, actor);
+  };
 
   switch (op) {
     case 'get': {
@@ -284,7 +333,7 @@ if (import.meta.main) {
       }
       const result = applyKnown(config, arg, value);
       if (!result.ok) { console.error(result.message); process.exit(1); }
-      writeJson(targetFile, config);
+      persist();
       console.log(result.message);
       break;
     }
@@ -294,7 +343,18 @@ if (import.meta.main) {
       if (!dotted) { console.error('set requires a dotted.path argument'); process.exit(1); }
       if (rest.length < 2) { console.error('set requires a value argument'); process.exit(1); }
       setPath(config, dotted, parseValue(rest[1]));
-      writeJson(targetFile, config);
+      persist();
+      break;
+    }
+
+    case 'unset': {
+      const dotted = rest[0];
+      if (!dotted) { console.error('unset requires a dotted.path argument'); process.exit(1); }
+      if (!unsetPath(config, dotted)) {
+        console.log(`${dotted} is not set — nothing to remove`);
+        break;
+      }
+      persist();
       break;
     }
 
@@ -307,12 +367,30 @@ if (import.meta.main) {
         console.error((err as Error).message);
         process.exit(1);
       }
-      writeJson(targetFile, config);
+      persist();
+      break;
+    }
+
+    case 'history': {
+      const args = rest.filter((a) => a !== '--limit');
+      const limitArg = flagValue(rest, '--limit');
+      const limit = limitArg !== undefined ? Number(limitArg) || 20 : 20;
+      const dotted = args[0] && !/^\d+$/.test(args[0]) ? args[0] : undefined;
+      const rows = readHistory(stateDir, dotted, limit);
+      if (rows.length === 0) {
+        console.log(dotted ? `No recorded changes for ${dotted}.` : 'No recorded settings changes.');
+        break;
+      }
+      for (const r of rows) {
+        const from = r.old === undefined ? '(unset)' : JSON.stringify(r.old);
+        const to = r.new === undefined ? '(removed)' : JSON.stringify(r.new);
+        console.log(`${r.ts}  ${r.path}  ${from} → ${to}  [${r.actor}]`);
+      }
       break;
     }
 
     default: {
-      console.error(`Unknown operation: ${op}. Valid ops: get, set, toggle, show, apply-known`);
+      console.error(`Unknown operation: ${op}. Valid ops: get, set, unset, toggle, show, apply-known, history`);
       process.exit(1);
     }
   }

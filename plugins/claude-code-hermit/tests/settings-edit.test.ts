@@ -208,7 +208,7 @@ describe('settings registry', () => {
     const tableArgs = new Set(tableSettings().map(s => s.arg));
     // A branch that is also in the table means the prose was left behind.
     for (const b of branches) expect(tableArgs.has(b)).toBe(false);
-    expect(branches.length).toBe(12); // 9 stateful + 3 side-effecting
+    expect(branches.length).toBe(13); // 9 stateful + 3 side-effecting + history (read-only, not a setting)
   });
 
   test('enums come from the shared module, not a second copy', () => {
@@ -325,5 +325,126 @@ describe('settings-edit apply-known', () => {
     const cfg: any = {};
     applyKnown(cfg, 'artifact-dashboard', 'off');
     expect(cfg.artifacts.dashboard).toBe(false);
+  });
+});
+
+// --- Audit ledger, unset, history ---
+
+function auditRows(dir: string): any[] {
+  const file = path.join(dir, '.claude-code-hermit', 'state', 'settings-audit.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+
+// Satisfies validate()'s required keys, so a mutation's own validity is the only
+// thing under test.
+function validConfig(extra: any = {}): any {
+  return {
+    agent_name: 'Atlas', language: 'en', timezone: 'UTC', escalation: 'balanced',
+    channels: {}, env: {}, heartbeat: { enabled: false }, routines: [], quality_gate: { tier: 'budget' },
+    ...extra,
+  };
+}
+
+describe('settings-edit audit ledger', () => {
+  test('set records an attributed row with old → new', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({ heartbeat: { enabled: true, every: '2h' } }));
+    await runScript('settings-edit.ts', { args: [file, 'set', 'heartbeat.every', '30m'] });
+    const rows = auditRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      actor: 'settings-edit', target: 'config.json',
+      path: 'heartbeat.every', old: '2h', new: '30m',
+    });
+  });
+
+  test('apply-known and toggle are audited too', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig());
+    await runScript('settings-edit.ts', { args: [file, 'apply-known', 'escalation', 'autonomous'] });
+    await runScript('settings-edit.ts', { args: [file, 'toggle', 'remote'] });
+    expect(auditRows(dir).map((r) => r.path)).toEqual(['escalation', 'remote']);
+  });
+
+  test('a refused write leaves neither config nor ledger changed', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig());
+    const before = readConfig(file);
+    const r = await runScript('settings-edit.ts', {
+      args: [file, 'set', 'routines', '[{"id":"x","skill":"s","schedule":"not a cron","enabled":true}]'],
+    });
+    expect(r.exitCode).toBe(1);
+    expect(readConfig(file)).toEqual(before);
+    expect(auditRows(dir)).toHaveLength(0);
+  });
+
+  test('a dangling channels.primary is refused', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({
+      channels: { discord: { enabled: true }, primary: 'discord' },
+    }));
+    const r = await runScript('settings-edit.ts', { args: [file, 'unset', 'channels.discord'] });
+    expect(r.exitCode).toBe(1);
+    expect(readConfig(file).channels.discord).toBeDefined();
+    expect(auditRows(dir)).toHaveLength(0);
+  });
+
+  test('pre-existing invalidity does not block an unrelated edit', async () => {
+    const dir = freshDir();
+    // Missing required keys — the operator's config is already invalid.
+    const file = seedConfig(dir, { agent_name: 'Atlas' });
+    const r = await runScript('settings-edit.ts', { args: [file, 'set', 'timezone', 'Europe/Lisbon'] });
+    expect(r.exitCode).toBe(0);
+    expect(readConfig(file).timezone).toBe('Europe/Lisbon');
+  });
+});
+
+describe('settings-edit unset', () => {
+  test('removes a nested leaf, leaving parents and siblings', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({ channels: { discord: { enabled: true }, telegram: { enabled: true } } }));
+    await runScript('settings-edit.ts', { args: [file, 'unset', 'channels.discord'] });
+    const cfg = readConfig(file);
+    expect(cfg.channels.discord).toBeUndefined();
+    expect(cfg.channels.telegram).toBeDefined();
+    expect(auditRows(dir)[0]).toMatchObject({ path: 'channels.discord' });
+  });
+
+  test('a missing path is a no-op, not an error', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig());
+    const r = await runScript('settings-edit.ts', { args: [file, 'unset', 'nope.not.here'] });
+    expect(r.exitCode).toBe(0);
+    expect(auditRows(dir)).toHaveLength(0);
+  });
+});
+
+describe('settings-edit history', () => {
+  test('prints recorded changes, filters by path, and honors --limit', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({ heartbeat: { enabled: true, every: '2h' } }));
+    await runScript('settings-edit.ts', { args: [file, 'set', 'heartbeat.every', '30m'] });
+    await runScript('settings-edit.ts', { args: [file, 'set', 'model', 'opus'] });
+
+    const all = await runScript('settings-edit.ts', { args: [file, 'history'] });
+    expect(all.stdout).toContain('heartbeat.every');
+    expect(all.stdout).toContain('model');
+    expect(all.stdout).toContain('[settings-edit]');
+
+    const filtered = await runScript('settings-edit.ts', { args: [file, 'history', 'heartbeat'] });
+    expect(filtered.stdout).toContain('heartbeat.every');
+    expect(filtered.stdout).not.toContain('"opus"');
+
+    const limited = await runScript('settings-edit.ts', { args: [file, 'history', '--limit', '1'] });
+    expect(limited.stdout.trim().split('\n')).toHaveLength(1);
+  });
+
+  test('an empty ledger reports plainly', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig());
+    const r = await runScript('settings-edit.ts', { args: [file, 'history'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('No recorded settings changes');
   });
 });

@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
 import { settleConfig, readConfigRaw } from './lib/config-read';
+import { auditConfigChange } from './lib/config-audit';
 import { localISOStamp } from './lib/time';
 import { readRuntimeJson, updateRuntimeField, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -99,9 +100,11 @@ function readActiveSession(): Json | null {
 // full set of template defaults. A config we could not parse is left untouched.
 function saveConfig(config: Json, raw: Json): void {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+  const before = structuredClone(raw);
   raw.always_on = config.always_on;
   try {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n');
+    auditConfigChange(path.dirname(CONFIG_PATH), before, raw, 'hermit-stop');
   } catch {}
 }
 
