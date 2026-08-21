@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { runScript, runProposal, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, fixturesDir, withDir, writeConfig, type Workdir } from './helpers/workdir';
+import { assistantEntry } from './helpers/transcript';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
 import { logRoutineEvent } from '../scripts/lib/routines/event';
 
@@ -3046,8 +3047,10 @@ describe('cc-compat', () => {
       fs.writeFileSync(file, `${lines.join('\n')}\n`);
       return file;
     };
-    const assistant = (model: string, timestamp: string, extra: Record<string, unknown> = {}) =>
-      JSON.stringify({ type: 'assistant', timestamp, ...extra, message: { model, content: [] } });
+    // Routed through the pinned fixture builder (tests/helpers/transcript.ts) so a
+    // cc-compat schema change fails loudly in fixture-helpers.test.ts, not silently here.
+    const assistant = (model: string, timestamp: string, extra: { isSidechain?: boolean } = {}) =>
+      assistantEntry({ model, timestamp, ...extra });
 
     test('returns the newest main-session assistant model', () => {
       const file = write([
@@ -3084,6 +3087,16 @@ describe('cc-compat', () => {
         JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', content: [] } }),
       ]);
       expect(lastAssistantModel(file)).toBeNull();
+    });
+
+    // The harness-verify gate compares this timestamp with Date.parse; an unparseable
+    // one would make every comparison false and take the fail-OPEN branch there.
+    test('an unparseable timestamp is skipped, not returned', () => {
+      const file = write([
+        assistant('claude-opus-5', '2026-08-20T23:30:00.000Z'),
+        assistant('claude-sonnet-5', 'not-a-date'),
+      ]);
+      expect(lastAssistantModel(file)?.model).toBe('claude-opus-5');
     });
 
     test('an unreadable file reads as null rather than throwing', () => {

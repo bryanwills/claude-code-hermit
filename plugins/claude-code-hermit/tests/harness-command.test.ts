@@ -13,6 +13,7 @@ import {
   readSwitchVerify,
   clearSwitchVerify,
   COMMAND_MARKER_TTL_SECS,
+  SWITCH_VERIFY_TTL_SECS,
 } from '../scripts/lib/harness-command';
 
 function tmpRoot(): string {
@@ -156,10 +157,20 @@ describe('switch-verify marker', () => {
   // Nothing else consumes this file, so an expired one must not linger on disk.
   test('marker past its TTL reads as null AND is deleted', () => {
     const root = tmpRoot();
-    const stale = new Date(Date.now() - (COMMAND_MARKER_TTL_SECS + 60) * 1000).toISOString();
+    const stale = new Date(Date.now() - (SWITCH_VERIFY_TTL_SECS + 60) * 1000).toISOString();
     writeSwitchVerify(root, { command: '/model', arg: 'fable', by: 'op', delivered_at: stale });
     expect(readSwitchVerify(root)).toBeNull();
     expect(fs.existsSync(verifyPath(root))).toBe(false);
+    fs.rmSync(root, { recursive: true });
+  });
+
+  // The verify marker outlives the 1h delivery TTL on purpose: it records a fact to
+  // observe, and expiring it while the session idled reproduced the stale-answer bug.
+  test('marker older than the delivery TTL but within its own TTL still reads', () => {
+    const root = tmpRoot();
+    const overnight = new Date(Date.now() - (COMMAND_MARKER_TTL_SECS + 3600) * 1000).toISOString();
+    writeSwitchVerify(root, { command: '/model', arg: 'fable', by: 'op', delivered_at: overnight });
+    expect(readSwitchVerify(root)?.arg).toBe('fable');
     fs.rmSync(root, { recursive: true });
   });
 

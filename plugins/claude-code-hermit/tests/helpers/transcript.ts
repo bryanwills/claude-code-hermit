@@ -12,6 +12,7 @@ export function triggerPrompt(text: string): string {
 export interface AssistantEntryOpts {
   model?: string;
   timestamp?: string;
+  isSidechain?: boolean;
   inputTokens?: number;
   cacheRead?: number;
   cacheWrite?: number;
@@ -22,6 +23,7 @@ export function assistantEntry(opts: AssistantEntryOpts = {}): string {
   const {
     model = 'claude-sonnet-4-6',
     timestamp,
+    isSidechain,
     inputTokens = 2,
     cacheRead = 0,
     cacheWrite = 0,
@@ -30,6 +32,7 @@ export function assistantEntry(opts: AssistantEntryOpts = {}): string {
   return JSON.stringify({
     type: 'assistant',
     ...(timestamp !== undefined ? { timestamp } : {}),
+    ...(isSidechain !== undefined ? { isSidechain } : {}),
     message: {
       model,
       usage: {

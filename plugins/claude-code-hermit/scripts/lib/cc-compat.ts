@@ -381,7 +381,10 @@ function lastAssistantModel(filePath: string): { model: string; timestamp: strin
       if (!entry || entry.type !== 'assistant' || entry.isSidechain === true) continue;
       const model = entry.message?.model;
       if (typeof model !== 'string' || !model) continue;
-      if (typeof entry.timestamp !== 'string' || !entry.timestamp) continue;
+      // Parseable, not just present: the harness-verify gate compares this with
+      // Date.parse, and NaN fails every comparison — which would take the
+      // fail-OPEN branch there. Skip the entry instead.
+      if (typeof entry.timestamp !== 'string' || Number.isNaN(Date.parse(entry.timestamp))) continue;
       return { model, timestamp: entry.timestamp };
     }
     return null;

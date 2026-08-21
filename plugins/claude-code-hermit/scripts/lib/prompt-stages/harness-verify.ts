@@ -22,6 +22,22 @@ import { readSwitchVerify, clearSwitchVerify, renderCommand } from '../harness-c
 import { lastAssistantModel } from '../cc-compat';
 import type { StageContext, StageResult } from './types';
 
+/**
+ * delivered_at is stamped when the keys hit the pane, but the switch APPLIES only when
+ * confirm-harness-switch.ts accepts the dialog — up to its polling deadline later. An
+ * assistant entry inside that window postdates the delivery yet was served by the old
+ * model, so treating "newer than delivered_at" as "post-switch" would report the old
+ * model as authoritative and burn the marker. Holding for the helper's full deadline
+ * closes that window at the cost of one extra held prompt at worst.
+ *
+ * NOTE: this hardcodes the same 5s ceiling confirm-harness-switch.ts caps its own
+ * poll at (scripts/confirm-harness-switch.ts:15-16). The two are not wired together —
+ * if that cap changes, this grace window silently stops covering it and the stale-
+ * answer bug this file exists to fix comes back. Consider exporting the ceiling from
+ * lib/harness-command.ts and importing it in both places instead of copying the literal.
+ */
+const SWITCH_APPLY_GRACE_MS = 5_000;
+
 export function run(ctx: StageContext): StageResult | void {
   const pending = readSwitchVerify(ctx.dir);
   if (!pending) return;
@@ -29,15 +45,23 @@ export function run(ctx: StageContext): StageResult | void {
   const rendered = renderCommand(pending);
   const observed = ctx.transcriptPath ? lastAssistantModel(ctx.transcriptPath) : null;
 
-  // No transcript to read, or nothing served since the switch landed: hold the marker
-  // and warn rather than answer from a pre-switch entry.
-  if (!observed || Date.parse(observed.timestamp) <= Date.parse(pending.delivered_at)) {
+  // No transcript to read, or nothing served since the switch could have applied: hold
+  // the marker and warn rather than answer from a pre-switch entry.
+  if (!observed || Date.parse(observed.timestamp) <= Date.parse(pending.delivered_at) + SWITCH_APPLY_GRACE_MS) {
     return {
       context: `[harness-command] "${rendered}" was delivered to this session at ${pending.delivered_at} and is not yet observable in the transcript. Your own sense of which model you run is fixed at session start and does not follow a switch — do not report it as the active one.\n`,
     };
   }
 
   clearSwitchVerify(ctx.dir);
+  // The transcript stamps only the serving model. That verifies a /model switch
+  // outright; for /effort it can confirm delivery but not the new effort level, and
+  // saying otherwise would be a false positive the transcript cannot support.
+  if (pending.command === '/effort') {
+    return {
+      context: `[harness-command] "${rendered}" was delivered at ${pending.delivered_at}. The transcript stamps only the serving model (currently ${observed.model}), not the effort level, so report the switch as delivered — not as confirmed.\n`,
+    };
+  }
   return {
     context: `[harness-command] "${rendered}" delivered at ${pending.delivered_at} — the transcript now reports model ${observed.model}. That is the session's serving model; prefer it over your own sense of which model you run.\n`,
   };

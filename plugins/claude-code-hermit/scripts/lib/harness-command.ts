@@ -64,6 +64,18 @@ export type PendingCommand = {
  * wedged for an hour should not suddenly clear its context when it recovers.
  */
 export const COMMAND_MARKER_TTL_SECS = 3600;
+
+/**
+ * The switch-verify marker records an already-delivered switch to OBSERVE, not a
+ * command to retry — it does not go stale the way a pending command does, and it
+ * self-clears the moment the switch is observed. Reusing the 1-hour delivery TTL
+ * silently reproduced the original stale-answer bug whenever no prompt arrived
+ * within the hour (idle overnight, heartbeat paused). A day covers any realistic
+ * gap; the TTL only remains as a backstop against a marker that can never be
+ * observed (e.g. no transcript_path on this harness) injecting its hold-warning
+ * forever.
+ */
+export const SWITCH_VERIFY_TTL_SECS = 86_400;
 const HARNESS_CONFIRM_TAIL_LINES = 20;
 
 const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
@@ -191,7 +203,7 @@ export function readSwitchVerify(hermitRoot: string): SwitchVerifyMarker | null 
 
     const ts = Date.parse(parsed.delivered_at);
     if (Number.isNaN(ts)) return null;
-    if ((Date.now() - ts) / 1000 > COMMAND_MARKER_TTL_SECS) {
+    if ((Date.now() - ts) / 1000 > SWITCH_VERIFY_TTL_SECS) {
       clearSwitchVerify(hermitRoot);
       return null;
     }

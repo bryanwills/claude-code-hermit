@@ -130,10 +130,16 @@ async function main(raw: string): Promise<void> {
   // kill can lose a send but never a state write.
   await stage('pause-keyword', pauseKeyword, ctx);
   await stage('harness-command', harnessCommand, ctx);
-  await stage('harness-verify', harnessVerify, ctx);
 
   // 6. Deterministic status.
   await stage('channel-status-responder', channelStatusResponder, ctx);
+
+  // 7. Switch verification LAST, and specifically after the status responder:
+  // its success path clears the verify marker, and a blocked prompt discards all
+  // accumulated context (see emit()). Running it earlier let a blocked `status`
+  // turn destroy the marker with the report unread — stage() skips it entirely
+  // once a block is settled, so the marker survives for the next real prompt.
+  await stage('harness-verify', harnessVerify, ctx);
 }
 
 function emit(): void {

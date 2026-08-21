@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
+import { assistantEntry } from './helpers/transcript';
 import { startHttpStub } from './helpers/http-stub';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
@@ -157,8 +158,9 @@ describe('user-prompt-pipeline: switch verification', () => {
 
   function writeTranscript(wd: Workdir, entries: Array<{ model: string; timestamp: string }>): string {
     const file = path.join(wd.dir, 'transcript.jsonl');
+    // Pinned fixture builder — see tests/helpers/transcript.ts.
     fs.writeFileSync(file, `${entries
-      .map((e) => JSON.stringify({ type: 'assistant', timestamp: e.timestamp, message: { model: e.model, content: [] } }))
+      .map((e) => assistantEntry({ model: e.model, timestamp: e.timestamp }))
       .join('\n')}\n`);
     return file;
   }
