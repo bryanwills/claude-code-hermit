@@ -98,3 +98,34 @@ describe('isTrustedController with plugin-qualified sources', () => {
     expect(isTrustedController(config, 'plugin:discord:discord', 'U1', '1')).toBe(false);
   });
 });
+
+// With no allowed_users, control authority binds to the *pinned* home rather
+// than the last-learned DM: dm_channel_id follows whichever chat wrote last, so
+// anchoring there let a new chat acquire pause/resume/status authority just by
+// messaging. default_chat_id only moves from the terminal.
+describe('isTrustedController — pinned-home anchor', () => {
+  test('the pin is the anchor; a moved dm_channel_id grants nothing', () => {
+    const config = { channels: { discord: { dm_channel_id: 'MOVED', default_chat_id: 'HOME' } } };
+    expect(isTrustedController(config, 'discord', 'U1', 'HOME')).toBe(true);
+    expect(isTrustedController(config, 'discord', 'U1', 'MOVED')).toBe(false);
+  });
+
+  test('unpinned install still anchors on the learned DM (unchanged for pre-pin configs)', () => {
+    const config = { channels: { discord: { dm_channel_id: 'D1' } } };
+    expect(isTrustedController(config, 'discord', 'U1', 'D1')).toBe(true);
+    expect(isTrustedController(config, 'discord', 'U1', 'OTHER')).toBe(false);
+  });
+
+  test('an explicit allowlist still wins over the pin', () => {
+    const config = {
+      channels: { discord: { allowed_users: ['ALLOWED'], default_chat_id: 'HOME' } },
+    };
+    expect(isTrustedController(config, 'discord', 'ALLOWED', 'ANY')).toBe(true);
+    expect(isTrustedController(config, 'discord', 'STRANGER', 'HOME')).toBe(false);
+  });
+
+  test('allowed_users=[] lockdown is not reopened by a matching pin', () => {
+    const config = { channels: { discord: { allowed_users: [], default_chat_id: 'HOME' } } };
+    expect(isTrustedController(config, 'discord', 'ANYONE', 'HOME')).toBe(false);
+  });
+});

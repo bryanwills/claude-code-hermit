@@ -230,6 +230,9 @@ if (Object.hasOwn(answers, 'channels')) {
     if (Object.hasOwn(ans, 'enabled')) merged.enabled = ans.enabled;
     else if (!Object.hasOwn(merged, 'enabled')) merged.enabled = true;
     if (!Object.hasOwn(merged, 'dm_channel_id')) merged.dm_channel_id = null;
+    // Pinned proactive home — seeded by channel-hook at first pairing, moved
+    // only from the terminal. A configured pin rides the ...existing spread.
+    if (!Object.hasOwn(merged, 'default_chat_id')) merged.default_chat_id = null;
     if (!Object.hasOwn(merged, 'state_dir')) merged.state_dir = `.claude.local/channels/${name}`;
     if (Object.hasOwn(ans, 'allowed_users')) merged.allowed_users = ans.allowed_users;
     // Outbound-only second destination for maintainer-tier alerts; a freshly
