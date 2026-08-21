@@ -354,6 +354,46 @@ function entryText(entry: Json): string {
 }
 
 /**
+ * The model that most recently served this session, per the transcript.
+ *
+ * Ground truth for "what am I running": the serving model is stamped on every
+ * assistant entry, whereas the model's own sense of it is fixed at session start
+ * and does not follow a mid-session /model switch (live-verified — an Opus-served
+ * turn reported itself as Sonnet).
+ *
+ * Sidechains are excluded: a subagent dispatched with its own model would
+ * otherwise answer for the main session. Reads a bounded tail only — 64KB is far
+ * more than the handful of entries needed and keeps this cheap on every prompt.
+ *
+ * @param {string} filePath
+ * @returns {{ model: string, timestamp: string } | null} null when unreadable or
+ *   when the window holds no qualifying entry.
+ */
+function lastAssistantModel(filePath: string): { model: string; timestamp: string } | null {
+  const TAIL_BYTES = 65536;
+  try {
+    const { lines } = readTailLines(filePath, TAIL_BYTES);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      let entry: Json;
+      try { entry = JSON.parse(line); } catch { continue; }
+      if (!entry || entry.type !== 'assistant' || entry.isSidechain === true) continue;
+      const model = entry.message?.model;
+      if (typeof model !== 'string' || !model) continue;
+      // Parseable, not just present: the harness-verify gate compares this with
+      // Date.parse, and NaN fails every comparison — which would take the
+      // fail-OPEN branch there. Skip the entry instead.
+      if (typeof entry.timestamp !== 'string' || Number.isNaN(Date.parse(entry.timestamp))) continue;
+      return { model, timestamp: entry.timestamp };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A user entry is a tool_result carrier (not a turn boundary) when its content
  * is an array containing any tool_result block. The triggering prompt that
  * opens a turn is a "real" user entry: string content, or an array with no
@@ -612,6 +652,7 @@ export {
   backgroundTasks,
   // Transcript parsing
   readTailLines,
+  lastAssistantModel,
   entryText,
   isToolResult,
   extractUsage,

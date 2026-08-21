@@ -16,6 +16,7 @@ import path from 'node:path';
 
 import { runScript, runProposal, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
 import { setupWorkdir, fixturesDir, withDir, writeConfig, type Workdir } from './helpers/workdir';
+import { assistantEntry } from './helpers/transcript';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
 import { logRoutineEvent } from '../scripts/lib/routines/event';
 
@@ -24,7 +25,7 @@ import { safeForLLM, safeForLLMMultiline } from '../scripts/lib/sanitize';
 import * as ccCompat from '../scripts/lib/cc-compat';
 import {
   sessionId, transcriptPath, sessionCrons, backgroundTasks,
-  extractUsage, costLogPath, ccVersion,
+  extractUsage, costLogPath, ccVersion, lastAssistantModel,
 } from '../scripts/lib/cc-compat';
 import * as costLog from '../scripts/lib/cost-log';
 import { costIndexPath, readCostIndex, updateCostIndex, scanAutomatedOpus } from '../scripts/lib/cost-log';
@@ -3037,6 +3038,70 @@ describe('cc-compat', () => {
   });
   test('cc-compat.js: extractUsage assistant without usage → null', () => {
     expect(extractUsage({ type: 'assistant', message: {} })).toBeNull();
+  });
+
+  // lastAssistantModel: the transcript is ground truth for the serving model
+  describe('cc-compat.js: lastAssistantModel', () => {
+    const write = (lines: string[]): string => {
+      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'last-model-')), 'transcript.jsonl');
+      fs.writeFileSync(file, `${lines.join('\n')}\n`);
+      return file;
+    };
+    // Routed through the pinned fixture builder (tests/helpers/transcript.ts) so a
+    // cc-compat schema change fails loudly in fixture-helpers.test.ts, not silently here.
+    const assistant = (model: string, timestamp: string, extra: { isSidechain?: boolean } = {}) =>
+      assistantEntry({ model, timestamp, ...extra });
+
+    test('returns the newest main-session assistant model', () => {
+      const file = write([
+        assistant('claude-sonnet-5', '2026-08-20T23:34:12.000Z'),
+        assistant('claude-fable-5', '2026-08-20T23:34:37.000Z'),
+      ]);
+      expect(lastAssistantModel(file)).toEqual({
+        model: 'claude-fable-5',
+        timestamp: '2026-08-20T23:34:37.000Z',
+      });
+    });
+
+    // A subagent runs its own model; it must never answer for the main session.
+    test('skips sidechain entries', () => {
+      const file = write([
+        assistant('claude-fable-5', '2026-08-20T23:34:37.000Z'),
+        assistant('claude-haiku-4-5', '2026-08-20T23:35:00.000Z', { isSidechain: true }),
+      ]);
+      expect(lastAssistantModel(file)?.model).toBe('claude-fable-5');
+    });
+
+    test('skips user entries and malformed lines', () => {
+      const file = write([
+        assistant('claude-opus-5', '2026-08-20T23:30:00.000Z'),
+        '{not json',
+        JSON.stringify({ type: 'user', message: { content: 'hi' }, timestamp: '2026-08-20T23:31:00.000Z' }),
+      ]);
+      expect(lastAssistantModel(file)?.model).toBe('claude-opus-5');
+    });
+
+    test('an assistant entry without a model or timestamp is not a match', () => {
+      const file = write([
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-20T23:30:00.000Z', message: { content: [] } }),
+        JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', content: [] } }),
+      ]);
+      expect(lastAssistantModel(file)).toBeNull();
+    });
+
+    // The harness-verify gate compares this timestamp with Date.parse; an unparseable
+    // one would make every comparison false and take the fail-OPEN branch there.
+    test('an unparseable timestamp is skipped, not returned', () => {
+      const file = write([
+        assistant('claude-opus-5', '2026-08-20T23:30:00.000Z'),
+        assistant('claude-sonnet-5', 'not-a-date'),
+      ]);
+      expect(lastAssistantModel(file)?.model).toBe('claude-opus-5');
+    });
+
+    test('an unreadable file reads as null rather than throwing', () => {
+      expect(lastAssistantModel('/nonexistent/transcript.jsonl')).toBeNull();
+    });
   });
 
   // costLogPath: deterministic from a stateDir

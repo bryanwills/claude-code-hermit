@@ -731,7 +731,10 @@ function writeSettingsEnv(config: Json): void {
       settings.env[key] = resolveStateDir(stateDir);
       // Both bare-host launches read the value from here: the tmux path copies
       // it into the env file it sources, the no-tmux path inherits it via execvp.
-      if (process.env[key] === undefined) {
+      // Truthiness, not presence: an empty ambient value (a profile leak, an unset
+      // compose interpolation) would otherwise win over the config path and hand
+      // the MCP server an empty state dir — an empty state dir is never intent.
+      if (!pyTruthy(process.env[key])) {
         process.env[key] = settings.env[key]; // already-set (Docker/compose) wins
       }
     }

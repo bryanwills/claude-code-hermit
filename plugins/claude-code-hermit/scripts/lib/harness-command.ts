@@ -64,6 +64,18 @@ export type PendingCommand = {
  * wedged for an hour should not suddenly clear its context when it recovers.
  */
 export const COMMAND_MARKER_TTL_SECS = 3600;
+
+/**
+ * The switch-verify marker records an already-delivered switch to OBSERVE, not a
+ * command to retry — it does not go stale the way a pending command does, and it
+ * self-clears the moment the switch is observed. Reusing the 1-hour delivery TTL
+ * silently reproduced the original stale-answer bug whenever no prompt arrived
+ * within the hour (idle overnight, heartbeat paused). A day covers any realistic
+ * gap; the TTL only remains as a backstop against a marker that can never be
+ * observed (e.g. no transcript_path on this harness) injecting its hold-warning
+ * forever.
+ */
+export const SWITCH_VERIFY_TTL_SECS = 86_400;
 const HARNESS_CONFIRM_TAIL_LINES = 20;
 
 const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
@@ -103,8 +115,7 @@ function markerPath(hermitRoot: string): string {
 }
 
 /** Atomic tmp+rename write. Returns false on any failure — callers must not ack a failed write. */
-export function writePendingCommand(hermitRoot: string, entry: PendingCommand): boolean {
-  const target = markerPath(hermitRoot);
+function writeMarker(target: string, entry: unknown): boolean {
   const tmp = `${target}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -115,6 +126,10 @@ export function writePendingCommand(hermitRoot: string, entry: PendingCommand): 
     try { fs.unlinkSync(tmp); } catch {}
     return false;
   }
+}
+
+export function writePendingCommand(hermitRoot: string, entry: PendingCommand): boolean {
+  return writeMarker(markerPath(hermitRoot), entry);
 }
 
 /** Read the marker, or null when absent, malformed, or past its TTL. */
@@ -142,4 +157,64 @@ export function clearPendingCommand(hermitRoot: string): void {
 /** Render a marker back to the literal text typed into the pane. */
 export function renderCommand(entry: { command: string; arg: string | null }): string {
   return entry.arg ? `${entry.command} ${entry.arg}` : entry.command;
+}
+
+// --- Post-delivery verification -------------------------------------------
+//
+// A delivered /model or /effort switch applies to the session, but the model's own
+// sense of which model it runs is fixed at session start and does not follow the
+// switch — live-verified on two hermits, where an Opus-served turn reported itself
+// as Sonnet. Asked "did it work?", the session answered from that stale
+// self-perception and reported a working switch as a silent failure.
+//
+// So the delivery leaves this marker behind and the prompt path answers the
+// question from the transcript instead, which carries the serving model per
+// assistant message. Separate from the pending marker on purpose: that one is
+// consumed by the Stop hook to DO the switch, this one by the UserPromptSubmit
+// path to OBSERVE it, and a delivery writes the second exactly when it clears the
+// first.
+
+export type SwitchVerifyMarker = {
+  command: string;
+  arg: string | null;
+  by: string;
+  delivered_at: string;
+};
+
+function switchVerifyPath(hermitRoot: string): string {
+  return path.join(hermitRoot, 'state', 'harness-switch-verify.json');
+}
+
+/** Atomic tmp+rename write. Returns false on any failure. */
+export function writeSwitchVerify(hermitRoot: string, entry: SwitchVerifyMarker): boolean {
+  return writeMarker(switchVerifyPath(hermitRoot), entry);
+}
+
+/**
+ * Read the marker, or null when absent, malformed, or past its TTL.
+ *
+ * Self-cleaning, unlike readPendingCommand: nothing else ever consumes this file, so
+ * an expired one left on disk would sit there until the next switch overwrote it.
+ */
+export function readSwitchVerify(hermitRoot: string): SwitchVerifyMarker | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(switchVerifyPath(hermitRoot), 'utf-8')) as SwitchVerifyMarker;
+    if (!parsed || typeof parsed.command !== 'string') return null;
+
+    const ts = Date.parse(parsed.delivered_at);
+    if (Number.isNaN(ts)) return null;
+    if ((Date.now() - ts) / 1000 > SWITCH_VERIFY_TTL_SECS) {
+      clearSwitchVerify(hermitRoot);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete the marker. Call once the switch has been observed in the transcript. */
+export function clearSwitchVerify(hermitRoot: string): void {
+  try { fs.unlinkSync(switchVerifyPath(hermitRoot)); } catch {}
 }

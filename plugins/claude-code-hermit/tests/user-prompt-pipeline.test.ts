@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
+import { assistantEntry } from './helpers/transcript';
 import { startHttpStub } from './helpers/http-stub';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
@@ -135,6 +136,89 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     } finally {
       stub.stop();
     }
+  });
+});
+
+// A delivered switch applies, but the model's self-perception does not follow it —
+// so the transcript, not the model, answers "which model am I running".
+describe('user-prompt-pipeline: switch verification', () => {
+  const verifyMarker = (dir: string) => hermit(dir, 'state', 'harness-switch-verify.json');
+  const DELIVERED_AT = '2026-08-20T23:34:17.000Z';
+
+  function seedDeliveredSwitch(wd: Workdir, arg = 'fable'): void {
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    fs.mkdirSync(path.dirname(verifyMarker(wd.dir)), { recursive: true });
+    fs.writeFileSync(verifyMarker(wd.dir), JSON.stringify({
+      command: '/model',
+      arg,
+      by: 'operator',
+      delivered_at: DELIVERED_AT,
+    }));
+  }
+
+  function writeTranscript(wd: Workdir, entries: Array<{ model: string; timestamp: string }>): string {
+    const file = path.join(wd.dir, 'transcript.jsonl');
+    // Pinned fixture builder — see tests/helpers/transcript.ts.
+    fs.writeFileSync(file, `${entries
+      .map((e) => assistantEntry({ model: e.model, timestamp: e.timestamp }))
+      .join('\n')}\n`);
+    return file;
+  }
+
+  async function runWith(wd: Workdir, transcript: string | null) {
+    return runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: 'which model are you on?', ...(transcript ? { transcript_path: transcript } : {}) }),
+      cwd: wd.dir,
+    });
+  }
+
+  test('reports the transcript model once the switch is observable, then clears the marker', async () => {
+    const wd = setupWorkdir();
+    seedDeliveredSwitch(wd);
+    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: '2026-08-20T23:34:37.000Z' }]);
+
+    const r = await runWith(wd, transcript);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('"/model fable" delivered');
+    expect(r.stdout).toContain('transcript now reports model claude-fable-5');
+    expect(fs.existsSync(verifyMarker(wd.dir))).toBe(false);
+  });
+
+  // The bug this whole path exists to prevent: answering from the PRE-switch entry.
+  test('holds the marker while only pre-switch entries exist, and never names that model', async () => {
+    const wd = setupWorkdir();
+    seedDeliveredSwitch(wd);
+    const transcript = writeTranscript(wd, [{ model: 'claude-sonnet-5', timestamp: '2026-08-20T23:34:12.000Z' }]);
+
+    const r = await runWith(wd, transcript);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('not yet observable');
+    expect(r.stdout).not.toContain('claude-sonnet-5');
+    expect(fs.existsSync(verifyMarker(wd.dir))).toBe(true);
+  });
+
+  test('a payload without a transcript_path holds the marker rather than guessing', async () => {
+    const wd = setupWorkdir();
+    seedDeliveredSwitch(wd);
+
+    const r = await runWith(wd, null);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('not yet observable');
+    expect(fs.existsSync(verifyMarker(wd.dir))).toBe(true);
+  });
+
+  test('no marker means the stage says nothing', async () => {
+    const wd = setupWorkdir();
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: '2026-08-20T23:34:37.000Z' }]);
+
+    const r = await runWith(wd, transcript);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('[harness-command]');
   });
 });
 
