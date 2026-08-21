@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.43] - 2026-08-21
 
 ### Added
 - The hermit's tone now lives in `.claude/output-styles/hermit-voice.md`, a native Claude Code output style, instead of prose inside `OPERATOR.md`. Claude Code loads it into the system prompt at session start, so voice holds for the whole session and survives compaction. `hatch` writes it from the comms-style answer and points `outputStyle` at it; edit it later with `/claude-code-hermit:hermit-settings voice` (terminal only).

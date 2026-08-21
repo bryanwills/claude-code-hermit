@@ -216,7 +216,7 @@ Config-defined watches auto-register at session start. Runtime truth: `.claude-c
 
 Channels let you talk to your hermit from your phone via Telegram, Discord, or iMessage. Setup, pairing, and Docker-specific config are covered in [Always-On Setup](always-on.md#channels-in-docker) and the [Claude Code Channels docs](https://code.claude.com/docs/en/channels).
 
-For bare-tmux setups, channel config lives at the user level by default (`~/.claude/channels/<plugin>/`). To scope config per-project (useful for multi-agent setups), create `.claude.local/channels/<plugin>/` with an `access.json` and optional `.env`. Make sure `.claude.local/` is gitignored.
+For bare-tmux setups, Hermit scopes channel config to `.claude.local/channels/<name>/` by default, including when `channels.<name>.state_dir` is omitted. `hermit-start` exports the derived `<NAME>_STATE_DIR` so the channel MCP server uses that project-local directory. Keep `.claude.local/` gitignored.
 
 ---
 

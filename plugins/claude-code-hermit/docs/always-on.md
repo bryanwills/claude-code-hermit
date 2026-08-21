@@ -138,7 +138,7 @@ The docker-setup wizard walks you through the right auth method and ensures `.en
 
 ## Channels
 
-Channel tokens live in `.claude.local/channels/<plugin>/.env` (project-local scope). `hermit-start` derives `DISCORD_STATE_DIR` / `TELEGRAM_STATE_DIR` from `channels.<name>.state_dir` in config.json (relative paths resolved against project root) and writes them into `settings.local.json` and the shell env so MCP servers can find them.
+Channel tokens live in `.claude.local/channels/<name>/.env` (project-local scope). `hermit-start` derives `DISCORD_STATE_DIR` / `TELEGRAM_STATE_DIR` from `channels.<name>.state_dir` in config.json (relative paths resolved against project root); on a bare-host boot, an omitted value defaults to `.claude.local/channels/<name>`. It writes the derived paths into `settings.local.json` and the shell env so MCP servers can find them.
 
 ### Docker
 
