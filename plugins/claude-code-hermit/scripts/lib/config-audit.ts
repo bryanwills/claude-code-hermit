@@ -195,7 +195,15 @@ export function readHistory(stateDir: string, dotted?: string, limit = 20): Audi
     if (!line.trim()) continue;
     try {
       const row = JSON.parse(line) as AuditRow;
-      if (dotted && row.path !== dotted && !row.path.startsWith(`${dotted}.`)) continue;
+      // Match in both directions: a query for `channels` must find the
+      // `channels.discord` row, and a query for `channels.discord.enabled` must
+      // find the row a whole-object `set channels.discord '{…}'` recorded.
+      if (
+        dotted &&
+        row.path !== dotted &&
+        !row.path.startsWith(`${dotted}.`) &&
+        !dotted.startsWith(`${row.path}.`)
+      ) continue;
       rows.push(row);
     } catch {
       continue;

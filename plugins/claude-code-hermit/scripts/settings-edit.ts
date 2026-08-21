@@ -28,7 +28,8 @@ import path from 'node:path';
 import { SETTINGS, READ_ONLY, byArg, type Setting } from './lib/settings/registry';
 import { auditConfigChange, readHistory } from './lib/config-audit';
 import { validate } from './validate-config';
-import { flagValue } from './lib/cli';
+import { flagValue, flagEq } from './lib/cli';
+import { safeForLLM } from './lib/sanitize';
 
 type Json = any;
 
@@ -282,10 +283,37 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  const config = readTargetJson(targetFile);
   // The state dir is the config's own directory (.claude-code-hermit/), where the
   // audit ledger lives under state/.
   const stateDir = path.dirname(path.resolve(targetFile));
+
+  // `history` reads the ledger, never the config — and it runs BEFORE the strict
+  // read below on purpose. A config someone corrupted is exactly when the operator
+  // needs to ask who last touched it, and readTargetJson would exit(1) first.
+  if (op === 'history') {
+    const limitArg = flagValue(rest, '--limit') ?? flagEq(rest, 'limit');
+    const limit = limitArg !== undefined ? Number(limitArg) || 20 : 20;
+    // Positional arg excludes every `--flag` and, for the two-token `--limit N`
+    // form, the value token right after it — otherwise the limit's number reads
+    // as the dotted path.
+    const dotted = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--limit');
+    const rows = readHistory(stateDir, dotted, limit);
+    if (rows.length === 0) {
+      console.log(dotted ? `No recorded changes for ${dotted}.` : 'No recorded settings changes.');
+    } else {
+      // capValue already serialized objects/arrays to a capped string — stringifying
+      // again would print them back-slash escaped.
+      const render = (v: Json): string => (typeof v === 'string' ? v : JSON.stringify(v));
+      for (const r of rows) {
+        const from = r.old === undefined ? '(unset)' : render(r.old);
+        const to = r.new === undefined ? '(removed)' : render(r.new);
+        console.log(`${r.ts}  ${r.path}  ${from} → ${to}  [${r.actor}]`);
+      }
+    }
+    process.exit(0);
+  }
+
+  const config = readTargetJson(targetFile);
   // Snapshot before any mutation — setPath and friends mutate in place, so a
   // reference would diff against itself and report nothing.
   const before: Json = structuredClone(config);
@@ -302,13 +330,20 @@ if (import.meta.main) {
    * never trip it), which is why the check lives here.
    */
   const persist = (actor = 'settings-edit'): void => {
-    const beforeErrors = validate(before).errors;
-    const newErrors = validate(config).errors.filter((e) => !beforeErrors.includes(e));
+    const priorReport = validate(before);
+    const report = validate(config);
+    const newErrors = report.errors.filter((e) => !priorReport.errors.includes(e));
     if (newErrors.length > 0) {
       console.error(`Refusing to write ${targetFile} — the change is invalid:`);
       newErrors.forEach((e) => console.error(`  ${e}`));
       process.exit(1);
     }
+    // Warnings don't block, but they must still be seen: the branches rerouted
+    // through this path used to write via Edit/Write, where the validate-config
+    // PostToolUse hook surfaced them. Dropping them silently would be a regression.
+    report.warnings
+      .filter((w) => !priorReport.warnings.includes(w))
+      .forEach((w) => console.error(`Warning: ${safeForLLM(w)}`));
     writeJson(targetFile, config);
     auditConfigChange(stateDir, existedBefore ? before : undefined, config, actor);
   };
@@ -368,24 +403,6 @@ if (import.meta.main) {
         process.exit(1);
       }
       persist();
-      break;
-    }
-
-    case 'history': {
-      const args = rest.filter((a) => a !== '--limit');
-      const limitArg = flagValue(rest, '--limit');
-      const limit = limitArg !== undefined ? Number(limitArg) || 20 : 20;
-      const dotted = args[0] && !/^\d+$/.test(args[0]) ? args[0] : undefined;
-      const rows = readHistory(stateDir, dotted, limit);
-      if (rows.length === 0) {
-        console.log(dotted ? `No recorded changes for ${dotted}.` : 'No recorded settings changes.');
-        break;
-      }
-      for (const r of rows) {
-        const from = r.old === undefined ? '(unset)' : JSON.stringify(r.old);
-        const to = r.new === undefined ? '(removed)' : JSON.stringify(r.new);
-        console.log(`${r.ts}  ${r.path}  ${from} → ${to}  [${r.actor}]`);
-      }
       break;
     }
 

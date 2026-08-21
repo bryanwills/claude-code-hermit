@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- Settings changes are now recorded in `state/settings-audit.jsonl` — one redacted row per changed value, with who changed it (operator edit, upgrade migration, learned channel id, boot flip, permissions sync) and when. Credential-bearing keys and everything under `env.` record presence only, never values.
+- Settings changes are now recorded in `state/settings-audit.jsonl` — one redacted row per changed value, with who changed it (operator edit, an upgrade's version stamp, learned channel id, boot flip, permissions sync) and when. Credential-bearing keys and everything under `env.` record presence only, never values.
 - `/claude-code-hermit:hermit-settings history [setting]` prints recent recorded changes; `/claude-code-hermit:recall` answers "did something change my settings?" from the same ledger.
 
 ### Changed

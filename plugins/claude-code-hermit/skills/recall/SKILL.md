@@ -20,7 +20,7 @@ When the question is about a **configuration change** rather than past work — 
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json history [dotted.path] [--limit N]
 ```
 
-Pass a dotted path when the operator named a specific setting (`heartbeat`, `model`, `channels`); omit it for "did anything change". Each row names the actor: `settings-edit` is an operator edit, `evolve-finalize` an upgrade migration, `channel-hook` a channel the hermit learned on its own, `hermit-start`/`hermit-stop` a boot flip, `apply-settings` a permissions sync. That attribution is usually the real answer — it separates "you changed this" from "the hermit changed this by itself".
+Pass a dotted path when the operator named a specific setting (`heartbeat`, `model`, `channels`); omit it for "did anything change". Each row names the actor: `settings-edit` is an operator edit, `evolve-finalize` an upgrade's version stamp, `channel-hook` a channel the hermit learned on its own, `hermit-start`/`hermit-stop` a boot flip, `apply-settings` a permissions sync. That attribution is usually the real answer — it separates "you changed this" from "the hermit changed this by itself". One gap to be honest about: `hermit-evolve`'s migration steps write `config.json` by hand, so a key an upgrade added or rewrote may leave no row — say "the ledger has nothing for this", never "nothing changed it".
 
 Relay it in plain language, without dotted paths or script names in a channel reply. An empty ledger means nothing has changed since the audit trail began. Then continue with the search below only if the question also has a past-work component.
 

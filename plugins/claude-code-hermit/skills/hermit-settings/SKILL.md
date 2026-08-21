@@ -249,7 +249,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 - Loop until operator says "done", "skip", or presses Enter:
   - If input targets a protected key: reject with the message above
   - If input is `remove <KEY>`: `unset env.<KEY>`
-  - If input is `<KEY> <VALUE>`: `set env.<KEY> <VALUE>`
+  - If input is `<KEY> <VALUE>`: `set env.<KEY> '"<VALUE>"'` — env values must stay **strings**, and `set` JSON-parses its argument, so a bare `20000` would land as a number and be copied into `.claude/settings.local.json` as one.
 - Note: "Env changes are written to `.claude/settings.local.json` on next `hermit-start`. To apply now, restart the hermit session."
 
 **If argument is "compact":**
@@ -346,7 +346,7 @@ Run `settings-edit ... set quality_gate.tier <chosen>` (creates the `quality_gat
 Note: if you commit autonomous-implementation diffs through a skill that already runs `/claude-code-hermit:simplify` before committing, consider **Budget** — any non-Budget tier here would double-fire the cleanup pass (~$0.40-$0.70 of duplicated spend per committed implementation).
 
 **If argument is "history":**
-Run `settings-edit ... history [dotted.path] [--limit N]` (the operator may name a setting: "history heartbeat"). Relay the rows in the operator's language, naming who made each change — `settings-edit` is an operator edit, `evolve-finalize` an upgrade migration, `channel-hook` a channel the hermit learned, `hermit-start`/`hermit-stop` a boot flip. In a channel reply, drop the dotted paths and script names for plain language ("the heartbeat interval went from 2h to 30m during an upgrade on the 18th"). An empty ledger means nothing has changed since the audit trail started, not that the setting is unset.
+Run `settings-edit ... history [dotted.path] [--limit N]` (the operator may name a setting: "history heartbeat"). Relay the rows in the operator's language, naming who made each change — `settings-edit` is an operator edit, `evolve-finalize` an upgrade's version stamp, `channel-hook` a channel the hermit learned, `hermit-start`/`hermit-stop` a boot flip. In a channel reply, drop the dotted paths and script names for plain language ("the heartbeat interval went from 2h to 30m on the 18th"). An empty ledger means nothing has changed since the audit trail started, not that the setting is unset — and note that `hermit-evolve`'s own migration steps write `config.json` by hand, so a key an upgrade added or rewrote may have no row at all.
 
 **If argument is "artifact-authorization":**
 This records a decision only — it never runs `apply-settings.ts` and never touches a settings file from this session. A channel reply may only flip hermit config, never permissions (auto-mode classifier invariant); the actual grant is applied by `hermit-start`'s boot-time `applyArtifactGrant`, outside any session.

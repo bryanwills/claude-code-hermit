@@ -202,8 +202,6 @@ export function finalize(opts: {
     errors.push({ code: 'write_failed', message: e.message });
     return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
   }
-  auditConfigChange(opts.hermitDir, configBefore, config, 'evolve-finalize');
-
   // Re-read from disk to confirm (the fix's whole point — catches a write that didn't land)
   let onDisk: Json;
   try {
@@ -218,6 +216,11 @@ export function finalize(opts: {
   if (!coreMatched) {
     errors.push({ code: 'verify_failed', message: `on-disk _hermit_versions["claude-code-hermit"]="${coreOnDisk}" but expected "${opts.core}"` });
   }
+
+  // Audit only what the re-read confirms is on disk. Auditing before this point
+  // would record the bump in the ledger even in the exact case this verification
+  // exists to catch — a write that reported success but did not land.
+  if (coreMatched) auditConfigChange(opts.hermitDir, configBefore, onDisk, 'evolve-finalize');
 
   const siblingsConfirmed: Record<string, string> = {};
   for (const name of appliedSiblingNames) {
