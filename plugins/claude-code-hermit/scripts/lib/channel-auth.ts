@@ -67,6 +67,9 @@ export function isTrustedController(
   if (Array.isArray(ch?.allowed_users)) {
     return isAllowedSender(config, source, userId); // explicit list (incl. [] lockdown) wins
   }
-  const home = ch?.default_chat_id ?? ch?.dm_channel_id; // no list -> pinned-home binding
-  return home != null && chatId != null && String(home) === String(chatId);
+  // `||`, not `??`: an empty-string pin must not mask a working dm_channel_id and
+  // lock the operator out of control entirely. Truthiness on both sides so a pair
+  // of empty values can never match either.
+  const home = ch?.default_chat_id || ch?.dm_channel_id; // no list -> pinned-home binding
+  return !!home && !!chatId && String(home) === String(chatId);
 }

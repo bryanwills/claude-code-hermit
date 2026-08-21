@@ -11,7 +11,10 @@ type Json = any;
 // dm_channel_id still moves with the operator's last inbound chat — only this
 // resolution decides where unattended proactive sends land.
 function proactiveChatId(ch: Json): string {
-  return ch?.default_chat_id ?? ch?.dm_channel_id;
+  // `||`, not `??`: an empty-string pin (a mistyped terminal edit — validate-config
+  // only type-checks) must not mask a working dm_channel_id and silently drop the
+  // channel out of proactive resolution entirely.
+  return ch?.default_chat_id || ch?.dm_channel_id;
 }
 
 // Primary-first, then config-order resolution shared by resolve() and

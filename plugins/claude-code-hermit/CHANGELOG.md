@@ -11,7 +11,7 @@
 
 ### Upgrade Instructions
 
-1. Read `.claude-code-hermit/config.json`. For each entry under `channels` (skip the `primary` key — it is a string pointer, not a channel), if the entry has a non-null `dm_channel_id` and no `default_chat_id`, set `default_chat_id` to that same value. Leave every other field untouched. Re-runnable: an entry that already has the key is skipped.
+1. Read `.claude-code-hermit/config.json`. For each entry under `channels` (skip the `primary` key — it is a string pointer, not a channel), if the entry has a non-null `dm_channel_id` and no `default_chat_id`, set `default_chat_id` to that same value — **unless that `dm_channel_id` equals the same entry's `maintainer_channel_id`**, in which case leave `default_chat_id` absent and say so in your report (that chat is outbound-only; pinning it would send every briefing there permanently, since nothing re-learns this field). Leave every other field untouched. Re-runnable: an entry that already has the key is skipped.
 2. In your report, name the chat id you copied for each channel. Proactive sends are pinned to it from now on, and the copy cannot tell an operator's normal chat from one they happened to message from last — so this is the operator's chance to spot a wrong home.
 3. Tell the operator, once, that briefings and notices are now pinned to that chat: messaging from another chat gets answered there but no longer moves them, and moving them is a terminal setting (`/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`).
 4. Nothing breaks if this migration is skipped — resolution falls back to `dm_channel_id` until the key exists.
