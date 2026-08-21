@@ -24,8 +24,12 @@ const write = (p: string, content: string) => fs.writeFileSync(p, content);
 // dir call runScript directly, per that helper's own note.
 function runChannelSend(opts: RunOptions = {}) {
   const { args = [], ...rest } = opts;
-  return args[0]
-    ? runPinnedScript('channel-send.ts', args[0], args, rest)
+  // The state dir is the first POSITIONAL, not args[0]: parseArgs pulls
+  // --tier/--notice out from anywhere in argv, so a flag-first call is legal and
+  // would otherwise pin AGENT_DIR to "--tier" and fail with a confusing exit 2.
+  const stateDir = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--tier');
+  return stateDir
+    ? runPinnedScript('channel-send.ts', stateDir, args, rest)
     : runScript('channel-send.ts', opts);
 }
 

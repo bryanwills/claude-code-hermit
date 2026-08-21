@@ -12,12 +12,26 @@
 - `/claude-code-hermit:channel-setup` now treats a channel with `enabled: false` as disabled rather than configured, and offers to re-enable it instead of proceeding as though it were live.
 - Bare-host (non-Docker) boots now export each channel's `<CHANNEL>_STATE_DIR` into the session environment, so channel plugin servers find their state dir instead of failing with `CONNECTION_CLOSED`.
 - A channel-requested `/model` or `/effort` switch is now reported back from the transcript's serving-model stamp instead of the session's stale session-start self-perception, with the report held until an assistant entry newer than the delivery exists.
+- The `.worktreeinclude` managed block carries `.claude-code-hermit/bin/hermit-run` into `claude --worktree` worktrees. The commands above name that path, and a worktree session has Write/Edit blocked outside the worktree, so Bash was their only route — proactive operator notification and settled-knowledge recording both died there with a shell `No such file or directory`. Only the resolver is copied; the rest of `bin/` are lifecycle wrappers that act on the main hermit.
+- The state-dir pin normalizes a worktree's projected `.claude-code-hermit/` to the main checkout's state dir instead of refusing it. `.claude-code-hermit` is the argv those same commands pass, and from a worktree it resolves to the projection while every accepted root is main's — so the pin rejected the one spelling the hermit ships. Not a widening: a projection can only normalize to the root its own walk-up finds, and that root still has to be an accepted one.
 
 ### Upgrade Instructions
 
-1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file> permissions-sync` against this hermit's resolved settings file to add the three new `hermit-run` grants. `hermit-start` re-ensures them at boot as well, so a hermit that restarts picks them up either way — run the sync so the current session gets them without waiting.
+1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file> permissions-sync` against this hermit's resolved settings file to add the three new `hermit-run` grants. This is the only thing that adds them — `hermit-start`'s boot-time grant covers `artifact-allow`/`automode-seed` only, so a restart will not pick these up. Do not skip this step.
 2. The two rewritten commands live in the plugin-owned CLAUDE-APPEND block, which Step 7 already replaces wholesale, so no manual edit is needed. If this operator hand-edited either of those two lines inside the block, their edit is overwritten — tell them once, and note the new form is `.claude-code-hermit/bin/hermit-run <name> …` run from the project root.
 3. Nothing to do for the `channel-send.ts` pin: every shipped caller already passes this project's own state dir.
+4. **Add `bin/hermit-run` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/bin/hermit-run` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/config.json`, leaving every other line in the block untouched. The block should end up as:
+
+   ```
+   # >>> claude-code-hermit (managed block — do not edit between markers) >>>
+   .claude-code-hermit/OPERATOR.md
+   .claude-code-hermit/config.json
+   .claude-code-hermit/bin/hermit-run
+   .claude-code-hermit/compiled/
+   # <<< claude-code-hermit <<<
+   ```
+
+   Then check the project's `.gitignore` for a `.claude-code-hermit/bin/` line and append it if absent — Claude Code only copies gitignored paths into a worktree, so without it the new line is inert.
 
 ## [1.2.42] - 2026-08-19
 

@@ -55,12 +55,12 @@ function hermitDir(): string {
 /**
  * A worktree's *projected* `.claude-code-hermit/` — never a resolution target.
  *
- * `.worktreeinclude`'s managed block copies OPERATOR.md, config.json and
- * compiled/ into a `claude --worktree` worktree so skills can Read them at the
- * relative path they expect, but never `state/` — hermit state is deliberately
- * main-rooted and shared across worktrees. So a dir carrying the config.json
- * sentinel with no `state/` is a projection of a real root further up, and the
- * resolvers walk past it to that root.
+ * `.worktreeinclude`'s managed block copies OPERATOR.md, config.json,
+ * bin/hermit-run and compiled/ into a `claude --worktree` worktree so skills can
+ * Read (and run) them at the relative path they expect, but never `state/` —
+ * hermit state is deliberately main-rooted and shared across worktrees. So a dir
+ * carrying the config.json sentinel with no `state/` is a projection of a real
+ * root further up, and the resolvers walk past it to that root.
  *
  * The `state/` test stays true only because no resolver returns a projection,
  * so nothing ever creates `state/` inside one. A writer that mkdir's its own
@@ -158,10 +158,23 @@ function pinnedRoot(resolved: string, matches: (root: string) => boolean): strin
   return main !== null && matches(main) ? resolved : null;
 }
 
+// A worktree projection named as the state dir means the caller's own root, one
+// level up. The commands the CLAUDE-APPEND block documents pass the relative
+// `.claude-code-hermit`, which from a `claude --worktree` session resolves to the
+// projection while every accepted root is main's — so without this the pin
+// refuses the very spelling the hermit ships. Not a widening: a projection can
+// only normalize to the root its own walk-up finds, and that root still has to
+// equal hermitDir() or the main checkout below. A foreign projection normalizes
+// to its own foreign root and is refused exactly as before.
+function resolveProjection(resolved: string): string {
+  if (!isWorktreeProjection(resolved)) return resolved;
+  return findHermitDir(path.dirname(resolved)) ?? resolved;
+}
+
 // Line comments, not a block comment: the grant strings above contain `*` and
 // `/` sequences that would close a block comment early.
 function assertStateDir(argvValue: string): string | null {
-  const resolved = path.resolve(argvValue);
+  const resolved = resolveProjection(path.resolve(argvValue));
   return pinnedRoot(resolved, root => resolved === root);
 }
 
