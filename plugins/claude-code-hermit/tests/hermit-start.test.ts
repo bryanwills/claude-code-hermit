@@ -761,6 +761,28 @@ describe('writeSettingsEnv', () => {
     expect(readSettings().env.DISCORD_STATE_DIR).toBe(expected);
   });
 
+  // A channel entry with no state_dir key still uses .claude.local/channels/<name>
+  // for its token (buildClaudeCommand's default), so it must export the same dir.
+  test('channel with no state_dir gets the conventional default exported', () => {
+    writeConfig({ channels: { discord: { enabled: true } } });
+    const config = loadConfig();
+    delete process.env.DISCORD_STATE_DIR;
+    captureLog(() => writeSettingsEnv(config));
+    const expected = path.join(process.cwd(), '.claude.local/channels/discord');
+    expect(readSettings().env.DISCORD_STATE_DIR).toBe(expected);
+    expect(stateDirEnv('DISCORD')).toBe(expected);
+  });
+
+  test('empty-string state_dir falls back to the default, not the project root', () => {
+    writeConfig({ channels: { discord: { enabled: true, state_dir: '' } } });
+    const config = loadConfig();
+    delete process.env.DISCORD_STATE_DIR;
+    captureLog(() => writeSettingsEnv(config));
+    const expected = path.join(process.cwd(), '.claude.local/channels/discord');
+    expect(readSettings().env.DISCORD_STATE_DIR).toBe(expected);
+    expect(readSettings().env.DISCORD_STATE_DIR).not.toBe(process.cwd());
+  });
+
   // Claude Code does not pass settings env to plugin MCP servers
   // (anthropics/claude-code#11927), so the bare-host boot paths depend on this
   // hydration to get the value into the tmux env file / execvp'd process.
@@ -789,7 +811,9 @@ describe('writeSettingsEnv', () => {
   test('channel name that is not a valid env identifier is not hydrated', () => {
     writeConfig({
       channels: {
-        'ms-teams': { enabled: true, state_dir: '/tmp/teams' },
+        // No state_dir here — the identifier guard must still bite on the
+        // defaulted path, not just the explicit one.
+        'ms-teams': { enabled: true },
         'x; touch /tmp/hermit-pwned': { enabled: true, state_dir: '/tmp/evil' },
       },
     });
@@ -1268,6 +1292,20 @@ describe('hydrateSetupTokenEnv', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'hermit-start.ts'), 'utf-8');
     const decl = src.slice(src.indexOf('const forwardVars ='));
     expect(decl.slice(0, decl.indexOf('\n'))).toContain('TOKEN_ENV_VAR');
+  });
+
+  // A channel with no explicit state_dir must still be forwarded — writeSettingsEnv
+  // already hydrated process.env for it, so this loop must not re-gate on presence.
+  test('the forwardVars loop no longer gates *_STATE_DIR forwarding on state_dir presence', () => {
+    const src = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'hermit-start.ts'), 'utf-8');
+    const loopStart = src.indexOf('for (const [chName] of iterChannelConfigs(config)) {');
+    expect(loopStart).toBeGreaterThan(-1);
+    // The loop's own closing brace is indented: matching a column-0 '}' would
+    // slice to the end of main() and assert against ~150 unrelated lines.
+    const loop = src.slice(loopStart, src.indexOf('\n  }', loopStart));
+    // Any `.state_dir` read here is a re-gate on config presence, whatever the
+    // binding is called. The uppercase `_STATE_DIR` key template is untouched.
+    expect(loop).not.toContain('.state_dir');
   });
 });
 
