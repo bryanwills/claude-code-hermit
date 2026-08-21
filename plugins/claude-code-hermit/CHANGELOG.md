@@ -15,6 +15,7 @@
 2. In your report, name the chat id you copied for each channel. Proactive sends are pinned to it from now on, and the copy cannot tell an operator's normal chat from one they happened to message from last — so this is the operator's chance to spot a wrong home.
 3. Tell the operator, once, that briefings and notices are now pinned to that chat: messaging from another chat gets answered there but no longer moves them, and moving them is a terminal setting (`/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`).
 4. Nothing breaks if this migration is skipped — resolution falls back to `dm_channel_id` until the key exists.
+- `/permission-mode <mode>` from a trusted channel switches the running session's permission mode, joining `/model`, `/effort`, `/compact` and `/clear`. Accepts `default`, `acceptEdits` and `auto`; `plan`, `bypassPermissions` and `dontAsk` are refused with a reason. Applied by driving Claude Code's Shift+Tab cycle and reading the status bar back, so the next prompt reports the mode the session actually landed in. Session-scoped — a restart re-asserts `config.permission_mode`.
 
 ### Fixed
 - `/claude-code-hermit:channel-setup` adds the channel entry itself when `channels` is empty, instead of stopping and pointing at `/claude-code-hermit:hermit-settings` — that skill carries `disable-model-invocation`, so nothing could reach it and the operator was left to type the command.

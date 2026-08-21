@@ -14,6 +14,8 @@ import {
   clearSwitchVerify,
   COMMAND_MARKER_TTL_SECS,
   SWITCH_VERIFY_TTL_SECS,
+  normalizePermissionMode,
+  permissionModeRefusal,
 } from '../scripts/lib/harness-command';
 
 function tmpRoot(): string {
@@ -21,11 +23,15 @@ function tmpRoot(): string {
 }
 
 describe('parseHarnessCommand grammar', () => {
-  test('accepts the four bare/arg forms', () => {
+  test('accepts the five bare/arg forms', () => {
     expect(parseHarnessCommand('/clear')).toEqual({ command: '/clear', arg: null });
     expect(parseHarnessCommand('/compact')).toEqual({ command: '/compact', arg: null });
     expect(parseHarnessCommand('/model opus')).toEqual({ command: '/model', arg: 'opus' });
     expect(parseHarnessCommand('/effort high')).toEqual({ command: '/effort', arg: 'high' });
+    expect(parseHarnessCommand('/permission-mode plan')).toEqual({
+      command: '/permission-mode',
+      arg: 'plan',
+    });
   });
 
   // The whole point of dropping the tier list: a new model must not need a code change.
@@ -76,6 +82,38 @@ describe('parseHarnessCommand grammar', () => {
     expect(parseHarnessCommand('/exit')).toBeNull();
     expect(parseHarnessCommand('/login')).toBeNull();
     expect(parseHarnessCommand('/claude-code-hermit:brief')).toBeNull();
+  });
+});
+
+describe('permission-mode targets', () => {
+  test('normalises the spellings an operator actually types', () => {
+    expect(normalizePermissionMode('acceptEdits')).toBe('acceptEdits');
+    expect(normalizePermissionMode('accept-edits')).toBe('acceptEdits');
+    expect(normalizePermissionMode('ACCEPTEDITS')).toBe('acceptEdits');
+    expect(normalizePermissionMode('auto')).toBe('auto');
+    // The status bar calls `default` "manual mode", so operators do too.
+    expect(normalizePermissionMode('manual')).toBe('default');
+    expect(normalizePermissionMode('nonsense')).toBeNull();
+  });
+
+  test('allows only the three recoverable modes', () => {
+    expect(permissionModeRefusal('default')).toBeNull();
+    expect(permissionModeRefusal('acceptEdits')).toBeNull();
+    expect(permissionModeRefusal('auto')).toBeNull();
+  });
+
+  // plan mode would take the channel down with it: replies are refused and an
+  // unanswerable approval prompt can wedge the turn that delivery depends on.
+  test('refuses plan, and says why in terms the operator can act on', () => {
+    const refusal = permissionModeRefusal('plan');
+    expect(refusal).toContain('replying');
+    expect(refusal).toContain('default');
+  });
+
+  test('refuses privilege escalation and modes outside the cycle', () => {
+    expect(permissionModeRefusal('bypassPermissions')).toContain('terminal');
+    expect(permissionModeRefusal('dontAsk')).toContain('not reachable mid-session');
+    expect(permissionModeRefusal('sudo')).toContain('not a permission mode');
   });
 });
 

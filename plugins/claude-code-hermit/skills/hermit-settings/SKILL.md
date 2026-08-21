@@ -90,7 +90,7 @@ Pass the **argument name**, not the dotted path — the script looks the path up
 | `remote` | `remote` | boolean | yes / no | next `hermit-start` |
 | `model` | `model` | string, nullable | passed straight to `--model` | next `hermit-start` |
 | `boot-skill` | `boot_skill` | string, nullable | namespaced skill | next `hermit-start` |
-| `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` |
+| `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` (a channel `/permission-mode auto\|acceptEdits\|default` changes the running session without changing this) |
 | `idle` | `idle_behavior` | enum | `discover` / `wait` | immediately |
 | `push-notifications` | `push_notifications` | boolean | on / off | immediately |
 | `reflection` | `reflection.graduation_min_sessions` | integer ≥1 | 1 = surface after one session; 2 = require recurrence | next reflect run |

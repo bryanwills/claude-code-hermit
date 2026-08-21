@@ -9,6 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { anchoredPaneTail } from './tmux';
+import { PERMISSION_MODE } from './settings/enums';
+
+type PermissionMode = (typeof PERMISSION_MODE)[number];
 
 // Args are NOT validated against a fixed value list: Claude Code rejects an unknown
 // model or effort level itself, and any list hard-coded here would go stale on the next
@@ -21,7 +24,7 @@ const ARG_RE = /^[A-Za-z0-9._[\]-]{1,64}$/;
 /** Commands taking no argument. */
 const BARE_COMMANDS = new Set(['/compact', '/clear']);
 /** Commands requiring exactly one argument. */
-const ARG_COMMANDS = new Set(['/model', '/effort']);
+const ARG_COMMANDS = new Set(['/model', '/effort', '/permission-mode']);
 
 export type ParsedCommand = { command: string; arg: string | null };
 
@@ -49,6 +52,59 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
     return ARG_RE.test(arg) ? { command, arg } : null;
   }
   return null;
+}
+
+// --- Permission-mode targets ----------------------------------------------
+//
+// The one place a value list is unavoidable. Every other arg is shape-checked and handed
+// to Claude Code, which rejects what it does not know — but there is no native command to
+// hand a permission mode to. Claude Code exposes no absolute setter at all (confirmed
+// against the permission-modes and keybindings docs): the only mid-session control is the
+// relative Shift+Tab cycle, so the hermit has to know which modes exist, which of them it
+// may steer the session into, and what each looks like once it lands.
+
+const MODE_ALIASES: Record<string, PermissionMode> = {
+  default: 'default',
+  manual: 'default',
+  acceptedits: 'acceptEdits',
+  auto: 'auto',
+  plan: 'plan',
+  bypasspermissions: 'bypassPermissions',
+  dontask: 'dontAsk',
+};
+
+/** Modes a trusted channel sender may steer the session into. */
+export const CHANNEL_SETTABLE_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'auto']);
+
+/**
+ * Why the remaining modes are refused rather than delivered.
+ *
+ * `plan` is the interesting one: it is harness-enforced read-only, so the hermit could
+ * still READ channel messages but every reply it tried to send would be refused — and the
+ * harness pushes a plan-mode turn toward an ExitPlanMode approval dialog that nobody is at
+ * the terminal to answer. Since delivery only ever happens on the Stop hook, a session
+ * wedged mid-turn can never receive the channel command that would undo it. Tightening
+ * that IS recoverable is what `default` is for.
+ */
+const MODE_REFUSALS: Partial<Record<PermissionMode, string>> = {
+  plan: 'plan mode blocks the hermit from replying on this channel and can leave the session waiting at a plan-approval prompt nobody is there to answer, with no way to switch back from chat. Ask for `default` to make it check with you before acting, or just say what it should plan before executing.',
+  bypassPermissions: 'switching into bypassPermissions from a chat message would widen what this session may do without asking, which is a decision for the terminal (and for containerised hermits, the boot config).',
+  dontAsk: "dontAsk is not reachable mid-session — Claude Code never puts it in the mode cycle, so it can only be set when the session starts.",
+};
+
+/** Canonical mode name for an operator-typed argument, or null when unrecognised. */
+export function normalizePermissionMode(arg: string): PermissionMode | null {
+  return MODE_ALIASES[arg.toLowerCase().replaceAll('-', '').replaceAll('_', '')] ?? null;
+}
+
+/** Why this target cannot be delivered, or null when it is settable from a channel. */
+export function permissionModeRefusal(arg: string): string | null {
+  const mode = normalizePermissionMode(arg);
+  if (!mode) {
+    return `"${arg}" is not a permission mode. This session can be switched to default, acceptEdits, or auto.`;
+  }
+  if (CHANNEL_SETTABLE_MODES.has(mode)) return null;
+  return MODE_REFUSALS[mode] ?? `${mode} cannot be set from a channel.`;
 }
 
 export type PendingCommand = {
