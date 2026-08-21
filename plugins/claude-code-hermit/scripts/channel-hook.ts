@@ -3,6 +3,7 @@ import path from 'node:path';
 import { safe } from './lib/sanitize';
 import { hermitDir, transcriptPath, readTailLines, turnPromptText } from './lib/cc-compat';
 import { readConfigRaw } from './lib/config-read';
+import { auditConfigChange } from './lib/config-audit';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { logMessage, isLoggingEnabled } from './lib/channel-log';
 
@@ -63,8 +64,9 @@ function readConfig(): Json | null {
   return readConfigRaw(HERMIT_DIR);
 }
 
-function writeConfig(config: Json): void {
+function writeConfig(config: Json, before: Json): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+  auditConfigChange(HERMIT_DIR, before, config, 'channel-hook');
 }
 
 export function persistDmChannelId(config: Json, channelKey: string, chatId: Json, isInboundReply: boolean): boolean {
@@ -227,9 +229,12 @@ function main() {
 
       let dirty = false;
 
+      // Snapshot before persistDmChannelId mutates in place, so the audit ledger
+      // can attribute the learned dm_channel_id to this hook.
+      const configBefore = structuredClone(config);
       const isInboundReply = isEligibleInboundReply(event, channelKey, input.chat_id);
       dirty = persistDmChannelId(config, channelKey, input.chat_id, isInboundReply) || dirty;
-      if (dirty) writeConfig(config);
+      if (dirty) writeConfig(config, configBefore);
 
       const ts = new Date().toISOString();
       updateLastReplyAt(channelKey, ts);

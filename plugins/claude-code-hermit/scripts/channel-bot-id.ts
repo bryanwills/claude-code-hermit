@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readConfigRaw } from './lib/config-read';
+import { auditConfigChange } from './lib/config-audit';
 import { readChannelToken } from './lib/channel-token';
 import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { emit } from './lib/cli';
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
     // Merge into the existing entry — never replace it. Re-running setup after
     // a bot swap must overwrite a stale id, so this is write-always, not
     // write-once.
+    const before = structuredClone(config);
     entry.bot_user_id = id;
     if (username) entry.bot_username = username;
     else delete entry.bot_username;
@@ -85,6 +87,7 @@ async function main(): Promise<void> {
       try { fs.unlinkSync(tmp); } catch {}
       emit(`SKIP ${channel}: config write failed (${e?.code || e?.message || 'error'})`);
     }
+    auditConfigChange(hermitDir, before, config, 'channel-bot-id');
     written = ' written';
   }
 

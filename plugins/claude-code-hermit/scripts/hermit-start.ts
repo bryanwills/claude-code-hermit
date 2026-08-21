@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
 import { readConfigRaw } from './lib/config-read';
+import { auditConfigChange } from './lib/config-audit';
 import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
@@ -1175,6 +1176,7 @@ async function main(): Promise<void> {
   }
 
   // Mark as always-on mode in config
+  const alwaysOnBefore = structuredClone(config);
   config.always_on = true;
   applyAlwaysOnDoctorSchedule(config);
   // Skipped when the on-disk config was unparseable: `config` is then pure
@@ -1183,6 +1185,7 @@ async function main(): Promise<void> {
   if (!configReadFailed) {
     try {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n');
+      auditConfigChange(path.dirname(CONFIG_PATH), alwaysOnBefore, config, 'hermit-start');
     } catch {}
   }
 

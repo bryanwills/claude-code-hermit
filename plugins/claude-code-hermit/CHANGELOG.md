@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- Settings changes are now recorded in `state/settings-audit.jsonl` — one redacted row per changed value, with who changed it (operator edit, an upgrade's version stamp, learned channel id, boot flip, permissions sync) and when. Credential-bearing keys and everything under `env.` record presence only, never values.
+- `/claude-code-hermit:hermit-settings history [setting]` prints recent recorded changes; `/claude-code-hermit:recall` answers "did something change my settings?" from the same ledger.
+
+### Changed
+- `/claude-code-hermit:hermit-settings` now persists every branch through `settings-edit` verbs, including channels, routines, env, docker and scheduled-checks, which previously wrote `config.json` directly. Writes that would leave the config invalid (bad cron, unknown enum, dangling `channels.primary`) are refused instead of landing.
+- `settings-edit.ts` gains `unset <dotted.path>` and `history`, and validates `set`/`unset` before writing.
 - Three narrow `Bash(.claude-code-hermit/bin/hermit-run …)` grants — `channel-send *`, `observations observe *`, `proposal shell-append *` — covering the scripts the model invokes ad hoc mid-session rather than from a skill's command block. Their `bun */scripts/*.ts` twins are wildcarded-interpreter rules, which auto mode suspends.
 - New `channels.<name>.default_chat_id` pins where unattended sends (briefings, notices, weekly review) go. It is seeded once at first pairing and never moved by an inbound message, so messaging the hermit from a second chat no longer redirects the operator's briefings there. Change it from the terminal with `/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`; the item is read-only on a channel-tagged turn.
 

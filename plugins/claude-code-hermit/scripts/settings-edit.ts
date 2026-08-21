@@ -6,9 +6,11 @@
  * Operations:
  *   get [dotted.path]        Print the JSON value at path (whole config if path omitted)
  *   set <dotted.path> <val>  Set a nested leaf, creating parent objects as needed
+ *   unset <dotted.path>      Delete a nested leaf (parents are left in place)
  *   toggle <dotted.path>     Boolean flip (absent → true; errors if current isn't boolean)
  *   show                     Render the operator-facing settings summary from live values
  *   apply-known <arg> <val>  Write one registry-backed setting, validated by kind/enum
+ *   history [path] [--limit N]  Print recent audited changes, newest last
  *
  * Value parsing for `set`: 'none'/'clear' → null; otherwise JSON.parse first
  * (so true, 42, "x", {...} work), falling back to the raw string on parse failure.
@@ -17,12 +19,17 @@
  * - Changes only the target leaf; all sibling keys are preserved (read-modify-write).
  * - Refuses to overwrite an existing-but-malformed config.json (never falls through to {}).
  * - Safe under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
+ * - Every successful mutation is recorded in state/settings-audit.jsonl.
  * - Zero runtime deps.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { SETTINGS, READ_ONLY, byArg, type Setting } from './lib/settings/registry';
+import { auditConfigChange, readHistory } from './lib/config-audit';
+import { validate } from './validate-config';
+import { flagValue, flagEq } from './lib/cli';
+import { safeForLLM } from './lib/sanitize';
 
 type Json = any;
 
@@ -89,6 +96,20 @@ export function setPath(obj: Json, dotted: string, value: Json): Json {
   }
   cur[leaf] = value;
   return obj;
+}
+
+/** Delete a leaf. Parent objects stay — an empty `channels` is still a valid config. */
+export function unsetPath(obj: Json, dotted: string): boolean {
+  const keys = dotted.split('.');
+  const leaf = keys.pop()!;
+  let cur = obj;
+  for (const key of keys) {
+    if (typeof cur[key] !== 'object' || cur[key] === null) return false;
+    cur = cur[key];
+  }
+  if (!(leaf in cur)) return false;
+  delete cur[leaf];
+  return true;
 }
 
 export function togglePath(obj: Json, dotted: string): Json {
@@ -262,7 +283,70 @@ if (import.meta.main) {
     process.exit(1);
   }
 
+  // The state dir is the config's own directory (.claude-code-hermit/), where the
+  // audit ledger lives under state/.
+  const stateDir = path.dirname(path.resolve(targetFile));
+
+  // `history` reads the ledger, never the config — and it runs BEFORE the strict
+  // read below on purpose. A config someone corrupted is exactly when the operator
+  // needs to ask who last touched it, and readTargetJson would exit(1) first.
+  if (op === 'history') {
+    const limitArg = flagValue(rest, '--limit') ?? flagEq(rest, 'limit');
+    const limit = limitArg !== undefined ? Number(limitArg) || 20 : 20;
+    // Positional arg excludes every `--flag` and, for the two-token `--limit N`
+    // form, the value token right after it — otherwise the limit's number reads
+    // as the dotted path.
+    const dotted = rest.find((a, i) => !a.startsWith('--') && rest[i - 1] !== '--limit');
+    const rows = readHistory(stateDir, dotted, limit);
+    if (rows.length === 0) {
+      console.log(dotted ? `No recorded changes for ${dotted}.` : 'No recorded settings changes.');
+    } else {
+      // capValue already serialized objects/arrays to a capped string — stringifying
+      // again would print them back-slash escaped.
+      const render = (v: Json): string => (typeof v === 'string' ? v : JSON.stringify(v));
+      for (const r of rows) {
+        const from = r.old === undefined ? '(unset)' : render(r.old);
+        const to = r.new === undefined ? '(removed)' : render(r.new);
+        console.log(`${r.ts}  ${r.path}  ${from} → ${to}  [${r.actor}]`);
+      }
+    }
+    process.exit(0);
+  }
+
   const config = readTargetJson(targetFile);
+  // Snapshot before any mutation — setPath and friends mutate in place, so a
+  // reference would diff against itself and report nothing.
+  const before: Json = structuredClone(config);
+  // A file that doesn't exist yet reads as {}; tell the audit ledger so it records
+  // one "config created" row instead of a row per template default.
+  const existedBefore = fs.existsSync(targetFile);
+
+  /**
+   * Persist a mutation: refuse it if it would introduce NEW validation errors,
+   * then write and audit. Pre-existing errors in the operator's config are not
+   * this command's business — blocking on them would lock the operator out of
+   * the very edits that fix them. Rerouting the hermit-settings array branches
+   * through this path removes the validate-config PostToolUse hook (fs writes
+   * never trip it), which is why the check lives here.
+   */
+  const persist = (actor = 'settings-edit'): void => {
+    const priorReport = validate(before);
+    const report = validate(config);
+    const newErrors = report.errors.filter((e) => !priorReport.errors.includes(e));
+    if (newErrors.length > 0) {
+      console.error(`Refusing to write ${targetFile} — the change is invalid:`);
+      newErrors.forEach((e) => console.error(`  ${e}`));
+      process.exit(1);
+    }
+    // Warnings don't block, but they must still be seen: the branches rerouted
+    // through this path used to write via Edit/Write, where the validate-config
+    // PostToolUse hook surfaced them. Dropping them silently would be a regression.
+    report.warnings
+      .filter((w) => !priorReport.warnings.includes(w))
+      .forEach((w) => console.error(`Warning: ${safeForLLM(w)}`));
+    writeJson(targetFile, config);
+    auditConfigChange(stateDir, existedBefore ? before : undefined, config, actor);
+  };
 
   switch (op) {
     case 'get': {
@@ -284,7 +368,7 @@ if (import.meta.main) {
       }
       const result = applyKnown(config, arg, value);
       if (!result.ok) { console.error(result.message); process.exit(1); }
-      writeJson(targetFile, config);
+      persist();
       console.log(result.message);
       break;
     }
@@ -294,7 +378,18 @@ if (import.meta.main) {
       if (!dotted) { console.error('set requires a dotted.path argument'); process.exit(1); }
       if (rest.length < 2) { console.error('set requires a value argument'); process.exit(1); }
       setPath(config, dotted, parseValue(rest[1]));
-      writeJson(targetFile, config);
+      persist();
+      break;
+    }
+
+    case 'unset': {
+      const dotted = rest[0];
+      if (!dotted) { console.error('unset requires a dotted.path argument'); process.exit(1); }
+      if (!unsetPath(config, dotted)) {
+        console.log(`${dotted} is not set — nothing to remove`);
+        break;
+      }
+      persist();
       break;
     }
 
@@ -307,12 +402,12 @@ if (import.meta.main) {
         console.error((err as Error).message);
         process.exit(1);
       }
-      writeJson(targetFile, config);
+      persist();
       break;
     }
 
     default: {
-      console.error(`Unknown operation: ${op}. Valid ops: get, set, toggle, show, apply-known`);
+      console.error(`Unknown operation: ${op}. Valid ops: get, set, unset, toggle, show, apply-known, history`);
       process.exit(1);
     }
   }

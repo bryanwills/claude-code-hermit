@@ -80,6 +80,7 @@ import path from 'node:path';
 import { emit, readStdin, readJson, flagValue } from './lib/cli';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
+import { auditConfigChange } from './lib/config-audit';
 import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, escapeRegExp, PATCH_KEY_RE } from './lib/md-write';
 import { computeBase, SUFFIX_LETTERS } from './lib/prop-id';
 import { readSettledConfig } from './lib/config-read';
@@ -402,6 +403,7 @@ export function verbRoutine(stateDir: string, stdin: string): string {
   if (!config) return 'ERROR|config-unreadable';
 
   if (!Array.isArray(config.routines)) config.routines = [];
+  const configBefore = structuredClone(config);
   const idx = config.routines.findIndex((r: Json) => r && r.id === entry.id);
   const verdict = idx >= 0 ? 'updated' : 'added';
   if (idx >= 0) config.routines[idx] = entry;
@@ -412,6 +414,7 @@ export function verbRoutine(stateDir: string, stdin: string): string {
   } catch {
     return 'ERROR|config-write-failed';
   }
+  auditConfigChange(stateDir, configBefore, config, 'proposal');
 
   return `OK|${verdict}`;
 }

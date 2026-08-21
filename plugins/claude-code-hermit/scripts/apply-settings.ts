@@ -35,6 +35,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { auditConfigChange } from './lib/config-audit';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -300,6 +301,9 @@ if (!targetFile || !op) {
 }
 
 const settings = readTargetJson(targetFile);
+// Snapshot before the ops below mutate in place — the audit ledger records what
+// this run actually changed in the operator's settings file.
+const settingsBefore = structuredClone(settings);
 
 // permissions-plan reports without touching the file; every other op falls through
 // to the write below.
@@ -391,4 +395,13 @@ switch (op) {
   }
 }
 
-if (!readOnly) writeJson(targetFile, settings);
+if (!readOnly) {
+  writeJson(targetFile, settings);
+  // The hermit state dir is a sibling of .claude/ — the ledger lives with the
+  // rest of the hermit's state, not next to the settings file it describes.
+  const stateDir = path.resolve(path.dirname(targetFile), '..', '.claude-code-hermit');
+  const target = path.basename(targetFile) === 'settings.local.json'
+    ? '.claude/settings.local.json'
+    : '.claude/settings.json';
+  auditConfigChange(stateDir, settingsBefore, settings, 'apply-settings', target);
+}

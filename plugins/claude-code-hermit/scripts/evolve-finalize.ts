@@ -27,6 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pinStateDirOrExit } from './lib/cc-compat';
+import { auditConfigChange } from './lib/config-audit';
 import { cmpSemver } from './lib/semver';
 
 type Json = any;
@@ -134,6 +135,9 @@ export function finalize(opts: {
     errors.push({ code, message: e.message });
     return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
   }
+  // Snapshot before the version merge below — the audit ledger must show the
+  // migration's before/after, and `config` is mutated in place from here on.
+  const configBefore = structuredClone(config);
 
   // Monotonicity guard. The stamp records which migrations have been APPLIED, so moving
   // it backwards claims migrations were reversed when nothing reversed them. That state
@@ -198,7 +202,6 @@ export function finalize(opts: {
     errors.push({ code: 'write_failed', message: e.message });
     return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, errors };
   }
-
   // Re-read from disk to confirm (the fix's whole point — catches a write that didn't land)
   let onDisk: Json;
   try {
@@ -213,6 +216,11 @@ export function finalize(opts: {
   if (!coreMatched) {
     errors.push({ code: 'verify_failed', message: `on-disk _hermit_versions["claude-code-hermit"]="${coreOnDisk}" but expected "${opts.core}"` });
   }
+
+  // Audit only what the re-read confirms is on disk. Auditing before this point
+  // would record the bump in the ledger even in the exact case this verification
+  // exists to catch — a write that reported success but did not land.
+  if (coreMatched) auditConfigChange(opts.hermitDir, configBefore, onDisk, 'evolve-finalize');
 
   const siblingsConfirmed: Record<string, string> = {};
   for (const name of appliedSiblingNames) {
