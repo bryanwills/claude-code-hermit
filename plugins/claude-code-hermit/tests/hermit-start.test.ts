@@ -1263,8 +1263,12 @@ describe('hydrateSetupTokenEnv', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'hermit-start.ts'), 'utf-8');
     const loopStart = src.indexOf('for (const [chName] of iterChannelConfigs(config)) {');
     expect(loopStart).toBeGreaterThan(-1);
-    const loop = src.slice(loopStart, src.indexOf('\n}', loopStart));
-    expect(loop).not.toContain('chCfg.state_dir');
+    // The loop's own closing brace is indented: matching a column-0 '}' would
+    // slice to the end of main() and assert against ~150 unrelated lines.
+    const loop = src.slice(loopStart, src.indexOf('\n  }', loopStart));
+    // Any `.state_dir` read here is a re-gate on config presence, whatever the
+    // binding is called. The uppercase `_STATE_DIR` key template is untouched.
+    expect(loop).not.toContain('.state_dir');
   });
 });
 
