@@ -40,6 +40,8 @@ const SWITCH_CASES = [
 const hermit = (dir: string, ...parts: string[]) =>
   path.join(dir, '.claude-code-hermit', ...parts);
 
+const switchVerifyMarker = (dir: string) => hermit(dir, 'state', 'harness-switch-verify.json');
+
 function seedPendingSwitch(dir: string, command: string, arg: string | null): void {
   fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
   fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
@@ -251,6 +253,23 @@ Permission required
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toContain('marker kept for retry');
       expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(true);
+      // Nothing was delivered, so there is nothing to verify against the transcript.
+      expect(fs.existsSync(switchVerifyMarker(dir))).toBe(false);
+    }));
+
+    test(`${label}: a delivered switch leaves a verify marker for the prompt path`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, arg);
+      const { bin, helperPid } = installFakeTmux(dir, 'Claude ready');
+
+      const result = await drain(dir, bin);
+      await waitForVerifierExit(helperPid);
+
+      expect(result.exitCode).toBe(0);
+      const verify = JSON.parse(fs.readFileSync(switchVerifyMarker(dir), 'utf-8'));
+      expect(verify.command).toBe(command);
+      expect(verify.arg).toBe(arg);
+      expect(verify.by).toBe('operator');
+      expect(Number.isNaN(Date.parse(verify.delivered_at))).toBe(false);
     }));
 
     test(`${label}: failed confirmation does not reissue the command`, withDir(async (dir) => {
@@ -305,6 +324,19 @@ describe('Stop hook reset-command delivery', () => {
     expect(readRuntime(dir).context_cleared).toBeUndefined();
     expect(fs.existsSync(statusCache)).toBe(true);
   }));
+
+  // Only /model and /effort change something the session then misreports about itself.
+  for (const command of ['/clear', '/compact']) {
+    test(`${command} leaves no switch-verify marker`, withDir(async (dir) => {
+      seedPendingSwitch(dir, command, null);
+      const { bin } = installFakeTmux(dir, 'Claude ready');
+
+      const result = await drain(dir, bin);
+
+      expect(result.exitCode).toBe(0);
+      expect(fs.existsSync(switchVerifyMarker(dir))).toBe(false);
+    }));
+  }
 
   test('a refused /clear send leaves no reset trace and keeps the marker', withDir(async (dir) => {
     seedPendingSwitch(dir, '/clear', null);

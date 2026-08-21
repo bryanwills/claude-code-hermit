@@ -6,6 +6,7 @@
 - `/claude-code-hermit:channel-setup` adds the channel entry itself when `channels` is empty, instead of stopping and pointing at `/claude-code-hermit:hermit-settings` — that skill carries `disable-model-invocation`, so nothing could reach it and the operator was left to type the command.
 - `/claude-code-hermit:channel-setup` now treats a channel with `enabled: false` as disabled rather than configured, and offers to re-enable it instead of proceeding as though it were live.
 - Bare-host (non-Docker) boots now export each channel's `<CHANNEL>_STATE_DIR` into the session environment, so channel plugin servers find their state dir instead of failing with `CONNECTION_CLOSED`.
+- A channel-requested `/model` or `/effort` switch is now reported back from the transcript, which stamps the serving model on every assistant entry. The switch itself always applied, but the session's own sense of which model it runs is fixed at session start and never followed it, so asked "did it work?" a hermit answered from that stale value and reported a working switch as a silent failure. The report is held until an assistant entry newer than the delivery exists, so the pre-switch entry can never be the answer.
 
 ## [1.2.42] - 2026-08-19
 

@@ -9,6 +9,9 @@ import {
   readPendingCommand,
   clearPendingCommand,
   renderCommand,
+  writeSwitchVerify,
+  readSwitchVerify,
+  clearSwitchVerify,
   COMMAND_MARKER_TTL_SECS,
 } from '../scripts/lib/harness-command';
 
@@ -116,6 +119,70 @@ describe('pending-command marker', () => {
     writePendingCommand(root, { command: '/clear', arg: null, by: 'op', requested_at: new Date().toISOString() });
     clearPendingCommand(root);
     expect(readPendingCommand(root)).toBeNull();
+    fs.rmSync(root, { recursive: true });
+  });
+});
+
+describe('switch-verify marker', () => {
+  const verifyPath = (root: string) => path.join(root, 'state', 'harness-switch-verify.json');
+
+  test('round-trips a delivered switch', () => {
+    const root = tmpRoot();
+    const entry = {
+      command: '/model',
+      arg: 'fable',
+      by: 'op',
+      delivered_at: new Date().toISOString(),
+    };
+    expect(writeSwitchVerify(root, entry)).toBe(true);
+    expect(readSwitchVerify(root)).toEqual(entry);
+    fs.rmSync(root, { recursive: true });
+  });
+
+  test('absent marker reads as null', () => {
+    const root = tmpRoot();
+    expect(readSwitchVerify(root)).toBeNull();
+    fs.rmSync(root, { recursive: true });
+  });
+
+  test('malformed marker reads as null rather than throwing', () => {
+    const root = tmpRoot();
+    fs.mkdirSync(path.join(root, 'state'), { recursive: true });
+    fs.writeFileSync(verifyPath(root), '{not json');
+    expect(readSwitchVerify(root)).toBeNull();
+    fs.rmSync(root, { recursive: true });
+  });
+
+  // Nothing else consumes this file, so an expired one must not linger on disk.
+  test('marker past its TTL reads as null AND is deleted', () => {
+    const root = tmpRoot();
+    const stale = new Date(Date.now() - (COMMAND_MARKER_TTL_SECS + 60) * 1000).toISOString();
+    writeSwitchVerify(root, { command: '/model', arg: 'fable', by: 'op', delivered_at: stale });
+    expect(readSwitchVerify(root)).toBeNull();
+    expect(fs.existsSync(verifyPath(root))).toBe(false);
+    fs.rmSync(root, { recursive: true });
+  });
+
+  test('clear removes it', () => {
+    const root = tmpRoot();
+    writeSwitchVerify(root, {
+      command: '/effort',
+      arg: 'high',
+      by: 'op',
+      delivered_at: new Date().toISOString(),
+    });
+    clearSwitchVerify(root);
+    expect(readSwitchVerify(root)).toBeNull();
+    fs.rmSync(root, { recursive: true });
+  });
+
+  // Singleton, matching the pending marker: two switches collapse to the last.
+  test('a second switch overwrites the first', () => {
+    const root = tmpRoot();
+    const now = new Date().toISOString();
+    writeSwitchVerify(root, { command: '/model', arg: 'fable', by: 'op', delivered_at: now });
+    writeSwitchVerify(root, { command: '/model', arg: 'opus', by: 'op', delivered_at: now });
+    expect(readSwitchVerify(root)?.arg).toBe('opus');
     fs.rmSync(root, { recursive: true });
   });
 });

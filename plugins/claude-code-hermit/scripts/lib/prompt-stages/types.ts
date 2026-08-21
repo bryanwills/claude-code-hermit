@@ -18,6 +18,11 @@ export interface StageContext {
   prompt: string;
   /** Parsed channel envelope, or null for operator/internal input. */
   envelope: ChannelEnvelope | null;
+  /**
+   * The hook payload's `transcript_path`, or null when absent (CC documents it as
+   * present on most, not all, events). Stages treat null as "can't tell" and fail closed.
+   */
+  transcriptPath: string | null;
   /** config.json, read at most once per prompt regardless of how many stages ask. */
   config(): any;
   /** state/runtime.json, read at most once per prompt. */

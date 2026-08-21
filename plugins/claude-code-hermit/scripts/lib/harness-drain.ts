@@ -5,7 +5,7 @@
 import { readRuntimeJson } from './runtime';
 import { sendKeys, tmuxSessionAlive } from './tmux';
 import { applyContextReset } from './context-reset';
-import { clearPendingCommand, readPendingCommand, renderCommand } from './harness-command';
+import { clearPendingCommand, readPendingCommand, renderCommand, writeSwitchVerify } from './harness-command';
 import { currentHHMMOrUTC } from './time';
 import { readSettledConfig } from './config-read';
 import path from 'node:path';
@@ -58,6 +58,18 @@ export function drainHarnessCommand(hermitRoot: string): void {
   // dialog after this process exits; doing a synchronous capture here races a pane that
   // cannot render yet.
   if (pending.command === '/model' || pending.command === '/effort') {
+    // The session cannot see its own switch: the model's sense of which model it runs
+    // is fixed at session start. Leave a marker so the prompt path answers that from
+    // the transcript instead of from stale self-perception (lib/prompt-stages/
+    // harness-verify.ts). Only a confirmed send reaches here, so the marker can never
+    // describe a switch that was not delivered.
+    writeSwitchVerify(hermitRoot, {
+      command: pending.command,
+      arg: pending.arg,
+      by: pending.by,
+      delivered_at: new Date().toISOString(),
+    });
+
     const helper = path.join(import.meta.dir, '..', 'confirm-harness-switch.ts');
     const child = Bun.spawn([process.execPath, helper, sessionName, pending.command], {
       stdin: 'ignore',

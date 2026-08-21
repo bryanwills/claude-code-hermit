@@ -29,7 +29,7 @@ process.stdout.on('error', () => {});
 // block on a failed send, and per-stage errors are isolated — a throwing stage
 // is logged to stderr and the rest still run (the stop-pipeline.ts pattern).
 
-import { hermitDir } from './lib/cc-compat';
+import { hermitDir, transcriptPath as ccTranscriptPath } from './lib/cc-compat';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { readConfigRaw } from './lib/config-read';
 import { readRuntimeJson } from './lib/runtime';
@@ -40,6 +40,7 @@ import { run as promptContext } from './lib/prompt-stages/prompt-context';
 import { run as channelReplyReminder } from './lib/prompt-stages/channel-reply-reminder';
 import { run as pauseKeyword } from './lib/prompt-stages/pause-keyword';
 import { run as harnessCommand } from './lib/prompt-stages/harness-command';
+import { run as harnessVerify } from './lib/prompt-stages/harness-verify';
 import { run as shutdownGate } from './lib/prompt-stages/shutdown-gate';
 import { run as channelStatusResponder } from './lib/prompt-stages/channel-status-responder';
 
@@ -66,9 +67,11 @@ async function main(raw: string): Promise<void> {
   // Defensive parse: stages that don't need the payload still run on bad input,
   // exactly as stop-pipeline.ts does.
   let prompt: string | null = null;
+  let transcript: string | null = null;
   try {
     const payload = JSON.parse(raw);
     prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : null;
+    transcript = ccTranscriptPath(payload);
   } catch {
     process.stderr.write('[user-prompt-pipeline] malformed stdin — continuing with an empty prompt\n');
     // A parse failure on non-empty stdin means a prompt did arrive and was
@@ -93,6 +96,7 @@ async function main(raw: string): Promise<void> {
     dir,
     prompt,
     envelope: parseChannelEnvelope(prompt),
+    transcriptPath: transcript,
     config() {
       // Raw, not settled: shutdown-gate and channel-status-responder treat a
       // null config as a disclosure gate (silent no-op); settling would loosen it.
@@ -126,6 +130,7 @@ async function main(raw: string): Promise<void> {
   // kill can lose a send but never a state write.
   await stage('pause-keyword', pauseKeyword, ctx);
   await stage('harness-command', harnessCommand, ctx);
+  await stage('harness-verify', harnessVerify, ctx);
 
   // 6. Deterministic status.
   await stage('channel-status-responder', channelStatusResponder, ctx);
