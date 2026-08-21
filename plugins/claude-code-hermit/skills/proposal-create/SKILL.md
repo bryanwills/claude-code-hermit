@@ -118,7 +118,7 @@ Body guidance:
 - Leave `## Operator Decision` blank — the operator fills that in.
 - Do NOT write bullet-point metadata (`- **Created:**`, etc.) — all metadata lives in the header lines / frontmatter only.
 
-Finally, refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md` (silently — no URL re-post; the proposal queue changed). Also refresh the proposals page (`config.artifacts.proposals`) per the same doc. Unlike the dashboard, when the proposals page returns a URL, surface a deep link for whatever flow announces this proposal to the operator to append to its message: `📎 <url>#prop-nnn ("PROP-NNN: <title>")` (lowercased `PROP-NNN` prefix as the anchor; include the section name in text since fragment auto-scroll in the artifact viewer is unconfirmed).
+Finally, refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md` (silently — no URL re-post; the proposal queue changed). Also refresh the proposals page (`config.artifacts.proposals`) per the same doc. Unlike the dashboard, when the proposals page returns a URL, surface it for whatever flow announces this proposal to the operator: append **at most one** `📎 <url>` line to that flow's message, regardless of how many proposals it created in this run — never one per proposal, and never one at all when no URL was returned.
 
 ## Do NOT Create Proposals For
 

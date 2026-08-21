@@ -18,7 +18,7 @@ Read the following (gracefully skip any file that doesn't exist). The nine sourc
 1. `.claude-code-hermit/state/alert-state.json` — `active` array and `suppressed` array; each entry has `type`, `timestamp`, `message`.
 2. `.claude-code-hermit/state/runtime.json` — `last_activity`, `session_id`.
 3. `.claude-code-hermit/state/reflection-state.json` — `last_reflection` timestamp, `counters` (including `judge_suppress_by_code` map and run/output fields), and `queue` (pending micro-proposals and reflect candidates).
-4. `.claude-code-hermit/config.json` — `routines` array (id, schedule, enabled); `channels` object (each channel's `dm_channel_id`).
+4. `.claude-code-hermit/config.json` — `routines` array (id, schedule, enabled); `channels` object (each channel's `default_chat_id` and `dm_channel_id`).
 5. `.claude-code-hermit/proposals/PROP-*.md` — glob; count by `status` frontmatter field, and read `id`, `title`, `accepted_date`, `resolved_date`, `tags` for the stale-proposal and fragile-zone analysis.
 6. `.claude-code-hermit/state/micro-proposals.json` — count entries with `status: "pending"`.
 7. Glob counts: `.claude-code-hermit/raw/**` (excluding `.archive/`), `.claude-code-hermit/compiled/**`, `.claude-code-hermit/raw/.archive/**`.
@@ -42,7 +42,7 @@ Read the following (gracefully skip any file that doesn't exist). The nine sourc
 
 **Knowledge:** Report glob counts for raw (excl. archive), compiled, and archived files. Omit if all three are zero and the directories are missing. If the operator explicitly asked to check or lint knowledge (phrasing like "check knowledge", "lint knowledge", "knowledge health"), also run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/knowledge-lint.ts .claude-code-hermit` and relay its findings verbatim (grouped by type with file paths, ages, and actionable advice) beneath the counts. The script is strictly read-only.
 
-**Channel availability:** From `config.json.channels`, for each configured channel, check whether `dm_channel_id` is set. Report "ready" or "not yet paired (no dm_channel_id — send a message first)".
+**Channel availability:** From `config.json.channels`, for each configured channel, check whether `default_chat_id` or (failing that) `dm_channel_id` is set — the same fallback chain the outbound resolver uses. Report "ready" or "not yet paired (no chat id — send a message first)".
 
 **Fragile zones:** From the last 5 session reports, gather the `tags` array from sessions with `status: partial` or `status: blocked`. Also gather `tags` from proposals with `status: dismissed` or `status: blocked`. Surface the top 2–3 tag clusters that appear repeatedly across fragile outcomes. If no blocked/partial sessions exist: "No fragile zones detected."
 
@@ -76,7 +76,7 @@ Reply in ≤1500 chars. Use exactly this section structure:
 - N raw, N compiled, N archived
 
 ### Channel availability
-- [channel]: ready (dm_channel_id set) [or "not yet paired"]
+- [channel]: ready (chat id set) [or "not yet paired"]
 (or: No channels configured — run /claude-code-hermit:channel-setup.)
 
 ### Fragile zones

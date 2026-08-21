@@ -39,8 +39,8 @@ const MAX_STDIN = 64 * 1024;
 // turn-boundary job. A channel reply lands at the END of a channel-responder
 // turn that already absorbed a skill body and several tool results; a window
 // that doesn't reach that turn's opening envelope fails the gate — and since
-// this hook is the only writer of dm_channel_id, that silently leaves proactive
-// outbound unconfigured.
+// this hook is the only writer of dm_channel_id and default_chat_id, that
+// silently leaves proactive outbound unconfigured.
 const TAIL_BYTES = 512 * 1024;
 
 const SERVER_TO_CHANNEL: Record<string, string> = {
@@ -93,7 +93,7 @@ export function persistDmChannelId(config: Json, channelKey: string, chatId: Jso
 
   // The maintainer chat is an outbound-only second destination
   // (docs/security.md § tiered disclosure) and must never be adopted as the
-  // primary bidirectional chat — dm_channel_id also binds operator trust in
+  // primary bidirectional chat — default_chat_id binds operator trust in
   // lib/channel-auth.ts isTrustedController. Replying into the maintainer
   // chat must not re-learn it as the DM channel.
   const maintainer = channel.maintainer_channel_id;
@@ -102,6 +102,24 @@ export function persistDmChannelId(config: Json, channelKey: string, chatId: Jso
       `[channel-hook] skipped ${channelKey}.dm_channel_id — ${safe(id)} is the maintainer chat\n`
     );
     return false;
+  }
+
+  // Seed the pinned proactive home once, then never move it: unattended sends
+  // (briefings, notices) resolve through default_chat_id, so a message from a
+  // second chat must not relocate them. On a first pairing this chat is the
+  // home; on an install that predates the pin the *incumbent* chat wins —
+  // the message that diverts dm_channel_id is never the one that decides
+  // where briefings live. Moving it afterwards is a terminal-only
+  // hermit-settings action.
+  if (channel.default_chat_id == null) {
+    const incumbent = channel.dm_channel_id == null ? null : String(channel.dm_channel_id);
+    // A dm_channel_id already clobbered to the maintainer chat (validate-config
+    // warns on it) must not become the permanent home either.
+    const usable = incumbent != null && !(maintainer != null && String(maintainer) === incumbent);
+    channel.default_chat_id = usable ? incumbent : id;
+    process.stderr.write(
+      `[channel-hook] seeded ${channelKey}.default_chat_id = ${safe(channel.default_chat_id)}\n`
+    );
   }
 
   channel.dm_channel_id = id;

@@ -4,6 +4,19 @@
 
 ### Added
 - Three narrow `Bash(.claude-code-hermit/bin/hermit-run …)` grants — `channel-send *`, `observations observe *`, `proposal shell-append *` — covering the scripts the model invokes ad hoc mid-session rather than from a skill's command block. Their `bun */scripts/*.ts` twins are wildcarded-interpreter rules, which auto mode suspends.
+- New `channels.<name>.default_chat_id` pins where unattended sends (briefings, notices, weekly review) go. It is seeded once at first pairing and never moved by an inbound message, so messaging the hermit from a second chat no longer redirects the operator's briefings there. Change it from the terminal with `/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`; the item is read-only on a channel-tagged turn.
+
+### Changed
+- Pause/resume/snooze and full status on a channel with no `allowed_users` now trust the pinned `default_chat_id` instead of the last-learned `dm_channel_id`, so control authority can no longer be acquired by messaging from a new chat. An explicit `allowed_users` list still wins, and a group/server home still trusts every member of that chat — set `allowed_users` there.
+- Chat-ID persistence is now solely the `PostToolUse` hook's job: `channel-responder` §1e no longer instructs a model-side `config.json` write, which had bypassed the hook's transcript-verified inbound gate and its maintainer-chat exclusion.
+
+### Upgrade Instructions
+
+1. Read `.claude-code-hermit/config.json`. For each entry under `channels` (skip the `primary` key — it is a string pointer, not a channel), if the entry has a non-null `dm_channel_id` and no `default_chat_id`, set `default_chat_id` to that same value — **unless that `dm_channel_id` equals the same entry's `maintainer_channel_id`**, in which case leave `default_chat_id` absent and say so in your report (that chat is outbound-only; pinning it would send every briefing there permanently, since nothing re-learns this field). Leave every other field untouched. Re-runnable: an entry that already has the key is skipped.
+2. In your report, name the chat id you copied for each channel. Proactive sends are pinned to it from now on, and the copy cannot tell an operator's normal chat from one they happened to message from last — so this is the operator's chance to spot a wrong home.
+3. Tell the operator, once, that briefings and notices are now pinned to that chat: messaging from another chat gets answered there but no longer moves them, and moving them is a terminal setting (`/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`).
+4. Nothing breaks if this migration is skipped — resolution falls back to `dm_channel_id` until the key exists.
+- `/permission-mode <mode>` from a trusted channel switches the running session's permission mode, joining `/model`, `/effort`, `/compact` and `/clear`. Accepts `default`, `acceptEdits` and `auto`; `plan`, `bypassPermissions` and `dontAsk` are refused with a reason. Applied by driving Claude Code's Shift+Tab cycle and reading the status bar back, so the next prompt reports the mode the session actually landed in. Session-scoped — a restart re-asserts `config.permission_mode`.
 
 ### Fixed
 - `channel-send.ts` pins its state-dir argument to this project's, so a call reaching it through the pre-approved `Bash(bun */scripts/channel-send.ts*)` grant can no longer send with another project's bot token to that project's chat. A mismatch exits 2 (caller error, nothing sent), not 1.
@@ -32,6 +45,7 @@
    ```
 
    Then check the project's `.gitignore` for a `.claude-code-hermit/bin/` line and append it if absent — Claude Code only copies gitignored paths into a worktree, so without it the new line is inert.
+- Creating several proposals in one run now appends at most one bare proposals-page link to the announcement message, instead of a separate `#prop-nnn` deep link per proposal that the claude.ai artifact viewer couldn't resolve anyway.
 
 ## [1.2.42] - 2026-08-19
 

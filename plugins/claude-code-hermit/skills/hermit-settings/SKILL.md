@@ -40,7 +40,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings reflection       — tune graduation threshold (graduation_min_sessions)
 /claude-code-hermit:hermit-settings push-notifications — toggle PushNotification doorbell (fires when no channel is enabled or a configured channel is unreachable)
 /claude-code-hermit:hermit-settings artifact-dashboard — toggle the Hermit Dashboard artifact (single-URL status/proposals/weekly-evolution page)
-/claude-code-hermit:hermit-settings artifact-proposals — toggle the Proposals-page artifact (full-text open-proposal page with deep-linked anchors)
+/claude-code-hermit:hermit-settings artifact-proposals — toggle the Proposals-page artifact (full-text open-proposal page)
 /claude-code-hermit:hermit-settings artifact-weekly-review — toggle the Weekly-review artifact (stable-URL passthrough of the compiled weekly report)
 /claude-code-hermit:hermit-settings artifact-authorization — record the unattended Artifact publish decision (applied by hermit-start at boot, not from this session)
 /claude-code-hermit:hermit-settings artifact-backend — where pages publish: `claude` (default), or the name of a connected MCP artifact server you registered yourself
@@ -90,7 +90,7 @@ Pass the **argument name**, not the dotted path — the script looks the path up
 | `remote` | `remote` | boolean | yes / no | next `hermit-start` |
 | `model` | `model` | string, nullable | passed straight to `--model` | next `hermit-start` |
 | `boot-skill` | `boot_skill` | string, nullable | namespaced skill | next `hermit-start` |
-| `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` |
+| `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` (a channel `/permission-mode auto\|acceptEdits\|default` changes the running session without changing this) |
 | `idle` | `idle_behavior` | enum | `discover` / `wait` | immediately |
 | `push-notifications` | `push_notifications` | boolean | on / off | immediately |
 | `reflection` | `reflection.graduation_min_sessions` | integer ≥1 | 1 = surface after one session; 2 = require recurrence | next reflect run |
@@ -120,20 +120,22 @@ Show current channel configuration from `config.json` → `channels` object. The
 ```
 Channels:
   Primary: discord    (or "none — falls back to first eligible channel in config order")
-  discord  enabled  allowed_users: [123456789]  morning_brief: 07:00  state_dir: /abs/path/...
+  discord  enabled  allowed_users: [123456789]  briefing chat: 987654321  morning_brief: 07:00  state_dir: /abs/path/...
   (or "No channels configured")
 ```
+"briefing chat" is `default_chat_id` — where unattended sends go — falling back to the learned `dm_channel_id` when the pin isn't seeded yet (say "not paired yet" when both are empty).
 Ask: "Add, remove, edit, or set primary? (add discord / add telegram / remove <name> / edit <name> / primary <name> / primary clear / done) [done]"
 Loop until operator says "done":
-- **add <name>:** Create entry `channels.<name>: { "enabled": true, "dm_channel_id": null }`. Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`). Set `state_dir` in the channel entry. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`."
+- **add <name>:** Create entry `channels.<name>: { "enabled": true, "dm_channel_id": null, "default_chat_id": null }`. Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`). Set `state_dir` in the channel entry. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`."
 - **remove <name>:** Delete `channels.<name>` from config.json. If `channels.primary === <name>`, also delete `channels.primary` (a dangling pointer would fail validation) and tell the operator: "Also cleared `channels.primary` (was pointing at the removed channel)."
-- **edit <name>:** Sub-menu — "What to change? (allowed_users / morning_brief / enabled / done)"
+- **edit <name>:** Sub-menu — "What to change? (allowed_users / briefing_chat / morning_brief / enabled / done)"
   - **allowed_users:** "Paste user IDs (space-separated), or 'clear' to allow everyone, or 'block' for empty array." Update `channels.<name>.allowed_users`.
+  - **briefing_chat:** `channels.<name>.default_chat_id` — the destination for unattended sends (briefings, notices, weekly review) and, on a channel with no `allowed_users`, the chat trusted for pause/resume/status. Seeded once at first pairing and never moved by an inbound message, so it takes an explicit change here. **Terminal only: on a channel-tagged turn show the current value, say it's a terminal setting, and change nothing** — a chat message must never be able to redirect briefings, whoever sent it. At the terminal ask: "Paste the chat/channel ID that should receive briefings (current: `<value>`)." ID discovery is the same as for a group chat — Discord: Developer Mode → right-click the chat → Copy Channel ID; Telegram: forward a message from it to `@userinfobot` (group IDs are negative integers). Reject a non-string, and reject a value equal to that channel's `maintainer_channel_id` (outbound-only chat — see `docs/security.md` § tiered disclosure).
   - **morning_brief:** "Enable morning brief for this channel? (yes <time> / no) [current]". If yes: `channels.<name>.morning_brief = { "enabled": true, "time": "<HH:MM>" }`. If no: set to `null`.
   - **enabled:** Toggle `channels.<name>.enabled`.
 - **primary <name>:** Validate `<name>` exists as a key in `channels` (and is not `primary` itself). If valid, set `channels.primary = "<name>"`. If invalid, reject: "No channel named `<name>` configured. Add it first with `add <name>`."
 - **primary clear:** Delete `channels.primary`. Outbound sends will fall back to the default `discord` → `telegram` → `imessage` order.
-Note: "Channel changes take effect on next `hermit-start` run. `channels.primary` is consulted live by `scripts/resolve-outbound-channel.ts` on every proactive send — no restart needed for that key alone."
+Note: "Channel changes take effect on next `hermit-start` run. `channels.primary` and `default_chat_id` are consulted live by `scripts/resolve-outbound-channel.ts` on every proactive send — no restart needed for those keys."
 
 **If argument is "brief":**
 - If no channels configured: "Morning brief requires channels. Configure channels first with `/claude-code-hermit:hermit-settings channels`."

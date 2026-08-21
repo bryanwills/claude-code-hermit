@@ -159,7 +159,7 @@ it, or none.
 
 `config.artifacts.proposals`, state key `proposals`. Every open (`proposed`/`accepted`)
 proposal renders as a collapsed-by-default `<details class="proposal" id="prop-nnn">`
-(lowercased `PROP-NNN` prefix as the `id`, for deep-linking) — a one-line summary (status
+(lowercased `PROP-NNN` prefix as the `id`) — a one-line summary (status
 chip, id, title, created-date) that expands to the full body on click, the same pattern
 the dashboard already uses for its proposals card. A heading above the list shows the open
 count (e.g. "3 Open"); deferred/resolved/dismissed proposals stay one-line history entries
@@ -173,19 +173,22 @@ otherwise mint a new artifact version once a day even with zero activity; create
 is shown instead, keeping the hash purely activity-driven (the open count is likewise
 activity-driven, not date-driven, so it doesn't reintroduce that churn).
 
+The `id` is inert as a deep link, though: the claude.ai artifact viewer renders the page
+inside a sandboxed cross-origin iframe whose `src` carries no fragment — confirmed by
+navigating a published proposals page with `#prop-nnn` appended, where the top-level
+document held zero `prop-*` anchors and the iframe never received the fragment. The `id`
+stays in the markup anyway, since it's free and still resolves for a locally opened or
+remixed copy of the page.
+
 Refresh triggers: `proposal-create` (step 6), `proposal-act` (every accept/defer/
 dismiss/resolve flow, after its Respond step). Both refresh silently by default,
 matching the dashboard's existing no-URL-re-post convention — with one exception:
-`proposal-create`'s own announcement message carries a deep link to the just-created
-proposal, since that's the moment the operator is most likely to want to jump straight
-to it: `📎 <url>#prop-nnn ("PROP-NNN: <title>")`. The anchor lives on the `<details>`
-element itself, so a browser that auto-opens the `:target`ed `<details>` (current Chrome/
-Safari/Firefox) lands the operator directly on the expanded proposal. Where a viewer
-doesn't do that — the claude.ai artifact viewer's fragment behavior is unverified (no
-browser access at the time this was written, though the anchor element's presence in the
-rendered DOM was confirmed) — the link still scrolls to the correct proposal's collapsed
-summary line, which already shows the chip, id, and title; the section name is included in
-text unconditionally so the link is useful either way.
+when the refresh returns a URL, the flow that just created one or more proposals
+appends a single bare `📎 <url>` line to its own announcement, whether it created
+one proposal or several. No fragment, and no proposal id or title in the link text
+(`PROP-NNN` in an operator-facing message violates CLAUDE-APPEND.md § Channel voice).
+When no URL is returned — the page is disabled, publish is unauthorized, or the
+publish failed — the line is omitted entirely and the rest of the message is unaffected.
 
 ## Localization
 
