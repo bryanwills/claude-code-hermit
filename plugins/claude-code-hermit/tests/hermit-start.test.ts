@@ -935,6 +935,20 @@ describe('writeSettingsEnv', () => {
     expect(out).toContain('not valid JSON');
   });
 
+  // Only the WRITE is suppressed. The profile and the channel state dirs reach
+  // the session through process.env, not through this file — dropping those on a
+  // malformed file would silently boot an always-on hermit with its strict-profile
+  // deny patterns off.
+  test('malformed settings.local.json still exports the hook profile', () => {
+    fs.writeFileSync('.claude/settings.local.json', '{ "env": { oops }');
+    writeConfig({ always_on: true, env: { AGENT_HOOK_PROFILE: 'strict' } });
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config));
+    expect(profileEnv()).toBe('strict');
+    expect(fs.readFileSync('.claude/settings.local.json', 'utf-8')).toBe('{ "env": { oops }');
+  });
+
   test('a settings file parsing to a non-object is treated the same way', () => {
     fs.writeFileSync('.claude/settings.local.json', '"just a string"');
     writeConfig({});
@@ -979,6 +993,18 @@ describe('writeSettingsEnv voice carrier', () => {
     writeConfig({});
     captureLog(() => writeSettingsEnv(loadConfig()));
     expect(readSettings().outputStyle).toBe('Concise');
+  });
+
+  // hatch stamps the key into whichever scope it resolved. When that is the
+  // committed settings.json, seeding a local-scope duplicate here would outrank
+  // it forever — and permanently shadow any later /config change made there.
+  test('a key already set in project scope is not duplicated into local scope', () => {
+    seedVoiceFile();
+    fs.writeFileSync('.claude/settings.json', JSON.stringify({ outputStyle: 'hermit-voice' }));
+    writeSettings({});
+    writeConfig({});
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings()).not.toContainKey('outputStyle');
   });
 
   test('language mirrors config.json into the native key', () => {

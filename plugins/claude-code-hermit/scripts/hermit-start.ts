@@ -27,7 +27,7 @@ import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
-import { HERMIT_OUTPUT_STYLE, voiceFileExists } from './lib/voice';
+import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
 
 type Json = any;
 
@@ -678,12 +678,17 @@ function writeSettingsEnv(config: Json): void {
   const settingsPath = '.claude/settings.local.json';
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
 
-  let settings: Json;
+  // A file that exists but doesn't parse is NOT an empty file. Falling back to
+  // {} and writing would rewrite it from scratch and destroy whatever the
+  // operator has in it — including their own /config choices, which now live
+  // alongside the keys this function writes. Suppress only the WRITE: the rest
+  // of this function has process-scoped side effects (AGENT_HOOK_PROFILE and
+  // every channel's *_STATE_DIR reach the session through process.env, not
+  // through this file), and skipping those would silently drop the always-on
+  // hook profile and leave channel MCP servers without a state dir.
+  let settings: Json = {};
+  let skipWrite = false;
   if (fs.existsSync(settingsPath)) {
-    // A file that exists but doesn't parse is NOT an empty file. Falling back to
-    // {} here would rewrite it from scratch on the next line and destroy whatever
-    // the operator has in it — including their own /config choices, which now
-    // live alongside the keys this function writes. Bail instead.
     try {
       const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       if (!isDict(parsed)) throw new Error('not a JSON object');
@@ -692,10 +697,8 @@ function writeSettingsEnv(config: Json): void {
       console.log(
         `[hermit] WARNING: ${settingsPath} is not valid JSON — skipping boot settings write so the file is left intact. Fix or remove it, then restart.`,
       );
-      return;
+      skipWrite = true;
     }
-  } else {
-    settings = {};
   }
 
   if (!('env' in settings)) settings.env = {};
@@ -807,8 +810,12 @@ function writeSettingsEnv(config: Json): void {
   // actually present (an install that never adopted it stays untouched) and
   // only when nothing owns the key — a style the operator chose in /config is
   // their decision, and hermit-doctor reports the mismatch rather than boot
-  // silently reclaiming it every restart.
-  if (voiceFileExists() && settings.outputStyle === undefined) {
+  // silently reclaiming it every restart. The absence test is the EFFECTIVE
+  // style across both scopes, not just this file's key: hatch may have stamped
+  // the key into committed settings.json, and seeding a duplicate here would
+  // put a local-scope copy in front of it that outranks — and permanently
+  // shadows — any later /config change made at project scope.
+  if (!skipWrite && voiceFileExists() && resolveEffectiveStyle().value === null) {
     settings.outputStyle = HERMIT_OUTPUT_STYLE;
     console.log(`[hermit] Voice: outputStyle set to ${HERMIT_OUTPUT_STYLE} in ${settingsPath}`);
   }
@@ -822,6 +829,8 @@ function writeSettingsEnv(config: Json): void {
   const mirroredLanguage = sanitizeLanguage(config.language);
   if (mirroredLanguage) settings.language = mirroredLanguage;
   else delete settings.language;
+
+  if (skipWrite) return; // malformed file — warned above, left byte-for-byte intact
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 

@@ -5,7 +5,7 @@ description: Returns a twenty-six-check health report on the hermit installation
 
 # Hermit Doctor
 
-Runs twenty-five read-only health checks against the current hermit install (`channel-liveness`
+Runs twenty-six read-only health checks against the current hermit install (`channel-liveness`
 is the only one that performs outbound API calls — see Notes) and surfaces the summary. Safe
 to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
@@ -35,19 +35,19 @@ The optional flag changes its destination, not whether doctor notifies:
    JSON to stdout. It exits 0 unconditionally — on any internal failure the failing
    check reports `status: "fail"` in its own entry rather than crashing the report.
 
-2. Parse the JSON. For each of the twenty-five checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
-   `proposals`, `dependencies`, `version-currency`, `permissions`, `docker-security`, `archive`, `reflect`, `scheduler`, `watchdog`,
+2. Parse the JSON. For each of the twenty-six checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
+   `proposals`, `dependencies`, `version-currency`, `permissions`, `docker-security`, `archive`, `auto-close`, `reflect`, `scheduler`, `watchdog`,
    `context-age`, `opus-wake`, `routine-cost`, `heartbeat`, `routine-monitor`, `raw-size`, `credential-expiry`, `model-pricing-known`, `context-scan`, `voice-carrier`, `channel-liveness`), emit one line using this format:
    - `✓ <id> — <detail>` when `status: ok`
    - `⚠ <id> — <detail>` when `status: warn`
    - `✗ <id> — <detail>` when `status: fail`
 
 3. Append a summary section to `.claude-code-hermit/sessions/SHELL.md` under a new
-   `## Doctor Report (<ts>)` heading. Use the same twenty-five lines from step 2. Place it
+   `## Doctor Report (<ts>)` heading. Use the same twenty-six lines from step 2. Place it
    above the `## Monitoring` section so it sits with session-level context, not
    with monitoring chatter.
 
-4. Return the twenty-five lines to the caller. Cap total output at 30 lines.
+4. Return the twenty-six lines to the caller. Cap total output at 30 lines.
 
 5. **Escalation.** The script already computed this — do not recompute it, and do not write alert
    state yourself. Read the `escalation` object from the step-1 JSON:
@@ -84,10 +84,10 @@ The optional flag changes its destination, not whether doctor notifies:
 
 ## Silence policy
 
-- If every check is `ok`, return only: `All twenty-five checks passed.` Do not notify via
+- If every check is `ok`, return only: `All twenty-six checks passed.` Do not notify via
   channel (Tier 0). Still append to SHELL.md so the run is traceable. Clearing the stale
   `doctor:*` entries is the script's job, not yours — it happens on every run.
-- If any check is `warn` or `fail`, return the full twenty-five-line summary. Notification is
+- If any check is `warn` or `fail`, return the full twenty-six-line summary. Notification is
   governed by `escalation.new` (step 5), not a blanket per-run ping: only findings not yet
   confirmed delivered notify the selected route.
 

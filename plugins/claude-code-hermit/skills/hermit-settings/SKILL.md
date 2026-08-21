@@ -131,6 +131,7 @@ In a terminal session:
 - If the file doesn't exist yet, render it from `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` — same as hatch Phase 4b — then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style` and report whether it printed `applied` or `kept:<value>`.
 - Edit the prose in place. Keep the frontmatter and the Precedence section as they are, keep it about tone rather than work context, and keep it short — it costs tokens on every API call.
 - Tell the operator it takes effect in the next session (the system prompt is built at session start).
+- **Under `AGENT_HOOK_PROFILE=strict`** (Docker and always-on boots) the deny patterns block `Edit`/`Write` on this file, same as `OPERATOR.md`. Don't retry: show the operator the exact prose to use and let them edit `.claude/output-styles/hermit-voice.md` themselves.
 
 **If argument is "channels":**
 Show current channel configuration from `config.json` → `channels` object. The `channels.primary` key (if set) is a magic pointer to the preferred outbound channel, not a channel itself — display it on its own line above the channel list:

@@ -2054,9 +2054,9 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
     expect(missing).toEqual([]);
   });
 
-  test('counts read twenty-five, not fifteen', () => {
-    expect(skill).not.toContain('fifteen');
-    expect(skill.toLowerCase()).toContain('twenty-five');
+  test('counts read twenty-six, not twenty-five', () => {
+    expect(skill.toLowerCase()).not.toContain('twenty-five');
+    expect(skill.toLowerCase()).toContain('twenty-six');
   });
 });
 
