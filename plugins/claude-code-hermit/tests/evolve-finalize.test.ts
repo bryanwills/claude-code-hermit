@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { finalize } from '../scripts/evolve-finalize';
+import { finalize, writeSnapshot } from '../scripts/evolve-finalize';
 import { runScript, runPinnedScript } from './helpers/run';
 
 // Fake plugin root with plugin.json version "1.2.6" (shared, read-only across tests).
@@ -367,4 +367,200 @@ test('malformed sibling: goes to siblings_skipped, core still bumps, ok:true', w
   expect(result.errors).toEqual([]);
   expect(result.core.confirmed).toBe('1.2.6');
   expect(result.ok).toBe(true);
+}));
+
+// -------------------------------------------------------
+// 12. Audit attribution (issue #753) — the step-1 snapshot
+// -------------------------------------------------------
+
+const snapFile = (dir: string) => path.join(dir, 'state', 'evolve-config-snapshot.json');
+
+const ledgerRows = (dir: string): any[] => {
+  const file = path.join(dir, 'state', 'settings-audit.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+};
+
+const rowFor = (dir: string, dotted: string) => ledgerRows(dir).find((r) => r.path === dotted);
+
+/** Plant a snapshot directly, so `ts` and `to` can be aged or mismatched per test. */
+const plantSnapshot = (dir: string, snap: unknown) => {
+  fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+  fs.writeFileSync(snapFile(dir), JSON.stringify(snap));
+};
+
+test('snapshot mode writes {ts,to,config} at 0600', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+
+  expect(writeSnapshot(dir, '1.2.6').startsWith('OK|')).toBe(true);
+
+  const snap = JSON.parse(fs.readFileSync(snapFile(dir), 'utf8'));
+  expect(snap.to).toBe('1.2.6');
+  expect(snap.config.heartbeat.every).toBe('2h');
+  expect(Number.isNaN(new Date(snap.ts).getTime())).toBe(false);
+  // Config carries channel tokens and an env block — the snapshot copies them verbatim.
+  expect(fs.statSync(snapFile(dir)).mode & 0o777).toBe(0o600);
+}));
+
+test('snapshot mode is fail-open: no config, no snapshot, no throw', withProj(async (dir) => {
+  expect(writeSnapshot(dir, '1.2.6').startsWith('SKIP|')).toBe(true);
+  expect(fs.existsSync(snapFile(dir))).toBe(false);
+}));
+
+test('snapshot mode exits 0 through the CLI and leaves config.json untouched', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  const before = fs.readFileSync(path.join(dir, 'config.json'), 'utf8');
+
+  const r = await runPinnedScript('evolve-finalize.ts', dir, [dir, 'snapshot', '--core=1.2.6']);
+
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout.startsWith('OK|')).toBe(true);
+  expect(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).toBe(before);
+  expect(JSON.parse(fs.readFileSync(snapFile(dir), 'utf8')).to).toBe('1.2.6');
+}));
+
+test('whole-run: a step-2b migration write is attributed to hermit-evolve', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  writeSnapshot(dir, '1.2.6');
+  // Stand in for step 2b + step 9: the upgrade rewrites config.json by hand.
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(result.audit_scope).toBe('whole-run');
+
+  const migrated = rowFor(dir, 'heartbeat.every');
+  expect(migrated.old).toBe('2h');
+  expect(migrated.new).toBe('30m');
+  expect(migrated.actor).toBe('hermit-evolve');
+  expect(rowFor(dir, '_hermit_versions.claude-code-hermit').new).toBe('1.2.6');
+  // Single-use: a snapshot left behind is what the staleness window exists to contain.
+  expect(fs.existsSync(snapFile(dir))).toBe(false);
+}));
+
+test('version-only: no snapshot degrades to the pre-#753 behavior', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.audit_scope).toBe('version-only');
+  expect(rowFor(dir, 'heartbeat.every')).toBeUndefined();
+  expect(rowFor(dir, '_hermit_versions.claude-code-hermit').actor).toBe('evolve-finalize');
+}));
+
+test('version-only: snapshot taken for a different --core is not trusted', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  plantSnapshot(dir, { ts: new Date().toISOString(), to: '9.9.9', config: { heartbeat: { every: '2h' } } });
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.audit_scope).toBe('version-only');
+  expect(rowFor(dir, 'heartbeat.every')).toBeUndefined();
+  expect(fs.existsSync(snapFile(dir))).toBe(false);
+}));
+
+test('version-only: a snapshot older than 24h is not trusted', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  // The window this closes: an aborted run's snapshot plus operator edits since.
+  const stale = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  plantSnapshot(dir, { ts: stale, to: '1.2.6', config: { heartbeat: { every: '2h' } } });
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.audit_scope).toBe('version-only');
+  expect(rowFor(dir, 'heartbeat.every')).toBeUndefined();
+}));
+
+test('version-only: an unparseable snapshot is discarded, not fatal', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+  fs.writeFileSync(snapFile(dir), '{ not json');
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(result.audit_scope).toBe('version-only');
+  expect(fs.existsSync(snapFile(dir))).toBe(false);
+}));
+
+test('a stamp that does not move records no _hermit_versions row, migration rows still land', withProj(async (dir) => {
+  // The structural property that lets the audit call run ungated by coreMatched:
+  // the diff is against the post-write re-read, so a stamp that is not on disk
+  // cannot produce a row, however the bump went.
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.6"}}');
+  writeSnapshot(dir, '1.2.6');
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.6"}}');
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(rowFor(dir, 'heartbeat.every').actor).toBe('hermit-evolve');
+  expect(rowFor(dir, '_hermit_versions.claude-code-hermit')).toBeUndefined();
+}));
+
+test('a write that never lands records nothing at all', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  writeSnapshot(dir, '1.2.6');
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  // Block the atomic write: config.json.tmp already exists as a directory.
+  fs.mkdirSync(path.join(dir, 'config.json.tmp'));
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(false);
+  expect(result.errors.map((e: any) => e.code)).toContain('write_failed');
+  expect(result.audit_scope).toBe('version-only');
+  expect(ledgerRows(dir)).toEqual([]);
+  // The migration write is on disk with nothing to explain it — keep the snapshot
+  // so the retry below can still attribute it.
+  expect(fs.existsSync(snapFile(dir))).toBe(true);
+}));
+
+test('a failed run keeps the snapshot, so the retry still attributes the migration', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  writeSnapshot(dir, '1.2.6');
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  fs.mkdirSync(path.join(dir, 'config.json.tmp'));
+
+  expect(finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] }).ok).toBe(false);
+
+  fs.rmdirSync(path.join(dir, 'config.json.tmp'));
+  const retry = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(retry.ok).toBe(true);
+  expect(retry.audit_scope).toBe('whole-run');
+  expect(rowFor(dir, 'heartbeat.every').old).toBe('2h');
+  expect(rowFor(dir, 'heartbeat.every').actor).toBe('hermit-evolve');
+  expect(fs.existsSync(snapFile(dir))).toBe(false);
+}));
+
+test('snapshot mode SKIPs a foreign state dir instead of exiting non-zero', withProj(async (dir) => {
+  writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  const foreign = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-foreign-'));
+  try {
+    // Readable config, so the only reason to SKIP is the pin.
+    writeConfig(foreign, '{"_hermit_versions":{"claude-code-hermit":"9.9.9"}}');
+    const r = await runPinnedScript('evolve-finalize.ts', dir, [foreign, 'snapshot', '--core=1.2.6']);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.startsWith('SKIP|')).toBe(true);
+    expect(fs.existsSync(snapFile(foreign))).toBe(false);
+  } finally {
+    try { fs.rmSync(foreign, { recursive: true, force: true }); } catch {}
+  }
+}));
+
+test('secrets stay redacted through a whole-run diff', withProj(async (dir) => {
+  writeConfig(dir, '{"env":{"SOME_KEY":"old-value"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  writeSnapshot(dir, '1.2.6');
+  writeConfig(dir, '{"env":{"SOME_KEY":"new-value"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+
+  finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  const row = rowFor(dir, 'env.SOME_KEY');
+  expect(row.old).toBe('[set]');
+  expect(row.new).toBe('[set]');
+  expect(JSON.stringify(ledgerRows(dir))).not.toContain('new-value');
 }));

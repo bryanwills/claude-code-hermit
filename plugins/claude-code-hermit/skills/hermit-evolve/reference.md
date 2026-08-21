@@ -70,6 +70,14 @@ Parse stdout as JSON (the "plan"). The plan's `errors` array is the **sole error
 
 **Version check:** the plan reports `from`, `to`, `up_to_date`, and `work_pending`. If `work_pending` is `false` (core current AND no sibling gap, drift, path-unresolved, or warnings), report "You're up to date (v<to>). Nothing to upgrade." and stop. If `up_to_date` is `true` but `work_pending` is `true` (sibling-only work), announce: "Core is current (v<to>); processing sibling hermits." and run only Steps 7, 8, 9, and 10 — the core-content steps (2 through 6) have no pending work when core is current. (Sibling migrations and CLAUDE-APPEND sync happen inside Step 7.) Otherwise (core has a gap) announce: "Upgrading from v<from> to v<to>." and run all steps.
 
+**Snapshot the config for the audit ledger.** Once the version check above has decided the run proceeds (so a stop-here run writes nothing), record what `config.json` looked like before any migration touches it:
+
+```
+bun <plugin_root>/scripts/evolve-finalize.ts .claude-code-hermit snapshot --core=<to>
+```
+
+Steps 2b and 9 write `config.json` by hand; without this, the finalizer's audit `before` is taken after those writes and the ledger can only ever show the version stamp. It always exits 0 — if it prints `SKIP|…`, continue the upgrade anyway. The finalizer reports which happened as `audit_scope` in Step 9.
+
 ### 2. Present the changelog
 
 Present the plan's `changelog_slice` to the operator: "Here's what changed:" followed by the slice. It already contains only the entries in `(from, to]`, oldest-first — no full-file read.
@@ -246,4 +254,5 @@ where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.c
   - `<to>` is the plan's `to`. Add one `--sibling=<name>=<vNEW>` for each sibling hermit with a **version gap** that was upgraded in Step 7 (where `name` is the sibling's plugin name and `vNEW` is its `sibling.to`). Omit `--sibling` for no-gap siblings (no version to bump). Omit `--sibling` entirely if no siblings had a gap.
   - **When `plan.up_to_date` is `true` (core current, sibling-only run):** the plan's `to` is still used as `--core=<to>`. Here `to` equals the on-disk stamp, so evolve-finalize re-stamps the same version — a genuine no-op that keeps the finalizer as the single atomic writer. (This is only reached when core is *current*; the config-ahead case never gets here, because the stale-runtime check above stops the run before Step 2. The finalizer independently refuses a lower `--core` with `core_version_regression`.)
   - Parse stdout as JSON. The finalizer's `core.confirmed` is the **authoritative on-disk version** — use it as `vNEW` in the Step 10 report, NOT `plan.to`.
+  - `audit_scope` reports whether the Step 1 snapshot was usable: `whole-run` means this upgrade's config changes are attributed in the settings ledger, `version-only` means only the version stamp was recorded. Carry it into the Step 10 report. It is never a failure — a `version-only` upgrade succeeded, it just left less history behind.
   - If `core.matched` is `false` or `errors` is non-empty, the bump did not land: set the `Upgrade:` line in the Step 10 report to `blocked: config version bump failed (<joined errors>)` and stop.
