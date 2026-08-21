@@ -2,8 +2,10 @@
 // scripts/lib/dashboard.ts's render/hash-gate discipline (see docs/artifacts.md).
 // Open (proposed/accepted) proposals render as collapsed-by-default
 // <details class="proposal" id="prop-nnn"> — a one-line summary that expands to
-// full text on click, each anchored for deep-linking from channel messages;
-// deferred/resolved/dismissed proposals are one-line history entries, same bucket the
+// full text on click. The id is inert in the claude.ai artifact viewer (sandboxed
+// cross-origin iframe, no fragment reaches it) but is kept for a locally opened or
+// remixed copy of the page; deferred/resolved/dismissed proposals are one-line
+// history entries, same bucket the
 // dashboard already computes. Self-contained fragment — no
 // <!DOCTYPE>/<html>/<head>/<body> (Artifact tool wraps it).
 

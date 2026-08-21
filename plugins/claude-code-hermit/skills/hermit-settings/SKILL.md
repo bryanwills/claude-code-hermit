@@ -40,7 +40,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings reflection       — tune graduation threshold (graduation_min_sessions)
 /claude-code-hermit:hermit-settings push-notifications — toggle PushNotification doorbell (fires when no channel is enabled or a configured channel is unreachable)
 /claude-code-hermit:hermit-settings artifact-dashboard — toggle the Hermit Dashboard artifact (single-URL status/proposals/weekly-evolution page)
-/claude-code-hermit:hermit-settings artifact-proposals — toggle the Proposals-page artifact (full-text open-proposal page with deep-linked anchors)
+/claude-code-hermit:hermit-settings artifact-proposals — toggle the Proposals-page artifact (full-text open-proposal page)
 /claude-code-hermit:hermit-settings artifact-weekly-review — toggle the Weekly-review artifact (stable-URL passthrough of the compiled weekly report)
 /claude-code-hermit:hermit-settings artifact-authorization — record the unattended Artifact publish decision (applied by hermit-start at boot, not from this session)
 /claude-code-hermit:hermit-settings artifact-backend — where pages publish: `claude` (default), or the name of a connected MCP artifact server you registered yourself
