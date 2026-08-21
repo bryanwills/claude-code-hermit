@@ -492,6 +492,11 @@ function resolveStateDir(stateDir: string): string {
   return path.isAbsolute(stateDir) ? stateDir : path.join(process.cwd(), stateDir);
 }
 
+/** A channel's configured state_dir, or the conventional default. */
+function channelStateDir(name: string, cfg: Json): string {
+  return pyTruthy(cfg.state_dir) ? cfg.state_dir : path.join('.claude.local', 'channels', name);
+}
+
 /** Read one line from stdin (Python input(): prompt to stdout, EOF → ''). */
 function inputLine(promptText: string): string {
   process.stdout.write(promptText);
@@ -532,7 +537,7 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
 
       // Warn if the token file is missing — still add the channel so the
       // plugin can surface its own auth error.
-      const stateDir = 'state_dir' in chCfg ? chCfg.state_dir : `.claude.local/channels/${channel}`;
+      const stateDir = channelStateDir(channel, chCfg);
       if (!fs.existsSync(path.join(resolveStateDir(stateDir), '.env'))) {
         console.log(`[hermit] WARNING: channel "${channel}" has no token configured.`);
         console.log('[hermit]   Run /claude-code-hermit:channel-setup to add it.');
@@ -717,27 +722,25 @@ function writeSettingsEnv(config: Json): void {
   // plugin defaults to ~/.claude/channels/<plugin>/, which is lost on Docker
   // container restart.
   for (const [chName, chCfg] of iterChannelConfigs(config)) {
-    const stateDir = chCfg.state_dir;
-    if (pyTruthy(stateDir)) {
-      const key = `${chName.toUpperCase()}_STATE_DIR`;
-      // Skip a name that isn't a valid shell identifier — the tmux env file is
-      // sourced as `export <key>=...`, where the key cannot be quoted, so an
-      // invalid one aborts the boot and a hostile one could inject a command.
-      // The forwardVars loop in main() drops the same names for that reason.
-      if (!ENV_VAR_RE.test(key)) {
-        console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${key} not exported.`);
-        continue;
-      }
-      // Relative paths resolved against project root (cwd at boot).
-      settings.env[key] = resolveStateDir(stateDir);
-      // Both bare-host launches read the value from here: the tmux path copies
-      // it into the env file it sources, the no-tmux path inherits it via execvp.
-      // Truthiness, not presence: an empty ambient value (a profile leak, an unset
-      // compose interpolation) would otherwise win over the config path and hand
-      // the MCP server an empty state dir — an empty state dir is never intent.
-      if (!pyTruthy(process.env[key])) {
-        process.env[key] = settings.env[key]; // already-set (Docker/compose) wins
-      }
+    const stateDir = channelStateDir(chName, chCfg);
+    const key = `${chName.toUpperCase()}_STATE_DIR`;
+    // Skip a name that isn't a valid shell identifier — the tmux env file is
+    // sourced as `export <key>=...`, where the key cannot be quoted, so an
+    // invalid one aborts the boot and a hostile one could inject a command.
+    // The forwardVars loop in main() drops the same names for that reason.
+    if (!ENV_VAR_RE.test(key)) {
+      console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${key} not exported.`);
+      continue;
+    }
+    // Relative paths resolved against project root (cwd at boot).
+    settings.env[key] = resolveStateDir(stateDir);
+    // Both bare-host launches read the value from here: the tmux path copies
+    // it into the env file it sources, the no-tmux path inherits it via execvp.
+    // Truthiness, not presence: an empty ambient value (a profile leak, an unset
+    // compose interpolation) would otherwise win over the config path and hand
+    // the MCP server an empty state dir — an empty state dir is never intent.
+    if (!pyTruthy(process.env[key])) {
+      process.env[key] = settings.env[key]; // already-set (Docker/compose) wins
     }
   }
 
@@ -1071,14 +1074,15 @@ async function main(): Promise<void> {
   // *_STATE_DIR vars must be OS env because MCP servers (channel plugins)
   // inherit shell env but don't read settings.local.json.
   const forwardVars = ['CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY', TOKEN_ENV_VAR, 'AGENT_HOOK_PROFILE'];
-  // *_STATE_DIR vars must reach MCP servers via OS env — see writeSettingsEnv.
-  // The same identifier guard applies here: these become unquotable
-  // `export <key>=...` lines below, so an ambient var under an invalid name
-  // (compose `environment:`, an `env NAME=... hermit-start` wrapper) must not
-  // slip through and break the sourcing — or inject a command.
-  for (const [chName, chCfg] of iterChannelConfigs(config)) {
+  // *_STATE_DIR vars must reach MCP servers via OS env — writeSettingsEnv already
+  // hydrated process.env for every channel (default or explicit state_dir) above
+  // main()'s call to it, so the only filter needed here is the identifier guard:
+  // these become unquotable `export <key>=...` lines below, so an ambient var
+  // under an invalid name (compose `environment:`, an `env NAME=... hermit-start`
+  // wrapper) must not slip through and break the sourcing — or inject a command.
+  for (const [chName] of iterChannelConfigs(config)) {
     const key = `${chName.toUpperCase()}_STATE_DIR`;
-    if (pyTruthy(chCfg.state_dir) && ENV_VAR_RE.test(key)) {
+    if (ENV_VAR_RE.test(key)) {
       forwardVars.push(key);
     }
   }
