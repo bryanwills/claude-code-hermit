@@ -801,6 +801,19 @@ describe('writeSettingsEnv', () => {
     expect(readSettings().env['MS-TEAMS_STATE_DIR']).toBeUndefined();
   });
 
+  test('drops a *_STATE_DIR key no configured channel claims, and logs it', () => {
+    writeConfig({
+      channels: { discord: { enabled: true, state_dir: '/tmp/test-discord' } },
+    });
+    writeSettings({ env: { SLACK_STATE_DIR: '/tmp/stale-slack' } });
+    const config = loadConfig();
+    const { out } = captureLog(() => writeSettingsEnv(config));
+    const env = readSettings().env;
+    expect(env.SLACK_STATE_DIR).toBeUndefined();
+    expect(env.DISCORD_STATE_DIR).toBe('/tmp/test-discord');
+    expect(out).toContain('SLACK_STATE_DIR');
+  });
+
   test('existing *_STATE_DIR in env wins over config (Docker sets it via compose)', () => {
     writeConfig({
       channels: { discord: { enabled: true, state_dir: '/tmp/from-config' } },

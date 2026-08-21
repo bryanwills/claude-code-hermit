@@ -36,6 +36,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
+import { channelStateDirKey } from './lib/channel-config';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -380,12 +381,17 @@ switch (op) {
       console.error('channel-env requires <CHANNEL_UPPER> and <abs_state_dir> arguments');
       process.exit(1);
     }
+    const stateDirKey = channelStateDirKey(channel);
+    if (!stateDirKey) {
+      console.error(`channel-env: "${channel}" is not a valid env-var name — refusing to write a key hermit-start would never export`);
+      process.exit(1);
+    }
     settings.env ??= {};
     // Tokens must live only in .env — strip any stale *_BOT_TOKEN from settings.
     for (const key of Object.keys(settings.env)) {
       if (/_BOT_TOKEN$/.test(key)) delete settings.env[key];
     }
-    settings.env[`${channel}_STATE_DIR`] = stateDir;
+    settings.env[stateDirKey] = stateDir;
     break;
   }
 

@@ -1,6 +1,8 @@
 // Reading the channels{} block of config.json. Shared by the booter and doctor
 // so neither has to import the other.
 
+import { ENV_VAR_RE } from '../validate-config';
+
 type Json = any;
 
 /** Python-style truthiness: empty arrays/objects/strings are falsy. */
@@ -30,4 +32,18 @@ export function getEnabledChannels(config: Json): string[] {
     if (pyTruthy('enabled' in cfg ? cfg.enabled : true)) names.push(name);
   }
   return names;
+}
+
+/**
+ * `<NAME>_STATE_DIR` env key for a channel, or null when the name is not a
+ * valid shell identifier. Both bare-host boot paths write these as
+ * unquotable `export <key>=...` lines in a sourced env file, so an invalid
+ * name must never reach one — it would abort the boot, and a hostile one
+ * could inject a command. `apply-settings.ts`'s `channel-env` op must reject
+ * the same names at setup time rather than writing a key hermit-start will
+ * silently refuse to export.
+ */
+export function channelStateDirKey(chName: string): string | null {
+  const key = `${chName.toUpperCase()}_STATE_DIR`;
+  return ENV_VAR_RE.test(key) ? key : null;
 }

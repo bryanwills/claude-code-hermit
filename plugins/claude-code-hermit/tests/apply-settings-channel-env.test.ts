@@ -84,6 +84,16 @@ describe('apply-settings.ts channel-env', () => {
     expect(r.exitCode).not.toBe(0);
   });
 
+  test('refuses a channel name that is not a valid env-var identifier', async () => {
+    const dir = freshDir();
+    const file = seedSettings(dir, {});
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'channel-env', 'MS-TEAMS', '/abs/state/ms-teams'],
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(readSettings(file).env ?? {}).toEqual({});
+  });
+
   test('refuses to overwrite a malformed settings file', async () => {
     const dir = freshDir();
     const claude = path.join(dir, '.claude');
