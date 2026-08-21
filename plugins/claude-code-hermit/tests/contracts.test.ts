@@ -3081,7 +3081,11 @@ describe('proactive-notify unification contract', () => {
     const append = read(path.join(TEMPLATES, 'CLAUDE-APPEND.md'));
     expect(responder).toContain('channel-send.ts');
     expect(responder).toContain('--notice');
-    expect(append).toContain('channel-send.ts');
+    // The APPEND names the same script through bin/hermit-run rather than the
+    // `bun ${CLAUDE_PLUGIN_ROOT}/scripts/…` spelling the skill uses: the token
+    // is substituted at skill load and never in the operator's CLAUDE.md, which
+    // this file is copied verbatim into.
+    expect(append).toContain('hermit-run channel-send');
     expect(append).toContain('--notice');
   });
 });

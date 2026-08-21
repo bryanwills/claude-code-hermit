@@ -7,7 +7,7 @@
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runScript } from './helpers/run';
+import { runScript, runPinnedScript, type RunOptions } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
 import { startHttpStub } from './helpers/http-stub';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
@@ -16,6 +16,22 @@ import { channelHealthPath } from '../scripts/lib/channel-health';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
+
+// channel-send.ts pins its state dir to hermitDir(), so these tests need the
+// sanctioned absolute-AGENT_DIR override that runPinnedScript already owns for
+// this class of script. A call with no argv (the usage-error case) skips the pin
+// — its arity check fires first. Tests that pass a deliberately foreign state
+// dir call runScript directly, per that helper's own note.
+function runChannelSend(opts: RunOptions = {}) {
+  const { args = [], ...rest } = opts;
+  // The state dir is the first POSITIONAL, not args[0]: parseArgs pulls
+  // --tier/--notice out from anywhere in argv, so a flag-first call is legal and
+  // would otherwise pin AGENT_DIR to "--tier" and fail with a confusing exit 2.
+  const stateDir = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--tier');
+  return stateDir
+    ? runPinnedScript('channel-send.ts', stateDir, args, rest)
+    : runScript('channel-send.ts', opts);
+}
 
 function setupChannelWorkdir(telegramExtra: object = {}, topExtra: object = {}): Workdir {
   const wd = setupWorkdir();
@@ -34,7 +50,7 @@ describe('channel-send CLI', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), 'hello operator'],
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
       });
@@ -57,7 +73,7 @@ describe('channel-send CLI', () => {
     const wd = setupChannelWorkdir();
     try {
       const longText = 'x'.repeat(5000);
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), longText],
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
       });
@@ -73,7 +89,7 @@ describe('channel-send CLI', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '-'],
         stdin: 'from stdin',
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
@@ -90,7 +106,7 @@ describe('channel-send CLI', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '-'],
         stdin: '   \n  ',
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
@@ -108,7 +124,7 @@ describe('channel-send CLI', () => {
     stub.setStatus(400);
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), 'hello'],
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
       });
@@ -123,7 +139,7 @@ describe('channel-send CLI', () => {
   test('dead listener -> exit non-zero with a stderr reason', async () => {
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), 'hello'],
         env: { HERMIT_TELEGRAM_API_URL: 'http://127.0.0.1:1' },
       });
@@ -140,7 +156,7 @@ describe('channel-send CLI', () => {
       write(hermit(wd.dir, 'config.json'), JSON.stringify({
         channels: { telegram: { enabled: true, dm_channel_id: '12345', state_dir: '.claude.local/channels/telegram' } },
       }));
-      const r = await runScript('channel-send.ts', { args: [hermit(wd.dir), 'hello'] });
+      const r = await runChannelSend({ args: [hermit(wd.dir), 'hello'] });
       expect(r.exitCode).not.toBe(0);
       expect(r.stderr).toContain('missing_token');
     } finally {
@@ -152,7 +168,7 @@ describe('channel-send CLI', () => {
     const wd = setupWorkdir();
     try {
       write(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: {} }));
-      const r = await runScript('channel-send.ts', { args: [hermit(wd.dir), 'hello'] });
+      const r = await runChannelSend({ args: [hermit(wd.dir), 'hello'] });
       expect(r.exitCode).not.toBe(0);
       expect(r.stderr).toContain('no_reachable_channel');
     } finally {
@@ -164,7 +180,7 @@ describe('channel-send CLI', () => {
     const wd = setupWorkdir();
     try {
       // No config.json written at all.
-      const r = await runScript('channel-send.ts', { args: [hermit(wd.dir), 'hello'] });
+      const r = await runChannelSend({ args: [hermit(wd.dir), 'hello'] });
       expect(r.exitCode).not.toBe(0);
       expect(r.stderr).toContain('config_read_failed');
     } finally {
@@ -173,15 +189,65 @@ describe('channel-send CLI', () => {
   });
 
   test('missing arguments -> usage error, exit non-zero', async () => {
-    const r = await runScript('channel-send.ts', { args: [] });
+    const r = await runChannelSend({ args: [] });
     expect(r.exitCode).not.toBe(0);
+  });
+
+  // The state-dir pin. `Bash(bun */scripts/channel-send.ts*)` pre-approves every
+  // argument, so an unvalidated root let one allowed call send with *another*
+  // project's bot token to *that* project's chat. Both modes pin separately —
+  // covering each keeps a later edit from dropping one silently. Exit 2, not 1:
+  // this is "the caller got it wrong, nothing was sent", not a failed delivery.
+  for (const [mode, tail] of [['--tier', ['hello']], ['--notice', ['--notice']]] as const) {
+    test(`a foreign state dir is refused in ${mode} mode before anything is sent`, async () => {
+      const stub = startHttpStub();
+      const mine = setupChannelWorkdir();
+      const theirs = setupChannelWorkdir();
+      try {
+        // runScript, not runChannelSend: the whole point is an argv state dir
+        // that AGENT_DIR does not match, which the pinned wrapper would paper over.
+        const r = await runScript('channel-send.ts', {
+          args: [hermit(theirs.dir), ...tail],
+          stdin: '{"client":"x"}',
+          env: { AGENT_DIR: hermit(mine.dir), HERMIT_TELEGRAM_API_URL: stub.url },
+        });
+        expect(r.exitCode).toBe(2);
+        expect(r.stderr).toContain("state dir must be this project's");
+        expect(r.stdout.trim()).toBe('');
+        expect(stub.requests.length).toBe(0);
+      } finally {
+        stub.stop();
+        mine.cleanup();
+        theirs.cleanup();
+      }
+    });
+  }
+
+  // The production shape every caller actually uses — the watchdog passes a
+  // relative '.claude-code-hermit' resolved against its own cwd, and the skills
+  // pass the same literal from the project root. The pin must not reject it.
+  test('the literal .claude-code-hermit from the project root passes the pin', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const r = await runChannelSend({
+        args: ['.claude-code-hermit', 'hello'],
+        cwd: wd.dir,
+        env: { AGENT_DIR: hermit(wd.dir), HERMIT_TELEGRAM_API_URL: stub.url },
+      });
+      expect(r.exitCode).toBe(0);
+      expect(stub.requests.length).toBe(1);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
   });
 
   test('--tier maintainer routes to maintainer_channel_id when configured', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir({ maintainer_channel_id: '99999' });
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '--tier', 'maintainer', '-'],
         stdin: 'ops detail',
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
@@ -200,7 +266,7 @@ describe('channel-send CLI', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '--tier', 'maintainer', 'ops detail'],
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
       });
@@ -217,7 +283,7 @@ describe('channel-send CLI', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '--tier', 'bogus', 'hi'],
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
       });
@@ -384,7 +450,7 @@ describe('sendOperatorNotice tiering', () => {
 describe('channel-send CLI --notice', () => {
   const findings = (wd: Workdir) => fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf8');
   const runNotice = (wd: Workdir, payload: object | string, stub: { url: string }) =>
-    runScript('channel-send.ts', {
+    runChannelSend({
       args: [hermit(wd.dir), '--notice'],
       stdin: typeof payload === 'string' ? payload : JSON.stringify(payload),
       env: { HERMIT_TELEGRAM_API_URL: stub.url },
@@ -531,7 +597,7 @@ describe('channel-send CLI --notice', () => {
       channels: { telegram: { enabled: true } }, // enabled but unpaired: no dm_channel_id
     }));
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '--notice'],
         stdin: JSON.stringify({ client: 'PLAIN', maintainer: 'DETAIL' }),
       });
@@ -550,7 +616,7 @@ describe('channel-send CLI --notice', () => {
     const wd = setupWorkdir();
     write(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: {} }));
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '--notice'],
         stdin: JSON.stringify({ client: 'hello' }),
       });
@@ -636,7 +702,7 @@ describe('channel-send CLI --notice', () => {
   test('--notice and --tier together -> exit 1 usage error', async () => {
     const wd = setupChannelWorkdir();
     try {
-      const r = await runScript('channel-send.ts', {
+      const r = await runChannelSend({
         args: [hermit(wd.dir), '--notice', '--tier', 'client'],
         stdin: JSON.stringify({ client: 'x' }),
       });

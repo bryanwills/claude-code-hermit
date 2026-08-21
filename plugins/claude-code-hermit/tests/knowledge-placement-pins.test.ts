@@ -28,9 +28,12 @@ const proposalCreate = read('skills', 'proposal-create', 'SKILL.md');
 describe('CLAUDE-APPEND placement trigger', () => {
   const pins = [
     'Settled knowledge gets one authoritative home',
-    // the exact fallback-row call form — written outside any skill context, so
-    // the always-loaded block is its only carrier
-    'observations.ts observe .claude-code-hermit skill-preference-applied',
+    // The exact fallback-row call form — written outside any skill context, so
+    // the always-loaded block is its only carrier. That is also why it routes
+    // through bin/hermit-run: `${CLAUDE_PLUGIN_ROOT}` is substituted at skill
+    // load and never in the operator's CLAUDE.md, so the plugin-cache spelling
+    // left the model hand-deriving a path here.
+    'hermit-run observations observe .claude-code-hermit skill-preference-applied',
     'skill-preference:<skill>',
     'Never write settled content into OPERATOR.md',
   ];
