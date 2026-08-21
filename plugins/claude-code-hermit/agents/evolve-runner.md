@@ -77,6 +77,7 @@ Bin wrappers: <restored/replaced(.bak) | none>
 Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | n/a>
 Docker rebuild: <needed + order | base-patched | no>
 CLAUDE-APPEND: <updated | unchanged>
+Context reload: <required (comma-separated plugin names) | no>
 Sibling hermits: <one or more of the following per sibling, space-separated, or "none">
   <name vOLD->vNEW>           (confirmed by finalizer — only from siblings_confirmed)
   <name current>              (no version gap)

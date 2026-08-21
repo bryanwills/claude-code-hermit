@@ -70,6 +70,8 @@ Parse stdout as JSON (the "plan"). The plan's `errors` array is the **sole error
 
 **Version check:** the plan reports `from`, `to`, `up_to_date`, and `work_pending`. If `work_pending` is `false` (core current AND no sibling gap, drift, path-unresolved, or warnings), report "You're up to date (v<to>). Nothing to upgrade." and stop. If `up_to_date` is `true` but `work_pending` is `true` (sibling-only work), announce: "Core is current (v<to>); processing sibling hermits." and run only Steps 7, 8, 9, and 10 — the core-content steps (2 through 6) have no pending work when core is current. (Sibling migrations and CLAUDE-APPEND sync happen inside Step 7.) Otherwise (core has a gap) announce: "Upgrading from v<from> to v<to>." and run all steps.
 
+Before entering either the full or sibling-only path, initialize `context_reload_targets` as an empty ordered list. Add a plugin name only after its CLAUDE-APPEND write succeeds; Step 10 uses this list to distinguish instructions that changed on disk from drift or refresh work that was only reported.
+
 **Snapshot the config for the audit ledger.** Once the version check above has decided the run proceeds (so a stop-here run writes nothing), record what `config.json` looked like before any migration touches it:
 
 ```
@@ -190,7 +192,7 @@ If the plan's `claude_append_changed` is `false`, skip this step. If `true`, rea
 
 - **`claude_append_old_block` present** (marker found — replace case): the new content is the marker-onward portion of `CLAUDE-APPEND.md` — from the `<!-- claude-code-hermit: Session Discipline -->` marker through its closing `<!-- /claude-code-hermit: Session Discipline -->` marker when the template carries one, else to the end of the block (the leading `---` already sits above the marker in the target). Apply a targeted `Edit` to the target file with `old_string` = `claude_append_old_block` (the exact current block) and `new_string` = that marker-onward content. **Do not read the whole target file** — the exact `old_string` is supplied by the plan, and the `---` must not be duplicated.
 - **`claude_append_old_block` absent** (marker not found — append case): append the **full `CLAUDE-APPEND.md` including its leading `---`** to the target file (same as init — the `---` separates the project's content from the block).
-- Report what changed.
+- After the targeted Edit or append succeeds, add `claude-code-hermit` to `context_reload_targets`, then report what changed.
 
 ### 7. Hermit upgrades
 
@@ -205,7 +207,7 @@ For each entry in `plan.siblings`:
     - `sibling.claude_append_needs_render` → report `<name> block refresh deferred to /<name>:hatch (template requires rendering)`; apply no Edit. Core cannot render a template carrying `mode:` markers — that is the owning plugin's own hatch's job.
     - `sibling.claude_append_block_missing` → report `<name> block-missing — run /<name>:hatch to install it`; apply no Edit. **Never append a sibling's block** — core has no way to guarantee an append would render it the way the sibling's own hatch does.
     - `sibling.claude_append_ambiguous` → report `<name> block-ambiguous — the marker appears more than once, manual review needed`; apply no Edit.
-    - Otherwise: same replace procedure as Step 6, using `sibling.marker` and `sibling.claude_append_old_block`.
+    - Otherwise: same replace procedure as Step 6, using `sibling.marker` and `sibling.claude_append_old_block`. After the replacement succeeds, add `<name>` to `context_reload_targets`.
   - Collect the sibling name for the `--sibling=<name>=<to>` flag in Step 9.
 
 - **No version gap (`up_to_date == true`) + `claude_append_changed == true`:**
@@ -216,6 +218,10 @@ For each entry in `plan.siblings`:
     - Otherwise → `<name> block-drifted` — advisory note for the operator to review manually.
 
 - **No version gap + `claude_append_changed == false` (or absent):** report `<name> current`, skip. (`claude_append_needs_render` may also be set here — it is a static property of the sibling's template, not pending work; core only acts on it inside the version-gap branch above.)
+
+Keep `context_reload_targets` deduplicated in stable order (core first, then `plan.siblings` order). Never add a target for an unchanged block, a no-gap `block-drifted` advisory, `claude_append_needs_render`, `claude_append_block_missing`, or `claude_append_ambiguous`; none of those branches wrote project instructions.
+
+In the final report, emit `Context reload: no` when the list is empty. Otherwise emit `Context reload: required (<names>)`, joining `context_reload_targets` with `, `.
 
 If `plan.siblings_path_unresolved` is non-empty, report each as `<name> path-unresolved` (registered in `_hermit_versions` but not found in the project-effective plugin list).
 
