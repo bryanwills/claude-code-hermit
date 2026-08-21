@@ -16,6 +16,10 @@
 - Pause/resume/snooze and full status on a channel with no `allowed_users` now trust the pinned `default_chat_id` instead of the last-learned `dm_channel_id`, so control authority can no longer be acquired by messaging from a new chat. An explicit `allowed_users` list still wins, and a group/server home still trusts every member of that chat — set `allowed_users` there.
 - Chat-ID persistence is now solely the `PostToolUse` hook's job: `channel-responder` §1e no longer instructs a model-side `config.json` write, which had bypassed the hook's transcript-verified inbound gate and its maintainer-chat exclusion.
 
+### Fixed
+- `/channel-setup` now refuses a channel name that can't become a valid env-var identifier (e.g. a hyphenated one) instead of confirming a `*_STATE_DIR` key that boot would then silently refuse to export, leaving the channel's MCP server without its state dir.
+- Boot now drops `*_STATE_DIR` env keys that no configured channel claims, instead of leaving stale or invalid ones in `settings.local.json` indefinitely. Keys the operator set in `config.json`'s `env` block are left alone, and the sweep is skipped entirely when `config.json` fails to parse.
+
 ### Upgrade Instructions
 
 1. Read `.claude-code-hermit/config.json`. For each entry under `channels` (skip the `primary` key — it is a string pointer, not a channel), if the entry has a non-null `dm_channel_id` and no `default_chat_id`, set `default_chat_id` to that same value — **unless that `dm_channel_id` equals the same entry's `maintainer_channel_id`**, in which case leave `default_chat_id` absent and say so in your report (that chat is outbound-only; pinning it would send every briefing there permanently, since nothing re-learns this field). Leave every other field untouched. Re-runnable: an entry that already has the key is skipped.

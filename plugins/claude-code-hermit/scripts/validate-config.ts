@@ -3,6 +3,7 @@ import path from 'node:path';
 import { safeForLLM } from './lib/sanitize';
 import * as ENUM from './lib/settings/enums';
 import { validateExpectArtifact } from './lib/routines/run-record';
+import { ENV_VAR_RE } from './lib/channel-config';
 
 type Json = any;
 
@@ -36,7 +37,6 @@ const VALID_OPERATOR_PROFILE = ENUM.OPERATOR_PROFILE;
 const VALID_BUDGET_ACTION = ENUM.BUDGET_ACTION;
 const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
 const TIME_RE = /^\d{2}:\d{2}$/;
-const ENV_VAR_RE = /^[A-Z_][A-Z0-9_]*$/;
 // Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with lib/routines/due.ts.
 const ROUTINE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
 

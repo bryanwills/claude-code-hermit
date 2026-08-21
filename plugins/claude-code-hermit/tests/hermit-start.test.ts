@@ -825,6 +825,43 @@ describe('writeSettingsEnv', () => {
     expect(readSettings().env['MS-TEAMS_STATE_DIR']).toBeUndefined();
   });
 
+  test('drops a *_STATE_DIR key no configured channel claims, and logs it', () => {
+    writeConfig({
+      channels: { discord: { enabled: true, state_dir: '/tmp/test-discord' } },
+    });
+    writeSettings({ env: { SLACK_STATE_DIR: '/tmp/stale-slack' } });
+    const config = loadConfig();
+    const { out } = captureLog(() => writeSettingsEnv(config));
+    const env = readSettings().env;
+    expect(env.SLACK_STATE_DIR).toBeUndefined();
+    expect(env.DISCORD_STATE_DIR).toBe('/tmp/test-discord');
+    expect(out).toContain('SLACK_STATE_DIR');
+  });
+
+  // config.env is operator-owned and `_STATE_DIR` is not a reserved suffix
+  // there — sweeping it would delete-and-readd on every boot and the var would
+  // never reach the session.
+  test('sweep spares a *_STATE_DIR key the operator set in config.env', () => {
+    writeConfig({
+      env: { HERMIT_STATE_DIR: '/srv/hermit-state' },
+      channels: { discord: { enabled: true, state_dir: '/tmp/test-discord' } },
+    });
+    const config = loadConfig();
+    const { out } = captureLog(() => writeSettingsEnv(config));
+    expect(readSettings().env.HERMIT_STATE_DIR).toBe('/srv/hermit-state');
+    expect(out).not.toContain('Cleaned stale state-dir');
+  });
+
+  // loadConfig fails open to defaults on malformed JSON, so `channels` is empty
+  // — acting on that would strip every live channel's state dir.
+  test('sweep is skipped when config.json failed to parse', () => {
+    fs.writeFileSync('.claude-code-hermit/config.json', '{ "channels": { ');
+    writeSettings({ env: { DISCORD_STATE_DIR: '/tmp/live-discord' } });
+    const config = loadConfig();
+    captureLog(() => writeSettingsEnv(config));
+    expect(readSettings().env.DISCORD_STATE_DIR).toBe('/tmp/live-discord');
+  });
+
   test('existing *_STATE_DIR in env wins over config (Docker sets it via compose)', () => {
     writeConfig({
       channels: { discord: { enabled: true, state_dir: '/tmp/from-config' } },

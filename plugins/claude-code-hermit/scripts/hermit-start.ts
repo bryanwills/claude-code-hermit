@@ -24,8 +24,7 @@ import { clearStatusCache } from './lib/context-reset';
 import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-token';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { isContainer } from './lib/container';
-import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels } from './lib/channel-config';
-import { ENV_VAR_RE } from './validate-config';
+import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
 
 type Json = any;
@@ -721,17 +720,17 @@ function writeSettingsEnv(config: Json): void {
   // they don't read settings.local.json directly. Without *_STATE_DIR the
   // plugin defaults to ~/.claude/channels/<plugin>/, which is lost on Docker
   // container restart.
+  const claimedStateDirKeys = new Set<string>();
   for (const [chName, chCfg] of iterChannelConfigs(config)) {
     const stateDir = channelStateDir(chName, chCfg);
-    const key = `${chName.toUpperCase()}_STATE_DIR`;
-    // Skip a name that isn't a valid shell identifier — the tmux env file is
-    // sourced as `export <key>=...`, where the key cannot be quoted, so an
-    // invalid one aborts the boot and a hostile one could inject a command.
-    // The forwardVars loop in main() drops the same names for that reason.
-    if (!ENV_VAR_RE.test(key)) {
-      console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${key} not exported.`);
+    // Guard rationale: see channelStateDirKey in lib/channel-config.ts. The
+    // forwardVars loop in main() drops the same names for that reason.
+    const key = channelStateDirKey(chName);
+    if (!key) {
+      console.log(`[hermit] Warning: channel "${chName}" has no valid env-var name — ${chName.toUpperCase()}_STATE_DIR not exported.`);
       continue;
     }
+    claimedStateDirKeys.add(key);
     // Relative paths resolved against project root (cwd at boot).
     settings.env[key] = resolveStateDir(stateDir);
     // Both bare-host launches read the value from here: the tmux path copies
@@ -742,6 +741,30 @@ function writeSettingsEnv(config: Json): void {
     if (!pyTruthy(process.env[key])) {
       process.env[key] = settings.env[key]; // already-set (Docker/compose) wins
     }
+  }
+
+  // Drop *_STATE_DIR keys no configured channel claims — pre-guard cruft, or a
+  // channel that was removed or renamed since the key was written. (A merely
+  // disabled channel still claims its key: the loop above iterates every
+  // configured channel, enabled or not.) Two exemptions, both about not
+  // destroying state on someone else's behalf:
+  //   - keys the operator put in config.env, which was merged into settings.env
+  //     above — that block is operator-owned and `_STATE_DIR` is not a reserved
+  //     suffix there (`HERMIT_STATE_DIR` is a real one). Sweeping them would
+  //     delete-and-readd forever, and the var would never reach the session.
+  //   - everything, when config.json failed to parse: loadConfig fails open to
+  //     defaults, so `channels` is empty and every live channel would look
+  //     stale. Same reason the config write-back is gated on this flag.
+  const configEnvKeys = new Set(Object.keys(envVars));
+  const staleStateDirKeys = configReadFailed
+    ? []
+    : Object.keys(settings.env).filter(
+        (k) =>
+          k.endsWith('_STATE_DIR') && !claimedStateDirKeys.has(k) && !configEnvKeys.has(k),
+      );
+  for (const key of staleStateDirKeys) delete settings.env[key];
+  if (staleStateDirKeys.length) {
+    console.log(`[hermit] Cleaned stale state-dir vars from settings.local.json: ${staleStateDirKeys.join(', ')}`);
   }
 
   // Remove channel bot tokens — they must only live in
@@ -1076,13 +1099,11 @@ async function main(): Promise<void> {
   const forwardVars = ['CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY', TOKEN_ENV_VAR, 'AGENT_HOOK_PROFILE'];
   // *_STATE_DIR vars must reach MCP servers via OS env — writeSettingsEnv already
   // hydrated process.env for every channel (default or explicit state_dir) above
-  // main()'s call to it, so the only filter needed here is the identifier guard:
-  // these become unquotable `export <key>=...` lines below, so an ambient var
-  // under an invalid name (compose `environment:`, an `env NAME=... hermit-start`
-  // wrapper) must not slip through and break the sourcing — or inject a command.
+  // main()'s call to it, so the only filter needed here is the identifier guard.
+  // Guard rationale: see channelStateDirKey in lib/channel-config.ts.
   for (const [chName] of iterChannelConfigs(config)) {
-    const key = `${chName.toUpperCase()}_STATE_DIR`;
-    if (ENV_VAR_RE.test(key)) {
+    const key = channelStateDirKey(chName);
+    if (key) {
       forwardVars.push(key);
     }
   }
