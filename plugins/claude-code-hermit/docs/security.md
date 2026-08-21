@@ -64,18 +64,23 @@ The `rm` entries cover four flag orders (`-rf`, `-fr`, `-r -f`, `-f -r`) in both
       "Bash(*--no-verify*)",
       "Edit(*.claude-code-hermit/OPERATOR.md)",
       "Write(*.claude-code-hermit/OPERATOR.md)",
-      "Edit(.claude/settings.json)",
-      "Write(.claude/settings.json)",
-      "Edit(.claude/settings.local.json)",
-      "Write(.claude/settings.local.json)",
-      "Bash(*> .claude/settings.json*)",
-      "Bash(*> .claude/settings.local.json*)"
+      "Edit(*.claude/settings.json)",
+      "Write(*.claude/settings.json)",
+      "Edit(*.claude/settings.local.json)",
+      "Write(*.claude/settings.local.json)",
+      "Edit(*.claude/output-styles/hermit-voice.md)",
+      "Write(*.claude/output-styles/hermit-voice.md)",
+      "Bash(*> *.claude/settings.json*)",
+      "Bash(*> *.claude/settings.local.json*)",
+      "Bash(*> *.claude/output-styles/hermit-voice.md*)"
     ]
   }
 }
 ```
 
-Only the five `git`/`npm`/`--no-verify` entries reach the native `settings.json permissions.deny` array (via `apply-settings.ts deny hardened`) — `ssh`/`docker`/`kubectl` are valid in devops contexts on the host and deliberately excluded even from hardened mode, and the OPERATOR.md/`settings.json`/`settings.local.json` guards are enforced by the runtime hook (`AGENT_HOOK_PROFILE=strict`) only, since they protect files the hook itself reads at startup.
+Only the five `git`/`npm`/`--no-verify` entries reach the native `settings.json permissions.deny` array (via `apply-settings.ts deny hardened`) — `ssh`/`docker`/`kubectl` are valid in devops contexts on the host and deliberately excluded even from hardened mode, and the OPERATOR.md/`settings.json`/`settings.local.json`/voice-file guards are enforced by the runtime hook (`AGENT_HOOK_PROFILE=strict`) only, since they protect files the hook itself reads at startup.
+
+**Every path glob here needs its leading `*`.** Hooks receive an absolute `file_path` and the matcher anchors the pattern at both ends, so a bare `Edit(.claude/settings.json)` matches nothing a real tool call ever sends. The settings entries shipped without it and were inert until fixed; the same shape now covers `.claude/output-styles/hermit-voice.md`, which is guarded for the same reason OPERATOR.md is — it is loaded into the next session's system prompt, so an unattended session must not be able to rewrite how it talks.
 
 `/claude-code-hermit:docker-setup` applies both sets (default + always-on). `/claude-code-hermit:hatch` hardened mode applies both sets minus `docker/kubectl/ssh` (valid on host). Hatch minimal mode applies the default set only.
 

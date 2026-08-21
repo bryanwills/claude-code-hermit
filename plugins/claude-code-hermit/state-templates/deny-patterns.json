@@ -37,11 +37,14 @@
     "Bash(*--no-verify*)",
     "Edit(*.claude-code-hermit/OPERATOR.md)",
     "Write(*.claude-code-hermit/OPERATOR.md)",
-    "Edit(.claude/settings.json)",
-    "Write(.claude/settings.json)",
-    "Edit(.claude/settings.local.json)",
-    "Write(.claude/settings.local.json)",
-    "Bash(*> .claude/settings.json*)",
-    "Bash(*> .claude/settings.local.json*)"
+    "Edit(*.claude/settings.json)",
+    "Write(*.claude/settings.json)",
+    "Edit(*.claude/settings.local.json)",
+    "Write(*.claude/settings.local.json)",
+    "Edit(*.claude/output-styles/hermit-voice.md)",
+    "Write(*.claude/output-styles/hermit-voice.md)",
+    "Bash(*> *.claude/settings.json*)",
+    "Bash(*> *.claude/settings.local.json*)",
+    "Bash(*> *.claude/output-styles/hermit-voice.md*)"
   ]
 }

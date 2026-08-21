@@ -19,6 +19,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings              — show all current settings
 /claude-code-hermit:hermit-settings name          — set agent name
 /claude-code-hermit:hermit-settings language       — set preferred language
+/claude-code-hermit:hermit-settings voice          — edit how the hermit talks (terminal only)
 /claude-code-hermit:hermit-settings timezone       — set timezone
 /claude-code-hermit:hermit-settings escalation     — set escalation threshold
 /claude-code-hermit:hermit-settings sign-off       — set sign-off line
@@ -119,6 +120,17 @@ Run `settings-edit ... set language <value>`.
 Then re-sync the artifact-chrome translation table (the dashboard/proposals pages overlay `.claude-code-hermit/state/artifact-strings.json` per key over the English defaults):
 - New value is **not** `en`: emit `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <value> <current-ISO-timestamp>`, translate every `strings` value into that language (keep keys and `{placeholder}` tokens verbatim), and write `.claude-code-hermit/state/artifact-strings.json`.
 - New value is `en`: delete `.claude-code-hermit/state/artifact-strings.json` if it exists (absent file ⇒ English chrome).
+
+**If argument is "voice":**
+The hermit's tone lives in `.claude/output-styles/hermit-voice.md`, a native Claude Code output style loaded into the system prompt at session start.
+
+**Terminal-only.** On a channel-tagged turn, do not edit the file — reply that voice changes are made from a terminal session (`/claude-code-hermit:hermit-settings voice`) and stop. This file shapes every future session's system prompt, so it is not something a remote message gets to rewrite.
+
+In a terminal session:
+- Show the current voice prose (skip the frontmatter and the Precedence section) and ask what should change.
+- If the file doesn't exist yet, render it from `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` — same as hatch Phase 4b — then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style` and report whether it printed `applied` or `kept:<value>`.
+- Edit the prose in place. Keep the frontmatter and the Precedence section as they are, keep it about tone rather than work context, and keep it short — it costs tokens on every API call.
+- Tell the operator it takes effect in the next session (the system prompt is built at session start).
 
 **If argument is "channels":**
 Show current channel configuration from `config.json` → `channels` object. The `channels.primary` key (if set) is a magic pointer to the preferred outbound channel, not a channel itself — display it on its own line above the channel list:

@@ -26,6 +26,8 @@ import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
+import { sanitizeLanguage } from './lib/operator-language';
+import { HERMIT_OUTPUT_STYLE, voiceFileExists } from './lib/voice';
 
 type Json = any;
 
@@ -677,9 +679,22 @@ function writeSettingsEnv(config: Json): void {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
 
   let settings: Json;
-  try {
-    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-  } catch {
+  if (fs.existsSync(settingsPath)) {
+    // A file that exists but doesn't parse is NOT an empty file. Falling back to
+    // {} here would rewrite it from scratch on the next line and destroy whatever
+    // the operator has in it — including their own /config choices, which now
+    // live alongside the keys this function writes. Bail instead.
+    try {
+      const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      if (!isDict(parsed)) throw new Error('not a JSON object');
+      settings = parsed;
+    } catch {
+      console.log(
+        `[hermit] WARNING: ${settingsPath} is not valid JSON — skipping boot settings write so the file is left intact. Fix or remove it, then restart.`,
+      );
+      return;
+    }
+  } else {
     settings = {};
   }
 
@@ -787,6 +802,26 @@ function writeSettingsEnv(config: Json): void {
   } else {
     delete settings.sandbox;
   }
+
+  // Voice carrier. Seed the style key only when the hermit's voice file is
+  // actually present (an install that never adopted it stays untouched) and
+  // only when nothing owns the key — a style the operator chose in /config is
+  // their decision, and hermit-doctor reports the mismatch rather than boot
+  // silently reclaiming it every restart.
+  if (voiceFileExists() && settings.outputStyle === undefined) {
+    settings.outputStyle = HERMIT_OUTPUT_STYLE;
+    console.log(`[hermit] Voice: outputStyle set to ${HERMIT_OUTPUT_STYLE} in ${settingsPath}`);
+  }
+
+  // Language mirror. config.json stays authoritative — it is what the
+  // deterministic senders (watchdog, cost alerts, deny notices) localize from,
+  // outside any session. This derives the native key so the main session also
+  // gets it from the system prompt instead of session-start context alone.
+  // Sanitized because the value reaches a prompt and `hermit-settings language`
+  // can be driven from a channel turn.
+  const mirroredLanguage = sanitizeLanguage(config.language);
+  if (mirroredLanguage) settings.language = mirroredLanguage;
+  else delete settings.language;
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 

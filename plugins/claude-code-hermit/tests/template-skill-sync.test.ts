@@ -131,12 +131,15 @@ describe('.worktreeinclude template', () => {
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('#'));
 
-  test('template contains exactly the four allowed paths', () => {
+  // The voice file is gitignored, so a worktree gets no copy from git — without
+  // this entry a worktree session would silently lose the hermit's voice.
+  test('template contains exactly the five allowed paths', () => {
     expect(effectivePaths()).toEqual([
       '.claude-code-hermit/OPERATOR.md',
       '.claude-code-hermit/config.json',
       '.claude-code-hermit/bin/hermit-run',
       '.claude-code-hermit/compiled/',
+      '.claude/output-styles/hermit-voice.md',
     ]);
   });
 

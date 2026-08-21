@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- The hermit's tone now lives in `.claude/output-styles/hermit-voice.md`, a native Claude Code output style, instead of prose inside `OPERATOR.md`. Claude Code loads it into the system prompt at session start, so voice holds for the whole session and survives compaction. `hatch` writes it from the comms-style answer and points `outputStyle` at it; edit it later with `/claude-code-hermit:hermit-settings voice` (terminal only).
+- `hermit-doctor` gains a `voice-carrier` check: it warns when the style file and the `outputStyle` key disagree, including when a `/config` pick in `settings.local.json` outranks a hermit key in committed `settings.json`. A style you chose yourself is reported, never overwritten.
+- Boot mirrors `config.json` `language` into the native `language` settings key, so the main session gets it from the system prompt too. `config.json` stays the place to change it (`/claude-code-hermit:hermit-settings language`) — the deterministic senders read from there.
 - Settings changes are now recorded in `state/settings-audit.jsonl` — one redacted row per changed value, with who changed it (operator edit, an upgrade, learned channel id, boot flip, permissions sync) and when. Credential-bearing keys and everything under `env.` record presence only, never values.
 - `/claude-code-hermit:hermit-evolve` snapshots `config.json` before running a version's migrations, so a setting an upgrade adds or rewrites is recorded as an upgrade change rather than going unattributed. When the snapshot is missing the upgrade still succeeds and reports `Audit scope: version-only`, rather than leaving the gap silent.
 - `/claude-code-hermit:hermit-settings history [setting]` prints recent recorded changes; `/claude-code-hermit:recall` answers "did something change my settings?" from the same ledger.
@@ -18,6 +21,7 @@
 - Chat-ID persistence is now solely the `PostToolUse` hook's job: `channel-responder` §1e no longer instructs a model-side `config.json` write, which had bypassed the hook's transcript-verified inbound gate and its maintainer-chat exclusion.
 
 ### Fixed
+- The `Edit`/`Write` deny patterns for `.claude/settings.json` and `.claude/settings.local.json` never matched: hooks receive an absolute path and the patterns lacked the leading `*` their `OPERATOR.md` counterparts have, so an always-on session's settings files were unprotected. They now match, along with the hermit's voice file.
 - `/channel-setup` now refuses a channel name that can't become a valid env-var identifier (e.g. a hyphenated one) instead of confirming a `*_STATE_DIR` key that boot would then silently refuse to export, leaving the channel's MCP server without its state dir.
 - Boot now drops `*_STATE_DIR` env keys that no configured channel claims, instead of leaving stale or invalid ones in `settings.local.json` indefinitely. Keys the operator set in `config.json`'s `env` block are left alone, and the sweep is skipped entirely when `config.json` fails to parse.
 
@@ -27,6 +31,8 @@
 2. In your report, name the chat id you copied for each channel. Proactive sends are pinned to it from now on, and the copy cannot tell an operator's normal chat from one they happened to message from last — so this is the operator's chance to spot a wrong home.
 3. Tell the operator, once, that briefings and notices are now pinned to that chat: messaging from another chat gets answered there but no longer moves them, and moving them is a terminal setting (`/claude-code-hermit:hermit-settings channels` → `edit <name>` → `briefing_chat`).
 4. Nothing breaks if this migration is skipped — resolution falls back to `dm_channel_id` until the key exists.
+5. **Voice file — announce, do not create.** Do NOT write `.claude/output-styles/hermit-voice.md`, do NOT run the `output-style` op, and do NOT edit `OPERATOR.md`. This one feature is adopt-on-request rather than on-by-default because the file becomes part of the system prompt and its content is the operator's own words: `OPERATOR.md` has no required structure, so any attempt to lift existing comms-style prose out of it would be a guess, and a guess about tone is worse than leaving tone where it already works. Until the operator adopts it, behavior is unchanged — boot writes no key while the file is absent.
+6. Tell the operator, once, that how you talk to them can now live in a file that Claude Code loads into the system prompt, so it holds all session instead of fading as context fills, and that running `/claude-code-hermit:hermit-settings voice` from a terminal session sets it up from their current preferences. Mention that their existing `OPERATOR.md` comms-style wording keeps working until they do, and that once the voice file exists you'll offer to trim the now-duplicated wording out of `OPERATOR.md` (as a diff, for their confirmation — never autonomously).
 - `/permission-mode <mode>` from a trusted channel switches the running session's permission mode, joining `/model`, `/effort`, `/compact` and `/clear`. Accepts `default`, `acceptEdits` and `auto`; `plan`, `bypassPermissions` and `dontAsk` are refused with a reason. Applied by driving Claude Code's Shift+Tab cycle and reading the status bar back, so the next prompt reports the mode the session actually landed in. Session-scoped — a restart re-asserts `config.permission_mode`.
 
 ### Fixed

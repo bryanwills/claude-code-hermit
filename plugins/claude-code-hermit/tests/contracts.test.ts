@@ -2030,11 +2030,11 @@ const DOCTOR_CHECK_IDS = [
   'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
   'permissions', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age',
   'opus-wake', 'routine-cost', 'heartbeat', 'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known',
-  'context-scan', 'channel-liveness',
+  'context-scan', 'voice-carrier', 'channel-liveness',
 ];
 
 describe('doctor report contract (PROP-018 count pin)', () => {
-  test('report emits exactly the 25 pinned check ids, in order', withTmpdir(async (dir) => {
+  test('report emits exactly the 26 pinned check ids, in order', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     const report = await runDoctorCheck(dir);
     expect((report.checks ?? []).map((c: any) => c.id)).toEqual(DOCTOR_CHECK_IDS);
@@ -3017,6 +3017,84 @@ describe('chat voice contract', () => {
   test('hermit-doctor/SKILL.md channel example contains no slash command', () => {
     const doctor = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
     expect(doctor).not.toMatch(/then run \/channel-setup/);
+  });
+});
+
+// ============================================================
+// Voice-carrier contract
+//
+// The hermit's tone rides in the SYSTEM PROMPT via a native Claude Code output
+// style, not in session-start context. That only works if the file Claude Code
+// loads carries exact frontmatter — a wrong `name` or a missing
+// keep-coding-instructions silently changes what the operator gets (no style, or
+// a hermit stripped of its engineering instructions). Hence verbatim assertions.
+// ============================================================
+
+describe('voice carrier contract', () => {
+  const voice = () => read(path.join(TEMPLATES, 'hermit-voice.md.template'));
+
+  test('template frontmatter names the style and keeps coding instructions', () => {
+    const text = voice();
+    expect(text.startsWith('---\n')).toBe(true);
+    const frontmatter = text.slice(4, text.indexOf('\n---', 4));
+    expect(frontmatter).toContain('name: hermit-voice');
+    expect(frontmatter).toContain('keep-coding-instructions: true');
+    expect(frontmatter).toContain('description:');
+  });
+
+  test('template carries the prose placeholder and the precedence rule', () => {
+    const text = voice();
+    expect(text).toContain('{{VOICE_PROSE}}');
+    expect(text).toContain(
+      'Project security, routing, approval, and audience rules take precedence',
+    );
+  });
+
+  test('channel routing policy stays in CLAUDE-APPEND.md, not the voice file', () => {
+    // The voice file is operator-owned tone. Channel voice/routing is plugin
+    // policy with its own home and its own contract test above — duplicating it
+    // here would give the operator an editable copy of a non-negotiable rule.
+    const text = voice();
+    expect(text).not.toContain('maintainer_channel_id');
+    expect(text).not.toContain('PROP-NNN');
+  });
+
+  test('OPERATOR.md template points tone at the voice file instead of owning it', () => {
+    const operator = read(path.join(TEMPLATES, 'OPERATOR.md'));
+    expect(operator).toContain('.claude/output-styles/hermit-voice.md');
+    expect(operator).not.toContain('Comms style:');
+  });
+
+  // The file feeds the next session's system prompt, so a remote message must
+  // not be able to rewrite it — the same reasoning that keeps OPERATOR.md and
+  // the settings files off the channel path.
+  test('hermit-settings keeps the voice operation terminal-only', () => {
+    const settings = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
+    expect(settings).toContain('**If argument is "voice":**');
+    expect(settings).toContain('Terminal-only.');
+  });
+
+  test('hatch routes the comms-style answer to the voice file, not OPERATOR.md', () => {
+    const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
+    expect(hatch).toContain('hermit-voice.md.template');
+    expect(hatch).toContain('apply-settings.ts <resolved-settings-file> output-style');
+  });
+
+  // The voice file is operator-curated and gitignored — which is exactly the
+  // combination that falls through every lifecycle pass unless each one names
+  // it: git won't carry it, so the worktree and migrate paths must.
+  test('the voice file is gitignored, worktree-included and marked must-migrate', () => {
+    expect(read(path.join(TEMPLATES, 'GITIGNORE-APPEND.txt')))
+      .toContain('.claude/output-styles/hermit-voice.md');
+    expect(read(path.join(TEMPLATES, 'WORKTREEINCLUDE-APPEND.txt')))
+      .toContain('.claude/output-styles/hermit-voice.md');
+
+    const migrate = read(path.join(SKILLS, 'migrate', 'SKILL.md'));
+    const row = migrate
+      .split('\n')
+      .find((l) => l.includes('output-styles/hermit-voice.md') && l.includes('|'));
+    expect(row).toBeDefined();
+    expect(row).toContain('MUST_MIGRATE');
   });
 });
 
