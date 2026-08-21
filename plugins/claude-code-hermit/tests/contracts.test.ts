@@ -1514,6 +1514,7 @@ describe('gate-agent memory contract', () => {
 
 describe('hermit-evolve delegation contract', () => {
   const skill = read(path.join(SKILLS, 'hermit-evolve', 'SKILL.md'));
+  const reference = read(path.join(SKILLS, 'hermit-evolve', 'reference.md'));
 
   test('SKILL.md dispatches evolve-runner fully-qualified', () => {
     expect(skill).toContain('claude-code-hermit:evolve-runner');
@@ -1549,6 +1550,45 @@ describe('hermit-evolve delegation contract', () => {
     const block = (text: string) => extractBlock(text, 'Upgrade: vOLD -> vNEW', '--- end ---');
     const agent = read(path.join(AGENTS, 'evolve-runner.md'));
     expect(block(agent)).toBe(block(skill));
+  });
+
+  test('report carries successful CLAUDE-APPEND writes into the context-reload notice', () => {
+    expect(skill).toContain('Context reload: <required (comma-separated plugin names) | no>');
+    expect(reference).toContain('initialize `context_reload_targets` as an empty ordered list');
+    expect(reference).toContain('After the targeted Edit or append succeeds, add `claude-code-hermit`');
+    expect(reference).toContain('After the replacement succeeds, add `<name>`');
+    expect(reference).toContain('emit `Context reload: no` when the list is empty');
+    expect(reference).toContain('emit `Context reload: required (<names>)`');
+  });
+
+  test('context reload is not requested for CLAUDE-APPEND branches that do not write', () => {
+    expect(reference).toContain('Never add a target for an unchanged block');
+    for (const branch of [
+      'block-drifted',
+      'claude_append_needs_render',
+      'claude_append_block_missing',
+      'claude_append_ambiguous',
+    ]) {
+      expect(reference).toContain(branch);
+    }
+  });
+
+  test('evolve-runner keeps Context reload alive on a blocked report', () => {
+    const agent = read(path.join(AGENTS, 'evolve-runner.md'));
+    expect(agent).toContain('except the `Context reload:` line');
+    expect(skill).toContain('Deliver it on a `blocked:` report too');
+  });
+
+  test('an unchanged sibling CLAUDE-APPEND block is reported without an Edit or reload target', () => {
+    expect(reference).toContain('`sibling.claude_append_changed !== true` → report `<name> block current`');
+    expect(reference).toContain('apply no Edit and add no reload target');
+  });
+
+  test('context-reload notice names every supported reload path and rejects plugin reload', () => {
+    expect(skill).toContain('Run `/compact` to load them now');
+    expect(skill).toContain('`/clear` or restarting the Claude session also works');
+    expect(skill).toContain('`/reload-plugins` alone does not reload CLAUDE.md');
+    expect(skill).toContain('Never issue `/compact`, `/clear`, or a restart on the operator\'s behalf');
   });
 
   test('evolve-runner reads reference.md, not SKILL.md, for steps 0-9', () => {

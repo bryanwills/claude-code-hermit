@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `/claude-code-hermit:hermit-evolve` now tells the operator to reload project context after it refreshes a core or downstream CLAUDE-APPEND block, recommending `/compact` while naming `/clear` or a Claude session restart as alternatives; `/reload-plugins` alone is no longer implied to be sufficient.
+
 ## [1.2.43] - 2026-08-21
 
 ### Added
