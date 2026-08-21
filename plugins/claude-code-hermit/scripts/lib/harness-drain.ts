@@ -3,12 +3,47 @@
 // spawning the whole Stop hook.
 
 import { readRuntimeJson } from './runtime';
-import { sendKeys, tmuxSessionAlive } from './tmux';
+import { capturePane, paneModeLine, sendKeys, tmuxSessionAlive } from './tmux';
 import { applyContextReset } from './context-reset';
-import { clearPendingCommand, readPendingCommand, renderCommand, writeSwitchVerify } from './harness-command';
+import { clearPendingCommand, normalizePermissionMode, readPendingCommand, renderCommand, writeSwitchVerify } from './harness-command';
+import type { PendingCommand } from './harness-command';
 import { currentHHMMOrUTC } from './time';
 import { readSettledConfig } from './config-read';
 import path from 'node:path';
+
+/**
+ * Hand a permission-mode switch to the detached cycler.
+ *
+ * The preconditions checked here are the ones that are cheaper to answer before spawning:
+ * the pane must be readable and must currently show a mode. A null read also covers the
+ * case that matters most — while any dialog is open the status bar is off-screen, so an
+ * unreadable mode is exactly the state in which nothing should be typed at all.
+ *
+ * The pending marker is deliberately left in place: the cycler clears it once its first
+ * keystroke lands, so a helper that dies before touching the pane leaves the request for
+ * the next turn to retry, the same contract sendKeys gives the typed commands.
+ */
+function deliverPermissionMode(hermitRoot: string, sessionName: string, pending: PendingCommand): void {
+  const target = pending.arg ? normalizePermissionMode(pending.arg) : null;
+  if (!target) return;
+
+  const pane = capturePane(sessionName);
+  const current = pane === null ? null : paneModeLine(pane);
+  if (!current) {
+    console.error('[stop-pipeline] harness-command: cannot read the permission mode from the pane — marker kept for retry');
+    return;
+  }
+
+  const helper = path.join(import.meta.dir, '..', 'cycle-permission-mode.ts');
+  const child = Bun.spawn([process.execPath, helper, sessionName, target, hermitRoot], {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+    env: process.env,
+  });
+  child.unref();
+  console.error(`[stop-pipeline] harness-command: cycling ${current} → ${target} (requested by ${pending.by})`);
+}
 
 /**
  * Deliver a pending channel-requested harness command into the pane.
@@ -46,6 +81,16 @@ export function drainHarnessCommand(hermitRoot: string): void {
   if (!sessionName || !tmuxSessionAlive(sessionName)) return;
 
   const text = renderCommand(pending);
+
+  // A permission mode is not typed — Claude Code has no slash command that sets one, so
+  // the text would land as a prompt. It is reached by driving the same Shift+Tab cycle a
+  // human uses, which needs a pane that can be read between keystrokes; that belongs in a
+  // detached helper for the same reason the /model confirmation does (Claude renders
+  // nothing until this hook returns).
+  if (pending.command === '/permission-mode') {
+    deliverPermissionMode(hermitRoot, sessionName, pending);
+    return;
+  }
 
   if (!sendKeys(sessionName, text)) {
     console.error(`[stop-pipeline] harness-command: tmux refused "${text}" — marker kept for retry`);

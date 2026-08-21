@@ -13,6 +13,7 @@
 
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { PERMISSION_MODE } from './settings/enums';
 
 type Json = any;
 
@@ -88,6 +89,66 @@ export function sendEnter(sessionName: string, transport: Transport = HOST): boo
   if (!sessionName) return false;
   const submitted = runTmux(transport, ['send-keys', '-t', sessionName, 'Enter']);
   return !submitted.error && submitted.status === 0;
+}
+
+/**
+ * Send one named key (tmux key-name form, e.g. `BTab`) with no trailing Enter.
+ *
+ * sendKeys below cannot express this: it forces `-l` (literal), so a key name would be
+ * typed as its own characters, and it always submits afterwards. Callers here are
+ * driving the TUI's own keybindings rather than typing a prompt.
+ *
+ * The letters-only shape check is the barrier, not a key allow-list: it keeps the value
+ * from carrying an escape sequence or literal text into the pane, and callers are trusted
+ * internal code (channel-supplied values never reach this).
+ */
+export function sendKey(sessionName: string, keyName: string, transport: Transport = HOST): boolean {
+  if (!sessionName || !/^[A-Za-z]+$/.test(keyName)) return false;
+  const sent = runTmux(transport, ['send-keys', '-t', sessionName, keyName]);
+  return !sent.error && sent.status === 0;
+}
+
+/**
+ * Claude Code's status-bar phrase for each permission mode, keyed by config value.
+ *
+ * Probed live on CC 2.1.238 — the phrase is stable but what surrounds it is not: the
+ * suffix varies with session state (`(shift+tab to cycle)` is absent on manual mode, and
+ * trailing segments like `· 2 monitors · ← for agents` appear on a busy hermit), so only
+ * the phrase itself may be matched.
+ */
+const MODE_PHRASES: Record<(typeof PERMISSION_MODE)[number], string> = {
+  auto: 'auto mode on',
+  default: 'manual mode on',
+  acceptEdits: 'accept edits on',
+  plan: 'plan mode on',
+  bypassPermissions: 'bypass permissions on',
+  dontAsk: "don't ask on",
+};
+
+const MODE_SCAN_LINES = 4;
+
+/**
+ * Read the session's active permission mode out of a captured pane, or null.
+ *
+ * Scans the last few nonblank rows rather than the final one: on a production hermit an
+ * artifact-links footer renders BELOW the status bar (probed on the fleet), so a
+ * last-line-only match reports nothing there. Null on no match and on a contradictory
+ * one — a caller acting on a misread mode would cycle the session somewhere the operator
+ * did not ask for, which is strictly worse than reporting that the pane was unreadable.
+ *
+ * Null is also the guard against acting while a dialog is up: a dialog terminates the
+ * visible content, so the status bar falls outside the scan window and no mode is
+ * returned (same property anchoredPaneTail relies on).
+ */
+export function paneModeLine(paneContent: string): string | null {
+  const lines = paneContent.split('\n').filter((line) => line.trim() !== '');
+  const tail = lines.slice(-MODE_SCAN_LINES).join('\n').toLowerCase();
+
+  const matched = Object.entries(MODE_PHRASES)
+    .filter(([, phrase]) => tail.includes(phrase))
+    .map(([mode]) => mode);
+
+  return matched.length === 1 ? matched[0] : null;
 }
 
 /**
