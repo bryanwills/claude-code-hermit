@@ -34,11 +34,11 @@ Whatever model your Claude Code instance uses by default. Override with `/hermit
 
 Depends on usage. Key cost drivers:
 
-- **Heartbeat interval** — 5m with Opus is expensive; 2h is the default and usually sufficient.
+- **Heartbeat interval** — 5m with Opus is expensive; `30m` is the default and usually sufficient.
 - **Autocompact threshold** — default 65% keeps context lean.
 - **Thinking tokens** — capped at 10K by default.
 
-Set a per-session budget with `/hermit-settings budget`. A typical interactive session costs $1-5. Always-on agents with 2h heartbeat (the default) are significantly cheaper than shorter intervals.
+Set a per-session budget with `/hermit-settings budget`. A typical interactive session costs $1-5. Always-on agents are significantly cheaper than interactive use: quiet heartbeat polls never reach the model, so the interval itself costs nothing when there is nothing to do.
 
 ---
 
@@ -120,7 +120,7 @@ Rule of thumb: *what the project is* → OPERATOR.md. *What Claude should do* �
 
 ## What's the difference between heartbeat and monitor?
 
-**Heartbeat** is the built-in periodic health check — runs every 2h by default, evaluates the `HEARTBEAT.md` checklist, and alerts you only when something needs attention. It's always-on infrastructure.
+**Heartbeat** is the built-in periodic health check — polls every 30m by default, evaluates the `HEARTBEAT.md` checklist, and alerts you only when something needs attention. It's always-on infrastructure.
 
 **Watch** (`/watch`) is a session-scoped background watcher you set up for specific concerns (e.g., "watch for CI failures every 5 minutes"). Watches are task-specific and stop when the session closes.
 

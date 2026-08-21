@@ -106,7 +106,7 @@ Manage with `/hermit-settings channels` (subcommands include `primary <name>` an
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable heartbeat on idle transitions. |
-| `every` | string | `"2h"` | Heartbeat interval (e.g., `"15m"`, `"1h"`, `"2h"`). |
+| `every` | string | `"30m"` | Heartbeat interval (e.g., `"15m"`, `"30m"`, `"2h"`). Quiet polls are zero-token at any cadence, so this sets how fast the damper-bypassing gates (pending proposals, budget, suppressed digest, stale sessions) are picked up — not how often the full checklist is re-read, which `clean_recheck_cooldown` governs. |
 | `active_hours.start` | string | `"08:00"` | Start of active window (heartbeat pauses outside). |
 | `active_hours.end` | string | `"23:00"` | End of active window. |
 | `stale_threshold` | string | `"2h"` | Alert if active session has no operator activity and no progress for this duration. |
@@ -126,7 +126,7 @@ Out-of-session supervisor that detects dead or wedged sessions and restarts them
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable restart/nudge/re-arm machinery. `enabled: false` disables the wedge-detection and restart path only. `context_clear_tokens`, `post_close_clear`, and `context_hygiene.compact` (see below) are scheduler-owned context-hygiene — they run on every scheduler tick regardless of this flag. |
-| `stale_factor` | number | `2` | Heartbeat staleness multiplier. Session is considered stale when `now - mtime(state/.heartbeat) > stale_factor × heartbeat.every`. |
+| `stale_factor` | number | `2` | Heartbeat staleness multiplier. Session is considered stale when `now - mtime(state/.heartbeat) > max(stale_factor × heartbeat.every, 4h)`. The 4h floor keeps the nudge probe — a paid full-context wake — at a fixed recovery cadence regardless of how short the poll interval is; raise `stale_factor` to widen past it. |
 | `escalate_after` | integer | `3` | Number of consecutive stale watchdog cycles before escalating from nudge to restart. |
 | `operator_grace` | string | `"15m"` | If `last-operator-action.json` shows activity within this window, the watchdog backs off (operator is mid-conversation). Duration format: `"15m"`, `"1h"`. |
 | `context_clear_tokens` | number \| null | `700000` | Auto-send `/clear` when the last hermit-owned turn's real context size (`max_prompt_tokens` — the largest single API call's `input + cache_write + cache_read` in the turn, not the per-turn sum across every call) exceeds this threshold. Prevents scheduled routines from re-reading a bloated context on every wake. Set to `null` or `0` to disable. Only fires on always-on hermits (not interactive), when the session is quiescent (pane unchanged across two scheduler ticks) and the operator has been silent ≥ 10 min. |
@@ -564,7 +564,7 @@ A realistic `config.json` for an always-on Docker hermit with Discord:
   },
   "heartbeat": {
     "enabled": true,
-    "every": "2h",
+    "every": "30m",
     "active_hours": {
       "start": "08:00",
       "end": "23:00"

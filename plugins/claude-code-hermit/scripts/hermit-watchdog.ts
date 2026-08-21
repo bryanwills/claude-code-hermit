@@ -673,6 +673,11 @@ const MONITOR_STARTUP_GRACE_SECS = 120;
 // blocked outright (seccomp / nested-userns), an undamped liveness-keyed re-arm would
 // re-inject every tick forever — each injection a paid full-context wake.
 export const MONITOR_REARM_DAMPER_SECS = 6 * 3600;
+// Lower bound on the wedge threshold (step 4), independent of heartbeat.every. The nudge
+// is an end-to-end liveness probe and each one is a paid full-context wake, so its cadence
+// is a recovery policy, not a function of the poll interval — without this floor a short
+// heartbeat interval would inflate the probe rate well past what quiet-arc recovery needs.
+export const WEDGE_FLOOR_SECS = 4 * 3600;
 
 /**
  * True when a monitor that should be ticking has a liveness timestamp stale past
@@ -708,7 +713,7 @@ function monitorLivenessStale(livenessFile: string, runtimeData: Json, threshold
 function heartbeatMonitorStale(config: Json): boolean {
   const hbCfg = config?.heartbeat;
   if (!hbCfg || typeof hbCfg !== 'object' || Array.isArray(hbCfg) || !hbCfg.enabled) return false;
-  const thresholdSecs = 3 * parseDuration(hbCfg.every ?? '2h');
+  const thresholdSecs = 3 * parseDuration(hbCfg.every ?? '30m');
   const monRt = readJson(path.join(STATE_DIR, 'heartbeat-monitor.runtime.json'));
   return monitorLivenessStale('heartbeat-liveness.json', monRt, thresholdSecs);
 }
@@ -1524,8 +1529,8 @@ async function main(): Promise<void> {
     const activeHours = heartbeatCfg.active_hours;
     const activeHoursIsObj = activeHours && typeof activeHours === 'object' && !Array.isArray(activeHours);
     if (!activeHoursIsObj || inActiveHours(activeHours, config.timezone ?? 'UTC')) {
-      const heartbeatEverySecs = parseDuration(heartbeatCfg.every ?? '2h');
-      const staleThresholdSecs = heartbeatEverySecs * staleFactor;
+      const heartbeatEverySecs = parseDuration(heartbeatCfg.every ?? '30m');
+      const staleThresholdSecs = Math.max(heartbeatEverySecs * staleFactor, WEDGE_FLOOR_SECS);
 
       const heartbeatAge = getFileAgeSecs(HEARTBEAT_FILE);
       if (heartbeatAge !== null) {

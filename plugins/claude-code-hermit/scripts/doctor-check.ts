@@ -1311,7 +1311,7 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
       return { id: 'heartbeat', status: 'ok', detail: `heartbeat: enabled, no active session (state=${sessionState ?? 'unknown'})` };
     }
 
-    const threshold = 3 * parseDuration(hbCfg.every, 2 * 3600000);
+    const threshold = 3 * parseDuration(hbCfg.every, 30 * 60000);
     // A healthy monitor writes liveness on its first loop iteration (before any
     // sleep), so a real tick lands within seconds of spawn. The absent-liveness
     // grace only needs to cover spawn + first precheck — not a full poll interval

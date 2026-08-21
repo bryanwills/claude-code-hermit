@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Default `heartbeat.every` is now `30m` (was `2h`). Quiet polls stay zero-token, so the change buys faster pickup of the checks that bypass the clean-recheck damper — pending proposals, budget alerts, the suppressed-alert digest, stale sessions — and lets consecutive real wakes land inside the prompt-cache window instead of re-paying a cold start each time. Widen it back with `/claude-code-hermit:hermit-settings heartbeat`.
+- The watchdog's heartbeat-staleness threshold is now `max(stale_factor × heartbeat.every, 4h)`. The nudge it gates is a paid full-context wake, so its cadence is recovery policy rather than a multiple of the poll interval; without the floor the new default would have quadrupled the probe rate on a quiet open session arc. `stale_factor` still widens the threshold past the floor.
+
+### Upgrade Instructions
+1. Read `.claude-code-hermit/config.json`. If `heartbeat.every` is exactly `"2h"`, set it to `"30m"`, leaving every other field untouched. If it holds any other value the operator chose it — leave it and say so in the report. Re-runnable: a config already on `"30m"` or a custom value is skipped.
+2. Tell the operator to run `/claude-code-hermit:heartbeat start` once, so the live Monitor re-registers at the new interval — its poll interval is fixed at registration. Without it the next session start or the daily `heartbeat-restart` anchor picks the change up on its own.
+
 ## [1.2.43] - 2026-08-21
 
 ### Added

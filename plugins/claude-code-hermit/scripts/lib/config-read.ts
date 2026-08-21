@@ -88,7 +88,7 @@ const TABLE: Record<string, Spec> = {
   }),
   heartbeat: shape({
     enabled: bool(true),
-    every: str('2h'),
+    every: str('30m'),
     active_hours: shape({ start: str('08:00'), end: str('23:00') }),
     stale_threshold: str('2h'),
     waiting_timeout: str(null),
