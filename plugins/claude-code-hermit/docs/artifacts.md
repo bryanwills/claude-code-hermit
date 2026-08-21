@@ -163,14 +163,7 @@ proposal renders as a collapsed-by-default `<details class="proposal" id="prop-n
 chip, id, title, created-date) that expands to the full body on click, the same pattern
 the dashboard already uses for its proposals card. A heading above the list shows the open
 count (e.g. "3 Open"); deferred/resolved/dismissed proposals stay one-line history entries
-— the same "other" bucket the dashboard already computes.
-
-The `id` is inert as a deep link, though: the claude.ai artifact viewer renders the page
-inside a sandboxed cross-origin iframe whose `src` carries no fragment — confirmed by
-navigating a published proposals page with `#prop-nnn` appended, where the top-level
-document held zero `prop-*` anchors and the iframe never received the fragment. The `id`
-stays in the markup anyway, since it's free and still resolves for a locally opened or
-remixed copy of the page. Rendered by
+— the same "other" bucket the dashboard already computes. Rendered by
 `scripts/lib/proposals-page.ts` (reuses the dashboard's proposal loader, markdown
 converter, and CSS — no CSS changes were needed since `.proposal`/`.proposal-body` already
 existed for the dashboard's own `<details>`). `<title>` is `<agent_name> — Proposals`,
@@ -179,6 +172,13 @@ omits proposal age-in-days (unlike the dashboard) — age is `Date.now()`-derive
 otherwise mint a new artifact version once a day even with zero activity; created-date
 is shown instead, keeping the hash purely activity-driven (the open count is likewise
 activity-driven, not date-driven, so it doesn't reintroduce that churn).
+
+The `id` is inert as a deep link, though: the claude.ai artifact viewer renders the page
+inside a sandboxed cross-origin iframe whose `src` carries no fragment — confirmed by
+navigating a published proposals page with `#prop-nnn` appended, where the top-level
+document held zero `prop-*` anchors and the iframe never received the fragment. The `id`
+stays in the markup anyway, since it's free and still resolves for a locally opened or
+remixed copy of the page.
 
 Refresh triggers: `proposal-create` (step 6), `proposal-act` (every accept/defer/
 dismiss/resolve flow, after its Respond step). Both refresh silently by default,

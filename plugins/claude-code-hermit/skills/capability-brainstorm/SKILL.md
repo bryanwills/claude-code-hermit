@@ -93,8 +93,10 @@ Send one message following the Operator Notification protocol in CLAUDE.md (empt
 
 2. **<short title>** — ...
 
-📎 <proposals page URL>   (omit this line entirely if `proposal-create` returned no URL)
+📎 <proposals page URL>
 ```
+
+The `📎` line is a single slot for the whole batch, not one per idea — omit it entirely when the proposals-page refresh returned no URL.
 
 If zero ideas were generated or all were suppressed/duplicated, the message is:
 ```
