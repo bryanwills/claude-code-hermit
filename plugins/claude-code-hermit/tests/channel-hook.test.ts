@@ -121,6 +121,63 @@ describe('persistDmChannelId — inbound-turn eligibility gate', () => {
   });
 });
 
+// default_chat_id is the pinned destination for unattended proactive sends and
+// the no-allowlist trust anchor. dm_channel_id still follows the operator's last
+// inbound chat; the pin is seeded once and then only moves from the terminal, so
+// a message from a second chat can neither relocate briefings nor hand that chat
+// operator authority.
+describe('persistDmChannelId — default_chat_id pin', () => {
+  test('first pairing seeds the pin from the chat that paired', () => {
+    const config: any = { channels: { discord: { dm_channel_id: null, default_chat_id: null } } };
+    expect(persistDmChannelId(config, 'discord', 'D1', true)).toBe(true);
+    expect(config.channels.discord.dm_channel_id).toBe('D1');
+    expect(config.channels.discord.default_chat_id).toBe('D1');
+  });
+
+  test('a later chat moves dm_channel_id but never the pin', () => {
+    const config: any = { channels: { discord: { dm_channel_id: 'D1', default_chat_id: 'D1' } } };
+    expect(persistDmChannelId(config, 'discord', 'D2', true)).toBe(true);
+    expect(config.channels.discord.dm_channel_id).toBe('D2');
+    expect(config.channels.discord.default_chat_id).toBe('D1');
+  });
+
+  // Pre-pin installs upgrade through here when the migration hasn't run: the
+  // incumbent chat is the home, never the message that diverted the DM.
+  test('unpinned install: the incumbent dm_channel_id becomes the pin, not the new chat', () => {
+    const config: any = { channels: { discord: { dm_channel_id: 'HOME' } } };
+    expect(persistDmChannelId(config, 'discord', 'OTHER', true)).toBe(true);
+    expect(config.channels.discord.dm_channel_id).toBe('OTHER');
+    expect(config.channels.discord.default_chat_id).toBe('HOME');
+  });
+
+  test('a dm_channel_id already clobbered to the maintainer chat is not pinned', () => {
+    const config: any = {
+      channels: { discord: { dm_channel_id: 'M1', maintainer_channel_id: 'M1' } },
+    };
+    expect(persistDmChannelId(config, 'discord', 'D2', true)).toBe(true);
+    expect(config.channels.discord.default_chat_id).toBe('D2');
+  });
+
+  test('numeric coercion applies to the pin too', () => {
+    const config: any = { channels: { discord: { dm_channel_id: null } } };
+    expect(persistDmChannelId(config, 'discord', 555, true)).toBe(true);
+    expect(config.channels.discord.default_chat_id).toBe('555');
+    expect(typeof config.channels.discord.default_chat_id).toBe('string');
+  });
+
+  test('a refused write seeds nothing (proactive send, maintainer chat)', () => {
+    const proactive: any = { channels: { discord: { dm_channel_id: 'D1' } } };
+    expect(persistDmChannelId(proactive, 'discord', 'D2', false)).toBe(false);
+    expect(proactive.channels.discord.default_chat_id).toBeUndefined();
+
+    const maintainer: any = {
+      channels: { discord: { dm_channel_id: 'D1', maintainer_channel_id: 'M1' } },
+    };
+    expect(persistDmChannelId(maintainer, 'discord', 'M1', true)).toBe(false);
+    expect(maintainer.channels.discord.default_chat_id).toBeUndefined();
+  });
+});
+
 // isEligibleInboundReply reads a tail window of the transcript file named by
 // event.transcript_path, finds the boundary prompt that opened the current
 // turn, and checks it's a <channel> envelope from the SAME chat as the reply.

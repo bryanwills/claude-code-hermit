@@ -44,13 +44,21 @@ export function isAllowedSender(config: Json, source: string, userId: string | n
  * Stricter gate for state-mutating (pause/resume/snooze) and disclosure (status)
  * paths. An explicit allowed_users list still wins — but when none is configured
  * this does NOT fall back to accept-all (as isAllowedSender does). Instead it
- * trusts only the operator's own DM chat (chat_id === channels[source].dm_channel_id),
- * so on a no-allowlist channel a stranger in a group can't freeze the hermit or
- * read its status, while the operator's DM keeps working with zero config.
+ * trusts only the operator's pinned home chat (chat_id === default_chat_id, or
+ * the learned dm_channel_id until the pin is seeded), so on a no-allowlist
+ * channel a stranger in a group can't freeze the hermit or read its status,
+ * while the operator's own chat keeps working with zero config.
  *
- * Caveat: if the operator's primary channel IS a group/server channel, its
- * dm_channel_id equals the group chat_id and every member matches — those installs
- * must set allowed_users. (Documented in docs/security.md + the CHANGELOG.)
+ * The anchor is the *pinned* home rather than the last-learned DM so control
+ * authority can't be acquired by messaging from a new chat: default_chat_id is
+ * seeded once by channel-hook and moved only from the terminal. Same fallback
+ * chain as resolve-outbound-channel's proactiveChatId (duplicated rather than
+ * imported — an auth gate shouldn't depend on the delivery module).
+ *
+ * Caveat: if the operator's home IS a group/server channel, its chat_id equals
+ * the group's and every member matches — those installs must set allowed_users.
+ * Pinning closes the acquisition path, not this standing exposure.
+ * (Documented in docs/security.md + the CHANGELOG.)
  */
 export function isTrustedController(
   config: Json, source: string, userId: string | null, chatId: string | null,
@@ -59,6 +67,6 @@ export function isTrustedController(
   if (Array.isArray(ch?.allowed_users)) {
     return isAllowedSender(config, source, userId); // explicit list (incl. [] lockdown) wins
   }
-  const dm = ch?.dm_channel_id; // no list configured -> operator-DM binding
-  return dm != null && chatId != null && String(dm) === String(chatId);
+  const home = ch?.default_chat_id ?? ch?.dm_channel_id; // no list -> pinned-home binding
+  return home != null && chatId != null && String(home) === String(chatId);
 }
