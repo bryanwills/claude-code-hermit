@@ -75,7 +75,11 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
     '## Watches',
     '## Knowledge Discipline',
     '## Rules',
-    'channel-send.ts .claude-code-hermit --notice', // the unified proactive-notify invocation
+    // The unified proactive-notify invocation. Routed through bin/hermit-run,
+    // not `bun ${CLAUDE_PLUGIN_ROOT}/scripts/…`: this file is copied verbatim
+    // into the operator's CLAUDE.md, where that token never expands, so the
+    // model had to hand-derive a plugin-cache path to run it.
+    'hermit-run channel-send .claude-code-hermit --notice',
     'HEARTBEAT_EVALUATE',                              // heartbeat notification trigger
     'ROUTINE_DUE',                                      // routine-monitor notification trigger
     'covered-by-memory',                               // canonical memory-suppression code

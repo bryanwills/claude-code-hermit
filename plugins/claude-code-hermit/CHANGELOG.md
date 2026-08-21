@@ -2,11 +2,22 @@
 
 ## [Unreleased]
 
+### Added
+- Three narrow `Bash(.claude-code-hermit/bin/hermit-run …)` grants — `channel-send *`, `observations observe *`, `proposal shell-append *` — covering the scripts the model invokes ad hoc mid-session rather than from a skill's command block. Their `bun */scripts/*.ts` twins are wildcarded-interpreter rules, which auto mode suspends.
+
 ### Fixed
+- `channel-send.ts` pins its state-dir argument to this project's, so a call reaching it through the pre-approved `Bash(bun */scripts/channel-send.ts*)` grant can no longer send with another project's bot token to that project's chat. A mismatch exits 2 (caller error, nothing sent), not 1.
+- The proactive-notify and settled-knowledge commands in `CLAUDE-APPEND.md` now use `.claude-code-hermit/bin/hermit-run`. They named `bun ${CLAUDE_PLUGIN_ROOT}/scripts/<name>.ts`, but that token is only substituted at skill load and never in the operator's `CLAUDE.md`, so the model had to hand-derive a versioned plugin-cache path — and the shortenings it improvised drew auto-mode classifier denials.
 - `/claude-code-hermit:channel-setup` adds the channel entry itself when `channels` is empty, instead of stopping and pointing at `/claude-code-hermit:hermit-settings` — that skill carries `disable-model-invocation`, so nothing could reach it and the operator was left to type the command.
 - `/claude-code-hermit:channel-setup` now treats a channel with `enabled: false` as disabled rather than configured, and offers to re-enable it instead of proceeding as though it were live.
 - Bare-host (non-Docker) boots now export each channel's `<CHANNEL>_STATE_DIR` into the session environment, so channel plugin servers find their state dir instead of failing with `CONNECTION_CLOSED`.
 - A channel-requested `/model` or `/effort` switch is now reported back from the transcript's serving-model stamp instead of the session's stale session-start self-perception, with the report held until an assistant entry newer than the delivery exists.
+
+### Upgrade Instructions
+
+1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file> permissions-sync` against this hermit's resolved settings file to add the three new `hermit-run` grants. `hermit-start` re-ensures them at boot as well, so a hermit that restarts picks them up either way — run the sync so the current session gets them without waiting.
+2. The two rewritten commands live in the plugin-owned CLAUDE-APPEND block, which Step 7 already replaces wholesale, so no manual edit is needed. If this operator hand-edited either of those two lines inside the block, their edit is overwritten — tell them once, and note the new form is `.claude-code-hermit/bin/hermit-run <name> …` run from the project root.
+3. Nothing to do for the `channel-send.ts` pin: every shipped caller already passes this project's own state dir.
 
 ## [1.2.42] - 2026-08-19
 
