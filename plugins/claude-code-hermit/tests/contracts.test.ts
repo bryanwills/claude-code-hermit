@@ -1573,6 +1573,17 @@ describe('hermit-evolve delegation contract', () => {
     }
   });
 
+  test('evolve-runner keeps Context reload alive on a blocked report', () => {
+    const agent = read(path.join(AGENTS, 'evolve-runner.md'));
+    expect(agent).toContain('except the `Context reload:` line');
+    expect(skill).toContain('Deliver it on a `blocked:` report too');
+  });
+
+  test('an unchanged sibling CLAUDE-APPEND block is reported without an Edit or reload target', () => {
+    expect(reference).toContain('`sibling.claude_append_changed !== true` → report `<name> block current`');
+    expect(reference).toContain('apply no Edit and add no reload target');
+  });
+
   test('context-reload notice names every supported reload path and rejects plugin reload', () => {
     expect(skill).toContain('Run `/compact` to load them now');
     expect(skill).toContain('`/clear` or restarting the Claude session also works');

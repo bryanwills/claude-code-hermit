@@ -80,7 +80,7 @@ conversation. Stop.
 
 **Print the summary** from the report fields. Omit lines where nothing changed. End with "Run /claude-code-hermit:hermit-settings to adjust any settings." if settings were added.
 
-**Project-context reload notice.** If `Context reload` is `required (<names>)`, append this to the summary in every delivery mode: "Project instructions updated for <names>. Run `/compact` to load them now; `/clear` or restarting the Claude session also works. `/reload-plugins` alone does not reload CLAUDE.md." If the field is `no`, omit the notice. Never issue `/compact`, `/clear`, or a restart on the operator's behalf.
+**Project-context reload notice.** If `Context reload` is `required (<names>)`, append this to the summary in every delivery mode: "Project instructions updated for <names>. Run `/compact` to load them now; `/clear` or restarting the Claude session also works. `/reload-plugins` alone does not reload CLAUDE.md." If the field is `no`, omit the notice. Deliver it on a `blocked:` report too — a blocked version bump does not undo a CLAUDE-APPEND write, and a re-run sees the block as already current, so this is the only time the operator hears about it. Never issue `/compact`, `/clear`, or a restart on the operator's behalf.
 
 **Resolve deferrals by execution and delivery mode.** If "Deferred for operator" is non-empty:
 - **Interactive execution:** for each deferred-migration block, present its `instruction` + `options` to the operator via `AskUserQuestion`, then apply the chosen branch inline (this is the only place changelog/migration text re-enters the main loop, and only for the rare deferred step).

@@ -207,6 +207,7 @@ For each entry in `plan.siblings`:
     - `sibling.claude_append_needs_render` → report `<name> block refresh deferred to /<name>:hatch (template requires rendering)`; apply no Edit. Core cannot render a template carrying `mode:` markers — that is the owning plugin's own hatch's job.
     - `sibling.claude_append_block_missing` → report `<name> block-missing — run /<name>:hatch to install it`; apply no Edit. **Never append a sibling's block** — core has no way to guarantee an append would render it the way the sibling's own hatch does.
     - `sibling.claude_append_ambiguous` → report `<name> block-ambiguous — the marker appears more than once, manual review needed`; apply no Edit.
+    - `sibling.claude_append_changed !== true` → report `<name> block current`; apply no Edit and add no reload target. The plan only supplies `claude_append_old_block` for a block that actually differs, so an already-current block has nothing to replace — treating it as the append case would duplicate the block.
     - Otherwise: same replace procedure as Step 6, using `sibling.marker` and `sibling.claude_append_old_block`. After the replacement succeeds, add `<name>` to `context_reload_targets`.
   - Collect the sibling name for the `--sibling=<name>=<to>` flag in Step 9.
 
@@ -220,8 +221,6 @@ For each entry in `plan.siblings`:
 - **No version gap + `claude_append_changed == false` (or absent):** report `<name> current`, skip. (`claude_append_needs_render` may also be set here — it is a static property of the sibling's template, not pending work; core only acts on it inside the version-gap branch above.)
 
 Keep `context_reload_targets` deduplicated in stable order (core first, then `plan.siblings` order). Never add a target for an unchanged block, a no-gap `block-drifted` advisory, `claude_append_needs_render`, `claude_append_block_missing`, or `claude_append_ambiguous`; none of those branches wrote project instructions.
-
-In the final report, emit `Context reload: no` when the list is empty. Otherwise emit `Context reload: required (<names>)`, joining `context_reload_targets` with `, `.
 
 If `plan.siblings_path_unresolved` is non-empty, report each as `<name> path-unresolved` (registered in `_hermit_versions` but not found in the project-effective plugin list).
 
@@ -262,3 +261,7 @@ where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.c
   - Parse stdout as JSON. The finalizer's `core.confirmed` is the **authoritative on-disk version** — use it as `vNEW` in the Step 10 report, NOT `plan.to`.
   - `audit_scope` reports whether the Step 1 snapshot was usable: `whole-run` means this upgrade's config changes are attributed in the settings ledger, `version-only` means only the version stamp was recorded. Carry it into the Step 10 report. It is never a failure — a `version-only` upgrade succeeded, it just left less history behind.
   - If `core.matched` is `false` or `errors` is non-empty, the bump did not land: set the `Upgrade:` line in the Step 10 report to `blocked: config version bump failed (<joined errors>)` and stop.
+
+### Report field: Context reload
+
+Always fill this field, whatever path the run took — including a core-only upgrade with no siblings, and a run blocked by the Step 9 finalizer after Steps 6/7 already wrote. In the final report, emit `Context reload: no` when the list is empty. Otherwise emit `Context reload: required (<names>)`, joining `context_reload_targets` with `, `.
