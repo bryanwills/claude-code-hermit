@@ -119,6 +119,42 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
+  test('an unsettable permission mode is refused with a reason, and records nothing', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      // plan mode would silence the very channel this request arrived on.
+      const r = await run(wd, '/permission-mode plan', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('refused "/permission-mode plan"');
+      expect(r.stdout).toContain('replying');
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    } finally {
+      stub.stop();
+    }
+  });
+
+  test('a settable permission mode is recorded for the Stop hook', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/permission-mode acceptEdits', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('[harness-command]');
+      expect(r.stdout).not.toContain('refused');
+      const pending = JSON.parse(fs.readFileSync(hermit(wd.dir, 'state', 'pending-harness-command.json'), 'utf-8'));
+      expect(pending).toMatchObject({ command: '/permission-mode', arg: 'acceptEdits' });
+    } finally {
+      stub.stop();
+    }
+  });
+
   test('resume during a pending shutdown does not clear an existing pause', async () => {
     const stub = startHttpStub();
     try {
@@ -219,6 +255,32 @@ describe('user-prompt-pipeline: switch verification', () => {
 
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain('[harness-command]');
+  });
+
+  // A permission mode leaves no trace in the transcript, so the model-freshness gate above
+  // must not get to it first — held there it would sit behind an assistant entry that says
+  // nothing about it, and describe itself in model terms while doing so.
+  test('answers a permission-mode switch from the pane, not the transcript gate', async () => {
+    const wd = setupWorkdir();
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    fs.mkdirSync(path.dirname(verifyMarker(wd.dir)), { recursive: true });
+    fs.writeFileSync(verifyMarker(wd.dir), JSON.stringify({
+      command: '/permission-mode',
+      arg: 'acceptEdits',
+      by: 'operator',
+      delivered_at: new Date().toISOString(),
+    }));
+    // Only a pre-switch entry exists — the gate would hold a /model marker here.
+    const transcript = writeTranscript(wd, [{ model: 'claude-sonnet-5', timestamp: '2020-01-01T00:00:00.000Z' }]);
+
+    const r = await runWith(wd, transcript);
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('not yet observable');
+    expect(r.stdout).toContain('[harness-command]');
+    // No tmux session in this fixture, so the honest answer is "could not read it back".
+    expect(r.stdout).toContain('could not be read back');
+    expect(fs.existsSync(verifyMarker(wd.dir))).toBe(false);
   });
 });
 

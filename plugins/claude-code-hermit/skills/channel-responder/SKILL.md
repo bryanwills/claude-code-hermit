@@ -104,10 +104,11 @@ This is how the agent learns the DM channel ID for proactive outbound notificati
 
 Before running any heavy sub-step — an archive traversal, a multi-file search, or a delegated execution step — apply the **Context-hygiene & delegation** rule: delegate when its criteria hold and keep only the verdict.
 
-- **Harness command** (exactly `/compact`, `/clear`, `/model <arg>`, or `/effort <arg>`)
-  - Intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's harness-command stage **before this skill runs** — the request is already recorded, and the `Stop` hook types it into the session when this turn ends. When `/model` or `/effort` opens Claude Code's cached-context warning, that same hook path confirms the already-authorized switch. There is nothing for you to do; acknowledge briefly via the channel if you like.
+- **Harness command** (exactly `/compact`, `/clear`, `/model <arg>`, `/effort <arg>`, or `/permission-mode <mode>`)
+  - Intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's harness-command stage **before this skill runs** — the request is already recorded, and the `Stop` hook applies it to the session when this turn ends. When `/model` or `/effort` opens Claude Code's cached-context warning, that same hook path confirms the already-authorized switch. There is nothing for you to do; acknowledge briefly via the channel if you like.
   - Do **not** try to run it yourself, and do not treat it as a skill invocation.
-  - It applies to *this* session only: the next `hermit-start` re-asserts `config.model` / `config.effort`. If Claude Code rejects the argument, that shows in the terminal, not in chat — so don't promise it took effect.
+  - It applies to *this* session only: the next `hermit-start` re-asserts `config.model` / `config.effort` / `config.permission_mode`. If Claude Code rejects the argument, that shows in the terminal, not in chat — so don't promise it took effect.
+  - `/permission-mode` accepts `default`, `acceptEdits`, or `auto`. Anything else is refused by that hook with a reason to relay — `plan` because it would block you from replying at all, `bypassPermissions` because widening autonomy is a terminal decision, `dontAsk` because Claude Code cannot reach it mid-session. Unlike the others it is applied by driving Claude Code's mode cycle and reading the status bar back, so the next prompt tells you the mode the session actually landed in: report that, not the one that was asked for.
   - A near-miss (`/model` with no argument, a bare `clear`, or prose mentioning one) is **not** intercepted — classify it under the categories below instead.
 
 - **Slash command** (message starts with `/`, e.g. `/claude-code-hermit:simplify`, `/plugin:command`)

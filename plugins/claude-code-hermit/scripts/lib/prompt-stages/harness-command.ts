@@ -6,11 +6,16 @@
 // compiled/spike-channel-block-responder-probe-2026-07-04.md), so the text arrives as
 // literal prose and the model can only look for a matching *skill*, which never exists.
 //
-// Harness state cannot be written to a file the way pause.json can — it has to be typed
-// into the pane. So this hook does the deterministic half (authorize + record) and the
+// Harness state cannot be written to a file the way pause.json can — it has to be driven
+// through the pane. So this hook does the deterministic half (authorize + record) and the
 // Stop hook does the delivery, once the turn it arrived on has ended and the pane is
 // idle. Splitting it this way keeps the authorization model identical to pause-keyword.ts
 // and never types into a pane mid-turn.
+//
+// /permission-mode is the exception to "typed into the pane": no native slash command sets
+// a permission mode, so the Stop hook drives Claude Code's own Shift+Tab cycle instead
+// (lib/harness-drain.ts → cycle-permission-mode.ts). Only the modes a channel may steer
+// the session into are recorded; the rest are refused here with a reason.
 //
 // Probe-verified limit (inherited from pause-keyword.ts): a UserPromptSubmit hook only
 // fires BETWEEN turns. A command sent while a turn is genuinely in flight arrives as
@@ -24,7 +29,7 @@
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
 import { isTrustedController } from '../channel-auth';
-import { parseHarnessCommand, writePendingCommand, renderCommand } from '../harness-command';
+import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal } from '../harness-command';
 import type { StageContext, StageResult } from './types';
 
 export function run(ctx: StageContext): StageResult | void {
@@ -45,6 +50,19 @@ export function run(ctx: StageContext): StageResult | void {
   // never happens.
   const runtime = ctx.runtime();
   if (!runtime || runtime.runtime_mode === 'interactive' || !runtime.tmux_session) return;
+
+  // Refuse an unsettable permission mode HERE, for the same reason the interactive check
+  // above refuses: recording a marker the drain will not act on would acknowledge a switch
+  // that never happens. Unlike an unauthorized sender this is not silent — the request was
+  // legitimate, so the operator gets told why it is being declined.
+  if (parsed.command === '/permission-mode' && parsed.arg) {
+    const refusal = permissionModeRefusal(parsed.arg);
+    if (refusal) {
+      return {
+        context: `[harness-command] refused "${renderCommand(parsed)}": ${refusal}\n`,
+      };
+    }
+  }
 
   const by = safeForLLM(senderLabel(env).slice(0, 64));
   const ok = writePendingCommand(dir, {

@@ -1,5 +1,5 @@
-// UserPromptSubmit stage — report a delivered /model or /effort switch back to the
-// session from the transcript.
+// UserPromptSubmit stage — report a delivered harness switch back to the session, from
+// the transcript for /model and /effort, and from the pane for /permission-mode.
 //
 // The gap this closes: delivery works (the Stop hook types the command into the pane
 // and Claude Code applies it), but the model's sense of WHICH model it is running is
@@ -20,6 +20,7 @@
 
 import { readSwitchVerify, clearSwitchVerify, renderCommand } from '../harness-command';
 import { lastAssistantModel } from '../cc-compat';
+import { capturePane, paneModeLine } from '../tmux';
 import type { StageContext, StageResult } from './types';
 
 /**
@@ -38,11 +39,46 @@ import type { StageContext, StageResult } from './types';
  */
 const SWITCH_APPLY_GRACE_MS = 5_000;
 
+const SESSION_SCOPED = 'This lasts for the current session only — a restart, including one the watchdog performs, puts the session back on the configured permission mode.';
+
+/**
+ * Report the mode the session is actually in now.
+ *
+ * The pane is authoritative and current, so unlike the model report below this needs no
+ * grace window — but it can be unreadable (a dialog covering the status bar, a session
+ * that has since gone away), and saying so is the honest answer. Claiming a switch that
+ * may not have happened is the one outcome worth avoiding: the operator asked for this to
+ * control what the hermit may do unattended.
+ */
+function permissionModeReport(ctx: StageContext, requested: string | null): string {
+  const sessionName = ctx.runtime()?.tmux_session ?? '';
+  const pane = sessionName ? capturePane(sessionName) : null;
+  const landed = pane === null ? null : paneModeLine(pane);
+
+  if (!landed) {
+    return `[harness-command] "/permission-mode ${requested}" was delivered, but the session's permission mode could not be read back from the pane — report it as delivered, not confirmed, and suggest checking the terminal.\n`;
+  }
+  if (requested && landed !== requested) {
+    return `[harness-command] "/permission-mode ${requested}" did not land — the session is in ${landed} mode. Report the failure and the mode it is actually in; do not claim the requested one.\n`;
+  }
+  return `[harness-command] the session is now in ${landed} permission mode, as requested. ${SESSION_SCOPED}\n`;
+}
+
 export function run(ctx: StageContext): StageResult | void {
   const pending = readSwitchVerify(ctx.dir);
   if (!pending) return;
 
   const rendered = renderCommand(pending);
+
+  // Permission mode is answered from the pane, not the transcript, so it must be routed
+  // before the transcript gate below — that gate exists to stop a stale MODEL being
+  // reported and would otherwise hold this marker (and describe it in model terms) while
+  // waiting for an assistant entry that has no bearing on it.
+  if (pending.command === '/permission-mode') {
+    clearSwitchVerify(ctx.dir);
+    return { context: permissionModeReport(ctx, pending.arg) };
+  }
+
   const observed = ctx.transcriptPath ? lastAssistantModel(ctx.transcriptPath) : null;
 
   // No transcript to read, or nothing served since the switch could have applied: hold
