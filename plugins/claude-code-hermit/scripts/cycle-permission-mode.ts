@@ -16,6 +16,13 @@ if (!sessionName || !target || !hermitRoot) {
 
 // One press per mode in the cycle, plus one to re-read after the last press. Bounded so a
 // status bar this build renders differently cannot spin the pane forever.
+//
+// Cycle membership is not fixed — probed on CC 2.1.238, it depends on how the session was
+// LAUNCHED. Standard is 4 (manual → acceptEdits → plan → auto →), a bypassPermissions
+// launch makes it 5 by keeping bypass in the loop (bypass → auto → manual → acceptEdits →
+// plan →), and a dontAsk launch drops dontAsk on the first press, never re-entering it.
+// Worst case is therefore 4 presses to reach any target plus 1 to re-read: 6 holds, but
+// with no slack, so a future mode joining the cycle needs this raised.
 const MAX_PRESSES = 6;
 const SETTLE_MS = 250;
 
@@ -34,9 +41,21 @@ let cleared = false;
  * success. And nothing is recorded at all until a keystroke has actually landed — before
  * that the pending marker is still there for the next turn to retry, and announcing a
  * failure for a request that is about to be tried again would be wrong twice over.
+ *
+ * Recording an outcome also consumes the pending marker, but ONLY on the no-press path:
+ * the session was already in the requested mode, so this returns without one keystroke
+ * and the loop's own clear never runs. Leaving the marker there would make every later
+ * Stop hook re-deliver a request that is already satisfied — respawning this helper and
+ * re-announcing the switch on every prompt until the TTL.
+ *
+ * Guarded on `cleared` because the marker path is a singleton: once the loop has cleared
+ * it, this process no longer owns whatever sits there. It may keep cycling for another
+ * second or so, and a channel message arriving in that window writes a NEW pending
+ * command to the same path — which an unconditional clear here would delete unsent.
  */
 function finish(landed: string | null): never {
   if (cleared || landed === target) {
+    if (!cleared) clearPendingCommand(hermitRoot);
     writeSwitchVerify(hermitRoot, {
       command: '/permission-mode',
       arg: target,

@@ -528,6 +528,24 @@ describe('Stop hook permission-mode delivery', () => {
     await waitForVerify(dir, 'auto');
 
     expect(fs.readFileSync(log, 'utf-8')).not.toContain('BTab');
+    // A satisfied request is consumed even though no key was pressed — otherwise every
+    // later Stop hook re-delivers it and re-announces the switch until the TTL expires.
+    expect(fs.existsSync(pendingMarker(dir))).toBe(false);
+  }));
+
+  // The prompt stage refuses these, so a marker naming one can only come from somewhere
+  // else. `plan` is in the cycle, so the actuator has to refuse it too.
+  test('drops a marker naming a mode no channel may set, without pressing', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/permission-mode', 'plan');
+    const { bin, log } = installCyclingTmux(dir, 'auto');
+
+    const result = await drain(dir, bin);
+    await Bun.sleep(300);
+
+    expect(result.stderr).toContain('not settable from a channel');
+    expect(fs.readFileSync(log, 'utf-8')).not.toContain('BTab');
+    expect(fs.existsSync(pendingMarker(dir))).toBe(false);
+    expect(fs.existsSync(switchVerifyMarker(dir))).toBe(false);
   }));
 
   // While a dialog is up the status bar is off-screen. Pressing blind from there could
@@ -571,7 +589,7 @@ exit 1
   // Dying before the first keystroke lands must leave the request retryable, the same
   // contract a refused sendKeys gives the typed commands.
   test('keeps the request when tmux refuses the first keystroke', withDir(async (dir) => {
-    seedPendingSwitch(dir, '/permission-mode', 'plan');
+    seedPendingSwitch(dir, '/permission-mode', 'default');
     const { bin } = installCyclingTmux(dir, 'auto', { refuseKeys: true });
 
     await drain(dir, bin);

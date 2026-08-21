@@ -5,7 +5,7 @@
 import { readRuntimeJson } from './runtime';
 import { capturePane, paneModeLine, sendKeys, tmuxSessionAlive } from './tmux';
 import { applyContextReset } from './context-reset';
-import { clearPendingCommand, normalizePermissionMode, readPendingCommand, renderCommand, writeSwitchVerify } from './harness-command';
+import { CHANNEL_SETTABLE_MODES, clearPendingCommand, normalizePermissionMode, readPendingCommand, renderCommand, writeSwitchVerify } from './harness-command';
 import type { PendingCommand } from './harness-command';
 import { currentHHMMOrUTC } from './time';
 import { readSettledConfig } from './config-read';
@@ -25,7 +25,18 @@ import path from 'node:path';
  */
 function deliverPermissionMode(hermitRoot: string, sessionName: string, pending: PendingCommand): void {
   const target = pending.arg ? normalizePermissionMode(pending.arg) : null;
-  if (!target) return;
+  // The prompt stage refuses an unsettable mode before a marker is ever written; the
+  // actuator re-checks anyway, because a marker reaching here from anywhere else (a
+  // hand-edited or model-written state file) must not be able to steer the session into
+  // `plan` — the one refused mode that IS in the cycle, and the one that can leave the
+  // session unable to receive the command undoing it. Dropped rather than kept: no later
+  // turn can make it deliverable, so retrying it until the TTL only respawns this path.
+  if (!target || !CHANNEL_SETTABLE_MODES.has(target)) {
+    clearPendingCommand(hermitRoot);
+    const why = target ? 'is not settable from a channel' : 'does not name a permission mode';
+    console.error(`[stop-pipeline] harness-command: "${renderCommand(pending)}" ${why} — dropped`);
+    return;
+  }
 
   const pane = capturePane(sessionName);
   const current = pane === null ? null : paneModeLine(pane);

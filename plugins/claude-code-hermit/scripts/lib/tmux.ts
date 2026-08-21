@@ -111,10 +111,12 @@ export function sendKey(sessionName: string, keyName: string, transport: Transpo
 /**
  * Claude Code's status-bar phrase for each permission mode, keyed by config value.
  *
- * Probed live on CC 2.1.238 — the phrase is stable but what surrounds it is not: the
- * suffix varies with session state (`(shift+tab to cycle)` is absent on manual mode, and
- * trailing segments like `· 2 monitors · ← for agents` appear on a busy hermit), so only
- * the phrase itself may be matched.
+ * All six probed live on CC 2.1.238 — the phrase is stable but what surrounds it is not:
+ * the suffix varies with session state (`(shift+tab to cycle)` is absent on manual mode,
+ * and trailing segments like `· 2 monitors · ← for agents` appear on a busy hermit), so
+ * only the phrase itself may be matched. The apostrophe in `don't ask on` is ASCII
+ * U+0027, not the typographic U+2019 — verified by hexdump of the rendered pane, because
+ * a curly one here would fail closed for exactly the most permissive sessions.
  */
 const MODE_PHRASES: Record<(typeof PERMISSION_MODE)[number], string> = {
   auto: 'auto mode on',
