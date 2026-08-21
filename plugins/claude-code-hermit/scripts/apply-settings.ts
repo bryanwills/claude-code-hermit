@@ -16,6 +16,10 @@
  *   artifact-allow           Merge just ["Artifact"] into permissions.allow — kept as its
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
+ *   output-style             Set outputStyle to the sealed "hermit-voice" value, but only when
+ *                            the key is absent. An operator's own /config choice is preserved
+ *                            untouched (file left byte-identical); prints "applied" or
+ *                            "kept:<value>" so callers can report the mismatch.
  *   automode-seed            Merge the hermit's sealed autoMode.allow exception + autoMode.
  *                            environment context into settings.local.json, so the auto-mode
  *                            classifier's soft-tier self-modification check clears sealed
@@ -37,6 +41,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
 import { channelStateDirKey } from './lib/channel-config';
+import { HERMIT_OUTPUT_STYLE } from './lib/voice';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -346,6 +351,19 @@ switch (op) {
     break;
   }
 
+  case 'output-style': {
+    // Only-if-absent, and the value is the sealed constant — never caller text.
+    // A style the operator chose in /config is their decision: this op leaves it
+    // (and the file's bytes) alone and prints what it found, so hatch and
+    // hermit-doctor can surface the mismatch rather than the hermit silently
+    // reclaiming the key on every boot.
+    const current = settings.outputStyle;
+    if (current === undefined) settings.outputStyle = HERMIT_OUTPUT_STYLE;
+    else readOnly = true;
+    console.log(current === undefined ? 'applied' : `kept:${current}`);
+    break;
+  }
+
   case 'automode-seed': {
     // autoMode is only read from local/user/managed scope — a committed
     // .claude/settings.json target would be a silent no-op trap.
@@ -396,7 +414,7 @@ switch (op) {
   }
 
   default: {
-    console.error(`Unknown operation: ${op}. Valid ops: task-id, allow, permissions-plan, permissions-sync, artifact-allow, automode-seed, deny, channel-env`);
+    console.error(`Unknown operation: ${op}. Valid ops: task-id, allow, permissions-plan, permissions-sync, artifact-allow, output-style, automode-seed, deny, channel-env`);
     process.exit(1);
   }
 }

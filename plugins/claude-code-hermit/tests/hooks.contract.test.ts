@@ -270,6 +270,7 @@ const STRICT_PATTERNS: string[] = [...DENY.default, ...DENY.always_on];
 
 const bash = (command: string) => ({ tool_name: 'Bash', tool_input: { command } });
 const edit = (file_path: string) => ({ tool_name: 'Edit', tool_input: { file_path } });
+const writeTool = (file_path: string) => ({ tool_name: 'Write', tool_input: { file_path } });
 
 type DenyRow = [
   name: string,
@@ -298,6 +299,21 @@ const DENY_ROWS: DenyRow[] = [
   // always_on patterns resolve only under the strict profile.
   ['block git push --force behind && (strict list)', bash('cd repo && git push --force origin x'), 'block', STRICT_PATTERNS],
   ['allow the same compound under the default list', bash('cd repo && git push --force origin x'), 'allow'],
+
+  // Settings and voice-file guards. Hooks receive an ABSOLUTE file_path, and the
+  // pattern regex is fully anchored — so these globs need a leading `*` or they
+  // can never fire on a real tool call, only on a relative path nothing sends.
+  ['block an absolute settings.json Edit (strict list)', edit('/home/u/p/.claude/settings.json'), 'block', STRICT_PATTERNS],
+  ['block an absolute settings.local.json Write (strict list)', writeTool('/home/u/p/.claude/settings.local.json'), 'block', STRICT_PATTERNS],
+  ['block an absolute voice-file Edit (strict list)', edit('/home/u/p/.claude/output-styles/hermit-voice.md'), 'block', STRICT_PATTERNS],
+  ['block an absolute voice-file Write (strict list)', writeTool('/home/u/p/.claude/output-styles/hermit-voice.md'), 'block', STRICT_PATTERNS],
+  ['block a redirect into an absolute settings path (strict list)', bash('echo {} > /home/u/p/.claude/settings.json'), 'block', STRICT_PATTERNS],
+  ['block a redirect into an absolute voice-file path (strict list)', bash('echo x > /home/u/p/.claude/output-styles/hermit-voice.md'), 'block', STRICT_PATTERNS],
+  ['still block the relative settings redirect spelling (strict list)', bash('echo {} > .claude/settings.local.json'), 'block', STRICT_PATTERNS],
+  ['allow a settings Edit under the default list', edit('/home/u/p/.claude/settings.json'), 'allow'],
+  ['allow a voice-file Edit under the default list', edit('/home/u/p/.claude/output-styles/hermit-voice.md'), 'allow'],
+  // Only the hermit's own style is guarded — the operator's other styles are theirs.
+  ['allow an unrelated output style under the strict list', edit('/home/u/p/.claude/output-styles/my-own.md'), 'allow', STRICT_PATTERNS],
 
   // An escaped quote (`\'`) is a literal to bash and must not open a quoted run
   // that swallows the following `&&`, or the trailing `rm -rf` segment escapes.
@@ -1625,14 +1641,14 @@ describe('channel-reply-reminder', () => {
 // -------------------------------------------------------
 
 describe('doctor-check', () => {
-  test('doctor-check (minimal install, 24 checks)', withDir(async (dir) => {
+  test('doctor-check (minimal install, 26 checks)', withDir(async (dir) => {
     seedDoctor(dir,
       '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"active_hours":{"start":"08:00","end":"23:00"}},"routines":[]}');
     const report = await doctorReport(dir);
     expect(report.checks.map((c: any) => c.id)).toEqual([
       'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
       'permissions', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age', 'opus-wake', 'routine-cost', 'heartbeat',
-      'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known', 'context-scan', 'channel-liveness',
+      'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known', 'context-scan', 'voice-carrier', 'channel-liveness',
     ]);
   }));
 

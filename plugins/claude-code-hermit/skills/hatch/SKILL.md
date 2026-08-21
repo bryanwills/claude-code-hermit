@@ -387,7 +387,7 @@ Collect findings silently. Do NOT print scan results to the operator.
 Using the scan results, write a concise context document. Follow these rules:
 
 1. **Never duplicate CLAUDE.md content.** If CLAUDE.md already covers a topic (testing, conventions, build commands), don't repeat it.
-2. **Never duplicate `config.json` fields.** `routines`, `channels` (including Discord/Telegram user IDs and `morning_brief`), `permission_mode`, `agent_name`, `sign_off`, `escalation`, `idle_behavior`, `boot_skill`, `shutdown_skill`, and `_hermit_versions` are already loaded structurally — do not restate them as prose. OPERATOR.md is for context the model can't infer from config (project focus, constraints, approval gates, comms style, project rationale).
+2. **Never duplicate `config.json` fields.** `routines`, `channels` (including Discord/Telegram user IDs and `morning_brief`), `permission_mode`, `agent_name`, `sign_off`, `escalation`, `idle_behavior`, `boot_skill`, `shutdown_skill`, and `_hermit_versions` are already loaded structurally — do not restate them as prose. OPERATOR.md is for context the model can't infer from config (project focus, constraints, approval gates, project rationale). Tone and comms style have their own home — the voice file, Phase 4b.
 3. **Only include high-confidence inferences.** If the scan clearly reveals something (e.g., package.json shows Node.js, README describes the project), include it. If uncertain, leave it for Phase 3 questions.
 4. **Keep it under 50 lines.** OPERATOR.md is loaded every session-start — bloat costs tokens. Write concise prose, not documentation.
 5. **No rigid sections required.** Use headers if they help organize, but don't create empty sections. The goal is a useful context document, not a filled-in form.
@@ -407,7 +407,7 @@ Questions are split into two `AskUserQuestion` calls (max 4 per call). Q1–Q4 a
 | 3   | Approval    | "What actions require your explicit approval before I proceed?"         | Deploys only / Breaking changes / Nothing extra  |
 | 4   | Comms style | "How do you prefer I communicate?"                                      | Concise / Detailed / Ask first                   |
 
-Accept any answer including free-text via Other. Expand into OPERATOR.md prose in Phase 4 — don't take options too literally.
+Accept any answer including free-text via Other. Expand Q1–Q3 into OPERATOR.md prose in Phase 4 — don't take options too literally. Q4 (Comms style) is handled by Phase 4b.
 
 **Call 2 — only if any of Q5–Q7 apply (skip conditions below):**
 
@@ -439,9 +439,23 @@ Incorporate the operator's answers into the draft:
 
 Write the final version to `.claude-code-hermit/OPERATOR.md`.
 
+#### Phase 4b — Write the voice file
+
+The hermit's tone lives in a native Claude Code output style, so it reaches the **system prompt** instead of session-start context — it holds for the whole session and survives compaction.
+
+1. If `.claude/output-styles/hermit-voice.md` already exists, leave it alone (it's operator-owned) and skip to step 3.
+2. Otherwise render `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` to `.claude/output-styles/hermit-voice.md`, replacing `{{VOICE_PROSE}}` with tone guidance written from the Q4 answer. Write it as instructions to yourself about how to talk to this operator — depth, cadence, how much reasoning to show, when to lead with the answer. Keep the frontmatter and the Precedence section exactly as the template has them. Don't restate channel-routing rules (they ship with the plugin), don't put work context here (that's OPERATOR.md), and keep it short — every line costs tokens on every API call.
+3. Point the settings key at it (target from step 2a):
+
+   ```
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> output-style
+   ```
+
+   Prints `applied`, or `kept:<value>` when the operator already has a different style set — in that case tell them their `/config` choice was left alone and the hermit voice won't be active until they switch to `hermit-voice`.
+
 #### Phase 5 — Confirm
 
-Tell the operator: "OPERATOR.md is ready. You can review it at `.claude-code-hermit/OPERATOR.md`. Refine anytime — just tell me what changed."
+Tell the operator: "OPERATOR.md is ready. You can review it at `.claude-code-hermit/OPERATOR.md`. Refine anytime — just tell me what changed." Mention the voice file too: how you talk to them is at `.claude/output-styles/hermit-voice.md`, editable directly or from a terminal session, and it takes effect on the next session.
 
 ### 6. Append session discipline to CLAUDE.md or CLAUDE.local.md
 

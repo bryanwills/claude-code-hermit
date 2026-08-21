@@ -14,6 +14,7 @@ import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } fr
 import { costLogPath } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
+import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
 import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
@@ -1932,6 +1933,54 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
   }
 }
 
+/**
+ * Voice carrier — is the hermit's tone actually reaching the system prompt?
+ *
+ * The two halves (the style file and the settings key) are owned by different
+ * parties: hatch writes the key, but the operator can change it in /config at
+ * any time, and boot deliberately does not reclaim it. That's a respected
+ * choice, not a bug — but it silently turns the voice off, so it has to surface
+ * somewhere, and this is that somewhere.
+ *
+ * Resolution uses local-over-project precedence rather than reading the hermit's
+ * own hatch target: the case worth catching is a hermit whose key sits in
+ * committed settings.json while a /config pick in settings.local.json outranks
+ * it — where the hermit's own file looks perfectly correct.
+ */
+function checkVoiceCarrier(p: DoctorPaths = PATHS) {
+  const id = 'voice-carrier';
+  try {
+    const projectRoot = path.dirname(p.hermitDir);
+    const hasFile = voiceFileExists(projectRoot);
+    const { value, source } = resolveEffectiveStyle(projectRoot);
+
+    if (!hasFile && value !== HERMIT_OUTPUT_STYLE) {
+      return { id, status: 'ok', detail: 'no hermit voice file (using Claude Code defaults)' };
+    }
+    if (!hasFile) {
+      return {
+        id, status: 'warn',
+        detail: `outputStyle is "${HERMIT_OUTPUT_STYLE}" (${source}) but ${VOICE_FILE_REL} is missing — run: /claude-code-hermit:hermit-settings voice`,
+      };
+    }
+    if (value === HERMIT_OUTPUT_STYLE) {
+      return { id, status: 'ok', detail: `voice active from ${VOICE_FILE_REL} (${source})` };
+    }
+    if (value === null) {
+      return {
+        id, status: 'warn',
+        detail: `${VOICE_FILE_REL} exists but no outputStyle key points at it — run: /claude-code-hermit:hermit-settings voice`,
+      };
+    }
+    return {
+      id, status: 'warn',
+      detail: `outputStyle is "${value}" (${source}), so the hermit voice file is inactive — set it to "${HERMIT_OUTPUT_STYLE}" in /config to re-enable, or leave it if that's intended`,
+    };
+  } catch (e: any) {
+    return { id, status: 'warn', detail: `check failed: ${e.message}` };
+  }
+}
+
 // ----------------- Orchestration -----------------
 
 async function runAllChecks(p: DoctorPaths = PATHS) {
@@ -1960,6 +2009,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkCredentialExpiry(p),
     checkModelPricingKnown(p),
     checkContextScan(p),
+    checkVoiceCarrier(p),
     await checkChannelLiveness(p),
   ];
 }
@@ -2083,7 +2133,7 @@ export {
   checkCost, checkProposals, checkDependencies, checkVersionCurrency, checkPermissions,
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor, checkRawSize,
-  checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkChannelLiveness,
+  checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkVoiceCarrier, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
   resolvePaths,
