@@ -1,9 +1,10 @@
 // Reading the channels{} block of config.json. Shared by the booter and doctor
 // so neither has to import the other.
 
-import { ENV_VAR_RE } from '../validate-config';
-
 type Json = any;
+
+/** A valid POSIX shell / env-var identifier. Re-exported by validate-config.ts. */
+export const ENV_VAR_RE = /^[A-Z_][A-Z0-9_]*$/;
 
 /** Python-style truthiness: empty arrays/objects/strings are falsy. */
 export function pyTruthy(v: Json): boolean {

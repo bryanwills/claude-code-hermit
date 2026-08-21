@@ -18,7 +18,7 @@
 
 ### Fixed
 - `/channel-setup` now refuses a channel name that can't become a valid env-var identifier (e.g. a hyphenated one) instead of confirming a `*_STATE_DIR` key that boot would then silently refuse to export, leaving the channel's MCP server without its state dir.
-- Boot now drops `*_STATE_DIR` env keys that no configured channel claims, instead of leaving stale or invalid ones in `settings.local.json` indefinitely.
+- Boot now drops `*_STATE_DIR` env keys that no configured channel claims, instead of leaving stale or invalid ones in `settings.local.json` indefinitely. Keys the operator set in `config.json`'s `env` block are left alone, and the sweep is skipped entirely when `config.json` fails to parse.
 
 ### Upgrade Instructions
 

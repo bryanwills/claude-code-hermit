@@ -741,10 +741,24 @@ function writeSettingsEnv(config: Json): void {
   }
 
   // Drop *_STATE_DIR keys no configured channel claims — pre-guard cruft, or a
-  // channel that was removed/disabled/renamed since the key was written.
-  const staleStateDirKeys = Object.keys(settings.env).filter(
-    (k) => k.endsWith('_STATE_DIR') && !claimedStateDirKeys.has(k),
-  );
+  // channel that was removed or renamed since the key was written. (A merely
+  // disabled channel still claims its key: the loop above iterates every
+  // configured channel, enabled or not.) Two exemptions, both about not
+  // destroying state on someone else's behalf:
+  //   - keys the operator put in config.env, which was merged into settings.env
+  //     above — that block is operator-owned and `_STATE_DIR` is not a reserved
+  //     suffix there (`HERMIT_STATE_DIR` is a real one). Sweeping them would
+  //     delete-and-readd forever, and the var would never reach the session.
+  //   - everything, when config.json failed to parse: loadConfig fails open to
+  //     defaults, so `channels` is empty and every live channel would look
+  //     stale. Same reason the config write-back is gated on this flag.
+  const configEnvKeys = new Set(Object.keys(envVars));
+  const staleStateDirKeys = configReadFailed
+    ? []
+    : Object.keys(settings.env).filter(
+        (k) =>
+          k.endsWith('_STATE_DIR') && !claimedStateDirKeys.has(k) && !configEnvKeys.has(k),
+      );
   for (const key of staleStateDirKeys) delete settings.env[key];
   if (staleStateDirKeys.length) {
     console.log(`[hermit] Cleaned stale state-dir vars from settings.local.json: ${staleStateDirKeys.join(', ')}`);
