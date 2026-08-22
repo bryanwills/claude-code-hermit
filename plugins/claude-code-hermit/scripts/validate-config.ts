@@ -299,7 +299,7 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       // every briefing to the maintainer chat until the operator rebinds from
       // the terminal. It also collapses two deliberately separate tiers onto
       // one chat — control authority (isTrustedController) and settings
-      // authority (isMaintainerController) are split across chats on purpose.
+      // authority (isSettingsController) are split across chats on purpose.
       // Warn (like the dm collision below) so doctor reports it.
       if (ch.default_chat_id != null && ch.maintainer_channel_id != null &&
           String(ch.default_chat_id) === String(ch.maintainer_channel_id)) {
@@ -317,6 +317,27 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           String(ch.dm_channel_id) === String(ch.maintainer_channel_id)) {
         warnings.push(
           `channels.${name}.dm_channel_id equals maintainer_channel_id — the maintainer chat is bound as the operator DM, so it carries control authority too; send a message from the real DM chat to re-pair`,
+        );
+      }
+      // The home-chat settings fallback (lib/channel-auth.ts
+      // isSettingsController) hands the security tier to whoever matches the
+      // pinned home. When that home is a group or server channel — the shape
+      // this heuristic reads: a pin that differs from the last chat the operator
+      // wrote from — every member of it holds the tier, since with no
+      // allowed_users the chat id is the only factor. Warn, don't error: a
+      // shared home is a legitimate setup, it just has to name its operators.
+      //
+      // Partial signal, deliberately: `dm_channel_id` is the last inbound chat,
+      // not a verified 1:1 DM, and channel-hook seeds `default_chat_id` from the
+      // same first message — so a hermit that only ever hears from one group has
+      // the two equal and is never warned. Nothing in a chat id says whether the
+      // chat is shared; this catches the divergent case and no more.
+      if (!Array.isArray(ch.allowed_users) && !ch.maintainer_channel_id &&
+          ch.default_chat_id != null && ch.dm_channel_id != null &&
+          String(ch.default_chat_id) !== String(ch.dm_channel_id) &&
+          config.operator_profile !== 'non-technical') {
+        warnings.push(
+          `channels.${name}.default_chat_id looks like a shared chat (it differs from dm_channel_id) with no allowed_users and no maintainer_channel_id — every member of it can change this hermit's security-tier settings; set allowed_users to name your operators`,
         );
       }
     }
@@ -565,6 +586,13 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
 
   if (config.ask_gate !== undefined && typeof config.ask_gate !== 'boolean') {
     errors.push('ask_gate: must be a boolean');
+  }
+
+  // Only a literal `false` opts out (channel-settings-gate.ts tests for it), so
+  // a truthy non-boolean here would read as "on" and quietly leave the security
+  // tier open to chat. Reject rather than coerce.
+  if (config.settings_from_chat !== undefined && typeof config.settings_from_chat !== 'boolean') {
+    errors.push('settings_from_chat: must be a boolean');
   }
 
   if (config.artifacts !== undefined) {

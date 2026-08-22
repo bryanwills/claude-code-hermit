@@ -62,6 +62,16 @@ function configWithMaintainer(extra: any = {}): any {
   };
 }
 
+/**
+ * Config for the ordinary operator-run install: a pinned home chat and no
+ * maintainer chat at all. This is the shape the fallback exists for — most
+ * hermits never set `maintainer_channel_id`, which is outbound routing for
+ * client-facing installs.
+ */
+function configHomeOnly(extra: any = {}): any {
+  return { channels: { discord: { default_chat_id: HOME_CHAT } }, ...extra };
+}
+
 /** The pending-confirmation record the gate writes when it issues a token. */
 function pendingToken(dir: string): string {
   const p = path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json');
@@ -189,6 +199,18 @@ describe('channelVerdict — policy', () => {
     expect(channelVerdict('frobnicate', 'model')).toBe('terminal-only');
   });
 
+  test('the two authority keys are terminal-only, container and leaf alike', () => {
+    // They decide who holds the tier — operator_profile gates the home-chat
+    // fallback, settings_from_chat switches every tier above `allowed` off — so
+    // a chat able to write either could grant itself authority or re-arm an
+    // opt-out the operator set. Same unrevocability as the enrollment root.
+    expect(channelVerdict('set', 'operator_profile')).toBe('terminal-only');
+    expect(channelVerdict('set', 'settings_from_chat')).toBe('terminal-only');
+    expect(channelVerdict('unset', 'settings_from_chat')).toBe('terminal-only');
+    expect(channelVerdict('toggle', 'settings_from_chat')).toBe('terminal-only');
+    expect(channelVerdict('set', 'settings_from_chat.anything')).toBe('terminal-only');
+  });
+
   test('read verbs are always allowed', () => {
     for (const verb of ['show', 'get', 'history']) {
       expect(channelVerdict(verb, 'permission_mode')).toBe('allowed');
@@ -291,8 +313,51 @@ describe('channel-settings-gate — enforcement', () => {
     expect(r.exitCode).toBe(2);
   });
 
-  test('allows a safe settings change from a channel turn', async () => {
-    const { dir, transcript } = fixture(CHANNEL_PROMPT);
+  test('allows a safe settings change from the operator\'s own chat', async () => {
+    const { dir, transcript } = fixture(CHANNEL_PROMPT, configHomeOnly());
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: { command: 'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set heartbeat.every 30m' },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
+  });
+
+  test('refuses the same safe change from a chat that holds no authority', async () => {
+    // `allowed` is a tier of settings, never a tier of senders: without this a
+    // stranger messaging from some other chat could set the model or switch the
+    // watchdog off, while being refused a plain status read by
+    // isTrustedController.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('turn the heartbeat down', { chatId: 'some-other-chat' }),
+      configHomeOnly()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: { command: 'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set heartbeat.every 30m' },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('neither the operator\'s own nor the settings chat');
+  });
+
+  test('the settings chat may make a safe change too — the ladder must not invert', async () => {
+    // The maintainer chat is not the pinned home, so isTrustedController alone
+    // would refuse it a safe write while still letting it flip permission_mode.
+    // On a client-facing install that home belongs to the client, so "ask from
+    // your own chat" would be advice the maintainer cannot act on.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('turn the heartbeat down'),
+      configWithMaintainer()
+    );
     const r = await runGate(
       payload({
         dir,
@@ -489,6 +554,164 @@ describe('channel-settings-gate — maintainer tier', () => {
       dir
     );
     expect(r.exitCode).toBe(2);
+  });
+});
+
+// `maintainer_channel_id` is outbound routing for client-facing installs, so
+// the ordinary operator-run hermit never sets one — which left the security
+// tier unreachable exactly where it was meant to be used. The home chat carries
+// it there instead, gated on operator_profile so a client's chat never does.
+describe('channel-settings-gate — home-chat fallback', () => {
+  test('the home chat carries the security tier when no maintainer chat exists', async () => {
+    const { dir, transcript } = fixture(CHANNEL_PROMPT, configHomeOnly());
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
+  });
+
+  test('a client-facing install keeps the tier terminal-only', async () => {
+    const { dir, transcript } = fixture(
+      CHANNEL_PROMPT,
+      configHomeOnly({ operator_profile: 'non-technical' })
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Security-tier hermit setting');
+  });
+
+  test('the fallback reaches the nonce tier too, and applies on the echo', async () => {
+    const config = configHomeOnly();
+    const ask = fixture(maintainerPrompt('switch permission mode', { chatId: HOME_CHAT }), config);
+    const first = await runGate(
+      payload({ dir: ask.dir, transcript: ask.transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      ask.dir
+    );
+    expect(first.exitCode).toBe(2);
+    expect(first.stderr).toContain('Second factor required');
+
+    const token = pendingToken(ask.dir);
+    fs.writeFileSync(
+      ask.transcript,
+      [
+        triggerPrompt(maintainerPrompt('switch permission mode', { chatId: HOME_CHAT })),
+        assistantEntry(),
+        triggerPrompt(maintainerPrompt(`confirming: ${token}`, { chatId: HOME_CHAT })),
+      ].join('\n') + '\n'
+    );
+    const second = await runGate(
+      payload({ dir: ask.dir, transcript: ask.transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      ask.dir
+    );
+    expect(second.exitCode).toBe(0);
+  });
+
+  test('the enrollment root stays terminal-only under the fallback', async () => {
+    const { dir, transcript } = fixture(CHANNEL_PROMPT, configHomeOnly());
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set channels.discord.allowed_users ["u-attacker"]',
+        },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Terminal-only hermit setting');
+  });
+
+  test('the authority keys stay terminal-only under the fallback', async () => {
+    for (const cmd of ['set operator_profile technical', 'set settings_from_chat true']) {
+      const { dir, transcript } = fixture(CHANNEL_PROMPT, configHomeOnly());
+      const r = await runGate(
+        payload({
+          dir,
+          transcript,
+          tool: 'Bash',
+          input: { command: `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json ${cmd}` },
+        }),
+        dir
+      );
+      expect(r.exitCode).toBe(2);
+      expect(r.stderr).toContain('Terminal-only hermit setting');
+    }
+  });
+
+  test('a configured maintainer chat turns the fallback off rather than widening it', async () => {
+    const { dir, transcript } = fixture(CHANNEL_PROMPT, configWithMaintainer());
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+  });
+});
+
+describe('channel-settings-gate — settings_from_chat opt-out', () => {
+  test('false collapses the security tier to terminal-only, maintainer chat included', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('turn escalation on'),
+      { ...configWithMaintainer(), settings_from_chat: false }
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('switched off for this hermit');
+  });
+
+  test('false blocks the nonce tier without issuing a code', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode'),
+      { ...configWithMaintainer(), settings_from_chat: false }
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).not.toContain('Second factor required');
+    expect(
+      fs.existsSync(path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json'))
+    ).toBe(false);
+  });
+
+  test('false leaves the everyday settings alone from the operator\'s own chat', async () => {
+    const { dir, transcript } = fixture(
+      CHANNEL_PROMPT,
+      configHomeOnly({ settings_from_chat: false })
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: { command: 'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set heartbeat.every 30m' },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
+  });
+
+  test('the identical blocked write still lands from a terminal turn', async () => {
+    const { dir, transcript } = fixture(
+      TERMINAL_PROMPT,
+      { ...configWithMaintainer(), settings_from_chat: false }
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
   });
 });
 

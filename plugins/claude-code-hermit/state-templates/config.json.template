@@ -17,6 +17,7 @@
   "chrome": false,
   "push_notifications": true,
   "ask_gate": true,
+  "settings_from_chat": true,
   "idle_behavior": "discover",
   "routines": [
     {"id": "heartbeat-restart",   "schedule": "0 4 * * *",  "skill": "claude-code-hermit:hermit-routines load",        "run_during_waiting": true, "enabled": true},

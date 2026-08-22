@@ -8,7 +8,9 @@
 
 import { describe, test, expect } from 'bun:test';
 import { normalizeChannelSource } from '../scripts/lib/channel-envelope';
-import { isAllowedSender, isTrustedController } from '../scripts/lib/channel-auth';
+import {
+  isAllowedSender, isTrustedController, isMaintainerController, isSettingsController,
+} from '../scripts/lib/channel-auth';
 
 describe('normalizeChannelSource', () => {
   test('plugin-qualified source — returns the server name', () => {
@@ -127,5 +129,87 @@ describe('isTrustedController — pinned-home anchor', () => {
   test('allowed_users=[] lockdown is not reopened by a matching pin', () => {
     const config = { channels: { discord: { allowed_users: [], default_chat_id: 'HOME' } } };
     expect(isTrustedController(config, 'discord', 'ANYONE', 'HOME')).toBe(false);
+  });
+});
+
+describe('isMaintainerController — strict, no fallback', () => {
+  test('the configured maintainer chat holds it; the home chat does not', () => {
+    const config = {
+      channels: { discord: { default_chat_id: 'HOME', maintainer_channel_id: 'OPS' } },
+    };
+    expect(isMaintainerController(config, 'discord', 'U1', 'OPS')).toBe(true);
+    expect(isMaintainerController(config, 'discord', 'U1', 'HOME')).toBe(false);
+  });
+
+  test('unconfigured — nobody holds it, whatever the chat', () => {
+    const config = { channels: { discord: { default_chat_id: 'HOME' } } };
+    expect(isMaintainerController(config, 'discord', 'U1', 'HOME')).toBe(false);
+  });
+
+  test('an allowlist still applies to the maintainer chat', () => {
+    const config = {
+      channels: { discord: { allowed_users: ['ALLOWED'], maintainer_channel_id: 'OPS' } },
+    };
+    expect(isMaintainerController(config, 'discord', 'ALLOWED', 'OPS')).toBe(true);
+    expect(isMaintainerController(config, 'discord', 'STRANGER', 'OPS')).toBe(false);
+  });
+});
+
+// The fallback: `maintainer_channel_id` is an outbound-routing field client-
+// facing installs set, so an operator-run hermit that never set one had no
+// reachable security tier at all. Its home chat now carries it — but only when
+// operator_profile says the person on that chat runs the box.
+describe('isSettingsController — home-chat fallback', () => {
+  test('technical install, no maintainer chat — the pinned home holds the tier', () => {
+    const config = {
+      operator_profile: 'technical',
+      channels: { discord: { default_chat_id: 'HOME', dm_channel_id: 'MOVED' } },
+    };
+    expect(isSettingsController(config, 'discord', 'U1', 'HOME')).toBe(true);
+    expect(isSettingsController(config, 'discord', 'U1', 'MOVED')).toBe(false);
+  });
+
+  test('absent operator_profile defaults to technical', () => {
+    const config = { channels: { discord: { default_chat_id: 'HOME' } } };
+    expect(isSettingsController(config, 'discord', 'U1', 'HOME')).toBe(true);
+  });
+
+  test('non-technical install — the client chat never inherits the tier', () => {
+    const config = {
+      operator_profile: 'non-technical',
+      channels: { discord: { default_chat_id: 'CLIENT' } },
+    };
+    expect(isSettingsController(config, 'discord', 'U1', 'CLIENT')).toBe(false);
+  });
+
+  test('a configured maintainer chat turns the fallback off, not wider', () => {
+    const config = {
+      operator_profile: 'technical',
+      channels: { discord: { default_chat_id: 'HOME', maintainer_channel_id: 'OPS' } },
+    };
+    expect(isSettingsController(config, 'discord', 'U1', 'OPS')).toBe(true);
+    expect(isSettingsController(config, 'discord', 'U1', 'HOME')).toBe(false);
+  });
+
+  test('an empty-string maintainer id reads as unconfigured, not as a lockout', () => {
+    const config = {
+      operator_profile: 'technical',
+      channels: { discord: { default_chat_id: 'HOME', maintainer_channel_id: '' } },
+    };
+    expect(isSettingsController(config, 'discord', 'U1', 'HOME')).toBe(true);
+  });
+
+  test('the fallback inherits the allowlist — a stranger in the home chat is refused', () => {
+    const config = {
+      operator_profile: 'technical',
+      channels: { discord: { allowed_users: ['ALLOWED'], default_chat_id: 'HOME' } },
+    };
+    expect(isSettingsController(config, 'discord', 'ALLOWED', 'HOME')).toBe(true);
+    expect(isSettingsController(config, 'discord', 'STRANGER', 'HOME')).toBe(false);
+  });
+
+  test('an unconfigured channel grants nothing', () => {
+    const config = { operator_profile: 'technical', channels: {} };
+    expect(isSettingsController(config, 'discord', 'U1', 'ANY')).toBe(false);
   });
 });

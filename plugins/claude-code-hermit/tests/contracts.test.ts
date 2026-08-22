@@ -502,6 +502,59 @@ describe('push_notifications validation', () => {
   });
 });
 
+describe('settings_from_chat validation', () => {
+  test('true and false are both valid', () => {
+    for (const val of [true, false]) {
+      const out = runValidate({ settings_from_chat: val });
+      expect(out.errors.some((e: string) => e.includes('settings_from_chat'))).toBe(false);
+    }
+  });
+
+  test('must be a boolean — a truthy string would read as "on" and is rejected', () => {
+    const out = runValidate({ settings_from_chat: 'off' });
+    expect(out.errors.some((e: string) => e.includes('settings_from_chat'))).toBe(true);
+  });
+});
+
+// The home-chat settings fallback binds the security tier to the pinned home,
+// so a shared home chat with no allowlist spreads that tier across everyone in
+// it. Warn, never error — a shared home is legitimate, it just needs naming.
+describe('shared-home settings-authority warning', () => {
+  const sharedHome = (extra: any = {}) => ({
+    channels: { discord: { default_chat_id: 'GROUP', dm_channel_id: 'DM', ...extra } },
+  });
+  const warned = (out: any) =>
+    out.warnings.some((w: string) => w.includes('can change this hermit\'s security-tier settings'));
+
+  test('warns on a shared home with no allowlist and no maintainer chat', () => {
+    expect(warned(runValidate(sharedHome()))).toBe(true);
+  });
+
+  test('silent once allowed_users names the operators', () => {
+    expect(warned(runValidate(sharedHome({ allowed_users: ['u-operator'] })))).toBe(false);
+  });
+
+  test('silent when a maintainer chat holds the tier instead', () => {
+    expect(warned(runValidate(sharedHome({ maintainer_channel_id: 'OPS' })))).toBe(false);
+  });
+
+  test('silent on a client-facing install, where the fallback never applies', () => {
+    const out = runValidate({ ...sharedHome(), operator_profile: 'non-technical' });
+    expect(warned(out)).toBe(false);
+  });
+
+  test('silent when the pinned home is the operator DM itself', () => {
+    const out = runValidate({
+      channels: { discord: { default_chat_id: 'DM', dm_channel_id: 'DM' } },
+    });
+    expect(warned(out)).toBe(false);
+  });
+
+  test('it is a warning, never an error', () => {
+    expect(runValidate(sharedHome()).errors.some((e: string) => e.includes('security-tier'))).toBe(false);
+  });
+});
+
 // expect_artifact declares the exact file a routine must produce. Globs are
 // rejected because they would make both the change check and the duplicate
 // check unsound (an unrelated fresh match passes; overlapping patterns are not

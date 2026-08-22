@@ -7,23 +7,42 @@
 // `<channel>`-tagged message is an unauthenticated claim of identity —
 // `user="operator"` is text anyone can send:
 //
-//   allowed        anyone who can reach the hermit at all
-//   maintainer     the configured maintainer chat, allowlist-checked
-//                  (boot_skill, remote, escalation, docker.*, artifacts.backend,
-//                  and everything not named below)
-//   nonce          maintainer chat AND an echoed token: permission_mode, env.*,
+//   allowed        the operator's own chat (isTrustedController — the same
+//                  anchor pause/resume/status use), or the settings chat, which
+//                  holds strictly more. Reads are open wider: any chat that may
+//                  reach the hermit can `show`/`get`/`history`.
+//   maintainer     the settings chat, allowlist-checked (isSettingsController):
+//                  the configured maintainer chat, or the home chat itself on
+//                  an operator-run install that never configured one
+//                  (boot_skill, remote, escalation, docker.*,
+//                  artifacts.backend, and everything not named below)
+//   nonce          settings chat AND an echoed token: permission_mode, env.*,
 //                  monitors (each entry carries a shell command)
-//   terminal-only  the enrollment root and any ancestor write that would
-//                  replace it — never reachable from a channel, on any tier
+//   terminal-only  the enrollment root, the two authority keys, and any
+//                  ancestor write that would replace them — never reachable
+//                  from a channel, on any tier
 //
 // The maintainer tier exists because the hermit that most needs these decisions
 // is the unattended one, and its operator is reachable on a channel, not at a
 // shell. Its anchor is a platform-supplied chat id (lib/channel-auth.ts
-// isMaintainerController), not message text. The enrollment root
-// (allowed_users, default_chat_id, dm_channel_id, maintainer_channel_id) is the
-// deliberate hole in that: a maintainer chat that could add an allowed user or
-// re-point itself would turn one compromise into a permanent, self-extending
-// one, instead of something an operator with terminal access can revoke.
+// isSettingsController), not message text. `maintainer_channel_id` alone was
+// too narrow an anchor to carry it: that field is outbound routing for
+// client-facing installs, so the ordinary operator-run hermit never sets one
+// and the whole tier was unreachable exactly where it was meant to be used.
+// The fallback is gated on `operator_profile` — on a client-facing install the
+// home chat belongs to the client, so only a `technical` install extends it.
+//
+// The enrollment root (allowed_users, default_chat_id, dm_channel_id,
+// maintainer_channel_id) is the deliberate hole in that: a settings chat that
+// could add an allowed user or re-point itself would turn one compromise into
+// a permanent, self-extending one, instead of something an operator with
+// terminal access can revoke. `operator_profile` and `settings_from_chat` join
+// it for the same reason — both decide who holds the tier, so a chat that could
+// write them could grant itself authority or re-arm an opt-out the operator set.
+//
+// `settings_from_chat: false` is that opt-out: it collapses everything above
+// the safe tier to terminal-only on every chat, the configured maintainer one
+// included. Absent or true, the tiers above apply.
 //
 // The decision keys on the CURRENT TURN's opening prompt, not on the session:
 // an operator typing in the managed hermit's own tmux pane is a terminal turn
@@ -47,7 +66,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir, transcriptPath, readTailLines, turnPromptText, dropSidechainLines } from './lib/cc-compat';
 import { parseChannelEnvelope, type ChannelEnvelope } from './lib/channel-envelope';
-import { isMaintainerController } from './lib/channel-auth';
+import { isSettingsController, isTrustedController } from './lib/channel-auth';
 import { readConfigRaw } from './lib/config-read';
 import { byArg } from './lib/settings/registry';
 import { runHook } from './lib/hook-input';
@@ -66,11 +85,28 @@ const DENY_TERMINAL_ONLY =
   'that was asked.';
 
 const DENY_NEEDS_MAINTAINER =
-  'Security-tier hermit setting. This turn arrived from a channel that is not the configured ' +
-  'maintainer chat, and settings like permission mode, boot skill, remote, escalation, docker and ' +
-  'the artifact backend change only from the maintainer chat or the operator\'s own terminal. Do ' +
+  'Security-tier hermit setting. Settings like permission mode, boot skill, remote, escalation, ' +
+  'docker and the artifact backend change only from the chat that holds settings authority — the ' +
+  'configured maintainer chat, or the hermit\'s own home chat when none is configured and the ' +
+  'install is operator-run — or from the operator\'s terminal. This turn arrived from neither. Do ' +
   'not retry, and do not edit config.json directly. Reply in the operator\'s language explaining ' +
   'where this has to be asked from, and carry on with anything else that was asked.';
+
+const DENY_NEEDS_TRUSTED =
+  'Hermit setting. This turn arrived from a chat that is neither the operator\'s own nor the ' +
+  'settings chat, and settings change only from one of those or from a terminal — the same rule ' +
+  'that governs pause, resume and status. Reading a setting is still fine from any chat. Do not ' +
+  'retry, and do not edit config.json directly. Reply in the operator\'s language saying the ' +
+  'change has to come from their own chat with the hermit, and carry on with anything else that ' +
+  'was asked.';
+
+const DENY_SETTINGS_FROM_CHAT_OFF =
+  'Settings changes from chat are switched off for this hermit (`settings_from_chat` is false), so ' +
+  'anything beyond the everyday settings changes only from a terminal session — from every chat, ' +
+  'including the maintainer one. Do not retry, and do not edit config.json directly. Reply in the ' +
+  'operator\'s language that this hermit is set to terminal-only for settings of this kind, name ' +
+  '`/claude-code-hermit:hermit-settings <argument>` as the terminal command, and carry on with ' +
+  'anything else that was asked.';
 
 function denyNeedsNonce(target: string, token: string): string {
   return (
@@ -155,6 +191,16 @@ const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_cha
 const ENROLLMENT_ANCESTOR = /^channels(\.[^.]+)?$/;
 
 /**
+ * The two keys that decide who holds settings authority at all, rather than
+ * what one may change. `operator_profile` gates the home-chat fallback
+ * (lib/channel-auth.ts isSettingsController) and `settings_from_chat` switches
+ * every tier above `allowed` off — so a chat able to write either could grant
+ * itself the tier or re-arm an opt-out the operator deliberately set. Same
+ * unrevocability argument as the enrollment root, so the same answer.
+ */
+const AUTHORITY_KEYS = /^(operator_profile|settings_from_chat)(\..+)?$/;
+
+/**
  * Execution-adjacent: `permission_mode` can be flipped to bypassPermissions,
  * `env` is a free-form dict that reaches the session's environment, and every
  * `monitors[]` entry carries a `command` string the `watch` skill registers as
@@ -197,8 +243,13 @@ function resolveTarget(verb: string, target: string): string {
  * falls through to the tier of whatever it would replace. Unknown and
  * future keys land on `maintainer` — the operator's own chat, allowlist-checked
  * and audited — rather than on the terminal, so adding a setting doesn't
- * silently lock the unattended operator out of it. Only the enrollment root is
- * enumerated as unreachable, because only it is unrecoverable.
+ * silently lock the unattended operator out of it. Only the enrollment root and
+ * the two authority keys are enumerated as unreachable, because only they are
+ * unrecoverable.
+ *
+ * The verdict is a tier, not an answer: `allowed` still requires the trusted
+ * chat for a write (main() applies that), and every tier above it is void when
+ * `settings_from_chat` is false.
  */
 export function channelVerdict(verb: string, target: string): Verdict {
   if (READ_VERBS.has(verb)) return 'allowed';
@@ -209,6 +260,7 @@ export function channelVerdict(verb: string, target: string): Verdict {
   if (ALLOWED_EXACT.has(dotted)) return 'allowed';
   if (ALLOWED_PATTERNS.some(rx => rx.test(dotted))) return 'allowed';
   if (ENROLLMENT_ROOT.test(dotted) || ENROLLMENT_ANCESTOR.test(dotted)) return 'terminal-only';
+  if (AUTHORITY_KEYS.test(dotted)) return 'terminal-only';
   if (NONCE_REQUIRED.test(dotted)) return 'nonce';
   return 'maintainer';
 }
@@ -293,8 +345,14 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
 
   let worst: Verdict = 'allowed';
   let targets: string[] = [];
+  let sawWrite = false;
   for (const m of matches) {
     const verb = m[2];
+    // Reads are open on every tier and to every chat that may reach the hermit,
+    // so they contribute neither a verdict nor a label. A command that is only
+    // reads returns null below and never reaches an authority check at all.
+    if (READ_VERBS.has(verb)) continue;
+    sawWrite = true;
     const t = strip(m[3]);
     // `unset` and `toggle` take a path and nothing else, so the token after
     // theirs belongs to the shell (a `&&`, a redirect), not to the setting.
@@ -304,11 +362,16 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
     if (STRICTNESS[v] > STRICTNESS[worst]) {
       worst = v;
       targets = [label];
-    } else if (v === worst && v !== 'allowed' && !targets.includes(label)) {
+    } else if (v === worst && !targets.includes(label)) {
       targets.push(label);
     }
   }
-  return worst === 'allowed' ? null : { verdict: worst, target: targets.sort().join(', ') };
+  // Safe-tier writes are returned too, not swallowed: `allowed` means "any
+  // setting", never "any sender", and main() still binds them to the operator's
+  // own chat. Only a command with no write at all is none of the gate's
+  // business.
+  if (!sawWrite) return null;
+  return { verdict: worst, target: targets.sort().join(', ') };
 }
 
 /**
@@ -358,21 +421,49 @@ function main(payload: any): void {
 
   if (!determined) {
     // Couldn't tell. On the managed unattended session a protected mutation
-    // fails closed; anywhere else an operator is present, so lean allow.
-    denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.');
+    // fails closed; anywhere else an operator is present, so lean allow. A
+    // safe-tier write is exempt: the fail-closed rule buys its broken flows
+    // back in blast radius, and a safe setting has none to speak of.
+    if (mutation.verdict !== 'allowed') {
+      denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.');
+    }
     return;
   }
 
   if (!envelope) return; // terminal-opened turn — the operator asked for this
 
+  // Cheapest check first: terminal-only never needs config content, so decide
+  // it before paying for the read — same cheap-checks-first ordering as the
+  // pure string matching above.
   if (mutation.verdict === 'terminal-only') deny(DENY_TERMINAL_ONLY);
 
   const config = readConfigRaw(dir);
-  if (!isMaintainerController(config, envelope.source, envelope.userId, envelope.chatId)) {
+
+  // Safe tier: any setting, but only from a chat that holds authority — the
+  // operator's own chat (the same anchor pause/resume/status bind to) or the
+  // settings chat, which holds strictly more than it. Without the first arm a
+  // stranger messaging from some other chat could set the model or switch the
+  // watchdog off while being refused a plain status read; without the second,
+  // a configured maintainer chat could flip `permission_mode` but not the
+  // model, and the tier ladder would invert at its own top.
+  if (mutation.verdict === 'allowed') {
+    const holdsAuthority =
+      isTrustedController(config, envelope.source, envelope.userId, envelope.chatId) ||
+      isSettingsController(config, envelope.source, envelope.userId, envelope.chatId);
+    if (!holdsAuthority) deny(DENY_NEEDS_TRUSTED);
+    return;
+  }
+
+  // The operator's opt-out, checked before authority: with settings_from_chat
+  // false there is no chat that holds these tiers, so naming one in the deny
+  // would send the operator somewhere that cannot help either.
+  if (config?.settings_from_chat === false) deny(DENY_SETTINGS_FROM_CHAT_OFF);
+
+  if (!isSettingsController(config, envelope.source, envelope.userId, envelope.chatId)) {
     deny(DENY_NEEDS_MAINTAINER);
   }
 
-  if (mutation.verdict === 'maintainer') return; // the maintainer chat carries this tier
+  if (mutation.verdict === 'maintainer') return; // the settings chat carries this tier
 
   // Nonce tier: the maintainer chat asks, the operator confirms. A token is
   // bound to one target and one chat, single-use, and matched only against the
