@@ -41,7 +41,7 @@ Next Start Point: Fresh start.
 
 Write `Auto-closed by heartbeat.` as the first line of `## Overview` in the session report.
 
-If step 7 returns `ok === false`, no markers were written and `pending-close.json` is left in place automatically, so the next heartbeat tick retries the drain.
+If step 7 returns `ok === false`, no markers were written and `pending-close.json` is left in place automatically, so a later tick retries the drain. Both drainers share a 30-minute backoff marker (`state/pending-close-drain.json`) and defer while an operator turn is open, so the retry is the first eligible heartbeat tick or routine poll after that window, not the very next one.
 
 ### Scheduled decision path (`--scheduled`)
 
