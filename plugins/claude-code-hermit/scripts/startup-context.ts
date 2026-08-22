@@ -19,6 +19,7 @@ import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { readSettledConfig } from './lib/config-read';
 import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
+import { readMicroProposals } from './lib/micro-proposals-io';
 
 type Json = any;
 
@@ -141,7 +142,10 @@ function buildCompactionPointers(agentDir: string): string {
   } catch {}
 
   try {
-    const mp = JSON.parse(fs.readFileSync(path.resolve(agentDir, 'state', 'micro-proposals.json'), 'utf-8'));
+    const read = readMicroProposals(path.resolve(agentDir, 'state', 'micro-proposals.json'));
+    // Omitting the line on a corrupt file implies an empty queue (#764) — say so instead.
+    if (read.status === 'corrupt') parts.push('pending micro-proposals: unreadable');
+    const mp = read.status === 'ok' ? read.data : { pending: [] };
     const pending = (Array.isArray(mp.pending) ? mp.pending : []).filter((p: Json) => p && p.status === 'pending');
     if (pending.length > 0) {
       const ids = pending.slice(0, 10).map((p: Json) => safe(p.id ?? '?'));

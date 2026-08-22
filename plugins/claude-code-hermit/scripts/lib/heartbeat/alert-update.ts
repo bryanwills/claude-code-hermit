@@ -166,6 +166,30 @@ function apply(payloadJson: string): void {
 
   const alerts: Json = { ...result.alerts, ...frozen };
 
+  // The freeze above keeps a corrupt source-of-truth from resolving real pending
+  // decisions, but on its own it is silent: frozen entries produce no firing item,
+  // so classifyTick emits nothing and the digest gate is off by design — the operator
+  // is never told their pending questions became unreadable (#764). Notify directly,
+  // once per day, for as long as the read keeps failing. Channel-voice split: the
+  // operator gets plain language, the parse error goes to the SHELL.md monitoring line.
+  const shouldNotifyStructuredFailure =
+    hasStructuredReadFailure && state.structured_read_failure_notified_date !== today;
+  if (shouldNotifyStructuredFailure) {
+    const failedSources = [
+      !micro.ok && 'micro-proposals.json',
+      !proposal.ok && 'proposals/',
+      !stale.ok && 'runtime.json',
+    ].filter(Boolean) as string[];
+    result.notifications.push(
+      "I can't read the record of decisions waiting on you — some may be pending without showing up. It needs a repair before I can see them again.");
+    result.monitoringLines.push(
+      `[${hhmm}] Heartbeat: structured read failure (${failedSources.join(', ')})` +
+      (micro.error ? ` — ${micro.error}` : '') + '. Pending-decision alerts frozen.');
+  }
+  const structuredFailureNotifiedDate = shouldNotifyStructuredFailure
+    ? today
+    : (typeof state.structured_read_failure_notified_date === 'string' ? state.structured_read_failure_notified_date : null);
+
   const self_eval: Json = {
     ...(state.self_eval && typeof state.self_eval === 'object' ? state.self_eval : {}),
     ...selfEvalUpdates,
@@ -180,6 +204,7 @@ function apply(payloadJson: string): void {
     // the next tick re-derives the moment the source file is readable again.
     last_clean_eval_at: hasStructuredReadFailure ? null : result.lastCleanEvalAt,
     last_digest_date: result.lastDigestDate,
+    structured_read_failure_notified_date: structuredFailureNotifiedDate,
   };
 
   const wrote = writeAlertState(stateFile, updated);
