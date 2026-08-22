@@ -183,7 +183,7 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 
 **`CLAUDE_CODE_EFFORT_LEVEL`** (optional) sets the reasoning effort level. Add it to `config.env` if you want to override the model default — note the env var takes highest priority and overrides runtime `/effort`, so omit it for interactive sessions where you want per-turn control. Valid values and defaults: [CC model-config docs](https://code.claude.com/docs/en/model-config#adjust-effort-level).
 
-A trusted channel sender can also pair the main model with an experimental [advisor model](https://code.claude.com/docs/en/advisor) mid-session via `/advisor <model>` (and clear it with `/advisor off`) — unlike `model`/`effort` above, this selection is not re-asserted at boot, so it persists until turned off.
+A trusted channel sender can also pair the main model with an experimental [advisor model](https://code.claude.com/docs/en/advisor) mid-session via `/advisor <model>` (and clear it with `/advisor off`) — unlike `model`/`effort` above, this selection is not re-asserted at boot. Claude Code writes it to its own user-level settings, so it persists across restarts, applies to every session sharing that config directory, and keeps adding spend until a trusted sender sends `/advisor off`.
 
 ---
 
