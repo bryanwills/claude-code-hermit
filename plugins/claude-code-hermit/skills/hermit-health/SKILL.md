@@ -15,7 +15,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 Read the following (gracefully skip any file that doesn't exist). The nine sources are independent — read them concurrently:
 
-1. `.claude-code-hermit/state/alert-state.json` — `active` array and `suppressed` array; each entry has `type`, `timestamp`, `message`.
+1. `.claude-code-hermit/state/alert-state.json` — the `alerts` object, keyed by alert id (`checklist:*`, `proposal-pending:PROP-NNN`, `micro-proposal-pending:*`, `stale-session`). Each entry has `text`, `count`, `first_seen`, `last_seen`, `suppressed`, `consecutive_clean`.
 2. `.claude-code-hermit/state/runtime.json` — `last_activity`, `session_id`.
 3. `.claude-code-hermit/state/reflection-state.json` — `last_reflection` timestamp, `counters` (including `judge_suppress_by_code` map and run/output fields), and `queue` (pending micro-proposals and reflect candidates).
 4. `.claude-code-hermit/config.json` — `routines` array (id, schedule, enabled); `channels` object (each channel's `default_chat_id` and `dm_channel_id`).
@@ -27,7 +27,7 @@ Read the following (gracefully skip any file that doesn't exist). The nine sourc
 
 ## Analysis
 
-**Alerts:** Count entries in `alert-state.json → active`. For each, compute age from `timestamp`. Show oldest. If none: "No active alerts."
+**Alerts:** From `alert-state.json → alerts`, active means `suppressed` is not `true`; suppressed ones are digest-only and reported separately. Compute each entry's age from `first_seen`. Report the active count with the oldest entry's `text` and age, then the suppressed count with its oldest age. If no active entries: "No active alerts" (still name the suppressed count when there is one).
 
 **Proposal queue:** Count proposals with `status: proposed` (pending operator review), `status: accepted` (in flight, not yet resolved), and `status: in_progress`. If all zero: "Queue empty."
 
@@ -56,7 +56,7 @@ Reply in ≤1500 chars. Use exactly this section structure:
 
 ```
 ### Alerts
-- N active (oldest: [type] Xd ago) [or "No active alerts"]
+- N active (oldest: [text] Xd ago), M suppressed (oldest Xd ago) [or "No active alerts"; omit the suppressed clause when M is 0]
 (or: Alerts — alert-state.json not found (hermit not yet initialized).)
 
 ### Proposal queue

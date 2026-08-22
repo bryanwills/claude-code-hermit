@@ -222,4 +222,25 @@ describe('doctor-check CLI', () => {
       expect(second.escalation.new.map((n: any) => n.id)).not.toContain(id);
     }
   }, 60_000);
+
+  // The check matched `status: 'open'`, a status no proposal has ever carried
+  // (proposed|accepted|resolved|dismissed|deferred), so it always counted zero and
+  // both warns below it were unreachable — doctor had no long-pending-proposal
+  // surface at all.
+  test.serial('proposals check counts `proposed` only and warns past 30 days', async () => {
+    fs.writeFileSync(path.join(hermit, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
+    const proposals = path.join(hermit, 'proposals');
+    fs.mkdirSync(proposals, { recursive: true });
+    const prop = (n: string, status: string, created: string) =>
+      fs.writeFileSync(path.join(proposals, `PROP-${n}-slug-120000.md`),
+        `---\nid: PROP-${n}\nstatus: ${status}\ntitle: T${n}\ncreated: ${created}\n---\nbody\n`, 'utf-8');
+    prop('001', 'proposed', '2020-01-01');  // awaiting review, far past 30d
+    prop('002', 'accepted', '2020-01-01');  // in flight — not the operator's queue
+    prop('003', 'dismissed', '2020-01-01');
+
+    const report = JSON.parse((await runScript('doctor-check.ts', { args: [hermit], cwd: dir })).stdout);
+    const proposalsCheck = report.checks.find((c: any) => c.id === 'proposals');
+    expect(proposalsCheck.status).toBe('warn');
+    expect(proposalsCheck.detail).toBe('1 open (1 older than 30d)');
+  }, 60_000);
 });

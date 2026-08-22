@@ -87,7 +87,7 @@ Current behavior — general purpose summary as described below.
 ## Plan
 
 1. Use `session_state` already read in the Dispatch step:
-   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using its Progress Log for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; if its `active` array is non-empty, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
+   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using its Progress Log for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; count the entries in its `alerts` object whose `suppressed` is not `true` (suppressed ones are digest-only — not "active"). If that count is above zero, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
    - **1b. `idle` (no dispatch):** read SHELL.md **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Format as:
      ```
      [Brief] YYYY-MM-DD | idle | N tasks completed
