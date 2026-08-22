@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- A trusted channel sender can now set the experimental advisor model mid-session with `/advisor <model>`, and clear it with `/advisor off`, on the same deferred harness-command path as `/model` and `/effort`.
+
 ### Changed
 - Docker images now install Bun 1.4.0 (was 1.3.11), picking up its Rust rewrite's faster startup and lower idle CPU and memory. Existing hermits need a `Dockerfile.hermit` patch and a rebuild — see Upgrade Instructions.
 

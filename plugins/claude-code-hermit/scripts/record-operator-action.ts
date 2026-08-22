@@ -116,8 +116,8 @@ function isRoutinePrompt(prompt: string): boolean {
   // `/model <arg>` for whatever arg arrived over the channel. NOTE the drift guard in
   // tests/auto-close.test.ts only scans *quoted* literals at sendKeys call sites, so a
   // template-literal injection like this generates no automatic coverage — the
-  // regression test for these two prefixes is hand-written in auto-close.test.ts.
-  if (t.startsWith('/model ') || t.startsWith('/effort ')) return true;
+  // regression test for these three prefixes is hand-written in auto-close.test.ts.
+  if (t.startsWith('/model ') || t.startsWith('/effort ') || t.startsWith('/advisor ')) return true;
   return false;
 }
 

@@ -525,7 +525,7 @@ describe('record-operator-action: hermit-injected commands stay in sync', () => 
   // injection would register as operator presence and suppress auto-close, with no
   // failing test to warn anyone. Keep in sync with the prefix rules in
   // record-operator-action.ts.
-  for (const literal of ['/model opus', '/model claude-opus-5[1m]', '/effort high']) {
+  for (const literal of ['/model opus', '/model claude-opus-5[1m]', '/effort high', '/advisor opus', '/advisor off']) {
     test(`drained harness command "${literal}" is dropped by record-operator-action.ts`, withTmp(async (dir) => {
       const r = await runScript('record-operator-action.ts', {
         stdin: JSON.stringify({ prompt: literal }),
