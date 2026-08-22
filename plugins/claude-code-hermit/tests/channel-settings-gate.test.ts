@@ -327,10 +327,11 @@ describe('channel-settings-gate — enforcement', () => {
     expect(r.exitCode).toBe(0);
   });
 
-  test('refuses the same safe change from a chat that is not the operator\'s', async () => {
+  test('refuses the same safe change from a chat that holds no authority', async () => {
     // `allowed` is a tier of settings, never a tier of senders: without this a
-    // stranger in a shared home chat could set the model or switch the watchdog
-    // off, while being refused a plain status read by isTrustedController.
+    // stranger messaging from some other chat could set the model or switch the
+    // watchdog off, while being refused a plain status read by
+    // isTrustedController.
     const { dir, transcript } = fixture(
       maintainerPrompt('turn the heartbeat down', { chatId: 'some-other-chat' }),
       configHomeOnly()
@@ -345,7 +346,28 @@ describe('channel-settings-gate — enforcement', () => {
       dir
     );
     expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain('not the operator\'s own');
+    expect(r.stderr).toContain('neither the operator\'s own nor the settings chat');
+  });
+
+  test('the settings chat may make a safe change too — the ladder must not invert', async () => {
+    // The maintainer chat is not the pinned home, so isTrustedController alone
+    // would refuse it a safe write while still letting it flip permission_mode.
+    // On a client-facing install that home belongs to the client, so "ask from
+    // your own chat" would be advice the maintainer cannot act on.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('turn the heartbeat down'),
+      configWithMaintainer()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: { command: 'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set heartbeat.every 30m' },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
   });
 
   test('allows read verbs from a channel turn', async () => {

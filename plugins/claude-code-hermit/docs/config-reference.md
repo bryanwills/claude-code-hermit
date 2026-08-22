@@ -176,7 +176,7 @@ Set to `false` to opt out entirely, or launch a one-off session with `HERMIT_ASK
 
 Single boolean. When `true` (default), settings can be changed from chat, tiered by which chat asks (`scripts/channel-settings-gate.ts`, a `PreToolUse` hook — the full table is in [`docs/security.md`](security.md) § Tiered settings authority):
 
-- **everyday settings** (name, language, model, heartbeat cadence, watchdog, …) — the operator's own chat, the same one trusted for pause/resume/status. Reads (`show`/`get`/`history`) are open to any chat that reaches the hermit.
+- **everyday settings** (name, language, model, heartbeat cadence, watchdog, …) — the operator's own chat, the same one trusted for pause/resume/status, or the settings chat below. Reads (`show`/`get`/`history`) are open to any chat that reaches the hermit.
 - **security tier** (`boot_skill`, `remote`, `escalation`, `docker.*`, `artifacts.backend`, and anything not otherwise listed) — the **settings chat**: the configured [`maintainer_channel_id`](#channels), or the home chat itself when none is configured and [`operator_profile`](#top-level-keys) is `"technical"`.
 - **execution-adjacent** (`permission_mode`, `env`, `monitors`) — the settings chat *plus* a confirmation code the hermit posts and the operator echoes back within 10 minutes.
 - **never from chat** — `allowed_users`, `default_chat_id`, `dm_channel_id`, `maintainer_channel_id`, `operator_profile`, `settings_from_chat`, and any direct `config.json` write.

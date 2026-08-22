@@ -322,10 +322,16 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       // The home-chat settings fallback (lib/channel-auth.ts
       // isSettingsController) hands the security tier to whoever matches the
       // pinned home. When that home is a group or server channel — the shape
-      // this heuristic reads: a pin that differs from the learned 1:1 DM — every
-      // member of it holds the tier, since with no allowed_users the chat id is
-      // the only factor. Warn, don't error: a shared home is a legitimate setup,
-      // it just has to name its operators.
+      // this heuristic reads: a pin that differs from the last chat the operator
+      // wrote from — every member of it holds the tier, since with no
+      // allowed_users the chat id is the only factor. Warn, don't error: a
+      // shared home is a legitimate setup, it just has to name its operators.
+      //
+      // Partial signal, deliberately: `dm_channel_id` is the last inbound chat,
+      // not a verified 1:1 DM, and channel-hook seeds `default_chat_id` from the
+      // same first message — so a hermit that only ever hears from one group has
+      // the two equal and is never warned. Nothing in a chat id says whether the
+      // chat is shared; this catches the divergent case and no more.
       if (!Array.isArray(ch.allowed_users) && !ch.maintainer_channel_id &&
           ch.default_chat_id != null && ch.dm_channel_id != null &&
           String(ch.default_chat_id) !== String(ch.dm_channel_id) &&

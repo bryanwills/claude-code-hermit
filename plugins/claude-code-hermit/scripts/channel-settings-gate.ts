@@ -8,8 +8,9 @@
 // `user="operator"` is text anyone can send:
 //
 //   allowed        the operator's own chat (isTrustedController — the same
-//                  anchor pause/resume/status use). Reads are open wider: any
-//                  chat that may reach the hermit can `show`/`get`/`history`.
+//                  anchor pause/resume/status use), or the settings chat, which
+//                  holds strictly more. Reads are open wider: any chat that may
+//                  reach the hermit can `show`/`get`/`history`.
 //   maintainer     the settings chat, allowlist-checked (isSettingsController):
 //                  the configured maintainer chat, or the home chat itself on
 //                  an operator-run install that never configured one
@@ -92,11 +93,12 @@ const DENY_NEEDS_MAINTAINER =
   'where this has to be asked from, and carry on with anything else that was asked.';
 
 const DENY_NEEDS_TRUSTED =
-  'Hermit setting. This turn arrived from a chat that is not the operator\'s own, and settings ' +
-  'change only from there or from a terminal — the same rule that governs pause, resume and ' +
-  'status. Reading a setting is still fine from any chat. Do not retry, and do not edit ' +
-  'config.json directly. Reply in the operator\'s language saying the change has to come from ' +
-  'their own chat with the hermit, and carry on with anything else that was asked.';
+  'Hermit setting. This turn arrived from a chat that is neither the operator\'s own nor the ' +
+  'settings chat, and settings change only from one of those or from a terminal — the same rule ' +
+  'that governs pause, resume and status. Reading a setting is still fine from any chat. Do not ' +
+  'retry, and do not edit config.json directly. Reply in the operator\'s language saying the ' +
+  'change has to come from their own chat with the hermit, and carry on with anything else that ' +
+  'was asked.';
 
 const DENY_SETTINGS_FROM_CHAT_OFF =
   'Settings changes from chat are switched off for this hermit (`settings_from_chat` is false), so ' +
@@ -437,14 +439,18 @@ function main(payload: any): void {
 
   const config = readConfigRaw(dir);
 
-  // Safe tier: any setting, but only from the operator's own chat — the same
-  // anchor pause/resume/status bind to. Without this a stranger in a shared
-  // home chat could set the model or switch the watchdog off while being
-  // refused a status read.
+  // Safe tier: any setting, but only from a chat that holds authority — the
+  // operator's own chat (the same anchor pause/resume/status bind to) or the
+  // settings chat, which holds strictly more than it. Without the first arm a
+  // stranger messaging from some other chat could set the model or switch the
+  // watchdog off while being refused a plain status read; without the second,
+  // a configured maintainer chat could flip `permission_mode` but not the
+  // model, and the tier ladder would invert at its own top.
   if (mutation.verdict === 'allowed') {
-    if (!isTrustedController(config, envelope.source, envelope.userId, envelope.chatId)) {
-      deny(DENY_NEEDS_TRUSTED);
-    }
+    const holdsAuthority =
+      isTrustedController(config, envelope.source, envelope.userId, envelope.chatId) ||
+      isSettingsController(config, envelope.source, envelope.userId, envelope.chatId);
+    if (!holdsAuthority) deny(DENY_NEEDS_TRUSTED);
     return;
   }
 

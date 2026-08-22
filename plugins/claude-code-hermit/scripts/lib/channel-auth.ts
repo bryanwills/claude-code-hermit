@@ -140,6 +140,16 @@ export function isMaintainerController(
  * The `settings_from_chat: false` opt-out is enforced by the gate, not here:
  * this answers "is this chat the authority", the gate answers "may any chat
  * hold it at all".
+ *
+ * Caveat worth stating, because the fallback inherits it wholesale: when
+ * `allowed_users` IS configured, isTrustedController defers to the allowlist and
+ * stops consulting the chat id at all. So on such an install the fallback grants
+ * this tier — nonce round trip included — to any allowlisted user from any chat
+ * the hermit can be reached in, not only from the pinned home. `allowed_users`
+ * is a reachability list, so an operator who allowlists a teammate to let them
+ * ask the hermit questions has also handed them settings authority; name only
+ * the people who should hold it, or point `maintainer_channel_id` at the chat
+ * that should. (Documented in docs/security.md.)
  */
 export function isSettingsController(
   config: Json, source: string, userId: string | null, chatId: string | null,
