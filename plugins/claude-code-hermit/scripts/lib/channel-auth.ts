@@ -89,6 +89,14 @@ export function isTrustedController(
  * Deliberately NOT an isTrustedController fallback chain: with no
  * maintainer_channel_id configured this returns false and the tier stays
  * terminal-only, so the privilege exists only where an operator opted into it.
+ *
+ * Caveat, sharper here than on isTrustedController: `isAllowedSender` accepts
+ * all senders when no `allowed_users` is configured, so on a no-allowlist
+ * install the chat id is the ONLY factor. If the maintainer chat is a group or
+ * server channel — which is the usual shape, since it exists to carry technical
+ * traffic away from the client chat — every member of that channel holds this
+ * tier. An install that points maintainer_channel_id at anything but a 1:1 chat
+ * must set `allowed_users`. (Documented in docs/security.md.)
  * The enrollment root (allowed_users, default_chat_id, dm_channel_id,
  * maintainer_channel_id) stays terminal-only even here — the gate owns that
  * list, because a chat that can re-point itself is a privilege the operator

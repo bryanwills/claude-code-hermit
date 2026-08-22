@@ -11,7 +11,8 @@
 //   maintainer     the configured maintainer chat, allowlist-checked
 //                  (boot_skill, remote, escalation, docker.*, artifacts.backend,
 //                  and everything not named below)
-//   nonce          maintainer chat AND an echoed token: permission_mode, env.*
+//   nonce          maintainer chat AND an echoed token: permission_mode, env.*,
+//                  monitors (each entry carries a shell command)
 //   terminal-only  the enrollment root and any ancestor write that would
 //                  replace it — never reachable from a channel, on any tier
 //
@@ -88,6 +89,9 @@ const READ_VERBS = new Set(['show', 'get', 'history']);
 /** Verbs that mutate config.json and therefore need a policy verdict. */
 const WRITE_VERBS = new Set(['set', 'unset', 'toggle', 'apply-known']);
 
+/** Write verbs that take a value after the target — see settings-edit.ts's dispatch. */
+const TAKES_VALUE = new Set(['set', 'apply-known']);
+
 // Dotted-path families a channel turn may write. Anything not matched here is
 // terminal-only, so a setting added later defaults to the safe side until it
 // is deliberately listed.
@@ -151,18 +155,32 @@ const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_cha
 const ENROLLMENT_ANCESTOR = /^channels(\.[^.]+)?$/;
 
 /**
- * Execution-adjacent: `permission_mode` can be flipped to bypassPermissions and
- * `env` is a free-form dict that reaches the session's environment. Both stay
- * behind the confirmation nonce even from the maintainer chat — see
- * lib/settings-confirm.ts for what that second factor is worth. `env` matches
- * as both the whole dict and any leaf, because replacing the dict is the
- * broader write of the two.
+ * Execution-adjacent: `permission_mode` can be flipped to bypassPermissions,
+ * `env` is a free-form dict that reaches the session's environment, and every
+ * `monitors[]` entry carries a `command` string the `watch` skill registers as
+ * a Monitor subprocess at session start (validate-config.ts requires it) — a
+ * config-declared shell command is at least as execution-adjacent as either of
+ * the other two, so it cannot sit a tier below them. All three stay behind the
+ * confirmation nonce even from the maintainer chat — see lib/settings-confirm.ts
+ * for what that second factor is worth. Each matches as both the whole
+ * container and any leaf, because replacing the container is the broader write.
  */
-const NONCE_REQUIRED = /^(permission_mode|env)(\..+)?$/;
+const NONCE_REQUIRED = /^(permission_mode|env|monitors)(\..+)?$/;
 
 /** Increasing strictness — a chained command takes the strongest verdict. */
 export type Verdict = 'allowed' | 'maintainer' | 'nonce' | 'terminal-only';
 const STRICTNESS: Record<Verdict, number> = { allowed: 0, maintainer: 1, nonce: 2, 'terminal-only': 3 };
+
+/**
+ * `apply-known`'s registry arg name resolved to its dotted config path; every
+ * other verb's target is already dotted and passes through. One helper so the
+ * verdict and the nonce's target binding can't resolve it differently — a token
+ * bound to `permissions` would never match a retry spelled `permission_mode`,
+ * and the operator would be asked to confirm the same change twice forever.
+ */
+function resolveTarget(verb: string, target: string): string {
+  return verb === 'apply-known' ? (byArg(target)?.path ?? target) : target;
+}
 
 /**
  * Verdict for one settings-edit invocation.
@@ -187,7 +205,7 @@ export function channelVerdict(verb: string, target: string): Verdict {
   if (!WRITE_VERBS.has(verb)) return 'terminal-only';
   if (!target) return 'terminal-only';
 
-  const dotted = verb === 'apply-known' ? (byArg(target)?.path ?? target) : target;
+  const dotted = resolveTarget(verb, target);
   if (ALLOWED_EXACT.has(dotted)) return 'allowed';
   if (ALLOWED_PATTERNS.some(rx => rx.test(dotted))) return 'allowed';
   if (ENROLLMENT_ROOT.test(dotted) || ENROLLMENT_ANCESTOR.test(dotted)) return 'terminal-only';
@@ -255,7 +273,7 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
   }
 
   const matches = [...command.matchAll(
-    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?/g
+    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+(\S+))?/g
   )];
   if (matches.length === 0) return null;
 
@@ -265,20 +283,32 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
   // (`set permission_mode ... && set env ...`) — binding to only the first
   // would let the operator's confirmation of that one wave the other through
   // unnamed and unconfirmed.
+  //
+  // The VALUE is part of the binding, not just the key: the deny reason is what
+  // the operator sees before echoing the code, so a token issued for
+  // `permission_mode=default` must not also apply `permission_mode=bypassPermissions`.
+  // Targets are sorted so a reordered retry of the same pair matches the
+  // outstanding token instead of superseding it.
+  const strip = (s: string | undefined) => (s ?? '').replace(/^['"]|['"]$/g, '');
+
   let worst: Verdict = 'allowed';
   let targets: string[] = [];
   for (const m of matches) {
     const verb = m[2];
-    const t = (m[3] ?? '').replace(/^['"]|['"]$/g, '');
+    const t = strip(m[3]);
+    // `unset` and `toggle` take a path and nothing else, so the token after
+    // theirs belongs to the shell (a `&&`, a redirect), not to the setting.
+    const value = TAKES_VALUE.has(verb) ? strip(m[4]) : '';
     const v = channelVerdict(verb, t);
+    const label = value ? `${resolveTarget(verb, t)}=${value}` : resolveTarget(verb, t);
     if (STRICTNESS[v] > STRICTNESS[worst]) {
       worst = v;
-      targets = [t];
-    } else if (v === worst && v !== 'allowed' && !targets.includes(t)) {
-      targets.push(t);
+      targets = [label];
+    } else if (v === worst && v !== 'allowed' && !targets.includes(label)) {
+      targets.push(label);
     }
   }
-  return worst === 'allowed' ? null : { verdict: worst, target: targets.join(', ') };
+  return worst === 'allowed' ? null : { verdict: worst, target: targets.sort().join(', ') };
 }
 
 /**
@@ -359,15 +389,19 @@ function main(payload: any): void {
   }
 
   // Reuse an outstanding token for the same ask: a model retry must not
-  // invalidate the code the operator has already been sent.
-  const token = pending && sameAsk ? pending.token : newToken();
+  // invalidate the code the operator has already been sent. `created` is
+  // carried over rather than refreshed — the TTL is measured from the moment
+  // the code was first posted to the chat, so a model that retries every few
+  // minutes cannot keep a code the operator never echoed alive indefinitely.
+  const reused = pending && sameAsk ? pending : null;
+  const token = reused ? reused.token : newToken();
   writePending(dir, {
     token,
     target: mutation.target,
     sourceKey: envelope.sourceKey,
     chatId: envelope.chatId,
     userId: envelope.userId,
-    created: Date.now(),
+    created: reused ? reused.created : Date.now(),
   });
   deny(denyNeedsNonce(mutation.target, token));
 }

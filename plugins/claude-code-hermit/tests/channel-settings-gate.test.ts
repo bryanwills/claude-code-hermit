@@ -113,6 +113,14 @@ describe('channelVerdict — policy', () => {
     expect(channelVerdict('set', 'env.MAX_THINKING_TOKENS')).toBe('nonce');
   });
 
+  test('monitors are nonce-tier — every entry carries a shell command', () => {
+    // validate-config.ts requires `monitors[].command`, and the watch skill
+    // registers it as a Monitor subprocess at session start. A config-declared
+    // shell command cannot sit a tier below permission_mode.
+    expect(channelVerdict('set', 'monitors')).toBe('nonce');
+    expect(channelVerdict('set', 'monitors.0.command')).toBe('nonce');
+  });
+
   test('the enrollment root is terminal-only on every tier', () => {
     for (const leaf of ['allowed_users', 'default_chat_id', 'dm_channel_id', 'maintainer_channel_id']) {
       expect(channelVerdict('set', `channels.discord.${leaf}`)).toBe('terminal-only');
@@ -524,6 +532,114 @@ describe('channel-settings-gate — confirmation nonce', () => {
     const first = pendingToken(dir);
     await runGate(call, dir);
     expect(pendingToken(dir)).toBe(first);
+  });
+
+  test('a retry does not refresh the code\'s expiry', async () => {
+    // Otherwise a model that retries every few minutes keeps a code the
+    // operator never echoed alive indefinitely, and the 10-minute window that
+    // bounds a read-only compromise of the chat never closes.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode'),
+      configWithMaintainer()
+    );
+    const call = payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } });
+    const record = () =>
+      JSON.parse(
+        fs.readFileSync(path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json'), 'utf8')
+      );
+    await runGate(call, dir);
+    const issued = record().created;
+    await new Promise(r => setTimeout(r, 5));
+    await runGate(call, dir);
+    expect(record().created).toBe(issued);
+  });
+
+  test('a code survives the model switching between the two spellings', async () => {
+    // `apply-known permissions` and `set permission_mode` are the same setting.
+    // If the token bound to the arg name, a retry in the other spelling would
+    // supersede the code the operator was already sent — an endless ask loop.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode'),
+      configWithMaintainer()
+    );
+    await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json apply-known permissions bypassPermissions',
+        },
+      }),
+      dir
+    );
+    const token = pendingToken(dir);
+
+    fs.writeFileSync(
+      transcript,
+      [
+        triggerPrompt(maintainerPrompt('switch permission mode')),
+        assistantEntry(),
+        triggerPrompt(maintainerPrompt(`confirming: ${token}`)),
+      ].join('\n') + '\n'
+    );
+    const other = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(other.exitCode).toBe(0);
+  });
+
+  test('a code issued for one value does not apply a different one', async () => {
+    // The operator confirms what the deny reason showed them. Binding only the
+    // key would let a confirmation of `permission_mode default` be spent on
+    // `permission_mode bypassPermissions`.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('tighten permission mode'),
+      configWithMaintainer()
+    );
+    const tighten =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set permission_mode default';
+    const first = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: tighten } }),
+      dir
+    );
+    expect(first.stderr).toContain('permission_mode=default');
+    const token = pendingToken(dir);
+
+    fs.writeFileSync(
+      transcript,
+      [
+        triggerPrompt(maintainerPrompt('tighten permission mode')),
+        assistantEntry(),
+        triggerPrompt(maintainerPrompt(`confirming: ${token}`)),
+      ].join('\n') + '\n'
+    );
+    const widened = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(widened.exitCode).toBe(2);
+  });
+
+  test('a chained unset does not read the shell operator as its value', async () => {
+    // `unset` takes a path and nothing else. Binding `env.FOO=&&` would show
+    // the operator a value that isn't one, and rebind on every retry whose
+    // trailing command differs — the same endless ask loop the sort fixes.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('drop that env var'),
+      configWithMaintainer()
+    );
+    const chained =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json unset env.FOO && echo done';
+    const denied = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: chained } }),
+      dir
+    );
+    expect(denied.exitCode).toBe(2);
+    expect(denied.stderr).toContain('env.FOO');
+    expect(denied.stderr).not.toContain('env.FOO=');
   });
 
   test('a consumed code cannot be replayed', async () => {
