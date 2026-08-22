@@ -917,7 +917,7 @@ function renderClassifierOverlay(config: Json): string | null {
     soft_deny: ['$defaults', AUTOMODE_SOFT_DENY_ENTRY],
   };
   if (artifactGrantApplies(config)) {
-    autoMode.allow = ['$defaults', automodeAllowEntry(PLUGIN_ROOT)];
+    autoMode.allow = ['$defaults', automodeAllowEntry(path.join(defaultConfigDir(), 'plugins'), PLUGIN_ROOT)];
     autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
   }
   const file = path.resolve(STATE_DIR, 'claude-settings.overlay.json');

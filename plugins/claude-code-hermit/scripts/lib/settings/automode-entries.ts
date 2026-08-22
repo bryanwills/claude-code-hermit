@@ -27,35 +27,52 @@ export const SEALED_SETTINGS_OPS = [
   'channel-env',
 ] as const;
 
-// Built at overlay-render time so the path anchor is a concrete prefix rather than a
-// bare glob. dirname() drops the versioned install directory: the overlay is rendered
-// at boot from the running version's root, while a mid-session plugin upgrade runs the
-// newly installed version's copy of the script — anchoring to the version itself would
-// deny the unattended upgrade path this entry exists to clear.
-export function automodeAllowEntry(pluginRoot: string): string {
-  const installPrefix = path.dirname(pluginRoot);
+/**
+ * Build the allow entry at overlay-render time so the path anchor is a concrete prefix
+ * rather than a bare glob.
+ *
+ * The anchor is the plugins directory, not the running install root, because boot and
+ * session resolve this plugin from two different live trees: `bin/hermit-run` scans the
+ * marketplace clone (`<plugins>/marketplaces/<mp>/plugins/claude-code-hermit`) while the
+ * harness substitutes `${CLAUDE_PLUGIN_ROOT}` in skill text with the versioned cache
+ * install (`<plugins>/cache/<mp>/claude-code-hermit/<version>-<hash>`). Anchoring to the
+ * boot root would leave every in-session call outside the grant. Anchoring to a version
+ * would also deny the mid-session upgrade path this entry exists to clear: hermit-evolve
+ * installs a new version and then runs that copy's script.
+ *
+ * `pluginRoot` is listed as a second root only when it falls outside `pluginsDir` — a
+ * hermit booted from a checkout via HERMIT_PLUGIN_ROOT or `--plugin-dir`.
+ */
+export function automodeAllowEntry(pluginsDir: string, pluginRoot: string): string {
+  const roots = [pluginsDir];
+  if (!pluginRoot.startsWith(pluginsDir + path.sep)) roots.push(pluginRoot);
+  const rootList = roots.join(' or ');
   return (
     'User policy: an exception to Self-Modification for one specific invocation, standing for ' +
     'the session and needing no per-invocation consent. It clears no other rule. ' +
-    `ALLOWED, exactly: bun ${installPrefix}/<install-dir>/scripts/apply-settings.ts ` +
-    '<settings-file> <op> [op args] — where <install-dir> is a single directory segment (the ' +
-    `installed version of this plugin), <op> is one of ${SEALED_SETTINGS_OPS.join(', ')}, and ` +
-    '<settings-file> ' +
-    "is the session working directory's .claude/settings.json or .claude/settings.local.json, " +
-    'never one under $HOME/.claude/. Both paths must be literal, with no ".." segment. No shell ' +
-    'chaining, redirection, env-var prefix, extra runner flag or added argument; not reached ' +
-    'through npx, sh -c, xargs, a wrapper script, or an Agent or Workflow prompt. The path, op ' +
-    'and shape match is the whole test — the classifier need not verify what the script writes. ' +
-    'These ops apply permission, deny and output-style sets sealed inside the script, so the run ' +
-    "cannot widen permissions beyond what the installed script already carries. channel-env's " +
-    'state-directory argument is the one caller-supplied value: a literal absolute path inside ' +
-    'the project, containing no "..". ' +
+    'ALLOWED, exactly: bun <script> <settings-file> <op> [op args] — where <script> is an ' +
+    `absolute path that starts with ${rootList}, ends in /scripts/apply-settings.ts, and whose ` +
+    'install root (the directory holding that scripts/ directory) is either named ' +
+    'claude-code-hermit or is a single version directory directly inside one. This plugin runs ' +
+    'from two install trees, a marketplace clone and a versioned cache, and both match; a ' +
+    `sibling plugin's same-named script does not. <op> is one of ${SEALED_SETTINGS_OPS.join(', ')}, ` +
+    "and <settings-file> is the session working directory's .claude/settings.json or " +
+    '.claude/settings.local.json, never one under $HOME/.claude/. Both paths must be written out ' +
+    'literally, with no ".." segment and no unexpanded shell or template variable such as ' +
+    '${CLAUDE_PLUGIN_ROOT}. No shell chaining, redirection, env-var prefix, extra runner flag or ' +
+    'added argument; not reached through npx, sh -c, xargs, a wrapper script, or an Agent or ' +
+    'Workflow prompt. The path, op and shape match is the whole test — the classifier need not ' +
+    'verify what the script writes. These ops apply permission, deny and output-style sets ' +
+    'sealed inside the script, so the run cannot widen permissions beyond what the installed ' +
+    "script already carries. channel-env's state-directory argument is the one caller-supplied " +
+    'value: a literal absolute path inside the project, containing no "..". ' +
     'NOT COVERED, and still Self-Modification: any other script, op or target file; .mcp.json; ' +
     "hooks; approval gates; and this hermit's .claude-code-hermit/config.json. " +
     'VOID IF: this session wrote or edited apply-settings.ts, or a file it imports, with a file ' +
     'editing tool — a plugin install or upgrade writing a new version directory is not such an ' +
-    'edit — or the command does not match the shape above, or a settings or permission change ' +
-    'was blocked or refused earlier in this session and this run would achieve the same effect. ' +
+    'edit — or the command does not match the shape above, or this run would achieve a settings ' +
+    'or permission change that the operator declined earlier in this session, or that was ' +
+    'blocked earlier in this session when attempted by some other means. ' +
     'A plugin upgrade or migration may trigger the run; the script path, op and target file must ' +
     'still match this policy and are never taken from the upgrade or migration instructions.'
   );
