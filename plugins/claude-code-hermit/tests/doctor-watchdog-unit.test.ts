@@ -16,6 +16,12 @@ import path from 'node:path';
 
 import { runScript } from './helpers/run';
 
+// Serial by necessity, not by taste: bunfig.toml's `concurrentTestGlob`
+// runs every `beforeEach`, then every body, then every `afterEach`, so
+// teardown sees the LAST value of a module/describe-scope fixture and rm's
+// a directory another test still needs. `test.serial` restores be/ae
+// pairing per test (`describe.serial` is silently ignored, Bun 1.3.14).
+// Drop it only after giving each test its own fixture.
 let dir: string;
 let hermit: string;
 let fakeBin: string;
@@ -88,7 +94,7 @@ const unitFor = (projectDir: string) => `hermit-watchdog@hermit-${path.basename(
 const isLinux = process.platform === 'linux';
 
 describe('watchdog unit status', () => {
-  test.if(isLinux)('exit 127 → fail naming the PATH remedy', async () => {
+  test.serial.if(isLinux)('exit 127 → fail naming the PATH remedy', async () => {
     writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '127', Result: 'exit-code' });
     const check = await watchdogCheck();
     expect(check.status).toBe('fail');
@@ -96,7 +102,7 @@ describe('watchdog unit status', () => {
     expect(check.detail).toContain('hermit-watchdog install');
   });
 
-  test.if(isLinux)('a non-127 failure points at the journal, not at re-installing', async () => {
+  test.serial.if(isLinux)('a non-127 failure points at the journal, not at re-installing', async () => {
     writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '0', Result: 'timeout' });
     const check = await watchdogCheck();
     expect(check.status).toBe('fail');
@@ -104,7 +110,7 @@ describe('watchdog unit status', () => {
     expect(check.detail).not.toContain('hermit-watchdog install');
   });
 
-  test.if(isLinux)('a healthy unit falls through to the existing staleness logic', async () => {
+  test.serial.if(isLinux)('a healthy unit falls through to the existing staleness logic', async () => {
     writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '0', Result: 'success' });
     const check = await watchdogCheck();
     expect(check.status).not.toBe('fail');
@@ -130,7 +136,7 @@ describe('watchdog unit status', () => {
     );
   }
 
-  test.if(isLinux)('firing unit with no baked PATH → warn pointing at re-install', async () => {
+  test.serial.if(isLinux)('firing unit with no baked PATH → warn pointing at re-install', async () => {
     writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '0', Result: 'success' });
     stampFreshRun();
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-wd-home-'));
@@ -146,7 +152,7 @@ describe('watchdog unit status', () => {
     }
   });
 
-  test.if(isLinux)('firing unit with a baked PATH → no PATH warning', async () => {
+  test.serial.if(isLinux)('firing unit with a baked PATH → no PATH warning', async () => {
     writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '0', Result: 'success' });
     stampFreshRun();
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-wd-home-'));
@@ -159,7 +165,7 @@ describe('watchdog unit status', () => {
     }
   });
 
-  test.if(isLinux)('the unit name comes from the hermit dir, not the working directory', async () => {
+  test.serial.if(isLinux)('the unit name comes from the hermit dir, not the working directory', async () => {
     // The stub only answers for the project's real unit; anything else gets
     // systemd's healthy-looking synthesis. Running the doctor from an unrelated
     // cwd must therefore still produce the failure.
