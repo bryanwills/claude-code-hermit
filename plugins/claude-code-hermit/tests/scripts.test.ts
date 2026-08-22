@@ -1206,9 +1206,60 @@ describe('update-alert-state', () => {
     }));
     write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json'); // ambiguous → freeze micro prefix, structuredReadOk=false
     const { state, stdout } = await updateAlertState(dir, firingPayload([]));
-    expect(stdout.notifications).toEqual([]); // digest suppressed despite the checklist alert being due
+    // digest suppressed despite the checklist alert being due; the only notification
+    // is the read-failure one (#764), which is precisely not a digest
+    expect(stdout.notifications.filter((n: string) => /digest/i.test(n))).toEqual([]);
     expect(state.last_digest_date).toBeNull(); // digest clock not advanced on a partial view
     expect(state.alerts['micro-proposal-pending:MP-1']).toBeDefined(); // frozen entry preserved
+  }));
+
+  test('update-alert-state (#764: a corrupt read notifies once, repeats stay silent until the next day)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json');
+
+    const first = await updateAlertState(dir, firingPayload([]));
+    expect(first.stdout.notifications).toHaveLength(1);
+    expect(first.stdout.notifications[0]).not.toMatch(/micro-proposals\.json|MP-/); // channel voice: no paths, no ids
+    expect(first.stdout.monitoring_lines.join('\n')).toContain('micro-proposals.json'); // technical detail is file-only
+    expect(first.state.structured_read_failure_notified_date).toBe('2026-07-10'); // NOW, tz UTC
+
+    const second = await updateAlertState(dir, firingPayload([]));
+    expect(second.stdout.notifications).toEqual([]); // same day — silent
+    expect(second.stdout.heartbeat_result).toBe('ALERT'); // but still never a false OK
+
+    // A new day re-notifies: the file is still broken and the operator still can't see their queue.
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      ...second.state, structured_read_failure_notified_date: '2020-01-01',
+    }));
+    const nextDay = await updateAlertState(dir, firingPayload([]));
+    expect(nextDay.stdout.notifications).toHaveLength(1);
+  }));
+
+  test('update-alert-state (#764: a recovered read clears the stamp, so a same-day re-break notifies again)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json');
+    const first = await updateAlertState(dir, firingPayload([]));
+    expect(first.state.structured_read_failure_notified_date).toBe('2026-07-10');
+
+    write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [] }));
+    const healthy = await updateAlertState(dir, firingPayload([]));
+    expect(healthy.state.structured_read_failure_notified_date).toBeNull();
+
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json');
+    const again = await updateAlertState(dir, firingPayload([]));
+    expect(again.stdout.notifications).toHaveLength(1); // a new incident, not the old day's silence
+  }));
+
+  test('update-alert-state (#764: a readable file notifies nothing and leaves the stamp alone)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [] }));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
+    expect(stdout.notifications).toEqual([]);
+    expect(stdout.heartbeat_result).toBe('OK');
+    expect(state.structured_read_failure_notified_date).toBeNull();
   }));
 
   // -----------------------------------------------------------------------

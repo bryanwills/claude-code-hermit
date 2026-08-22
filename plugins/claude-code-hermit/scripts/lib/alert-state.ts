@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter, listProposalFiles } from './frontmatter';
+import { readMicroProposals } from './micro-proposals-io';
 import { elapsedSinceHHMM } from './time';
 import { extractSection } from './md-write';
 
@@ -306,21 +307,11 @@ export function classifyTick(opts: {
 // prefix's existing alerts; it must freeze them untouched for the tick.
 // ---------------------------------------------------------------------------
 
-export function deriveMicroPendingKeys(stateDir: string): { ok: boolean; items: FiringItem[] } {
-  const p = path.join(stateDir, 'state', 'micro-proposals.json');
-  let raw: string;
-  try {
-    raw = fs.readFileSync(p, 'utf-8');
-  } catch (err: any) {
-    return err?.code === 'ENOENT' ? { ok: true, items: [] } : { ok: false, items: [] };
-  }
-  let data: Json;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return { ok: false, items: [] };
-  }
-  const pending = Array.isArray(data?.pending) ? data.pending : [];
+export function deriveMicroPendingKeys(stateDir: string): { ok: boolean; items: FiringItem[]; error?: string } {
+  const read = readMicroProposals(path.join(stateDir, 'state', 'micro-proposals.json'));
+  if (read.status === 'corrupt') return { ok: false, items: [], error: read.error };
+  if (read.status === 'missing') return { ok: true, items: [] };
+  const pending = read.data.pending;
   const items: FiringItem[] = [];
   for (const entry of pending) {
     if (!entry || entry.status !== 'pending' || entry.tier !== 1 || typeof entry.id !== 'string') continue;

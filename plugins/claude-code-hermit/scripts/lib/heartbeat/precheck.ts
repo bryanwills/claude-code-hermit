@@ -5,8 +5,9 @@
 // With --peek: read-only — computes the same verdict without any state mutation.
 //
 // Owner contract (write-field split with SKILL.md):
-//   This script owns: alert-state.json total_ticks, last_stale_wake_at
-//   SKILL.md owns:    alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at
+//   This script owns: alert-state.json total_ticks, last_stale_wake_at, last_micro_corrupt_wake_at
+//   SKILL.md owns:    alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at,
+//                     structured_read_failure_notified_date (written by `heartbeat.ts alert-state`)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +17,7 @@ import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertStat
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
 import { isProposalScanItem } from '../heartbeat-items';
 import { isPaused } from '../pause';
+import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
 import { pendingCloseDrainDue } from '../auto-close';
@@ -154,8 +156,13 @@ function resolveProposalScanItem(dir: string, alertMap: Json): 'clean' | 'evalua
 // correct — a pending decision is not "clean" — but bypassing it is not a licence to
 // fire indefinitely; once suppressed, the once-daily digest gate keeps surfacing it.
 // Read-only — writes nothing, so it is identical under --peek.
-function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evaluate' {
-  const micro = readJSON(path.join(dir, 'state', 'micro-proposals.json')) ?? { pending: [] };
+// A corrupt file is NOT an empty queue: the sibling scan above fails open on every
+// ambiguous read of its source of truth, and this one must too, or a hand-edit typo
+// silently buries every pending operator question (#764). Caller damps the repeat.
+function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evaluate' | 'corrupt' {
+  const read = readMicroProposals(path.join(dir, 'state', 'micro-proposals.json'));
+  if (read.status === 'corrupt') return 'corrupt';
+  const micro = read.status === 'missing' ? { pending: [] } : read.data;
   const pending = Array.isArray(micro.pending)
     ? micro.pending.filter((p: Json) => p && p.status === 'pending' && p.tier === 1)
     : [];
@@ -253,6 +260,14 @@ if (r.kind === 'ok') {
 if (typeof alertState.total_ticks !== 'number' || !Number.isFinite(alertState.total_ticks)) {
   alertState.total_ticks = 0;
 }
+const microScan = resolveMicroPendingScan(stateDir, alertState.alerts ?? {});
+// Recovery clears the damper: a file repaired and re-broken inside the 24h window is a
+// NEW corruption, and inheriting the previous one's stamp would silence its wake. Folded
+// into the tick-increment write below rather than a second writeAlertState call, since
+// precheck runs on every heartbeat poll.
+if (microScan !== 'corrupt' && !peek && typeof alertState.last_micro_corrupt_wake_at === 'string') {
+  delete alertState.last_micro_corrupt_wake_at;
+}
 if (!peek) {
   alertState.total_ticks += 1;
   writeAlertState(alertStatePath, alertState);
@@ -261,7 +276,22 @@ if (!peek) {
 // peek fires one tick early; the subsequent mutating call lands on the multiple-of-20
 if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20 === 0) emit('EVALUATE');
 
-if (resolveMicroPendingScan(stateDir, alertState.alerts ?? {}) === 'evaluate') emit('EVALUATE');
+if (microScan === 'evaluate') emit('EVALUATE');
+// Corrupt file: wake so the tick can tell the operator, but at most once a day —
+// the file stays corrupt until a human fixes it, and waking every poll to repeat
+// that is the same unbounded-wake shape the pending-micro damper just removed.
+if (microScan === 'corrupt') {
+  const lastWake = typeof alertState.last_micro_corrupt_wake_at === 'string'
+    ? new Date(alertState.last_micro_corrupt_wake_at).getTime()
+    : NaN;
+  if (isNaN(lastWake) || (now - lastWake) >= 24 * 3600000) {
+    if (!peek) {
+      alertState.last_micro_corrupt_wake_at = new Date(now).toISOString();
+      writeAlertState(alertStatePath, alertState);
+    }
+    emit('EVALUATE');
+  }
+}
 
 // PROP-016: an un-notified budget alert (cost-tracker.ts writes these directly,
 // bypassing the LLM-owned suppressed/digest dance the generic checklist alerts use)

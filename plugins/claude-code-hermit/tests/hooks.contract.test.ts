@@ -1099,8 +1099,19 @@ Rota body.
     expect(r.stdout).toContain('---Compaction Pointers---');
     expect(r.stdout).toContain('task: Test task for hook validation');
     expect(r.stdout).not.toContain('session_state:');
-    expect(r.stdout).not.toContain('pending micro-proposals:');
+    // MP is the exception to silent fail-open: omitting the line entirely implies an
+    // empty queue, which is how a corrupt file buried pending questions (#764).
+    expect(r.stdout).toContain('pending micro-proposals: unreadable');
     expect(r.stdout).not.toContain('outbound channel:');
+  }));
+
+  test('startup-context (missing micro-proposals.json stays silent — ENOENT is not corruption)', withDir(async (dir) => {
+    fs.rmSync(hermit(dir, 'state', 'micro-proposals.json'), { force: true });
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('pending micro-proposals:');
   }));
 
   test('startup-context (source=compact, no state at all → total fail-open, no section)', withDir(async (dir) => {
