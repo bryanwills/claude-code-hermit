@@ -482,6 +482,8 @@ describe('config contract: template and DEFAULT_CONFIG must mirror', () => {
     'routine_wake_lint', 'routine_wake_lint.max_windows',
     // Read directly by doctor-check.ts's routine-cost check (raw config read, own default of 2) — not part of the loadConfig merge.
     'doctor', 'doctor.routine_cost_floor_usd',
+    // Read by hermit-watchdog through lib/config-read (own default of '4h') — not part of the loadConfig merge.
+    'watchdog.wedge_floor',
   ]);
 
   test('key path sync: flattened key paths must match (excluding known template-only keys)', () => {

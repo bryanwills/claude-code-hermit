@@ -29,7 +29,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings brief          — configure morning brief
 /claude-code-hermit:hermit-settings permissions    — configure unattended mode
 /claude-code-hermit:hermit-settings heartbeat      — enable/disable, interval, quiet mode, active hours
-/claude-code-hermit:hermit-settings watchdog       — enable/disable, stale_factor, escalate_after, operator_grace, context hygiene compaction
+/claude-code-hermit:hermit-settings watchdog       — enable/disable, stale_factor, wedge_floor, escalate_after, operator_grace, context hygiene compaction
 /claude-code-hermit:hermit-settings routines        — manage scheduled routines (add/edit/remove/enable/disable)
 /claude-code-hermit:hermit-settings idle             — set idle behavior (wait or discover)
 /claude-code-hermit:hermit-settings env              — view/edit environment variables
@@ -205,13 +205,13 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     stale_factor           — missed-cycle tolerance multiplier (e.g. 2); effective
                              threshold is max(stale_factor × heartbeat.every, wedge_floor) [current]
     wedge_floor            — lower bound on that threshold, whatever the poll interval
-                             (e.g. 4h; lower it for faster detection, 0 = no floor)       [current]
+                             (e.g. 4h; lower it for faster detection, 0s = no floor)      [current]
     escalate_after         — consecutive stale cycles before escalation (e.g. 3)          [current]
     operator_grace         — silence window before alert fires (e.g. 15m, 1h)             [current]
     context_clear_tokens   — emergency /clear when prompt tokens exceed this (e.g. 700000, 0=off) [current]
   ```
   Then ask each field in sequence.
-- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings.
+- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
   - Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall`. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
 - **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above, same as `context_clear_tokens`): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```

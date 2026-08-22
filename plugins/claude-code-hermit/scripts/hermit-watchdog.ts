@@ -677,7 +677,7 @@ export const MONITOR_REARM_DAMPER_SECS = 6 * 3600;
 // nudge is an end-to-end liveness probe and each one is a paid full-context wake, so its
 // cadence is a recovery policy, not a function of the poll interval. Operator-settable via
 // `watchdog.wedge_floor`: an install that deliberately tightened heartbeat.every keeps its
-// own recovery SLA, and "0" restores the plain stale_factor × every product.
+// own recovery SLA, and "0s" restores the plain stale_factor × every product.
 export const WEDGE_FLOOR_DEFAULT = '4h';
 
 /**

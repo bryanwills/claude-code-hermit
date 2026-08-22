@@ -106,10 +106,14 @@ const DEFAULT_CONFIG: Json = {
     channel_log_enabled: true,
     channel_log_retention_days: 90,
   },
+  // wedge_floor is deliberately template-only, not part of this boot merge: the
+  // always-on branch writes the merged config back to disk, and stamping the `4h`
+  // default there on a restart would look like an operator-set value to the
+  // upgrade that derives wedge_floor from the pre-upgrade threshold. The watchdog
+  // reads it through lib/config-read, which supplies the same default.
   watchdog: {
     enabled: false,
     stale_factor: 2,
-    wedge_floor: '4h',
     escalate_after: 3,
     operator_grace: '15m',
     context_clear_tokens: 700000,

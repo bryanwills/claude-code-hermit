@@ -857,6 +857,21 @@ test('wedge_floor override: every 15m + 1h-stale heartbeat → nudge (floor lowe
   expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge');
 }));
 
+// "0s" is the documented no-floor value (a bare 0 is a number, which config-read
+// discards back to the default). Same config as the first floor test above, which
+// suppresses the nudge at 1h — here the floor is off, so the 1h product decides.
+test('wedge_floor "0s": every 30m + 90m-stale heartbeat → nudge (floor disabled)', withHermit(async (h) => {
+  writeConfig(h, '30m', { wedge_floor: '0s' });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5400);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge');
+}));
+
 // -------------------------------------------------------
 // 5b. Supervision on an idle session arc
 //
