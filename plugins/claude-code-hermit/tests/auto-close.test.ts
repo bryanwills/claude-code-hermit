@@ -881,6 +881,50 @@ describe('daily-auto-close lull + pending-close drain', () => {
     expect(await precheck(dir, { now: NOW, peek: true })).toBe('AUTO_CLOSE');
     expect(fs.existsSync(drainMarker(dir))).toBe(false);
   }));
+
+  // --- interval-aware cooldown (issue #771) ----------------------------------
+  // The flat 30-min cooldown was tuned for the 60s routine poll. On a heartbeat-only
+  // hermit the poll period IS the heartbeat interval, and the marker is stamped by the
+  // non-peek run — i.e. after the peek that emitted — so the tick one interval later
+  // reads an age just under the interval and can never clear a cooldown equal to it.
+  // The heartbeat drainer therefore caps its cooldown at half its own interval.
+
+  /** drainDue with an explicit heartbeat.every, keeping active hours full-day. */
+  function drainDueEvery(dir: string, every: string): void {
+    drainDue(dir);
+    fs.writeFileSync(hermit(dir, 'config.json'),
+      `{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"24:00"},"every":"${every}"}}`);
+  }
+
+  // drain.22. every=30m: a marker older than half the interval retries on the NEXT
+  // tick, not the one after it (the #771 regression — 16 min was suppressed before).
+  test('drain: every=30m + cooldown stamped 16 min ago → AUTO_CLOSE (retries next tick)', withTmp(async (dir) => {
+    drainDueEvery(dir, '30m');
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:29:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
+  }));
+
+  // drain.23. ...but the cooldown still bounds a close that keeps failing: an emission
+  // inside the same interval must not re-wake.
+  test('drain: every=30m + cooldown stamped 10 min ago → does NOT emit AUTO_CLOSE', withTmp(async (dir) => {
+    drainDueEvery(dir, '30m');
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:35:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).not.toBe('AUTO_CLOSE');
+  }));
+
+  // drain.24. A long interval keeps the shipped 30-min semantics — half of 12h is
+  // capped, never widened, so a slow heartbeat cannot stretch the backoff.
+  test('drain: every=12h + cooldown stamped 31 min ago → AUTO_CLOSE (capped at 30)', withTmp(async (dir) => {
+    drainDueEvery(dir, '12h');
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:14:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
+  }));
+
+  test('drain: every=12h + cooldown stamped 29 min ago → does NOT emit AUTO_CLOSE', withTmp(async (dir) => {
+    drainDueEvery(dir, '12h');
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:16:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).not.toBe('AUTO_CLOSE');
+  }));
 });
 
 // -------------------------------------------------------
