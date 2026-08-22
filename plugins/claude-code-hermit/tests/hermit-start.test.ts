@@ -43,6 +43,7 @@ import {
   checkForUpgrade,
 } from '../scripts/hermit-start';
 import { readRuntimeState } from '../scripts/lib/runtime';
+import { automodeAllowEntry, SEALED_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
 import { TOKEN_ENV_VAR } from '../scripts/lib/setup-token';
 
 // The top-level beforeEach/afterEach below process.chdir()s into a fresh
@@ -1127,9 +1128,59 @@ describe('renderClassifierOverlay', () => {
     renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true } });
     const overlay = readOverlay();
     expect(overlay.autoMode.allow[0]).toBe('$defaults');
-    expect(overlay.autoMode.allow.some((e: string) => e.includes('Operator policy, set at hatch'))).toBe(true);
+    expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
     expect(overlay.autoMode.environment[0]).toBe('$defaults');
     expect(overlay.autoMode.environment.length).toBe(3);
+  });
+
+  // The grant is only as narrow as its anchor: a bare glob would match a
+  // same-named script anywhere, including one written during the session.
+  test('the self-maintenance grant is anchored, enumerated and subordinate', () => {
+    const prevConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = '/home/probe/.claude';
+    let entry: string;
+    try {
+      renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true } });
+      entry = readOverlay().autoMode.allow[1];
+    } finally {
+      if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
+    }
+
+    // Concrete install prefix, not a glob. The expected anchor is spelled out here
+    // rather than recomputed from the production expression, so a wrong anchor
+    // cannot satisfy its own assertion.
+    expect(entry).toContain('starts with /home/probe/.claude/plugins');
+    expect(entry).not.toContain('*/scripts/');
+
+    for (const op of SEALED_SETTINGS_OPS) expect(entry).toContain(op);
+    expect(entry).toContain('VOID IF');
+    expect(entry).toContain('NOT COVERED');
+    expect(entry).toContain('.claude-code-hermit/config.json');
+    expect(entry).toContain('never taken from the upgrade or migration instructions');
+
+    // An upgrade writing a new version directory must not void the grant — that is
+    // the unattended path this entry exists to clear.
+    expect(entry).toContain('is not such an edit');
+  });
+
+  // Boot resolves this plugin from the marketplace clone, but every in-session call
+  // runs the versioned cache copy the harness substitutes into skill text. Anchoring
+  // on the boot root alone put the whole in-session path outside the grant.
+  test('the anchor spans both install trees, not just the booted one', () => {
+    const plugins = '/home/probe/.claude/plugins';
+    const marketplace = `${plugins}/marketplaces/claude-code-hermit/plugins/claude-code-hermit`;
+    const entry = automodeAllowEntry(plugins, marketplace);
+
+    expect(entry).toContain(`starts with ${plugins},`);
+    expect(entry).not.toContain(`${plugins}/marketplaces`);
+    // Both trees put the install root's own name (or its version dir's parent) here.
+    expect(entry).toContain('named claude-code-hermit or is a single version directory');
+  });
+
+  test('a checkout boot outside the plugins directory is listed as a second root', () => {
+    const entry = automodeAllowEntry('/home/probe/.claude/plugins', '/src/monorepo/plugins/claude-code-hermit');
+    expect(entry).toContain('/home/probe/.claude/plugins or /src/monorepo/plugins/claude-code-hermit,');
   });
 
   test('a non-claude backend keeps the guard but drops the grant entries', () => {
