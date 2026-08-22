@@ -1236,6 +1236,22 @@ describe('update-alert-state', () => {
     expect(nextDay.stdout.notifications).toHaveLength(1);
   }));
 
+  test('update-alert-state (#764: a recovered read clears the stamp, so a same-day re-break notifies again)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json');
+    const first = await updateAlertState(dir, firingPayload([]));
+    expect(first.state.structured_read_failure_notified_date).toBe('2026-07-10');
+
+    write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [] }));
+    const healthy = await updateAlertState(dir, firingPayload([]));
+    expect(healthy.state.structured_read_failure_notified_date).toBeNull();
+
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json');
+    const again = await updateAlertState(dir, firingPayload([]));
+    expect(again.stdout.notifications).toHaveLength(1); // a new incident, not the old day's silence
+  }));
+
   test('update-alert-state (#764: a readable file notifies nothing and leaves the stamp alone)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');

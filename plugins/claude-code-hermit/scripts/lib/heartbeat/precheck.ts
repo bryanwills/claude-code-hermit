@@ -260,6 +260,14 @@ if (r.kind === 'ok') {
 if (typeof alertState.total_ticks !== 'number' || !Number.isFinite(alertState.total_ticks)) {
   alertState.total_ticks = 0;
 }
+const microScan = resolveMicroPendingScan(stateDir, alertState.alerts ?? {});
+// Recovery clears the damper: a file repaired and re-broken inside the 24h window is a
+// NEW corruption, and inheriting the previous one's stamp would silence its wake. Folded
+// into the tick-increment write below rather than a second writeAlertState call, since
+// precheck runs on every heartbeat poll.
+if (microScan !== 'corrupt' && !peek && typeof alertState.last_micro_corrupt_wake_at === 'string') {
+  delete alertState.last_micro_corrupt_wake_at;
+}
 if (!peek) {
   alertState.total_ticks += 1;
   writeAlertState(alertStatePath, alertState);
@@ -268,7 +276,6 @@ if (!peek) {
 // peek fires one tick early; the subsequent mutating call lands on the multiple-of-20
 if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20 === 0) emit('EVALUATE');
 
-const microScan = resolveMicroPendingScan(stateDir, alertState.alerts ?? {});
 if (microScan === 'evaluate') emit('EVALUATE');
 // Corrupt file: wake so the tick can tell the operator, but at most once a day —
 // the file stays corrupt until a human fixes it, and waking every poll to repeat

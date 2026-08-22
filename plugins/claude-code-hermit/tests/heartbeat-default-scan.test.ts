@@ -242,6 +242,16 @@ describe('default proposal-scan resolution', () => {
     const dir = build({});
     expect(await verdict(dir)).toBe('OK');
   });
+
+  test('18. repaired then re-broken inside 24h wakes again (damper cleared on recovery)', async () => {
+    const dir = build({ microCorrupt: true });
+    const mp = hermit(dir, 'state', 'micro-proposals.json');
+    expect(await verdict(dir)).toBe('EVALUATE');
+    fs.writeFileSync(mp, JSON.stringify({ pending: [] }));
+    expect(await verdict(dir)).toBe('OK');
+    fs.writeFileSync(mp, '{"pending": [');
+    expect(await verdict(dir)).toBe('EVALUATE'); // new corruption, not the old one's silence
+  });
 });
 
 // Coherence guard: the whole optimization hinges on isProposalScanItem matching

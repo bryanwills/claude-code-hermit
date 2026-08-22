@@ -175,20 +175,34 @@ function apply(payloadJson: string): void {
   const shouldNotifyStructuredFailure =
     hasStructuredReadFailure && state.structured_read_failure_notified_date !== today;
   if (shouldNotifyStructuredFailure) {
+    // deriveStaleSession only reports ok:false for a non-ENOENT read of sessions/SHELL.md
+    // (an unreadable runtime.json falls back to 'idle' and stays ok) — name that file, or
+    // the monitoring line points the repair at a healthy one.
     const failedSources = [
       !micro.ok && 'micro-proposals.json',
       !proposal.ok && 'proposals/',
-      !stale.ok && 'runtime.json',
+      !stale.ok && 'sessions/SHELL.md',
     ].filter(Boolean) as string[];
-    result.notifications.push(
-      "I can't read the record of decisions waiting on you — some may be pending without showing up. It needs a repair before I can see them again.");
+    const hasDecisionReadFailure = !micro.ok || !proposal.ok;
+    result.notifications.push(hasDecisionReadFailure
+      ? "I can't read the record of decisions waiting on you — some may be pending without showing up. It needs a repair before I can see them again."
+      : "I can't read my own session notes right now, so I can't tell whether the current session has gone quiet. It needs a repair before I can check again.");
     result.monitoringLines.push(
       `[${hhmm}] Heartbeat: structured read failure (${failedSources.join(', ')})` +
       (micro.error ? ` — ${micro.error}` : '') + '. Pending-decision alerts frozen.');
   }
-  const structuredFailureNotifiedDate = shouldNotifyStructuredFailure
-    ? today
-    : (typeof state.structured_read_failure_notified_date === 'string' ? state.structured_read_failure_notified_date : null);
+  // Clear the stamp the moment the read recovers: a file repaired and re-broken later
+  // the same day is a NEW incident, and carrying the old stamp would silence it.
+  let structuredFailureNotifiedDate: string | null;
+  if (!hasStructuredReadFailure) {
+    structuredFailureNotifiedDate = null;
+  } else if (shouldNotifyStructuredFailure) {
+    structuredFailureNotifiedDate = today;
+  } else {
+    structuredFailureNotifiedDate = typeof state.structured_read_failure_notified_date === 'string'
+      ? state.structured_read_failure_notified_date
+      : null;
+  }
 
   const self_eval: Json = {
     ...(state.self_eval && typeof state.self_eval === 'object' ? state.self_eval : {}),
