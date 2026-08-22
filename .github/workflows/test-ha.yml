@@ -38,5 +38,12 @@ jobs:
       - run: pip install pyyaml python-dotenv
       - run: bun install --frozen-lockfile
       - run: bunx tsc
-      - run: bun test
+      # Previously pinned to --parallel=4 (333d7334) on an unverified
+      # "ubuntu-latest is 4 vCPU" assumption; reverted (6287b1f8) after a
+      # subprocess test consumed most of the 5s default timeout under CI
+      # contention. Bare --parallel self-tunes to whatever the runner
+      # actually has instead of repeating that assumption; --timeout=15000
+      # is the headroom that actually fixes the contention. Local `bun test`
+      # stays on the 5s default so genuine slowness still surfaces in dev.
+      - run: bun test --parallel --timeout=15000
         working-directory: plugins/claude-code-homeassistant-hermit
