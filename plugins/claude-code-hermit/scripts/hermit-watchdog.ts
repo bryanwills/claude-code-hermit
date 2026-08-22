@@ -622,8 +622,13 @@ function evaluateReauth(): 'active' | 'spawned' | 'idle' {
 /** Send a heartbeat run nudge to a potentially wedged session.
  *  The nudge is a paid full-context wake, so repeats within one episode are spaced
  *  by the staleness threshold that detected the wedge: one probe per detection
- *  window. Ticks in between still count (`consecutive_stale`), so escalation fires
- *  on exactly the tick it would have without the throttle. */
+ *  window. Ticks in between still count (`consecutive_stale`), so the cycle count
+ *  reaches `escalate_after` on exactly the tick it would have without the throttle.
+ *  The other escalation input does move, deliberately: `last_pane_hash` is captured
+ *  before the keystroke, so under the old cadence every tick's nudge re-rendered the
+ *  pane (the queued message) and `paneFrozen` could never be true — a wedge masked
+ *  itself from the restart it needed. Staying silent between probes lets a genuinely
+ *  frozen pane read as frozen, so the pane-frozen restart is now reachable. */
 function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string, minIntervalSecs: number): void {
   if (isPaused(HERMIT_ROOT).paused) return; // PROP-015 — no nudges while paused
 
