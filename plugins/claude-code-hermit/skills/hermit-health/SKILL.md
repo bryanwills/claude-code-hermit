@@ -56,7 +56,7 @@ Reply in ≤1500 chars. Use exactly this section structure:
 
 ```
 ### Alerts
-- N active (oldest: [text] Xd ago), M suppressed (oldest Xd ago) [or "No active alerts"; omit the suppressed clause when M is 0]
+- N active (oldest: [text] Xd ago), M suppressed (oldest Xd ago) [with N = 0: "No active alerts, M suppressed (oldest Xd ago)"; omit the suppressed clause entirely when M is 0]
 (or: Alerts — alert-state.json not found (hermit not yet initialized).)
 
 ### Proposal queue
