@@ -28,6 +28,8 @@ import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateD
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
 import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
+import { AUTOMODE_ALLOW_ENTRY, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
+import { writeFileAtomic } from './lib/md-write';
 
 type Json = any;
 
@@ -627,6 +629,14 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
     }
   }
 
+  // Auto-mode classifier policy for THIS session only — see
+  // renderClassifierOverlay(). Written fresh each boot; absent on write failure,
+  // which degrades the classifier to its defaults rather than blocking the boot.
+  const overlay = renderClassifierOverlay(config);
+  if (overlay) {
+    cmd.push('--settings', overlay);
+  }
+
   if (pyTruthy(config.model)) {
     cmd.push('--model', config.model);
   }
@@ -854,20 +864,66 @@ function writeSettingsEnv(config: Json): void {
  * operator configured a backend to prevent.
  */
 function applyArtifactGrant(config: Json): void {
+  if (!artifactGrantApplies(config)) return;
+  const script = path.join(PLUGIN_ROOT, 'scripts', 'apply-settings.ts');
+  const r = spawnSync('bun', [script, '.claude/settings.local.json', 'artifact-allow'], { stdio: 'pipe', encoding: 'utf-8' });
+  if (r.status !== 0) {
+    console.log(`[hermit] WARNING: boot grant 'artifact-allow' failed: ${(r.stderr || '').trim()} — continuing boot.`);
+    return;
+  }
+  console.log('[hermit] Artifact publish grant ensured (permissions.allow in .claude/settings.local.json)');
+}
+
+/**
+ * Does the artifact publish grant apply — a page enabled, explicit
+ * authorization, and the default/claude backend?
+ *
+ * Shared by applyArtifactGrant (which performs the boot-time permission
+ * write) and renderClassifierOverlay (whose sealed self-maintenance entries
+ * exist to clear exactly that write, so they ship only where it is live).
+ */
+function artifactGrantApplies(config: Json): boolean {
   const artifacts = isDict(config.artifacts) ? config.artifacts : {};
   const anyPage = ['dashboard', 'proposals', 'weekly_review'].some((k) => pyTruthy(artifacts[k]));
-  if (!anyPage || artifacts.publish_authorized !== true) return;
+  if (!anyPage || artifacts.publish_authorized !== true) return false;
   const backend = typeof artifacts.backend === 'string' ? artifacts.backend.trim() : '';
-  if (backend !== '' && backend !== 'claude') return;
-  const script = path.join(PLUGIN_ROOT, 'scripts', 'apply-settings.ts');
-  for (const op of ['artifact-allow', 'automode-seed']) {
-    const r = spawnSync('bun', [script, '.claude/settings.local.json', op], { stdio: 'pipe', encoding: 'utf-8' });
-    if (r.status !== 0) {
-      console.log(`[hermit] WARNING: boot grant '${op}' failed: ${(r.stderr || '').trim()} — continuing boot.`);
-      return;
-    }
+  return backend === '' || backend === 'claude';
+}
+
+/**
+ * Render the per-session auto-mode classifier overlay and return its absolute
+ * path (null when it could not be written — boot continues without it).
+ *
+ * Why a launch-time overlay rather than a settings file: since Claude Code
+ * 2.1.207 the classifier reads autoMode only from user scope, managed
+ * settings, or --settings. A project-local write is silently ignored
+ * (anthropics/claude-code#87545), and a user-scope write would apply this
+ * project's policy to every other Claude session on the machine — with no
+ * cross-project locking, two hermits booting could also clobber each other's
+ * merge. The overlay is per-hermit, rewritten from scratch every boot (so it
+ * self-heals and never accumulates drift), and passed only to the session this
+ * boot launches.
+ *
+ * Written via tmp + rename so a crash mid-write can never leave the launch
+ * pointing at a half-written file.
+ */
+function renderClassifierOverlay(config: Json): string | null {
+  const autoMode: Record<string, string[]> = {
+    soft_deny: ['$defaults', AUTOMODE_SOFT_DENY_ENTRY],
+  };
+  if (artifactGrantApplies(config)) {
+    autoMode.allow = ['$defaults', AUTOMODE_ALLOW_ENTRY];
+    autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
   }
-  console.log('[hermit] Artifact publish grant ensured (permissions.allow + autoMode seed in .claude/settings.local.json)');
+  const file = path.resolve(STATE_DIR, 'claude-settings.overlay.json');
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    writeFileAtomic(file, JSON.stringify({ autoMode }, null, 2) + '\n');
+    return file;
+  } catch (e: any) {
+    console.log(`[hermit] WARNING: classifier overlay not written (${e?.message ?? e}) — continuing boot without it.`);
+    return null;
+  }
 }
 
 /**
@@ -1324,6 +1380,7 @@ export {
   getEnabledChannels,
   resolveStateDir,
   buildClaudeCommand,
+  renderClassifierOverlay,
   writeSettingsEnv,
   applyArtifactGrant,
   shlexQuote,

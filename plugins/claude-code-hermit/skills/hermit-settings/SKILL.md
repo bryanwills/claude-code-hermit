@@ -1,7 +1,6 @@
 ---
 name: hermit-settings
 description: View or change hermit configuration for this project. Manages model, channels, morning brief, heartbeat, routines, idle behavior, compaction thresholds, Docker packages, and unattended mode.
-disable-model-invocation: true
 ---
 # Hermit Settings
 
@@ -10,6 +9,8 @@ View or modify the hermit configuration for this project.
 ## Step 0 — Channel reply
 
 If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool. Otherwise emit to conversation.
+
+**Security tier — terminal-only on a channel-tagged turn.** Some settings decide what this hermit may do or who may talk to it: `permissions`, `env`, `boot-skill`, `remote`, `escalation`, `docker`, `artifact-authorization`, `artifact-backend`, and every `channels` operation except a channel's `morning_brief` (add/remove/primary/enabled, `allowed_users`, `briefing_chat`). On a channel-tagged turn these are **view-only**: show the current value, say plainly that this one is changed from a terminal session with `/claude-code-hermit:hermit-settings <argument>`, and change nothing. Everything else in this skill is fair game over a channel — the write still goes through `settings-edit`, so it stays validated and audited. The authoritative list is the policy table in `scripts/channel-settings-gate.ts`, a `PreToolUse` hook that denies a protected write whose turn was opened by a channel message; treat a denial as this rule firing, relay its reason, and don't look for another route.
 
 On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via the reply tool instead of waiting on terminal input — the branch proceeds as an over-channel exchange (ask, then act on the reply when it arrives), the same as any other channel conversation. **Never call `AskUserQuestion` on a channel-tagged turn** — it renders in the terminal, invisible to a remote operator. The one bounded ask in this skill (`quality-gate`, below) additionally queues a durable micro-proposal entry per `channel-responder` § Channel-safe ask bridge (schema: `reflect` § Queuing procedure), so it survives compaction or a session restart; free-form asks queue nothing.
 

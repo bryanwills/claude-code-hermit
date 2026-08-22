@@ -32,6 +32,7 @@ import {
   iterChannelConfigs,
   writeSettingsEnv,
   applyArtifactGrant,
+  renderClassifierOverlay,
   applyAlwaysOnDoctorSchedule,
   clearShutdownStampsOnBoot,
   clearStatusCacheOnBoot,
@@ -1033,14 +1034,14 @@ describe('writeSettingsEnv voice carrier', () => {
 });
 
 describe('applyArtifactGrant', () => {
-  test('flag true + a page enabled writes Artifact allow + autoMode entries', () => {
+  test('flag true + a page enabled writes the Artifact permission only', () => {
     writeSettings({});
     captureLog(() => applyArtifactGrant({ artifacts: { dashboard: true, proposals: false, weekly_review: false, publish_authorized: true } }));
     const settings = readSettings();
     expect(settings.permissions.allow).toContain('Artifact');
-    expect(settings.autoMode.allow[0]).toBe('$defaults');
-    expect(settings.autoMode.allow.some((e: string) => e.includes('Operator policy, set at hatch'))).toBe(true);
-    expect(settings.autoMode.environment[0]).toBe('$defaults');
+    // autoMode moved to the per-session launch overlay: the classifier stopped
+    // reading it from a project settings file in Claude Code 2.1.207.
+    expect(settings.autoMode).toBeUndefined();
   });
 
   test('flag null does nothing', () => {
@@ -1095,7 +1096,63 @@ describe('applyArtifactGrant', () => {
     captureLog(() => applyArtifactGrant(config));
     const settings = readSettings();
     expect(settings.permissions.allow).toContain('Artifact');
-    expect(settings.autoMode.allow.length).toBeGreaterThan(0);
+  });
+});
+
+describe('renderClassifierOverlay', () => {
+  const OVERLAY = '.claude-code-hermit/state/claude-settings.overlay.json';
+
+  function readOverlay(): any {
+    return JSON.parse(fs.readFileSync(OVERLAY, 'utf-8'));
+  }
+
+  test('always carries the terminal-only soft_deny guard, with $defaults intact', () => {
+    const file = renderClassifierOverlay({});
+    expect(file).toBe(path.resolve(OVERLAY));
+    const overlay = readOverlay();
+    expect(overlay.autoMode.soft_deny[0]).toBe('$defaults');
+    expect(overlay.autoMode.soft_deny.some((e: string) => e.includes('terminal-only settings'))).toBe(true);
+  });
+
+  test('omits the self-maintenance entries when the artifact grant does not apply', () => {
+    renderClassifierOverlay({});
+    const overlay = readOverlay();
+    expect(overlay.autoMode.allow).toBeUndefined();
+    expect(overlay.autoMode.environment).toBeUndefined();
+  });
+
+  test('includes them under the same gating as the artifact grant', () => {
+    renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true } });
+    const overlay = readOverlay();
+    expect(overlay.autoMode.allow[0]).toBe('$defaults');
+    expect(overlay.autoMode.allow.some((e: string) => e.includes('Operator policy, set at hatch'))).toBe(true);
+    expect(overlay.autoMode.environment[0]).toBe('$defaults');
+    expect(overlay.autoMode.environment.length).toBe(3);
+  });
+
+  test('a non-claude backend keeps the guard but drops the grant entries', () => {
+    renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true, backend: 'my-artifact-host' } });
+    const overlay = readOverlay();
+    expect(overlay.autoMode.soft_deny.length).toBe(2);
+    expect(overlay.autoMode.allow).toBeUndefined();
+  });
+
+  test('re-rendering is byte-identical and leaves no tmp file', () => {
+    const config = { artifacts: { dashboard: true, publish_authorized: true } };
+    renderClassifierOverlay(config);
+    const first = fs.readFileSync(OVERLAY, 'utf-8');
+    renderClassifierOverlay(config);
+    expect(fs.readFileSync(OVERLAY, 'utf-8')).toBe(first);
+    const leftovers = fs.readdirSync(path.dirname(OVERLAY)).filter(f => f.endsWith('.tmp'));
+    expect(leftovers).toEqual([]);
+  });
+
+  test('buildClaudeCommand passes the overlay as an absolute --settings path', async () => {
+    const { cmd } = await runBuildClaudeCommand({}, CLAUDE_FETCH_FAILS);
+    const i = cmd.indexOf('--settings');
+    expect(i).toBeGreaterThan(-1);
+    expect(path.isAbsolute(cmd[i + 1])).toBe(true);
+    expect(cmd[i + 1].endsWith('claude-settings.overlay.json')).toBe(true);
   });
 });
 

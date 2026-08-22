@@ -1239,6 +1239,31 @@ describe('bootstrap skills', () => {
 });
 
 // ============================================================
+// hermit-settings channel reachability
+//
+// The skill defines channel branches (Step 0, the quality-gate and
+// artifact-authorization `--answer` re-entries channel-responder invokes via
+// the Skill tool). disable-model-invocation made all of them unreachable.
+// The security tier is held by scripts/channel-settings-gate.ts instead, so
+// the flag must not come back.
+// ============================================================
+
+describe('hermit-settings channel reachability', () => {
+  const text = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
+
+  test('is model-invocable, so its channel re-entries can run', () => {
+    const parts = split3(text, '---\n');
+    const fm = parts.length === 3 ? parts[1] : '';
+    expect(fm).not.toContain('disable-model-invocation');
+  });
+
+  test('Step 0 fences the security tier and names the enforcing gate', () => {
+    expect(text).toContain('channel-settings-gate.ts');
+    expect(text).toMatch(/view-only/i);
+  });
+});
+
+// ============================================================
 // channel-setup empty-channels branch (TestChannelSetupEmptyChannels)
 //
 // channel-setup used to hard-stop on `channels: {}` and point at
