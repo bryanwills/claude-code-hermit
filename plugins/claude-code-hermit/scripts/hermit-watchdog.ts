@@ -619,9 +619,32 @@ function evaluateReauth(): 'active' | 'spawned' | 'idle' {
   }
 }
 
-/** Send a heartbeat run nudge to a potentially wedged session. */
-function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string): void {
+/** Send a heartbeat run nudge to a potentially wedged session.
+ *  The nudge is a paid full-context wake, so repeats within one episode are spaced
+ *  by the staleness threshold that detected the wedge: one probe per detection
+ *  window. Ticks in between still count (`consecutive_stale`), so the cycle count
+ *  reaches `escalate_after` on exactly the tick it would have without the throttle.
+ *  The other escalation input does move, deliberately: `last_pane_hash` is captured
+ *  before the keystroke, so under the old cadence every tick's nudge re-rendered the
+ *  pane (the queued message) and `paneFrozen` could never be true — a wedge masked
+ *  itself from the restart it needed. Staying silent between probes lets a genuinely
+ *  frozen pane read as frozen, so the pane-frozen restart is now reachable. */
+function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string, minIntervalSecs: number): void {
   if (isPaused(HERMIT_ROOT).paused) return; // PROP-015 — no nudges while paused
+
+  const nudgeAge = watchdogState.last_nudge_at ? ageSecs(watchdogState.last_nudge_at) : null;
+  const due = nudgeAge === null || nudgeAge >= minIntervalSecs;
+
+  watchdogState.consecutive_stale = consecutive;
+  watchdogState.last_pane_hash = paneHash;
+
+  if (!due) {
+    writeWatchdogState(watchdogState);
+    appendEvent('nudge-throttled', `stale cycle ${consecutive}`);
+    process.stderr.write(`[watchdog] nudge throttled for "${sessionName}" (stale cycle ${consecutive})\n`);
+    return;
+  }
+
   sendKeys(sessionName, '/claude-code-hermit:heartbeat run');
   // One push per wedge episode. Keying on `consecutive === 1` alone re-fires when
   // the operator-recency guard resets consecutive_stale to 0 mid-episode (an
@@ -629,8 +652,6 @@ function doNudge(sessionName: string, watchdogState: Json, consecutive: number, 
   // heartbeat actually recovers (the fresh-heartbeat branch in main), fixes that.
   const shouldNotify = !watchdogState.wedge_notified;
   if (shouldNotify) watchdogState.wedge_notified = true;
-  watchdogState.consecutive_stale = consecutive;
-  watchdogState.last_pane_hash = paneHash;
   watchdogState.last_nudge_at = utcStamp();
   writeWatchdogState(watchdogState);
   appendEvent('nudge', `stale cycle ${consecutive}`);
@@ -1565,13 +1586,16 @@ async function main(): Promise<void> {
             writeWatchdogState(watchdogState);
             await doRestart(sessionName, 'pane-frozen', runtime, timezone);
           } else {
-            doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone);
+            doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs);
           }
         } else {
           // Heartbeat recovered — reset the episode and re-arm the wedge push so a
-          // genuinely new wedge later can notify again.
+          // genuinely new wedge later can notify again. Clearing last_nudge_at re-arms
+          // the nudge throttle for the same reason: a new episode's first probe should
+          // fire immediately, not wait out the previous episode's window.
           watchdogState.consecutive_stale = 0;
           watchdogState.wedge_notified = false;
+          watchdogState.last_nudge_at = null;
           watchdogState.last_pane_hash = currentPaneHash;
           writeWatchdogState(watchdogState);
         }

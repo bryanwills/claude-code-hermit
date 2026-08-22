@@ -1192,6 +1192,85 @@ test('pane changed at cycle 3 → nudge (not restart)', withHermit(async (h) => 
 }));
 
 // -------------------------------------------------------
+// 9b. Nudge throttle: one paid probe per staleness window
+// -------------------------------------------------------
+
+test('stale + nudged 60s ago → throttled, no keystroke', withHermit(async (h) => {
+  writeConfig(h); // 2h × 2 vs 4h floor → 4h window
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 0, last_pane_hash: null,
+    last_nudge_at: new Date(Date.now() - 60 * 1000).toISOString(),
+  }) + '\n');
+  writeFakeTmux(h, 0, 'some pane content');
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge-throttled');
+  const tmuxLog = path.join(h.dir, 'tmux-calls.log');
+  const calls = fs.existsSync(tmuxLog) ? fs.readFileSync(tmuxLog, 'utf-8') : '';
+  expect(calls).not.toContain('heartbeat run');
+}));
+
+test('throttled tick still counts toward escalation', withHermit(async (h) => {
+  writeConfig(h);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 1, last_pane_hash: null,
+    last_nudge_at: new Date(Date.now() - 60 * 1000).toISOString(),
+  }) + '\n');
+  writeFakeTmux(h, 0, 'some pane content');
+  writeFakePgrep(h, 1);
+  await watchdog(h, 'run');
+  expect(readJson(state(h, 'watchdog-state.json')).consecutive_stale).toBe(2);
+}));
+
+test('stale + last nudge older than the window → nudge fires and re-stamps', withHermit(async (h) => {
+  writeConfig(h);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const stale = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 0, last_pane_hash: null, last_nudge_at: stale,
+  }) + '\n');
+  writeFakeTmux(h, 0, 'some pane content');
+  writeFakePgrep(h, 1);
+  await watchdog(h, 'run');
+  expect(fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')).toContain('heartbeat run');
+  expect(readJson(state(h, 'watchdog-state.json')).last_nudge_at).not.toBe(stale);
+}));
+
+test('heartbeat recovered → nudge throttle re-armed', withHermit(async (h) => {
+  writeConfig(h);
+  touchAgo(state(h, '.heartbeat'), 60); // fresh → recovery branch
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 2, last_pane_hash: null,
+    last_nudge_at: new Date(Date.now() - 60 * 1000).toISOString(),
+  }) + '\n');
+  writeFakeTmux(h, 0, 'some pane content');
+  writeFakePgrep(h, 1);
+  await watchdog(h, 'run');
+  expect(readJson(state(h, 'watchdog-state.json')).last_nudge_at).toBeNull();
+}));
+
+test('escalation takes precedence — the throttle is never consulted', withHermit(async (h) => {
+  writeConfig(h);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const paneContent = 'frozen pane';
+  const frozenHash = crypto.createHash('sha256').update(`${paneContent}\n`).digest('hex');
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 2, last_pane_hash: frozenHash,
+    last_nudge_at: new Date(Date.now() - 60 * 1000).toISOString(),
+  }) + '\n');
+  writeFakeTmux(h, 0, paneContent);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('restart');
+  expect(events).not.toContain('nudge');
+}));
+
+// -------------------------------------------------------
 // 10. Re-arm fallback: heartbeat-restart not fired in > 26h
 // -------------------------------------------------------
 
