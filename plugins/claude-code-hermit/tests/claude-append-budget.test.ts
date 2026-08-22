@@ -60,7 +60,14 @@ describe('CLAUDE-APPEND size budget', () => {
     // hook-dedup note. This entry also covers the interim +87 B "sanctioned
     // even when the blocked call was a channel send" clause (8,337 B), which
     // shipped without a ledger line.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(8650);
+    // Raised to 9,100 for the terminal-only settings rule (landing at ~9,057 B),
+    // which arrives with hermit-settings becoming channel-invocable. Deliberate
+    // and load-bearing twice over: it steers the model to explain the boundary
+    // instead of attempting a write the channel-settings gate would deny (the
+    // deterministic layer), and the auto-mode classifier reads CLAUDE.md too, so
+    // the same sentence backs the overlay's soft_deny. Kept to one bullet with no
+    // config values or path list — the gate's policy table is authoritative.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(9100);
   });
 });
 
