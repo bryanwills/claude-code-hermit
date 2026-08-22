@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, readFileWithFrontmatter, parseFrontmatter, isEmptyAutoArchive, newestByType, globDir } from './lib/frontmatter';
 import { costLogPath, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { readSettledConfig } from './lib/config-read';
 import { formatTokens } from './lib/format';
 import { lint as knowledgeLint } from './knowledge-lint';
 
@@ -301,12 +302,23 @@ try {
   }
 } catch {}
 
-// --- Usage (usage-metrics.jsonl → weekly-review suggestions) ---
-// Suggest-only: never auto-archives. Coverage is inherently partial (startup
-// injection, subagent reads, and skill invocations outside the tracked paths
-// are invisible), so a young or missing ledger must never read as "unused".
-const USAGE_STALE_DAYS = 60;
-const usageStaleMs = USAGE_STALE_DAYS * 86400000;
+// --- Usage (usage-metrics.jsonl → auto-archive + dormant-skill suggestions) ---
+// Subagent reads do reach the ledger (PostToolUse fires for sidechain calls,
+// probed on CC 2.1.239), so "no tracked use" is real evidence — docs with none
+// in the window are archived move-only, with the digest as the operator's veto.
+// Startup injection stays untracked, which is why foundational/topic/review
+// artifacts are exempt below. A young or missing ledger never reads as unused.
+let usageStaleDays = 30;
+let usageAutoArchive = true;
+try {
+  // Already settled: `knowledge` is always an object and both keys are coerced
+  // to their declared types. Only the >0 floor does work — a hand-edited 0 or
+  // negative would make every doc instantly stale.
+  const knowledgeCfg = readSettledConfig(hermitDir).knowledge;
+  if (knowledgeCfg.usage_stale_days > 0) usageStaleDays = knowledgeCfg.usage_stale_days;
+  if (knowledgeCfg.usage_auto_archive === false) usageAutoArchive = false;
+} catch {}
+const usageStaleMs = usageStaleDays * 86400000;
 const compiledDir = path.join(hermitDir, 'compiled');
 const usageLedgerPath = path.join(hermitDir, 'state', 'usage-metrics.jsonl');
 
@@ -330,7 +342,7 @@ try {
   }
 } catch {}
 
-const untouchedDocs: { stem: string; lastRead: number | null; date: Date }[] = [];
+let untouchedDocs: { stem: string; lastRead: number | null; date: Date }[] = [];
 const dormantSkills: { name: string; lastUsed: number }[] = [];
 
 // Guard: a ledger younger than the staleness window (or missing entirely)
@@ -364,12 +376,36 @@ if (ledgerStartMs !== null && (now.getTime() - ledgerStartMs) >= usageStaleMs) {
   dormantSkills.sort((a, b) => a.lastUsed - b.lastUsed);
 }
 
+// Archive the untouched docs: move-only into compiled/.archive/, reported in
+// the digest so the operator can veto by moving one back. A failed move drops
+// the doc back to a suggestion rather than losing it silently.
+const autoArchived: string[] = [];
+if (usageAutoArchive && untouchedDocs.length > 0) {
+  const usageArchiveDir = path.join(compiledDir, '.archive');
+  fs.mkdirSync(usageArchiveDir, { recursive: true });
+  const stillUntouched: typeof untouchedDocs = [];
+  for (const doc of untouchedDocs) {
+    let dest = path.join(usageArchiveDir, `${doc.stem}.md`);
+    if (fs.existsSync(dest)) dest = path.join(usageArchiveDir, `${doc.stem}-${Date.now()}.md`);
+    try {
+      fs.renameSync(path.join(compiledDir, `${doc.stem}.md`), dest);
+      autoArchived.push(doc.stem);
+    } catch {
+      stillUntouched.push(doc);
+    }
+  }
+  untouchedDocs = stillUntouched;
+}
+
 const usageUntouchedCount = untouchedDocs.length + dormantSkills.length;
 
 let usageSection = '';
-if (untouchedDocs.length > 0 || dormantSkills.length > 0) {
+if (autoArchived.length > 0 || untouchedDocs.length > 0 || dormantSkills.length > 0) {
   const DOC_CAP = 10, SKILL_CAP = 10;
-  usageSection = `### Usage (no tracked use ≥${USAGE_STALE_DAYS}d)\n`;
+  usageSection = `### Usage (no tracked use ≥${usageStaleDays}d)\n`;
+  for (const stem of autoArchived) {
+    usageSection += `- compiled/${stem}.md — auto-archived to compiled/.archive/ (restore by moving it back)\n`;
+  }
   for (const d of untouchedDocs.slice(0, DOC_CAP)) {
     const lastReadStr = d.lastRead !== null ? new Date(d.lastRead).toISOString().slice(0, 10) : 'never';
     usageSection += `- compiled/${d.stem}.md — last tracked read ${lastReadStr}, updated ${d.date.toISOString().slice(0, 10)}\n`;
@@ -379,7 +415,7 @@ if (untouchedDocs.length > 0 || dormantSkills.length > 0) {
     usageSection += `- skill ${s.name} — last tracked use ${new Date(s.lastUsed).toISOString().slice(0, 10)}\n`;
   }
   if (dormantSkills.length > SKILL_CAP) usageSection += `- (+${dormantSkills.length - SKILL_CAP} more)\n`;
-  usageSection += `Tracked sources only (skill-tool calls, operator slash commands, compiled/ Reads); startup injection and subagent reads are not tracked.\n\n`;
+  usageSection += `Tracked sources: skill-tool calls, operator slash commands, and compiled/ Reads (subagent reads included); startup injection is not tracked.\n\n`;
 }
 
 // --- Build report ---
@@ -415,6 +451,7 @@ const frontmatter = [
   `reflect_cost_usd: ${reflectCost.toFixed(2)}`,
   `reflect_observations: ${reflectObsTotal}`,
   `usage_untouched_count: ${usageUntouchedCount}`,
+  `usage_auto_archived: [${autoArchived.map(s => `"${s.replace(/,/g, ';')}"`).join(', ')}]`,
   '---',
 ].join('\n');
 

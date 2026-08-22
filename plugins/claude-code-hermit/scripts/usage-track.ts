@@ -7,17 +7,21 @@ type Json = any;
  * PostToolUse hook — appends a usage event to state/usage-metrics.jsonl when a
  * skill is invoked via the Skill tool or a compiled/ artifact is read.
  *
- * Feeds weekly-review's "no tracked use" suggestions (never auto-archives).
- * Coverage is inherently partial: startup-context injection, subagent reads,
- * user-typed slash commands (which bypass the Skill tool entirely — see
+ * Feeds weekly-review's "no tracked use" section, which auto-archives on this
+ * evidence. Subagent reads ARE captured: PostToolUse fires for sidechain tool
+ * calls, with the parent session_id in the payload (probed on CC 2.1.239).
+ * Coverage gaps that remain: startup-context injection, user-typed slash
+ * commands (which bypass the Skill tool entirely — see
  * scripts/record-operator-action.ts for that capture path), and Reads whose
  * PostToolUse payload (tool_response carries the full file body) exceeds
- * MAX_STDIN are not seen here.
+ * MAX_STDIN.
  *
  * Fails open on every error path — never blocks Claude Code. Zero stdout.
  */
 
-const MAX_STDIN = 64 * 1024;
+// tool_response carries the full file body, so a tight cap drops exactly the
+// reads the ledger exists to record — a large doc looked permanently unused.
+const MAX_STDIN = 1024 * 1024;
 const COMPILED_RE = /(?:^|\/)\.claude-code-hermit\/compiled\/([^/]+)\.md$/;
 
 function readEvent(callback: (event: Json) => void): void {

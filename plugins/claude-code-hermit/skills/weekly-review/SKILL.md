@@ -13,7 +13,7 @@ Generates the weekly review for the current ISO week.
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/weekly-review.ts .claude-code-hermit
    ```
 
-2. Report the result. On success, output the review filename. If a **Knowledge Health** section appears in the review output, summarize the issues to the operator. If a **Usage** section appears, relay it as a suggestion: name the untouched docs/skills and point at `bun ${CLAUDE_PLUGIN_ROOT}/scripts/archive-compiled.ts .claude-code-hermit` for docs the operator confirms. Never archive on usage silence yourself — the section reports *tracked* use only (skill-tool calls, operator slash commands, compiled/ Reads); startup injection and subagent reads aren't seen.
+2. Report the result. On success, output the review filename. If a **Knowledge Health** section appears in the review output, summarize the issues to the operator. If a **Usage** section appears, relay it: the script has already auto-archived the docs with no tracked use in the window (move-only, into `compiled/.archive/` — restoring one is moving the file back), and lists dormant skills as suggestions only. Don't archive anything further yourself, and never on judgment alone: semantic changes (merging or rewriting topic pages, reclassifying a compiled conclusion as raw, tagging `foundational`) always wait for explicit operator approval. Tracked use covers skill-tool calls, operator slash commands, and compiled/ Reads including subagent reads; startup injection isn't tracked.
 
 3. **Dispatch the topic-page semantic check** to the isolated-context runner — its full-body reads stay off this session's context. Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/reference.md`. The runner reads every `compiled/topic-*.md`, checks for contradictions, stale claims, and broken `[[wikilinks]]` (capped at 3 findings), and returns:
 
@@ -56,7 +56,7 @@ Generates the weekly review for the current ISO week.
    ```
 
 5. Read the frontmatter needed for the channel summary from the freshly-written review file:
-   - Read `.claude-code-hermit/compiled/review-weekly-<current-week>.md` frontmatter (just written in step 1) — do not read the body; every value the channel message needs lives in frontmatter (`delivered_count`, `delivered`, `proposals_accepted`, `proposals_resolved`, `open_loops_count`, `total_cost_usd`, `usage_untouched_count`).
+   - Read `.claude-code-hermit/compiled/review-weekly-<current-week>.md` frontmatter (just written in step 1) — do not read the body; every value the channel message needs lives in frontmatter (`delivered_count`, `delivered`, `proposals_accepted`, `proposals_resolved`, `open_loops_count`, `total_cost_usd`, `usage_untouched_count`, `usage_auto_archived`).
    - Also read the prior week's `compiled/review-weekly-*.md` frontmatter (sort by `week` descending, take the second file) for the Spend delta.
    - If no prior week file exists: omit the "vs prior week" comparison and show this week's spend only.
    - If the current-week file is missing (script failed): skip step 6 entirely and fall back to a plain note ("Weekly review didn't generate this week — nothing to send.").
@@ -71,7 +71,8 @@ Generates the weekly review for the current ISO week.
      Delivered: <delivered_count> thing(s) — <delivered, comma-joined plain names> [omit this whole line when delivered_count is 0]
      Decisions: <proposals_accepted> approved, <proposals_resolved> resolved this week [omit this whole line when both are 0]
      Waiting on you: <open_loops_count> thing(s) need a yes/no [omit this whole line when 0]
-     Unused: <usage_untouched_count> thing(s) I haven't touched in 2 months — say "archive them" if you want them tidied away [omit this whole line when 0]
+     Tidied: put <usage_auto_archived count> unused doc(s) away — <usage_auto_archived, comma-joined plain names> — say "restore <name>" to bring one back [omit this whole line when the list is empty]
+     Unused: <usage_untouched_count> thing(s) look dormant — say "archive them" if you want them tidied away [omit this whole line when 0]
      Spend: $<total_cost_usd> this week (vs $<prior week's total_cost_usd>, if a prior file exists) — an estimate, not a bill
      ```
      Followed by the `Topic pages:` findings from step 3 when present, plus a final line listing whichever of the dashboard/weekly-review URLs were returned (e.g. `📎 <dashboard url> · 📎 <weekly-review url>` — omit either half that wasn't returned).
@@ -113,4 +114,5 @@ Generates the weekly review for the current ISO week.
 - The routine is enabled by default for new installs. Existing operators who haven't opted in can enable it via `/claude-code-hermit:hermit-settings`.
 - `archive-raw.ts` only moves files — it never deletes. Archived files land in `raw/.archive/` and can be restored manually.
 - `archive-compiled.ts` only moves files — it never deletes. Keeps the newest 2 artifacts per type; `foundational`-tagged artifacts and `topic` pages are always retained (living pages compact by merging, not archival). Archived files land in `compiled/.archive/` and can be restored manually.
-- Usage tracking (`state/usage-metrics.jsonl`, fed by hooks) is best-effort — it only sees skill-tool calls, operator slash commands, and compiled/ Reads, never startup injection or subagent reads. The Usage section only ever suggests; it never archives anything on its own.
+- Usage tracking (`state/usage-metrics.jsonl`, fed by hooks) sees skill-tool calls, operator slash commands, and compiled/ Reads — including subagent reads, since PostToolUse fires for sidechain tool calls (probed on CC 2.1.239). Startup injection isn't tracked, which is why `foundational` and `topic` artifacts are exempt.
+- Auto-archival is usage-evidence-based and move-only: docs with no tracked read in `knowledge.usage_stale_days` (default 30) go to `compiled/.archive/`, and only once the ledger itself is that old. Restoring one is moving the file back. Set `knowledge.usage_auto_archive: false` for suggest-only. Dormant skills are never auto-acted on, and semantic changes stay operator-approved.

@@ -104,6 +104,8 @@ const DEFAULT_CONFIG: Json = {
     raw_retention_days: 14,
     compiled_budget_chars: 2500,
     working_set_warn: 20,
+    usage_stale_days: 30,
+    usage_auto_archive: true,
     archive_retention_days: null,
     channel_log_enabled: true,
     channel_log_retention_days: 90,
