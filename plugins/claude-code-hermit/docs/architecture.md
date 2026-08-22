@@ -162,7 +162,7 @@ your-project/
 │   │   ├── telemetry-alert.json      # Telemetry export-failure alert dedup (telemetry-export-owned)
 │   │   ├── channel-health.json       # Advisory channel send-liveness (channel-send-owned)
 │   │   ├── operator-turn-open.json   # Transient "an operator turn is in flight" marker (opened on operator prompts, cleared at Stop)
-│   │   ├── pending-close-drain.json  # Shared 30-min backoff between queued-close drain emissions (auto-close-owned)
+│   │   ├── pending-close-drain.json  # Shared backoff between queued-close drain emissions (auto-close-owned)
 │   │   ├── .heartbeat                # Activity marker (heartbeat-touch-owned)
 │   │   └── .lifecycle.lock           # Always-on lifecycle lock (hermit-start-owned)
 │   ├── bin/hermit-start, hermit-stop
@@ -197,7 +197,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/heartbeat-liveness.json` | heartbeat-monitor.sh (every poll iteration)         | doctor-check.ts (heartbeat liveness check), heartbeat status  |
 | `state/cc-stop-snapshot.json`  | stop-pipeline.ts only                               | doctor-check.ts (scheduler/background-task health check)      |
 | `state/operator-turn-open.json` | record-operator-action.ts (opens, on kept operator prompts + `--force`); stop-pipeline.ts (clears at Stop — the only deleter) | routines.ts due + lib/heartbeat/precheck.ts, both via lib/auto-close.ts `operatorTurnOpen` (defer gate, 60-min TTL backstop against a marker orphaned by a failed Stop) |
-| `state/pending-close-drain.json` | lib/auto-close.ts `stampDrainCooldown`, called by routines.ts due and lib/heartbeat/precheck.ts (non-peek only) | the same two drainers (30-min shared backoff before re-emitting a queued close) |
+| `state/pending-close-drain.json` | lib/auto-close.ts `stampDrainCooldown`, called by routines.ts due and lib/heartbeat/precheck.ts (non-peek only) | the same two drainers (shared backoff before re-emitting a queued close: 30 min for the routine poll, halved by the heartbeat drainer once `heartbeat.every` reaches 30 min) |
 | `state/.heartbeat`             | heartbeat-touch.ts only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.ts only                                | hermit-stop.ts (cleanup)                                      |
 | `state/cost-index.json`        | cost-tracker.ts + subagent-cost.ts (each folds its own append; tmp+rename, offset-based) | cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts |

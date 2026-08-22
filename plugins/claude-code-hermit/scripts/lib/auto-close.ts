@@ -61,13 +61,22 @@ export function operatorTurnOpen(hermitDir: string, nowMs: number): boolean {
 // read as expired (fail-open) — a broken marker must never strand a queued close.
 // The marker is shared by both drainers on purpose: the cooldown means "don't re-wake
 // for this close too soon", not "don't re-wake via this specific poller".
-export function drainCooldownExpired(hermitDir: string, nowMs: number): boolean {
+//
+// The default is tuned for the 60s routine poll. A slower poller must pass a cooldown
+// below its own interval, or it can never clear the gate on the next tick: the marker
+// is stamped by the non-peek run, i.e. AFTER the peek that emitted, so one interval
+// later the age is short of the interval by that wake latency (#771).
+export function drainCooldownExpired(
+  hermitDir: string,
+  nowMs: number,
+  cooldownMinutes: number = PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES,
+): boolean {
   const marker = readJSON(drainMarkerPath(hermitDir));
   const at = marker && typeof marker.last_emitted_at === 'string'
     ? new Date(marker.last_emitted_at).getTime() : NaN;
   if (isNaN(at)) return true;
   const ageMin = (nowMs - at) / 60_000;
-  return ageMin < 0 || ageMin > PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES;
+  return ageMin < 0 || ageMin > cooldownMinutes;
 }
 
 // Records a drain emission. Callers stamp BEFORE emitting: if the write fails the

@@ -21,7 +21,7 @@ import { isPaused } from '../pause';
 import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
-import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown } from '../auto-close';
+import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown, PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES } from '../auto-close';
 
 type Json = any;
 
@@ -177,6 +177,13 @@ function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evalua
   return 'clean';
 }
 
+// Settled config, read once. Declared here rather than beside the active-hours gate
+// below because the pending-close drain — which runs before every other gate — sizes
+// its cooldown from heartbeat.every. The reader never writes and never throws, so the
+// paths that emit before that gate only pay one extra small read.
+const config = readSettledConfig(stateDir);
+const hbConfig = config.heartbeat;
+
 // Resolve "now" once: real wall-clock, overridable by HERMIT_NOW for deterministic
 // tests. Shared by the pending-close drain and the in_progress 12h check below.
 let now = Date.now();
@@ -200,10 +207,28 @@ if (process.env.HERMIT_NOW) {
 // close that never completes: without it every tick re-emits, and each emission is a
 // paid full-context wake. Under --peek the verdict is computed but not stamped, so a
 // peek never consumes the cooldown the real tick needs.
+//
+// Hence the half-interval cap below: a cooldown as long as this poller's own interval
+// can never expire on the next tick (drainCooldownExpired's note has the derivation),
+// which is what made a failing close retry only every other tick once heartbeat.every
+// became 30m (#771). The min() only tightens the shared 30-min ceiling, never widens
+// it. Config is read live here while the monitor baked its interval in at launch, so
+// an `every` edited mid-session can diverge from the real poll cadence until the
+// monitor restarts — bounded, self-healing, and never worse than the old behavior.
+//
+// Below a 30-min interval the shipped flat cooldown already expires within a tick or
+// two, so there is nothing to fix and halving would only shorten the backoff: an
+// `every` of 5m would re-wake a failing close every 5 min instead of every ~35. A
+// suppressed tick costs nothing (the peek never wakes the model), so short intervals
+// keep the flat 30. Also absorbs `every: "0m"`, which would otherwise disable the gate.
+const everyMin = parseDuration(hbConfig.every, 30 * 60_000) / 60_000;
+const drainCooldownMin = everyMin < PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
+  ? PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
+  : Math.min(PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES, everyMin / 2);
 if (
   pendingCloseDrainDue(stateDir, now) &&
   !operatorTurnOpen(stateDir, now) &&
-  drainCooldownExpired(stateDir, now)
+  drainCooldownExpired(stateDir, now, drainCooldownMin)
 ) {
   if (peek || stampDrainCooldown(stateDir, now)) emit('AUTO_CLOSE');
 }
@@ -243,8 +268,6 @@ try {
   }
 } catch { /* fail-open: scan trouble must not block the tick */ }
 
-const config = readSettledConfig(stateDir);
-const hbConfig = config.heartbeat;
 const timezone = config.timezone ?? 'UTC';
 const activeHours = hbConfig.active_hours;
 
