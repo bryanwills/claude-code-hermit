@@ -203,7 +203,7 @@ This means even a raw `docker compose down` (without `hermit-docker down`) will 
 Hermit archives the current session via two triggers:
 
 - **12h inactivity** — `heartbeat.ts precheck` checks `last-operator-action.json` on each tick. If the operator has not acted for >12h, it returns the `AUTO_CLOSE` verdict.
-- **Daily midnight with lull** — the `daily-auto-close` routine fires at `0 0 * * *` (local). If the operator is currently active (last action ≤10 min), the routine writes `state/pending-close.json`. The next eligible Monitor-mode 60-second routine poll or heartbeat tick after the operator has been idle >10 min drains the flag, provided no operator turn is open (`state/operator-turn-open.json`, 60-min TTL) and the shared 30-minute drain backoff (`state/pending-close-drain.json`) has expired. If the operator was already idle when the routine fired, it closes directly without queueing.
+- **Daily midnight with lull** — the `daily-auto-close` routine fires at `0 0 * * *` (local). If the operator is currently active (last action ≤10 min), the routine writes `state/pending-close.json`. The next eligible Monitor-mode 60-second routine poll or heartbeat tick after the operator has been idle >10 min drains the flag, provided no operator turn is open (`state/operator-turn-open.json`, 60-min TTL) and the shared drain backoff (`state/pending-close-drain.json`) has expired — 30 minutes for the routine poll, halved by the heartbeat drainer once `heartbeat.every` reaches 30 minutes so a slow heartbeat retries on its next tick. If the operator was already idle when the routine fired, it closes directly without queueing.
 
 On either trigger:
 
