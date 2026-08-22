@@ -15,6 +15,12 @@ import path from 'node:path';
 import os from 'node:os';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 
+// Serial by necessity, not by taste: bunfig.toml's `concurrentTestGlob`
+// runs every `beforeEach`, then every body, then every `afterEach`, so
+// teardown sees the LAST value of a module/describe-scope fixture and rm's
+// a directory another test still needs. `test.serial` restores be/ae
+// pairing per test (`describe.serial` is silently ignored, Bun 1.3.14).
+// Drop it only after giving each test its own fixture.
 let dir: string;
 let hermit: string;
 let ledger: string;
@@ -41,7 +47,7 @@ const check = (id: string, status: string, detail = `${id} detail`) => ({ id, st
 const readLedger = () => JSON.parse(fs.readFileSync(ledger, 'utf-8')).alerts;
 
 describe('escalate — episode lifecycle', () => {
-  test('first warn is new; unchanged second run is silent and preserves first_seen', async () => {
+  test.serial('first warn is new; unchanged second run is silent and preserves first_seen', async () => {
 
     const checks = [check('permissions', 'warn'), check('runtime', 'ok')];
 
@@ -62,7 +68,7 @@ describe('escalate — episode lifecycle', () => {
     expect(entry.count).toBe(2);
   });
 
-  test('an unconfirmed finding is re-offered until delivery is confirmed', async () => {
+  test.serial('an unconfirmed finding is re-offered until delivery is confirmed', async () => {
 
     const checks = [check('permissions', 'warn')];
 
@@ -75,7 +81,7 @@ describe('escalate — episode lifecycle', () => {
     expect(escalate(checks, '2026-08-04T10:00:00Z').new).toEqual([]);
   });
 
-  test('detail change and warn->fail stay one episode, not a re-notification', async () => {
+  test.serial('detail change and warn->fail stay one episode, not a re-notification', async () => {
 
     escalate([check('docker-security', 'warn', 'overlay missing')], '2026-08-01T10:00:00Z');
     markNotified(['docker-security']);
@@ -89,7 +95,7 @@ describe('escalate — episode lifecycle', () => {
     expect(entry.first_seen).toBe('2026-08-01T10:00:00Z');
   });
 
-  test('resolution deletes the key and reports it; recurrence is new again', async () => {
+  test.serial('resolution deletes the key and reports it; recurrence is new again', async () => {
 
     escalate([check('permissions', 'warn')], '2026-08-01T10:00:00Z');
     markNotified(['permissions']);
@@ -103,7 +109,7 @@ describe('escalate — episode lifecycle', () => {
     expect(readLedger()['doctor:permissions'].first_seen).toBe('2026-08-03T10:00:00Z');
   });
 
-  test('a check absent from the report entirely resolves its episode', async () => {
+  test.serial('a check absent from the report entirely resolves its episode', async () => {
 
     escalate([check('reflect', 'warn')], '2026-08-01T10:00:00Z');
     markNotified(['reflect']);
@@ -114,7 +120,7 @@ describe('escalate — episode lifecycle', () => {
     expect(readLedger()['doctor:reflect']).toBeUndefined();
   });
 
-  test('markNotified ignores unknown ids without corrupting the ledger', async () => {
+  test.serial('markNotified ignores unknown ids without corrupting the ledger', async () => {
 
     escalate([check('permissions', 'warn')], '2026-08-01T10:00:00Z');
     expect(markNotified(['nonexistent-check'])).toBe(true);
@@ -123,7 +129,7 @@ describe('escalate — episode lifecycle', () => {
 });
 
 describe('escalate — degraded prior state', () => {
-  test('missing ledger is a trustworthy prior: first run notifies', async () => {
+  test.serial('missing ledger is a trustworthy prior: first run notifies', async () => {
 
     expect(fs.existsSync(ledger)).toBe(false);
     const out = escalate([check('permissions', 'warn')], '2026-08-01T10:00:00Z');
@@ -131,7 +137,7 @@ describe('escalate — degraded prior state', () => {
     expect(out.new).toHaveLength(1);
   });
 
-  test('corrupt ledger re-seeds but emits nothing — it cannot know what was already sent', async () => {
+  test.serial('corrupt ledger re-seeds but emits nothing — it cannot know what was already sent', async () => {
     fs.writeFileSync(ledger, '{ this is not json', 'utf-8');
 
 
@@ -149,7 +155,7 @@ describe('escalate — degraded prior state', () => {
     expect(next.new).toHaveLength(1); // owed: never confirmed delivered
   });
 
-  test('unreadable ledger touches nothing and reports persisted:false', async () => {
+  test.serial('unreadable ledger touches nothing and reports persisted:false', async () => {
     fs.writeFileSync(ledger, JSON.stringify({ alerts: {} }), 'utf-8');
     fs.chmodSync(ledger, 0o000);
 
@@ -168,7 +174,7 @@ describe('escalate — degraded prior state', () => {
 });
 
 describe('escalate — file boundaries', () => {
-  test('doctor findings never touch alert-state.json', async () => {
+  test.serial('doctor findings never touch alert-state.json', async () => {
     const alertState = path.join(hermit, 'state', 'alert-state.json');
     const seeded = JSON.stringify({ alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 3 }, null, 2) + '\n';
     fs.writeFileSync(alertState, seeded, 'utf-8');
@@ -180,7 +186,7 @@ describe('escalate — file boundaries', () => {
     expect(readLedger()['doctor:permissions']).toBeDefined();
   });
 
-  test('readMergedAlerts unions doctor entries with the other alert files', async () => {
+  test.serial('readMergedAlerts unions doctor entries with the other alert files', async () => {
     const { readMergedAlerts } = await import(`${PLUGIN_ROOT}/scripts/lib/alert-state.ts`);
     fs.writeFileSync(
       path.join(hermit, 'state', 'alert-state.json'),
@@ -196,7 +202,7 @@ describe('escalate — file boundaries', () => {
 });
 
 describe('doctor-check CLI', () => {
-  test('emits escalation in the report and --mark-notified silences the next run', async () => {
+  test.serial('emits escalation in the report and --mark-notified silences the next run', async () => {
     fs.writeFileSync(path.join(hermit, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
     const run = async (...args: string[]) =>
       await runScript('doctor-check.ts', { args: [hermit, ...args], cwd: dir });

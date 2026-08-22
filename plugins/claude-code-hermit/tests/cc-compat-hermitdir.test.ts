@@ -58,6 +58,12 @@ function makeProjection(root: string): string {
 // Tests
 // -------------------------------------------------------------------------
 
+// Serial by necessity, not by taste: bunfig.toml's `concurrentTestGlob`
+// runs every `beforeEach`, then every body, then every `afterEach`, so
+// teardown sees the LAST value of a module/describe-scope fixture and rm's
+// a directory another test still needs. `test.serial` restores be/ae
+// pairing per test (`describe.serial` is silently ignored, Bun 1.3.14).
+// Drop it only after giving each test its own fixture.
 describe('hermitDir()', () => {
   let tmp: string;
   let origCwd: string;
@@ -77,7 +83,7 @@ describe('hermitDir()', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('(a) absolute AGENT_DIR wins over CLAUDE_PROJECT_DIR and drifted cwd', () => {
+  it.serial('(a) absolute AGENT_DIR wins over CLAUDE_PROJECT_DIR and drifted cwd', () => {
     const agentDir = path.join(tmp, '.claude-code-hermit');
     // Set a conflicting CLAUDE_PROJECT_DIR pointing somewhere else
     const other = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-other-'));
@@ -93,7 +99,7 @@ describe('hermitDir()', () => {
     }
   });
 
-  it('(b) relative AGENT_DIR is ignored — falls through to CLAUDE_PROJECT_DIR', () => {
+  it.serial('(b) relative AGENT_DIR is ignored — falls through to CLAUDE_PROJECT_DIR', () => {
     // This is the legacy registration shape that CAUSED #384: AGENT_DIR=".claude-code-hermit"
     process.env.AGENT_DIR = '.claude-code-hermit'; // relative — must be ignored
     process.env.CLAUDE_PROJECT_DIR = tmp;
@@ -176,7 +182,7 @@ describe('hermitDir()', () => {
     // The cap is 8 CHECKS — the start dir plus 7 ancestors — so the deepest
     // findable sentinel sits 7 levels up. Pinned because both the cap and the
     // off-by-one are easy to "tidy" into a different boundary later.
-    it('finds a sentinel 7 levels up, and gives up at 8', () => {
+    it.serial('finds a sentinel 7 levels up, and gives up at 8', () => {
       const at7 = nest(7);
       const at8 = nest(8);
       try {
@@ -188,7 +194,7 @@ describe('hermitDir()', () => {
       }
     });
 
-    it('walks past a config-less decoy to the real project above it', () => {
+    it.serial('walks past a config-less decoy to the real project above it', () => {
       // A partially-populated `.claude-code-hermit/` — OPERATOR.md but no
       // config.json — must not capture the walk.
       const root = makeTmpHermit();
@@ -202,7 +208,7 @@ describe('hermitDir()', () => {
       }
     });
 
-    it('walks past a worktree projection to the main checkout above it', () => {
+    it.serial('walks past a worktree projection to the main checkout above it', () => {
       // The real `claude --worktree` shape: `.worktreeinclude`'s managed block
       // copies OPERATOR.md, config.json and compiled/ in, but never state/.
       // The config.json sentinel alone would capture the walk here and route
@@ -219,7 +225,7 @@ describe('hermitDir()', () => {
       }
     });
 
-    it('accepts a root once it has state/ — the projection test is state-based', () => {
+    it.serial('accepts a root once it has state/ — the projection test is state-based', () => {
       // Guards the discriminator itself: config.json + state/ is a real root at
       // any depth, so the skip above can never swallow a genuine nested hermit.
       const root = makeTmpHermit();
@@ -233,7 +239,7 @@ describe('hermitDir()', () => {
       }
     });
 
-    it('ignores CLAUDE_PROJECT_DIR — the caller-supplied start wins', () => {
+    it.serial('ignores CLAUDE_PROJECT_DIR — the caller-supplied start wins', () => {
       const elsewhere = makeTmpHermit();
       try {
         process.env.CLAUDE_PROJECT_DIR = elsewhere;
@@ -269,11 +275,11 @@ describe('assertStateDir() with a worktree projection', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('normalizes a projection of the accepted root to that root', () => {
+  it.serial('normalizes a projection of the accepted root to that root', () => {
     expect(assertStateDir(makeProjection(tmp))).toBe(path.join(tmp, '.claude-code-hermit'));
   });
 
-  it('still refuses a projection belonging to another project', () => {
+  it.serial('still refuses a projection belonging to another project', () => {
     const foreign = makeTmpHermit();
     try {
       expect(assertStateDir(makeProjection(foreign))).toBeNull();
@@ -282,7 +288,7 @@ describe('assertStateDir() with a worktree projection', () => {
     }
   });
 
-  it('leaves a real root untouched', () => {
+  it.serial('leaves a real root untouched', () => {
     expect(assertStateDir(path.join(tmp, '.claude-code-hermit'))).toBe(path.join(tmp, '.claude-code-hermit'));
   });
 });
