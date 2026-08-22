@@ -4,7 +4,8 @@
 
 ### Added
 - `/claude-code-hermit:hermit-settings` can now be reached from a channel, so settings like the model, heartbeat cadence, morning-brief time or language can be changed from Discord/Telegram. The write still goes through `settings-edit`, so it stays validated and audited.
-- Security-tier settings stay terminal-only: a new `PreToolUse` gate (`channel-settings-gate.ts`) denies changes to permission mode, `env`, boot skill, remote, escalation, Docker, artifact authorization/backend and channel topology — plus direct `config.json` edits — when the current turn was opened by a channel message. It keys on the turn, not the session, so typing in the hermit's own terminal is unaffected.
+- Security-tier settings stay terminal-only: a new `PreToolUse` gate (`channel-settings-gate.ts`) denies changes to permission mode, `env`, boot skill, remote, escalation, Docker, artifact backend and channel topology — plus direct `config.json` edits — when the current turn was opened by a channel message. It keys on the turn, not the session, so typing in the hermit's own terminal is unaffected.
+- Artifact publish authorization can be given from Discord/Telegram. `artifacts.publish_authorized` records a decision, not a permission — the `permissions.allow` grant is written by `hermit-start` at the next boot, outside any session — so the operator can answer the authorization ask from chat, which is where an unattended hermit reaches them.
 
 ### Fixed
 - The hermit's auto-mode policy reaches the classifier again. Claude Code 2.1.207 stopped reading `autoMode` from project settings files, which silently disabled the entries `hatch` and boot were seeding into `.claude/settings.local.json` (upstream anthropics/claude-code#87545). `hermit-start` now renders `state/claude-settings.overlay.json` at every boot and launches with `--settings`, scoped to that session; nothing is written to your user settings. The `apply-settings.ts automode-seed` op is retired and exits 1.
@@ -12,7 +13,7 @@
 ### Upgrade Instructions
 1. **No settings writes in this session.** The next `hermit-start` boot renders the classifier overlay and launches with `--settings` on its own. Do not run `apply-settings.ts automode-seed` — it is retired and will exit 1.
 2. **Leave existing `autoMode` entries alone.** A hermit hatched before this version has sealed entries in `.claude/settings.local.json` that Claude Code no longer reads. They are inert, not harmful; removing them is a later attended cleanup, not part of this upgrade.
-3. Tell the operator in one line: settings can now be changed from chat, except the ones that decide what the hermit may do or who may reach it (permission mode, env, boot skill, remote, escalation, Docker, artifact authorization, channel allowlists) — those still need a terminal session.
+3. Tell the operator in one line: settings can now be changed from chat, except the ones that decide what the hermit may do or who may reach it (permission mode, env, boot skill, remote, escalation, Docker, artifact backend, channel allowlists) — those still need a terminal session.
 
 ## [1.2.43] - 2026-08-21
 

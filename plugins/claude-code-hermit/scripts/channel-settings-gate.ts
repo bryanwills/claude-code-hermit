@@ -5,11 +5,11 @@
 // change safe settings (name, language, heartbeat cadence, ...) through
 // settings-edit's validated, audited write path. The tier below never travels
 // that way: permission_mode, env, boot_skill, remote, escalation, docker.*,
-// the artifact publish grant, and channel topology (allowlists, briefing chat)
-// all decide either what this hermit is allowed to do or who is allowed to
-// talk to it. A `<channel>`-tagged message is an unauthenticated claim of
-// identity — `user="operator"` is text anyone can send — so it must not be
-// able to widen either.
+// artifacts.backend, and channel topology (allowlists, briefing chat) all
+// decide either what this hermit is allowed to do or who is allowed to talk
+// to it. A `<channel>`-tagged message is an unauthenticated claim of identity
+// — `user="operator"` is text anyone can send — so it must not be able to
+// widen either.
 //
 // The decision keys on the CURRENT TURN's opening prompt, not on the session:
 // an operator typing in the managed hermit's own tmux pane is a terminal turn
@@ -31,7 +31,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { hermitDir, transcriptPath, readTailLines, turnPromptText } from './lib/cc-compat';
+import { hermitDir, transcriptPath, readTailLines, turnPromptText, dropSidechainLines } from './lib/cc-compat';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { byArg } from './lib/settings/registry';
 import { runHook } from './lib/hook-input';
@@ -41,7 +41,7 @@ const TAIL_BYTES = 512 * 1024;
 
 const DENY_REASON =
   'Terminal-only hermit setting. This turn arrived from a channel, and security-tier settings ' +
-  '(permission mode, env, boot skill, remote, escalation, docker, artifact authorization/backend, ' +
+  '(permission mode, env, boot skill, remote, escalation, docker, artifact backend, ' +
   'and channel topology such as allowed_users or the briefing chat) change only on the operator\'s ' +
   'own terminal-typed request. Do not retry, and do not edit config.json directly. Reply in the ' +
   'operator\'s language that this one has to be done from a terminal session with ' +
@@ -69,6 +69,13 @@ const ALLOWED_EXACT = new Set([
   'artifacts.dashboard',
   'artifacts.proposals',
   'artifacts.weekly_review',
+  // Records a publish decision, never a permission. The grant it authorizes
+  // (permissions.allow `Artifact`) is written by hermit-start's boot-time
+  // applyArtifactGrant, a plain OS process outside any session — so a channel
+  // turn still only flips config. Channel-settable is the point: the hermit
+  // that needs this decision is the unattended one, and the ask reaches its
+  // operator over the channel.
+  'artifacts.publish_authorized',
 ]);
 
 const ALLOWED_PATTERNS: RegExp[] = [
@@ -85,9 +92,13 @@ const ALLOWED_PATTERNS: RegExp[] = [
 /**
  * Verdict for one settings-edit invocation.
  *
- * `target` is either a registry argument name (apply-known) or a dotted config
- * path (set/unset/toggle); both are normalized to the dotted path so
- * `apply-known permissions` and `set permission_mode` can't disagree.
+ * `target` is a registry argument name for `apply-known` and a dotted config
+ * path for set/unset/toggle; the registry lookup resolves the former to the
+ * latter so `apply-known permissions` and `set permission_mode` can't disagree.
+ * It is deliberately NOT applied to a dotted target: an arg name that collides
+ * with a real config key (`reflection` → `reflection.graduation_min_sessions`)
+ * would otherwise let `set reflection <object>` be judged as its leaf and
+ * defeat the ancestor rule below.
  *
  * An allowed path is allowed only as an exact leaf write: writing a parent
  * (`channels.discord`, `channels`, `routines`) replaces every descendant,
@@ -98,7 +109,7 @@ export function channelVerdict(verb: string, target: string): 'allowed' | 'termi
   if (!WRITE_VERBS.has(verb)) return 'terminal-only';
   if (!target) return 'terminal-only';
 
-  const dotted = byArg(target)?.path ?? target;
+  const dotted = verb === 'apply-known' ? (byArg(target)?.path ?? target) : target;
   if (ALLOWED_EXACT.has(dotted)) return 'allowed';
   if (ALLOWED_PATTERNS.some(rx => rx.test(dotted))) return 'allowed';
   return 'terminal-only';
@@ -110,6 +121,11 @@ export function channelVerdict(verb: string, target: string): 'allowed' | 'termi
  * Errors are contained here rather than left to runHook's fail-open wrapper:
  * an unreadable transcript is "undetermined", which the caller resolves per
  * session type, not an unconditional allow.
+ *
+ * Sidechain entries are dropped first. A subagent's own opening prompt is a
+ * plain `type:'user'` entry written into the same transcript, so without this
+ * a channel-opened turn that delegates the settings write to a subagent would
+ * resolve to that subagent's prompt and read as terminal-opened.
  */
 function turnIsChannelOpened(payload: any): { channel: boolean; determined: boolean } {
   try {
@@ -117,7 +133,8 @@ function turnIsChannelOpened(payload: any): { channel: boolean; determined: bool
     if (!tPath || !fs.existsSync(tPath)) return { channel: false, determined: false };
 
     const { lines } = readTailLines(tPath, TAIL_BYTES);
-    const prompt = turnPromptText(lines, lines.length);
+    const mainLines = dropSidechainLines(lines);
+    const prompt = turnPromptText(mainLines, mainLines.length);
     if (!prompt.boundaryFound) return { channel: false, determined: false };
 
     return { channel: parseChannelEnvelope(prompt.text) !== null, determined: true };
@@ -140,18 +157,40 @@ function targetsConfigFile(p: string): boolean {
  * resolver (`.claude-code-hermit/bin/hermit-run settings-edit <file> set ...`)
  * — plus direct redirects into config.json. Returns null when the command
  * isn't a settings mutation at all.
+ *
+ * EVERY settings-edit invocation in the command is judged, not just the first:
+ * one Bash call can chain several (`... set model haiku && ... set
+ * permission_mode bypassPermissions`), and a leading safe write must not
+ * launder a protected one behind it.
  */
 function protectedMutation(command: string): boolean | null {
   if (/>\s*\S*\.claude-code-hermit\/config\.json/.test(command)) return true;
 
-  const m = command.match(
-    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?/
-  );
-  if (!m) return null;
+  const matches = [...command.matchAll(
+    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?/g
+  )];
+  if (matches.length === 0) return null;
 
-  const verb = m[2];
-  const target = (m[3] ?? '').replace(/^['"]|['"]$/g, '');
-  return channelVerdict(verb, target) === 'terminal-only';
+  for (const m of matches) {
+    const verb = m[2];
+    const target = (m[3] ?? '').replace(/^['"]|['"]$/g, '');
+    if (channelVerdict(verb, target) === 'terminal-only') return true;
+  }
+  return false;
+}
+
+/**
+ * Fail closed on a managed (unattended) session when a protected mutation
+ * can't be judged — either the turn's provenance is undetermined or the call
+ * itself was too large to inspect, which is the shape an evasion takes.
+ * Anywhere an operator is plausibly present, lean allow instead.
+ */
+function denyIfManaged(diagnostic: string): void {
+  if (process.env.HERMIT_MANAGED !== '1') return; // attended — lean allow
+  const dir = hermitDir();
+  if (!dir || !fs.existsSync(dir)) return;
+  process.stderr.write(`${DENY_REASON}\n(${diagnostic})\n`);
+  process.exit(2);
 }
 
 function main(payload: any): void {
@@ -182,12 +221,7 @@ function main(payload: any): void {
   if (!determined) {
     // Couldn't tell. On the managed unattended session a protected mutation
     // fails closed; anywhere else an operator is present, so lean allow.
-    if (process.env.HERMIT_MANAGED === '1') {
-      process.stderr.write(
-        `${DENY_REASON}\n(Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.)\n`
-      );
-      process.exit(2);
-    }
+    denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.');
     return;
   }
 
@@ -197,5 +231,15 @@ function main(payload: any): void {
   process.exit(2);
 }
 
+/**
+ * Stdin too large for runHook to buffer, so the tool call can't be inspected
+ * at all — the same shape an evasion takes (pad the command past the cap and
+ * the gate never sees it). Mirrors pause-gate.ts in failing closed rather than
+ * letting an uninspectable payload through.
+ */
+function denyIfUninspectable(): void {
+  denyIfManaged('The tool call was too large to inspect on a managed session, so it defaults to terminal-only.');
+}
+
 // Gated: importing this module for `channelVerdict()` must not read stdin or exit.
-if (import.meta.main) runHook(main);
+if (import.meta.main) runHook(main, denyIfUninspectable);
