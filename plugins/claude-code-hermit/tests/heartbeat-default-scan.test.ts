@@ -43,6 +43,7 @@ interface Fixture {
   proposals?: Array<{ id: string; status: string }>;
   unparseableProposal?: string; // filename → written with NO frontmatter block
   microPending?: boolean;
+  microPendingIds?: string[]; // ids of the pending tier-1 entries (default ['MP-1'])
   totalTicks?: number;
   noProposalsDir?: boolean;  // don't create proposals/ at all (ENOENT readdir path)
   proposalsAsFile?: boolean; // proposals is a regular file, not a dir (ENOTDIR readdir path)
@@ -75,10 +76,11 @@ function build(fix: Fixture): string {
   if (fix.unparseableProposal) {
     fs.writeFileSync(hermit(dir, 'proposals', fix.unparseableProposal), 'Just a bullet, no frontmatter.\n');
   }
-  if (fix.microPending) {
+  if (fix.microPending || fix.microPendingIds) {
+    const ids = fix.microPendingIds ?? ['MP-1'];
     fs.writeFileSync(
       hermit(dir, 'state', 'micro-proposals.json'),
-      JSON.stringify({ pending: [{ id: 'MP-1', status: 'pending', tier: 1 }] }),
+      JSON.stringify({ pending: ids.map(id => ({ id, status: 'pending', tier: 1 })) }),
     );
   }
   return dir;
@@ -95,6 +97,10 @@ async function verdict(dir: string, peek = false): Promise<string> {
 
 const suppressed = (id: string, consecutive_clean = 0) => ({
   [`proposal-pending:${id}`]: { suppressed: true, consecutive_clean, count: 6 },
+});
+
+const microSuppressed = (id: string, consecutive_clean = 0) => ({
+  [`micro-proposal-pending:${id}`]: { suppressed: true, consecutive_clean, count: 6 },
 });
 
 describe('default proposal-scan resolution', () => {
@@ -134,6 +140,26 @@ describe('default proposal-scan resolution', () => {
 
   test('6. clean scan but a tier-1 micro-proposal is pending → EVALUATE (gate precedes item loop)', async () => {
     const dir = build({ microPending: true });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('6a. pending micro-proposal + suppressed alert (digest sent today) → OK', async () => {
+    // The cost fix: an unanswered operator question stops forcing a paid wake on
+    // every poll once its alert has aged into the suppressed state.
+    const dir = build({ microPending: true, alertState: { alerts: microSuppressed('MP-1') } });
+    expect(await verdict(dir)).toBe('OK');
+  });
+
+  test('6b. pending micro-proposal, suppressed but consecutive_clean > 0 (resolving) → EVALUATE', async () => {
+    const dir = build({ microPending: true, alertState: { alerts: microSuppressed('MP-1', 1) } });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('6c. two pending micro-proposals, only one suppressed → EVALUATE', async () => {
+    const dir = build({
+      microPendingIds: ['MP-1', 'MP-2'],
+      alertState: { alerts: microSuppressed('MP-1') },
+    });
     expect(await verdict(dir)).toBe('EVALUATE');
   });
 
