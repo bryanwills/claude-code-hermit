@@ -8,6 +8,7 @@
 
 ### Fixed
 - A pending tier-1 micro-proposal no longer forces a wake on every heartbeat poll. The gate read `micro-proposals.json` directly and never consulted the `micro-proposal-pending:*` suppression ladder already maintained for it, so an unanswered question to the operator — the channel-bridged ask path forces tier 1 — made every poll a paid full-context wake for as long as it went unanswered. It now applies the same suppressed / `consecutive_clean` predicate as the proposal scan, and the once-daily digest keeps surfacing the question after it damps.
+- `/claude-code-hermit:hermit-evolve` now tells the operator to reload project context after it refreshes a core or downstream CLAUDE-APPEND block, recommending `/compact` while naming `/clear` or a Claude session restart as alternatives; `/reload-plugins` alone is no longer implied to be sufficient.
 
 ### Upgrade Instructions
 1. Read `.claude-code-hermit/config.json`. If `heartbeat.every` is exactly `"2h"`, set it to `"30m"`, leaving every other field untouched. If it holds any other value the operator chose it — leave it and say so in the report. Re-runnable: a config already on `"30m"` or a custom value is skipped.
