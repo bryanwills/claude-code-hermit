@@ -37,6 +37,7 @@ import { assertStateDir, pinStateDirOrExit } from './lib/cc-compat';
 import { auditConfigChange } from './lib/config-audit';
 import { cmpSemver } from './lib/semver';
 import { utcISOStamp } from './lib/time';
+import { applyMissingDefaults, hasPath, isPlainObject } from './lib/evolve-config';
 
 type Json = any;
 
@@ -45,6 +46,9 @@ export interface FinalizeResult {
   core: { requested: string; confirmed: string | null; matched: boolean };
   siblings_confirmed: Record<string, string>;
   siblings_skipped: string[];
+  /** Dotted paths this run added from the template, confirmed against the re-read.
+   *  Empty when --plugin-root is omitted (no template to diff) or nothing was missing. */
+  settings_added: string[];
   /** whole-run: `before` came from a step-1 snapshot, so migration writes are attributed.
    *  version-only: no usable snapshot, so the ledger sees just what finalize() itself wrote. */
   audit_scope: 'whole-run' | 'version-only';
@@ -52,10 +56,11 @@ export interface FinalizeResult {
 }
 
 // Pre-migration config snapshot, written at evolve step 1 and consumed here.
-// hermit-evolve's step 2b migrations and step 9 merge write config.json by hand,
-// long before this script reads it, so a `before` taken here can only ever show
-// the version stamp. The snapshot moves `before` ahead of those writes, which is
-// what lets the ledger answer "why did this setting change during the upgrade?".
+// hermit-evolve's step 2b migrations write config.json (through settings-edit)
+// long before this script reads it, so a `before` taken here would miss them and
+// could only ever show the version stamp and this run's own defaults merge. The
+// snapshot moves `before` ahead of those writes, which is what lets the ledger
+// answer "why did this setting change during the upgrade?".
 const SNAPSHOT_FILE = 'evolve-config-snapshot.json';
 
 // A snapshot older than this is not trusted. The window it closes: a prior run
@@ -161,10 +166,6 @@ function parseArgs(argv: string[]): {
   return { hermitDir, core, pluginRoot, siblings };
 }
 
-function isPlainObject(v: any): boolean {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
-}
-
 export function finalize(opts: {
   hermitDir: string;
   core: string | null;
@@ -174,9 +175,23 @@ export function finalize(opts: {
   const errors: { code: string; message: string }[] = [];
   const siblingsSkipped: string[] = [];
 
+  // Every rejection below returns the same shape: nothing confirmed, nothing added,
+  // version-only attribution, carrying whatever has been pushed to `errors` and
+  // `siblingsSkipped` by then (both captured by reference, so this reads their state
+  // at call time). Push the error, then `return fail()`.
+  const fail = (): FinalizeResult => ({
+    ok: false,
+    core: { requested: opts.core ?? '', confirmed: null, matched: false },
+    siblings_confirmed: {},
+    siblings_skipped: siblingsSkipped,
+    settings_added: [],
+    audit_scope: 'version-only',
+    errors,
+  });
+
   if (!opts.core || opts.core.trim() === '') {
     errors.push({ code: 'no_core_target', message: '--core=<version> is required' });
-    return { ok: false, core: { requested: opts.core ?? '', confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: [], audit_scope: 'version-only', errors };
+    return fail();
   }
 
   // Validate sibling args. Malformed entries go to siblings_skipped (not errors) —
@@ -201,19 +216,19 @@ export function finalize(opts: {
       pluginVer = typeof pj.version === 'string' ? pj.version : null;
     } catch (e: any) {
       errors.push({ code: 'plugin_json_unreadable', message: e.message });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+      return fail();
     }
     if (pluginVer === null) {
       errors.push({ code: 'plugin_json_unreadable', message: 'plugin.json missing .version field' });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+      return fail();
     }
     if (pluginVer !== opts.core) {
       errors.push({ code: 'core_version_mismatch', message: `--core="${opts.core}" does not match plugin.json version="${pluginVer}"` });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+      return fail();
     }
   }
 
-  // Read live config from disk (after step 9's new_config_keys merge is already written)
+  // Read live config from disk (after step 2b's migrations, which write via settings-edit)
   const configPath = path.join(opts.hermitDir, 'config.json');
   let config: Json;
   try {
@@ -223,7 +238,7 @@ export function finalize(opts: {
       : e && e.name === 'SyntaxError' ? 'config_json_invalid'
       : 'config_unreadable';
     errors.push({ code, message: e.message });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+    return fail();
   }
   // The audit `before`. Prefer the step-1 snapshot: it predates hermit-evolve's
   // step 2b migrations and step 9 merge, so one diff covers everything the upgrade
@@ -257,7 +272,25 @@ export function finalize(opts: {
       code: 'core_version_regression',
       message: `--core="${opts.core}" is older than the applied version "${onDiskCore}" in _hermit_versions — refusing to downgrade the stamp (migrations are not reversed by lowering it). The loaded plugin is likely a stale install copy.`,
     });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+    return fail();
+  }
+
+  // Missing template defaults, applied here rather than by the runner in prose.
+  // Derived against the config just read from disk, so anything an Upgrade
+  // Instruction or the runner's own auto-detect (language/timezone) already wrote
+  // is present and therefore never revisited — missing-only, operator values safe.
+  // Riding in the single write below is what keeps a half-merged config impossible.
+  // No --plugin-root (tests, and only tests, omit it), or no template under it,
+  // means nothing to diff against — the version bump is this script's contract and
+  // proceeds either way. A template
+  // that exists but is malformed throws to main()'s handler as `fatal`, before the
+  // write below, so config.json is left byte-identical.
+  let settingsAdded: string[] = [];
+  const tmplPath = opts.pluginRoot
+    ? path.join(opts.pluginRoot, 'state-templates', 'config.json.template')
+    : null;
+  if (tmplPath && fs.existsSync(tmplPath)) {
+    settingsAdded = applyMissingDefaults(config, JSON.parse(fs.readFileSync(tmplPath, 'utf8')));
   }
 
   // Core is the install marker so it's safe to create the object if absent.
@@ -296,7 +329,7 @@ export function finalize(opts: {
   } catch (e: any) {
     try { fs.unlinkSync(tmp); } catch {}
     errors.push({ code: 'write_failed', message: e.message });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+    return fail();
   }
   // Re-read from disk to confirm (the fix's whole point — catches a write that didn't land)
   let onDisk: Json;
@@ -304,7 +337,7 @@ export function finalize(opts: {
     onDisk = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (e: any) {
     errors.push({ code: 'verify_failed', message: `re-read after write failed: ${e.message}` });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, audit_scope: 'version-only', errors };
+    return fail();
   }
 
   const coreOnDisk: string = (isPlainObject(onDisk._hermit_versions) ? onDisk._hermit_versions['claude-code-hermit'] : null) ?? '';
@@ -340,6 +373,9 @@ export function finalize(opts: {
     core: { requested: opts.core, confirmed: coreOnDisk, matched: coreMatched },
     siblings_confirmed: siblingsConfirmed,
     siblings_skipped: siblingsSkipped,
+    // Confirmed against the re-read, same rule as core/siblings above: report what
+    // is on disk, never what we intended to write.
+    settings_added: settingsAdded.filter((p) => hasPath(onDisk, p)),
     audit_scope: auditScope,
     errors,
   };
@@ -382,6 +418,7 @@ if (import.meta.main) {
       core: { requested: core ?? '', confirmed: null, matched: false },
       siblings_confirmed: {},
       siblings_skipped: [],
+      settings_added: [],
       audit_scope: 'version-only',
       errors: [{ code: 'fatal', message: e.message }],
     };

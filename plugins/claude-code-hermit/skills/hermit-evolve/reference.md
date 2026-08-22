@@ -78,7 +78,7 @@ Before entering either the full or sibling-only path, initialize `context_reload
 bun <plugin_root>/scripts/evolve-finalize.ts .claude-code-hermit snapshot --core=<to>
 ```
 
-Steps 2b and 9 write `config.json` by hand; without this, the finalizer's audit `before` is taken after those writes and the ledger can only ever show the version stamp. It always exits 0 — if it prints `SKIP|…`, continue the upgrade anyway. The finalizer reports which happened as `audit_scope` in Step 9.
+Step 2b migrations write `config.json` (through settings-edit) before the finalizer runs; without this snapshot, the finalizer's audit `before` is taken after those writes and the ledger could only ever show the version stamp and its own defaults merge. It always exits 0 — if it prints `SKIP|…`, continue the upgrade anyway. The finalizer reports which happened as `audit_scope` in Step 9.
 
 ### 2. Present the changelog
 
@@ -95,6 +95,16 @@ Within `changelog_slice` (already ordered oldest-first), each version entry may 
 
 The CHANGELOG.md `### Upgrade Instructions` sections are the single source of truth for migrations — do not skip or merely display them. The same pattern applies to sibling-hermit upgrades in Step 7.
 
+**Any instruction that changes `.claude-code-hermit/config.json` is applied with settings-edit verbs — never the Edit or Write tool**, whatever wording the instruction uses ("read config.json and set…", "edit config.json", "add the key"). Read with `get`, then write one key per call:
+
+```
+bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json get <dotted.path>
+bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json set <dotted.path> <json-value>
+bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json unset <dotted.path>
+```
+
+Use the absolute `<plugin_root>` path, not an env var. This keeps every migration validated and recorded in the settings ledger, and it is what the strict profile requires — there, a tool write to `config.json` is hook-blocked. A conditional instruction ("if it is exactly X, change it to Y") is evaluated from the `get` output first; if the condition does not hold, make no call. If a verb refuses a write, treat that step as a deferred migration (record it verbatim per the Delegated mode rules) rather than falling back to a direct edit.
+
 **Surgical docker-template migrations.** An Upgrade Instruction may surgically patch a wizard-rendered docker template (`Dockerfile.hermit`) and re-record its `template-manifest.json` baseline. When it does, it sets the report's `Docker rebuild` field to `base-patched`. Treat the corresponding `docker_templates` drift entry as resolved — do **not** surface it as unresolved upstream drift in Step 10.
 
 ### 3. New config keys
@@ -103,13 +113,17 @@ The plan's `new_config_keys` array lists every key in the current `config.json.t
 
 ### 4. Apply new settings
 
-**Delegated mode:** add **every** entry in the plan's `new_config_keys` silently with its `default` from the plan — operator-set values are never listed by the plan, so this never overwrites a choice. There is no prompting (the subagent can't `AskUserQuestion`). The former identity/preference keys below are almost always already set by evolve time, so they rarely appear; when one does, it takes the plan `default` and the operator adjusts via `/hermit-settings`. Collect every silently-set key for the step-10 report. If `new_config_keys` is empty, skip this step.
+**Delegated mode:** you write nothing here for most keys — Step 9's finalizer applies every still-missing template default itself. There is no prompting (the subagent can't `AskUserQuestion`), and operator-set values are never listed by the plan, so nothing overwrites a choice. If `new_config_keys` is empty, skip this step.
 
-Special-default keys (apply the noted default when the key is in `new_config_keys`):
-- `language` (0.0.1) / `timezone` (0.0.1): when missing, the subagent **auto-detects** the value (`$LANG` / system timezone via `date +%Z`/`timedatectl`) and writes that, rather than the static plan default. (These are 0.0.1 keys, set at hatch, so they are almost never missing at evolve time.)
-- All other keys: apply the plan's `default` verbatim (operator tunes via `/hermit-settings` afterward). The canonical defaults live in `state-templates/config.json.template`; `evolve-plan.ts` derives each `new_config_keys[].default` from it, so there is no separate default list to maintain here.
+Special-default keys — the **only** keys this step writes, because their value is detected, not templated:
+- `language` (0.0.1) / `timezone` (0.0.1): when one appears in `new_config_keys`, **auto-detect** the value (`$LANG` / system timezone via `date +%Z`/`timedatectl`) and write it now via a settings-edit verb, so the finalizer sees it as already present and skips it:
 
-The actual write happens in step 9 (merge into config, missing-only); this step just records which keys to set.
+  ```
+  bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json set language <detected>
+  ```
+
+  (These are 0.0.1 keys, set at hatch, so they are almost never missing at evolve time.)
+- All other keys: **do nothing** — the finalizer writes them from `state-templates/config.json.template`, the same source `evolve-plan.ts` derives `new_config_keys[].default` from, and reports what it added as `settings_added`. The operator tunes them via `/hermit-settings` afterward.
 
 ### 4b. Legacy plan-table check
 
@@ -248,9 +262,8 @@ where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.c
 
 ### 9. Write updated config
 
-- **Re-read `.claude-code-hermit/config.json` now** — Step 2b migrations may have written keys since the pre-pass ran.
-- For each entry in `new_config_keys` (with the defaults applied in Step 4), set `path` to its value **only if that path is still missing** in the freshly-read config. Never overwrite an existing operator or migration-set value. Write these merged keys to `.claude-code-hermit/config.json` before running the finalizer below.
-- **Bump `_hermit_versions` deterministically — do NOT hand-edit this key.** After the `new_config_keys` merge above is written to disk, run the finalizer. It re-reads config from disk, writes the version bumps atomically, and prints the confirmed on-disk values:
+- **Do not merge `new_config_keys` by hand, and never Edit/Write `config.json`.** The finalizer below re-reads config from disk and applies every still-missing template default itself, in the same atomic write as the version stamp. Operator values and anything Step 2b or Step 4 already wrote are present by then, so they are never revisited. (Under the strict profile a tool write to `config.json` is hook-blocked outright.)
+- **Bump `_hermit_versions` deterministically — do NOT hand-edit this key.** Run the finalizer. It writes the merged defaults and the version bumps atomically, then prints the confirmed on-disk values:
 
   ```
   bun <plugin_root>/scripts/evolve-finalize.ts .claude-code-hermit --core=<to> --plugin-root=<plugin_root> [--sibling=<name>=<vNEW> ...]
@@ -259,6 +272,7 @@ where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.c
   - `<to>` is the plan's `to`. Add one `--sibling=<name>=<vNEW>` for each sibling hermit with a **version gap** that was upgraded in Step 7 (where `name` is the sibling's plugin name and `vNEW` is its `sibling.to`). Omit `--sibling` for no-gap siblings (no version to bump). Omit `--sibling` entirely if no siblings had a gap.
   - **When `plan.up_to_date` is `true` (core current, sibling-only run):** the plan's `to` is still used as `--core=<to>`. Here `to` equals the on-disk stamp, so evolve-finalize re-stamps the same version — a genuine no-op that keeps the finalizer as the single atomic writer. (This is only reached when core is *current*; the config-ahead case never gets here, because the stale-runtime check above stops the run before Step 2. The finalizer independently refuses a lower `--core` with `core_version_regression`.)
   - Parse stdout as JSON. The finalizer's `core.confirmed` is the **authoritative on-disk version** — use it as `vNEW` in the Step 10 report, NOT `plan.to`.
+  - `settings_added` lists the dotted paths it actually added, confirmed against its re-read. Report those as the added settings in Step 10 — not the keys Step 4 recorded, which are only what the plan expected.
   - `audit_scope` reports whether the Step 1 snapshot was usable: `whole-run` means this upgrade's config changes are attributed in the settings ledger, `version-only` means only the version stamp was recorded. Carry it into the Step 10 report. It is never a failure — a `version-only` upgrade succeeded, it just left less history behind.
   - If `core.matched` is `false` or `errors` is non-empty, the bump did not land: set the `Upgrade:` line in the Step 10 report to `blocked: config version bump failed (<joined errors>)` and stop.
 

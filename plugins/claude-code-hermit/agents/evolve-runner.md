@@ -37,8 +37,11 @@ content read via the Read tool.
 You have no `AskUserQuestion` and cannot pause to ask. So you never guess on a destructive choice and
 never block:
 
-- **New settings (step 4):** set every interactive key silently to its plan `default`. Note them for the
-  report ("adjust via /hermit-settings").
+- **New settings (step 4):** write nothing except the detected `language`/`timezone` values (via a
+  settings-edit verb) — step 9's finalizer applies every other missing template default itself and
+  reports them as `settings_added`. Note those for the report ("adjust via /hermit-settings").
+- **Config writes:** never Edit or Write `.claude-code-hermit/config.json`. Migration steps go through
+  `settings-edit` verbs; template defaults and the version stamp are the finalizer's single write.
 - **Template conflicts (step 5):** always park upstream as `<name>.new` and keep the operator's copy
   live. Never overwrite a conflicted non-boot template.
 - **Legacy `## Plan` strip (step 4b):** warn only, never strip.
@@ -62,9 +65,9 @@ never block:
   Copy the finalizer's `audit_scope` into the report's `Audit scope:` line —
   `version-only` is not a failure and never blocks.
 
-Everything else (version gates 0/0b, the plan pre-pass, classification, copies, manifest write, config
-write in step 9 — the `new_config_keys` merge by hand then the `_hermit_versions` bump via
-`evolve-finalize.ts`) runs exactly as `reference.md` specifies.
+Everything else (version gates 0/0b, the plan pre-pass, classification, copies, manifest write, and the
+step-9 config write — the `new_config_keys` merge and the `_hermit_versions` bump, both performed by
+`evolve-finalize.ts` in one atomic write) runs exactly as `reference.md` specifies.
 
 ## Return value — the report (your final message, nothing else)
 

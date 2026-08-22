@@ -23,6 +23,7 @@
     "Bash(*SECRET*)",
     "Bash(*TOKEN*)",
     "Bash(*> *.claude-code-hermit/OPERATOR.md*)",
+    "Bash(*>.claude-code-hermit/OPERATOR.md*)",
     "Edit(*/.claude/plugins/marketplaces/*)",
     "Write(*/.claude/plugins/marketplaces/*)"
   ],
@@ -37,6 +38,8 @@
     "Bash(*--no-verify*)",
     "Edit(*.claude-code-hermit/OPERATOR.md)",
     "Write(*.claude-code-hermit/OPERATOR.md)",
+    "Edit(*.claude-code-hermit/config.json)",
+    "Write(*.claude-code-hermit/config.json)",
     "Edit(*.claude/settings.json)",
     "Write(*.claude/settings.json)",
     "Edit(*.claude/settings.local.json)",
@@ -45,6 +48,11 @@
     "Write(*.claude/output-styles/hermit-voice.md)",
     "Bash(*> *.claude/settings.json*)",
     "Bash(*> *.claude/settings.local.json*)",
-    "Bash(*> *.claude/output-styles/hermit-voice.md*)"
+    "Bash(*> *.claude/output-styles/hermit-voice.md*)",
+    "Bash(*> *.claude-code-hermit/config.json*)",
+    "Bash(*>.claude/settings.json*)",
+    "Bash(*>.claude/settings.local.json*)",
+    "Bash(*>.claude/output-styles/hermit-voice.md*)",
+    "Bash(*>.claude-code-hermit/config.json*)"
   ]
 }

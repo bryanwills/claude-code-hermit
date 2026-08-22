@@ -552,6 +552,116 @@ test('snapshot mode SKIPs a foreign state dir instead of exiting non-zero', with
   }
 }));
 
+// -------------------------------------------------------
+// Template-default merge (issue #760) — the finalizer applies missing keys
+// itself, inside the same atomic write as the version stamp, instead of the
+// runner hand-merging them before calling this script.
+// -------------------------------------------------------
+
+/** A plugin root carrying both plugin.json and a config template. */
+function withTmplRoot(tmpl: unknown, fn: (pr: string) => Promise<void> | void) {
+  return async () => {
+    const pr = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-finalize-tpr-'));
+    fs.mkdirSync(path.join(pr, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pr, '.claude-plugin', 'plugin.json'), '{"version":"1.2.6"}\n');
+    fs.mkdirSync(path.join(pr, 'state-templates'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pr, 'state-templates', 'config.json.template'),
+      JSON.stringify(tmpl, null, 2),
+    );
+    try { await fn(pr); } finally {
+      try { fs.rmSync(pr, { recursive: true, force: true }); } catch {}
+    }
+  };
+}
+
+const TMPL = {
+  language: 'en',
+  heartbeat: { every: '30m', active_hours: '08:00-22:00' },
+  artifacts: { dashboard: true },
+};
+
+test('#760: missing nested leaf and absent parent both land in one write', withTmplRoot(TMPL, async (pr) => {
+  await withProj(async (dir) => {
+    // `heartbeat.every` present (operator value), `heartbeat.active_hours` missing,
+    // `artifacts` absent entirely, `language` missing.
+    writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+    const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+
+    expect(result.ok).toBe(true);
+    expect(result.settings_added.sort()).toEqual(['artifacts', 'heartbeat.active_hours', 'language']);
+
+    const onDisk = readConfig(dir);
+    expect(onDisk.language).toBe('en');
+    expect(onDisk.heartbeat.active_hours).toBe('08:00-22:00');
+    expect(onDisk.artifacts).toEqual({ dashboard: true });
+    // Operator value survives, and the stamp rode the same write.
+    expect(onDisk.heartbeat.every).toBe('2h');
+    expect(onDisk._hermit_versions['claude-code-hermit']).toBe('1.2.6');
+  })();
+}));
+
+test('#760: re-run adds nothing and reports an empty settings_added', withTmplRoot(TMPL, async (pr) => {
+  await withProj(async (dir) => {
+    writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+    finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+    const first = readConfig(dir);
+
+    const again = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+    expect(again.ok).toBe(true);
+    expect(again.settings_added).toEqual([]);
+    expect(readConfig(dir)).toEqual(first);
+  })();
+}));
+
+test('#760: a value written earlier in the run is never overwritten', withTmplRoot(TMPL, async (pr) => {
+  await withProj(async (dir) => {
+    // What the runner's language/timezone auto-detect (or a migration) leaves behind.
+    writeConfig(dir, '{"language":"pt","_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+    const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+
+    expect(result.settings_added).not.toContain('language');
+    expect(readConfig(dir).language).toBe('pt');
+  })();
+}));
+
+test('#760: a rejected run merges nothing — config stays byte-identical', withTmplRoot(TMPL, async (pr) => {
+  await withProj(async (dir) => {
+    // Regression guard rejects before any mutation; the merge must not have run.
+    writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"9.9.9"}}');
+    const before = fs.readFileSync(path.join(dir, 'config.json'), 'utf8');
+
+    const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors[0].code).toBe('core_version_regression');
+    expect(result.settings_added).toEqual([]);
+    expect(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).toBe(before);
+  })();
+}));
+
+test('#760: no template under the plugin root is not an error', withProj(async (dir) => {
+  // PR has plugin.json but no state-templates/ — the version bump still lands.
+  writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(result.settings_added).toEqual([]);
+  expect(readConfig(dir)._hermit_versions['claude-code-hermit']).toBe('1.2.6');
+}));
+
+test('#760: merged defaults are attributed in the audit ledger', withTmplRoot(TMPL, async (pr) => {
+  await withProj(async (dir) => {
+    writeConfig(dir, '{"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+    writeSnapshot(dir, '1.2.6');
+
+    const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+
+    expect(result.audit_scope).toBe('whole-run');
+    expect(rowFor(dir, 'language').new).toBe('en');
+  })();
+}));
+
 test('secrets stay redacted through a whole-run diff', withProj(async (dir) => {
   writeConfig(dir, '{"env":{"SOME_KEY":"old-value"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
   writeSnapshot(dir, '1.2.6');
