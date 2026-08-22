@@ -56,7 +56,7 @@ function driftEnv(): Record<string, string> {
 
 // The second test overwrites (and restores) the shared hermitDir/config.json
 // fixture in-place — a mutation of tmpRoot, not just a read — which the first
-// test also reads via an absolute path. Empirically confirmed (bun 1.3.14):
+// test also reads via an absolute path. Empirically confirmed (bun 1.3.14 & 1.4.0):
 // describe.serial does not reliably force sequential execution of its own
 // child tests under --concurrent — per-test .serial marking does.
 describe('validate-config with drifted cwd (#384 regression)', () => {
