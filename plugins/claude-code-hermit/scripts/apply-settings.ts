@@ -72,6 +72,12 @@ const HERMIT_ALLOW = [
   'Bash(bash */scripts/routine-monitor.sh *)',
   'Bash(bun */scripts/evolve-plan.ts*)',
   'Bash(bun */scripts/evolve-finalize.ts*)',
+  // The only sanctioned config.json writer an unattended run reaches by hand:
+  // hermit-evolve's step 2b migrations and its language/timezone write go
+  // through it, and the strict profile hook-blocks the Edit/Write route they
+  // used to take. Without a grant those writes hit the permission engine in a
+  // session that has no AskUserQuestion to recover with.
+  'Bash(bun */scripts/settings-edit.ts*)',
   'Bash(bun */scripts/manifest-seed.ts*)',
   'Bash(bun */scripts/apply-settings.ts*)',
   'Bash(bun */scripts/channel-log.ts*)',

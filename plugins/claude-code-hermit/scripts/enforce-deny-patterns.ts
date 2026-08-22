@@ -28,15 +28,25 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-function matchesPattern(toolCall: { tool: string; candidates: string[] }, pattern: string): boolean {
+function matchesPattern(toolCall: { tool: string; candidates: string[]; segments: string[] }, pattern: string): boolean {
   const m = pattern.match(/^(\w+)\((.+)\)$/);
   if (!m) return false;
 
   const [, patternTool, patternGlob] = m;
   if (toolCall.tool !== patternTool) return false;
 
+  // A redirect and its target always sit in the SAME compound segment, so a
+  // glob carrying `>` is matched against segments only. Matched against the
+  // whole command, the wildcard between `>` and the path spans a separator and
+  // blocks unrelated pairs — `bun x.ts 2> /dev/null; cat …/config.json` (a pure
+  // read) would hit `Bash(*> *.claude-code-hermit/config.json*)`, and so would
+  // `echo done > /tmp/log; bun …/settings-edit.ts …/config.json set …` — the
+  // sanctioned writer these patterns exist to funnel writes onto.
+  // Non-redirect globs keep the whole command as a candidate: `Bash(curl * |
+  // bash*)` deliberately spans the pipe.
   const rx = globToRegex(patternGlob);
-  return toolCall.candidates.some(c => rx.test(c));
+  const scoped = patternGlob.includes('>') ? toolCall.segments : toolCall.candidates;
+  return scoped.some(c => rx.test(c));
 }
 
 // Split a command into compound segments on &&, ||, ;, and | — but only when
@@ -144,7 +154,7 @@ function normalize(command: string): string {
   return out;
 }
 
-function buildToolCall(event: Json): { tool: string; content: string; candidates: string[] } {
+function buildToolCall(event: Json): { tool: string; content: string; candidates: string[]; segments: string[] } {
   const name = event.tool_name || '';
   const input = event.tool_input || {};
 
@@ -161,15 +171,16 @@ function buildToolCall(event: Json): { tool: string; content: string; candidates
     // normalize() never folds text inside quotes. Dedup via Set.
     const rawSegments = splitSegments(command).map((s: string) => s.trim());
     const normalizedSegments = splitSegments(normalized).map((s: string) => s.trim());
-    const candidates = [...new Set([command, normalized, ...rawSegments, ...normalizedSegments])].filter(Boolean);
-    return { tool: 'Bash', content: command, candidates };
+    const segments = [...new Set([...rawSegments, ...normalizedSegments])].filter(Boolean);
+    const candidates = [...new Set([command, normalized, ...segments])].filter(Boolean);
+    return { tool: 'Bash', content: command, candidates, segments };
   }
   if (name === 'Edit' || name === 'Write') {
     // File paths are never segmented — a `|` in a filename must not fragment it.
     const content = input.file_path || input.path || '';
-    return { tool: name, content, candidates: [content] };
+    return { tool: name, content, candidates: [content], segments: [content] };
   }
-  return { tool: name, content: '', candidates: [] };
+  return { tool: name, content: '', candidates: [], segments: [] };
 }
 
 type ToolCall = ReturnType<typeof buildToolCall>;

@@ -114,7 +114,7 @@ Operator pastes the token via Other, or selects Skip.
 2. Write `<TOKEN_VAR>=<pasted-token>` to `<state_dir>/.env` (overwrite if exists)
 3. `chmod 600 <state_dir>/.env`
 4. Ensure `.claude.local/` is in `.gitignore`: check if `.gitignore` exists and contains `.claude.local/`; if missing, append `.claude.local/`.
-5. If `channels.<channel>.state_dir` was not set in config.json (a legacy entry, or one reached through the single-enabled-channel branch that never ran *Adding an entry*), run that same `hatch-config.ts … --reinit` one-liner for `<channel>` now — it fills the conventional `state_dir`, validates, and audits, leaving every other field intact. Never write the key with Edit/Write.
+5. If `channels.<channel>.state_dir` was not set in config.json (a legacy entry, or one reached through the single-enabled-channel branch that never ran *Adding an entry*), run the same `hatch-config.ts … --reinit` one-liner for `<channel>` now, but with an **empty** entry — `echo '{"channels":{"<name>":{}}}' | …` — so an existing `enabled: false` is preserved (the `{"enabled":true}` payload would flip it). It fills the conventional `state_dir`, validates, and audits, leaving every other field intact. Never write the key with Edit/Write.
 6. Wire `<CHANNEL_UPPERCASE>_STATE_DIR` into `.claude/settings.local.json`. Compute the absolute path of `state_dir`, then run:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json channel-env <CHANNEL_UPPERCASE> <absolute_state_dir>
