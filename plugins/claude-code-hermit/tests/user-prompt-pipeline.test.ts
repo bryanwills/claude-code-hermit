@@ -179,7 +179,15 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
 // so the transcript, not the model, answers "which model am I running".
 describe('user-prompt-pipeline: switch verification', () => {
   const verifyMarker = (dir: string) => hermit(dir, 'state', 'harness-switch-verify.json');
-  const DELIVERED_AT = '2026-08-20T23:34:17.000Z';
+
+  // Relative to now, never a pinned wall-clock date: readSwitchVerify drops a
+  // marker older than SWITCH_VERIFY_TTL_SECS (24h), so an absolute delivered_at
+  // passes until that instant and then fails forever.
+  const DELIVERED_AT = new Date(Date.now() - 60_000).toISOString();
+  /** Clear of SWITCH_APPLY_GRACE_MS after delivery — the switch is observable. */
+  const POST_SWITCH_AT = new Date(Date.parse(DELIVERED_AT) + 30_000).toISOString();
+  /** Inside the grace window — could still be the pre-switch model. */
+  const PRE_SWITCH_AT = new Date(Date.parse(DELIVERED_AT) - 5_000).toISOString();
 
   function seedDeliveredSwitch(wd: Workdir, arg = 'fable'): void {
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
@@ -211,7 +219,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   test('reports the transcript model once the switch is observable, then clears the marker', async () => {
     const wd = setupWorkdir();
     seedDeliveredSwitch(wd);
-    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: '2026-08-20T23:34:37.000Z' }]);
+    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: POST_SWITCH_AT }]);
 
     const r = await runWith(wd, transcript);
 
@@ -225,7 +233,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   test('holds the marker while only pre-switch entries exist, and never names that model', async () => {
     const wd = setupWorkdir();
     seedDeliveredSwitch(wd);
-    const transcript = writeTranscript(wd, [{ model: 'claude-sonnet-5', timestamp: '2026-08-20T23:34:12.000Z' }]);
+    const transcript = writeTranscript(wd, [{ model: 'claude-sonnet-5', timestamp: PRE_SWITCH_AT }]);
 
     const r = await runWith(wd, transcript);
 
@@ -249,7 +257,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   test('no marker means the stage says nothing', async () => {
     const wd = setupWorkdir();
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
-    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: '2026-08-20T23:34:37.000Z' }]);
+    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: POST_SWITCH_AT }]);
 
     const r = await runWith(wd, transcript);
 

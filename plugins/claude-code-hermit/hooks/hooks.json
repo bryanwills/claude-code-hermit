@@ -38,6 +38,18 @@
         "description": "Warn (or block, with HERMIT_CACHE_GUARD=block) when editing a marketplace cache copy whose runtime source is canonical"
       },
       {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-settings-gate.ts"],
+            "timeout": 3
+          }
+        ],
+        "description": "Deny security-tier hermit settings writes (permission_mode, env, boot_skill, remote, escalation, docker, artifact authorization/backend, channel topology) and direct config.json edits when the current turn was opened by a channel message"
+      },
+      {
         "matcher": "AskUserQuestion",
         "hooks": [
           {

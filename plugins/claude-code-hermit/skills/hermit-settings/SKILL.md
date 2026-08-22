@@ -1,7 +1,6 @@
 ---
 name: hermit-settings
 description: View or change hermit configuration for this project. Manages model, channels, morning brief, heartbeat, routines, idle behavior, compaction thresholds, Docker packages, and unattended mode.
-disable-model-invocation: true
 ---
 # Hermit Settings
 
@@ -10,6 +9,8 @@ View or modify the hermit configuration for this project.
 ## Step 0 — Channel reply
 
 If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool. Otherwise emit to conversation.
+
+**Security tier — terminal-only on a channel-tagged turn.** Some settings decide what this hermit may do or who may talk to it: `permissions`, `env`, `boot-skill`, `remote`, `escalation`, `docker`, `artifact-backend`, and every `channels` operation except a channel's `morning_brief` (add/remove/primary/enabled, `allowed_users`, `briefing_chat`). On a channel-tagged turn these are **view-only**: show the current value, say plainly that this one is changed from a terminal session with `/claude-code-hermit:hermit-settings <argument>`, and change nothing. Everything else in this skill is fair game over a channel — the write still goes through `settings-edit`, so it stays validated and audited. The authoritative list is the policy table in `scripts/channel-settings-gate.ts`, a `PreToolUse` hook that denies a protected write whose turn was opened by a channel message; treat a denial as this rule firing, relay its reason, and don't look for another route.
 
 On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via the reply tool instead of waiting on terminal input — the branch proceeds as an over-channel exchange (ask, then act on the reply when it arrives), the same as any other channel conversation. **Never call `AskUserQuestion` on a channel-tagged turn** — it renders in the terminal, invisible to a remote operator. The one bounded ask in this skill (`quality-gate`, below) additionally queues a durable micro-proposal entry per `channel-responder` § Channel-safe ask bridge (schema: `reflect` § Queuing procedure), so it survives compaction or a session restart; free-form asks queue nothing.
 
@@ -29,7 +30,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings brief          — configure morning brief
 /claude-code-hermit:hermit-settings permissions    — configure unattended mode
 /claude-code-hermit:hermit-settings heartbeat      — enable/disable, interval, quiet mode, active hours
-/claude-code-hermit:hermit-settings watchdog       — enable/disable, stale_factor, escalate_after, operator_grace, context hygiene compaction
+/claude-code-hermit:hermit-settings watchdog       — enable/disable, stale_factor, wedge_floor, escalate_after, operator_grace, context hygiene compaction
 /claude-code-hermit:hermit-settings routines        — manage scheduled routines (add/edit/remove/enable/disable)
 /claude-code-hermit:hermit-settings idle             — set idle behavior (wait or discover)
 /claude-code-hermit:hermit-settings env              — view/edit environment variables
@@ -187,6 +188,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 
     enabled                false
     stale_factor           2
+    wedge_floor            4h
     escalate_after         3
     operator_grace         15m
     context_clear_tokens   700000
@@ -202,13 +204,15 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Watchdog sub-fields (press Enter to keep current value):
     stale_factor           — missed-cycle tolerance multiplier (e.g. 2); effective
-                             threshold is max(stale_factor × heartbeat.every, 4h)         [current]
+                             threshold is max(stale_factor × heartbeat.every, wedge_floor) [current]
+    wedge_floor            — lower bound on that threshold, whatever the poll interval
+                             (e.g. 4h; lower it for faster detection, 0s = no floor)      [current]
     escalate_after         — consecutive stale cycles before escalation (e.g. 3)          [current]
     operator_grace         — silence window before alert fires (e.g. 15m, 1h)             [current]
     context_clear_tokens   — emergency /clear when prompt tokens exceed this (e.g. 700000, 0=off) [current]
   ```
   Then ask each field in sequence.
-- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.enabled`, `watchdog.stale_factor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings.
+- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
   - Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall`. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
 - **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above, same as `context_clear_tokens`): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```
@@ -370,9 +374,10 @@ Ask: "This hermit publishes status/proposal/weekly-review pages via Claude Code'
   1. Authorize — grant applied automatically at next boot
   2. Bank first publishes — you publish the first version of each page now; refreshes then reuse the same URL
 [current: <artifacts.publish_authorized value>]"
-On answer "Authorize" (or "on"/"yes"): run `settings-edit ... set artifacts.publish_authorized true`. Reply: "Recorded: artifact publish authorized. The grant (permissions.allow `Artifact` + auto-mode seed) is applied automatically at next boot — `.claude-code-hermit/bin/hermit-stop` then `hermit-start` to apply now. No settings files were modified from this session."
+On answer "Authorize" (or "on"/"yes"): run `settings-edit ... set artifacts.publish_authorized true`. Reply: "Recorded: artifact publish authorized. The grant (permissions.allow `Artifact`) is applied automatically at next boot — `.claude-code-hermit/bin/hermit-stop` then `hermit-start` to apply now. No settings files were modified from this session."
 On answer "Bank first publishes" (or "off"/"no"/"decline"): run `settings-edit ... set artifacts.publish_authorized false`. Reply: "Recorded: no standing grant. First publish of each enabled page must happen in an attended session (`docs/artifacts.md` § refresh procedure); refreshes then reuse the same URL without prompting."
-**Channel re-entry:** if invoked as `artifact-authorization --answer "<label>"` (channel-responder resolving a micro-proposal queued by `hermit-evolve`'s Step 10 deferred-migration relay, per the CHANGELOG's artifact-publish-authorization instruction), skip the Ask above and match `<label>` case-insensitively by prefix against `Authorize` / `Bank first publishes`, then run the matching `settings-edit` command and reply exactly as above.
+**Channel-tagged turn:** send the same prompt via the channel reply tool with the two options numbered, AND queue a pending micro-proposal entry per `reflect` § Queuing procedure: `options: ["authorize", "bank first publishes"]`, `tier: 1`, `on_resolve: "/claude-code-hermit:hermit-settings artifact-authorization --answer {answer}"`. Note in the message that "Bank first publishes" still needs a terminal session later to do the banking itself — only the decision travels over the channel.
+**Channel re-entry:** if invoked as `artifact-authorization --answer "<label>"` (channel-responder resolving a micro-proposal queued by `hermit-evolve`'s Step 10 deferred-migration relay, per the CHANGELOG's artifact-publish-authorization instruction), skip the Ask above and match `<label>` case-insensitively by prefix against `Authorize` / `Bank first publishes`, then run the matching `settings-edit` command and reply exactly as above. This branch is deliberately channel-reachable — the flag is a decision record, not a permission — so it is exempt from the terminal-only tier the rest of `artifacts.*` policy sits behind.
 
 ### 3. Write config
 

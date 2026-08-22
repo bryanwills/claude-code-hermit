@@ -539,8 +539,8 @@ entries the target lacks, and any entries from retired plugin versions it still 
 3. Otherwise show the operator the entries — what will be added, and what retired entries will be removed — and ask with `AskUserQuestion` (header: "Hook perms") — options: **Yes — add** (merge so hooks run without prompting, default) / **No — skip** (you'll be prompted during sessions).
 4. If the operator confirms: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> permissions-sync`
    (Adds every missing sealed entry and removes only entries from retired plugin versions. Operator-authored rules are never touched.)
-   Then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json automode-seed` — **always `.claude/settings.local.json`, regardless of `hatch_target`**: the auto-mode classifier reads `autoMode` config only from local/user scope, never a committed project `.claude/settings.json`, so seeding anywhere else would be a silent no-op. Tell the operator in one line: "Also recorded an auto-mode exception and environment context in `.claude/settings.local.json` so unattended upgrade migrations can run the plugin's sealed settings ops."
-5. If the operator declines: skip (including the auto-mode seed above — an operator who wants prompts should not get a standing classifier exception), and note: "You may be prompted to approve hook commands during sessions. Run `/claude-code-hermit:hermit-settings permissions` to add them later."
+   (No auto-mode step here: the classifier reads `autoMode` only from user scope, managed settings, or `--settings`, so there is nothing useful to seed into a project settings file. `hermit-start` renders the hermit's classifier policy into a per-session overlay at every boot and launches with `--settings`.)
+5. If the operator declines: skip, and note: "You may be prompted to approve hook commands during sessions. Run `/claude-code-hermit:hermit-settings permissions` to add them later."
 
 **Seed `state/template-manifest.json`** (deferred from Step 2 — now that the `bun */scripts/manifest-seed.ts*` permission is in place). It records the sha256 pristine-baseline that the `hermit-evolve` drift signals depend on. The script computes the hashes (an LLM cannot sha256 reliably). Read the current plugin version from `${CLAUDE_SKILL_DIR}/../../.claude-plugin/plugin.json`, then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts .claude-code-hermit` with this JSON on stdin:
 
@@ -798,7 +798,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Step 7 | .gitignore append | apply silently (per-line idempotent) |
 | Step 7a | .worktreeinclude managed block | apply silently (marker-block idempotent — skip if marker already present) |
 | Step 7.5 | git init (fresh dirs only) | run `git init` if `git_init_eligible`; omit otherwise |
-| Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file; also seeds the `automode-seed` auto-mode exception silently into `.claude/settings.local.json` (always local, regardless of `hatch_target`) |
+| Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file (auto-mode policy needs no seeding — it ships in the per-session overlay `hermit-start` renders at boot) |
 | Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
 | Step 9c | Artifact publish permission | same as Advanced — `artifact-allow` applied silently (skip entirely if all three `artifacts.*` are `false`) and `artifacts.publish_authorized` set to `true` in config |
 

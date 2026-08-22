@@ -69,6 +69,17 @@ const SPECS: Spec[] = [
     failExit: 0,
   },
   {
+    name: 'core/channel-settings-gate',
+    script: 'plugins/claude-code-hermit/scripts/channel-settings-gate.ts',
+    benign: BASH_LS,
+    // 0 here, unlike ha/mcp-safety-gate, because this gate's fail-closed
+    // direction is env-gated: denyIfManaged() only blocks under
+    // HERMIT_MANAGED=1 inside a hermit project, neither of which holds in the
+    // clean-env sandbox. That conditional deny is owned by the plugin's own
+    // suite; what this corpus pins is that the oversize path still drains.
+    failExit: 0,
+  },
+  {
     name: 'dev/git-push-guard',
     script: 'plugins/claude-code-dev-hermit/scripts/git-push-guard.ts',
     benign: BASH_LS,
