@@ -73,3 +73,31 @@ export function isTrustedController(
   const home = ch?.default_chat_id || ch?.dm_channel_id; // no list -> pinned-home binding
   return !!home && !!chatId && String(home) === String(chatId);
 }
+
+/**
+ * The one inbound surface that may write the security tier of settings
+ * (channel-settings-gate.ts). Strictly above isTrustedController: the home chat
+ * carries control authority (pause/status), the maintainer chat carries
+ * *settings* authority.
+ *
+ * Two independent facts must hold, and both come from the platform rather than
+ * from message text: the envelope's chat is the configured maintainer chat, and
+ * its canonical sender passes any configured allowlist. `user="operator"` is an
+ * attacker-chosen string; a chat id is not, which is what makes this a
+ * materially stronger signal than the envelope's identity attributes alone.
+ *
+ * Deliberately NOT an isTrustedController fallback chain: with no
+ * maintainer_channel_id configured this returns false and the tier stays
+ * terminal-only, so the privilege exists only where an operator opted into it.
+ * The enrollment root (allowed_users, default_chat_id, dm_channel_id,
+ * maintainer_channel_id) stays terminal-only even here — the gate owns that
+ * list, because a chat that can re-point itself is a privilege the operator
+ * can no longer revoke.
+ */
+export function isMaintainerController(
+  config: Json, source: string, userId: string | null, chatId: string | null,
+): boolean {
+  const maintainer = channelEntry(config, source)?.maintainer_channel_id;
+  if (!maintainer || !chatId || String(maintainer) !== String(chatId)) return false;
+  return isAllowedSender(config, source, userId);
+}
