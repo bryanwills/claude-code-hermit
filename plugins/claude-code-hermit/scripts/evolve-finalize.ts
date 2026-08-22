@@ -175,9 +175,23 @@ export function finalize(opts: {
   const errors: { code: string; message: string }[] = [];
   const siblingsSkipped: string[] = [];
 
+  // Every rejection below returns the same shape: nothing confirmed, nothing added,
+  // version-only attribution, carrying whatever has been pushed to `errors` and
+  // `siblingsSkipped` by then (both captured by reference, so this reads their state
+  // at call time). Push the error, then `return fail()`.
+  const fail = (): FinalizeResult => ({
+    ok: false,
+    core: { requested: opts.core ?? '', confirmed: null, matched: false },
+    siblings_confirmed: {},
+    siblings_skipped: siblingsSkipped,
+    settings_added: [],
+    audit_scope: 'version-only',
+    errors,
+  });
+
   if (!opts.core || opts.core.trim() === '') {
     errors.push({ code: 'no_core_target', message: '--core=<version> is required' });
-    return { ok: false, core: { requested: opts.core ?? '', confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: [], settings_added: [], audit_scope: 'version-only', errors };
+    return fail();
   }
 
   // Validate sibling args. Malformed entries go to siblings_skipped (not errors) —
@@ -202,15 +216,15 @@ export function finalize(opts: {
       pluginVer = typeof pj.version === 'string' ? pj.version : null;
     } catch (e: any) {
       errors.push({ code: 'plugin_json_unreadable', message: e.message });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+      return fail();
     }
     if (pluginVer === null) {
       errors.push({ code: 'plugin_json_unreadable', message: 'plugin.json missing .version field' });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+      return fail();
     }
     if (pluginVer !== opts.core) {
       errors.push({ code: 'core_version_mismatch', message: `--core="${opts.core}" does not match plugin.json version="${pluginVer}"` });
-      return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+      return fail();
     }
   }
 
@@ -224,7 +238,7 @@ export function finalize(opts: {
       : e && e.name === 'SyntaxError' ? 'config_json_invalid'
       : 'config_unreadable';
     errors.push({ code, message: e.message });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+    return fail();
   }
   // The audit `before`. Prefer the step-1 snapshot: it predates hermit-evolve's
   // step 2b migrations and step 9 merge, so one diff covers everything the upgrade
@@ -258,7 +272,7 @@ export function finalize(opts: {
       code: 'core_version_regression',
       message: `--core="${opts.core}" is older than the applied version "${onDiskCore}" in _hermit_versions — refusing to downgrade the stamp (migrations are not reversed by lowering it). The loaded plugin is likely a stale install copy.`,
     });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+    return fail();
   }
 
   // Missing template defaults, applied here rather than by the runner in prose.
@@ -315,7 +329,7 @@ export function finalize(opts: {
   } catch (e: any) {
     try { fs.unlinkSync(tmp); } catch {}
     errors.push({ code: 'write_failed', message: e.message });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+    return fail();
   }
   // Re-read from disk to confirm (the fix's whole point — catches a write that didn't land)
   let onDisk: Json;
@@ -323,7 +337,7 @@ export function finalize(opts: {
     onDisk = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (e: any) {
     errors.push({ code: 'verify_failed', message: `re-read after write failed: ${e.message}` });
-    return { ok: false, core: { requested: opts.core, confirmed: null, matched: false }, siblings_confirmed: {}, siblings_skipped: siblingsSkipped, settings_added: [], audit_scope: 'version-only', errors };
+    return fail();
   }
 
   const coreOnDisk: string = (isPlainObject(onDisk._hermit_versions) ? onDisk._hermit_versions['claude-code-hermit'] : null) ?? '';
