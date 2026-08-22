@@ -141,6 +141,10 @@ function writeLedgerLines(hermitDir: string, lines: object[]): void {
   fs.writeFileSync(p, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
 }
 
+function writeConfig(hermitDir: string, config: object): void {
+  fs.writeFileSync(path.join(hermitDir, 'config.json'), JSON.stringify(config, null, 2));
+}
+
 function writeCompiledDoc(hermitDir: string, filename: string, fm: Record<string, string>): void {
   const lines = Object.entries(fm).map(([k, v]) => `${k}: ${v}`);
   const content = `---\n${lines.join('\n')}\n---\nBody.\n`;
@@ -148,15 +152,106 @@ function writeCompiledDoc(hermitDir: string, filename: string, fm: Record<string
 }
 
 describe('weekly-review.ts — Usage section', () => {
-  test('old ledger + stale untouched doc — Usage section lists it', withHermitDir(async (hermitDir) => {
+  // Archiving needs proof the Read hook ever fired; every archiving test seeds a
+  // compiled read of an unrelated doc so the ledger has capture evidence.
+  const CAPTURE_EVIDENCE = { ts: daysAgoIso(80), kind: 'compiled', name: 'some-other-doc', source: 'read' };
+
+  test('old ledger + stale untouched doc — auto-archived, reported, and counted as handled', withHermitDir(async (hermitDir) => {
+    writeLedgerLines(hermitDir, [{ ts: daysAgoIso(90), kind: 'meta', event: 'ledger-start' }, CAPTURE_EVIDENCE]);
+    writeCompiledDoc(hermitDir, 'note-old-2026-01-01.md', { type: 'note', created: daysAgoIso(100) });
+    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
+    expect(r.exitCode).toBe(0);
+    const { fm, body } = readReview(hermitDir);
+    expect(body).toContain('### Usage');
+    expect(body).toContain('auto-archived to compiled/.archive/');
+    expect(fm.usage_auto_archived).toEqual(['note-old-2026-01-01']);
+    // Move-only: gone from compiled/, present in the archive, never deleted.
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', 'note-old-2026-01-01.md'))).toBe(false);
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', '.archive', 'note-old-2026-01-01.md'))).toBe(true);
+    expect(fm.usage_untouched_count).toBe('0');
+  }));
+
+  test('usage_auto_archive: false — suggest-only, file stays put', withHermitDir(async (hermitDir) => {
+    writeConfig(hermitDir, { knowledge: { usage_auto_archive: false } });
     writeLedgerLines(hermitDir, [{ ts: daysAgoIso(90), kind: 'meta', event: 'ledger-start' }]);
     writeCompiledDoc(hermitDir, 'note-old-2026-01-01.md', { type: 'note', created: daysAgoIso(100) });
     const r = await runScript('weekly-review.ts', { args: [hermitDir] });
     expect(r.exitCode).toBe(0);
     const { fm, body } = readReview(hermitDir);
     expect(body).toContain('### Usage');
+    expect(body).not.toContain('auto-archived');
     expect(body).toContain('note-old-2026-01-01.md');
+    expect(fm.usage_auto_archived).toEqual([]);
     expect(fm.usage_untouched_count).toBe('1');
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', 'note-old-2026-01-01.md'))).toBe(true);
+  }));
+
+  test('a ledger with no compiled read at all archives nothing — tracking gap, not disuse', withHermitDir(async (hermitDir) => {
+    writeLedgerLines(hermitDir, [
+      { ts: daysAgoIso(200), kind: 'meta', event: 'ledger-start' },
+      { ts: daysAgoIso(3), kind: 'skill', name: 'claude-code-hermit:brief', source: 'skill-tool' },
+    ]);
+    writeCompiledDoc(hermitDir, 'note-old-2026-01-01.md', { type: 'note', created: daysAgoIso(100) });
+    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
+    expect(r.exitCode).toBe(0);
+    const { fm, body } = readReview(hermitDir);
+    expect(body).toContain('Nothing was auto-archived');
+    expect(fm.usage_auto_archived).toEqual([]);
+    expect(fm.usage_untouched_count).toBe('1');
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', 'note-old-2026-01-01.md'))).toBe(true);
+  }));
+
+  test('a doc the operator restored is not archived again', withHermitDir(async (hermitDir) => {
+    writeLedgerLines(hermitDir, [{ ts: daysAgoIso(90), kind: 'meta', event: 'ledger-start' }, CAPTURE_EVIDENCE]);
+    writeCompiledDoc(hermitDir, 'note-old-2026-01-01.md', { type: 'note', created: daysAgoIso(100) });
+    fs.writeFileSync(
+      path.join(hermitDir, 'state', 'usage-archived.json'),
+      JSON.stringify({ stems: ['note-old-2026-01-01'] }),
+    );
+    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
+    expect(r.exitCode).toBe(0);
+    const { fm } = readReview(hermitDir);
+    expect(fm.usage_auto_archived).toEqual([]);
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', 'note-old-2026-01-01.md'))).toBe(true);
+  }));
+
+  test('at most 10 docs move per run — the rest carry over as suggestions', withHermitDir(async (hermitDir) => {
+    writeLedgerLines(hermitDir, [{ ts: daysAgoIso(200), kind: 'meta', event: 'ledger-start' }, CAPTURE_EVIDENCE]);
+    for (let i = 0; i < 12; i++) {
+      writeCompiledDoc(hermitDir, `note-${i}.md`, { type: 'note', created: daysAgoIso(150 - i) });
+    }
+    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
+    expect(r.exitCode).toBe(0);
+    const { fm } = readReview(hermitDir);
+    expect(fm.usage_auto_archived.length).toBe(10);
+    expect(fm.usage_untouched_count).toBe('2');
+    const left = fs.readdirSync(path.join(hermitDir, 'compiled')).filter(f => f.startsWith('note-'));
+    expect(left.length).toBe(2);
+    // The record survives for the next run's restore check.
+    const recorded = JSON.parse(fs.readFileSync(path.join(hermitDir, 'state', 'usage-archived.json'), 'utf-8'));
+    expect(recorded.stems.length).toBe(10);
+  }));
+
+  test('usage_auto_archive: null disables archiving like false', withHermitDir(async (hermitDir) => {
+    writeConfig(hermitDir, { knowledge: { usage_auto_archive: null } });
+    writeLedgerLines(hermitDir, [{ ts: daysAgoIso(90), kind: 'meta', event: 'ledger-start' }, CAPTURE_EVIDENCE]);
+    writeCompiledDoc(hermitDir, 'note-old-2026-01-01.md', { type: 'note', created: daysAgoIso(100) });
+    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
+    expect(r.exitCode).toBe(0);
+    const { fm } = readReview(hermitDir);
+    expect(fm.usage_auto_archived).toEqual([]);
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', 'note-old-2026-01-01.md'))).toBe(true);
+  }));
+
+  test('usage_stale_days override widens the window — a 100d doc is not yet stale at 200d', withHermitDir(async (hermitDir) => {
+    writeConfig(hermitDir, { knowledge: { usage_stale_days: 200 } });
+    writeLedgerLines(hermitDir, [{ ts: daysAgoIso(300), kind: 'meta', event: 'ledger-start' }]);
+    writeCompiledDoc(hermitDir, 'note-old-2026-01-01.md', { type: 'note', created: daysAgoIso(100) });
+    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
+    expect(r.exitCode).toBe(0);
+    const { body } = readReview(hermitDir);
+    expect(body).not.toContain('### Usage');
+    expect(fs.existsSync(path.join(hermitDir, 'compiled', 'note-old-2026-01-01.md'))).toBe(true);
   }));
 
   test('foundational-tagged doc is exempt from the Usage section', withHermitDir(async (hermitDir) => {

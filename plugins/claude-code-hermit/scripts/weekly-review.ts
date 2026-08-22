@@ -8,7 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, readFileWithFrontmatter, parseFrontmatter, isEmptyAutoArchive, newestByType, globDir } from './lib/frontmatter';
 import { costLogPath, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { readSettledConfig } from './lib/config-read';
 import { formatTokens } from './lib/format';
+import { writeFileAtomic } from './lib/md-write';
 import { lint as knowledgeLint } from './knowledge-lint';
 
 type Json = any;
@@ -301,16 +303,31 @@ try {
   }
 } catch {}
 
-// --- Usage (usage-metrics.jsonl → weekly-review suggestions) ---
-// Suggest-only: never auto-archives. Coverage is inherently partial (startup
-// injection, subagent reads, and skill invocations outside the tracked paths
-// are invisible), so a young or missing ledger must never read as "unused".
-const USAGE_STALE_DAYS = 60;
-const usageStaleMs = USAGE_STALE_DAYS * 86400000;
+// --- Usage (usage-metrics.jsonl → auto-archive + dormant-skill suggestions) ---
+// Subagent reads do reach the ledger (PostToolUse fires for sidechain calls,
+// probed on CC 2.1.239), so "no tracked use" is real evidence — docs with none
+// in the window are archived move-only, with the digest as the operator's veto.
+// Startup injection stays untracked, which is why foundational/topic/review
+// artifacts are exempt below. A young or missing ledger never reads as unused.
+let usageStaleDays = 30;
+let usageAutoArchive = true;
+try {
+  // Already settled: `knowledge` is always an object and both keys are coerced
+  // to their declared types. Only the >0 floor does work — a hand-edited 0 or
+  // negative would make every doc instantly stale.
+  const knowledgeCfg = readSettledConfig(hermitDir).knowledge;
+  if (knowledgeCfg.usage_stale_days > 0) usageStaleDays = knowledgeCfg.usage_stale_days;
+  // `!== true` rather than `=== false`: an explicit null is preserved by
+  // settleValue as a deliberate operator value with disable semantics
+  // (lib/config-read.ts), so it has to turn archiving off like `false` does.
+  if (knowledgeCfg.usage_auto_archive !== true) usageAutoArchive = false;
+} catch {}
+const usageStaleMs = usageStaleDays * 86400000;
 const compiledDir = path.join(hermitDir, 'compiled');
 const usageLedgerPath = path.join(hermitDir, 'state', 'usage-metrics.jsonl');
 
 let ledgerStartMs: number | null = null;
+let compiledEvidence = false;
 const lastUsedMs = new Map<string, number>(); // key: `${kind}:${name}`
 try {
   const usageLines = fs.readFileSync(usageLedgerPath, 'utf-8').split('\n');
@@ -322,6 +339,7 @@ try {
       if (!Number.isFinite(tsMs)) continue;
       if (ledgerStartMs === null || tsMs < ledgerStartMs) ledgerStartMs = tsMs;
       if ((e.kind === 'skill' || e.kind === 'compiled') && typeof e.name === 'string') {
+        if (e.kind === 'compiled') compiledEvidence = true;
         const key = `${e.kind}:${e.name}`;
         const prev = lastUsedMs.get(key);
         if (prev === undefined || tsMs > prev) lastUsedMs.set(key, tsMs);
@@ -330,7 +348,7 @@ try {
   }
 } catch {}
 
-const untouchedDocs: { stem: string; lastRead: number | null; date: Date }[] = [];
+let untouchedDocs: { stem: string; lastRead: number | null; date: Date }[] = [];
 const dormantSkills: { name: string; lastUsed: number }[] = [];
 
 // Guard: a ledger younger than the staleness window (or missing entirely)
@@ -364,12 +382,72 @@ if (ledgerStartMs !== null && (now.getTime() - ledgerStartMs) >= usageStaleMs) {
   dormantSkills.sort((a, b) => a.lastUsed - b.lastUsed);
 }
 
+// Archive the untouched docs: move-only into compiled/.archive/, reported in
+// the digest so the operator can veto by moving one back. A failed move drops
+// the doc back to a suggestion rather than losing it silently.
+//
+// Three limits beyond the ledger-age guard, all of them about evidence:
+//  - The ledger must hold at least one compiled read. A hook that never fired
+//    (not installed, silently failing, dropping reads at the old stdin cap)
+//    produces exactly the same "nothing was used" ledger as a genuinely idle
+//    week, and the first post-upgrade run is where the two are least
+//    distinguishable. Without capture evidence the docs stay suggestions.
+//  - A stem archived once is never archived again. Moving the file back is the
+//    documented restore, and a move leaves no read event and no marker — the
+//    operator's veto would otherwise lose again every week.
+//  - At most RUN_CAP moves per run. A backlogged hermit's first run would
+//    otherwise empty compiled/ in one go and emit an unbounded digest; the
+//    remainder carries over to the following weeks as suggestions.
+const RUN_CAP = 10;
+const archivedOncePath = path.join(hermitDir, 'state', 'usage-archived.json');
+const archivedOnce = new Set<string>();
+try {
+  const prior = JSON.parse(fs.readFileSync(archivedOncePath, 'utf-8'));
+  if (Array.isArray(prior?.stems)) for (const s of prior.stems) if (typeof s === 'string') archivedOnce.add(s);
+} catch {}
+
+const autoArchived: string[] = [];
+if (usageAutoArchive && compiledEvidence && untouchedDocs.length > 0) {
+  const usageArchiveDir = path.join(compiledDir, '.archive');
+  const stillUntouched: typeof untouchedDocs = [];
+  let archiveDirReady = false;
+  try {
+    fs.mkdirSync(usageArchiveDir, { recursive: true });
+    archiveDirReady = true;
+  } catch {}
+  for (const doc of untouchedDocs) {
+    if (archivedOnce.has(doc.stem)) continue; // operator moved it back — theirs to keep
+    if (!archiveDirReady || autoArchived.length >= RUN_CAP) {
+      stillUntouched.push(doc);
+      continue;
+    }
+    let dest = path.join(usageArchiveDir, `${doc.stem}.md`);
+    if (fs.existsSync(dest)) dest = path.join(usageArchiveDir, `${doc.stem}-${Date.now()}.md`);
+    try {
+      fs.renameSync(path.join(compiledDir, `${doc.stem}.md`), dest);
+      autoArchived.push(doc.stem);
+    } catch {
+      stillUntouched.push(doc);
+    }
+  }
+  untouchedDocs = stillUntouched;
+  if (autoArchived.length > 0) {
+    for (const stem of autoArchived) archivedOnce.add(stem);
+    try {
+      writeFileAtomic(archivedOncePath, JSON.stringify({ stems: [...archivedOnce] }, null, 2));
+    } catch {}
+  }
+}
+
 const usageUntouchedCount = untouchedDocs.length + dormantSkills.length;
 
 let usageSection = '';
-if (untouchedDocs.length > 0 || dormantSkills.length > 0) {
+if (autoArchived.length > 0 || untouchedDocs.length > 0 || dormantSkills.length > 0) {
   const DOC_CAP = 10, SKILL_CAP = 10;
-  usageSection = `### Usage (no tracked use ≥${USAGE_STALE_DAYS}d)\n`;
+  usageSection = `### Usage (no tracked use ≥${usageStaleDays}d)\n`;
+  for (const stem of autoArchived) {
+    usageSection += `- compiled/${stem}.md — auto-archived to compiled/.archive/ (restore by moving it back)\n`;
+  }
   for (const d of untouchedDocs.slice(0, DOC_CAP)) {
     const lastReadStr = d.lastRead !== null ? new Date(d.lastRead).toISOString().slice(0, 10) : 'never';
     usageSection += `- compiled/${d.stem}.md — last tracked read ${lastReadStr}, updated ${d.date.toISOString().slice(0, 10)}\n`;
@@ -379,7 +457,10 @@ if (untouchedDocs.length > 0 || dormantSkills.length > 0) {
     usageSection += `- skill ${s.name} — last tracked use ${new Date(s.lastUsed).toISOString().slice(0, 10)}\n`;
   }
   if (dormantSkills.length > SKILL_CAP) usageSection += `- (+${dormantSkills.length - SKILL_CAP} more)\n`;
-  usageSection += `Tracked sources only (skill-tool calls, operator slash commands, compiled/ Reads); startup injection and subagent reads are not tracked.\n\n`;
+  if (usageAutoArchive && !compiledEvidence) {
+    usageSection += `Nothing was auto-archived: the ledger holds no compiled/ read at all, which reads as a tracking gap rather than as disuse. These stay suggestions until it records one.\n`;
+  }
+  usageSection += `Tracked sources: skill-tool calls, operator slash commands, and compiled/ Reads (subagent reads included); startup injection is not tracked.\n\n`;
 }
 
 // --- Build report ---
@@ -415,6 +496,7 @@ const frontmatter = [
   `reflect_cost_usd: ${reflectCost.toFixed(2)}`,
   `reflect_observations: ${reflectObsTotal}`,
   `usage_untouched_count: ${usageUntouchedCount}`,
+  `usage_auto_archived: [${autoArchived.map(s => `"${s.replace(/,/g, ';')}"`).join(', ')}]`,
   '---',
 ].join('\n');
 

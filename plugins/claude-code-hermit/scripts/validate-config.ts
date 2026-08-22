@@ -542,6 +542,19 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           errors.push('knowledge.working_set_warn: must be a positive integer');
         }
       }
+      if (k.usage_stale_days !== undefined) {
+        if (!Number.isInteger(k.usage_stale_days) || k.usage_stale_days <= 0) {
+          errors.push('knowledge.usage_stale_days: must be a positive integer');
+        }
+      }
+      if (k.usage_auto_archive !== undefined) {
+        // A string "false" would settle back to the `true` default and archive
+        // the docs the operator was trying to protect — flag it rather than
+        // silently coerce.
+        if (k.usage_auto_archive !== null && typeof k.usage_auto_archive !== 'boolean') {
+          errors.push('knowledge.usage_auto_archive: must be a boolean or null');
+        }
+      }
       if (k.archive_retention_days !== undefined) {
         if (k.archive_retention_days !== null && (!Number.isInteger(k.archive_retention_days) || k.archive_retention_days <= 0)) {
           errors.push('knowledge.archive_retention_days: must be a positive integer or null');

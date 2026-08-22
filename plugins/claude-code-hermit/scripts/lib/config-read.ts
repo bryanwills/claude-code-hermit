@@ -101,6 +101,8 @@ const TABLE: Record<string, Spec> = {
     raw_retention_days: num(14),
     compiled_budget_chars: num(2500),
     working_set_warn: num(20),
+    usage_stale_days: num(30),
+    usage_auto_archive: bool(true),
     archive_retention_days: num(null),
     channel_log_enabled: bool(true),
     channel_log_retention_days: num(90),

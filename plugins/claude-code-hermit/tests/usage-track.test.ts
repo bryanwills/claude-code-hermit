@@ -60,6 +60,18 @@ describe('usage-track', () => {
     expect(events.at(-1)).toMatchObject({ kind: 'compiled', name: 'note-y', source: 'read' });
   }));
 
+  test('Read with a large tool_response body — still recorded (payload carries the file body)', withDir(async (dir) => {
+    const filePath = hermit(dir, 'compiled', 'note-big-2026-01-01.md');
+    const r = await run({
+      tool_name: 'Read',
+      tool_input: { file_path: filePath },
+      tool_response: 'x'.repeat(100 * 1024),
+    }, dir);
+    expect(r.exitCode).toBe(0);
+    const events = readLedgerEvents(dir);
+    expect(events.at(-1)).toMatchObject({ kind: 'compiled', name: 'note-big-2026-01-01', source: 'read' });
+  }));
+
   test('Read of a non-compiled path — no event, no ledger file', withDir(async (dir) => {
     const r = await run({ tool_name: 'Read', tool_input: { file_path: '/src/foo.ts' } }, dir);
     expect(r.exitCode).toBe(0);
