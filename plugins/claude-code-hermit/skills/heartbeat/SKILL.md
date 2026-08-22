@@ -77,7 +77,7 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
 
 Start the heartbeat as a persistent CC Monitor subprocess.
 
-1. Read `heartbeat.every` from config (default: `"2h"`). Parse to seconds (`"30m"` → 1800, `"2h"` → 7200, etc).
+1. Read `heartbeat.every` from config (default: `"30m"`). Parse to seconds (`"30m"` → 1800, `"2h"` → 7200, etc).
 2. Resolve the script path: `${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat-monitor.sh` (resolve at skill execution time — not available inside the subprocess).
 3. Sweep any pre-existing CronCreate entry for the old recurring-cron approach: `CronList` → if an entry's `prompt` matches `/claude-code-hermit:heartbeat run`, `CronDelete` it. Idempotent.
 4. Read `state/heartbeat-monitor.runtime.json` if it exists. If it contains a `task_id`, TaskStop that task — ignore not-found errors (the monitor may have already exited). Clear any prior entry from `state/heartbeat-monitor.runtime.json`. Delete `state/heartbeat-liveness.json` if it exists — this clears the previous monitor's liveness record so the doctor check does not flag stale data from the prior session during the new monitor's startup window.

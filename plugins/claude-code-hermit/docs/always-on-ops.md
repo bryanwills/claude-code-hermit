@@ -240,7 +240,7 @@ Four levers, in rough order of impact:
 
 Not suitable for routines whose value is chat or transcript output (subagent output collapses to one line) or for `heartbeat-restart` (must run in-session). See the [Routines](#routines) section above and [config-reference](config-reference.md#idle-agency--routines).
 
-**3. Interval and active hours.** Cost is wakes/day × cost/wake. Widen `heartbeat.every` (default `2h`) or tighten `active_hours` in `config.json`. Only `EVALUATE`/`AUTO_CLOSE` wakes cost tokens — the `--peek` poll between them is free.
+**3. Interval and active hours.** Cost is wakes/day × cost/wake. Widen `heartbeat.every` (default `30m`) or tighten `active_hours` in `config.json`. Only `EVALUATE`/`AUTO_CLOSE` wakes cost tokens — the `--peek` poll between them is free.
 
 **4. Checklist curation.** A shorter, sharper `HEARTBEAT.md` lets the free OK precheck path fire more often, skipping the full LLM eval. `/claude-code-hermit:heartbeat edit` warns when the list exceeds 10 items.
 
