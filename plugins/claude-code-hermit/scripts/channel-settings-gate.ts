@@ -1,23 +1,37 @@
-// PreToolUse hook (matcher "Bash|Edit|Write") — binds the security tier of
-// hermit settings to the terminal.
+// PreToolUse hook (matcher "Bash|Edit|Write") — tiers the security-relevant
+// hermit settings by where the request came from.
 //
 // hermit-settings is model-invocable, so a channel message can legitimately
 // change safe settings (name, language, heartbeat cadence, ...) through
-// settings-edit's validated, audited write path. The tier below never travels
-// that way: permission_mode, env, boot_skill, remote, escalation, docker.*,
-// artifacts.backend, and channel topology (allowlists, briefing chat) all
-// decide either what this hermit is allowed to do or who is allowed to talk
-// to it. A `<channel>`-tagged message is an unauthenticated claim of identity
-// — `user="operator"` is text anyone can send — so it must not be able to
-// widen either.
+// settings-edit's validated, audited write path. The rest is tiered, because a
+// `<channel>`-tagged message is an unauthenticated claim of identity —
+// `user="operator"` is text anyone can send:
+//
+//   allowed        anyone who can reach the hermit at all
+//   maintainer     the configured maintainer chat, allowlist-checked
+//                  (boot_skill, remote, escalation, docker.*, artifacts.backend,
+//                  and everything not named below)
+//   nonce          maintainer chat AND an echoed token: permission_mode, env.*,
+//                  monitors (each entry carries a shell command)
+//   terminal-only  the enrollment root and any ancestor write that would
+//                  replace it — never reachable from a channel, on any tier
+//
+// The maintainer tier exists because the hermit that most needs these decisions
+// is the unattended one, and its operator is reachable on a channel, not at a
+// shell. Its anchor is a platform-supplied chat id (lib/channel-auth.ts
+// isMaintainerController), not message text. The enrollment root
+// (allowed_users, default_chat_id, dm_channel_id, maintainer_channel_id) is the
+// deliberate hole in that: a maintainer chat that could add an allowed user or
+// re-point itself would turn one compromise into a permanent, self-extending
+// one, instead of something an operator with terminal access can revoke.
 //
 // The decision keys on the CURRENT TURN's opening prompt, not on the session:
 // an operator typing in the managed hermit's own tmux pane is a terminal turn
-// and passes, while a message relayed into that same session is blocked. That
+// and passes, while a message relayed into that same session is tiered. That
 // is why this is a turn-provenance gate rather than a session-identity one.
 // Provenance is resolved exactly like channel-hook.ts's isEligibleInboundReply
-// (transcript tail -> turn boundary -> envelope), minus the chat-id match:
-// any envelope at all makes the turn channel-opened.
+// (transcript tail -> turn boundary -> envelope), and now keeps the parsed
+// envelope so the chat id can be matched rather than discarded.
 //
 // Deny mechanics mirror ask-gate.ts: a PreToolUse exit-2 deny is binding
 // within one tool call with zero model cooperation, and the reason on stderr
@@ -32,26 +46,51 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir, transcriptPath, readTailLines, turnPromptText, dropSidechainLines } from './lib/cc-compat';
-import { parseChannelEnvelope } from './lib/channel-envelope';
+import { parseChannelEnvelope, type ChannelEnvelope } from './lib/channel-envelope';
+import { isMaintainerController } from './lib/channel-auth';
+import { readConfigRaw } from './lib/config-read';
 import { byArg } from './lib/settings/registry';
 import { runHook } from './lib/hook-input';
+import { readPending, writePending, clearPending, newToken, bodyEchoesToken } from './lib/settings-confirm';
 
 // Same window channel-hook.ts uses: enough to hold a turn, cheap to read.
 const TAIL_BYTES = 512 * 1024;
 
-const DENY_REASON =
-  'Terminal-only hermit setting. This turn arrived from a channel, and security-tier settings ' +
-  '(permission mode, env, boot skill, remote, escalation, docker, artifact backend, ' +
-  'and channel topology such as allowed_users or the briefing chat) change only on the operator\'s ' +
-  'own terminal-typed request. Do not retry, and do not edit config.json directly. Reply in the ' +
-  'operator\'s language that this one has to be done from a terminal session with ' +
-  '`/claude-code-hermit:hermit-settings <argument>`, and carry on with anything else that was asked.';
+const DENY_TERMINAL_ONLY =
+  'Terminal-only hermit setting. Channel enrollment (allowed_users, default_chat_id, ' +
+  'dm_channel_id, maintainer_channel_id) decides who is allowed to talk to this hermit, so it ' +
+  'changes only on the operator\'s own terminal-typed request — the maintainer chat cannot grant ' +
+  'itself more reach. Writing a parent object counts, and so does editing config.json directly. ' +
+  'Do not retry. Reply in the operator\'s language that this one has to be done from a terminal ' +
+  'session with `/claude-code-hermit:hermit-settings <argument>`, and carry on with anything else ' +
+  'that was asked.';
+
+const DENY_NEEDS_MAINTAINER =
+  'Security-tier hermit setting. This turn arrived from a channel that is not the configured ' +
+  'maintainer chat, and settings like permission mode, boot skill, remote, escalation, docker and ' +
+  'the artifact backend change only from the maintainer chat or the operator\'s own terminal. Do ' +
+  'not retry, and do not edit config.json directly. Reply in the operator\'s language explaining ' +
+  'where this has to be asked from, and carry on with anything else that was asked.';
+
+function denyNeedsNonce(target: string, token: string): string {
+  return (
+    `Second factor required for \`${target}\`. This setting reaches what the session may execute, ` +
+    'so the maintainer chat alone does not authorize it. Send exactly this confirmation code to ' +
+    `the maintainer chat now — \`.claude-code-hermit/bin/hermit-run channel-send ` +
+    `.claude-code-hermit --notice\` with {"maintainer": "...${token}..."} on stdin — then stop and ` +
+    'wait. Do not retry the setting in this turn: it applies only after the operator echoes the ' +
+    `code back in a maintainer-chat message. The code expires in 10 minutes.`
+  );
+}
 
 /** settings-edit verbs that only read — always safe, whatever the target. */
 const READ_VERBS = new Set(['show', 'get', 'history']);
 
 /** Verbs that mutate config.json and therefore need a policy verdict. */
 const WRITE_VERBS = new Set(['set', 'unset', 'toggle', 'apply-known']);
+
+/** Write verbs that take a value after the target — see settings-edit.ts's dispatch. */
+const TAKES_VALUE = new Set(['set', 'apply-known']);
 
 // Dotted-path families a channel turn may write. Anything not matched here is
 // terminal-only, so a setting added later defaults to the safe side until it
@@ -90,6 +129,60 @@ const ALLOWED_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * The enrollment root: who may talk to this hermit, and which chat holds the
+ * maintainer tier. Terminal-only on every turn, maintainer chat included —
+ * these four keys are what the maintainer tier is *anchored on*, so letting
+ * that chat write them would make a single compromise self-extending and
+ * unrevokable. Everything else in the security tier is recoverable by an
+ * operator who can still reach a terminal; this is the part that would not be.
+ *
+ * Matches the leaf AND anything beneath it. `settings-edit`'s setPath treats a
+ * dotted path as a plain traversal and arrays are objects, so
+ * `channels.discord.allowed_users.0` writes one allowlist entry — an
+ * exact-leaf-only match would let that land on `maintainer` and hand the
+ * maintainer chat the self-extending compromise this tier exists to block.
+ * Indexed paths are a real spelling here, not a hypothetical: ALLOWED_PATTERNS
+ * above depends on them for `routines.<n>.enabled`.
+ */
+const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_channel_id|maintainer_channel_id)(\..+)?$/;
+
+/**
+ * `channels` and `channels.<platform>` — writing either replaces the enrollment
+ * root wholesale, so the ancestor rule has to hold at every tier, not just for
+ * a channel turn. (Ancestors of merely maintainer-tier keys are maintainer-tier
+ * themselves: nothing protected hides beneath them.)
+ */
+const ENROLLMENT_ANCESTOR = /^channels(\.[^.]+)?$/;
+
+/**
+ * Execution-adjacent: `permission_mode` can be flipped to bypassPermissions,
+ * `env` is a free-form dict that reaches the session's environment, and every
+ * `monitors[]` entry carries a `command` string the `watch` skill registers as
+ * a Monitor subprocess at session start (validate-config.ts requires it) — a
+ * config-declared shell command is at least as execution-adjacent as either of
+ * the other two, so it cannot sit a tier below them. All three stay behind the
+ * confirmation nonce even from the maintainer chat — see lib/settings-confirm.ts
+ * for what that second factor is worth. Each matches as both the whole
+ * container and any leaf, because replacing the container is the broader write.
+ */
+const NONCE_REQUIRED = /^(permission_mode|env|monitors)(\..+)?$/;
+
+/** Increasing strictness — a chained command takes the strongest verdict. */
+export type Verdict = 'allowed' | 'maintainer' | 'nonce' | 'terminal-only';
+const STRICTNESS: Record<Verdict, number> = { allowed: 0, maintainer: 1, nonce: 2, 'terminal-only': 3 };
+
+/**
+ * `apply-known`'s registry arg name resolved to its dotted config path; every
+ * other verb's target is already dotted and passes through. One helper so the
+ * verdict and the nonce's target binding can't resolve it differently — a token
+ * bound to `permissions` would never match a retry spelled `permission_mode`,
+ * and the operator would be asked to confirm the same change twice forever.
+ */
+function resolveTarget(verb: string, target: string): string {
+  return verb === 'apply-known' ? (byArg(target)?.path ?? target) : target;
+}
+
+/**
  * Verdict for one settings-edit invocation.
  *
  * `target` is a registry argument name for `apply-known` and a dotted config
@@ -98,21 +191,26 @@ const ALLOWED_PATTERNS: RegExp[] = [
  * It is deliberately NOT applied to a dotted target: an arg name that collides
  * with a real config key (`reflection` → `reflection.graduation_min_sessions`)
  * would otherwise let `set reflection <object>` be judged as its leaf and
- * defeat the ancestor rule below.
+ * defeat the ancestor rule.
  *
- * An allowed path is allowed only as an exact leaf write: writing a parent
- * (`channels.discord`, `channels`, `routines`) replaces every descendant,
- * protected ones included, so ancestors are never channel-writable.
+ * An `allowed` path is allowed only as an exact leaf write; a parent write
+ * falls through to the tier of whatever it would replace. Unknown and
+ * future keys land on `maintainer` — the operator's own chat, allowlist-checked
+ * and audited — rather than on the terminal, so adding a setting doesn't
+ * silently lock the unattended operator out of it. Only the enrollment root is
+ * enumerated as unreachable, because only it is unrecoverable.
  */
-export function channelVerdict(verb: string, target: string): 'allowed' | 'terminal-only' {
+export function channelVerdict(verb: string, target: string): Verdict {
   if (READ_VERBS.has(verb)) return 'allowed';
   if (!WRITE_VERBS.has(verb)) return 'terminal-only';
   if (!target) return 'terminal-only';
 
-  const dotted = verb === 'apply-known' ? (byArg(target)?.path ?? target) : target;
+  const dotted = resolveTarget(verb, target);
   if (ALLOWED_EXACT.has(dotted)) return 'allowed';
   if (ALLOWED_PATTERNS.some(rx => rx.test(dotted))) return 'allowed';
-  return 'terminal-only';
+  if (ENROLLMENT_ROOT.test(dotted) || ENROLLMENT_ANCESTOR.test(dotted)) return 'terminal-only';
+  if (NONCE_REQUIRED.test(dotted)) return 'nonce';
+  return 'maintainer';
 }
 
 /**
@@ -127,19 +225,23 @@ export function channelVerdict(verb: string, target: string): 'allowed' | 'termi
  * a channel-opened turn that delegates the settings write to a subagent would
  * resolve to that subagent's prompt and read as terminal-opened.
  */
-function turnIsChannelOpened(payload: any): { channel: boolean; determined: boolean } {
+function turnEnvelope(payload: any): { envelope: ChannelEnvelope | null; determined: boolean } {
   try {
     const tPath = transcriptPath(payload);
-    if (!tPath || !fs.existsSync(tPath)) return { channel: false, determined: false };
+    if (!tPath || !fs.existsSync(tPath)) return { envelope: null, determined: false };
 
     const { lines } = readTailLines(tPath, TAIL_BYTES);
     const mainLines = dropSidechainLines(lines);
     const prompt = turnPromptText(mainLines, mainLines.length);
-    if (!prompt.boundaryFound) return { channel: false, determined: false };
+    if (!prompt.boundaryFound) return { envelope: null, determined: false };
 
-    return { channel: parseChannelEnvelope(prompt.text) !== null, determined: true };
+    // Attributes come from the opening tag only (parseChannelEnvelope is
+    // start-anchored and truncates the body at the first `</channel>`), so a
+    // second `<channel chat_id="...">` pasted into a message body is inert and
+    // cannot shift which chat this turn appears to come from.
+    return { envelope: parseChannelEnvelope(prompt.text), determined: true };
   } catch {
-    return { channel: false, determined: false };
+    return { envelope: null, determined: false };
   }
 }
 
@@ -163,20 +265,50 @@ function targetsConfigFile(p: string): boolean {
  * permission_mode bypassPermissions`), and a leading safe write must not
  * launder a protected one behind it.
  */
-function protectedMutation(command: string): boolean | null {
-  if (/>\s*\S*\.claude-code-hermit\/config\.json/.test(command)) return true;
+function protectedMutation(command: string): { verdict: Verdict; target: string } | null {
+  // An opaque write of the whole file can replace the enrollment root, so it
+  // takes the strictest tier regardless of what it happens to contain.
+  if (/>\s*\S*\.claude-code-hermit\/config\.json/.test(command)) {
+    return { verdict: 'terminal-only', target: 'config.json' };
+  }
 
   const matches = [...command.matchAll(
-    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?/g
+    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+(\S+))?/g
   )];
   if (matches.length === 0) return null;
 
+  // Every distinct target tied at the worst tier survives into `target`, not
+  // just the first. At the nonce tier this string is what the confirmation
+  // token binds to, and one command can carry two nonce-tier writes
+  // (`set permission_mode ... && set env ...`) — binding to only the first
+  // would let the operator's confirmation of that one wave the other through
+  // unnamed and unconfirmed.
+  //
+  // The VALUE is part of the binding, not just the key: the deny reason is what
+  // the operator sees before echoing the code, so a token issued for
+  // `permission_mode=default` must not also apply `permission_mode=bypassPermissions`.
+  // Targets are sorted so a reordered retry of the same pair matches the
+  // outstanding token instead of superseding it.
+  const strip = (s: string | undefined) => (s ?? '').replace(/^['"]|['"]$/g, '');
+
+  let worst: Verdict = 'allowed';
+  let targets: string[] = [];
   for (const m of matches) {
     const verb = m[2];
-    const target = (m[3] ?? '').replace(/^['"]|['"]$/g, '');
-    if (channelVerdict(verb, target) === 'terminal-only') return true;
+    const t = strip(m[3]);
+    // `unset` and `toggle` take a path and nothing else, so the token after
+    // theirs belongs to the shell (a `&&`, a redirect), not to the setting.
+    const value = TAKES_VALUE.has(verb) ? strip(m[4]) : '';
+    const v = channelVerdict(verb, t);
+    const label = value ? `${resolveTarget(verb, t)}=${value}` : resolveTarget(verb, t);
+    if (STRICTNESS[v] > STRICTNESS[worst]) {
+      worst = v;
+      targets = [label];
+    } else if (v === worst && v !== 'allowed' && !targets.includes(label)) {
+      targets.push(label);
+    }
   }
-  return false;
+  return worst === 'allowed' ? null : { verdict: worst, target: targets.sort().join(', ') };
 }
 
 /**
@@ -185,12 +317,16 @@ function protectedMutation(command: string): boolean | null {
  * itself was too large to inspect, which is the shape an evasion takes.
  * Anywhere an operator is plausibly present, lean allow instead.
  */
+function deny(reason: string): never {
+  process.stderr.write(`${reason}\n`);
+  process.exit(2);
+}
+
 function denyIfManaged(diagnostic: string): void {
   if (process.env.HERMIT_MANAGED !== '1') return; // attended — lean allow
   const dir = hermitDir();
   if (!dir || !fs.existsSync(dir)) return;
-  process.stderr.write(`${DENY_REASON}\n(${diagnostic})\n`);
-  process.exit(2);
+  deny(`${DENY_TERMINAL_ONLY}\n(${diagnostic})`);
 }
 
 function main(payload: any): void {
@@ -201,22 +337,24 @@ function main(payload: any): void {
   // and Write, and almost none of them are settings mutations. Same
   // cheap-checks-first ordering as ask-gate.ts.
   const input = payload?.tool_input ?? {};
-  let isProtected: boolean | null = null;
+  let mutation: { verdict: Verdict; target: string } | null = null;
 
   if (tool === 'Bash') {
-    isProtected = protectedMutation(typeof input.command === 'string' ? input.command : '');
+    mutation = protectedMutation(typeof input.command === 'string' ? input.command : '');
   } else {
     const fp = typeof input.file_path === 'string' ? input.file_path : '';
-    isProtected = targetsConfigFile(fp) ? true : null;
+    // Edit/Write of config.json is opaque here — it can rewrite the enrollment
+    // root, so it takes the strictest tier.
+    mutation = targetsConfigFile(fp) ? { verdict: 'terminal-only', target: 'config.json' } : null;
   }
 
-  if (isProtected !== true) return; // not a protected mutation (or not a settings call at all)
+  if (!mutation) return; // not a protected mutation (or not a settings call at all)
 
   // Not a hermit project — this plugin's hooks fire everywhere it's loaded.
   const dir = hermitDir();
   if (!dir || !fs.existsSync(dir)) return;
 
-  const { channel, determined } = turnIsChannelOpened(payload);
+  const { envelope, determined } = turnEnvelope(payload);
 
   if (!determined) {
     // Couldn't tell. On the managed unattended session a protected mutation
@@ -225,10 +363,47 @@ function main(payload: any): void {
     return;
   }
 
-  if (!channel) return; // terminal-opened turn — the operator asked for this
+  if (!envelope) return; // terminal-opened turn — the operator asked for this
 
-  process.stderr.write(`${DENY_REASON}\n`);
-  process.exit(2);
+  if (mutation.verdict === 'terminal-only') deny(DENY_TERMINAL_ONLY);
+
+  const config = readConfigRaw(dir);
+  if (!isMaintainerController(config, envelope.source, envelope.userId, envelope.chatId)) {
+    deny(DENY_NEEDS_MAINTAINER);
+  }
+
+  if (mutation.verdict === 'maintainer') return; // the maintainer chat carries this tier
+
+  // Nonce tier: the maintainer chat asks, the operator confirms. A token is
+  // bound to one target and one chat, single-use, and matched only against the
+  // harness-written envelope body — never the model's own tool call.
+  const pending = readPending(dir);
+  const sameAsk =
+    pending?.target === mutation.target &&
+    pending?.sourceKey === envelope.sourceKey &&
+    pending?.chatId === envelope.chatId;
+
+  if (pending && sameAsk && bodyEchoesToken(envelope.body, pending.token)) {
+    clearPending(dir);
+    return; // confirmed
+  }
+
+  // Reuse an outstanding token for the same ask: a model retry must not
+  // invalidate the code the operator has already been sent. `created` is
+  // carried over rather than refreshed — the TTL is measured from the moment
+  // the code was first posted to the chat, so a model that retries every few
+  // minutes cannot keep a code the operator never echoed alive indefinitely.
+  const reused = pending && sameAsk ? pending : null;
+  const token = reused ? reused.token : newToken();
+  writePending(dir, {
+    token,
+    target: mutation.target,
+    sourceKey: envelope.sourceKey,
+    chatId: envelope.chatId,
+    userId: envelope.userId,
+    created: reused ? reused.created : Date.now(),
+  });
+  deny(denyNeedsNonce(mutation.target, token));
 }
 
 /**

@@ -93,11 +93,12 @@ export function persistDmChannelId(config: Json, channelKey: string, chatId: Jso
     return false;
   }
 
-  // The maintainer chat is an outbound-only second destination
-  // (docs/security.md § tiered disclosure) and must never be adopted as the
-  // primary bidirectional chat — default_chat_id binds operator trust in
-  // lib/channel-auth.ts isTrustedController. Replying into the maintainer
-  // chat must not re-learn it as the DM channel.
+  // The maintainer chat must never be adopted as the primary bidirectional
+  // chat — default_chat_id binds operator *control* authority in
+  // lib/channel-auth.ts isTrustedController, and the two tiers are kept on
+  // separate chats on purpose (the maintainer chat carries settings authority
+  // instead, via isMaintainerController). Replying into the maintainer chat
+  // must not re-learn it as the DM channel and collapse them into one.
   const maintainer = channel.maintainer_channel_id;
   if (maintainer != null && String(maintainer) === id) {
     process.stderr.write(
