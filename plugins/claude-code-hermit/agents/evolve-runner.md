@@ -57,7 +57,9 @@ never block:
 - **Version bump (step 9):** run `evolve-finalize.ts` and parse its stdout JSON. Use `core.confirmed` as
   `vNEW` in the report — NOT `plan.to`. If the script exits non-zero, `core.matched` is false, or `errors`
   is non-empty, return `Upgrade: blocked: config version bump failed — <joined error messages>` and omit
-  the rest of the report. Copy the finalizer's `audit_scope` into the report's `Audit scope:` line —
+  the rest of the report **except the `Context reload:` line** — steps 6/7 may already have rewritten
+  project instructions on disk, and a blocked version bump does not undo those writes.
+  Copy the finalizer's `audit_scope` into the report's `Audit scope:` line —
   `version-only` is not a failure and never blocks.
 
 Everything else (version gates 0/0b, the plan pre-pass, classification, copies, manifest write, config
@@ -77,6 +79,7 @@ Bin wrappers: <restored/replaced(.bak) | none>
 Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | n/a>
 Docker rebuild: <needed + order | base-patched | no>
 CLAUDE-APPEND: <updated | unchanged>
+Context reload: <required (comma-separated plugin names) | no>
 Sibling hermits: <one or more of the following per sibling, space-separated, or "none">
   <name vOLD->vNEW>           (confirmed by finalizer — only from siblings_confirmed)
   <name current>              (no version gap)

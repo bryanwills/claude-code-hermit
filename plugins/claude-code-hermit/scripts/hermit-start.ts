@@ -87,7 +87,7 @@ const DEFAULT_CONFIG: Json = {
   },
   heartbeat: {
     enabled: true,
-    every: '2h',
+    every: '30m',
     active_hours: {
       start: '08:00',
       end: '23:00',

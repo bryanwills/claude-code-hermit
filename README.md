@@ -160,7 +160,7 @@ Tune via `/hermit-settings` (or just by asking the hermit). Some of the settings
 | `artifacts` | dashboard / proposals / weekly review — **all enabled** |
 | `idle_behavior` | **`discover`** (proactive) / `wait` (passive) |
 | `heartbeat.enabled` | timed idle sweeps — **`true`** |
-| `heartbeat.every` | idle sweep cadence — **`2h`** |
+| `heartbeat.every` | idle sweep cadence — **`30m`** |
 | `active_hours` | active window — **`08:00`–`23:00`** |
 | `heartbeat.stale_threshold` | alert if no progress for — **`2h`** |
 | `heartbeat.waiting_timeout` | auto `waiting`→`idle` after — **`null`** (off) |
@@ -191,7 +191,7 @@ All live-editable with `/hermit-settings` (or just ask the hermit) — no reboot
 
 - **Model & Auto mode.** Defaults to Sonnet — a good balance of reasoning and cost for an unattended session. Auto mode is generally available to all users across subscription plans and API usage; supported models and provider configuration can still vary, so if Claude reports the current selection unavailable, choose a supported model or another permission mode. Switch to `opus` for heavier reasoning; per-routine `model: "haiku"` remains useful for lightweight, isolated work.
 
-- **Heartbeat.** `heartbeat.every` sets the idle sweep (default `2h`; `1h` tighter, `4h`+ fewer wakes); `active_hours` bounds the window (`08:00`–`23:00`). `heartbeat.enabled: false` stops timed wakes entirely — channels and routines still fire.
+- **Heartbeat.** `heartbeat.every` sets the idle sweep (default `30m`; `2h`+ for slower pickup). Quiet polls cost nothing at any cadence, so this mostly controls how fast structured checks (proposals, budget, stale sessions) are picked up. `active_hours` bounds the window (`08:00`–`23:00`). `heartbeat.enabled: false` stops timed wakes entirely — channels and routines still fire.
 
 - **Idle behavior.** `discover` (default) adds a priority-alignment pass against `OPERATOR.md` + cost log; `wait` is passive (tasks/channels only). Either way the daily `reflect` routine still runs — `wait` only silences between-schedule discovery, not the learning loop.
 

@@ -202,7 +202,8 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 - If yes: show the configurable sub-fields before asking each one:
   ```
   Watchdog sub-fields (press Enter to keep current value):
-    stale_factor           — missed-cycle tolerance multiplier (e.g. 2)                   [current]
+    stale_factor           — missed-cycle tolerance multiplier (e.g. 2); effective
+                             threshold is max(stale_factor × heartbeat.every, 4h)         [current]
     escalate_after         — consecutive stale cycles before escalation (e.g. 3)          [current]
     operator_grace         — silence window before alert fires (e.g. 15m, 1h)             [current]
     context_clear_tokens   — emergency /clear when prompt tokens exceed this (e.g. 700000, 0=off) [current]

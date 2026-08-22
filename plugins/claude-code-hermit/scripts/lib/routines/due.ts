@@ -270,9 +270,10 @@ if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
   // An open operator turn suppresses the drain even when the 10-min lull has
   // passed: someone who typed 11 minutes ago and is now watching a long agent
   // turn is present, and closing under them at 60s granularity would destroy
-  // in-flight work. The heartbeat drainer does not check this — its 2h cadence
-  // made the window negligible — so the divergence is deliberate and lives here
-  // at the call site rather than inside the shared predicate.
+  // in-flight work. The heartbeat drainer does not check this — the divergence is
+  // deliberate and lives here at the call site rather than inside the shared
+  // predicate. That poll's window scales with heartbeat.every, so a shorter
+  // interval lands on an open operator turn more often.
   if (configured && !operatorTurnOpen && drainCooldownExpired()) {
     // Write-before-emit, mirroring the persist-before-emit contract above: if the
     // cooldown stamp fails we must not emit, or a read-only state dir turns a

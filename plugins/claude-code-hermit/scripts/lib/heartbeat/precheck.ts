@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { currentHHMM, todayYMD, parseDuration } from '../time';
 import { readSettledConfig } from '../config-read';
-import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts } from '../alert-state';
+import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts, MICRO_PREFIX } from '../alert-state';
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
 import { isProposalScanItem } from '../heartbeat-items';
 import { isPaused } from '../pause';
@@ -144,6 +144,31 @@ function resolveProposalScanItem(dir: string, alertMap: Json): 'clean' | 'evalua
   return 'clean';
 }
 
+// Same shape as resolveProposalScanItem, for the micro-approval queue. A pending
+// tier-1 micro-proposal is a structured alert key (MICRO_PREFIX), derived by
+// deriveMicroPendingKeys and aged through the same suppress-after-5-fires ladder on
+// every EVALUATE tick — this scan is what reads that ladder back. Without it the gate
+// fired on raw micro-proposals.json forever, so an unanswered operator question (the
+// channel-bridged ask path forces tier 1) turned every poll into a paid full-context
+// wake for as long as it went unanswered. Bypassing clean_recheck_cooldown is still
+// correct — a pending decision is not "clean" — but bypassing it is not a licence to
+// fire indefinitely; once suppressed, the once-daily digest gate keeps surfacing it.
+// Read-only — writes nothing, so it is identical under --peek.
+function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evaluate' {
+  const micro = readJSON(path.join(dir, 'state', 'micro-proposals.json')) ?? { pending: [] };
+  const pending = Array.isArray(micro.pending)
+    ? micro.pending.filter((p: Json) => p && p.status === 'pending' && p.tier === 1)
+    : [];
+  for (const p of pending) {
+    // deriveMicroPendingKeys skips a non-string id, so no alert key exists to suppress
+    // against — fail open rather than let a malformed entry read as damped.
+    if (typeof p.id !== 'string') return 'evaluate';
+    const entry = alertMap[`${MICRO_PREFIX}${p.id}`];
+    if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) return 'evaluate';
+  }
+  return 'clean';
+}
+
 // Resolve "now" once: real wall-clock, overridable by HERMIT_NOW for deterministic
 // tests. Shared by the pending-close drain and the in_progress 12h check below.
 let now = Date.now();
@@ -236,10 +261,7 @@ if (!peek) {
 // peek fires one tick early; the subsequent mutating call lands on the multiple-of-20
 if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20 === 0) emit('EVALUATE');
 
-const microProposals = readJSON(path.join(stateDir, 'state', 'micro-proposals.json')) ?? { pending: [] };
-const hasPendingMicro = Array.isArray(microProposals.pending) &&
-  microProposals.pending.some((p: Json) => p.status === 'pending' && p.tier === 1);
-if (hasPendingMicro) emit('EVALUATE');
+if (resolveMicroPendingScan(stateDir, alertState.alerts ?? {}) === 'evaluate') emit('EVALUATE');
 
 // PROP-016: an un-notified budget alert (cost-tracker.ts writes these directly,
 // bypassing the LLM-owned suppressed/digest dance the generic checklist alerts use)

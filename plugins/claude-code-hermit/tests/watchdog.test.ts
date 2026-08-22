@@ -70,11 +70,11 @@ function setupHermit(): Hermit {
   };
 }
 
-function writeConfig(h: Hermit): void {
+function writeConfig(h: Hermit, every = '2h'): void {
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
     watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' },
     heartbeat: {
-      enabled: true, every: '2h',
+      enabled: true, every,
       active_hours: { start: '00:00', end: '23:59' },
       stale_threshold: '2h',
     },
@@ -788,6 +788,59 @@ test('stale dialog scrollback + stale heartbeat → normal nudge recovery contin
   expect(events).not.toContain('stall-question-detected');
   expect(events).toContain('nudge');
   expect(fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')).toContain('send-keys');
+}));
+
+// -------------------------------------------------------
+// 4b. Wedge threshold floor (WEDGE_FLOOR_SECS)
+// -------------------------------------------------------
+
+test('floor: every 30m + 1h-stale heartbeat → no nudge (threshold floored to 4h)', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 3600); // 1h — past 30m*2, inside the 4h floor
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '').not.toContain('nudge');
+}));
+
+test('floor: every 30m + 3h59m-stale heartbeat → no nudge (just inside the floor)', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 4 * 3600 - 60);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '').not.toContain('nudge');
+}));
+
+test('floor: every 30m + 5h-stale heartbeat → nudge (past the 4h floor)', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge');
+}));
+
+// Floor is a lower bound, not a replacement: a long interval still widens the threshold.
+test('floor inactive: every 4h + 5h-stale heartbeat → no nudge (8h product wins)', withHermit(async (h) => {
+  writeConfig(h, '4h');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '').not.toContain('nudge');
 }));
 
 // -------------------------------------------------------
