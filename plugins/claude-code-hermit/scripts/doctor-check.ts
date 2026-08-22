@@ -274,7 +274,11 @@ function checkProposals(p: DoctorPaths = PATHS) {
     let stale = 0;
     for (const f of files) {
       const fm = readFrontmatter(f);
-      if (!fm || fm.status !== 'open') continue;
+      // `proposed` is the awaiting-review status; `open` was never in the vocabulary
+      // (proposed|accepted|resolved|dismissed|deferred — see lib/artifact-theme.ts's
+      // CHIP_STATUSES), so this check silently counted zero and both warns below
+      // were unreachable.
+      if (!fm || fm.status !== 'proposed') continue;
       open++;
       if (fm.created) {
         const age = now - new Date(fm.created).getTime();

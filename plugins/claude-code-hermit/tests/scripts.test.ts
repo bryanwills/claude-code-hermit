@@ -956,6 +956,31 @@ describe('update-alert-state', () => {
     expect(alerting.last_clean_eval_at).toBeNull();
   }));
 
+  // Issue #783: a proposal awaiting review re-derives its `proposal-pending:*` key
+  // on every tick, so `firing` was never empty and last_clean_eval_at was never
+  // stamped — precheck's clean-recheck damper could never arm and every poll
+  // promoted to a full paid EVALUATE for as long as the proposal sat unreviewed
+  // (observed live: one key at 227 ticks since July). An already-suppressed key is
+  // bookkeeping, not news: it must not disarm the damper.
+  test('update-alert-state (#783: a tick firing only already-suppressed keys is clean — stamps last_clean_eval_at, reports OK)', withDir(async (dir) => {
+    fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
+    const pending: Array<[string, string, number]> = [['025', 'Retry queue', 227], ['030', 'Cost index', 82], ['032', 'Digest gate', 35]];
+    const alerts: Record<string, unknown> = {};
+    for (const [n, title, count] of pending) {
+      write(hermit(dir, 'proposals', `PROP-${n}-slug-120000.md`), `---\nid: PROP-${n}\nstatus: proposed\ntitle: ${title}\n---\nbody\n`);
+      alerts[`proposal-pending:PROP-${n}`] = { count, consecutive_clean: 0, suppressed: true, first_seen: '2026-07-01', last_seen: '2026-07-09', text: `PROP-${n} "${title}"` };
+    }
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts, self_eval: {}, total_ticks: 345, last_clean_eval_at: null, last_digest_date: '2026-07-10', // digest already sent today
+    }));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([])); // model reports nothing new
+    expect(stdout.heartbeat_result).toBe('OK');
+    expect(state.last_clean_eval_at).toBe(NOW);
+    expect(stdout.notifications).toEqual([]);
+    // Still tracked, still suppressed, still counting — only the damper verdict changed.
+    expect(state.alerts['proposal-pending:PROP-025']).toMatchObject({ count: 228, suppressed: true, consecutive_clean: 0 });
+  }));
+
   test('update-alert-state (total_ticks, last_stale_wake_at, last_digest_date preserved absent a digest event)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{},"self_eval":{},"total_ticks":42,"last_stale_wake_at":"2026-06-21T20:00:00.000Z","last_digest_date":"2026-06-21","last_clean_eval_at":null}');
