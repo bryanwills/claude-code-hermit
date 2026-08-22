@@ -2859,7 +2859,7 @@ describe('reflect-precheck', () => {
 
 describe('routines.ts log-event', () => {
 
-  // Empirically confirmed (bun 1.3.14): describe.serial does not reliably
+  // Empirically confirmed (bun 1.3.14 & 1.4.0): describe.serial does not reliably
   // force sequential execution of its own child tests under --concurrent —
   // only per-test .serial marking does. So each test below is marked individually.
   describe('hermit root resolution', () => {

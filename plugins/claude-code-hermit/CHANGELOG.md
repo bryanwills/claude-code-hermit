@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Docker images now install Bun 1.4.0 (was 1.3.11), picking up its Rust rewrite's faster startup and lower idle CPU and memory. Existing hermits need a `Dockerfile.hermit` patch and a rebuild — see Upgrade Instructions.
+
+### Upgrade Instructions
+
+**Docker runtime bump to Bun 1.4.0.** Existing hermits with a deployed `Dockerfile.hermit` need a surgical `ARG BUN_VERSION` patch and a rebuild. Non-Docker hermits: nothing to do — their bun comes from the host, and `required_bun_version` is unchanged at `>=1.3.0`, so no host upgrade is forced.
+
+**Step 1 — Existence / idempotency.** Check for `Dockerfile.hermit` at the project root. If it does not exist, skip to Step 4 (Docker not set up). If it already contains `ARG BUN_VERSION=1.4.0`, skip to Step 3 (already patched; still re-record the baseline so the drift detector clears).
+
+**Step 2 — Surgical patch.** Replace the single line matching `^ARG BUN_VERSION=` in `Dockerfile.hermit` with `ARG BUN_VERSION=1.4.0`. Match on the key, not on the old value — deploys exist on several past pins. If no such line is present (operator restructured how bun is installed), this is a genuine either/or with no safe non-destructive default: record a deferred-migration block with the instruction "manually set bun to 1.4.0 in `Dockerfile.hermit`, then rebuild", skip this patch, and **continue the remaining evolve steps** (do not abort).
+
+**Step 3 — Re-record the template baseline** so `classifyDockerTemplates` clears the drift and won't nag on future evolves. Run:
+
+```
+bun -e '
+  const fs=require("node:fs"), c=require("node:crypto");
+  const [tmpl, ver]=process.argv.slice(2);
+  const mp=".claude-code-hermit/state/template-manifest.json";
+  if(!fs.existsSync(mp)) process.exit(0);
+  const m=JSON.parse(fs.readFileSync(mp,"utf8")); m.files ??= {};
+  const h=c.createHash("sha256").update(fs.readFileSync(tmpl)).digest("hex");
+  m.files["docker/Dockerfile.hermit.template"]={sha256:h, plugin_version:ver};
+  fs.writeFileSync(mp, JSON.stringify(m,null,2)+"\n");
+' "${CLAUDE_PLUGIN_ROOT}/state-templates/docker/Dockerfile.hermit.template" "<to>"
+```
+
+(`<to>` is the plan's `to` version string, available from the pre-pass result.)
+
+If `.claude-code-hermit/state/template-manifest.json` does not exist, skip this step — drift was `unknown` and the patch alone is sufficient (docker-setup was never run, so there is no baseline to update).
+
+**Step 4 — Report.** Set the report's `Docker rebuild` field to `base-patched`. Step 10 will emit a rebuild-only notice and suppress the generic "re-run /docker-setup" drift bullet for `Dockerfile.hermit`.
+
+No `config.json` changes required.
+
 ## [1.2.44] - 2026-08-22
 
 ### Added

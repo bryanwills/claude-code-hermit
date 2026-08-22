@@ -151,7 +151,7 @@ describe('cost-tracker', () => {
 // freezes its CWD-relative state paths (.status.json etc.) at import time. So we
 // chdir into ONE shared workdir for the first (and only) import, restore CWD, and
 // both cases rewrite .status.json inside that same frozen workdir.
-// Empirically confirmed (bun 1.3.14): describe.serial does not reliably force
+// Empirically confirmed (bun 1.3.14 & 1.4.0): describe.serial does not reliably force
 // sequential execution under --concurrent — per-test .serial marking does,
 // and also keeps this describe's beforeAll (which does a real process.chdir)
 // out of the concurrent pool.
