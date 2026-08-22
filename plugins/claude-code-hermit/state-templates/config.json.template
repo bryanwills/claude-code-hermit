@@ -71,6 +71,7 @@
   "watchdog": {
     "enabled": false,
     "stale_factor": 2,
+    "wedge_floor": "4h",
     "escalate_after": 3,
     "operator_grace": "15m",
     "context_clear_tokens": 700000

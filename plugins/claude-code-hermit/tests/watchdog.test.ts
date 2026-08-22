@@ -70,9 +70,9 @@ function setupHermit(): Hermit {
   };
 }
 
-function writeConfig(h: Hermit, every = '2h'): void {
+function writeConfig(h: Hermit, every = '2h', watchdogExtra: Record<string, unknown> = {}): void {
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
-    watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' },
+    watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m', ...watchdogExtra },
     heartbeat: {
       enabled: true, every,
       active_hours: { start: '00:00', end: '23:59' },
@@ -791,7 +791,7 @@ test('stale dialog scrollback + stale heartbeat → normal nudge recovery contin
 }));
 
 // -------------------------------------------------------
-// 4b. Wedge threshold floor (WEDGE_FLOOR_SECS)
+// 4b. Wedge threshold floor (watchdog.wedge_floor / WEDGE_FLOOR_DEFAULT)
 // -------------------------------------------------------
 
 test('floor: every 30m + 1h-stale heartbeat → no nudge (threshold floored to 4h)', withHermit(async (h) => {
@@ -841,6 +841,20 @@ test('floor inactive: every 4h + 5h-stale heartbeat → no nudge (8h product win
 
   expect(r.exitCode).toBe(0);
   expect(fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '').not.toContain('nudge');
+}));
+
+// The floor is operator policy, not a constant: an install that tightened heartbeat.every
+// can tighten the wedge threshold back down with it. Without wedge_floor this config waits 4h.
+test('wedge_floor override: every 15m + 1h-stale heartbeat → nudge (floor lowered to 30m)', withHermit(async (h) => {
+  writeConfig(h, '15m', { wedge_floor: '30m' });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge');
 }));
 
 // -------------------------------------------------------
