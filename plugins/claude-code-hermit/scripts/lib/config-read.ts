@@ -72,6 +72,7 @@ const TABLE: Record<string, Spec> = {
   chrome: bool(false),
   push_notifications: bool(true),
   ask_gate: bool(true),
+  settings_from_chat: bool(true),
   idle_behavior: str('discover'),
   routines: arr,
   monitors: arr,

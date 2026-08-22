@@ -87,8 +87,10 @@ export function isTrustedController(
  * materially stronger signal than the envelope's identity attributes alone.
  *
  * Deliberately NOT an isTrustedController fallback chain: with no
- * maintainer_channel_id configured this returns false and the tier stays
- * terminal-only, so the privilege exists only where an operator opted into it.
+ * maintainer_channel_id configured this returns false, and it stays exactly
+ * that strict. The fallback for installs that never configured one lives in
+ * isSettingsController below — which is what the gate calls — so every caller
+ * wanting the strict reading of "is this the maintainer chat" still gets it.
  *
  * Caveat, sharper here than on isTrustedController: `isAllowedSender` accepts
  * all senders when no `allowed_users` is configured, so on a no-allowlist
@@ -108,4 +110,58 @@ export function isMaintainerController(
   const maintainer = channelEntry(config, source)?.maintainer_channel_id;
   if (!maintainer || !chatId || String(maintainer) !== String(chatId)) return false;
   return isAllowedSender(config, source, userId);
+}
+
+/**
+ * Settings authority for one inbound turn — what channel-settings-gate.ts asks.
+ * Either of two things grants it:
+ *
+ *   1. the chat IS the configured maintainer chat (isMaintainerController), or
+ *   2. no maintainer chat is configured and this is an operator-run install, in
+ *      which case the hermit's own pinned home chat carries the tier.
+ *
+ * The fallback exists because `maintainer_channel_id` is an outbound-routing
+ * field for client-facing installs: the ordinary operator-run hermit never sets
+ * it, which left the whole security tier unreachable on exactly the unattended
+ * installs whose operator lives on a channel rather than at a shell.
+ *
+ * It is gated on `operator_profile` because that is where the config already
+ * records who is on the other end — `technical` means the person on the chat
+ * runs the box, `non-technical` means a client does, and on a client install
+ * the home chat is the client's, so the fallback must not apply there. That
+ * makes `operator_profile` an authority input, which is why the gate holds it
+ * terminal-only alongside the enrollment root: a chat that could flip its own
+ * install to `technical` would grant itself this tier.
+ *
+ * A configured maintainer chat turns the fallback OFF rather than widening it.
+ * An operator who named a settings chat meant that one — not that one plus the
+ * home chat — and the narrower reading is the one they can predict.
+ *
+ * The `settings_from_chat: false` opt-out is enforced by the gate, not here:
+ * this answers "is this chat the authority", the gate answers "may any chat
+ * hold it at all".
+ *
+ * Caveat worth stating, because the fallback inherits it wholesale: when
+ * `allowed_users` IS configured, isTrustedController defers to the allowlist and
+ * stops consulting the chat id at all. So on such an install the fallback grants
+ * this tier — nonce round trip included — to any allowlisted user from any chat
+ * the hermit can be reached in, not only from the pinned home. `allowed_users`
+ * is a reachability list, so an operator who allowlists a teammate to let them
+ * ask the hermit questions has also handed them settings authority; name only
+ * the people who should hold it, or point `maintainer_channel_id` at the chat
+ * that should. (Documented in docs/security.md.)
+ */
+export function isSettingsController(
+  config: Json, source: string, userId: string | null, chatId: string | null,
+): boolean {
+  // Truthiness, matching isMaintainerController's own guard exactly — an empty
+  // string is not a configured maintainer chat, and the two must not disagree
+  // about that or a `""` would deny both tiers at once.
+  if (channelEntry(config, source)?.maintainer_channel_id) {
+    return isMaintainerController(config, source, userId, chatId);
+  }
+  // `??` covers an absent key; the explicit !== 'technical' covers a null or a
+  // future profile value — anything but a known operator-run install declines.
+  if ((config?.operator_profile ?? 'technical') !== 'technical') return false;
+  return isTrustedController(config, source, userId, chatId);
 }
