@@ -920,10 +920,27 @@ describe('daily-auto-close lull + pending-close drain', () => {
     expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
   }));
 
+  // drain.25. The mirror of drain.24: 29 min is still inside the capped-at-30 window.
   test('drain: every=12h + cooldown stamped 29 min ago → does NOT emit AUTO_CLOSE', withTmp(async (dir) => {
     drainDueEvery(dir, '12h');
     writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:16:00+00:00"}');
     expect(await precheck(dir, { now: NOW })).not.toBe('AUTO_CLOSE');
+  }));
+
+  // drain.26. Below 30m the flat backoff already clears within a tick or two, so
+  // halving would only shorten it — a tightened `every` must not turn a failing
+  // close into a wake every few minutes.
+  test('drain: every=5m + cooldown stamped 20 min ago → does NOT emit AUTO_CLOSE (floor)', withTmp(async (dir) => {
+    drainDueEvery(dir, '5m');
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:25:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).not.toBe('AUTO_CLOSE');
+  }));
+
+  // drain.27. ...and it still retries once that flat backoff expires.
+  test('drain: every=5m + cooldown stamped 45 min ago → AUTO_CLOSE', withTmp(async (dir) => {
+    drainDueEvery(dir, '5m');
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:00:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
   }));
 });
 

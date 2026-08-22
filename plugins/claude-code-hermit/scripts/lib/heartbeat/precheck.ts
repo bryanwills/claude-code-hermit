@@ -215,11 +215,20 @@ if (process.env.HERMIT_NOW) {
 // it. Config is read live here while the monitor baked its interval in at launch, so
 // an `every` edited mid-session can diverge from the real poll cadence until the
 // monitor restarts — bounded, self-healing, and never worse than the old behavior.
+//
+// Below a 30-min interval the shipped flat cooldown already expires within a tick or
+// two, so there is nothing to fix and halving would only shorten the backoff: an
+// `every` of 5m would re-wake a failing close every 5 min instead of every ~35. A
+// suppressed tick costs nothing (the peek never wakes the model), so short intervals
+// keep the flat 30. Also absorbs `every: "0m"`, which would otherwise disable the gate.
 const everyMin = parseDuration(hbConfig.every, 30 * 60_000) / 60_000;
+const drainCooldownMin = everyMin < PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
+  ? PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
+  : Math.min(PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES, everyMin / 2);
 if (
   pendingCloseDrainDue(stateDir, now) &&
   !operatorTurnOpen(stateDir, now) &&
-  drainCooldownExpired(stateDir, now, Math.min(PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES, everyMin / 2))
+  drainCooldownExpired(stateDir, now, drainCooldownMin)
 ) {
   if (peek || stampDrainCooldown(stateDir, now)) emit('AUTO_CLOSE');
 }
