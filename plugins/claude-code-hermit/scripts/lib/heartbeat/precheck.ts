@@ -5,7 +5,8 @@
 // With --peek: read-only — computes the same verdict without any state mutation.
 //
 // Owner contract (write-field split with SKILL.md):
-//   This script owns: alert-state.json total_ticks, last_stale_wake_at, last_micro_corrupt_wake_at
+//   This script owns: alert-state.json total_ticks, last_stale_wake_at, last_micro_corrupt_wake_at;
+//                     pending-close-drain.json (shared with lib/routines/due.ts, non-peek only)
 //   SKILL.md owns:    alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at,
 //                     structured_read_failure_notified_date (written by `heartbeat.ts alert-state`)
 
@@ -20,7 +21,7 @@ import { isPaused } from '../pause';
 import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
-import { pendingCloseDrainDue } from '../auto-close';
+import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown } from '../auto-close';
 
 type Json = any;
 
@@ -192,7 +193,20 @@ if (process.env.HERMIT_NOW) {
 // The verdict itself lives in lib/auto-close.ts so the routine poll (lib/routines/
 // due.ts) drains on the same terms — this tick is not the only drainer, and is
 // absent entirely when heartbeat.enabled is false.
-if (pendingCloseDrainDue(stateDir, now)) emit('AUTO_CLOSE');
+//
+// Both guards are shared with that poll. The lull inside pendingCloseDrainDue ages
+// from prompt submission, so an operator watching a long agent turn reads as away
+// while still present — the turn marker is what catches that. The cooldown bounds a
+// close that never completes: without it every tick re-emits, and each emission is a
+// paid full-context wake. Under --peek the verdict is computed but not stamped, so a
+// peek never consumes the cooldown the real tick needs.
+if (
+  pendingCloseDrainDue(stateDir, now) &&
+  !operatorTurnOpen(stateDir, now) &&
+  drainCooldownExpired(stateDir, now)
+) {
+  if (peek || stampDrainCooldown(stateDir, now)) emit('AUTO_CLOSE');
+}
 
 let heartbeatContent: string;
 try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }

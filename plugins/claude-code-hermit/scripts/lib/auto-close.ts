@@ -10,9 +10,13 @@
 // harmless because session-close --scheduled re-derives the decision from live
 // state via auto-close-decision. The drain is a nudge, never an authority.
 //
-// Reads only — no writes, no module-level state. Safe to import from CLI scripts.
+// No module-level state; safe to import from CLI scripts. Reads only, with one
+// sanctioned write: `stampDrainCooldown` persists the drain backoff marker, which
+// both drainers must record before emitting.
+import fs from 'node:fs';
 import path from 'node:path';
 import { readJson as readJSON } from './cli';
+import { writeFileAtomic } from './md-write';
 
 export const AUTO_CLOSE_LULL_MINUTES = 10;
 export const AUTO_CLOSE_LULL_MS = AUTO_CLOSE_LULL_MINUTES * 60_000;
@@ -24,6 +28,61 @@ export const AUTO_CLOSE_LULL_MS = AUTO_CLOSE_LULL_MINUTES * 60_000;
 // and each emission dispatches a model wake, so a close that keeps failing must
 // not retry every 60 seconds.
 export const PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES = 30;
+
+// Backstop for a turn marker orphaned by a Stop hook that never ran. Long enough
+// that a real turn is never cut short, short enough that a crashed session cannot
+// strand a queued close indefinitely.
+export const TURN_OPEN_TTL_MS = 60 * 60 * 1000;
+
+// Backoff marker for the pending-close drain. Deliberately its own file and NOT a
+// key inside pending-close.json: that file today has exactly one atomic writer and
+// one deleter with singleton semantics, so adding attempt metadata would introduce
+// the first read-modify-write on it — and a delete landing inside that window would
+// resurrect a flag session-archive.ts had just cleared, which can auto-close a
+// freshly-started session. A separate file only ever suppresses, so its worst
+// failure is one delayed drain, and cooldown expiry self-heals.
+const drainMarkerPath = (hermitDir: string) =>
+  path.join(hermitDir, 'state', 'pending-close-drain.json');
+
+// A live operator exchange is open: the marker is written by record-operator-action.ts
+// on kept operator prompts and cleared by stop-pipeline.ts at Stop. This is NOT the
+// 10-min lull — that one ages from prompt submission, so an operator watching a long
+// agent turn goes quiet while still present. Absent, malformed, stale, or future-dated
+// (clock skew) all read as no-open-turn. Fail-open: a broken marker must never starve
+// the drain or the routine poll.
+export function operatorTurnOpen(hermitDir: string, nowMs: number): boolean {
+  const marker = readJSON(path.join(hermitDir, 'state', 'operator-turn-open.json'));
+  const at = marker && typeof marker.at === 'string' ? new Date(marker.at).getTime() : NaN;
+  const age = nowMs - at;
+  return age >= 0 && age <= TURN_OPEN_TTL_MS; // NaN fails both
+}
+
+// True when no drain has been emitted recently. Absent/malformed/future-dated all
+// read as expired (fail-open) — a broken marker must never strand a queued close.
+// The marker is shared by both drainers on purpose: the cooldown means "don't re-wake
+// for this close too soon", not "don't re-wake via this specific poller".
+export function drainCooldownExpired(hermitDir: string, nowMs: number): boolean {
+  const marker = readJSON(drainMarkerPath(hermitDir));
+  const at = marker && typeof marker.last_emitted_at === 'string'
+    ? new Date(marker.last_emitted_at).getTime() : NaN;
+  if (isNaN(at)) return true;
+  const ageMin = (nowMs - at) / 60_000;
+  return ageMin < 0 || ageMin > PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES;
+}
+
+// Records a drain emission. Callers stamp BEFORE emitting: if the write fails the
+// emission must be suppressed, or a read-only state dir turns a failing close into a
+// wake every poll. Returns whether the marker landed.
+export function stampDrainCooldown(hermitDir: string, nowMs: number): boolean {
+  const p = drainMarkerPath(hermitDir);
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    writeFileAtomic(p, JSON.stringify({ last_emitted_at: new Date(nowMs).toISOString() }, null, 2) + '\n');
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // True when a queued midnight close is ready to drain. Lifted verbatim from the
 // heartbeat precheck block so both callers share one verdict; the caller decides
