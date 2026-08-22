@@ -279,13 +279,23 @@ export function classifyTick(opts: {
     lastDigestDate = today;
   }
 
+  // "Clean" means nothing ACTIONABLE fired, not nothing fired (#783). A key whose
+  // previous entry was already suppressed re-fires on every tick for as long as its
+  // source-of-truth says so (a proposal sitting at `status: proposed` re-derives its
+  // key forever) — that is bookkeeping the operator has already been told about, and
+  // counting it as un-clean starved last_clean_eval_at, leaving precheck's
+  // clean-recheck damper permanently disarmed: every poll became a paid EVALUATE.
+  // A brand-new key, an unsuppressed repeat, and the count===6 suppression
+  // transition all still read as actionable (prev entry absent or unsuppressed).
+  const isClean = firing.every(f => prevAlerts[f.key]?.suppressed === true);
+
   return {
     alerts,
     monitoringLines,
     notifications,
-    lastCleanEvalAt: firing.length === 0 ? nowIso : null,
+    lastCleanEvalAt: isClean ? nowIso : null,
     lastDigestDate,
-    heartbeatResult: firing.length === 0 ? 'OK' : 'ALERT',
+    heartbeatResult: isClean ? 'OK' : 'ALERT',
   };
 }
 
