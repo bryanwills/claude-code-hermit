@@ -673,11 +673,12 @@ const MONITOR_STARTUP_GRACE_SECS = 120;
 // blocked outright (seccomp / nested-userns), an undamped liveness-keyed re-arm would
 // re-inject every tick forever — each injection a paid full-context wake.
 export const MONITOR_REARM_DAMPER_SECS = 6 * 3600;
-// Lower bound on the wedge threshold (step 4), independent of heartbeat.every. The nudge
-// is an end-to-end liveness probe and each one is a paid full-context wake, so its cadence
-// is a recovery policy, not a function of the poll interval — without this floor a short
-// heartbeat interval would inflate the probe rate well past what quiet-arc recovery needs.
-export const WEDGE_FLOOR_SECS = 4 * 3600;
+// Default lower bound on the wedge threshold (step 4), independent of heartbeat.every. The
+// nudge is an end-to-end liveness probe and each one is a paid full-context wake, so its
+// cadence is a recovery policy, not a function of the poll interval. Operator-settable via
+// `watchdog.wedge_floor`: an install that deliberately tightened heartbeat.every keeps its
+// own recovery SLA, and "0s" restores the plain stale_factor × every product.
+export const WEDGE_FLOOR_DEFAULT = '4h';
 
 /**
  * True when a monitor that should be ticking has a liveness timestamp stale past
@@ -1530,7 +1531,8 @@ async function main(): Promise<void> {
     const activeHoursIsObj = activeHours && typeof activeHours === 'object' && !Array.isArray(activeHours);
     if (!activeHoursIsObj || inActiveHours(activeHours, config.timezone ?? 'UTC')) {
       const heartbeatEverySecs = parseDuration(heartbeatCfg.every ?? '30m');
-      const staleThresholdSecs = Math.max(heartbeatEverySecs * staleFactor, WEDGE_FLOOR_SECS);
+      const wedgeFloorSecs = parseDuration(watchdogCfg.wedge_floor ?? WEDGE_FLOOR_DEFAULT);
+      const staleThresholdSecs = Math.max(heartbeatEverySecs * staleFactor, wedgeFloorSecs);
 
       const heartbeatAge = getFileAgeSecs(HEARTBEAT_FILE);
       if (heartbeatAge !== null) {
