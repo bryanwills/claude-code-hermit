@@ -41,6 +41,7 @@ import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
 import { channelStateDirKey } from './lib/channel-config';
 import { HERMIT_OUTPUT_STYLE } from './lib/voice';
+import { SEALED_SETTINGS_OPS } from './lib/settings/automode-entries';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -385,7 +386,7 @@ switch (op) {
   }
 
   default: {
-    console.error(`Unknown operation: ${op}. Valid ops: task-id, allow, permissions-plan, permissions-sync, artifact-allow, output-style, automode-seed, deny, channel-env`);
+    console.error(`Unknown operation: ${op}. Valid ops: ${SEALED_SETTINGS_OPS.join(', ')}`);
     process.exit(1);
   }
 }

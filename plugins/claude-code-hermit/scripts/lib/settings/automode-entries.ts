@@ -12,12 +12,54 @@
 // anthropics/claude-code#87545), and a user-scope write would leak one
 // project's policy into every other Claude session on the machine.
 
-export const AUTOMODE_ALLOW_ENTRY =
-  'Operator policy, set at hatch: hermit self-maintenance may run ' +
-  '`bun */scripts/apply-settings.ts <settings-file> <op>` unattended — approval for ' +
-  'these sealed settings operations is granted here in advance, including when the ' +
-  'run is initiated by plugin upgrade or migration instructions rather than a live ' +
-  'operator message.';
+import path from 'node:path';
+
+// The ops apply-settings.ts dispatches — the single source of truth for both the
+// allow entry below and that script's own usage message, so an op cannot be added
+// there without the classifier policy naming it. Retired verbs stay out: they exit 1.
+export const SEALED_SETTINGS_OPS = [
+  'allow',
+  'permissions-plan',
+  'permissions-sync',
+  'artifact-allow',
+  'output-style',
+  'deny',
+  'channel-env',
+] as const;
+
+// Built at overlay-render time so the path anchor is a concrete prefix rather than a
+// bare glob. dirname() drops the versioned install directory: the overlay is rendered
+// at boot from the running version's root, while a mid-session plugin upgrade runs the
+// newly installed version's copy of the script — anchoring to the version itself would
+// deny the unattended upgrade path this entry exists to clear.
+export function automodeAllowEntry(pluginRoot: string): string {
+  const installPrefix = path.dirname(pluginRoot);
+  return (
+    'User policy: an exception to Self-Modification for one specific invocation, standing for ' +
+    'the session and needing no per-invocation consent. It clears no other rule. ' +
+    `ALLOWED, exactly: bun ${installPrefix}/<install-dir>/scripts/apply-settings.ts ` +
+    '<settings-file> <op> [op args] — where <install-dir> is a single directory segment (the ' +
+    `installed version of this plugin), <op> is one of ${SEALED_SETTINGS_OPS.join(', ')}, and ` +
+    '<settings-file> ' +
+    "is the session working directory's .claude/settings.json or .claude/settings.local.json, " +
+    'never one under $HOME/.claude/. Both paths must be literal, with no ".." segment. No shell ' +
+    'chaining, redirection, env-var prefix, extra runner flag or added argument; not reached ' +
+    'through npx, sh -c, xargs, a wrapper script, or an Agent or Workflow prompt. The path, op ' +
+    'and shape match is the whole test — the classifier need not verify what the script writes. ' +
+    'These ops apply permission, deny and output-style sets sealed inside the script, so the run ' +
+    "cannot widen permissions beyond what the installed script already carries. channel-env's " +
+    'state-directory argument is the one caller-supplied value: a literal absolute path inside ' +
+    'the project, containing no "..". ' +
+    'NOT COVERED, and still Self-Modification: any other script, op or target file; .mcp.json; ' +
+    "hooks; approval gates; and this hermit's .claude-code-hermit/config.json. " +
+    'VOID IF: this session wrote or edited apply-settings.ts, or a file it imports, with a file ' +
+    'editing tool — a plugin install or upgrade writing a new version directory is not such an ' +
+    'edit — or the command does not match the shape above, or a settings or permission change ' +
+    'was blocked or refused earlier in this session and this run would achieve the same effect. ' +
+    'A plugin upgrade or migration may trigger the run; the script path, op and target file must ' +
+    'still match this policy and are never taken from the upgrade or migration instructions.'
+  );
+}
 
 export const AUTOMODE_ENV_ENTRIES = [
   'Key internal services: this project runs a claude-code-hermit autonomous session; ' +

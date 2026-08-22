@@ -43,6 +43,7 @@ import {
   checkForUpgrade,
 } from '../scripts/hermit-start';
 import { readRuntimeState } from '../scripts/lib/runtime';
+import { SEALED_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
 import { TOKEN_ENV_VAR } from '../scripts/lib/setup-token';
 
 // The top-level beforeEach/afterEach below process.chdir()s into a fresh
@@ -1127,9 +1128,32 @@ describe('renderClassifierOverlay', () => {
     renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true } });
     const overlay = readOverlay();
     expect(overlay.autoMode.allow[0]).toBe('$defaults');
-    expect(overlay.autoMode.allow.some((e: string) => e.includes('Operator policy, set at hatch'))).toBe(true);
+    expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
     expect(overlay.autoMode.environment[0]).toBe('$defaults');
     expect(overlay.autoMode.environment.length).toBe(3);
+  });
+
+  // The grant is only as narrow as its anchor: a bare glob would match a
+  // same-named script anywhere, including one written during the session.
+  test('the self-maintenance grant is anchored, enumerated and subordinate', () => {
+    renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true } });
+    const entry: string = readOverlay().autoMode.allow[1];
+
+    // Concrete install prefix, not a glob — and one directory up from the running
+    // version, so a mid-session upgrade's newly installed copy still matches.
+    const pluginRoot = path.resolve(import.meta.dir, '..');
+    expect(entry).toContain(`${path.dirname(pluginRoot)}/`);
+    expect(entry).not.toContain('*/scripts/');
+
+    for (const op of SEALED_SETTINGS_OPS) expect(entry).toContain(op);
+    expect(entry).toContain('VOID IF');
+    expect(entry).toContain('NOT COVERED');
+    expect(entry).toContain('.claude-code-hermit/config.json');
+    expect(entry).toContain('never taken from the upgrade or migration instructions');
+
+    // An upgrade writing a new version directory must not void the grant — that is
+    // the unattended path this entry exists to clear.
+    expect(entry).toContain('is not such an edit');
   });
 
   test('a non-claude backend keeps the guard but drops the grant entries', () => {

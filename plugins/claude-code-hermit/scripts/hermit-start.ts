@@ -28,7 +28,7 @@ import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateD
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
 import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
-import { AUTOMODE_ALLOW_ENTRY, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
+import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
 import { writeFileAtomic } from './lib/md-write';
 
 type Json = any;
@@ -917,7 +917,7 @@ function renderClassifierOverlay(config: Json): string | null {
     soft_deny: ['$defaults', AUTOMODE_SOFT_DENY_ENTRY],
   };
   if (artifactGrantApplies(config)) {
-    autoMode.allow = ['$defaults', AUTOMODE_ALLOW_ENTRY];
+    autoMode.allow = ['$defaults', automodeAllowEntry(PLUGIN_ROOT)];
     autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
   }
   const file = path.resolve(STATE_DIR, 'claude-settings.overlay.json');

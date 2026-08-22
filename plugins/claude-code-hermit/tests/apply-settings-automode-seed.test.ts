@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
+import { SEALED_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-automode-seed-');
 afterAll(cleanup);
@@ -48,5 +49,31 @@ describe('apply-settings.ts automode-seed (retired)', () => {
     const r = await runScript('apply-settings.ts', { args: [file, 'artifact-allow'] });
     expect(r.exitCode).toBe(0);
     expect(JSON.parse(fs.readFileSync(file, 'utf8')).permissions.allow).toContain('Artifact');
+  });
+});
+
+// The classifier's allow entry names the ops it covers, so an op added to the
+// dispatch without reaching SEALED_SETTINGS_OPS would run unattended under a
+// policy that never mentioned it. RETIRED_OPS are dispatched only to exit 1.
+describe('apply-settings.ts op registry', () => {
+  const RETIRED_OPS = ['automode-seed'];
+
+  test('every dispatched op is either sealed or retired', () => {
+    const src = fs.readFileSync(
+      path.join(import.meta.dir, '..', 'scripts', 'apply-settings.ts'),
+      'utf8',
+    );
+    const dispatched = [...src.matchAll(/^  case '([a-z-]+)':/gm)].map((m) => m[1]);
+    expect(dispatched.length).toBeGreaterThan(0);
+    expect(dispatched.sort()).toEqual([...SEALED_SETTINGS_OPS, ...RETIRED_OPS].sort());
+  });
+
+  test('the usage message advertises exactly the sealed ops', async () => {
+    const dir = freshDir();
+    const file = seedFile(dir, 'settings.local.json', {});
+    const r = await runScript('apply-settings.ts', { args: [file, 'no-such-op'] });
+    expect(r.exitCode).toBe(1);
+    for (const op of SEALED_SETTINGS_OPS) expect(r.stderr).toContain(op);
+    for (const op of RETIRED_OPS) expect(r.stderr).not.toContain(op);
   });
 });
