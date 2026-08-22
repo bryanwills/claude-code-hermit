@@ -23,7 +23,7 @@ function tmpRoot(): string {
 }
 
 describe('parseHarnessCommand grammar', () => {
-  test('accepts the five bare/arg forms', () => {
+  test('accepts the six bare/arg forms', () => {
     expect(parseHarnessCommand('/clear')).toEqual({ command: '/clear', arg: null });
     expect(parseHarnessCommand('/compact')).toEqual({ command: '/compact', arg: null });
     expect(parseHarnessCommand('/model opus')).toEqual({ command: '/model', arg: 'opus' });
@@ -32,12 +32,25 @@ describe('parseHarnessCommand grammar', () => {
       command: '/permission-mode',
       arg: 'plan',
     });
+    expect(parseHarnessCommand('/advisor opus')).toEqual({ command: '/advisor', arg: 'opus' });
   });
 
   // The whole point of dropping the tier list: a new model must not need a code change.
   test('accepts arbitrary future model names and effort levels', () => {
     expect(parseHarnessCommand('/model fable')).toEqual({ command: '/model', arg: 'fable' });
     expect(parseHarnessCommand('/effort ultracode')).toEqual({ command: '/effort', arg: 'ultracode' });
+  });
+
+  // Same grammar as /model: no advisor value list, so a new advisor alias (or CC's own
+  // "off" to clear the selection) never needs a code change here.
+  test('accepts advisor aliases including off, without a value list', () => {
+    expect(parseHarnessCommand('/advisor fable')).toEqual({ command: '/advisor', arg: 'fable' });
+    expect(parseHarnessCommand('/advisor sonnet')).toEqual({ command: '/advisor', arg: 'sonnet' });
+    expect(parseHarnessCommand('/advisor off')).toEqual({ command: '/advisor', arg: 'off' });
+    expect(parseHarnessCommand('/advisor claude-opus-5')).toEqual({
+      command: '/advisor',
+      arg: 'claude-opus-5',
+    });
   });
 
   // Bracketed aliases are real (this repo's own sessions run claude-opus-5[1m]).
@@ -54,6 +67,10 @@ describe('parseHarnessCommand grammar', () => {
     expect(parseHarnessCommand('/effort')).toBeNull();
     expect(parseHarnessCommand('/clear now')).toBeNull();
     expect(parseHarnessCommand('/compact everything')).toBeNull();
+    // A bare /advisor opens Claude Code's interactive picker — a real blocking dialog
+    // (CC 2.1.240, probe-verified) nobody unattended could answer. Must stay null.
+    expect(parseHarnessCommand('/advisor')).toBeNull();
+    expect(parseHarnessCommand('/advisor opus sonnet')).toBeNull();
   });
 
   test('rejects bare words — strict slash grammar', () => {
@@ -76,6 +93,9 @@ describe('parseHarnessCommand grammar', () => {
     expect(parseHarnessCommand('/model opus;ls')).toBeNull();
     expect(parseHarnessCommand('/model $(id)')).toBeNull();
     expect(parseHarnessCommand(`/model ${'a'.repeat(65)}`)).toBeNull();
+    expect(parseHarnessCommand('/advisor opus\n/clear')).toBeNull();
+    expect(parseHarnessCommand('/advisor `whoami`')).toBeNull();
+    expect(parseHarnessCommand('/advisor $(id)')).toBeNull();
   });
 
   test('rejects unknown slash commands', () => {

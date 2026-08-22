@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+### Added
+- A trusted channel sender can now set the experimental advisor model mid-session with `/advisor <model>`, and clear it with `/advisor off`, on the same deferred harness-command path as `/model` and `/effort`.
 ### Fixed
 - The heartbeat no longer wakes on every poll while a proposal awaits review. A pending proposal re-fires its alert each tick, which starved `last_clean_eval_at` and left the clean-recheck damper permanently disarmed; already-suppressed alerts no longer count against a clean tick.
 - `/hermit-doctor`'s proposal check matched a status no proposal ever carries, so it always reported zero and never warned. It now counts `proposed` proposals and warns past 30 days or above 10 open.

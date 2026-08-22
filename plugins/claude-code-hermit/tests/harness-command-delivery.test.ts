@@ -416,6 +416,22 @@ describe('Stop hook reset-command delivery', () => {
     expect(fs.existsSync(statusCache)).toBe(true);
   }));
 
+  // /advisor delivers through the same generic sendKeys path as /clear and /compact —
+  // it has no cached-context dialog to confirm and no self-perception gap to correct
+  // (live-probed CC 2.1.240: every argument form renders inline), so it must leave no
+  // switch-verify marker and spawn no confirm-harness-switch.ts helper.
+  test('/advisor opus delivers and leaves no switch-verify marker', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/advisor', 'opus');
+    const { bin, log } = installFakeTmux(dir, 'Claude ready');
+
+    const result = await drain(dir, bin);
+
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(log, 'utf-8')).toContain('-l -- /advisor opus');
+    expect(fs.existsSync(marker(dir))).toBe(false);
+    expect(fs.existsSync(switchVerifyMarker(dir))).toBe(false);
+  }));
+
   // Only /model and /effort change something the session then misreports about itself.
   for (const command of ['/clear', '/compact']) {
     test(`${command} leaves no switch-verify marker`, withDir(async (dir) => {

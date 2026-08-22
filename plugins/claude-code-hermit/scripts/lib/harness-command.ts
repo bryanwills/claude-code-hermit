@@ -23,8 +23,13 @@ const ARG_RE = /^[A-Za-z0-9._[\]-]{1,64}$/;
 
 /** Commands taking no argument. */
 const BARE_COMMANDS = new Set(['/compact', '/clear']);
+// The exactly-two-token rule enforced below is load-bearing for /advisor specifically:
+// a bare `/advisor` opens Claude Code's interactive advisor picker (a real blocking
+// dialog, "Enter to confirm · Esc to cancel" — probe-verified, CC 2.1.240) that no one
+// unattended could ever answer. Keeping it out of ARG_COMMANDS' bare form is what stops
+// that picker from ever being deliverable; do not add a bare `/advisor` acceptance path.
 /** Commands requiring exactly one argument. */
-const ARG_COMMANDS = new Set(['/model', '/effort', '/permission-mode']);
+const ARG_COMMANDS = new Set(['/model', '/effort', '/permission-mode', '/advisor']);
 
 export type ParsedCommand = { command: string; arg: string | null };
 
@@ -134,6 +139,12 @@ export const COMMAND_MARKER_TTL_SECS = 3600;
 export const SWITCH_VERIFY_TTL_SECS = 86_400;
 const HARNESS_CONFIRM_TAIL_LINES = 20;
 
+// /advisor has NO entry here on purpose. Upstream: "Enabling or disabling the advisor
+// mid-session does not invalidate your main model's prompt cache" — and live-probed
+// (CC 2.1.240): every argument form, valid (`/advisor opus` → inline "Advisor set to
+// Opus 5") or invalid (`/advisor bogusmodel`, `/advisor haiku`), renders inline with no
+// pane dialog at all. Don't "fix" this omission by adding a matcher for a dialog that
+// does not exist.
 const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
   '/model': [
     'Switch model?',

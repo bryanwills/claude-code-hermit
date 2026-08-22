@@ -113,6 +113,11 @@ export function drainHarnessCommand(hermitRoot: string): void {
   // Delegate the narrowly-scoped confirmation check so it can observe the resulting
   // dialog after this process exits; doing a synchronous capture here races a pane that
   // cannot render yet.
+  //
+  // /advisor is deliberately NOT in this gate: it has no cached-context dialog to
+  // confirm and no self-perception gap to correct (the advisor is a tool attachment,
+  // not the serving model) — live-probed CC 2.1.240, every argument form renders
+  // inline. It falls through to the plain sendKeys above and needs nothing further.
   if (pending.command === '/model' || pending.command === '/effort') {
     // The session cannot see its own switch: the model's sense of which model it runs
     // is fixed at session start. Leave a marker so the prompt path answers that from

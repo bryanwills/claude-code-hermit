@@ -155,6 +155,24 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
+  test('a trusted /advisor <model> is recorded for the Stop hook', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/advisor opus', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('[harness-command]');
+      expect(r.stdout).toContain('will be applied to this session when the current turn ends');
+      const pending = JSON.parse(fs.readFileSync(hermit(wd.dir, 'state', 'pending-harness-command.json'), 'utf-8'));
+      expect(pending).toMatchObject({ command: '/advisor', arg: 'opus' });
+    } finally {
+      stub.stop();
+    }
+  });
+
   test('resume during a pending shutdown does not clear an existing pause', async () => {
     const stub = startHttpStub();
     try {
