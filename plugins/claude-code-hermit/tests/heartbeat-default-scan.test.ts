@@ -47,6 +47,7 @@ interface Fixture {
   totalTicks?: number;
   noProposalsDir?: boolean;  // don't create proposals/ at all (ENOENT readdir path)
   proposalsAsFile?: boolean; // proposals is a regular file, not a dir (ENOTDIR readdir path)
+  microCorrupt?: boolean;    // micro-proposals.json present but unparseable (#764)
 }
 
 function build(fix: Fixture): string {
@@ -76,6 +77,9 @@ function build(fix: Fixture): string {
   if (fix.unparseableProposal) {
     fs.writeFileSync(hermit(dir, 'proposals', fix.unparseableProposal), 'Just a bullet, no frontmatter.\n');
   }
+  if (fix.microCorrupt) {
+    fs.writeFileSync(hermit(dir, 'state', 'micro-proposals.json'), '{"pending": [');
+  }
   if (fix.microPending || fix.microPendingIds) {
     const ids = fix.microPendingIds ?? ['MP-1'];
     fs.writeFileSync(
@@ -86,11 +90,11 @@ function build(fix: Fixture): string {
   return dir;
 }
 
-async function verdict(dir: string, peek = false): Promise<string> {
+async function verdict(dir: string, peek = false, now = NOW): Promise<string> {
   const r = await runScript('heartbeat.ts', {
     args: ['precheck', ...(peek ? ['--peek'] : []), '.claude-code-hermit'],
     cwd: dir,
-    env: { HERMIT_NOW: NOW },
+    env: { HERMIT_NOW: now },
   });
   return r.stdout.trim();
 }
@@ -202,6 +206,51 @@ describe('default proposal-scan resolution', () => {
   test('12. proposals/ is a regular file (ENOTDIR readdir error) → EVALUATE (fail-open, never a false OK)', async () => {
     const dir = build({ proposalsAsFile: true });
     expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  // #764: the micro scan applied the fail-open rule to a malformed *entry* but not
+  // to a malformed *file*, so a corrupt queue read as clean and every pending
+  // operator question went invisible. Corrupt now wakes — but only once a day,
+  // since a human has to fix the file and waking every poll to say so is the
+  // unbounded-wake shape the pending-micro damper exists to prevent.
+  test('13. corrupt micro-proposals.json → EVALUATE (fail-open, never a false OK)', async () => {
+    const dir = build({ microCorrupt: true });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('14. corrupt micro-proposals.json, second tick same day → damped, no repeat wake', async () => {
+    const dir = build({ microCorrupt: true });
+    expect(await verdict(dir)).toBe('EVALUATE');
+    expect(await verdict(dir)).toBe('OK'); // damper stamped by the first tick
+  });
+
+  test('15. corrupt micro-proposals.json, 25h later → wakes again', async () => {
+    const dir = build({ microCorrupt: true });
+    expect(await verdict(dir)).toBe('EVALUATE');
+    expect(await verdict(dir, false, '2026-07-04T13:00:00Z')).toBe('EVALUATE');
+  });
+
+  test('16. corrupt micro-proposals.json under --peek writes no damper stamp', async () => {
+    const dir = build({ microCorrupt: true });
+    const p = hermit(dir, 'state', 'alert-state.json');
+    const before = fs.readFileSync(p, 'utf8');
+    expect(await verdict(dir, true)).toBe('EVALUATE');
+    expect(fs.readFileSync(p, 'utf8')).toBe(before);
+  });
+
+  test('17. missing micro-proposals.json stays clean (ENOENT is not ambiguous)', async () => {
+    const dir = build({});
+    expect(await verdict(dir)).toBe('OK');
+  });
+
+  test('18. repaired then re-broken inside 24h wakes again (damper cleared on recovery)', async () => {
+    const dir = build({ microCorrupt: true });
+    const mp = hermit(dir, 'state', 'micro-proposals.json');
+    expect(await verdict(dir)).toBe('EVALUATE');
+    fs.writeFileSync(mp, JSON.stringify({ pending: [] }));
+    expect(await verdict(dir)).toBe('OK');
+    fs.writeFileSync(mp, '{"pending": [');
+    expect(await verdict(dir)).toBe('EVALUATE'); // new corruption, not the old one's silence
   });
 });
 
