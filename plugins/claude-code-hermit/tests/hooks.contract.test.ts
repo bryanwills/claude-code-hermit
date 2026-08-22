@@ -312,6 +312,29 @@ const DENY_ROWS: DenyRow[] = [
   ['still block the relative settings redirect spelling (strict list)', bash('echo {} > .claude/settings.local.json'), 'block', STRICT_PATTERNS],
   ['allow a settings Edit under the default list', edit('/home/u/p/.claude/settings.json'), 'allow'],
   ['allow a voice-file Edit under the default list', edit('/home/u/p/.claude/output-styles/hermit-voice.md'), 'allow'],
+
+  // config.json guard. Both tool spellings are required: the permission engine
+  // folds Write into an Edit glob, but this hook matches tool names exactly.
+  ['block an absolute config.json Edit (strict list)', edit('/home/u/p/.claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
+  ['block an absolute config.json Write (strict list)', writeTool('/home/u/p/.claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
+  ['block a relative config.json Edit (strict list)', edit('.claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
+  ['allow a config.json Edit under the default list', edit('/home/u/p/.claude-code-hermit/config.json'), 'allow'],
+  // The sanctioned writers stay reachable — they are Bash calls, not tool writes.
+  ['allow the settings-edit funnel under the strict list', bash('bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set language en'), 'allow', STRICT_PATTERNS],
+
+  // Redirect spellings. `*> *path*` catches a space after `>`; `*>.path*` catches
+  // the compact form — both are needed, neither covers all four spellings alone.
+  ['block a spaced redirect into config.json (strict list)', bash('echo {} > .claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
+  ['block a compact redirect into config.json (strict list)', bash('echo {}>.claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
+  ['block a no-space-before redirect into config.json (strict list)', bash('echo {} >.claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
+  ['block a compact redirect into settings.local.json (strict list)', bash('echo {}>.claude/settings.local.json'), 'block', STRICT_PATTERNS],
+  ['block a compact redirect into the voice file (strict list)', bash('echo x>.claude/output-styles/hermit-voice.md'), 'block', STRICT_PATTERNS],
+  ['block a compact redirect into OPERATOR.md (default list)', bash('echo x>.claude-code-hermit/OPERATOR.md'), 'block'],
+  // A `2>&1` fd-dup ahead of an unrelated config read is not a write.
+  ['allow a 2>&1 pipeline that later reads config.json', bash('bun x.ts 2>&1 | tee out; cat .claude-code-hermit/config.json'), 'allow', STRICT_PATTERNS],
+  // Known limit: the glob is not quote-aware, so a quoted `>` ahead of the path
+  // matches. Accepted — same behavior the shipped settings.json patterns have.
+  ['block a quoted-> jq read of config.json (known limit, strict list)', bash('jq ".spend > 5" .claude-code-hermit/config.json'), 'block', STRICT_PATTERNS],
   // Only the hermit's own style is guarded — the operator's other styles are theirs.
   ['allow an unrelated output style under the strict list', edit('/home/u/p/.claude/output-styles/my-own.md'), 'allow', STRICT_PATTERNS],
 

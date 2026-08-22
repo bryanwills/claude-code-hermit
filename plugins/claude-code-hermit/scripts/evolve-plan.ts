@@ -23,6 +23,7 @@ import path from 'node:path';
 
 import { sha256 } from './lib/hash';
 import { cmpSemver } from './lib/semver';
+import { newConfigKeys, isPlainObject } from './lib/evolve-config';
 
 type Json = any;
 
@@ -66,10 +67,6 @@ const TEMPLATE_FILES = [
   'SESSION-REPORT.md.template',
   'PROPOSAL.md.template',
 ];
-
-function isPlainObject(v: any): boolean {
-  return v !== null && typeof v === 'object' && !Array.isArray(v);
-}
 
 function readJSON(p: string): Json {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -125,30 +122,6 @@ function changelogSlice(text: string, from: string, to: string | null) {
     .map((e: Json) => normTrailing(lines.slice(e.start, e.end).join('\n')))
     .join('\n\n');
   return { slice, versions: inRange.map((e: Json) => e.version) };
-}
-
-// Deep diff of the template against the project config; reports ONLY keys
-// missing from the project (operator values are never reported/overwritten).
-// Parent object entirely absent -> emit the parent path with its full default
-// subtree. Parent present but children missing -> emit the missing leaves as
-// dotted paths. Arrays and scalars are leaves (no element-level merge), so a
-// new default routine in a later version rides on Upgrade Instructions, as today.
-function newConfigKeys(tmpl: Json, config: Json, prefix?: string, out?: Json[]): Json[] {
-  out = out || [];
-  prefix = prefix || '';
-  if (!isPlainObject(tmpl)) return out;
-  for (const key of Object.keys(tmpl)) {
-    const tval = tmpl[key];
-    const fullPath = prefix ? `${prefix}.${key}` : key;
-    const present = isPlainObject(config) && Object.prototype.hasOwnProperty.call(config, key);
-    if (!present) {
-      out.push({ path: fullPath, default: tval });
-    } else if (isPlainObject(tval) && isPlainObject(config[key])) {
-      newConfigKeys(tval, config[key], fullPath, out);
-    }
-    // present + leaf, or present with a type mismatch -> operator value kept, skip.
-  }
-  return out;
 }
 
 // 3-way classify a single file (already-read buffers) against the manifest
