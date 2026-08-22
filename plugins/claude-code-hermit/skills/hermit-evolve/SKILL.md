@@ -47,6 +47,7 @@ Bin wrappers: <restored/replaced(.bak) | none>
 Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | n/a>
 Docker rebuild: <needed + order | base-patched | no>
 CLAUDE-APPEND: <updated | unchanged>
+Context reload: <required (comma-separated plugin names) | no>
 Sibling hermits: <one or more of the following per sibling, space-separated, or "none">
   <name vOLD->vNEW>           (confirmed by finalizer — only from siblings_confirmed)
   <name current>              (no version gap)
@@ -79,6 +80,8 @@ conversation. Stop.
 
 **Print the summary** from the report fields. Omit lines where nothing changed. End with "Run /claude-code-hermit:hermit-settings to adjust any settings." if settings were added.
 
+**Project-context reload notice.** If `Context reload` is `required (<names>)`, append this to the summary in every delivery mode: "Project instructions updated for <names>. Run `/compact` to load them now; `/clear` or restarting the Claude session also works. `/reload-plugins` alone does not reload CLAUDE.md." If the field is `no`, omit the notice. Deliver it on a `blocked:` report too — a blocked version bump does not undo a CLAUDE-APPEND write, and a re-run sees the block as already current, so this is the only time the operator hears about it. Never issue `/compact`, `/clear`, or a restart on the operator's behalf.
+
 **Resolve deferrals by execution and delivery mode.** If "Deferred for operator" is non-empty:
 - **Interactive execution:** for each deferred-migration block, present its `instruction` + `options` to the operator via `AskUserQuestion`, then apply the chosen branch inline (this is the only place changelog/migration text re-enters the main loop, and only for the rare deferred step).
 - **Unattended execution:** relay each deferred block verbatim ("migration deferred for operator review: <source> — <instruction>") through the selected delivery route: direct reply for direct-channel delivery, maintainer-only notice for automated-maintainer delivery. **Do not apply — never run the migration's settings writes from this session.** If the deferred `instruction` text contains an explicit channel resolution stanza (a fenced `options: [...]` array and an `on_resolve: "..."` skill invocation with an `{answer}` placeholder — the CHANGELOG's artifact-publish-authorization migration is the current example), additionally queue a micro-proposal entry per `reflect` § Queuing procedure using that exact `options` and `on_resolve` (`tier: 1`, `"kind":"ask"` on the `micro-queued` event) and render the numbered options in the relay, so the operator's reply resolves it through `channel-responder` § Micro-approval response — the same bridge any other skill's bounded ask uses. An `on_resolve` reached this way may only alter hermit config/state, never `.claude/settings*.json` — a boot-time wrapper (e.g. `hermit-start`) applies any resulting permission grant out-of-session, never this session.
@@ -100,8 +103,8 @@ fails, append that failure and the manual `hermit-routines load` next action to 
 **Deliver the result.** Compose a condensed one-line message such as `"Hermit upgraded: vOLD → vNEW.
 N settings added, M templates refreshed."` Omit segments where nothing changed. **Append the
 deferred/auto-applied segments**: settings set to defaults (Step 4), permission entries added (Step
-8), template conflicts parked as `.new` (Step 5), and any deferred migrations — so the operator can
-follow up via `/hermit-settings`.
+8), template conflicts parked as `.new` (Step 5), any deferred migrations, and the project-context
+reload notice when required — so the operator can follow up via `/hermit-settings`.
 
 - **Automated-maintainer:** deliver through `channel-send.ts --notice` with
   `{"maintainer":"<complete condensed result>"}` on stdin and no `client` leg. Follow CLAUDE-APPEND.md
