@@ -815,6 +815,72 @@ describe('daily-auto-close lull + pending-close drain', () => {
     writeState(dir, 'runtime.json', '{"session_state":"in_progress","session_id":"S-004"}');
     expect(await precheck(dir, { now: '2026-05-21T01:00:00+00:00' })).toBe('AUTO_CLOSE');
   }));
+
+  // --- heartbeat drainer guards (issue #762) ---------------------------------
+  // The 10-min lull ages from prompt submission, so an operator watching a long
+  // agent turn reads as away while still present. The turn marker is the signal
+  // that catches that; the cooldown bounds a close that never completes.
+
+  const drainMarker = (dir: string) => hermit(dir, 'state', 'pending-close-drain.json');
+
+  /** pending-close + a 15-min lull: the drain is due on every clause but the new guards. */
+  function drainDue(dir: string): void {
+    hbSetup(dir);
+    writeState(dir, 'pending-close.json', PENDING);
+    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T22:30:00+00:00"}');
+    writeState(dir, 'runtime.json', RUNTIME_IN_PROGRESS);
+  }
+
+  // drain.15. open operator turn suppresses the drain even past the lull
+  test('drain: open operator turn + lull passed → does NOT emit AUTO_CLOSE', withTmp(async (dir) => {
+    drainDue(dir);
+    writeState(dir, 'operator-turn-open.json', '{"at":"2026-05-20T22:20:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).not.toBe('AUTO_CLOSE');
+  }));
+
+  // drain.16. a marker orphaned by a failed Stop must not strand the close forever
+  test('drain: turn marker older than the 60-min TTL → AUTO_CLOSE (orphan backstop)', withTmp(async (dir) => {
+    drainDue(dir);
+    writeState(dir, 'operator-turn-open.json', '{"at":"2026-05-20T21:00:00+00:00"}'); // 105 min old
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
+  }));
+
+  // drain.17. fail-open: a broken marker must never starve the drain
+  test('drain: malformed turn marker → AUTO_CLOSE (fail-open)', withTmp(async (dir) => {
+    drainDue(dir);
+    writeState(dir, 'operator-turn-open.json', '{"at":"not-a-date"}');
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
+  }));
+
+  // drain.18. cooldown: a close that keeps failing must not re-wake every tick
+  test('drain: cooldown stamped 5 min ago → does NOT emit AUTO_CLOSE', withTmp(async (dir) => {
+    drainDue(dir);
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:40:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).not.toBe('AUTO_CLOSE');
+  }));
+
+  // drain.19. ...but it must retry once the backoff expires
+  test('drain: cooldown stamped 45 min ago → AUTO_CLOSE (backoff expired)', withTmp(async (dir) => {
+    drainDue(dir);
+    writeState(dir, 'pending-close-drain.json', '{"last_emitted_at":"2026-05-20T22:00:00+00:00"}');
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
+  }));
+
+  // drain.20. write-before-emit: the real tick records its emission
+  test('drain: AUTO_CLOSE stamps the cooldown marker', withTmp(async (dir) => {
+    drainDue(dir);
+    expect(await precheck(dir, { now: NOW })).toBe('AUTO_CLOSE');
+    expect(JSON.parse(fs.readFileSync(drainMarker(dir), 'utf-8')).last_emitted_at)
+      .toBe('2026-05-20T22:45:00.000Z');
+  }));
+
+  // drain.21. --peek is read-only: same verdict, no marker, so it cannot consume
+  // the cooldown the mutating tick needs.
+  test('drain: --peek emits AUTO_CLOSE without stamping the cooldown', withTmp(async (dir) => {
+    drainDue(dir);
+    expect(await precheck(dir, { now: NOW, peek: true })).toBe('AUTO_CLOSE');
+    expect(fs.existsSync(drainMarker(dir))).toBe(false);
+  }));
 });
 
 // -------------------------------------------------------

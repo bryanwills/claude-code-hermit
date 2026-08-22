@@ -30,7 +30,7 @@ import { makeTzFormatter, partsFromFormatter, compileCron, cronMatchesCompiled }
 import { readJson as readJSON } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { logRoutineEvent } from './event';
-import { pendingCloseDrainDue, PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES } from '../auto-close';
+import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown } from '../auto-close';
 
 type Json = any;
 
@@ -38,7 +38,6 @@ const ANCHOR_ID = 'heartbeat-restart';
 const DRAIN_ID = 'daily-auto-close'; // routine the pending-close drain re-fires
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
-const TURN_TTL_MS = 60 * 60 * 1000; // orphaned-marker backstop; see gate comment below
 
 const hermitDir = process.argv[2];
 if (!hermitDir) process.exit(0);
@@ -46,14 +45,6 @@ if (!hermitDir) process.exit(0);
 const stateDir = path.join(hermitDir, 'state');
 const schedulePath = path.join(stateDir, 'routine-schedule.json');
 const livenessPath = path.join(stateDir, 'routine-monitor-liveness.json');
-// Backoff marker for the pending-close drain below. Deliberately its own file and
-// NOT a key inside pending-close.json: that file today has exactly one atomic
-// writer and one deleter with singleton semantics, so adding attempt metadata
-// would introduce the first read-modify-write on it — and a delete landing inside
-// that window would resurrect a flag session-archive.ts had just cleared, which
-// can auto-close a freshly-started session. A separate file only ever suppresses,
-// so its worst failure is one delayed drain, and TTL expiry self-heals.
-const drainMarkerPath = path.join(stateDir, 'pending-close-drain.json');
 
 function now(): Date {
   if (process.env.HERMIT_NOW) {
@@ -85,18 +76,6 @@ function writeJSONAtomic(p: string, value: Json): boolean {
 
 function writeLiveness(): void {
   writeJSONAtomic(livenessPath, { last_peek_at: new Date().toISOString() });
-}
-
-// True when no drain has been emitted recently. Absent/malformed/future-dated all
-// read as expired (fail-open) — a broken marker must never strand a queued close,
-// which is the failure this whole change exists to remove.
-function drainCooldownExpired(): boolean {
-  const marker: Json = readJSON(drainMarkerPath);
-  const at = marker && typeof marker.last_emitted_at === 'string'
-    ? new Date(marker.last_emitted_at).getTime() : NaN;
-  if (isNaN(at)) return true;
-  const ageMin = (nowDate.getTime() - at) / MINUTE_MS;
-  return ageMin < 0 || ageMin > PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES;
 }
 
 function stamp(id: string, event: string): void {
@@ -134,15 +113,10 @@ const eligible = routines.filter((r: Json) =>
 let runtime: Json = readJSON(path.join(stateDir, 'runtime.json'));
 const sessionState: string | null = runtime && typeof runtime.session_state === 'string' ? runtime.session_state : null;
 
-// Live-exchange signal: an operator-initiated turn is open (marker written by
-// record-operator-action.ts on kept operator prompts, cleared by stop-pipeline.ts
-// at Stop). TTL bounds a marker orphaned by a failed Stop. Absent, malformed,
-// stale, or future-dated (clock skew — lib/heartbeat/precheck.ts precedent) all read
-// as no-open-turn → emit. Fail-open: a broken marker must never starve routines.
-const turnMarker: Json = readJSON(path.join(stateDir, 'operator-turn-open.json'));
-const turnAt = turnMarker && typeof turnMarker.at === 'string' ? new Date(turnMarker.at).getTime() : NaN;
-const turnAge = nowDate.getTime() - turnAt;
-const operatorTurnOpen = turnAge >= 0 && turnAge <= TURN_TTL_MS; // NaN fails both
+// Live-exchange signal: an operator-initiated turn is open. Shared with the
+// heartbeat drainer — see lib/auto-close.ts for the marker's lifecycle and why a
+// broken marker reads as no-open-turn.
+const turnOpen = operatorTurnOpen(hermitDir, nowDate.getTime());
 
 let paused = false;
 try {
@@ -219,7 +193,7 @@ for (const routine of eligible) {
     pendingStamps.push([id, 'skipped-waiting']);
     continue;
   }
-  if (operatorTurnOpen) {
+  if (turnOpen) {
     // Defer: live operator exchange — do NOT consume; next poll re-derives from
     // the untouched cursor and fires at the first post-turn poll.
     continue;
@@ -269,12 +243,9 @@ if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
   const configured = routines.some((r: Json) => r && r.id === DRAIN_ID);
   // An open operator turn suppresses the drain even when the 10-min lull has
   // passed: someone who typed 11 minutes ago and is now watching a long agent
-  // turn is present, and closing under them at 60s granularity would destroy
-  // in-flight work. The heartbeat drainer does not check this — the divergence is
-  // deliberate and lives here at the call site rather than inside the shared
-  // predicate. That poll's window scales with heartbeat.every, so a shorter
-  // interval lands on an open operator turn more often.
-  if (configured && !operatorTurnOpen && drainCooldownExpired()) {
+  // turn is present, and closing under them would destroy in-flight work. Both
+  // drainers apply this guard and share one cooldown marker — see lib/auto-close.ts.
+  if (configured && !turnOpen && drainCooldownExpired(hermitDir, nowDate.getTime())) {
     // Write-before-emit, mirroring the persist-before-emit contract above: if the
     // cooldown stamp fails we must not emit, or a read-only state dir turns a
     // failing close into a wake every 60 seconds. Stamped unconditionally (even
@@ -282,7 +253,7 @@ if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
     // otherwise the same-poll dedup lasts exactly one poll, and with the flag
     // still on disk mid-close the next poll would emit a second close into the
     // one still running.
-    const stamped = writeJSONAtomic(drainMarkerPath, { last_emitted_at: nowDate.toISOString() });
+    const stamped = stampDrainCooldown(hermitDir, nowDate.getTime());
     if (stamped && !dueIds.includes(DRAIN_ID)) {
       dueIds.push(DRAIN_ID);
     }
