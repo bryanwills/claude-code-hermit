@@ -265,7 +265,7 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
     channel enabled, so even `no_channel: true` means it is configured but unreachable (unpaired,
     empty `allowed_users`, unreadable config), which is exactly the signal the operator needs.
 - Never send a proactive notice through a channel reply tool, and never advise `/<channel>:access`
-  for a maintainer chat — the maintainer chat is reached by direct API POST and is outbound-only.
+  for a maintainer chat — the maintainer chat is reached by direct API POST, not `access.json` pairing (its one inbound authority is the settings tier, `docs/security.md` § Tiered settings authority, not reply routing).
 
 ## 6. Channel-safe ask bridge
 

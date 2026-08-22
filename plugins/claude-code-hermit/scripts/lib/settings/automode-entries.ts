@@ -91,7 +91,10 @@ export const AUTOMODE_ENV_ENTRIES = [
 // the classifier from approving some path the gate's command matching misses.
 // Terminal intent clears a soft block, so an operator typing at the terminal is
 // unaffected — a `<channel>`-tagged request is not the operator's own message
-// and does not clear it.
+// and does not clear it. Deliberately coarser than the gate: this entry does not
+// carve out the maintainer chat, so a legitimate maintainer-tier write can still
+// draw classifier friction where the deterministic gate would allow it. The gate
+// is authoritative; this is a speed bump behind it, not a second policy.
 export const AUTOMODE_SOFT_DENY_ENTRY =
   'Hermit terminal-only settings: never change this hermit\'s security-tier configuration in ' +
   '.claude-code-hermit/config.json — permission_mode, env, boot_skill, remote, escalation, ' +
