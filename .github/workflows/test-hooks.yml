@@ -59,8 +59,5 @@ jobs:
       # The repo-internal /simplify mirror must stay byte-identical to the shipped skill.
       - name: Guard .claude/skills/simplify mirror
         run: diff -r .claude/skills/simplify plugins/claude-code-hermit/skills/simplify
-      # Pinned to 4 workers, not bare --parallel (which defaults to CPU count):
-      # workers x --max-concurrency (20) oversubscribes the box, and the
-      # subprocess-spawning tests then time out at 5s. 4 is green and ~40% faster.
-      - run: bun test --parallel=4
+      - run: bun test
         working-directory: plugins/claude-code-hermit
