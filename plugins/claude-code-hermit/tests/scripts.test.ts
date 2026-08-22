@@ -2401,6 +2401,82 @@ describe('heartbeat-precheck (damper: clean-recheck cooldown)', () => {
 });
 
 // -------------------------------------------------------
+// Shared: iteration-bounded monitor runner (heartbeat-monitor.sh /
+// routine-monitor.sh). Both scripts loop forever with no iteration bound, so
+// a test that needs iteration 2 (or N consecutive iterations) must supply the
+// bound itself. Waits for the stub to be invoked `iters` times, then kills
+// the monitor — never bounded by wall-clock, so contention makes a run
+// slower, never wrong. Throws naming the shortfall if `iters` is never
+// reached within `deadlineMs`.
+// -------------------------------------------------------
+
+async function runMonitorUntil(opts: {
+  scriptPath: string;
+  stubBody: string;
+  envVar: 'HEARTBEAT_PRECHECK' | 'ROUTINE_DUE_SCRIPT';
+  interval: string;
+  iters: number;
+  deadlineMs?: number;
+}): Promise<{ stdout: string }> {
+  const { scriptPath, stubBody, envVar, interval, iters, deadlineMs = 30000 } = opts;
+  const stubTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mon-stub-'));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mon-hermit-'));
+  try {
+    const stubFile = path.join(stubTmp, 'stub.js');
+    const counterFile = path.join(workDir, '.mon-iters');
+    // Resolve the dir positionally-agnostically: routine-monitor invokes the
+    // stub as `<dir>` but heartbeat-monitor invokes it as `--peek <dir>`.
+    // Names are prefixed to avoid colliding with a stubBody's own top-level
+    // consts (e.g. a stub that tracks its own scenario counter as `cf`/`n`).
+    const prologue = `const fs=require('fs'), path=require('path');
+const d=process.argv[process.argv.length-1];
+const __iterFile=path.join(d,'.mon-iters');
+let __iterN=0; try{__iterN=parseInt(fs.readFileSync(__iterFile,'utf8'))||0;}catch{}
+__iterN++; fs.writeFileSync(__iterFile,String(__iterN));
+`;
+    fs.writeFileSync(stubFile, prologue + stubBody);
+    // No `timeout` wrapper: SIGKILL sent to a `timeout`-wrapped process cannot
+    // be forwarded (SIGKILL is uncatchable), which would leave bash and its
+    // sleep child holding the stdout pipe open forever. Kill bash directly.
+    const proc = Bun.spawn({
+      cmd: ['bash', scriptPath, interval, workDir],
+      env: { ...process.env, [envVar]: stubFile },
+      stdin: Buffer.from(''),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const stdoutPromise = new Response(proc.stdout).text();
+    // Wait for iters+1, not iters: the counter increments inside the *child*
+    // stub, but the matching `echo`/case-statement output happens afterward in
+    // the *parent* bash loop, so "child N has exited" does not itself prove
+    // "bash already echoed iteration N". bash is single-threaded, though — it
+    // cannot spawn iteration N+1's child until it has run iteration N's echo,
+    // ONCE-check and sleep to completion. Waiting one iteration past the target
+    // makes that ordering a guarantee instead of a race, which otherwise only
+    // surfaces under CPU contention (confirmed empirically: this test flaked
+    // under a saturated 12-core box before this +1).
+    const target = iters + 1;
+    const deadline = Date.now() + deadlineMs;
+    let count = 0;
+    while (Date.now() < deadline) {
+      try { count = parseInt(fs.readFileSync(counterFile, 'utf8')) || 0; } catch {}
+      if (count >= target) break;
+      await Bun.sleep(25);
+    }
+    proc.kill('SIGKILL');
+    await proc.exited;
+    const stdout = await stdoutPromise;
+    if (count < target) {
+      throw new Error(`runMonitorUntil: stub invoked ${count}/${target} times within ${deadlineMs}ms`);
+    }
+    return { stdout };
+  } finally {
+    try { fs.rmSync(stubTmp, { recursive: true, force: true }); } catch {}
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+// -------------------------------------------------------
 // heartbeat-monitor.sh — real-script tests (HEARTBEAT_MONITOR_ONCE=1)
 // -------------------------------------------------------
 
@@ -2501,25 +2577,18 @@ describe('heartbeat-monitor', () => {
   });
 
   // 20i. EVALUATE on iter-2 → HEARTBEAT_EVALUATE (suppression is first-iteration-only).
-  // Runs without HEARTBEAT_MONITOR_ONCE so the loop can reach iter-2; bounded by timeout(1).
+  // Runs without HEARTBEAT_MONITOR_ONCE so the loop can reach iter-2, bounded by
+  // observed iterations rather than a wall-clock window.
   test('heartbeat-monitor (iter-2 EVALUATE → HEARTBEAT_EVALUATE, suppression not permanent)', async () => {
-    const stub = makeStub('process.stdout.write("EVALUATE\\n");\n');
-    const hbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-hermit-'));
-    try {
-      const proc = Bun.spawn({
-        cmd: ['timeout', '3', 'bash', MONITOR_SH, '1', hbDir],
-        env: { ...process.env, HEARTBEAT_PRECHECK: stub.path },
-        stdin: Buffer.from(''),
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-      expect(stdout).toContain('HEARTBEAT_EVALUATE');
-    } finally {
-      stub.cleanup();
-      try { fs.rmSync(hbDir, { recursive: true, force: true }); } catch {}
-    }
-  }, 10000);
+    const { stdout } = await runMonitorUntil({
+      scriptPath: MONITOR_SH,
+      stubBody: 'process.stdout.write("EVALUATE\\n");\n',
+      envVar: 'HEARTBEAT_PRECHECK',
+      interval: '0.2',
+      iters: 2,
+    });
+    expect(stdout).toContain('HEARTBEAT_EVALUATE');
+  }, 45000);
 });
 
 // -------------------------------------------------------
@@ -2571,72 +2640,54 @@ describe('routine-monitor', () => {
     expect(r.stdout).toContain('ROUTINE_MONITOR_ERROR: routine-due failed');
   });
 
-  // Loop reaches iter-2 without ONCE (bounded by timeout(1)) — confirms no
-  // per-iteration suppression (unlike heartbeat's cold-start damper, routine-due's
-  // init-to-now semantics already make iter-1 safe, so no suppression is needed here).
+  // Loop reaches iter-2 without ONCE — confirms no per-iteration suppression
+  // (unlike heartbeat's cold-start damper, routine-due's init-to-now semantics
+  // already make iter-1 safe, so no suppression is needed here). Bounded by
+  // observed iterations rather than a wall-clock window.
   test('routine-monitor (loop reaches iter-2 without ONCE)', async () => {
-    const stub = makeRtStub('process.stdout.write("ROUTINE_DUE [hermit-routine:x]\\n");\n');
-    const rtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-hermit-'));
-    try {
-      const proc = Bun.spawn({
-        cmd: ['timeout', '3', 'bash', RT_MONITOR_SH, '1', rtDir],
-        env: { ...process.env, ROUTINE_DUE_SCRIPT: stub.path },
-        stdin: Buffer.from(''),
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      expect(lines.length).toBeGreaterThanOrEqual(2);
-    } finally {
-      stub.cleanup();
-      try { fs.rmSync(rtDir, { recursive: true, force: true }); } catch {}
-    }
-  }, 10000);
-
-  // Drives ONE bounded, long-lived monitor process (ROUTINE_MONITOR_ONCE would reset the
-  // in-loop fail counter every invocation, so it can't test suppression).
-  async function rtMonitorBounded(stubBody: string, timeoutSec = 3): Promise<{ stdout: string }> {
-    const stub = makeRtStub(stubBody);
-    const rtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-hermit-'));
-    try {
-      const proc = Bun.spawn({
-        cmd: ['timeout', String(timeoutSec), 'bash', RT_MONITOR_SH, '0.2', rtDir],
-        env: { ...process.env, ROUTINE_DUE_SCRIPT: stub.path },
-        stdin: Buffer.from(''),
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [stdout] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-      return { stdout };
-    } finally {
-      stub.cleanup();
-      try { fs.rmSync(rtDir, { recursive: true, force: true }); } catch {}
-    }
-  }
+    const { stdout } = await runMonitorUntil({
+      scriptPath: RT_MONITOR_SH,
+      stubBody: 'process.stdout.write("ROUTINE_DUE [hermit-routine:x]\\n");\n',
+      envVar: 'ROUTINE_DUE_SCRIPT',
+      interval: '0.2',
+      iters: 2,
+    });
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+  }, 45000);
 
   const countErrors = (s: string) => s.split('\n').filter(l => l.includes('ROUTINE_MONITOR_ERROR')).length;
 
   // Persistent failure: 1st emits, every consecutive failure suppressed (count never
-  // reaches 60 in the window), so exactly one error line across many iterations.
+  // reaches 60 across the 5 observed iterations), so exactly one error line.
   test('routine-monitor (consecutive failures throttled to one error line)', async () => {
-    const { stdout } = await rtMonitorBounded('process.exit(1);\n');
+    const { stdout } = await runMonitorUntil({
+      scriptPath: RT_MONITOR_SH,
+      stubBody: 'process.exit(1);\n',
+      envVar: 'ROUTINE_DUE_SCRIPT',
+      interval: '0.2',
+      iters: 5,
+    });
     expect(countErrors(stdout)).toBe(1);
-  }, 10000);
+  }, 45000);
 
   // Alternating fail/success (odd calls fail via a counter file): each success resets the
   // counter, so each subsequent failure is a fresh streak that re-emits — ≥2 error lines
   // proves the reset re-arms emission (without reset it would stay at exactly 1).
   test('routine-monitor (success resets the throttle → next failure re-emits)', async () => {
-    const stub = `const fs=require('fs'),path=require('path');
-const cf=path.join(process.argv[2],'.rtcount');
-let n=0; try{n=parseInt(fs.readFileSync(cf,'utf8'))||0;}catch{}
-n++; fs.writeFileSync(cf,String(n));
-if(n%2===1) process.exit(1);
-`;
-    const { stdout } = await rtMonitorBounded(stub);
+    const { stdout } = await runMonitorUntil({
+      scriptPath: RT_MONITOR_SH,
+      stubBody: `const cf=path.join(d,'.rtcount');
+let m=0; try{m=parseInt(fs.readFileSync(cf,'utf8'))||0;}catch{}
+m++; fs.writeFileSync(cf,String(m));
+if(m%2===1) process.exit(1);
+`,
+      envVar: 'ROUTINE_DUE_SCRIPT',
+      interval: '0.2',
+      iters: 5,
+    });
     expect(countErrors(stdout)).toBeGreaterThanOrEqual(2);
-  }, 10000);
+  }, 45000);
 });
 
 // -------------------------------------------------------

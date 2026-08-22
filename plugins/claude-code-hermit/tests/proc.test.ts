@@ -26,33 +26,33 @@ function spawnProc(cmd: string[]): number {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Poll `fn` until it returns true or the timeout elapses. */
-async function pollUntil(fn: () => boolean, timeoutMs = 4000, stepMs = 50): Promise<boolean> {
+/** Poll `fn` until it returns true, or throw naming the unmet condition. */
+async function pollUntil(fn: () => boolean, timeoutMs = 15000, stepMs = 50): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (fn()) return true;
+    if (fn()) return;
     await wait(stepMs);
   }
-  return fn();
+  if (!fn()) throw new Error(`pollUntil: condition not met within ${timeoutMs}ms`);
 }
 
 describe('collectTree', () => {
   test('includes descendants of the root', async () => {
-    const root = spawnProc(['bash', '-c', 'sleep 5 & sleep 5 & wait']);
+    const root = spawnProc(['bash', '-c', 'sleep 30 & sleep 30 & wait']);
     // Wait for the two sleep children to actually fork (parent + 2 = 3).
     await pollUntil(() => collectTree([root]).pids.length >= 3);
     const { pids: tree, capped } = collectTree([root]);
     expect(capped).toBe(false);
     expect(tree).toContain(root);
     expect(tree.length).toBeGreaterThanOrEqual(3);
-  });
+  }, 30000);
 
   test('cap marks the result unverified', async () => {
-    const root = spawnProc(['bash', '-c', 'sleep 5 & sleep 5 & wait']);
+    const root = spawnProc(['bash', '-c', 'sleep 30 & sleep 30 & wait']);
     await pollUntil(() => collectTree([root]).pids.length >= 3);
     // With children present and cap 1, the traversal must report itself capped.
     expect(collectTree([root], 1).capped).toBe(true);
-  });
+  }, 30000);
 });
 
 describe('terminateSurvivors', () => {
