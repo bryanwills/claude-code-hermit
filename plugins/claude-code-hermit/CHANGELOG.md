@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.44] - 2026-08-22
 
 ### Added
 - `/claude-code-hermit:hermit-settings` can now be reached from a channel, so settings like the model, heartbeat cadence, morning-brief time or language can be changed from Discord/Telegram. The write still goes through `settings-edit`, so it stays validated and audited.
