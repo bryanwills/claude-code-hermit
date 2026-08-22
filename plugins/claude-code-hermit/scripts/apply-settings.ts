@@ -20,11 +20,10 @@
  *                            the key is absent. An operator's own /config choice is preserved
  *                            untouched (file left byte-identical); prints "applied" or
  *                            "kept:<value>" so callers can report the mismatch.
- *   automode-seed            Merge the hermit's sealed autoMode.allow exception + autoMode.
- *                            environment context into settings.local.json, so the auto-mode
- *                            classifier's soft-tier self-modification check clears sealed
- *                            settings writes made unattended. Target MUST be settings.local.json
- *                            — the classifier never reads autoMode from committed project settings.
+ *   automode-seed            RETIRED — exits 1. The classifier stopped reading autoMode from any
+ *                            project settings file in Claude Code 2.1.207, so this verb's writes
+ *                            were silently ignored. The sealed entries now ship in the per-session
+ *                            overlay hermit-start renders (lib/settings/automode-entries.ts).
  *   deny <minimal|hardened>  Merge deny-patterns from state-templates/deny-patterns.json
  *   channel-env <CH> <dir>   Set env.<CH>_STATE_DIR and strip any stale env.*_BOT_TOKEN
  *
@@ -155,25 +154,6 @@ const HERMIT_OBSOLETE = [
   'Bash(bun */scripts/cron-tz-shift.ts*)',
 ];
 
-// Sealed autoMode entries — operator-owned policy seeded at attended hatch and
-// re-ensured by hermit-start at boot. Declarative, no persuasion prose (a live
-// probe model flags over-argued entries as planted justification). Keep in sync
-// with docs/security.md § Auto-mode classifier.
-const AUTOMODE_ALLOW_ENTRY =
-  'Operator policy, set at hatch: hermit self-maintenance may run ' +
-  '`bun */scripts/apply-settings.ts <settings-file> <op>` unattended — approval for ' +
-  'these sealed settings operations is granted here in advance, including when the ' +
-  'run is initiated by plugin upgrade or migration instructions rather than a live ' +
-  'operator message.';
-
-const AUTOMODE_ENV_ENTRIES = [
-  'Key internal services: this project runs a claude-code-hermit autonomous session; ' +
-    '.claude-code-hermit/ is its internal working state and the installed hermit ' +
-    "plugins' scripts/*.ts are its trusted maintenance tooling.",
-  "Trusted internal domains: api.telegram.org and discord.com are the operator's own " +
-    'hermit notification channels (bot DM liveness probes and message sends).',
-];
-
 // Hardened extras — a subset of always_on patterns safe to persist to settings.
 // Excludes docker/kubectl/ssh: valid in devops contexts on the host; hook-enforced at runtime.
 // Matches what hatch Step 9 "hardened" option produces.
@@ -259,19 +239,6 @@ function removeAllow(settings: Json, entries: string[]): void {
   if (entries.length === 0 || !Array.isArray(settings?.permissions?.allow)) return;
   const drop = new Set(entries);
   settings.permissions.allow = settings.permissions.allow.filter((e: string) => !drop.has(e));
-}
-
-function mergeAutoModeList(settings: Json, key: 'allow' | 'environment', entries: string[]): void {
-  settings.autoMode ??= {};
-  const block = settings.autoMode as Record<string, unknown>;
-  // Create with "$defaults" so built-in rules are inherited. If an array
-  // pre-exists WITHOUT "$defaults", that is the operator's deliberate
-  // replacement of the defaults — do not inject it.
-  if (!Array.isArray(block[key])) block[key] = ['$defaults'];
-  const list = block[key] as string[];
-  for (const e of entries) {
-    if (!list.includes(e)) list.push(e);
-  }
 }
 
 function mergeDeny(settings: Json, entries: string[]): void {
@@ -365,15 +332,19 @@ switch (op) {
   }
 
   case 'automode-seed': {
-    // autoMode is only read from local/user/managed scope — a committed
-    // .claude/settings.json target would be a silent no-op trap.
-    if (path.basename(targetFile) !== 'settings.local.json') {
-      console.error('automode-seed must target a settings.local.json file — autoMode is not read from committed project settings.');
-      process.exit(1);
-    }
-    mergeAutoModeList(settings, 'allow', [AUTOMODE_ALLOW_ENTRY]);
-    mergeAutoModeList(settings, 'environment', AUTOMODE_ENV_ENTRIES);
-    break;
+    // Retired. Since Claude Code 2.1.207 the classifier reads autoMode only
+    // from user scope, managed settings, or --settings — never from a project
+    // settings file — so every write this verb made was silently ignored
+    // (upstream anthropics/claude-code#87545). hermit-start now renders the
+    // sealed entries into a per-session overlay and launches with --settings.
+    // Kept as a loud failure so old CHANGELOG upgrade instructions that still
+    // call it can't look like they succeeded.
+    console.error(
+      'automode-seed is retired: autoMode is not read from a project settings file since Claude Code 2.1.207. ' +
+      'The sealed entries now ship in the boot-time classifier overlay (hermit-start renders ' +
+      '.claude-code-hermit/state/claude-settings.overlay.json and launches with --settings). No action needed.'
+    );
+    process.exit(1);
   }
 
   case 'deny': {

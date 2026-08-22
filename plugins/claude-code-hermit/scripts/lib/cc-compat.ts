@@ -355,6 +355,21 @@ function readTailLines(filePath: string, tailBytes: number): { lines: string[]; 
 }
 
 /**
+ * Drop sidechain (subagent-owned) lines before a turn-boundary walk. A
+ * subagent's opening prompt is a plain `type:'user'` entry written into the
+ * same transcript, so a walk that keeps them resolves to the subagent's prompt
+ * rather than the turn's. A line that fails to parse is kept — the caller's own
+ * parse stays the authority on malformed lines.
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+function dropSidechainLines(lines: string[]): string[] {
+  return lines.filter(l => {
+    try { return JSON.parse(l).isSidechain !== true; } catch { return true; }
+  });
+}
+
+/**
  * Stringify an entry's message.content regardless of whether it is a string
  * or a content-block array. Real CC transcripts use both shapes.
  * @param {object} entry
@@ -665,6 +680,7 @@ export {
   backgroundTasks,
   // Transcript parsing
   readTailLines,
+  dropSidechainLines,
   lastAssistantModel,
   entryText,
   isToolResult,
