@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.46] - 2026-08-23
 
 ### Fixed
 - The 1.2.45 Bun pin deferred as a manual step on most Docker hermits. Scaffolds generated before 1.2.0 install bun through `npm install -g bun` and carry no `ARG BUN_VERSION` line, so the patch found nothing to change. A new `docker-bun-pin.ts` migration classifies the deployed `Dockerfile.hermit` and converges the npm shape onto the pinned native installer, leaving only a rebuild for you.
