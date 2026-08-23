@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The 1.2.45 Bun pin deferred as a manual step on most Docker hermits. Scaffolds generated before 1.2.0 install bun through `npm install -g bun` and carry no `ARG BUN_VERSION` line, so the patch found nothing to change. A new `docker-bun-pin.ts` migration classifies the deployed `Dockerfile.hermit` and converges the npm shape onto the pinned native installer, leaving only a rebuild for you.
+
+### Upgrade Instructions
+
+**Docker runtime pinned to Bun 1.4.0 (completes the 1.2.45 step).** Non-Docker hermits: nothing to do — bun comes from the host and `required_bun_version` is unchanged at `>=1.3.0`.
+
+**Step 1 — Pin.** From the project root, run:
+
+```
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/docker-bun-pin.ts .claude-code-hermit 1.4.0 <to>
+```
+
+(`<to>` is the plan's `to` version string, available from the pre-pass result.) The script classifies `Dockerfile.hermit`, applies the right patch, and re-records the template baseline so the drift detector clears. It is idempotent — a hermit already patched by hand is reported, not re-patched. A converged pre-1.2.0 scaffold keeps its old baseline on purpose: only its bun block is current, so the Dockerfile drift nudge on future evolves is a true signal, not a leftover.
+
+**Step 2 — Report, by verdict line.**
+
+- `OK|converged` or `OK|repinned <old>-><new>` → set the report's `Docker rebuild` field to `base-patched`. Step 10 emits a rebuild-only notice and suppresses the generic "re-run /docker-setup" drift bullet for `Dockerfile.hermit`.
+- `OK|already-pinned` or `SKIP|absent` → nothing to report.
+- `DEFER|unrecognized bun install shape` → the file no longer matches any shipped shape (bun installed some other way). Record a deferred-migration block with the instruction "manually set bun to 1.4.0 in `Dockerfile.hermit`, then rebuild", and **continue the remaining evolve steps** (do not abort).
+
+No `config.json` changes required.
+
 ## [1.2.45] - 2026-08-23
 
 ### Added
@@ -18,7 +43,7 @@
 
 **Step 1 — Existence / idempotency.** Check for `Dockerfile.hermit` at the project root. If it does not exist, skip to Step 4 (Docker not set up). If it already contains `ARG BUN_VERSION=1.4.0`, skip to Step 3 (already patched; still re-record the baseline so the drift detector clears).
 
-**Step 2 — Surgical patch.** Replace the single line matching `^ARG BUN_VERSION=` in `Dockerfile.hermit` with `ARG BUN_VERSION=1.4.0`. Match on the key, not on the old value — deploys exist on several past pins. If no such line is present (operator restructured how bun is installed), this is a genuine either/or with no safe non-destructive default: record a deferred-migration block with the instruction "manually set bun to 1.4.0 in `Dockerfile.hermit`, then rebuild", skip this patch, and **continue the remaining evolve steps** (do not abort).
+**Step 2 — Surgical patch.** Replace the single line matching `^ARG BUN_VERSION=` in `Dockerfile.hermit` with `ARG BUN_VERSION=1.4.0`. Match on the key, not on the old value — deploys exist on several past pins. If no such line is present, skip this patch **without** recording a deferred-migration block and continue: scaffolds generated before 1.2.0 install bun a different way, and the `docker-bun-pin.ts` step in a later entry classifies and converges them (deferring only a genuinely unrecognized shape).
 
 **Step 3 — Re-record the template baseline** so `classifyDockerTemplates` clears the drift and won't nag on future evolves. Run:
 

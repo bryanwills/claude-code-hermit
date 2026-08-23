@@ -80,6 +80,7 @@ const HERMIT_ALLOW = [
   // session that has no AskUserQuestion to recover with.
   'Bash(bun */scripts/settings-edit.ts*)',
   'Bash(bun */scripts/manifest-seed.ts*)',
+  'Bash(bun */scripts/docker-bun-pin.ts*)',
   'Bash(bun */scripts/apply-settings.ts*)',
   'Bash(bun */scripts/channel-log.ts*)',
   'Bash(bun */scripts/channel-send.ts*)',
