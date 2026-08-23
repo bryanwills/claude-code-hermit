@@ -20,6 +20,8 @@ import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-lang
 import { readSettledConfig } from './lib/config-read';
 import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
 import { readMicroProposals } from './lib/micro-proposals-io';
+import { tmuxSessionAlive } from './lib/tmux';
+import { readRuntimeJson } from './lib/runtime';
 
 type Json = any;
 
@@ -185,7 +187,41 @@ function buildCompactionPointers(agentDir: string): string {
   return parts.join('\n');
 }
 
+// --- Residency: resident vs guest ---------------------------------------
+// A hatched folder can hold more than one session at once. The managed
+// always-on hermit is the one carrying HERMIT_MANAGED=1 (stamped into the tmux
+// env-file by hermit-start; a hand-launched `claude` in the same folder never
+// inherits it). So a session WITHOUT the marker, in a project whose managed
+// tmux session is still alive, is a *guest*: it gets a short banner instead of
+// the full hermit framing, making role assignment mechanical rather than a
+// judgment call. No new state file — the marker plus runtime.json's
+// tmux_session is the whole signal.
+function residentSessionActive(agentDir: string): boolean {
+  if (process.env.HERMIT_MANAGED === '1') return false; // this session IS the resident
+  const runtime = readRuntimeJson(path.resolve(agentDir, 'state'));
+  const tmuxSession = runtime && typeof runtime.tmux_session === 'string' ? runtime.tmux_session : '';
+  // Unreadable state or no recorded session → no resident claim, full framing (fail-open).
+  if (!tmuxSession) return false;
+  return tmuxSessionAlive(tmuxSession);
+}
+
+// The guest injection: identity, the one fact that matters, and the three
+// things only the resident may do. Deliberately short — a guest session is here
+// to do ordinary work, not to be briefed on the hermit.
+function emitGuestBanner(agentDir: string): void {
+  const project = path.basename(path.dirname(path.resolve(agentDir)));
+  console.log('---Guest Session---');
+  console.log(`Project: ${safe(project)} — a managed hermit session is already running here.`);
+  console.log('You are a guest, not the hermit. Do not answer channel messages, do not write');
+  console.log('sessions/SHELL.md or other hermit state, and do not start the heartbeat, routines,');
+  console.log('or watches — the resident session owns all of that. Otherwise work normally.');
+}
+
 function main(source: string | null) {
+  if (residentSessionActive(AGENT_DIR)) {
+    emitGuestBanner(AGENT_DIR);
+    return;
+  }
   if (source === 'compact') {
     emitCompactCapsule();
   } else {
