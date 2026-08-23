@@ -33,11 +33,13 @@ test('terminateSurvivors reports a SIGTERM-ignoring process as a survivor', asyn
   c.unref();
   child = { pid: c.pid! };
 
-  const deadline = Date.now() + 5000;
+  // Error-path bound, not a speed assertion: under `bun test --parallel` on a
+  // contended runner the fixture can take seconds to install its trap.
+  const deadline = Date.now() + 20000;
   while (!fs.existsSync(ready) && Date.now() < deadline) await wait(50);
   expect(fs.existsSync(ready)).toBe(true);
   try { fs.unlinkSync(ready); } catch {}
 
   const survivors = await terminateSurvivors([c.pid!]);
   expect(survivors).toContain(c.pid!);
-});
+}, 45000);

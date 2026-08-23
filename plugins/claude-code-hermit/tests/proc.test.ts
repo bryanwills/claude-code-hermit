@@ -64,7 +64,7 @@ describe('terminateSurvivors', () => {
     const pid = spawnProc(['sleep', '0.05']);
     await pollUntil(() => !pidAlive(pid)); // wait for natural exit
     expect(await terminateSurvivors([pid])).toEqual([]);
-  });
+  }, 30000);
 
   test('a cooperative process is terminated (not reported as survivor)', async () => {
     process.env.HERMIT_STOP_GRACE_MS = '50';
@@ -72,7 +72,7 @@ describe('terminateSurvivors', () => {
     const pid = spawnProc(['sleep', '30']);
     await pollUntil(() => pidAlive(pid));
     expect(await terminateSurvivors([pid])).toEqual([]);
-  });
+  }, 30000);
 
   // NOTE: the "SIGTERM-ignoring process is reported as a survivor" case lives in
   // its own file (proc-survivor.test.ts). Spawning a long-lived signal-ignoring
