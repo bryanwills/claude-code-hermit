@@ -15,7 +15,7 @@
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/docker-bun-pin.ts .claude-code-hermit 1.4.0 <to>
 ```
 
-(`<to>` is the plan's `to` version string, available from the pre-pass result.) The script classifies `Dockerfile.hermit`, applies the right patch, and re-records the template baseline so the drift detector clears. It is idempotent — a hermit already patched by hand is reported, not re-patched.
+(`<to>` is the plan's `to` version string, available from the pre-pass result.) The script classifies `Dockerfile.hermit`, applies the right patch, and re-records the template baseline so the drift detector clears. It is idempotent — a hermit already patched by hand is reported, not re-patched. A converged pre-1.2.0 scaffold keeps its old baseline on purpose: only its bun block is current, so the Dockerfile drift nudge on future evolves is a true signal, not a leftover.
 
 **Step 2 — Report, by verdict line.**
 

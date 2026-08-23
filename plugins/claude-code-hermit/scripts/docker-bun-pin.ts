@@ -2,7 +2,6 @@
 // pre-1.2.0 npm install shape onto the canonical ARG + native-installer block.
 //
 // Usage: bun docker-bun-pin.ts <hermit-state-dir> <bun-version> <plugin-version>
-//   (run from the project root — Dockerfile.hermit is resolved against CWD)
 //
 // Verdicts (stdout, one line, exit 0):
 //   SKIP|absent                  no Dockerfile.hermit
@@ -46,8 +45,9 @@ const [stateDirArg, bunVersion, pluginVersion] = process.argv.slice(2);
 if (!stateDirArg || !bunVersion || !pluginVersion) {
   die('usage: bun docker-bun-pin.ts <hermit-state-dir> <bun-version> <plugin-version>');
 }
-// Same pin as manifest-seed.ts: the state dir is not caller-chosen, and this
-// script is reached through a wildcarded grant that covers every argument.
+// Same pin as manifest-seed.ts: the state dir is not caller-chosen, and the
+// allow-list grant for this script (`Bash(bun */scripts/docker-bun-pin.ts*)`)
+// covers every argument.
 const stateDir = pinStateDirOrExit(stateDirArg, 'docker-bun-pin');
 
 // The ENV/RUN half of the canonical install, lifted from the shipped template:
@@ -92,7 +92,9 @@ function readManifest(): { path: string; data: any } | null {
 // Re-records the pristine baseline so evolve-plan's drift classifier stops
 // flagging Dockerfile.hermit.template. Only for a verdict that leaves the
 // deployment matching the shipped template: recording it after a DEFER would
-// clear the drift signal on a hermit whose bun was never pinned.
+// clear the drift signal on a hermit whose bun was never pinned, and after a
+// converge it would vouch for a pre-1.2.0 scaffold that is several template
+// generations behind in everything except the bun block we just spliced in.
 function writeBaseline(manifest: { path: string; data: any } | null): void {
   if (!manifest) return;
   manifest.data.files[MANIFEST_KEY] = {
@@ -104,14 +106,23 @@ function writeBaseline(manifest: { path: string; data: any } | null): void {
   fs.renameSync(tmp, manifest.path);
 }
 
-function commit(dockerfile: string, contents: string, verdict: string): never {
+function commit(contents: string, verdict: string): never {
   fs.writeFileSync(dockerfile, contents, 'utf8');
   writeBaseline(manifest);
   console.log(verdict);
   process.exit(0);
 }
 
-const dockerfile = path.resolve('Dockerfile.hermit');
+function defer(): never {
+  console.log('DEFER|unrecognized bun install shape');
+  process.exit(0);
+}
+
+// Anchored on the state dir's parent, the project root `pinStateDirOrExit` just
+// validated — never on CWD. A shell that drifted (which persists across calls)
+// would otherwise resolve nothing, report SKIP|absent, and leave the hermit
+// silently unpinned: the exact no-op this migration exists to end.
+const dockerfile = path.join(path.dirname(stateDir), 'Dockerfile.hermit');
 if (!fs.existsSync(dockerfile)) {
   console.log('SKIP|absent');
   process.exit(0);
@@ -124,8 +135,12 @@ const lines = original.split('\n');
 // deployed file exactly as it was.
 const manifest = readManifest();
 
+// An ARG line only means "pinned" alongside the installer it feeds. Following
+// the 1.2.45 note by hand on a pre-1.2.0 scaffold produces the ARG with npm
+// still installing a floating bun below it: a dead ARG, not a pin.
 const argIdx = lines.findIndex((l) => /^ARG BUN_VERSION=/.test(l));
-if (argIdx !== -1) {
+const nativeInstall = lines.some((l) => l.includes('https://bun.sh/install'));
+if (argIdx !== -1 && nativeInstall) {
   const current = lines[argIdx].slice('ARG BUN_VERSION='.length).trim();
   if (current === bunVersion) {
     writeBaseline(manifest);
@@ -133,17 +148,25 @@ if (argIdx !== -1) {
     process.exit(0);
   }
   lines[argIdx] = `ARG BUN_VERSION=${bunVersion}`;
-  commit(dockerfile, lines.join('\n'), `OK|repinned ${current}->${bunVersion}`);
+  commit(lines.join('\n'), `OK|repinned ${current}->${bunVersion}`);
 }
 
 // Legacy shape: bun rides along in the npm globals line. Also matches a
 // hand-applied `bun@1.4.0` pin, which converges rather than being re-nagged.
-const npmIdx = lines.findIndex((l) => /^RUN npm install -g bun(@\S+)? /.test(l));
+// A dead ARG is dropped first so the converged file carries exactly one.
+const body = argIdx === -1 ? lines : lines.filter((_, i) => i !== argIdx);
+const npmIdx = body.findIndex((l) => /^RUN npm install -g bun(@\S+)? /.test(l));
 if (npmIdx !== -1) {
-  lines[npmIdx] = lines[npmIdx].replace(/^(RUN npm install -g )bun(@\S+)? /, '$1');
-  lines.splice(npmIdx + 1, 0, '', `ARG BUN_VERSION=${bunVersion}`, canonicalInstallBlock());
-  commit(dockerfile, lines.join('\n'), 'OK|converged');
+  // Splicing into a continued RUN would land the block mid-command and break
+  // the build. Defer instead of writing a Dockerfile that cannot be built.
+  if (/\\\s*$/.test(body[npmIdx])) defer();
+  body[npmIdx] = body[npmIdx].replace(/^(RUN npm install -g )bun(@\S+)? /, '$1');
+  body.splice(npmIdx + 1, 0, '', `ARG BUN_VERSION=${bunVersion}`, canonicalInstallBlock());
+  // No writeBaseline: see the comment there — a converged scaffold is current
+  // in its bun block alone, and the drift nudge on the rest is a true signal.
+  fs.writeFileSync(dockerfile, body.join('\n'), 'utf8');
+  console.log('OK|converged');
+  process.exit(0);
 }
 
-console.log('DEFER|unrecognized bun install shape');
-process.exit(0);
+defer();

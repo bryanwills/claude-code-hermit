@@ -139,8 +139,49 @@ describe('docker-bun-pin.ts', () => {
     expect(dockerfile(dir)).toBe(custom);
   });
 
+  // What following the 1.2.45 note by hand on a pre-1.2.0 scaffold produces:
+  // the ARG is there, but npm still installs a floating bun below it. Reading
+  // the ARG alone would call that pinned and leave the image unpinned forever.
+  test('converges a dead ARG that no native installer reads', async () => {
+    const dir = project(LEGACY.replace(/^ARG CLAUDE_CODE_VERSION=.*$/m, (l) => `ARG BUN_VERSION=1.4.0\n${l}`));
+    const r = await pin(dir);
+    expect(r.verdict).toBe('OK|converged');
+
+    const out = dockerfile(dir);
+    expect(out).not.toMatch(/npm install -g bun/);
+    expect(out).toContain('RUN curl -fsSL https://bun.sh/install');
+    expect(out.split('ARG BUN_VERSION=').length - 1).toBe(1);
+  });
+
+  // Splicing after a continued RUN lands the block mid-command — the image
+  // stops building. Defer beats emitting a Dockerfile that cannot be built.
+  test('defers when the npm line continues onto the next', async () => {
+    const custom = LEGACY.replace(
+      /^(RUN npm install -g bun .*)$/m,
+      '$1 && \\\n    npm cache clean --force',
+    );
+    const dir = project(custom);
+    const r = await pin(dir);
+    expect(r.verdict).toBe('DEFER|unrecognized bun install shape');
+    expect(dockerfile(dir)).toBe(custom);
+  });
+
+  // Shell CWD persists across calls, so a drifted evolve session must not turn
+  // a deployed Dockerfile into a clean "Docker not set up" verdict.
+  test('finds the Dockerfile through the state dir, not CWD', async () => {
+    const dir = project(LEGACY);
+    const stateDir = path.join(dir, '.claude-code-hermit');
+    const r = await runScript('docker-bun-pin.ts', {
+      args: [stateDir, '1.4.0', '1.2.46'],
+      cwd: freshDir(),
+      env: { AGENT_DIR: stateDir },
+    });
+    expect(r.stdout.trim()).toBe('OK|converged');
+    expect(dockerfile(dir)).toContain('ARG BUN_VERSION=1.4.0');
+  });
+
   test('re-records the template baseline, preserving foreign keys', async () => {
-    const dir = project(LEGACY, {
+    const dir = project(TEMPLATE.replace('ARG BUN_VERSION=1.4.0', 'ARG BUN_VERSION=1.3.11'), {
       version: 1,
       files: {
         'templates/SHELL.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.40' },
@@ -154,6 +195,17 @@ describe('docker-bun-pin.ts', () => {
     expect(entry.plugin_version).toBe('1.2.46');
     expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(entry.sha256).not.toBe('b'.repeat(64));
+  });
+
+  // A converged pre-1.2.0 scaffold matches the shipped template in its bun
+  // block and nothing else — still on the old base image, without the layers
+  // added since. Vouching for it would silence a true drift signal for good.
+  test('leaves the baseline alone when it converges', async () => {
+    const stale = { sha256: 'b'.repeat(64), plugin_version: '1.2.40' };
+    const dir = project(LEGACY, { version: 1, files: { 'docker/Dockerfile.hermit.template': stale } });
+    const r = await pin(dir);
+    expect(r.verdict).toBe('OK|converged');
+    expect(manifest(dir).files['docker/Dockerfile.hermit.template']).toEqual(stale);
   });
 
   // Recording the baseline says "this deployment matches the shipped template".
