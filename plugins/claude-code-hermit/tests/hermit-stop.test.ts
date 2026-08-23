@@ -255,8 +255,12 @@ describe('hermit-stop contract', () => {
       writeConfig(dir);
       writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
       const { bin } = installFakeTmux(dir, { hasSession: true, panePid: child.pid });
-      const deadline = Date.now() + 5000;
+      // Error-path bound, not a speed assertion: under `bun test --parallel` the
+      // fixture can take seconds to install its TERM trap, and stopping before the
+      // marker exists would kill it outright and mis-report as a missing orphan.
+      const deadline = Date.now() + 20000;
       while (!fs.existsSync(ready) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      expect(fs.existsSync(ready)).toBe(true);
       const { exitCode, stdout } = await runStop(dir, ['--force'], bin, {
         HERMIT_STOP_GRACE_MS: '50',
         HERMIT_TERM_WAIT_MS: '400',
@@ -273,7 +277,7 @@ describe('hermit-stop contract', () => {
       try { process.kill(child.pid!, 'SIGKILL'); } catch {}
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 45000);
 
   test('no session but fresh liveness → probable orphan, no stamp, exit 1', async () => {
     const dir = makeDir();

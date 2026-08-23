@@ -41,11 +41,18 @@ const SWITCH_CASES = [
 const hermit = (dir: string, ...parts: string[]) =>
   path.join(dir, '.claude-code-hermit', ...parts);
 
+// Error-path bound for the readiness polls below, not an assertion about speed:
+// these tests wait on detached subprocesses, so under `bun test --parallel` on a
+// contended runner a 4-5s window fails a run that is merely slow. Bun's
+// `--timeout` does not extend an in-test `Date.now()` deadline, so the bound has
+// to be raised here too.
+const POLL_DEADLINE_MS = 20_000;
+
 const switchVerifyMarker = (dir: string) => hermit(dir, 'state', 'harness-switch-verify.json');
 const pendingMarker = (dir: string) => hermit(dir, 'state', 'pending-harness-command.json');
 
 /** Wait for the detached cycler to record the mode the session actually landed in. */
-async function waitForVerify(dir: string, arg: string, timeoutMs = 5_000): Promise<void> {
+async function waitForVerify(dir: string, arg: string, timeoutMs = POLL_DEADLINE_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fs.existsSync(switchVerifyMarker(dir))) {
@@ -191,7 +198,7 @@ exit 1
   return { bin, log, modeFile };
 }
 
-async function waitForMode(modeFile: string, want: string, timeoutMs = 5_000): Promise<void> {
+async function waitForMode(modeFile: string, want: string, timeoutMs = POLL_DEADLINE_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (fs.readFileSync(modeFile, 'utf-8') === want) return;
@@ -212,7 +219,7 @@ async function drain(dir: string, bin: string) {
   });
 }
 
-async function waitForVerifierExit(helperPid: string, timeoutMs = 4_000): Promise<void> {
+async function waitForVerifierExit(helperPid: string, timeoutMs = POLL_DEADLINE_MS): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let pid: number | null = null;
   while (Date.now() < deadline) {
