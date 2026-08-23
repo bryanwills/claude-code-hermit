@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Notices asking for a decision or reply now always carry a plain-language client leg; the `maintainer` key supplements it with technical detail instead of replacing it. Heartbeat findings, inbox items, and pending-proposal digests were landing maintainer-only — or nowhere on non-technical installs with no maintainer chat configured.
+- Denying a direct `config.json` edit from a channel turn now points to the `settings-edit` recovery path instead of "terminal only", so channel-side settings changes (adding a routine, for example) can self-recover through the tiered script path.
+
 ## [1.2.46] - 2026-08-23
 
 ### Fixed

@@ -84,6 +84,15 @@ const DENY_TERMINAL_ONLY =
   'session with `/claude-code-hermit:hermit-settings <argument>`, and carry on with anything else ' +
   'that was asked.';
 
+const DENY_DIRECT_CONFIG_EDIT =
+  'Direct config.json edits are blocked from chat on every tier — a file write is opaque here, so ' +
+  'it is treated as if it could replace the enrollment root. The change itself may still be ' +
+  'possible: re-issue it through the audited script path, `.claude-code-hermit/bin/hermit-run ' +
+  'settings-edit .claude-code-hermit/config.json set <dotted.path> <value>` — settings are tiered ' +
+  'per-field there, and many (routines included) are writable from the chat holding settings ' +
+  'authority. Only if the script path is also denied does this need a terminal, via ' +
+  '`/claude-code-hermit:hermit-settings <argument>`.';
+
 const DENY_NEEDS_MAINTAINER =
   'Security-tier hermit setting. Settings like permission mode, boot skill, remote, escalation, ' +
   'docker and the artifact backend change only from the chat that holds settings authority — the ' +
@@ -385,11 +394,15 @@ function deny(reason: string): never {
   process.exit(2);
 }
 
-function denyIfManaged(diagnostic: string): void {
+function denyIfManaged(diagnostic: string, target?: string): void {
   if (process.env.HERMIT_MANAGED !== '1') return; // attended — lean allow
   const dir = hermitDir();
   if (!dir || !fs.existsSync(dir)) return;
-  deny(`${DENY_TERMINAL_ONLY}\n(${diagnostic})`);
+  // A direct config.json edit gets the recovery-path message here too: safe-tier
+  // settings-edit writes are exempt from this fail-closed rule, so the script
+  // path it points at can still succeed where the opaque edit cannot.
+  const message = target === 'config.json' ? DENY_DIRECT_CONFIG_EDIT : DENY_TERMINAL_ONLY;
+  deny(`${message}\n(${diagnostic})`);
 }
 
 function main(payload: any): void {
@@ -425,7 +438,7 @@ function main(payload: any): void {
     // safe-tier write is exempt: the fail-closed rule buys its broken flows
     // back in blast radius, and a safe setting has none to speak of.
     if (mutation.verdict !== 'allowed') {
-      denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.');
+      denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.', mutation.target);
     }
     return;
   }
@@ -434,8 +447,14 @@ function main(payload: any): void {
 
   // Cheapest check first: terminal-only never needs config content, so decide
   // it before paying for the read — same cheap-checks-first ordering as the
-  // pure string matching above.
-  if (mutation.verdict === 'terminal-only') deny(DENY_TERMINAL_ONLY);
+  // pure string matching above. An opaque whole-file write (Edit/Write on
+  // config.json, or a shell redirect into it) gets its own message: the *edit*
+  // is terminal-only because it can't be inspected, but the change behind it
+  // may be a lower tier through settings-edit — the deny must teach that
+  // recovery path, not send the model to a terminal it doesn't have.
+  if (mutation.verdict === 'terminal-only') {
+    deny(mutation.target === 'config.json' ? DENY_DIRECT_CONFIG_EDIT : DENY_TERMINAL_ONLY);
+  }
 
   const config = readConfigRaw(dir);
 

@@ -171,6 +171,10 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - If it would replace the current task: confirm with the operator before switching
   - Never silently abandon work in progress
 
+- **Settings change request** ("change the model", "add a routine", "turn off the heartbeat" — anything that alters `.claude-code-hermit/config.json`)
+  - Every config write goes through the settings verbs: `/claude-code-hermit:hermit-settings`, whose writes run `.claude-code-hermit/bin/hermit-run settings-edit …`. Never touch `config.json` with the Edit or Write tools, from any turn origin — the `channel-settings-gate` hook tiers the script path per-field but blocks a direct file edit outright.
+  - A gate denial is the policy answering, not an obstacle: it names the chat or tier that can authorize the change (and, for a direct-edit denial, the script path to re-issue it through). Relay its reason in plain voice and follow its recovery instruction — never look for another write route.
+
 - **Question** ("why did you...", "what about...", "how does X work?")
   - Answer in the context of the current session
   - Reference specific files or decisions from SHELL.md when relevant
@@ -244,11 +248,17 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
   ```
   with a JSON payload on stdin:
   - plain, client-safe notice → `{ "client": "<text>" }`
-  - technical / operational / spend content with no plain version → `{ "maintainer": "<text>" }`
-  - both → `{ "client": "<plain headline>", "maintainer": "<full detail incl. figures>" }`. The
-    maintainer text must be the **complete richer version of the same notice, not a fragment** —
-    when both audiences resolve to the same chat the client leg is dropped, so the maintainer text
-    has to stand alone.
+  - `{ "maintainer": "<text>" }` **alone** is reserved for content with no client-facing
+    consequence — spend detail, FYI diagnostics, or a skill that explicitly mandates a
+    maintainer-only leg. Never for a notice that asks a decision, a reply, or names something the
+    operator must act on: composing the plain client version is part of the work, not an optional
+    extra, and skipping it misroutes the ask (maintainer chat configured) or silently parks it in
+    Findings (non-technical profile, none configured).
+  - decision-seeking or actionable content that also has technical detail (heartbeat findings,
+    inbox items, pending proposals) → `{ "client": "<plain headline + the ask>", "maintainer":
+    "<full detail incl. figures>" }`. The maintainer text must be the **complete richer version of
+    the same notice, not a fragment** — when both audiences resolve to the same chat the client leg
+    is dropped, so the maintainer text has to stand alone.
   - add `"sensitive": true` for credential-bearing text (keeps it out of the searchable channel log).
 
   Compose each version in the operator's configured `language`.
