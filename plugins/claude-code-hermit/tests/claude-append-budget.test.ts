@@ -75,9 +75,11 @@ describe('CLAUDE-APPEND size budget', () => {
     // trims before it raises.
     // The maintainer-audience rewrite (a `maintainer` leg supplements and never
     // replaces the `client` leg; decision-seeking notices always carry a plain
-    // client leg) was funded in place per that rule: +~330 B of rule against
-    // ~330 B trimmed from the auto-mode denial bullet's restated fallback and
-    // the proposal-id rationale sentence — net ~flat, no raise.
+    // client leg, and the maintainer text still has to stand alone where both
+    // audiences resolve to one chat) was funded in place per that rule: ~330 B
+    // trimmed from the auto-mode denial bullet's restated fallback and the
+    // proposal-id rationale sentence paid for most of it — +210 B net against
+    // the ~500 B of margin, no raise.
     expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(9600);
   });
 });

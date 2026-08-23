@@ -84,14 +84,21 @@ const DENY_TERMINAL_ONLY =
   'session with `/claude-code-hermit:hermit-settings <argument>`, and carry on with anything else ' +
   'that was asked.';
 
+// Deliberately spells the recovery path out in parts rather than as one runnable
+// command line: protectedMutation() matches `settings-edit <word> <word>` anywhere
+// in a Bash command string, so a verbatim invocation here would re-trigger this
+// gate the moment the model quotes the deny text inside a command (a heredoc
+// `--notice` payload, a Findings append). Backticking the verb with no trailing
+// space keeps the token out of that match while still naming it.
 const DENY_DIRECT_CONFIG_EDIT =
   'Direct config.json edits are blocked from chat on every tier — a file write is opaque here, so ' +
   'it is treated as if it could replace the enrollment root. The change itself may still be ' +
-  'possible: re-issue it through the audited script path, `.claude-code-hermit/bin/hermit-run ' +
-  'settings-edit .claude-code-hermit/config.json set <dotted.path> <value>` — settings are tiered ' +
-  'per-field there, and many (routines included) are writable from the chat holding settings ' +
-  'authority. Only if the script path is also denied does this need a terminal, via ' +
-  '`/claude-code-hermit:hermit-settings <argument>`.';
+  'possible: re-issue it through the audited script path — `.claude-code-hermit/bin/hermit-run` ' +
+  'with the `settings-edit` verb, the hermit config path, then `set <dotted.path> <value>`. ' +
+  'Settings are tiered per-field there, and many (routines included) are writable from the chat ' +
+  'holding settings authority. Only if that path is also denied does this need a terminal, via ' +
+  '`/claude-code-hermit:hermit-settings <argument>`. Reply in the operator\'s language saying what ' +
+  'is happening to the change, and carry on with anything else that was asked.';
 
 const DENY_NEEDS_MAINTAINER =
   'Security-tier hermit setting. Settings like permission mode, boot skill, remote, escalation, ' +
@@ -438,7 +445,7 @@ function main(payload: any): void {
     // safe-tier write is exempt: the fail-closed rule buys its broken flows
     // back in blast radius, and a safe setting has none to speak of.
     if (mutation.verdict !== 'allowed') {
-      denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to terminal-only.', mutation.target);
+      denyIfManaged('Turn provenance could not be determined from the transcript on a managed session, so this defaults to the strictest tier.', mutation.target);
     }
     return;
   }
