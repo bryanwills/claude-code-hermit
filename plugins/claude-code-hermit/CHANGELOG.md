@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.45] - 2026-08-23
 
 ### Added
 - A trusted channel sender can now set the experimental advisor model mid-session with `/advisor <model>`, and clear it with `/advisor off`, on the same deferred harness-command path as `/model` and `/effort`.
