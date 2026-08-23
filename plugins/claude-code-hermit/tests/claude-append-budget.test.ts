@@ -73,6 +73,13 @@ describe('CLAUDE-APPEND size budget', () => {
     // creep. The ~500 B of slack is the margin, not a budget to spend — the next
     // deliberate addition still gets its ledger line here, and the one after that
     // trims before it raises.
+    // The maintainer-audience rewrite (a `maintainer` leg supplements and never
+    // replaces the `client` leg; decision-seeking notices always carry a plain
+    // client leg, and the maintainer text still has to stand alone where both
+    // audiences resolve to one chat) was funded in place per that rule: ~330 B
+    // trimmed from the auto-mode denial bullet's restated fallback and the
+    // proposal-id rationale sentence paid for most of it — +210 B net against
+    // the ~500 B of margin, no raise.
     expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(9600);
   });
 });
@@ -96,6 +103,10 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
     'HEARTBEAT_EVALUATE',                              // heartbeat notification trigger
     'ROUTINE_DUE',                                      // routine-monitor notification trigger
     'covered-by-memory',                               // canonical memory-suppression code
+    // The audience rule: decision-seeking notices must reach the client chat.
+    // Composed maintainer-only, they misroute (maintainer chat configured) or
+    // vanish to Findings (non-technical, none configured) — live-fleet incident.
+    'must carry a plain-language `client` leg',
   ];
   for (const a of anchors) {
     test(`contains anchor: ${a}`, () => {

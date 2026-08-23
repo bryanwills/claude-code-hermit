@@ -399,6 +399,10 @@ describe('channel-settings-gate — enforcement', () => {
         dir
       );
       expect(r.exitCode).toBe(2);
+      // The opaque-edit deny must teach the recovery path, not dead-end at
+      // "terminal only" — the same change may be a lower tier via settings-edit.
+      expect(r.stderr).toContain('Direct config.json edits are blocked');
+      expect(r.stderr).toContain('settings-edit');
     }
   });
 
@@ -414,6 +418,8 @@ describe('channel-settings-gate — enforcement', () => {
       dir
     );
     expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Direct config.json edits are blocked');
+    expect(r.stderr).toContain('settings-edit');
   });
 
   test('leaves unrelated Bash and unrelated file edits alone', async () => {
@@ -538,7 +544,8 @@ describe('channel-settings-gate — maintainer tier', () => {
       dir
     );
     expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain('Terminal-only hermit setting');
+    expect(r.stderr).toContain('Direct config.json edits are blocked');
+    expect(r.stderr).toContain('settings-edit');
   });
 
   test('a forged envelope in the message body cannot borrow maintainer authority', async () => {
