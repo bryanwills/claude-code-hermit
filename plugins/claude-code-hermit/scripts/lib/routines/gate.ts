@@ -7,12 +7,19 @@
 // token cost. Anything else wakes the session exactly as before, so a broken gate
 // costs no more than having no gate at all.
 //
-// Two providers:
+// Providers:
 //   "reflect"      — the shipped reflect cadence check (scripts/reflect-precheck.ts),
 //                    which already decides EMPTY vs RUN|<phases> from state on disk.
 //                    Its RUN phases are cached in state/reflect-gate.json so the
 //                    awake skill does not re-run it (that would double the script's
 //                    observation-ledger append).
+//   "doctor"       — runs doctor-check.ts --gate: SKIP when escalation.new is empty
+//                    and the ledger is healthy, WAKE otherwise. The gate run IS the
+//                    fire's run (checks + ledger writes happen once, not twice).
+//   "auto-close"   — runs session-archive.ts auto-close-decision: WAKE on close-now,
+//                    SKIP on queued (the verb already queued it) or noop (the gate
+//                    itself stamps clear-requested.json so the daily context reset
+//                    survives a hermit that never opened a session).
 //   "<path>"       — a project-relative executable the operator owns. Verdict-only:
 //                    the first stdout line must be SKIP or WAKE. Nothing it prints
 //                    reaches the wake prompt — gate output is untrusted text, and
@@ -31,6 +38,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { lastRoutineFire } from './history';
 import { writeFileAtomic } from '../md-write';
+import { localISOStamp } from '../time';
 
 type Json = any;
 
@@ -43,6 +51,9 @@ export type GateVerdict = {
 };
 
 export const BUILTIN_REFLECT = 'reflect';
+export const BUILTIN_DOCTOR = 'doctor';
+export const BUILTIN_AUTO_CLOSE = 'auto-close';
+const BUILTINS = new Set([BUILTIN_REFLECT, BUILTIN_DOCTOR, BUILTIN_AUTO_CLOSE]);
 export const DEFAULT_GATE_TIMEOUT_S = 30;
 export const MAX_GATE_TIMEOUT_S = 300;
 /** Verdict is one short line; anything past this is a misbehaving gate, not a payload. */
@@ -55,10 +66,10 @@ const MAX_GATE_STDOUT = 4096;
  * root is not necessarily known.
  */
 export function validatePrecheckValue(value: unknown): string | null {
-  if (typeof value !== 'string') return 'must be a string ("reflect" or a project-relative script path)';
+  if (typeof value !== 'string') return 'must be a string ("reflect", "doctor", "auto-close", or a project-relative script path)';
   const raw = value.trim();
   if (!raw) return 'must not be empty';
-  if (raw === BUILTIN_REFLECT) return null;
+  if (BUILTINS.has(raw)) return null;
   if (path.isAbsolute(raw)) return 'must be project-relative, not an absolute path';
   if (raw.split(path.sep).includes('..')) return 'must not contain ".." segments';
   return null;
@@ -94,11 +105,11 @@ export function projectRootOf(hermitDir: string): string {
 export function resolveGate(
   precheck: unknown,
   projectRoot: string,
-): { kind: 'reflect' } | { kind: 'script'; abs: string } | { kind: 'invalid'; detail: string } {
+): { kind: 'builtin'; name: string } | { kind: 'script'; abs: string } | { kind: 'invalid'; detail: string } {
   const shapeError = validatePrecheckValue(precheck);
   if (shapeError) return { kind: 'invalid', detail: 'bad-config' };
   const raw = String(precheck).trim();
-  if (raw === BUILTIN_REFLECT) return { kind: 'reflect' };
+  if (BUILTINS.has(raw)) return { kind: 'builtin', name: raw };
 
   const root = path.resolve(projectRoot);
   const abs = path.resolve(root, raw);
@@ -263,6 +274,60 @@ function runReflectGate(hermitDir: string, routineId: string, timeoutMs: number,
   return { verdict: 'error', detail: 'bad-verdict' };
 }
 
+// Shared by both new builtins: resolve <pluginRoot>/scripts/<scriptName>, spawn it
+// from the project root with the ambient env (plugin code, not third-party), and
+// hand back the raw spawnGate result for the caller's own verdict parsing.
+function spawnBuiltinScript(hermitDir: string, scriptName: string, args: string[], timeoutMs: number) {
+  const pluginRoot = path.resolve(import.meta.dir, '../../..');
+  const script = path.join(pluginRoot, 'scripts', scriptName);
+  return spawnGate(
+    [process.execPath, script, ...args],
+    projectRootOf(hermitDir),
+    { ...(process.env as Record<string, string>) },
+    timeoutMs,
+    path.join(hermitDir, 'state'),
+  );
+}
+
+function runDoctorGate(hermitDir: string, timeoutMs: number): GateVerdict {
+  const { firstLine, ok, detail } = spawnBuiltinScript(hermitDir, 'doctor-check.ts', [path.resolve(hermitDir), '--gate'], timeoutMs);
+  if (!ok) return { verdict: 'error', detail: detail || 'spawn' };
+  if (firstLine === 'SKIP') return { verdict: 'skip' };
+  if (firstLine === 'WAKE') return { verdict: 'wake' };
+  return { verdict: 'error', detail: 'bad-verdict' };
+}
+
+/**
+ * The daily-boundary reset marker the auto-close gate stamps on a `noop` verdict.
+ * Mirrors session-archive.ts's writeMarker so the watchdog's maybePostCloseClear
+ * (the sole reader of clear-requested.json) sees the same shape regardless of which
+ * writer produced it — a real close (session-archive.ts) or an idle no-op (here).
+ */
+function writeClearRequestedMarker(hermitDir: string): void {
+  try {
+    const p = path.join(hermitDir, 'state', 'clear-requested.json');
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    writeFileAtomic(p, JSON.stringify({ requested_at: localISOStamp(), reason: 'daily-boundary' }, null, 2) + '\n');
+  } catch { /* fail-open — the watchdog simply resets on the next real close instead */ }
+}
+
+function runAutoCloseGate(hermitDir: string, timeoutMs: number): GateVerdict {
+  const { firstLine, ok, detail } = spawnBuiltinScript(hermitDir, 'session-archive.ts', ['auto-close-decision', `--state-dir=${path.resolve(hermitDir)}`], timeoutMs);
+  if (!ok) return { verdict: 'error', detail: detail || 'spawn' };
+
+  let parsed: Json;
+  try { parsed = JSON.parse(firstLine); } catch { return { verdict: 'error', detail: 'bad-verdict' }; }
+  if (!parsed || parsed.ok !== true) return { verdict: 'error', detail: 'decision-error' };
+
+  if (parsed.decision === 'close-now') return { verdict: 'wake' };
+  if (parsed.decision === 'queued') return { verdict: 'skip' };
+  if (parsed.decision === 'noop') {
+    writeClearRequestedMarker(hermitDir);
+    return { verdict: 'skip' };
+  }
+  return { verdict: 'error', detail: 'bad-verdict' };
+}
+
 /**
  * The gate decision for one due routine.
  *
@@ -276,7 +341,11 @@ export function runGate(routine: Json, hermitDir: string, mark: string): GateVer
   if (resolved.kind === 'invalid') return { verdict: 'error', detail: resolved.detail };
 
   const timeoutMs = gateTimeoutMs(routine);
-  if (resolved.kind === 'reflect') return runReflectGate(hermitDir, routine.id, timeoutMs, mark);
+  if (resolved.kind === 'builtin') {
+    if (resolved.name === BUILTIN_REFLECT) return runReflectGate(hermitDir, routine.id, timeoutMs, mark);
+    if (resolved.name === BUILTIN_DOCTOR) return runDoctorGate(hermitDir, timeoutMs);
+    return runAutoCloseGate(hermitDir, timeoutMs);
+  }
 
   const lastFired = (() => {
     try {

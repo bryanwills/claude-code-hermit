@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The `doctor` and `daily-auto-close` routines ship with a builtin `precheck` gate, so a day with nothing to report or close no longer wakes the session. `"precheck": "doctor"` runs the 27 checks and their ledger writes once, in the gate itself, and SKIPs when nothing currently failing is still owed to the operator. `"precheck": "auto-close"` runs the same decision the `--scheduled` archive path already made, and SKIPs on `queued` or `noop` — WAKE only fires an actual close.
+- A hermit that never opened a session (`idle`, no active session id) no longer archives an empty nightly report. The `auto-close` gate stamps the daily context-reset marker itself on that branch, so the `/clear` the archive path used to trigger keeps firing on schedule either way.
+
+### Upgrade Instructions
+
+**Doctor and daily-auto-close stop waking the session on a quiet day.** In `.claude-code-hermit/config.json`, for each of the `routines[]` entries with `"id": "doctor"` and `"id": "daily-auto-close"`: if its `skill` still starts with the shipped value (`claude-code-hermit:hermit-doctor` / `claude-code-hermit:session-close`) and it has **no** `precheck` key, add `"precheck": "doctor"` or `"precheck": "auto-close"` respectively. If the routine has been renamed, points at a different skill, or already has a `precheck`, leave it untouched and note that in the evolve report — an operator's own gate is never replaced. Removing the key later restores the old always-wake behavior.
+
 ## [1.2.47] - 2026-08-24
 
 ### Added

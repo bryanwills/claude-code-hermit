@@ -345,6 +345,19 @@ describe('routine-due: pending-close drain', () => {
     expect(r.stdout.trim()).toBe(DRAIN_LINE);
   }));
 
+  // The drain push (below) runs after the gate loop has already finished this
+  // poll, unconditionally on dueIds — a gated daily-auto-close must not lose the
+  // drain just because its own cron mark isn't due (it isn't, here: NOW is 15:00,
+  // the schedule is midnight, and the schedule cursor is pinned to NOW by seed()).
+  test('a gated daily-auto-close still drains — the gate never runs for this poll', withDir(async (dir) => {
+    seed(dir, [{ ...AUTO_CLOSE, precheck: 'auto-close' }]);
+    writeRuntime(dir, 'in_progress');
+    writePending(dir);
+    const r = await run(dir, NOW);
+    expect(r.stdout.trim()).toBe(DRAIN_LINE);
+    expect(readMetricsRows(dir)).toEqual([]);
+  }));
+
   test('no flag → silent (an ordinary poll must not emit)', withDir(async (dir) => {
     seed(dir);
     writeRuntime(dir, 'in_progress');

@@ -2222,6 +2222,16 @@ if (import.meta.main) {
     const checks = await runAllChecks();
     const escalation = escalate(checks, new Date().toISOString());
     const report = writeReport(checks, escalation);
+    if (process.argv[3] === '--gate') {
+      // Routine precheck gate (lib/routines/gate.ts runDoctorGate): the checks and
+      // ledger writes above ARE this fire's run — do not run them a second time when
+      // the skill wakes. SKIP only when nothing is owed AND the ledger itself is
+      // trustworthy; either failure must wake so the skill's own fail-open path
+      // (SKILL.md: record under ## Findings, send nothing) still gets to run.
+      const skip = escalation.new.length === 0 && escalation.persisted && escalation.prior_state_known;
+      process.stdout.write((skip ? 'SKIP' : 'WAKE') + '\n');
+      process.exit(0);
+    }
     // Print the report JSON so skills/tests can capture it without re-reading.
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
   } catch (e: any) {

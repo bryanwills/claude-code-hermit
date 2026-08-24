@@ -912,11 +912,24 @@ function verbAutoCloseDecision(flags: Record<string, string | true>): Json {
     return { ok: true, decision: 'noop', reason: `runtime unreadable (${r.kind})` };
   }
   // `missing` falls through: no runtime.json means no session, so any flag is stale.
+  // Both noop exits below reap a stale pending-close flag the same way, differing
+  // only in the reason string, so share the reap+format instead of repeating it.
+  const noop = (reason: string): Json => {
+    const reaped = reapPendingClose(stateDir) === 'deleted';
+    return { ok: true, decision: 'noop', reason: `${reason}${reaped ? '; stale pending-close deleted' : ''}` };
+  };
   const sessionState = r.kind === 'ok' ? (r.value?.session_state ?? 'unset') : r.kind;
   if (sessionState !== 'in_progress' && sessionState !== 'idle') {
     // Nothing to close; a leftover flag from a prior session is stale — reap it.
-    const reaped = reapPendingClose(stateDir) === 'deleted';
-    return { ok: true, decision: 'noop', reason: `session_state=${sessionState}${reaped ? '; stale pending-close deleted' : ''}` };
+    return noop(`session_state=${sessionState}`);
+  }
+  const sessionId = r.kind === 'ok' ? (r.value?.session_id ?? null) : null;
+  if (sessionState === 'idle' && sessionId == null) {
+    // Distinguish "resting, nothing to close" from "in_progress, needs archiving".
+    // closeFinalUpdates() (below) nulls session_id only on a real close and stamps a
+    // fresh one on the idle-archive rollover path — so idle + null id is the terminal
+    // rest state, not a session worth an empty nightly archive.
+    return noop('idle, no active session');
   }
 
   let lastAction: Json = null;
