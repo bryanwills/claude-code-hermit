@@ -157,7 +157,7 @@ Claude Code's `--permission-mode auto` (the hermit's default) routes tool calls 
   |---|---|---|
   | `allowed` | the operator's own chat (`isTrustedController`) or the settings chat, which holds strictly more; **reads** from any chat that reaches the hermit | name, language, cadence, `artifacts.publish_authorized`, … |
   | `maintainer` | the settings chat (`isSettingsController`), allowlist-checked | `boot_skill`, `remote`, `escalation`, `docker.*`, `artifacts.backend`, and anything not named below |
-  | `nonce` | settings chat **and** an echoed confirmation code | `permission_mode`, `env`, `env.*`, `monitors` (every entry carries a shell `command`) |
+  | `nonce` | settings chat **and** an echoed confirmation code | `permission_mode`, `env`, `env.*`, `monitors` (every entry carries a shell `command`), `routines.<n>.precheck` and a whole-`routines` write that arms or changes one (a `precheck` is an executable the routine monitor runs unattended — the same trust class as a monitor command) |
   | `terminal-only` | the operator's own terminal, on every turn | `allowed_users`, `default_chat_id`, `dm_channel_id`, `maintainer_channel_id`, `operator_profile`, `settings_from_chat`, any ancestor write that would replace them, and any direct `config.json` write |
 
   The maintainer tier exists because the hermit that most needs these decisions is the unattended one, and its operator is reachable on a channel, not at a shell. Its anchor is the platform-supplied chat id (`lib/channel-auth.ts` `isSettingsController`), not message text — a materially stronger signal than `user="operator"`, which anyone can send.

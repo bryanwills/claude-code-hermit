@@ -7,7 +7,7 @@ import path from 'node:path';
 import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 import { triggerPrompt, assistantEntry } from './helpers/transcript';
-import { channelVerdict } from '../scripts/channel-settings-gate';
+import { channelVerdict, precheckSetChanged } from '../scripts/channel-settings-gate';
 import { SETTINGS } from '../scripts/lib/settings/registry';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-channel-settings-gate-');
@@ -129,6 +129,46 @@ describe('channelVerdict — policy', () => {
     // shell command cannot sit a tier below permission_mode.
     expect(channelVerdict('set', 'monitors')).toBe('nonce');
     expect(channelVerdict('set', 'monitors.0.command')).toBe('nonce');
+  });
+
+  test('a routine precheck is nonce-tier — the monitor runs it unattended', () => {
+    // Same class as monitors[].command: an executable named in config that a
+    // subprocess runs with no classifier in front of it.
+    expect(channelVerdict('set', 'routines.0.precheck')).toBe('nonce');
+    expect(channelVerdict('set', 'routines.2.precheck_timeout_s')).toBe('nonce');
+  });
+
+  test('the everyday routine fields keep their existing tier', () => {
+    // Adding a routine and flipping one on or off is daily operator work from
+    // chat; taxing it with a confirmation code to protect one field would be
+    // the wrong trade. The container write is judged by value instead.
+    expect(channelVerdict('set', 'routines.0.enabled')).not.toBe('nonce');
+    expect(channelVerdict('set', 'routines')).not.toBe('nonce');
+  });
+
+  test('precheckSetChanged only fires on a write that arms or changes a gate', () => {
+    // hermit-settings writes the whole array back for every add and edit, so
+    // this is what decides whether that write needs the code.
+    const current = [
+      { id: 'reflect', precheck: 'reflect' },
+      { id: 'brief' },
+    ];
+    const unchanged = JSON.stringify([{ id: 'reflect', precheck: 'reflect' }, { id: 'brief' }]);
+    const reordered = JSON.stringify([{ id: 'brief' }, { id: 'reflect', precheck: 'reflect' }]);
+    const added = JSON.stringify([{ id: 'reflect', precheck: 'reflect' }, { id: 'brief', precheck: 'tools/x.sh' }]);
+    const retargeted = JSON.stringify([{ id: 'reflect', precheck: 'tools/evil.sh' }, { id: 'brief' }]);
+    const dropped = JSON.stringify([{ id: 'reflect' }, { id: 'brief' }]);
+    const retimed = JSON.stringify([{ id: 'reflect', precheck: 'reflect', precheck_timeout_s: 300 }, { id: 'brief' }]);
+
+    expect(precheckSetChanged(unchanged, current)).toBe(false);
+    expect(precheckSetChanged(reordered, current)).toBe(false);
+    expect(precheckSetChanged(dropped, current)).toBe(false);   // de-escalation
+    expect(precheckSetChanged(added, current)).toBe(true);
+    expect(precheckSetChanged(retargeted, current)).toBe(true);
+    expect(precheckSetChanged(retimed, current)).toBe(true);
+    // An opaque write must not buy a weaker tier than a legible one.
+    expect(precheckSetChanged('not json', current)).toBe(true);
+    expect(precheckSetChanged('{}', current)).toBe(true);
   });
 
   test('the enrollment root is terminal-only on every tier', () => {

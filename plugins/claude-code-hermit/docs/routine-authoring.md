@@ -64,9 +64,30 @@ produce a report.
      owns the audit trail (updates `reflection-state.json`, appends the Progress Log line) so
      reflect's skill body never loads on a no-op day.
 
-   Wire the precheck into the routine's execution prompt the same way `hermit-routines` already does
-   for its `reflect` special case (`skills/hermit-routines/SKILL.md`, Shared execution semantics — "skill is exactly claude-code-hermit:reflect"): run the script, branch
-   on its single stdout line, only invoke the skill on the "do something" branch.
+   **Declare it as the routine's `precheck` and the check runs before the wake, not after it.**
+   Set `"precheck": "tools/your-gate.sh"` (project-relative) on the routine entry: the routine
+   monitor runs it at fire time, in its own subprocess, and a first stdout line of `SKIP` consumes
+   the fire and stamps `skipped-precheck` without waking the session at all — zero tokens, and the
+   skip still counts as a run in `routines.ts health`. `WAKE`, a non-zero exit, unparseable output,
+   or the timeout (`precheck_timeout_s`, default 30s, max 300) all fire the routine exactly as an
+   ungated one would; a failure stamps `precheck-error` with the reason, and the `routine-precheck`
+   doctor check surfaces a gate that has never succeeded. The builtin `"precheck": "reflect"` is the
+   shipped reflect cadence check, wired this way by default.
+
+   Rules for the script: **verdict only** — nothing it prints reaches the session, so a gate that
+   found work hands nothing over; the skill re-queries its own source using the `ROUTINE_LAST_FIRED`
+   env var (ISO timestamp of the last successful fire, empty on the first, meaning "everything is
+   new"). It also gets `HERMIT_DIR` and `ROUTINE_ID`, and a deliberately minimal environment —
+   secrets belong in a file the script reads, not in the monitor's env. Keep it read-only and cheap:
+   mutation belongs in the skill, which only runs when the gate says so. Declaring a gate from chat
+   takes the confirmation-code tier (it is an executable the hermit runs unattended, the same trust
+   class as a `monitors[]` command). In CronCreate fallback mode the gate still runs, but after the
+   wake: same behavior, no token saving.
+
+   Where a gate is not declared, the older in-prompt pattern still works — run the script from the
+   routine's execution prompt and branch on its line, the way `hermit-routines` does for its `reflect`
+   special case (`skills/hermit-routines/SKILL.md`, Shared execution semantics). That saves the skill
+   body, but not the wake.
 
 Applying all four steps turns a routine that always pays for a full skill load and a session-model
 turn into one that usually costs a single cheap bash check, and only pays for the skill (at

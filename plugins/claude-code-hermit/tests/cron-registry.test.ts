@@ -85,6 +85,28 @@ describe('planCron — targeted changes', () => {
     expect(plan.keepCount).toBe(1);
   });
 
+  // In fallback mode the wake gate runs from the CronCreate prompt, so a changed
+  // precheck has to re-register that prompt like any other execution input.
+  test('precheck added → exactly that id DELETE+CREATE', () => {
+    const before = [r('a'), r('b')];
+    const mirror = seedMirror(before, {}, T0 - 1000);
+    const after = [r('a', { precheck: 'tools/gate.sh' }), r('b')];
+    const plan = planCron(after, mirror, BOOT_A, PLUGIN_ROOT, null, 'UTC', T0);
+    expect(plan.deletes).toEqual(['a']);
+    expect(plan.creates.map(c => c.id)).toEqual(['a']);
+    expect(plan.keepCount).toBe(1);
+  });
+
+  test('precheck_timeout_s changed → exactly that id DELETE+CREATE', () => {
+    const before = [r('a', { precheck: 'tools/gate.sh', precheck_timeout_s: 30 }), r('b')];
+    const mirror = seedMirror(before, {}, T0 - 1000);
+    const after = [r('a', { precheck: 'tools/gate.sh', precheck_timeout_s: 90 }), r('b')];
+    const plan = planCron(after, mirror, BOOT_A, PLUGIN_ROOT, null, 'UTC', T0);
+    expect(plan.deletes).toEqual(['a']);
+    expect(plan.creates.map(c => c.id)).toEqual(['a']);
+    expect(plan.keepCount).toBe(1);
+  });
+
   // expect_artifact is embedded in the fallback CronCreate prompt, so it has to
   // be part of the hash — otherwise adding or editing a contract leaves the old
   // prompt registered indefinitely.

@@ -144,3 +144,57 @@ describe('routine-precheck', () => {
     expect(Object.keys(rows[0]).sort()).toEqual(['delivery', 'event', 'routine_id', 'ts']);
   }));
 });
+
+// CronCreate fallback has no `due`, so this verb is the wake gate's only chance
+// to run there. The wake is already paid for by the time it does: behavior
+// parity with monitor mode, not cost parity.
+describe('routine-precheck — wake gate in fallback delivery', () => {
+  const writeGatedConfig = (dir: string, precheck: string) =>
+    fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify({
+      timezone: 'UTC',
+      routines: [{ id: 'gated', schedule: '0 9 * * *', skill: 'my-plugin:thing', enabled: true, precheck }],
+    }));
+  const writeGate = (dir: string, body: string): string => {
+    const rel = path.join('tools', 'gate.sh');
+    fs.mkdirSync(path.join(dir, 'tools'), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), body, { mode: 0o755 });
+    return rel;
+  };
+
+  test('SKIP short-circuits before the started stamp', withDir(async (dir) => {
+    writeGatedConfig(dir, writeGate(dir, '#!/usr/bin/env bash\necho SKIP\n'));
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'cron-create'], cwd: dir });
+    expect(r.stdout.trim()).toBe('SKIP');
+    const rows = readMetricsRows(dir);
+    // No `started`: a fire that never opened must not read as abandoned later.
+    expect(rows.map((x: any) => x.event)).toEqual(['skipped-precheck']);
+  }), 20000);
+
+  test('WAKE proceeds and opens the attempt', withDir(async (dir) => {
+    writeGatedConfig(dir, writeGate(dir, '#!/usr/bin/env bash\necho WAKE\n'));
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'cron-create'], cwd: dir });
+    expect(r.stdout.trim()).toBe('PROCEED');
+    expect(readMetricsRows(dir).map((x: any) => x.event)).toEqual(['started']);
+  }), 20000);
+
+  test('a failing gate proceeds and records why', withDir(async (dir) => {
+    writeGatedConfig(dir, writeGate(dir, '#!/usr/bin/env bash\nexit 2\n'));
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'cron-create'], cwd: dir });
+    expect(r.stdout.trim()).toBe('PROCEED');
+    const rows = readMetricsRows(dir);
+    expect(rows.map((x: any) => x.event)).toEqual(['precheck-error', 'started']);
+    expect(rows[0].detail).toBe('exit:2');
+  }), 20000);
+
+  test('monitor delivery does not re-run the gate — due already decided', withDir(async (dir) => {
+    writeGatedConfig(dir, writeGate(dir, [
+      '#!/usr/bin/env bash',
+      'echo ran >> "$HERMIT_DIR/state/gate-calls.txt"',
+      'echo SKIP',
+      '',
+    ].join('\n')));
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'monitor'], cwd: dir });
+    expect(r.stdout.trim()).toBe('PROCEED');
+    expect(fs.existsSync(hermit(dir, 'state', 'gate-calls.txt'))).toBe(false);
+  }), 20000);
+});

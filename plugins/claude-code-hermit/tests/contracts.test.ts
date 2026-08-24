@@ -555,6 +555,52 @@ describe('shared-home settings-authority warning', () => {
   });
 });
 
+// `precheck` is the routine's wake gate: an executable the routine monitor runs
+// unattended before deciding whether to wake the session. The validator owns only
+// the shape — containment against the project root is re-checked at fire time.
+describe('routine precheck validation', () => {
+  const ROUTINE = { id: 'mail', schedule: '*/15 * * * *', skill: 'mail-triage', enabled: true };
+  const withPrecheck = (extra: Record<string, unknown>) =>
+    runValidate({ routines: [{ ...ROUTINE, ...extra }] });
+
+  test('the builtin provider and a project-relative path are accepted', () => {
+    expect(withPrecheck({ precheck: 'reflect' }).errors).toEqual([]);
+    expect(withPrecheck({ precheck: 'tools/mail-gate.sh' }).errors).toEqual([]);
+  });
+
+  test('absolute paths and traversal are rejected', () => {
+    expect(withPrecheck({ precheck: '/etc/passwd' }).errors.join(' ')).toContain('precheck');
+    expect(withPrecheck({ precheck: '../outside.sh' }).errors.join(' ')).toContain('precheck');
+  });
+
+  test('a non-string precheck is rejected', () => {
+    expect(withPrecheck({ precheck: 42 }).errors.join(' ')).toContain('precheck');
+  });
+
+  test('timeout must be an integer within bounds', () => {
+    expect(withPrecheck({ precheck: 'reflect', precheck_timeout_s: 60 }).errors).toEqual([]);
+    expect(withPrecheck({ precheck: 'reflect', precheck_timeout_s: 301 }).errors.join(' ')).toContain('precheck_timeout_s');
+    expect(withPrecheck({ precheck: 'reflect', precheck_timeout_s: 0 }).errors.join(' ')).toContain('precheck_timeout_s');
+  });
+
+  test('a timeout without a gate warns rather than errors', () => {
+    const out = withPrecheck({ precheck_timeout_s: 60 });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings.join(' ')).toContain('precheck_timeout_s');
+  });
+
+  test('a gate on the re-arm anchor warns — it never runs through the monitor', () => {
+    const out = runValidate({
+      routines: [{
+        id: 'heartbeat-restart', schedule: '0 4 * * *',
+        skill: 'claude-code-hermit:hermit-routines load', enabled: true, precheck: 'reflect',
+      }],
+    });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings.join(' ')).toContain('heartbeat-restart');
+  });
+});
+
 // expect_artifact declares the exact file a routine must produce. Globs are
 // rejected because they would make both the change check and the duplicate
 // check unsound (an unrelated fresh match passes; overlapping patterns are not
@@ -2147,12 +2193,12 @@ describe('reflect routine gating contract (token efficiency)', () => {
 const DOCTOR_CHECK_IDS = [
   'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
   'permissions', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age',
-  'opus-wake', 'routine-cost', 'heartbeat', 'routine-monitor', 'raw-size', 'credential-expiry', 'model-pricing-known',
+  'opus-wake', 'routine-cost', 'heartbeat', 'routine-monitor', 'routine-precheck', 'raw-size', 'credential-expiry', 'model-pricing-known',
   'context-scan', 'voice-carrier', 'channel-liveness',
 ];
 
 describe('doctor report contract (PROP-018 count pin)', () => {
-  test('report emits exactly the 26 pinned check ids, in order', withTmpdir(async (dir) => {
+  test('report emits exactly the 27 pinned check ids, in order', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     const report = await runDoctorCheck(dir);
     expect((report.checks ?? []).map((c: any) => c.id)).toEqual(DOCTOR_CHECK_IDS);
@@ -2172,9 +2218,9 @@ describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs
     expect(missing).toEqual([]);
   });
 
-  test('counts read twenty-six, not twenty-five', () => {
-    expect(skill.toLowerCase()).not.toContain('twenty-five');
-    expect(skill.toLowerCase()).toContain('twenty-six');
+  test('counts read twenty-seven, not twenty-six', () => {
+    expect(skill.toLowerCase()).not.toContain('twenty-six');
+    expect(skill.toLowerCase()).toContain('twenty-seven');
   });
 });
 

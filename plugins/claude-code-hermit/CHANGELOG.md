@@ -2,9 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+- Routines accept a `precheck` wake gate the routine monitor runs at fire time — the builtin `"reflect"`, or a project-relative script printing `SKIP` or `WAKE`. A `SKIP` consumes the fire and records `skipped-precheck` without waking the session; anything else fires the routine as before. `precheck_timeout_s` (default 30, max 300) bounds one run, and a new `routine-precheck` doctor check reports gates that never succeed.
+
+### Changed
+- The `reflect` routine ships with `"precheck": "reflect"`, so a day with nothing to reflect on no longer wakes the session.
+- Declaring or changing a routine `precheck` from a channel now takes the confirmation-code tier, matching `monitors[]`.
+
 ### Fixed
 - Notices asking for a decision or reply now always carry a plain-language client leg; the `maintainer` key supplements it with technical detail instead of replacing it. Heartbeat findings, inbox items, and pending-proposal digests were landing maintainer-only — or nowhere on non-technical installs with no maintainer chat configured.
 - Denying a direct `config.json` edit from a channel turn now points to the `settings-edit` recovery path instead of "terminal only", so channel-side settings changes (adding a routine, for example) can self-recover through the tiered script path.
+
+### Upgrade Instructions
+
+**Reflect stops waking the session on empty days.** In `.claude-code-hermit/config.json`, find the `routines[]` entry with `"id": "reflect"`. If it has no `precheck` key, add `"precheck": "reflect"`. If the key is already present with any value, leave the entry exactly as it is — this step is a no-op on a re-run, and an operator who changed the value keeps it. Do not add the key to any other routine; operator-authored routines are untouched. To opt back out later, delete the key.
 
 ## [1.2.46] - 2026-08-23
 

@@ -1,8 +1,10 @@
 // state/routine-metrics.jsonl → an ordered per-routine attempt projection.
 //
-// The ledger records four event kinds: `started` (precheck, at fire time),
-// `fired` / `failed-<reason>` (finish — exactly one terminal per attempt), and
-// `skipped-*` (due.ts gates, which open no attempt at all). Counting those
+// The ledger records five event kinds: `started` (precheck, at fire time),
+// `fired` / `failed-<reason>` (finish — exactly one terminal per attempt),
+// `skipped-*` (due.ts gates, which open no attempt at all), and `precheck-error`
+// (a declared wake gate that could not answer, so the fire woke anyway — the one
+// non-terminal row that means the opposite of a skip). Counting those
 // independently — the `errored = started − fired` arithmetic this replaces — is
 // wrong in three ways the fold below fixes:
 //
@@ -40,6 +42,14 @@ export type RoutineHistoryEntry = {
   open_attempt: boolean;
   /** `skipped-*` rows: the routine was due but gated, so no attempt was made. */
   skips: number;
+  /**
+   * `precheck-error` rows: the routine's declared wake gate could not answer, so
+   * the fire woke the session anyway. Counted apart from `skips` because it is the
+   * inverse signal — the operator declared a gate and is paying the wakes regardless.
+   */
+  precheck_errors: number;
+  /** The most recent `precheck-error` detail in-window (timeout | exit:<n> | …). */
+  last_precheck_error: { ts: string; detail: string } | null;
   last_fire: string | null;
 };
 
@@ -50,7 +60,7 @@ export type RoutineHistory = {
   source: 'ok' | 'missing' | 'unreadable';
 };
 
-type ParsedRow = { ts: number; tsRaw: string; id: string; event: string; seq: number };
+type ParsedRow = { ts: number; tsRaw: string; id: string; event: string; seq: number; detail?: string };
 
 /** A routine with no events yet. Also used by health.ts for a cost-only routine. */
 export function emptyEntry(id: string): RoutineHistoryEntry {
@@ -63,6 +73,8 @@ export function emptyEntry(id: string): RoutineHistoryEntry {
     orphan_terminals: 0,
     open_attempt: false,
     skips: 0,
+    precheck_errors: 0,
+    last_precheck_error: null,
     last_fire: null,
   };
 }
@@ -101,7 +113,10 @@ function parseRows(lines: string[]): { rows: ParsedRow[]; malformed: number } {
       malformed += 1;
       continue;
     }
-    rows.push({ ts, tsRaw: e.ts, id: e.routine_id, event: e.event, seq });
+    rows.push({
+      ts, tsRaw: e.ts, id: e.routine_id, event: e.event, seq,
+      detail: typeof e.detail === 'string' ? e.detail : undefined,
+    });
   }
   rows.sort((a, b) => (a.ts - b.ts) || (a.seq - b.seq));
   return { rows, malformed };
@@ -159,9 +174,16 @@ export function foldRoutineHistory(
       continue;
     }
 
-    // `skipped-*` (and any other event string the ledger accepts — event.ts
-    // deliberately does not validate) open no attempt and close none.
-    if (inWindow && row.event.startsWith('skipped-')) entry.skips += 1;
+    // `skipped-*` and `precheck-error` (and any other event string the ledger
+    // accepts — event.ts deliberately does not validate) open no attempt and close
+    // none. A precheck error is not a skip: the routine woke anyway, which is
+    // exactly what makes it worth surfacing.
+    if (!inWindow) continue;
+    if (row.event.startsWith('skipped-')) entry.skips += 1;
+    else if (row.event === 'precheck-error') {
+      entry.precheck_errors += 1;
+      entry.last_precheck_error = { ts: row.tsRaw, detail: row.detail || 'unspecified' };
+    }
   }
 
   // Only an attempt that OPENED in-window is reported as open — see

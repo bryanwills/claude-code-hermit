@@ -108,6 +108,8 @@ function promptHash(r: Json, shiftedSchedule: string, pluginRoot: string): strin
     model: r.model ?? null,
     reflect_after: !!r.reflect_after,
     expect_artifact: r.expect_artifact ?? null,
+    precheck: r.precheck ?? null,
+    precheck_timeout_s: r.precheck_timeout_s ?? null,
     shifted_schedule: shiftedSchedule,
     pluginRoot,
   }));

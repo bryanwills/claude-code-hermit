@@ -1,6 +1,9 @@
 // `routines.ts log-event <routine-id> <event> [delivery]` — appends one line to
 // state/routine-metrics.jsonl. Events: fired | skipped-waiting | skipped-paused |
-// started. delivery: cron-create (default) | monitor.
+// skipped-precheck | precheck-error | started. delivery: cron-create (default) |
+// monitor. `precheck-error` rows carry a `detail` field naming how the gate failed
+// (timeout | exit:<code> | bad-verdict | spawn | a config reason) — see
+// lib/routines/gate.ts; every other event omits the key.
 //
 // Ported from log-routine-event.sh, and still emitting the same four keys with
 // the same UTC second-precision stamp. The row shape is pinned (tests assert it,
@@ -73,6 +76,7 @@ export function logRoutineEvent(
   event: string,
   hermitRoot: string,
   delivery = 'cron-create',
+  detail?: string,
 ): string | null {
   const metrics = path.join(hermitRoot, 'state', 'routine-metrics.jsonl');
 
@@ -92,7 +96,14 @@ export function logRoutineEvent(
   try {
     return appendJsonlLine(
       metrics,
-      JSON.stringify({ ts: utcISOStamp(), routine_id: id, event, delivery }),
+      // `detail` is omitted rather than nulled when absent: every existing reader
+      // parses whole rows, and an extra always-present key would churn the shape
+      // for the events that have nothing to say.
+      JSON.stringify(
+        detail === undefined
+          ? { ts: utcISOStamp(), routine_id: id, event, delivery }
+          : { ts: utcISOStamp(), routine_id: id, event, delivery, detail },
+      ),
     );
   } catch (err: any) {
     return `could not append to ${metrics}: ${err?.message ?? err}`;

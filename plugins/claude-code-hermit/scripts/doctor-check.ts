@@ -22,6 +22,7 @@ import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
+import { readRoutineHistory } from './lib/routines/history';
 import { isCloseableSessionState } from './lib/auto-close';
 import { promptTokensOf, compactibleTokens } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
@@ -1466,6 +1467,65 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
   }
 }
 
+/**
+ * Wake gates that are not gating.
+ *
+ * A `precheck` fails open: the routine wakes the session anyway, so a broken gate
+ * costs no more than having none — but it also saves nothing, silently. This is the
+ * only surface that says so. Deliberately its own check rather than a line on
+ * routine-monitor: that one returns early in fallback mode and whenever no session
+ * is active, and a gate can be failing in exactly those states.
+ */
+function checkRoutinePrecheck(p: DoctorPaths = PATHS) {
+  const { hermitDir, stateDir } = p;
+  try {
+    const read = readConfigOrCovered('routine-precheck', p);
+    if ('covered' in read) return read.covered;
+    const config = read.config;
+
+    const gated = (Array.isArray(config.routines) ? config.routines : [])
+      .filter((r: Json) => r && r.enabled === true && r.precheck != null && r.id !== 'heartbeat-restart');
+    if (gated.length === 0) {
+      return { id: 'routine-precheck', status: 'ok', detail: 'routine-precheck: no gated routines' };
+    }
+
+    const history = readRoutineHistory(path.join(stateDir, 'routine-metrics.jsonl'), 14);
+    const byId = new Map(history.routines.map((r) => [r.id, r]));
+    const broken: string[] = [];
+    for (const routine of gated) {
+      const entry = byId.get(routine.id);
+      if (!entry || entry.precheck_errors === 0) continue;
+      // Errors alongside real fires are transient (a flaky API, one slow poll).
+      // Errors with nothing else to show for the window is a gate that has never
+      // worked: every fire since has been a wake the operator meant to skip.
+      if (entry.fires > 0 || entry.skips > 0) continue;
+      broken.push(`${routine.id} (${entry.precheck_errors}x ${entry.last_precheck_error?.detail ?? 'unspecified'})`);
+    }
+
+    let monRt: Json = null;
+    try { monRt = JSON.parse(fs.readFileSync(path.join(stateDir, 'routine-monitor.runtime.json'), 'utf-8')); } catch { /* absent */ }
+    const fallback = monRt && monRt.mode === 'croncreate-fallback';
+
+    if (broken.length) {
+      return {
+        id: 'routine-precheck',
+        status: 'warn',
+        detail: `routine-precheck: gate never succeeded for ${broken.join(', ')} — every fire woke the session. Check the script from ${hermitDir}'s project root.`,
+      };
+    }
+    if (fallback) {
+      return {
+        id: 'routine-precheck',
+        status: 'ok',
+        detail: `routine-precheck: ${gated.length} gated routine(s), croncreate-fallback mode — prechecks run after the wake, so no zero-token skips`,
+      };
+    }
+    return { id: 'routine-precheck', status: 'ok', detail: `routine-precheck: ${gated.length} gated routine(s), no gate errors in 14d` };
+  } catch (e: any) {
+    return { id: 'routine-precheck', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
 function checkRawSize(p: DoctorPaths = PATHS) {
   const { hermitDir, stateDir } = p;
   try {
@@ -2009,6 +2069,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkRoutineCost(p),
     checkHeartbeat(p),
     checkRoutineMonitor(p),
+    checkRoutinePrecheck(p),
     checkRawSize(p),
     checkCredentialExpiry(p),
     checkModelPricingKnown(p),
@@ -2136,7 +2197,8 @@ export {
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
   checkCost, checkProposals, checkDependencies, checkVersionCurrency, checkPermissions,
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
-  checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor, checkRawSize,
+  checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
+  checkRoutinePrecheck, checkRawSize,
   checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkVoiceCarrier, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
