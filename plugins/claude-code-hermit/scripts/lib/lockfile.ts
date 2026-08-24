@@ -12,6 +12,9 @@
 import fs from 'node:fs';
 
 const DEFAULT_STALE_MS = 15 * 60 * 1000;
+// A takeover is a handful of syscalls; a claim marker older than this was left
+// behind by a stealer that died mid-swap.
+const STALE_CLAIM_MS = 30 * 1000;
 
 function pidAlive(pid: number): boolean {
   try {
@@ -47,6 +50,38 @@ function tryCreate(lockPath: string): boolean {
   }
 }
 
+// The marker naming the exact file a takeover is replacing. Every racer stats
+// the same unchanging file, so they all derive the same name.
+function claimPathFor(lockPath: string, ino: number, mtimeMs: number): string {
+  return `${lockPath}.steal.${ino}.${Math.round(mtimeMs)}`;
+}
+
+// Exclusive-create the marker naming one specific stale lock file: the only
+// compare-and-swap the filesystem offers. Whoever creates it is the single
+// process allowed to replace that file. Returns false if a takeover of the same
+// file is already in flight.
+function claimStale(claimPath: string): boolean {
+  try {
+    fs.writeFileSync(claimPath, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch (e: any) {
+    if (!e || e.code !== 'EEXIST') throw e; // real fs error — surface it
+  }
+  try {
+    if (Date.now() - fs.statSync(claimPath).mtimeMs < STALE_CLAIM_MS) return false;
+    // The stealer died mid-swap. Dropping its marker reopens the race, which
+    // the exclusive create below re-serializes.
+    fs.unlinkSync(claimPath);
+    fs.writeFileSync(claimPath, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch {
+    // Deliberately fail closed here: the marker vanished, or another racer got
+    // to it first. Reporting contention costs the caller a retry; guessing
+    // wrong in the other direction costs two holders.
+    return false;
+  }
+}
+
 /**
  * Try to acquire the lock. Returns true on success, false on live contention.
  * Stale locks (dead PID, empty/unparseable content, or mtime older than
@@ -57,13 +92,27 @@ function acquireLock(lockPath: string, staleMs: number = DEFAULT_STALE_MS): bool
 
   let holderPid: number | null = null;
   let mtimeMs = 0;
+  let ino = 0;
+  // Read the PID and the identity through ONE descriptor: a separate open for
+  // each could straddle a concurrent takeover, judging the old file's dead PID
+  // while identifying the replacement, and then delete a live lock.
+  let fd: number | null = null;
   try {
-    const content = fs.readFileSync(lockPath, 'utf-8').trim();
+    fd = fs.openSync(lockPath, 'r');
+    const st = fs.fstatSync(fd);
+    mtimeMs = st.mtimeMs;
+    ino = st.ino;
+    const content = fs.readFileSync(fd, 'utf-8').trim();
     holderPid = /^\d+$/.test(content) ? parseInt(content, 10) : null;
-    mtimeMs = fs.statSync(lockPath).mtimeMs;
   } catch {
     // Vanished between create-attempt and read — retry once.
     return tryCreate(lockPath);
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
   }
 
   const fresh = Date.now() - mtimeMs < staleMs;
@@ -72,24 +121,28 @@ function acquireLock(lockPath: string, staleMs: number = DEFAULT_STALE_MS): bool
   }
 
   // Stale: dead holder, no/garbage PID (legacy empty flock file), or expired
-  // mtime. Claim it by atomic rename, NOT unlink-by-path: two racers that both
-  // judged the lock stale would otherwise each unlink the path and each create
-  // a fresh lock (the second deletes the first's live lock) → double-acquire.
-  // renameSync is atomic on a given inode, so exactly one racer moves it aside;
-  // the loser's rename throws ENOENT and falls through to a clean retry.
-  const graveyard = `${lockPath}.stale.${process.pid}`;
+  // mtime. Two racers that both judged THIS file stale must not both replace
+  // it, so serialize on a marker naming the exact file they judged. Neither
+  // rename nor unlink can do this: both act on a path, not an inode, so a slow
+  // racer would move or delete the winner's brand-new lock and acquire on top
+  // of it → double-acquire.
+  const claim = claimPathFor(lockPath, ino, mtimeMs);
+  if (!claimStale(claim)) return false; // a takeover of this file is already in flight
   try {
-    if (fs.statSync(lockPath).mtimeMs !== mtimeMs) return false; // renewed in-window → back off
-    fs.renameSync(lockPath, graveyard);
-  } catch {
-    // Vanished or lost the takeover race — retry create; if someone else won,
-    // tryCreate returns false (genuinely held now).
+    try {
+      const st = fs.statSync(lockPath);
+      // Still the file we judged? If not it was already replaced — leave it be
+      // and let tryCreate report the truth.
+      if (st.ino === ino && st.mtimeMs === mtimeMs) fs.unlinkSync(lockPath);
+    } catch {
+      // Vanished — fall through to the create.
+    }
     return tryCreate(lockPath);
+  } finally {
+    try {
+      fs.unlinkSync(claim);
+    } catch {}
   }
-  try {
-    fs.unlinkSync(graveyard);
-  } catch {}
-  return tryCreate(lockPath);
 }
 
 /** Release the lock if this process holds it. */
@@ -100,4 +153,4 @@ function releaseLock(lockPath: string): void {
   } catch {}
 }
 
-export { acquireLock, releaseLock, pidAlive, DEFAULT_STALE_MS };
+export { acquireLock, releaseLock, pidAlive, claimPathFor, DEFAULT_STALE_MS };
