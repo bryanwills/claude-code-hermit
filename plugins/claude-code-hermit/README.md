@@ -62,7 +62,7 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 
 A hermit watches what keeps going wrong across sessions, proposes a fix, and asks you yes or no. It won't propose the same thing twice.
 
-At natural pauses — session end, idle ticks, scheduled cadence — it reflects. Most reflections never reach the model: a precheck script gates whether any phase (compute, resolution check, cost spike, digest, newborn) is actually due. When one is, two subagents vet the candidate before it reaches you:
+At natural pauses — session end, idle ticks, scheduled cadence — it reflects. Most reflections never reach the model: a precheck script decides whether any phase (compute, resolution check, cost spike, digest, newborn) is actually due. In Monitor mode, that check runs before the wake, so an empty day costs zero model tokens; CronCreate fallback still wakes before checking but does not load the reflect skill when there is nothing to do. When a phase is due, two subagents vet the candidate before it reaches you:
 
 - **`reflection-judge`** confirms the cited evidence actually exists in the session reports, so a proposal can't certify itself.
 - **`proposal-triage`** deduplicates against open proposals, cross-checks your `MEMORY.md` and `OPERATOR.md`, and applies a three-condition bar.
@@ -193,7 +193,7 @@ All live-editable with `/hermit-settings` (or just ask the hermit) — no reboot
 
 - **Heartbeat.** `heartbeat.every` sets the idle sweep (default `30m`; `2h`+ for slower pickup). Quiet polls cost nothing at any cadence, so this mostly controls how fast structured checks (proposals, budget, stale sessions) are picked up. `active_hours` bounds the window (`08:00`–`23:00`). `heartbeat.enabled: false` stops timed wakes entirely — channels and routines still fire.
 
-- **Idle behavior.** `discover` (default) adds a priority-alignment pass against `OPERATOR.md` + cost log; `wait` is passive (tasks/channels only). Either way the daily `reflect` routine still runs — `wait` only silences between-schedule discovery, not the learning loop.
+- **Idle behavior.** `discover` (default) adds a priority-alignment pass against `OPERATOR.md` + cost log; `wait` is passive (tasks/channels only). Either way the daily `reflect` schedule is still evaluated; when its precheck finds no due phase, it consumes the fire without invoking the learning loop. `wait` only silences between-schedule discovery.
 
 - **Routines.** Each routine takes an optional `model`: run lightweight ones on `haiku` to save cost or heavier ones on `opus` for more reasoning, in an isolated subagent. Omit `model` to keep it inline in the main session context — use that when the routine's value is its chat/transcript output, not just a status line. In Monitor mode, exactly co-due routines batch into one wake; offset routines you want as separate turns by a few minutes to keep the prompt cache warm. CronCreate fallback always fires them separately (see [Config Reference](docs/config-reference.md) for the full rule).
 
@@ -252,6 +252,7 @@ Join the [`claude-code-hermit` Discord community](https://discord.gg/54sJqAxhUh)
 - [Owner's Guide](docs/owners-guide.md)
 - [Plugin Hermit Storage](docs/plugin-hermit-storage.md)
 - [Recommended Plugins](docs/recommended-plugins.md)
+- [Remote Endpoint](docs/remote-endpoint.md)
 - [Routine Authoring](docs/routine-authoring.md)
 - [Security](docs/security.md)
 - [Testing](docs/testing.md)
