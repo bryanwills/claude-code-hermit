@@ -23,6 +23,7 @@ import path from 'node:path';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { listProposalFiles, readFileWithFrontmatter } from './lib/frontmatter';
 import { appendEvent, resolvedEvent } from './lib/proposals/event';
+import { sweepMoot } from './lib/proposals/micro';
 import { writeFileAtomic, patchFrontmatter, appendShellLine, PATCH_KEY_RE } from './lib/md-write';
 
 type Json = any;
@@ -103,6 +104,12 @@ function apply(stateDir: string, stdin: string): Json {
       } catch (e: any) {
         errors.push(`${a.proposal_id}: metrics append failed: ${e.message}`);
       }
+      // Resolving retires any ask parked on this proposal — same reconciliation
+      // proposal.ts's patch verb runs, since this path writes frontmatter
+      // itself rather than going through it. A miss is reported, never fatal:
+      // the proposal really was resolved.
+      const swept = sweepMoot(stateDir, { proposalId: a.proposal_id });
+      if (!swept.ok) errors.push(`${a.proposal_id}: pending-ask reconciliation: ${swept.error}`);
       applied.auto_resolve++;
     } else {
       applied.nudge++;

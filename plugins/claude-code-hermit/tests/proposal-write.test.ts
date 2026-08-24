@@ -733,6 +733,93 @@ describe('proposal.ts dispatch gate', () => {
   });
 });
 
+// Every proposal-act flow writes status through `patch`, so this is where an
+// ask parked on the proposal has to be retired — the queue would otherwise keep
+// asking how to implement something already resolved, dismissed, or deferred.
+describe('proposal.ts patch — pending-ask reconciliation', () => {
+  function seedAsk(dir: string, propId: string, extra: Record<string, any> = {}): void {
+    fs.writeFileSync(
+      path.join(stateArg(dir), 'state', 'micro-proposals.json'),
+      JSON.stringify({
+        pending: [{
+          id: 'MP-1', tier: 1, status: 'pending', follow_up_count: 0, ts: '2026-08-21T13:48:35Z',
+          question: 'Suggestion #1 accepted — how should it be implemented?',
+          proposal_id: propId, on_resolve: `/claude-code-hermit:proposal-act accept ${propId} --answer {answer}`,
+          ...extra,
+        }],
+      }, null, 2) + '\n',
+    );
+  }
+  function pending(dir: string): any[] {
+    return JSON.parse(fs.readFileSync(path.join(stateArg(dir), 'state', 'micro-proposals.json'), 'utf-8')).pending;
+  }
+  function createProposal(dir: string): Promise<string> {
+    return runProposal(stateArg(dir), ['create'], { stdin: heredoc({ Title: 'Reconcile target' }, MIN_BODY) })
+      .then(r => r.stdout.trim());
+  }
+
+  for (const [status, extraSets] of [
+    ['resolved', ['--set', 'resolved_date=@now']],
+    ['dismissed', ['--set', 'dismissed_date=@now']],
+    ['deferred', ['--set', 'deferred_date=@now']],
+  ] as Array<[string, string[]]>) {
+    test(`patch to ${status} retires the linked ask`, withDir(async (dir) => {
+      seedState(dir);
+      const id = await createProposal(dir);
+      seedAsk(dir, id.slice(0, 8));
+
+      const r = await runProposal(stateArg(dir), ['patch', id, '--set', `status=${status}`, ...extraSets]);
+      expect(r.stdout.trim()).toBe(`OK|${id}`);
+      expect(pending(dir)).toHaveLength(0);
+      expect(metricsLines(dir).filter(e => e.action === 'moot')).toHaveLength(1);
+    }));
+  }
+
+  test('patch to accepted keeps the ask pending', withDir(async (dir) => {
+    seedState(dir);
+    const id = await createProposal(dir);
+    seedAsk(dir, id.slice(0, 8));
+
+    await runProposal(stateArg(dir), ['patch', id, '--set', 'status=accepted']);
+    expect(pending(dir)).toHaveLength(1);
+  }));
+
+  test('an ask for another proposal survives', withDir(async (dir) => {
+    seedState(dir);
+    const id = await createProposal(dir);
+    seedAsk(dir, 'PROP-999');
+
+    await runProposal(stateArg(dir), ['patch', id, '--set', 'status=resolved']);
+    expect(pending(dir)).toHaveLength(1);
+  }));
+
+  // The stdin `Set:` form is the one proposal-act's resolve/dismiss flows use
+  // alongside a Decision line; a hook reading only argv would miss it.
+  test('the stdin Set: form reconciles too', withDir(async (dir) => {
+    seedState(dir);
+    const id = await createProposal(dir);
+    seedAsk(dir, id.slice(0, 8));
+
+    const r = await runProposal(stateArg(dir), ['patch', id], { stdin: 'Set: status=resolved\nDecision: Done.\n' });
+    expect(r.stdout.trim()).toBe(`OK|${id}`);
+    expect(pending(dir)).toHaveLength(0);
+  }));
+
+  // The proposal write already landed — reporting ERROR| would tell the caller
+  // nothing was patched, which is false and worse than the stale ask.
+  test('a corrupt queue warns but still reports the patch as applied', withDir(async (dir) => {
+    seedState(dir);
+    const id = await createProposal(dir);
+    fs.writeFileSync(path.join(stateArg(dir), 'state', 'micro-proposals.json'), '{"pending": [ ,] }\n');
+
+    const r = await runProposal(stateArg(dir), ['patch', id, '--set', 'status=resolved']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe(`OK|${id}`);
+    expect(r.stderr).toContain('reconciliation');
+    expect(fs.readFileSync(propPath(dir, id), 'utf-8')).toContain('status: resolved');
+  }));
+});
+
 // `index` is the third carve-out: it was a fail-open derived-cache rebuild before
 // absorption (`SKIP|no state dir`, exit 0) and stays one. Falling through to the
 // generic exit-1 usage guard would read as a real failure to its callers.

@@ -330,3 +330,50 @@ describe('apply-reflection-actions: edges', () => {
     }
   }));
 });
+
+// Reflect auto-resolves through its own frontmatter write rather than
+// proposal.ts's patch verb, so it needs the same reconciliation: an ask parked
+// on a proposal reflect just resolved is a question nobody can still answer.
+describe('apply-reflection-actions: pending-ask reconciliation', () => {
+  const microPath = (dir: string) => hermit(dir, 'state', 'micro-proposals.json');
+
+  function seedAsk(dir: string, entry: Record<string, any>): void {
+    fs.writeFileSync(microPath(dir), JSON.stringify({
+      pending: [{
+        id: 'MP-1', tier: 1, status: 'pending', follow_up_count: 0, ts: '2026-07-19T09:00:00Z',
+        question: 'Suggestion #1 accepted — how should it be implemented?', ...entry,
+      }],
+    }, null, 2) + '\n');
+  }
+  const pending = (dir: string) => JSON.parse(fs.readFileSync(microPath(dir), 'utf-8')).pending;
+
+  test('auto-resolve retires the ask linked to that proposal', withTmp(async (dir) => {
+    seedAsk(dir, { proposal_id: 'PROP-042' });
+    const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
+
+    expect(result.ok).toBe(true);
+    expect(result.applied.auto_resolve).toBe(1);
+    expect(result.errors).toBeUndefined();
+    expect(pending(dir)).toHaveLength(0);
+    expect(metricsRows(dir).filter(r => r.action === 'moot')).toHaveLength(1);
+  }));
+
+  test('an ask for a different proposal is left alone', withTmp(async (dir) => {
+    seedAsk(dir, { proposal_id: 'PROP-999' });
+    const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
+
+    expect(result.ok).toBe(true);
+    expect(pending(dir)).toHaveLength(1);
+  }));
+
+  // The proposal really was resolved — the reconciliation miss is reported
+  // without unmarking the write that already landed.
+  test('a corrupt queue reports in errors without failing the resolve', withTmp(async (dir) => {
+    fs.writeFileSync(microPath(dir), '{"pending": [ ,] }\n');
+    const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
+
+    expect(result.applied.auto_resolve).toBe(1);
+    expect(result.errors.join(' ')).toContain('reconciliation');
+    expect(fs.readFileSync(proposalPath(dir), 'utf-8')).toMatch(/^status: resolved$/m);
+  }));
+});

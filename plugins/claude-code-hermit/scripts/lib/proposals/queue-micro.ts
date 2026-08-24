@@ -13,7 +13,9 @@
 // `on_resolve` are optional per the channel-bridged-ask extension (branches.md:
 // 205-207); when `on_resolve` is present, tier is forced to 1 and the metrics
 // event carries "kind":"ask" (branches.md:207,214) regardless of the caller's tier.
-// Dedup is by exact `question` match against existing `pending` entries.
+// Dedup is by exact `question` match against existing `pending` entries, or by
+// `proposal_id` when the payload declares one (that link also lets `micro
+// sweep` retire the ask once its proposal reaches a terminal status).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +25,7 @@ import { readStdin } from '../cli';
 import { readSettledConfig } from '../config-read';
 import { writeFileAtomic } from '../md-write';
 import { readMicroProposals } from '../micro-proposals-io';
+import { linkedProposalId, normalizeProposalId } from './micro';
 
 type Json = any;
 
@@ -45,6 +48,13 @@ export async function run(stateDir: string): Promise<void> {
   const isBridged = onResolve !== undefined;
   const tier = isBridged ? 1 : (payload.tier ?? 1);
   const options: string[] | undefined = payload.options;
+  // Declared link to the proposal this ask belongs to. Malformed values are
+  // dropped rather than fatal: the ask still deserves to be queued, it just
+  // falls back to the legacy on_resolve link that `micro sweep` also reads.
+  const proposalId: string | undefined =
+    typeof payload.proposal_id === 'string' && normalizeProposalId(payload.proposal_id)
+      ? payload.proposal_id
+      : undefined;
 
   const stateSubdir = path.join(stateDir, 'state');
   const microPath = path.join(stateSubdir, 'micro-proposals.json');
@@ -61,7 +71,16 @@ export async function run(stateDir: string): Promise<void> {
   // Dedup against live entries only (issue 676): a stale non-"pending" row left
   // in the array is invisible to every reader and will be pruned by the next
   // brief-cycle, so matching it here would silently swallow a fresh candidate.
-  const existing = micro.pending.find((e: Json) => e && e.status === 'pending' && e.question === question);
+  // A linked ask ALSO dedups on the proposal it belongs to, not only on wording:
+  // the question embeds a display index ("Suggestion #3") that shifts with list
+  // order, so exact-text matching alone would queue a second ask for the same
+  // proposal. The link is read through `linkedProposalId` (normalized padding,
+  // plus the legacy on_resolve form) so an entry queued before `proposal_id`
+  // existed is still recognized; exact-question dedup stays as the fallback for
+  // unlinked asks and for that same legacy window.
+  const wanted = proposalId ? normalizeProposalId(proposalId) : null;
+  const existing = micro.pending.find((e: Json) => e && e.status === 'pending'
+    && ((wanted !== null && linkedProposalId(e) === wanted) || e.question === question));
   if (existing) {
     process.stdout.write(`DUPLICATE|${existing.id}\n`);
     process.exit(0);
@@ -92,6 +111,7 @@ export async function run(stateDir: string): Promise<void> {
   const entry: Json = { id, tier, status: 'pending', follow_up_count: 0, ts: utcISOStamp(), question };
   if (options) entry.options = options;
   if (onResolve) entry.on_resolve = onResolve;
+  if (proposalId) entry.proposal_id = proposalId;
   micro.pending.push(entry);
 
   fs.mkdirSync(stateSubdir, { recursive: true });

@@ -38,13 +38,19 @@ import { appendJsonlLine } from '../append-jsonl';
 import { writeFileAtomic } from '../md-write';
 import { emit, flagValue } from '../cli';
 import { readMicroProposals } from '../micro-proposals-io';
+import { listProposalFiles, readFrontmatter } from '../frontmatter';
 
 type Json = any;
 
 const VERBS = ['resolve', 'nudge'];
 const ACTIONS = ['approved', 'rejected', 'answered', 'expired'];
 
-const USAGE = 'Usage: proposal.ts micro <hermit-state-dir> resolve|nudge <MP-id> [--action <a>] [--answer <label>] | brief-cycle';
+// A proposal in one of these states can no longer consume an "how should I
+// implement this?" answer, so the ask it parked is moot. Re-accepting a
+// deferred proposal queues a fresh entry, so sweeping it loses nothing.
+export const MOOT_STATUSES = ['resolved', 'dismissed', 'deferred'];
+
+const USAGE = 'Usage: proposal.ts micro <hermit-state-dir> resolve|nudge <MP-id> [--action <a>] [--answer <label>] | brief-cycle | sweep';
 
 function fail(msg: string): never {
   console.error(msg);
@@ -116,14 +122,142 @@ function briefCycle(dir: string): never {
   emit(JSON.stringify({ new: fresh, renudged, expired, dropped }));
 }
 
+// --- Moot-ask reconciliation -----------------------------------------------
+// An ask parked by proposal-act's accept flow can be settled elsewhere: the
+// hermit implements it in-session, the operator resolves/dismisses/defers the
+// proposal, or reflect auto-resolves it. Nothing then cleared the queue entry,
+// so the heartbeat kept deriving a pending-decision alert from a question that
+// no longer meant anything. The proposal-status writers call sweepMoot() on
+// every moot-status write; the `sweep` verb runs the same pass over the whole
+// queue (upgrade migration and manual repair).
+
+const PROPOSAL_ID_RE = /^PROP-(\d+)$/;
+// Legacy entries (queued before `proposal_id` existed) carry the link only
+// inside the accept callback. Match that documented shape alone: `on_resolve`
+// is free-form — channel-responder lets any skill set it — so a bare PROP-NNN
+// occurring anywhere in an arbitrary command is not a declared link.
+const LEGACY_LINK_RE = /proposal-act accept (PROP-\d+)/;
+
+// Canonical ids are zero-padded to 3 digits (proposals/resolve.ts does the same
+// on operator input). Normalizing both sides keeps an unpadded `PROP-19` in a
+// legacy on_resolve from silently missing `PROP-019-*.md`.
+export function normalizeProposalId(id: string): string | null {
+  const m = PROPOSAL_ID_RE.exec(id);
+  return m ? `PROP-${m[1].padStart(3, '0')}` : null;
+}
+
+export function linkedProposalId(entry: Json): string | null {
+  if (typeof entry.proposal_id === 'string') {
+    const norm = normalizeProposalId(entry.proposal_id);
+    if (norm) return norm;
+  }
+  if (typeof entry.on_resolve === 'string') {
+    const m = LEGACY_LINK_RE.exec(entry.on_resolve);
+    if (m) return normalizeProposalId(m[1]);
+  }
+  return null;
+}
+
+// Boundary-safe: `PROP-1` must never match `PROP-12` (same rule as
+// apply-reflection-actions.ts), and the legacy slug-less `PROP-NNN.md` form
+// still counts. Zero or multiple matches are ambiguous — never destructive.
+function proposalStatus(proposalsDir: string, files: string[], id: string): string | null {
+  const matches = files.filter(f => f.startsWith(`${id}-`) || f === `${id}.md`);
+  if (matches.length !== 1) return null;
+  const fm = readFrontmatter(path.join(proposalsDir, matches[0]));
+  return fm && typeof fm.status === 'string' ? fm.status : null;
+}
+
+export type SweepResult = { ok: boolean; swept: string[]; error?: string };
+
+/**
+ * Remove pending asks whose linked proposal has reached a moot status.
+ * `opts.proposalId` narrows the pass to one proposal (the status writers);
+ * omitted, every linked entry is checked (the `sweep` verb).
+ * Never throws: an unreadable queue or proposals dir returns ok:false and
+ * leaves both untouched, so a caller that already wrote a proposal can report
+ * the miss without pretending its own write failed.
+ */
+export function sweepMoot(stateDir: string, opts: { proposalId?: string } = {}): SweepResult {
+  const target = opts.proposalId ? normalizeProposalId(opts.proposalId) : null;
+  if (opts.proposalId && !target) return { ok: false, swept: [], error: `not a proposal id: ${opts.proposalId}` };
+
+  const microPath = path.join(stateDir, 'state', 'micro-proposals.json');
+  const read = readMicroProposals(microPath);
+  if (read.status === 'missing') return { ok: true, swept: [] };
+  if (read.status === 'corrupt') return { ok: false, swept: [], error: read.error };
+  const micro: Json = read.data;
+
+  const proposalsDir = path.join(stateDir, 'proposals');
+  const listed = listProposalFiles(proposalsDir);
+  if (!listed.ok) return { ok: false, swept: [], error: 'proposals/ is unreadable — nothing swept' };
+
+  const statusCache = new Map<string, string | null>();
+  const kept: Json[] = [];
+  const removed: Json[] = [];
+
+  for (const e of micro.pending) {
+    // Same `!e` tolerance as every other reader: a hand-edited null element
+    // must not throw. Non-pending rows are brief-cycle's to prune, not ours.
+    if (!e || e.status !== 'pending') { kept.push(e); continue; }
+    const pid = linkedProposalId(e);
+    if (!pid || (target && pid !== target)) { kept.push(e); continue; }
+    if (!statusCache.has(pid)) statusCache.set(pid, proposalStatus(proposalsDir, listed.files, pid));
+    const status = statusCache.get(pid) ?? null;
+    if (status === null || !MOOT_STATUSES.includes(status)) { kept.push(e); continue; }
+    removed.push({ id: e.id, question: e.question, proposal_id: pid, proposal_status: status });
+  }
+
+  if (removed.length === 0) return { ok: true, swept: [] };
+
+  micro.pending = kept;
+  try { writeFileAtomic(microPath, JSON.stringify(micro, null, 2) + '\n'); }
+  catch (err: any) { return { ok: false, swept: [], error: `micro-proposals.json write failed (${err.message})` }; }
+
+  // Ledger after the write lands, matching the resolve path's ordering.
+  // `moot` is its own action: reflect reads a high `expired` rate as poor
+  // question timing, which a settled proposal says nothing about.
+  const ledger = path.join(stateDir, 'state', 'proposal-metrics.jsonl');
+  // Keep appending past a failure and name every id that went unrecorded: the
+  // queue write already landed for all of them, so bailing on the first error
+  // would leave the later removals silently absent from the ledger AND absent
+  // from the message the caller reports.
+  const unrecorded: string[] = [];
+  let ledgerError: string | null = null;
+  for (const r of removed) {
+    const event: Json = {
+      ts: utcISOStamp(), type: 'micro-resolved', micro_id: r.id, action: 'moot',
+      question: r.question, proposal_id: r.proposal_id, proposal_status: r.proposal_status,
+    };
+    const err = appendJsonlLine(ledger, JSON.stringify(event));
+    if (err) { unrecorded.push(r.id); ledgerError = err; }
+  }
+  if (unrecorded.length > 0) {
+    return {
+      ok: false,
+      swept: removed.map(x => x.id),
+      error: `${ledgerError} — ${unrecorded.join(', ')} removed from pending but the micro-resolved event was NOT recorded.`,
+    };
+  }
+
+  return { ok: true, swept: removed.map(r => r.id) };
+}
+
+function sweepCli(stateDir: string): never {
+  const result = sweepMoot(stateDir);
+  if (!result.ok) fail(result.error ?? 'sweep failed');
+  emit(result.swept.length > 0 ? `SWEPT|${result.swept.join(',')}` : 'NONE|no-moot');
+}
+
 export function run(stateDir: string, args: string[]): never {
   const verb = args[0];
   const id = args[1];
 
   if (!verb) fail(USAGE);
 
-  // brief-cycle takes no <MP-id> — dispatch it before the id requirement below.
+  // brief-cycle and sweep take no <MP-id> — dispatch before the id requirement.
   if (verb === 'brief-cycle') briefCycle(stateDir);
+  if (verb === 'sweep') sweepCli(stateDir);
 
   if (!id) fail(USAGE);
 
