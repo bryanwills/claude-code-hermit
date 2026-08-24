@@ -36,10 +36,13 @@ export type ParsedCommand = { command: string; arg: string | null };
 /**
  * Strict slash grammar, exact whole-body match.
  *
- * Deliberately does NOT accept a bare `compact`/`clear`, and does not strip a Telegram
- * group's `@botname` suffix — an operator decision: the slash makes the intent explicit.
- * Consequence, accepted: in a group chat where the client rewrites `/clear` to
- * `/clear@thebot`, the command silently no-ops.
+ * Deliberately does NOT accept a bare `compact`/`clear` — an operator decision: the
+ * slash makes the intent explicit.
+ *
+ * Stays a pure harness parser that knows nothing about channels. A Telegram group's
+ * `@botname` suffix is resolved upstream by prompt-stages/harness-command.ts via
+ * channel-slash-address.ts, so `/clear@thebot` reaches here as plain `/clear` when it
+ * names this bot, and never reaches here at all when it names another.
  */
 export function parseHarnessCommand(body: string): ParsedCommand | null {
   const trimmed = body.trim();

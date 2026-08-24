@@ -119,7 +119,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - Invoke the matching skill, slash command, or subagent via the appropriate tool. Pass any remaining text as arguments/prompt.
   - If nothing matches, say so briefly.
 
-- **Status request** ("what are you working on?", "status", "progress")
+- **Status request** ("what are you working on?", "how's it going", "progress", or a bare "status" — the deterministic reply needs `/status`, so anything short of that reaches you)
   - If `session_state` (runtime.json) is `idle`: respond with session summary — tasks completed, "ready for what's next"
   - If `session_state` is `in_progress`: respond with a concise summary of SHELL.md: task, current step, blockers
   - Keep it short — channel messages should be brief
@@ -179,12 +179,14 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - Answer in the context of the current session
   - Reference specific files or decisions from SHELL.md when relevant
 
-- **Pause / resume / snooze** (bare, exact-match "pause", "stop", "resume", or "snooze <duration>")
-  - These exact messages are intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's pause stage (PROP-015) **before this skill ever runs** — `state/pause.json` is already set or cleared by the time you see the prompt. There is nothing left for you to do for the state change itself; if you want to acknowledge it, reply via the channel.
-  - A sentence that merely mentions "pause" or "stop" (not an exact match) is not intercepted — classify it under Emergency below instead.
-  - **Never attempt to resume yourself while paused.** The PreToolUse gate (`pause-gate.ts`) denies every tool call except the channel reply tool while paused — including a Bash call running `hermit-pause.ts off` — and returns the pause reason in the denial. Resume can only come from an exact "resume" message (the deterministic hook above) or the operator's own `.claude-code-hermit/bin/hermit-pause off`.
+- **Pause / resume / snooze** (exactly `/pause`, `/stop`, `/resume`, or `/snooze <duration>`)
+  - These exact messages are intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's pause stage (PROP-015) **before this skill ever runs** — `state/operator-pause.json` is already set or cleared by the time you see the prompt. There is nothing left for you to do for the state change itself; if you want to acknowledge it, reply via the channel.
+  - The slash is required, matching the harness commands above. A **bare** "pause"/"stop"/"resume"/"snooze 2h" is *not* intercepted and changes nothing — an ordinary word must not be able to freeze the hermit. A bare "stop" is classified under Emergency below.
+  - On a channel whose bot has a stored handle, `/pause@<that handle>` is equivalent; a command addressed to any other bot is ignored.
+  - **Never attempt to resume yourself while paused.** The PreToolUse gate (`pause-gate.ts`) denies every tool call except the channel reply tool while paused — including a Bash call running `hermit-pause.ts off` — and returns the pause reason in the denial. Resume can only come from an exact `/resume` message (the deterministic hook above) or the operator's own `.claude-code-hermit/bin/hermit-pause off`.
 
-- **Emergency** ("abort", "revert", "rollback", or a "stop" that is not a bare exact match — see Pause/resume/snooze above for the exact-match case)
+- **Emergency** ("abort", "revert", "rollback", or "stop")
+  - A bare "stop" reaches you rather than the deterministic hook, so this halt is **cooperative, not binding** — it depends on you acting on it. The binding form is `/stop` or `/pause`, which blocks every tool but the channel reply.
   - Halt current work immediately
   - Set `runtime.json` `session_state` to `waiting` (`waiting_reason: "operator_input"`) and note the halt reason in SHELL.md `## Blockers`
   - Confirm the halt and ask for next steps
@@ -194,7 +196,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 - Keep responses concise — one short paragraph max for channels
 - Always reference the current task so the operator knows you're oriented
 - If you can't handle the request, say so clearly and suggest what the operator should do
-- **Channel voice:** no internal IDs (PROP-NNN, S-NNN, MP-…), no token counts or cost-log jargon, no slash commands, no file paths, no cron strings. Say what happened and the one next thing the operator can do from chat (a plain reply, not a command). Internal IDs stay in files; terminal/maintainer output is exempt. See `CLAUDE-APPEND.md` § Operator Notification for the full rule.
+- **Channel voice:** no internal IDs (PROP-NNN, S-NNN, MP-…), no token counts or cost-log jargon, no slash commands, no file paths, no cron strings. Say what happened and the one next thing the operator can do from chat (a plain reply, not a command). Internal IDs stay in files; terminal/maintainer output is exempt. **One exception:** the five channel control commands — `/pause`, `/stop`, `/resume`, `/snooze`, `/status` — may be named when the operator asks how to control you, because they *are* the reply they would send. No other slash command qualifies. See `CLAUDE-APPEND.md` § Operator Notification for the full rule.
 
 ## 4. Capture Interactive Patterns
 

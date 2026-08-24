@@ -1,7 +1,8 @@
 // UserPromptSubmit stage — deterministic status responder.
 //
 // When the inbound prompt is a <channel> envelope whose body is exactly
-// "status" (trimmed, case-insensitive) and the sender passes the channel's
+// "/status" (trimmed, case-insensitive, optionally addressed to this bot as
+// "/status@handle") and the sender passes the channel's
 // allowed_users gate, formats an operator-language status reply from
 // read-only state (pause, session status, budget, pending approvals, next
 // routine) and sends it directly via lib/channel-send — bypassing the model
@@ -15,11 +16,12 @@
 //
 // Near-miss bodies and mid-turn arrivals (which never reach UserPromptSubmit
 // at all — CC delivers them as steering on an in-flight turn) fall through
-// untouched: this hook only ever acts on an exact idle "status" request.
+// untouched: this hook only ever acts on an exact idle "/status" request.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { isAllowedSender, isTrustedController } from '../channel-auth';
+import { isAllowedSender, isTrustedController, channelBotUsername } from '../channel-auth';
+import { resolveSlashCommand } from '../channel-slash-address';
 import { isPaused, pauseReasonLabel } from '../pause';
 import { resolveTimezone, budgetLine } from '../spend-status';
 import { friendlyBoundary, parseSimpleCronTime } from '../time';
@@ -170,12 +172,14 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
   const envelope = ctx.envelope;
   if (!envelope) return;
 
-  // Exact-match only — near-misses fall through to the model (probe-verified).
-  if (envelope.body.trim().toLowerCase() !== 'status') return;
-
   const dir = ctx.dir;
   const config = ctx.config();
   if (!config) return;
+
+  // Slash-only exact match, same rule as the pause and harness commands — a bare
+  // "status" now falls through to the model, as every near-miss already did.
+  const addressed = resolveSlashCommand(envelope.body, channelBotUsername(config, envelope.source));
+  if (!addressed || addressed.command !== '/status' || addressed.rest.length > 0) return;
 
   if (!isAllowedSender(config, envelope.source, envelope.userId)) return;
 

@@ -28,8 +28,9 @@
 
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
-import { isTrustedController } from '../channel-auth';
+import { isTrustedController, channelBotUsername } from '../channel-auth';
 import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal } from '../harness-command';
+import { resolveSlashCommand } from '../channel-slash-address';
 import type { StageContext, StageResult } from './types';
 
 export function run(ctx: StageContext): StageResult | void {
@@ -37,11 +38,19 @@ export function run(ctx: StageContext): StageResult | void {
   if (!env) return;
   if (!env.body) return;
 
-  const parsed = parseHarnessCommand(env.body);
-  if (!parsed) return;
-
   const dir = ctx.dir;
   const config = ctx.config();
+
+  // Addressing runs BEFORE the grammar, not inside it: parseHarnessCommand stays a
+  // pure harness parser that knows nothing about channels. Resolving here is what
+  // makes a Telegram group's `/clear@thebot` work, and keeps `/clear@someoneelse`
+  // a no-op.
+  const addressed = resolveSlashCommand(env.body, channelBotUsername(config, env.source));
+  if (!addressed) return;
+
+  const parsed = parseHarnessCommand(`${addressed.command}${addressed.rest}`);
+  if (!parsed) return;
+
   if (!isTrustedController(config, env.source, env.userId, env.chatId)) return; // unauthorized — silent no-op
 
   // Interactive sessions store tmux_session: null (hermit-start.ts), so there is no pane

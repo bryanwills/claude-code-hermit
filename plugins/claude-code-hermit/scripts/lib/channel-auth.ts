@@ -24,6 +24,17 @@ export function channelEntry(config: Json, source: string): Json {
 }
 
 /**
+ * The channel entry's `bot_username`, or null when the entry, the field, or the
+ * config itself is missing or malformed. `@botname` addressing
+ * (channel-slash-address.ts) reads this from three prompt stages; one accessor
+ * keeps "no configured handle" from meaning something different in each.
+ */
+export function channelBotUsername(config: Json, source: string): string | null {
+  const entry = channelEntry(config, source);
+  return typeof entry?.bot_username === 'string' ? entry.bot_username : null;
+}
+
+/**
  * Mirrors channel-responder/SKILL.md 1c: absent allowed_users → accept all
  * (backwards compatible); [] → lockdown; otherwise the sender's user id must
  * be present in the list. Callers that can't respond to the operator on
