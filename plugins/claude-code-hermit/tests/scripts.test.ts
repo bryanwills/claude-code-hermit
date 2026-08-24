@@ -1152,18 +1152,41 @@ describe('update-alert-state', () => {
     });
   }));
 
-  test('update-alert-state (daily digest fires once per tz-local day; legacy structured entry without channelText is scrubbed id-free — R2)', withDir(async (dir) => {
+  test('update-alert-state (daily digest fires once per tz-local day, id-free, aged not counted — R2)', withDir(async (dir) => {
     write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
-    // Pre-#594-channelText entry: only `text` (id-carrying), no `channelText`.
-    // Its condition has cleared (firing empty, no proposals/ dir), so the
-    // resolution branch keeps it unrewritten — the digest must still not leak PROP-005.
+    // Still firing: the proposal is on disk at `proposed`, so the key re-derives
+    // this tick. Only a firing entry is digest-eligible, so a fixture that had
+    // gone quiet would prove nothing about the digest's wording.
+    fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
+    fs.writeFileSync(hermit(dir, 'proposals', 'PROP-005-test-120000.md'), '---\nid: PROP-005\nstatus: proposed\ntitle: Add retry logic\n---\nbody\n');
     write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
       alerts: { 'proposal-pending:PROP-005': { count: 6, consecutive_clean: 0, suppressed: true, first_seen: '2026-07-01', last_seen: '2026-07-09', text: 'PROP-005 "Add retry logic"' } },
       self_eval: {}, total_ticks: 30, last_digest_date: null,
     }));
     const { state, stdout } = await updateAlertState(dir, firingPayload([]));
-    expect(stdout.notifications.some((n: string) => n.includes('Add retry logic'))).toBe(true);
+    const digest = stdout.notifications.find((n: string) => n.startsWith('Suppressed alert digest:'));
+    expect(digest).toContain('Add retry logic');
+    // Age, never the evaluation count: "8x" reads as eight messages sent when
+    // the ladder sent two.
+    expect(digest).toContain('first seen 2026-07-01');
+    expect(digest).not.toMatch(/\d+x,/);
     expect(stdout.notifications.join('\n')).not.toMatch(/PROP-\d+|MP-[\w-]+|\bS-\d+\b/);
+    expect(state.last_digest_date).toBe('2026-07-10');
+  }));
+
+  test('update-alert-state (a suppressed entry whose source went quiet is not digested, but still stamps the day)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
+    // No proposals/ dir → the key stops firing → hysteresis keeps the row one
+    // more tick. Listing it would re-announce a decision already settled; not
+    // stamping the day would leave precheck's digest gate re-firing paid wakes
+    // until the row finally drops.
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts: { 'proposal-pending:PROP-005': { count: 6, consecutive_clean: 0, suppressed: true, first_seen: '2026-07-01', last_seen: '2026-07-09', text: 'PROP-005 "Add retry logic"', channelText: 'proposal "Add retry logic" awaiting review' } },
+      self_eval: {}, total_ticks: 30, last_digest_date: null,
+    }));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
+    expect(stdout.notifications.some((n: string) => n.startsWith('Suppressed alert digest:'))).toBe(false);
+    expect(state.alerts['proposal-pending:PROP-005'].consecutive_clean).toBe(1);
     expect(state.last_digest_date).toBe('2026-07-10');
   }));
 

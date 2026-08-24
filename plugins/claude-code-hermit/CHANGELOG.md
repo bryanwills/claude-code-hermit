@@ -16,8 +16,18 @@
 - Notices asking for a decision or reply now always carry a plain-language client leg; the `maintainer` key supplements it with technical detail instead of replacing it. Heartbeat findings, inbox items, and pending-proposal digests were landing maintainer-only — or nowhere on non-technical installs with no maintainer chat configured.
 - Denying a direct `config.json` edit from a channel turn now points to the `settings-edit` recovery path instead of "terminal only", so channel-side settings changes (adding a routine, for example) can self-recover through the tiered script path.
 - Autonomous Progress Log appends to `sessions/SHELL.md` are serialized with a lock. Two overlapping appends each rewrote the whole file from their own stale read, so the loser silently reverted whatever the winner had just added.
+- Accepting a suggestion over a channel parks a "how should I implement this?" question, and nothing retired it once the decision was settled another way — the heartbeat then asked about it daily forever. Resolving, dismissing, or deferring a proposal now clears the question it parked, through every path that writes a proposal's status.
+- The daily digest lists only decisions still waiting and dates them (`first seen 2026-08-21`) instead of printing an evaluation count that read as "8 unanswered notices" when two were ever sent.
 
 ### Upgrade Instructions
+
+**Clear questions left behind by already-settled decisions.** Run once from the project root:
+
+```bash
+bun "${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts" micro .claude-code-hermit sweep
+```
+
+`SWEPT|<ids>` lists the questions retired (their proposals were already resolved, dismissed, or deferred); `NONE|no-moot` means there were none. Safe to re-run — it only ever removes questions whose proposal has reached one of those three states, and every removal is recorded in `state/proposal-metrics.jsonl` as a `moot` event.
 
 **Reflect stops waking the session on empty days.** In `.claude-code-hermit/config.json`, find the `routines[]` entry with `"id": "reflect"`. If it has no `precheck` key, add `"precheck": "reflect"`. If the key is already present with any value, leave the entry exactly as it is — this step is a no-op on a re-run, and an operator who changed the value keeps it. Do not add the key to any other routine; operator-authored routines are untouched. To opt back out later, delete the key.
 

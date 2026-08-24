@@ -269,13 +269,25 @@ export function classifyTick(opts: {
   }
 
   const suppressedEntries = Object.entries(alerts).filter(([, e]: [string, Json]) => e?.suppressed === true);
+  // Only what is still firing belongs in the digest. A suppressed row whose
+  // source went quiet is retained one extra tick for hysteresis (above), and
+  // listing it re-announces something already settled — the operator reads the
+  // digest as "these still need you".
+  const activeEntries = suppressedEntries.filter(([, e]: [string, Json]) => (e.consecutive_clean ?? 0) === 0);
   let lastDigestDate = opts.prevLastDigestDate ?? null;
   // structuredReadOk gate: don't emit or advance the digest on a partial view.
   if (structuredReadOk && suppressedEntries.length > 0 && lastDigestDate !== today) {
-    const list = suppressedEntries
-      .map(([k, e]: [string, Json]) => `${channelLabel(k, e)} (${e.count}x, since ${e.first_seen})`)
-      .join('; ');
-    notifications.push(`Suppressed alert digest: ${list}`);
+    if (activeEntries.length > 0) {
+      // Age, not tick count: `count` counts evaluations, so rendering it invites
+      // reading "8x" as eight messages sent when the ladder sent two.
+      const list = activeEntries
+        .map(([k, e]: [string, Json]) => `${channelLabel(k, e)} (first seen ${e.first_seen})`)
+        .join('; ');
+      notifications.push(`Suppressed alert digest: ${list}`);
+    }
+    // Stamp the day even when nothing was active. precheck's digest gate wakes
+    // on ANY suppressed entry, so an unstamped date would re-fire a paid
+    // EVALUATE every poll until the hysteresis rows finally drop.
     lastDigestDate = today;
   }
 

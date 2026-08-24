@@ -62,7 +62,7 @@
 //   resolve-id <stateDir> <operator-input>       MATCH|… AMBIGUOUS|… NONE|…
 //   gate <stateDir> --gate … --caller …          PROCEED|… DROP|… GATE_FAILED
 //   queue-micro <stateDir>                       QUEUED|<MP-id> / DUPLICATE|<id>
-//   micro <stateDir> resolve|nudge|brief-cycle   RESOLVED|… NUDGED|… NONE|… / JSON
+//   micro <stateDir> resolve|nudge|brief-cycle|sweep  RESOLVED|… NUDGED|… SWEPT|… NONE|… / JSON
 //   index <stateDir>                             OK|<n> proposals / SKIP|…
 //   metrics [<stateDir>] [--source=<key>]        markdown table / one-line verdict
 //   success-signal --validate "<predicate>"      OK (exit 0) / reason (exit 1)
@@ -90,7 +90,7 @@ import { run as regenerateSummary } from './generate-summary';
 import { run as runResolveId } from './lib/proposals/resolve';
 import { run as runGate } from './lib/proposals/gate';
 import { run as runQueueMicro } from './lib/proposals/queue-micro';
-import { run as runMicro } from './lib/proposals/micro';
+import { run as runMicro, sweepMoot, MOOT_STATUSES } from './lib/proposals/micro';
 import { run as runMetrics } from './lib/proposals/metrics';
 import { run as runEvent } from './lib/proposals/event';
 import { run as runSuccessSignal } from './lib/proposals/success-signal';
@@ -351,6 +351,20 @@ export function verbPatch(stateDir: string, stdin: string, args: string[]): stri
   }
 
   regenTail(stateDir);
+
+  // A terminal status retires any ask parked on this proposal by proposal-act's
+  // accept flow — otherwise the queue keeps a question the decision already
+  // answered, and the heartbeat digests it daily forever. Best-effort by
+  // design: the proposal write has landed, so a reconciliation miss is a
+  // warning, never `ERROR|` (which would read as "nothing was patched").
+  // `proposal.ts micro <dir> sweep` re-runs the same pass.
+  if (typeof patch.status === 'string' && MOOT_STATUSES.includes(patch.status)) {
+    const propId = /^(PROP-\d+)/.exec(path.basename(targetPath))?.[1];
+    if (propId) {
+      const swept = sweepMoot(stateDir, { proposalId: propId });
+      if (!swept.ok) warn(`pending-ask reconciliation for ${propId} failed: ${swept.error}`);
+    }
+  }
 
   return `OK|${path.basename(targetPath).replace(/\.md$/, '')}`;
 }
