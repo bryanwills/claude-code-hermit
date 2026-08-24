@@ -25,6 +25,7 @@ import { readStdin } from '../cli';
 import { readSettledConfig } from '../config-read';
 import { writeFileAtomic } from '../md-write';
 import { readMicroProposals } from '../micro-proposals-io';
+import { linkedProposalId, normalizeProposalId } from './micro';
 
 type Json = any;
 
@@ -51,7 +52,7 @@ export async function run(stateDir: string): Promise<void> {
   // dropped rather than fatal: the ask still deserves to be queued, it just
   // falls back to the legacy on_resolve link that `micro sweep` also reads.
   const proposalId: string | undefined =
-    typeof payload.proposal_id === 'string' && /^PROP-\d+$/.test(payload.proposal_id)
+    typeof payload.proposal_id === 'string' && normalizeProposalId(payload.proposal_id)
       ? payload.proposal_id
       : undefined;
 
@@ -70,13 +71,16 @@ export async function run(stateDir: string): Promise<void> {
   // Dedup against live entries only (issue 676): a stale non-"pending" row left
   // in the array is invisible to every reader and will be pruned by the next
   // brief-cycle, so matching it here would silently swallow a fresh candidate.
-  // A linked ask dedups on the proposal it belongs to, not on wording: the
-  // question embeds a display index ("Suggestion #3") that shifts with list
-  // order, so exact-text matching would queue a second ask for the same
-  // proposal. Unlinked asks keep exact-question dedup.
-  const existing = proposalId
-    ? micro.pending.find((e: Json) => e && e.status === 'pending' && e.proposal_id === proposalId)
-    : micro.pending.find((e: Json) => e && e.status === 'pending' && e.question === question);
+  // A linked ask ALSO dedups on the proposal it belongs to, not only on wording:
+  // the question embeds a display index ("Suggestion #3") that shifts with list
+  // order, so exact-text matching alone would queue a second ask for the same
+  // proposal. The link is read through `linkedProposalId` (normalized padding,
+  // plus the legacy on_resolve form) so an entry queued before `proposal_id`
+  // existed is still recognized; exact-question dedup stays as the fallback for
+  // unlinked asks and for that same legacy window.
+  const wanted = proposalId ? normalizeProposalId(proposalId) : null;
+  const existing = micro.pending.find((e: Json) => e && e.status === 'pending'
+    && ((wanted !== null && linkedProposalId(e) === wanted) || e.question === question));
   if (existing) {
     process.stdout.write(`DUPLICATE|${existing.id}\n`);
     process.exit(0);

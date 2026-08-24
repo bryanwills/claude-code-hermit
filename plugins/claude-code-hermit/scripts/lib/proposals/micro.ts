@@ -141,12 +141,12 @@ const LEGACY_LINK_RE = /proposal-act accept (PROP-\d+)/;
 // Canonical ids are zero-padded to 3 digits (proposals/resolve.ts does the same
 // on operator input). Normalizing both sides keeps an unpadded `PROP-19` in a
 // legacy on_resolve from silently missing `PROP-019-*.md`.
-function normalizeProposalId(id: string): string | null {
+export function normalizeProposalId(id: string): string | null {
   const m = PROPOSAL_ID_RE.exec(id);
   return m ? `PROP-${m[1].padStart(3, '0')}` : null;
 }
 
-function linkedProposalId(entry: Json): string | null {
+export function linkedProposalId(entry: Json): string | null {
   if (typeof entry.proposal_id === 'string') {
     const norm = normalizeProposalId(entry.proposal_id);
     if (norm) return norm;
@@ -218,13 +218,26 @@ export function sweepMoot(stateDir: string, opts: { proposalId?: string } = {}):
   // `moot` is its own action: reflect reads a high `expired` rate as poor
   // question timing, which a settled proposal says nothing about.
   const ledger = path.join(stateDir, 'state', 'proposal-metrics.jsonl');
+  // Keep appending past a failure and name every id that went unrecorded: the
+  // queue write already landed for all of them, so bailing on the first error
+  // would leave the later removals silently absent from the ledger AND absent
+  // from the message the caller reports.
+  const unrecorded: string[] = [];
+  let ledgerError: string | null = null;
   for (const r of removed) {
     const event: Json = {
       ts: utcISOStamp(), type: 'micro-resolved', micro_id: r.id, action: 'moot',
       question: r.question, proposal_id: r.proposal_id, proposal_status: r.proposal_status,
     };
     const err = appendJsonlLine(ledger, JSON.stringify(event));
-    if (err) return { ok: false, swept: removed.map(x => x.id), error: `${err} — ${r.id} was removed from pending but its micro-resolved event was NOT recorded.` };
+    if (err) { unrecorded.push(r.id); ledgerError = err; }
+  }
+  if (unrecorded.length > 0) {
+    return {
+      ok: false,
+      swept: removed.map(x => x.id),
+      error: `${ledgerError} — ${unrecorded.join(', ')} removed from pending but the micro-resolved event was NOT recorded.`,
+    };
   }
 
   return { ok: true, swept: removed.map(r => r.id) };
