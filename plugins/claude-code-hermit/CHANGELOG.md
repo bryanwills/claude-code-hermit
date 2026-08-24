@@ -33,13 +33,7 @@
   - *Keep today's behavior* — leave the key in place. It now reads as an explicit choice rather than a leftover default.
 
   Only an always-on launch is affected; an interactive `claude` in the same project never inherits this profile.
-- The spawn gate's `start` and `stop` sit on the everyday authority tier instead of asking for an echoed confirmation code from the settings chat. A spawned session is bound to the claude.ai account signed in on the machine, so the gate changes where the operator can spawn from, not who can.
 
-### Fixed
-- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt that an unattended session cannot answer.
-- An `AGENT_HOOK_PROFILE` supplied by the environment is validated and floored like any other source. It was previously written straight through: an ambient `minimal`, or a typo, bypassed both the validation and the always-on floor and became the profile the session actually ran at.
-- Setting a credential from chat no longer puts its value in the confirmation request or in `state/settings-confirm.json`. An ask the operator never echoed used to leave that value on disk indefinitely, since an expired record is treated as absent without being deleted.
-- A first always-on tmux boot after `hatch` resolves the same hook profile as every later boot. The profile was read from `config.always_on`, which is not written until the end of the boot, so a freshly hatched hermit resolved its first launch as interactive.
 **Suggest wake gates for routines that still wake the session on every fire.** Run this after the previous step.
 
 1. Run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts" health .claude-code-hermit --days 14` and read the JSON it prints. If its `source` is not `ok`, the routine ledger could not be read — record nothing, stop, and note in the evolve report that this audit could not run. Otherwise read its `routines[]` array.
@@ -53,7 +47,10 @@
 **Note:** a gate is a `SKIP`/`WAKE` script declared as the routine's `precheck` — see `docs/routine-authoring.md`. Setting one from chat takes the confirmation-code tier. Removing the key restores always-wake.
 
 ### Fixed
-- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt. Auto mode suspends the wildcarded rules that used to cover them.
+- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt that an unattended session cannot answer. Auto mode suspends the wildcarded rules that used to cover them.
+- An `AGENT_HOOK_PROFILE` supplied by the environment is validated and floored like any other source. It was previously written straight through: an ambient `minimal`, or a typo, bypassed both the validation and the always-on floor and became the profile the session actually ran at.
+- Setting a credential from chat no longer puts its value in the confirmation request or in `state/settings-confirm.json`. An ask the operator never echoed used to leave that value on disk indefinitely, since an expired record is treated as absent without being deleted.
+- A first always-on tmux boot after `hatch` resolves the same hook profile as every later boot. The profile was read from `config.always_on`, which is not written until the end of the boot, so a freshly hatched hermit resolved its first launch as interactive.
 - The spawn-gate skill no longer tells the hermit to sweep worktrees after closing the gate — `stop` already sweeps, so that was a wasted second call every time.
 - `settings-edit … unset routines.<n>` removed the entry but left a `null` in its place, which failed validation on every later settings write. Array indices now splice, and `set` at an index past the end of an array is refused instead of creating a hole.
 

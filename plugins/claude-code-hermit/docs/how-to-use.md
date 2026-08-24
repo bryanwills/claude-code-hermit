@@ -192,8 +192,8 @@ A trusted channel sender can also pair the main model with an experimental [advi
 | Profile                | What runs                                      | Best for                       |
 | ---------------------- | ---------------------------------------------- | ------------------------------ |
 | **minimal**            | Cost tracking only                             | Experimenting                  |
-| **standard** (default) | + session quality checks                       | Day-to-day work                |
-| **strict**             | + safety hooks from hermits                    | Always-on, production-adjacent |
+| **standard** (interactive default) | + session quality checks                       | Day-to-day work                |
+| **strict** (always-on default)      | + safety hooks from hermits                    | Always-on, production-adjacent |
 
 You usually don't set this. With nothing configured, an always-on launch (tmux or Docker) resolves **strict** and an interactive one **standard**, so a managed hermit gets the safety hooks without being asked. The launch output's `Hook profile:` line tells you what was resolved and where it came from.
 

@@ -150,7 +150,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `sign_off` | optional sign-off on channel messages |
 | `model` | session model — **`sonnet`** |
 | `permission_mode` | how freely the unattended agent acts — **`auto`** |
-| `AGENT_HOOK_PROFILE` | guardrail profile — `minimal` / **`standard`** / `strict` |
+| `AGENT_HOOK_PROFILE` | guardrail profile — `minimal` / **`standard`** (interactive) / **`strict`** (always-on) |
 | `channels` | Discord / Telegram / iMessage (+ `allowed_users`) |
 | `channels.primary` | which channel gets outbound pings |
 | `push_notifications` | native/mobile push on alerts — **`true`** |
