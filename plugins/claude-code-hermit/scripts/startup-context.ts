@@ -22,6 +22,7 @@ import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-wr
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson } from './lib/runtime';
+import { markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
 type Json = any;
 
@@ -217,8 +218,13 @@ function emitGuestBanner(agentDir: string): void {
   console.log('or watches — the resident session owns all of that. Otherwise work normally.');
 }
 
-function main(source: string | null) {
+function main(source: string | null, sessionId: string | null) {
+  const stateDir = path.resolve(AGENT_DIR, 'state');
+  pruneGuestMarkers(stateDir);
   if (residentSessionActive(AGENT_DIR)) {
+    // The banner only reaches the model; the marker is what the state-writing
+    // hooks read, since they run per turn with no model in the loop.
+    markGuest(stateDir, sessionId);
     emitGuestBanner(AGENT_DIR);
     return;
   }
@@ -561,27 +567,29 @@ if (import.meta.main) {
   // invocation, a held-open pipe), a short fallback still emits the source-less
   // startup context rather than silently injecting nothing at all.
   let ran = false;
-  const runOnce = (source: string | null): void => {
+  const runOnce = (source: string | null, sessionId: string | null): void => {
     if (ran) return;
     ran = true;
-    try { main(source); } catch { /* fail-open */ }
+    try { main(source, sessionId); } catch { /* fail-open */ }
   };
   try {
     let buf = '';
     process.stdin.setEncoding('utf8');
     process.stdin.on('data', chunk => { buf += chunk; });
     process.stdin.on('error', () => {});
-    const fallback = setTimeout(() => runOnce(null), 2000);
+    const fallback = setTimeout(() => runOnce(null, null), 2000);
     process.stdin.on('end', () => {
       clearTimeout(fallback); // normal path — no need to wait out the fallback
       let source: string | null = null;
+      let sessionId: string | null = null;
       try {
         const payload = JSON.parse(buf);
         if (payload && typeof payload.source === 'string') source = payload.source;
+        if (payload && typeof payload.session_id === 'string') sessionId = payload.session_id;
       } catch { /* empty/non-JSON stdin — treat as unknown source */ }
-      runOnce(source);
+      runOnce(source, sessionId);
     });
   } catch {
-    runOnce(null);
+    runOnce(null, null);
   }
 }

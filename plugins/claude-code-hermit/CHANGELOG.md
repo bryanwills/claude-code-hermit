@@ -16,6 +16,8 @@
 - Notices asking for a decision or reply now always carry a plain-language client leg; the `maintainer` key supplements it with technical detail instead of replacing it. Heartbeat findings, inbox items, and pending-proposal digests were landing maintainer-only — or nowhere on non-technical installs with no maintainer chat configured.
 - Denying a direct `config.json` edit from a channel turn now points to the `settings-edit` recovery path instead of "terminal only", so channel-side settings changes (adding a routine, for example) can self-recover through the tiered script path.
 - Autonomous Progress Log appends to `sessions/SHELL.md` are serialized with a lock. Two overlapping appends each rewrote the whole file from their own stale read, so the loser silently reverted whatever the winner had just added.
+- A guest session no longer refreshes the resident hermit's `state/.heartbeat`. Every guest turn touched it, so a frozen resident kept looking alive and the watchdog never restarted it. A session that is the only one in the folder still signals as before.
+- A guest session's compaction is no longer attributed to the resident: the `sessions/SHELL.md` breadcrumb is labeled as a guest's, and it no longer stamps the resident's `runtime.json` as having had its context reset.
 
 ### Upgrade Instructions
 

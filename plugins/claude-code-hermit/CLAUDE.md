@@ -49,6 +49,14 @@ When installed in a target project, state lives in `.claude-code-hermit/`:
 
 `hatch` also seeds `bin/` (lifecycle scripts), `docker/` (container scaffolding), `HEARTBEAT.md`, and `SESSION-REPORT.md` — see `state-templates/` for the full set.
 
+### State ownership under residency
+
+A hatched folder can hold more than one session, so every state file needs an owner. `startup-context.ts` decides resident-vs-guest once per session and records the verdict with `lib/guest-marker.ts`; hooks read it with `isGuest(stateDir, payload.session_id)` (they run per turn with no model in the loop, so the guest banner cannot reach them). Three buckets — a new state file belongs to exactly one:
+
+- **Resident-owned** — liveness signals, context-reset stamps, session-id caches, CC-payload snapshots. Guests never write: gate the write on `isGuest`. Gated so far: `state/.heartbeat` (stop-pipeline), `runtime.json.last_context_reset_at` (precompact-stamp). Still ungated and known: `state/cc-stop-snapshot.json`, `sessions/.status.json`, cost attribution.
+- **Folder-shared** — `sessions/SHELL.md` Progress Log, the cost log. Any session writes; entries carry provenance instead of a gate (the PreCompact breadcrumb labels a guest's reset). `SHELL.md` stays one file: "the only plan surface" is a contract, and its read-modify-write is already serialized by `withProgressLogLock`.
+- **Session-keyed** — anything that must vary per session is keyed by session id (like the guest markers), never a singleton.
+
 ## Hatch target routing
 
 `scripts/domain-hatch.ts` owns target resolution and stamping for every consumer — core `hatch`, `hermit-evolve`, `docker-setup`, and all five domain hatches. Routing is derived from the plugin's install scope (read from `claude plugin list --json`): `scope=local` → `CLAUDE.local.md` + `.claude/settings.local.json`; `scope=project` → `CLAUDE.md` + `.claude/settings.json`; `scope=user` or no detectable scope → `.local` files (safer default). Advanced mode lets the operator override the scope-derived default via the Visibility prompt.

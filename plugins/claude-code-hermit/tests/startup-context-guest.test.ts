@@ -40,9 +40,13 @@ function fixture(dir: string, opts: { tmuxSession?: string; tmuxExit?: number })
   };
 }
 
-async function run(dir: string, env: Record<string, string>) {
-  return runScript('startup-context.ts', { stdin: '{}', env });
+async function run(dir: string, env: Record<string, string>, sessionId?: string) {
+  const payload = sessionId === undefined ? {} : { session_id: sessionId };
+  return runScript('startup-context.ts', { stdin: JSON.stringify(payload), env });
 }
+
+const markerFor = (dir: string, sessionId: string) =>
+  path.join(dir, '.claude-code-hermit', 'state', `.guest-${sessionId}`);
 
 describe('startup-context.ts — resident vs guest', () => {
   it('managed session gets the full framing even while its tmux session is alive', async () => {
@@ -94,6 +98,68 @@ describe('startup-context.ts — resident vs guest', () => {
       expect(res.exitCode).toBe(0);
       expect(res.stdout).not.toContain('---Guest Session---');
       expect(res.stdout).toContain('---Active Session---');
+    } finally {
+      wd.cleanup();
+    }
+  });
+});
+
+// The banner tells the model; the marker tells the state-writing hooks, which run
+// per turn with no model in the loop.
+describe('startup-context.ts — guest marker', () => {
+  it('marks the guest session so the per-turn hooks can read the verdict', async () => {
+    const wd = setupWorkdir();
+    try {
+      const env = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 0 });
+      const res = await run(wd.dir, { ...env, HERMIT_MANAGED: '' }, 'sess-guest');
+      expect(res.stdout).toContain('---Guest Session---');
+      expect(fs.existsSync(markerFor(wd.dir, 'sess-guest'))).toBe(true);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  it('marks nothing for the resident or for a session with no live resident', async () => {
+    const wd = setupWorkdir();
+    try {
+      const live = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 0 });
+      await run(wd.dir, { ...live, HERMIT_MANAGED: '1' }, 'sess-resident');
+      expect(fs.existsSync(markerFor(wd.dir, 'sess-resident'))).toBe(false);
+
+      const dead = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 1 });
+      await run(wd.dir, { ...dead, HERMIT_MANAGED: '' }, 'sess-solo');
+      expect(fs.existsSync(markerFor(wd.dir, 'sess-solo'))).toBe(false);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  it('marks nothing when the payload carries no session id', async () => {
+    const wd = setupWorkdir();
+    try {
+      const env = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 0 });
+      const res = await run(wd.dir, { ...env, HERMIT_MANAGED: '' });
+      expect(res.stdout).toContain('---Guest Session---');
+      const stateDir = path.join(wd.dir, '.claude-code-hermit', 'state');
+      expect(fs.readdirSync(stateDir).filter(n => n.startsWith('.guest-'))).toEqual([]);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  it('prunes a marker left behind by a long-gone session', async () => {
+    const wd = setupWorkdir();
+    try {
+      const env = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 0 });
+      const stale = markerFor(wd.dir, 'sess-ancient');
+      fs.writeFileSync(stale, 'old\n');
+      const old = Date.now() - 8 * 24 * 60 * 60 * 1000;
+      fs.utimesSync(stale, old / 1000, old / 1000);
+
+      await run(wd.dir, { ...env, HERMIT_MANAGED: '' }, 'sess-guest');
+
+      expect(fs.existsSync(stale)).toBe(false);
+      expect(fs.existsSync(markerFor(wd.dir, 'sess-guest'))).toBe(true);
     } finally {
       wd.cleanup();
     }
