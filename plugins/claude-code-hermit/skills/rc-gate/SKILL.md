@@ -1,6 +1,7 @@
 ---
 name: rc-gate
-description: Open, close, or check the Remote Control spawn gate — the hermit-managed `claude remote-control` server that lets a phone spawn new sessions into this project. Activates on messages like "open the spawn gate", "let me start sessions from my phone", "close the gate", "is the gate open", "give me the remote link", "clean up the leftover worktrees".
+description: Open, close, or check the Remote Control spawn gate — the hermit-managed `claude remote-control` server that lets a phone spawn new sessions into this project.
+disable-model-invocation: true
 ---
 # RC Gate
 
@@ -27,44 +28,20 @@ All four are `.claude-code-hermit/bin/hermit-run rc-server <verb>`:
 opens or scans. Hand it over as a link, not as a command.
 
 Run each verb bare. The grant for these four is an exact command match, so a
-pipe, a redirect, or a `timeout`/`cd` wrapper falls outside it and re-prompts —
-in an unattended session that prompt is a dead end.
-
-## Authority
-
-All four verbs sit on the everyday `allowed` tier (`docs/security.md` § Tiered
-settings authority): the terminal, the operator's own chat, or the settings
-chat. Any other chat gets the current status and a pointer to the operator's own
-chat, nothing more.
-
-The gate does not widen who can reach this machine. A spawned session is visible
-only to the claude.ai account signed in here, and the server refuses to start
-without that login, so the URL is safe to hand over and opening the gate grants
-nobody else access. What a stranger could do from a chat is disrupt: burn a
-session slot, or close a gate and archive sessions the operator still has open.
-That is why the everyday tier applies rather than something stricter.
-
-Be honest about what enforces this: nothing does. Pause and resume are checked
-deterministically before the model sees them; these verbs are not covered by
-`channel-settings-gate.ts` either, so the fence here is your judgment alone. Do
-not route around a refusal by invoking the tmux command directly.
+pipe, a redirect, or a `timeout`/`cd` wrapper falls outside it and re-prompts.
 
 ## Behavior
 
-Report state, not mechanics. The operator wants to know whether they can spawn
-from their phone, and the link if so — never the tmux session name, the flags, or
-the pane text.
+Report state, not mechanics — whether the operator can spawn from their phone,
+and the link if so. Never the tmux session name, the flags, or the pane text.
 
-A time-boxed open ("open it for two hours") is `start` now plus a Progress Log
-note naming the close time; there is no scheduler behind it, so say that you will
-close it when you next see the clock pass that mark, and close it when you do.
+A spawned session is visible only to the claude.ai account signed in here, and
+the server refuses to start without that login. Anyone with access to that
+account can spawn while the gate is open.
 
-When `start` refuses with the not-logged-in verdict, that is final: Remote Control
-requires a claude.ai `/login` on this machine and this install's auth does not
-carry it. Say so once, don't retry, and don't propose workarounds.
+When `start` refuses with the not-logged-in verdict, that is final. Say it once,
+don't retry, don't propose workarounds.
 
-Run `gc` whenever the operator mentions leftover or stuck worktrees, and after
-any `stop`. Archiving a spawned session from the Claude app reads as a crash to
-the server and leaves a locked worktree behind — that sweep is the hermit's job,
-not the server's. A `kept` line means that worktree still holds uncommitted work;
-tell the operator it is there and let them decide, never delete it for them.
+Run `gc` when the operator mentions leftover or stuck worktrees; `stop` already
+sweeps. A `kept` line means that worktree holds uncommitted work — say it is
+there and let the operator decide, never delete it for them.

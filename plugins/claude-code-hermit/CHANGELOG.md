@@ -9,8 +9,12 @@
 - A hermit that never opened a session (`idle`, no active session id) no longer archives an empty nightly report. The `auto-close` gate stamps the daily context-reset marker itself on that branch, so the `/clear` the archive path used to trigger keeps firing on schedule either way.
 - The spawn gate's `start` and `stop` sit on the everyday authority tier instead of asking for an echoed confirmation code from the settings chat. A spawned session is bound to the claude.ai account signed in on the machine, so the gate changes where the operator can spawn from, not who can.
 - Adding or removing a routine from a channel writes one entry by index instead of rewriting the whole `routines` array, so it no longer asks for a confirmation code. Only an entry that carries a `precheck` still does.
+- The spawn gate is opened, closed and checked by you, not by the hermit. `/claude-code-hermit:rc-gate` no longer responds to a chat request or a phrase like "open the spawn gate" — run it yourself. The authority prose it used to carry is gone with it, since a spawned session was always bound to the claude.ai account signed in on the machine.
+- Claude Code `>=2.1.241` is now the minimum. `hermit-evolve` stops on an older CLI rather than upgrading.
 
 ### Upgrade Instructions
+
+**Claude Code 2.1.241 is required.** If `hermit-evolve` reports a version below that and stops, run `claude update` (or your package manager's equivalent), restart the session, and re-run `/claude-code-hermit:hermit-evolve`. There is no bypass.
 
 **Channel control commands now need a slash.** No config or state change — the matchers ship in the plugin. Tell the operator, once, that the words they used to send to stop and resume you have changed: it is now `/pause` (or `/stop`), `/resume`, `/snooze 2h` and `/status`, and the old bare words no longer stop you. Mention that a plain "stop" still gets your attention but only asks you to halt, where `/stop` blocks you outright. If they reach you somewhere they have to @mention you first, say the mention can stay in front of the command — `@you /pause` works, and so does the `/pause@you` form their client may produce on its own.
 
@@ -29,7 +33,8 @@
 **Note:** a gate is a `SKIP`/`WAKE` script declared as the routine's `precheck` — see `docs/routine-authoring.md`. Setting one from chat takes the confirmation-code tier. Removing the key restores always-wake.
 
 ### Fixed
-- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt that an unattended session cannot answer.
+- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt. Auto mode suspends the wildcarded rules that used to cover them.
+- The spawn-gate skill no longer tells the hermit to sweep worktrees after closing the gate — `stop` already sweeps, so that was a wasted second call every time.
 - `settings-edit … unset routines.<n>` removed the entry but left a `null` in its place, which failed validation on every later settings write. Array indices now splice, and `set` at an index past the end of an array is refused instead of creating a hole.
 
 ## [1.2.47] - 2026-08-24

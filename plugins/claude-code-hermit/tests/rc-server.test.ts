@@ -127,6 +127,26 @@ describe('rc-server.ts', () => {
     }
   });
 
+  // stop() returns gc() on both branches, which is why the skill no longer tells
+  // the model to follow a stop with a gc. The already-down branch is the one a
+  // refactor would most plausibly drop, so it is the one pinned here.
+  it('stop on an already-down gate still sweeps an orphaned bridge worktree', async () => {
+    const wd = setupGitWorkdir();
+    try {
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-afterstop');
+      git(wd.dir, 'worktree', 'add', '-q', '-b', 'cse-session-afterstop', wt);
+      git(wd.dir, 'worktree', 'lock', wt);
+
+      const res = await rcServer(wd.dir, ['stop']);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout).toContain('down');
+      expect(res.stdout).toContain('removed bridge-afterstop');
+      expect(fs.existsSync(wt)).toBe(false);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
   it('status reports down when no gate session exists', async () => {
     const wd = setupGitWorkdir();
     try {
