@@ -2905,8 +2905,11 @@ describe('composeRestartMessage / composeWedgeMessage / composePauseMessage', ()
 // telemetry export (step 0d: independent of watchdog.enabled, like 0a-0c)
 // -------------------------------------------------------
 
-/** Minimal config: watchdog disabled (so the process exits right after step 0d, with
- *  no tmux dependency) plus an enabled telemetry_export block pointed at a mock webhook. */
+/** Minimal config: watchdog disabled (so the process exits right after step 0d) plus an
+ *  enabled telemetry_export block pointed at a mock webhook. Steps 0a-0c still shell out
+ *  to tmux before the gate, so these tests stub it like every other one. An unstubbed
+ *  tmux resolves to the host's, and a snap-packaged tmux costs ~3s per call, which alone
+ *  pushes the test past bun's 5s default timeout. */
 function writeTelemetryConfig(h: Hermit, url: string): void {
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
     watchdog: { enabled: false },
@@ -2921,6 +2924,8 @@ function writeTelemetryConfig(h: Hermit, url: string): void {
 
 describe('telemetry export (step 0d)', () => {
   test('fires with watchdog.enabled: false — one POST, state stamped, event logged', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
     let calls = 0;
     const server = Bun.serve({ port: 0, fetch: () => { calls++; return new Response('ok', { status: 200 }); } });
     try {
@@ -2938,6 +2943,8 @@ describe('telemetry export (step 0d)', () => {
   }));
 
   test('interval not yet due → no POST', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
     let calls = 0;
     const server = Bun.serve({ port: 0, fetch: () => { calls++; return new Response('ok', { status: 200 }); } });
     try {
@@ -2958,6 +2965,8 @@ describe('telemetry export (step 0d)', () => {
   }));
 
   test('no telemetry_export block → nothing leaves the box', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
     let calls = 0;
     const server = Bun.serve({ port: 0, fetch: () => { calls++; return new Response('ok', { status: 200 }); } });
     try {
