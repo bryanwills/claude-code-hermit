@@ -19,6 +19,7 @@ import { flushResetBreadcrumb } from './lib/progress-log';
 import { stampContextReset } from './lib/context-reset';
 import { currentHHMMOrUTC } from './lib/time';
 import { readSettledConfig } from './lib/config-read';
+import { isGuest } from './lib/guest-marker';
 
 type Json = any;
 
@@ -35,11 +36,16 @@ function main(raw: string): void {
   const agentDir = hermitDir();
   const shellPath = path.join(agentDir, 'sessions', 'SHELL.md');
   const hhmm = currentHHMMOrUTC(readSettledConfig(agentDir).timezone ?? 'UTC');
-  flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger, hhmm });
+  const guest = isGuest(path.join(agentDir, 'state'), payload.session_id);
+  flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger, hhmm, guest });
   // The watchdog's own stamps only cover compactions it initiated; this is the only
   // signal for an operator-typed /compact or a native auto-compaction, both of which
   // leave the last cost-log entry describing a context that no longer exists.
-  stampContextReset(agentDir);
+  //
+  // Not for a guest: the stamp says the RESIDENT's context was reset, and the watchdog
+  // reads it to decide that the resident's last cost entry describes a context that no
+  // longer exists. The guest's own compaction says nothing about the resident's context.
+  if (!guest) stampContextReset(agentDir);
 }
 
 try {

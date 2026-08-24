@@ -18,6 +18,8 @@
 - Autonomous Progress Log appends to `sessions/SHELL.md` are serialized with a lock. Two overlapping appends each rewrote the whole file from their own stale read, so the loser silently reverted whatever the winner had just added.
 - Accepting a suggestion over a channel parks a "how should I implement this?" question, and nothing retired it once the decision was settled another way — the heartbeat then asked about it daily forever. Resolving, dismissing, or deferring a proposal now clears the question it parked, through every path that writes a proposal's status.
 - The daily digest lists only decisions still waiting and dates them (`first seen 2026-08-21`) instead of printing an evaluation count that read as "8 unanswered notices" when two were ever sent.
+- A guest session no longer refreshes the resident hermit's `state/.heartbeat`. Every guest turn touched it, so a frozen resident kept looking alive and the watchdog never restarted it. A session that is the only one in the folder still signals as before.
+- A guest session's compaction is no longer attributed to the resident: the `sessions/SHELL.md` breadcrumb is labeled as a guest's, and it no longer stamps the resident's `runtime.json` as having had its context reset.
 
 ### Upgrade Instructions
 

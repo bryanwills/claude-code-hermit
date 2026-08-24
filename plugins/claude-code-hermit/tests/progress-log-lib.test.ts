@@ -91,6 +91,12 @@ describe('flushResetBreadcrumb', () => {
     expect(shell).not.toContain('tokens');
   }));
 
+  test('a guest reset is labeled so the resident log keeps its provenance', withTmpShell((shellPath) => {
+    flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger: 'auto', hhmm: '09:00', guest: true });
+    const shell = fs.readFileSync(shellPath, 'utf-8');
+    expect(shell).toContain('context compacted (auto) — guest session — arc may have unfinished work');
+  }));
+
   test('fail-open: unwritable target does not throw', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-progresslog-bad-'));
     try {

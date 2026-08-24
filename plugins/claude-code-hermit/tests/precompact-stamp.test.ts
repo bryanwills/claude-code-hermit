@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { runScript } from './helpers/run';
+import { markGuest } from '../scripts/lib/guest-marker';
 
 function makeDir(): string {
   const hermitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-precompact-'));
@@ -172,6 +173,56 @@ describe('precompact-stamp: no-op on anything that is not a genuine PreCompact p
       const result = await runHook(JSON.stringify({ hook_event_name: 'PreCompact' }), hermitDir);
       expect(result.exitCode).toBe(0);
       expect(fs.readFileSync(shellPath, 'utf-8')).toBe(before);
+    } finally {
+      fs.rmSync(hermitDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// issue #793 — SHELL.md is one session's narrative, archived as that session's report and
+// read by reflect and the weekly review, so a guest's compaction must say so. The reset
+// stamp is a claim about the RESIDENT's context and is not the guest's to make at all.
+describe('precompact-stamp: guest session', () => {
+  function seedRuntime(hermitDir: string): void {
+    fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
+    fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'),
+      JSON.stringify({ session_id: 'S-001', session_state: 'idle' }), 'utf-8');
+  }
+
+  test('a guest compaction is labeled and never stamps the resident runtime', async () => {
+    const hermitDir = makeDir();
+    try {
+      seedRuntime(hermitDir);
+      markGuest(path.join(hermitDir, 'state'), 'sess-guest');
+      const result = await runHook(
+        JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'auto', session_id: 'sess-guest' }),
+        hermitDir,
+      );
+      expect(result.exitCode).toBe(0);
+      const shell = fs.readFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), 'utf-8');
+      expect(shell).toContain('context compacted (auto) — guest session');
+      const runtime = JSON.parse(fs.readFileSync(path.join(hermitDir, 'state', 'runtime.json'), 'utf-8'));
+      expect(runtime.last_context_reset_at).toBeUndefined();
+    } finally {
+      fs.rmSync(hermitDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a marker for another session leaves this one unlabeled and stamped', async () => {
+    const hermitDir = makeDir();
+    try {
+      seedRuntime(hermitDir);
+      markGuest(path.join(hermitDir, 'state'), 'sess-somebody-else');
+      const result = await runHook(
+        JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'auto', session_id: 'sess-resident' }),
+        hermitDir,
+      );
+      expect(result.exitCode).toBe(0);
+      const shell = fs.readFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), 'utf-8');
+      expect(shell).toContain('context compacted (auto)');
+      expect(shell).not.toContain('guest session');
+      const runtime = JSON.parse(fs.readFileSync(path.join(hermitDir, 'state', 'runtime.json'), 'utf-8'));
+      expect(runtime.last_context_reset_at).toBeDefined();
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
