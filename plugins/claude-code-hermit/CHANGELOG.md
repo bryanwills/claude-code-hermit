@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.48] - 2026-08-24
 
 ### Changed
 - Channel control commands require a slash: `/pause`, `/stop`, `/resume`, `/snooze <dur>` and `/status`, matching `/compact` and `/clear`. The bare words they replace no longer bind — a word an operator might type in ordinary conversation can no longer freeze the hermit. A bare "stop" now reaches the model as a cooperative Emergency halt instead of an immediate one; `/stop` and `/pause` remain binding.
