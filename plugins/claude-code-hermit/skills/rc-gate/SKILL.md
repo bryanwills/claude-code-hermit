@@ -19,9 +19,9 @@ All four are `.claude-code-hermit/bin/hermit-run rc-server <verb>`:
 | Verb | What it does | Output |
 |---|---|---|
 | `start` | opens the gate (tmux session `hermit-rc-gate`), waits for the server | `ready <url>` or a one-line refusal |
-| `status` | one pane read | `down`, `ready`, or `connected N/32` |
+| `status` | one pane read | `down`, `starting` (up but not serving yet), `ready`, or `connected N/32` |
 | `stop` | closes the gate, then sweeps | `closed` / `down`, plus any removals |
-| `gc` | sweeps worktrees left by archived spawns | one line per removed worktree |
+| `gc` | sweeps worktrees left by archived spawns | one line per worktree removed, or kept because it holds uncommitted work |
 
 `start` prints the `claude.ai/code?environment=…` URL — that is what the operator
 opens or scans. Hand it over as a link, not as a command.
@@ -58,4 +58,5 @@ carry it. Say so once, don't retry, and don't propose workarounds.
 Run `gc` whenever the operator mentions leftover or stuck worktrees, and after
 any `stop`. Archiving a spawned session from the Claude app reads as a crash to
 the server and leaves a locked worktree behind — that sweep is the hermit's job,
-not the server's.
+not the server's. A `kept` line means that worktree still holds uncommitted work;
+tell the operator it is there and let them decide, never delete it for them.

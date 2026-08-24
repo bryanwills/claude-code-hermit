@@ -50,11 +50,18 @@ function repoRoot(): string {
   return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : process.cwd();
 }
 
-/** Status read off an already-captured pane, so callers holding one don't re-spawn tmux. */
+/**
+ * Status read off an already-captured pane, so callers holding one don't re-spawn tmux.
+ *
+ * A live tmux session is not by itself proof the server is serving: `start`
+ * leaves the session running when it times out, so 'ready' has to come from the
+ * same signal `start` waits on, not from mere liveness.
+ */
 function statusFromPane(pane: string): string {
   const cap = pane.match(CAPACITY_RE);
   if (cap && Number(cap[1]) > 0) return `connected ${cap[1]}/${cap[2]}`;
-  return 'ready';
+  if (READY_RE.test(pane) || URL_RE.test(pane)) return 'ready';
+  return 'starting';
 }
 
 /** One-line status derived from a single pane capture. */
@@ -148,6 +155,12 @@ function worktreeBranches(root: string): Map<string, string> {
  * session from the Claude app reads as a crash to the server and orphans a
  * *locked* worktree, so unlock comes first and `git worktree remove` needs a
  * --force fallback.
+ *
+ * A dirty worktree is never swept. Once the lock is gone the only thing
+ * `remove` still refuses is uncommitted work, so the --force fallback would be
+ * a delete of exactly that. An orphan holding a spawned session's unsaved work
+ * is the operator's to resolve; gc reports it and moves on. Committed work is
+ * covered separately, by deleting the branch with -d rather than -D.
  */
 function gc(): number {
   const root = repoRoot();
@@ -167,18 +180,33 @@ function gc(): number {
   }
 
   const branches = worktreeBranches(root);
+  let removed = 0;
   for (const name of entries) {
     const dir = path.join(wtDir, name);
     if (inUse(cwds, dir)) continue;
-    sh('git', ['-C', root, 'worktree', 'unlock', dir]); // absent lock → non-zero, ignored
-    if (sh('git', ['-C', root, 'worktree', 'remove', dir]).status !== 0) {
-      sh('git', ['-C', root, 'worktree', 'remove', '--force', dir]);
+    // Untracked files count: a spawned session's new files are usually the work.
+    if (sh('git', ['-C', dir, 'status', '--porcelain']).stdout.trim()) {
+      console.log(`kept ${name} (uncommitted changes)`);
+      continue;
     }
-    sh('git', ['-C', root, 'worktree', 'prune']);
+    sh('git', ['-C', root, 'worktree', 'unlock', dir]); // absent lock → non-zero, ignored
+    if (
+      sh('git', ['-C', root, 'worktree', 'remove', dir]).status !== 0 &&
+      sh('git', ['-C', root, 'worktree', 'remove', '--force', dir]).status !== 0
+    ) {
+      console.error(`[rc-server] could not remove ${name} — left in place.`);
+      continue;
+    }
+    // -d, not -D: the dirty check above only catches *uncommitted* work, so a
+    // session that committed and never pushed still reads as clean here. -d
+    // refuses an unmerged branch, leaving a stray local branch rather than
+    // destroying the commits behind it.
     const branch = branches.get(dir);
-    if (branch) sh('git', ['-C', root, 'branch', '-D', branch]);
+    if (branch) sh('git', ['-C', root, 'branch', '-d', branch]);
     console.log(`removed ${name}`);
+    removed++;
   }
+  if (removed) sh('git', ['-C', root, 'worktree', 'prune']);
   return 0;
 }
 

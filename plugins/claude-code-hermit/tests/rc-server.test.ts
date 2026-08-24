@@ -86,6 +86,44 @@ describe('rc-server.ts', () => {
     }
   });
 
+  it('gc sweeps a committed-but-unmerged worktree without destroying its commits', async () => {
+    const wd = setupGitWorkdir();
+    try {
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-committed321');
+      git(wd.dir, 'worktree', 'add', '-q', '-b', 'cse-session-committed', wt);
+      // A spawned session that finished its work and committed it: the tree is
+      // clean, so the dirty guard waves it through — only -d keeps the commits.
+      fs.writeFileSync(path.join(wt, 'done.txt'), 'finished work\n');
+      git(wt, 'add', 'done.txt');
+      git(wt, 'commit', '-qm', 'work from a spawned session');
+
+      const res = await rcServer(wd.dir, ['gc']);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout).toContain('removed bridge-committed321');
+      expect(fs.existsSync(wt)).toBe(false);
+      expect(git(wd.dir, 'branch', '--list', 'cse-session-committed').trim()).not.toBe('');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  it('gc keeps a bridge worktree holding uncommitted work', async () => {
+    const wd = setupGitWorkdir();
+    try {
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-dirty789');
+      git(wd.dir, 'worktree', 'add', '-q', '-b', 'cse-session-dirty', wt);
+      fs.writeFileSync(path.join(wt, 'unsaved.txt'), 'work the operator has not committed\n');
+
+      const res = await rcServer(wd.dir, ['gc']);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout).toContain('kept bridge-dirty789');
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(git(wd.dir, 'branch', '--list', 'cse-session-dirty').trim()).not.toBe('');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
   it('status reports down when no gate session exists', async () => {
     const wd = setupGitWorkdir();
     try {
