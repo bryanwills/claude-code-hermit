@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { acquireLock, releaseLock } from '../scripts/lib/lockfile';
+import { acquireLock, releaseLock, claimPathFor } from '../scripts/lib/lockfile';
 
 function makeDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-lock-'));
@@ -128,9 +128,9 @@ describe('lockfile', () => {
     const dir = makeDir();
     try {
       const lock = path.join(dir, '.lifecycle.lock');
-      // Pre-seed an hour-old stale lock, then race N acquirers. The rename-based
-      // takeover must let exactly one win — unlink-by-path takeover would let the
-      // loser delete the winner's fresh lock and both end up "holding" it.
+      // Pre-seed an hour-old stale lock, then race N acquirers. Exactly one must
+      // win — a takeover acting on the path rather than on the file it judged
+      // lets a loser displace the winner's fresh lock and both end up "holding" it.
       fs.writeFileSync(lock, '999999'); // bogus pid, hour-old → unambiguously stale
       const old = new Date(Date.now() - 60 * 60 * 1000);
       fs.utimesSync(lock, old, old);
@@ -146,6 +146,47 @@ describe('lockfile', () => {
       }));
       expect(outs.filter((o) => o === 'WON').length).toBe(1);
       expect(outs.length).toBe(8);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Only the marker's holder may replace the file it names, which is what
+  // keeps two racers from both replacing it. Derived through the production
+  // formula so the two can't drift apart.
+  function claimMarker(lock: string): string {
+    const st = fs.statSync(lock);
+    return claimPathFor(lock, st.ino, st.mtimeMs);
+  }
+
+  test('takeover backs off while another process is already replacing the same stale lock', () => {
+    const dir = makeDir();
+    try {
+      const lock = path.join(dir, '.lifecycle.lock');
+      fs.writeFileSync(lock, '999999');
+      const old = new Date(Date.now() - 60 * 60 * 1000);
+      fs.utimesSync(lock, old, old);
+      fs.writeFileSync(claimMarker(lock), '4242'); // an in-flight takeover
+      expect(acquireLock(lock)).toBe(false);
+      expect(fs.readFileSync(lock, 'utf-8')).toBe('999999'); // left for the stealer
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a takeover marker left by a crashed stealer does not wedge the lock forever', () => {
+    const dir = makeDir();
+    try {
+      const lock = path.join(dir, '.lifecycle.lock');
+      fs.writeFileSync(lock, '999999');
+      const old = new Date(Date.now() - 60 * 60 * 1000);
+      fs.utimesSync(lock, old, old);
+      const claim = claimMarker(lock);
+      fs.writeFileSync(claim, '4242');
+      fs.utimesSync(claim, old, old); // stealer died mid-swap an hour ago
+      expect(acquireLock(lock)).toBe(true);
+      expect(fs.readFileSync(lock, 'utf-8')).toBe(String(process.pid));
+      expect(fs.existsSync(claim)).toBe(false); // and the marker is cleaned up
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- A session opened in a hermit folder while the managed hermit is running now gets a short guest banner instead of the full hermit framing — it is told not to answer channels, write session state, or start schedulers. Role assignment is mechanical (the existing `HERMIT_MANAGED` marker plus a tmux liveness check), not a judgment call.
+- `hermit-run rc-server <start|stop|status|gc>` and the `/claude-code-hermit:rc-gate` skill open a hermit-managed Remote Control spawn gate, so you can start new sessions in a project from your phone. Spawns land in isolated worktrees, and `gc` sweeps the locked worktrees left behind when a spawned session is archived from the app. Requires a claude.ai `/login` on the machine.
+
 ### Fixed
+- Two lifecycle-lock acquirers that both judged the same lock stale could each end up holding it — the takeover moved aside whatever sat at the lock path, including the winner's brand-new lock. Takeovers are now serialized by an exclusive marker naming the exact file being replaced, and that file is re-verified by identity before removal, so `hermit-start`, `hermit-stop`, and the watchdog can no longer run a lifecycle operation concurrently.
 - Notices asking for a decision or reply now always carry a plain-language client leg; the `maintainer` key supplements it with technical detail instead of replacing it. Heartbeat findings, inbox items, and pending-proposal digests were landing maintainer-only — or nowhere on non-technical installs with no maintainer chat configured.
 - Denying a direct `config.json` edit from a channel turn now points to the `settings-edit` recovery path instead of "terminal only", so channel-side settings changes (adding a routine, for example) can self-recover through the tiered script path.
 
