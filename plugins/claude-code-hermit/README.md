@@ -40,12 +40,12 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 - **Agent Routines** Add your own routines that run from one persistent `Monitor` subprocess that decides eligibility outside the session, so a skipped fire costs zero tokens and co-due routines batch into one wake; a daily `CronCreate` anchor re-arms it. Falls back to per-routine `CronCreate` where `Monitor` is unavailable. Managed by `/hermit-routines`.
 - **Heartbeat** polls from a persistent `Monitor` subprocess — a filesystem-only precheck decides every tick, and the model only wakes (and only bills) when something actually changed.
 - **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
-- **Channels** let you DM a session; the hermit agent acts on it (*"accept PROP-014"*, *"status"*) and **pings you first** when something needs a yes/no.
-- **Pause it from your phone — and it actually stops.** Ask for status, pause, resume, or snooze over Discord or Telegram. The pause is enforced at the tool boundary, not merely treated as a conversational request.
+- **Operate it from your phone.** Hermit pings you first when it needs a decision. From a trusted Discord or Telegram chat, send work, inspect status and spend, accept proposals, pause/resume/snooze, change settings, or drive Claude Code itself with `/model`, `/effort`, `/permission-mode`, `/compact`, `/clear`, and `/advisor`. Pause is enforced at the tool boundary, not merely treated as a conversational request.
+- **Spawn new sessions remotely.** `/rc-gate` opens a Remote Control gate so the Claude app can start sessions in isolated worktrees, with cleanup for worktrees left behind after archival.
 - **Native Claude Code Artifacts integration** publishes a live Hermit Dashboard, open proposals, weekly reviews, and any compiled document you request as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs, with organization sharing where supported. Point `artifacts.backend` at your own MCP artifact server to publish there instead.
 - **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget on fresh and resumed starts. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
 - **Plan tracking** lives in the SHELL.md Progress Log — timestamped steps that survive compaction, restart, and every model tier.
-- **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context.
+- **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context. A second session in the same folder is mechanically recognized as a guest and framed not to answer channels, write resident state, or start schedulers.
 - **Orchestrator** instructed to delegate tasks & exploration to other agents, main context stays clean for token efficiency.
 
 **Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, clears stale context after a midnight close, and compacts long-running context so cold wakes don't re-pay the full accumulated history — recovery never depends on the session being conscious.
@@ -139,7 +139,7 @@ Or run `.claude-code-hermit/bin/hermit-update` (local/tmux) or `.claude-code-her
 
 ## Configure it
 
-Tune via `/hermit-settings` (or just by asking the hermit). Some of the settings available:
+Tune from a terminal with `/hermit-settings`, or change permitted settings from a trusted Discord or Telegram chat. Every write is validated and recorded in a redacted audit ledger; `/hermit-settings history [setting]` shows what changed. Some of the settings available:
 
 | Key | Default / options (default **bold**) |
 |-----|--------------------------------------|
@@ -187,7 +187,7 @@ Full schema in the [Config Reference](docs/config-reference.md)
 
 ## Tips & tuning
 
-All live-editable with `/hermit-settings` (or just ask the hermit) — no reboot.
+Settings apply without a reboot. Channel writes follow tiered authority: execution-adjacent changes require a one-time confirmation code, and channel enrollment stays terminal-only.
 
 - **Model & Auto mode.** Defaults to Sonnet — a good balance of reasoning and cost for an unattended session. Auto mode is generally available to all users across subscription plans and API usage; supported models and provider configuration can still vary, so if Claude reports the current selection unavailable, choose a supported model or another permission mode. Switch to `opus` for heavier reasoning; per-routine `model: "haiku"` remains useful for lightweight, isolated work.
 
