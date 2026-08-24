@@ -8,7 +8,7 @@
 
 ### Upgrade Instructions
 
-**Doctor and daily-auto-close stop waking the session on a quiet day.** In `.claude-code-hermit/config.json`, for each of the `routines[]` entries with `"id": "doctor"` and `"id": "daily-auto-close"`: if its `skill` still starts with the shipped value (`claude-code-hermit:hermit-doctor` / `claude-code-hermit:session-close`) and it has **no** `precheck` key, add `"precheck": "doctor"` or `"precheck": "auto-close"` respectively. If the routine has been renamed, points at a different skill, or already has a `precheck`, leave it untouched and note that in the evolve report — an operator's own gate is never replaced. Removing the key later restores the old always-wake behavior.
+**Doctor and daily-auto-close stop waking the session on a quiet day.** In `.claude-code-hermit/config.json`, for each of the `routines[]` entries with `"id": "doctor"` and `"id": "daily-auto-close"`: if its `skill` still starts with the shipped value (`claude-code-hermit:hermit-doctor` / `claude-code-hermit:session-close`) and it has **no** `precheck` key, add `"precheck": "doctor"` or `"precheck": "auto-close"` respectively. On the `doctor` entry also add `"precheck_timeout_s": 120` unless it already sets one — the gate runs the full check sweep, and the 30s default is not enough for an install whose docker or credential probes are slow. If the routine has been renamed, points at a different skill, or already has a `precheck`, leave it untouched and note that in the evolve report — an operator's own gate is never replaced. Removing the key later restores the old always-wake behavior.
 
 ## [1.2.47] - 2026-08-24
 

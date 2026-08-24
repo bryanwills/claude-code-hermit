@@ -421,6 +421,22 @@ describe('routine gate — auto-close builtin', () => {
     expect(marker.reason).toBe('daily-boundary');
   }));
 
+  // A non-resting noop (waiting session, missing/unreadable runtime) leaves live
+  // context in place. Stamping the marker there would have the watchdog read it as
+  // "a close just happened" and `/clear` a session nothing archived.
+  test('a waiting session → SKIP (noop) but NO clear-requested marker', withDir(async (dir) => {
+    // `run_during_waiting` mirrors the shipped daily-auto-close, so the gate — not
+    // due.ts's waiting check — is what decides this fire.
+    writeConfig(dir, [ROUTINE({ id: 'daily-auto-close', precheck: 'auto-close', run_during_waiting: true })]);
+    writeSchedule(dir, { 'daily-auto-close': { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
+    writeStateJSON(dir, 'runtime.json', { session_state: 'waiting', session_id: 'S-001' });
+
+    const r = await runDue(dir, AUTO_CLOSE_NOW);
+    expect(r.stdout.trim()).toBe('');
+    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
+    expect(fs.existsSync(stateFile(dir, 'clear-requested.json'))).toBe(false);
+  }));
+
   test('operator active inside the lull → SKIP (queued), no clear-requested marker', withDir(async (dir) => {
     seed(dir);
     writeStateJSON(dir, 'runtime.json', { session_state: 'in_progress' });

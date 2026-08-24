@@ -17,9 +17,10 @@
 //                    and the ledger is healthy, WAKE otherwise. The gate run IS the
 //                    fire's run (checks + ledger writes happen once, not twice).
 //   "auto-close"   — runs session-archive.ts auto-close-decision: WAKE on close-now,
-//                    SKIP on queued (the verb already queued it) or noop (the gate
-//                    itself stamps clear-requested.json so the daily context reset
-//                    survives a hermit that never opened a session).
+//                    SKIP on queued (the verb already queued it) or noop. On the
+//                    `resting` noop only (idle, no active session) the gate stamps
+//                    clear-requested.json itself, so the daily context reset survives
+//                    a hermit that never opened a session.
 //   "<path>"       — a project-relative executable the operator owns. Verdict-only:
 //                    the first stdout line must be SKIP or WAKE. Nothing it prints
 //                    reaches the wake prompt — gate output is untrusted text, and
@@ -298,7 +299,8 @@ function runDoctorGate(hermitDir: string, timeoutMs: number): GateVerdict {
 }
 
 /**
- * The daily-boundary reset marker the auto-close gate stamps on a `noop` verdict.
+ * The daily-boundary reset marker the auto-close gate stamps on a `resting` noop
+ * verdict (idle, no active session) — not on every `noop`.
  * Mirrors session-archive.ts's writeMarker so the watchdog's maybePostCloseClear
  * (the sole reader of clear-requested.json) sees the same shape regardless of which
  * writer produced it — a real close (session-archive.ts) or an idle no-op (here).
@@ -322,7 +324,12 @@ function runAutoCloseGate(hermitDir: string, timeoutMs: number): GateVerdict {
   if (parsed.decision === 'close-now') return { verdict: 'wake' };
   if (parsed.decision === 'queued') return { verdict: 'skip' };
   if (parsed.decision === 'noop') {
-    writeClearRequestedMarker(hermitDir);
+    // Only the `resting` noop (idle, no active session) stands in for the archive
+    // that would otherwise have stamped this marker. Every other noop — a `waiting`
+    // session, an unreadable runtime — leaves live context in place, and the
+    // watchdog would later read a stale marker as "a close just happened" and
+    // `/clear` a session nothing archived.
+    if (parsed.resting === true) writeClearRequestedMarker(hermitDir);
     return { verdict: 'skip' };
   }
   return { verdict: 'error', detail: 'bad-verdict' };
