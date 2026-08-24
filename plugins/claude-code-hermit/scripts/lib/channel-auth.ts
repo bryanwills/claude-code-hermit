@@ -23,6 +23,29 @@ export function channelEntry(config: Json, source: string): Json {
   return Object.prototype.hasOwnProperty.call(channels, key) ? channels[key] : undefined;
 }
 
+/** The hermit's own account on a channel. Either field is null when the entry,
+ *  the field, or the config itself is missing or malformed. */
+export interface ChannelBotIdentity {
+  /** `@handle` — Telegram mentions and the `/cmd@handle` suffix carry this. */
+  username: string | null;
+  /** Numeric platform id — Discord mentions carry this, never the handle. */
+  userId: string | null;
+}
+
+/**
+ * Both halves of the bot's own identity from one entry lookup. Self-mention and
+ * `@botname` addressing (channel-slash-address.ts) read them from three prompt
+ * stages and the reply reminder reads both together; one accessor keeps "no
+ * configured identity" from meaning something different in each.
+ */
+export function channelBotIdentity(config: Json, source: string): ChannelBotIdentity {
+  const entry = channelEntry(config, source);
+  return {
+    username: typeof entry?.bot_username === 'string' ? entry.bot_username : null,
+    userId: entry?.bot_user_id == null ? null : String(entry.bot_user_id),
+  };
+}
+
 /**
  * Mirrors channel-responder/SKILL.md 1c: absent allowed_users → accept all
  * (backwards compatible); [] → lockdown; otherwise the sender's user id must

@@ -26,14 +26,19 @@ function envelope(body: string, user = 'u1', chatId = '12345'): string {
   return `<channel source="telegram" chat_id="${chatId}" user="${user}">${body}</channel>`;
 }
 
-function setupChannelWorkdir(): Workdir {
+function setupChannelWorkdir(channelExtra: Record<string, unknown> = {}): Workdir {
   const wd = setupWorkdir();
   const stateDir = path.join(wd.dir, '.claude.local', 'channels', 'telegram');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_TOKEN=test-token\n');
   fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({
     timezone: 'UTC',
-    channels: { telegram: { enabled: true, dm_channel_id: '12345', allowed_users: ['u1'], state_dir: '.claude.local/channels/telegram' } },
+    channels: {
+      telegram: {
+        enabled: true, dm_channel_id: '12345', allowed_users: ['u1'],
+        state_dir: '.claude.local/channels/telegram', ...channelExtra,
+      },
+    },
   }));
   return wd;
 }
@@ -62,13 +67,13 @@ async function run(wd: Workdir, body: string, stubUrl: string) {
 }
 
 describe('user-prompt-pipeline: shutdown is terminal', () => {
-  test('status during a pending shutdown → one send, one block, status never answers', async () => {
+  test('/status during a pending shutdown → one send, one block, status never answers', async () => {
     const stub = startHttpStub();
     try {
       const wd = setupChannelWorkdir();
       writeRuntime(wd, PENDING_SHUTDOWN);
 
-      const r = await run(wd, 'status', stub.url);
+      const r = await run(wd, '/status', stub.url);
 
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
@@ -83,7 +88,7 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
-  test('status during a pending shutdown with a FAILED send → shutdown relay only, status never answers', async () => {
+  test('/status during a pending shutdown with a FAILED send → shutdown relay only, status never answers', async () => {
     const wd = setupChannelWorkdir();
     writeRuntime(wd, PENDING_SHUTDOWN);
 
@@ -93,7 +98,7 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     // purpose — both stages read the same HERMIT_TELEGRAM_API_URL, so a request
     // count could not tell the two senders apart; the discriminator is that the
     // `[status]` relay is absent while the `[shutdown]` one is present.
-    const r = await run(wd, 'status', 'http://127.0.0.1:1');
+    const r = await run(wd, '/status', 'http://127.0.0.1:1');
 
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('[shutdown]');
@@ -173,7 +178,42 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
-  test('resume during a pending shutdown does not clear an existing pause', async () => {
+  // Addressing is resolved before the harness grammar, so a Telegram group's
+  // `/cmd@thebot` reaches the parser — and one aimed at another bot does not.
+  test('a harness command addressed to this bot reaches the pending marker', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir({ bot_username: 'ourbot' });
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/model@ourbot opus', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('[harness-command]');
+      const pending = JSON.parse(fs.readFileSync(hermit(wd.dir, 'state', 'pending-harness-command.json'), 'utf-8'));
+      expect(pending).toMatchObject({ command: '/model', arg: 'opus' });
+    } finally {
+      stub.stop();
+    }
+  });
+
+  test('a harness command addressed to another bot writes no marker', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir({ bot_username: 'ourbot' });
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/model@otherbot opus', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[harness-command]');
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    } finally {
+      stub.stop();
+    }
+  });
+
+  test('/resume during a pending shutdown does not clear an existing pause', async () => {
     const stub = startHttpStub();
     try {
       const wd = setupChannelWorkdir();
@@ -182,7 +222,7 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
       fs.writeFileSync(pausePath, JSON.stringify({ paused: true, reason: 'operator', by: 'u1' }));
       writeRuntime(wd, PENDING_SHUTDOWN);
 
-      const r = await run(wd, 'resume', stub.url);
+      const r = await run(wd, '/resume', stub.url);
 
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(fs.readFileSync(pausePath, 'utf-8')).paused).toBe(true);

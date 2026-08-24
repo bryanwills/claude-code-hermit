@@ -62,7 +62,7 @@ Behavioral "when X, do Y" rules belong in `CLAUDE.md`, not here — see [the FAQ
 
 Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, records its steps in the Progress Log, and waits for your go-ahead. As it works, `SHELL.md` tracks everything — the plan, progress log, blockers, findings. Cost is tracked separately in `.status.json` and injected into context at session start.
 
-Check status anytime — just type "status":
+Check status anytime — just type `/status`:
 
 ```
 Session S-001 | in_progress | feature, api

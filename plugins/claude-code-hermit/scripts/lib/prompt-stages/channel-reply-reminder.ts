@@ -10,7 +10,7 @@
 
 import { safeForLLM } from '../sanitize';
 import { logMessage, isLoggingEnabled } from '../channel-log';
-import { isAllowedSender, channelEntry } from '../channel-auth';
+import { isAllowedSender, channelBotIdentity } from '../channel-auth';
 import { escapeRegExp } from '../md-write';
 import type { ChannelEnvelope, StageContext, StageResult } from './types';
 
@@ -38,9 +38,7 @@ const MAX_BOT_REF_LEN = 64;
 // an always-on hermit pays nothing per message for a capability it needs only
 // when it is mentioned.
 function selfMentionClause(ctx: StageContext, envelope: ChannelEnvelope): string {
-  const entry = channelEntry(ctx.config(), envelope.source);
-  const id = entry?.bot_user_id == null ? null : String(entry.bot_user_id);
-  const username = typeof entry?.bot_username === 'string' ? entry.bot_username : null;
+  const { userId: id, username } = channelBotIdentity(ctx.config(), envelope.source);
 
   let matched: string | null = null;
   // Digit-delimited, not a bare substring: a platform id is a long digit run, so
