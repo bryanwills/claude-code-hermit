@@ -14,7 +14,7 @@ process.stdout.on('error', () => {});
 //   1. Shutdown is terminal. While a shutdown is pending, the audit/context
 //      stages still run, then the shutdown stage answers and the pipeline
 //      ends — whether or not its send succeeded. Previously a failed shutdown
-//      send fell through, and an exact `status` message could then send and
+//      send fell through, and an exact `/status` message could then send and
 //      block on its own, discarding the shutdown-relay instruction the model
 //      was supposed to act on. Pause/resume and harness commands are skipped
 //      for the same reason: mutating session state mid-shutdown answers a

@@ -226,6 +226,61 @@ describe('pause-keyword', () => {
     }));
   });
 
+  // A mention-gated channel — the default for a server channel — delivers the
+  // operator's mention verbatim ahead of the command. These drive the whole hook,
+  // so they cover the config→stage→addressing wiring, not just the primitive.
+  describe('leading self-mention addressing', () => {
+    const SELF_ID = '1503162355876499589';
+    const withIdentity =
+      `{"channels":{"discord":{"dm_channel_id":"1","bot_username":"ourbot","bot_user_id":"${SELF_ID}"}}}`;
+
+    test('Discord mention of this bot before the command — acts', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), withIdentity);
+      const r = await run(`<channel source="discord" chat_id="1" user="U1"><@${SELF_ID}> /pause</channel>`, dir);
+      expect(r.exitCode).toBe(0);
+      expect(isPaused(hermit(dir)).paused).toBe(true);
+    }));
+
+    test('mention of a different account — silent no-op', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), withIdentity);
+      const r = await run('<channel source="discord" chat_id="1" user="U1"><@999999999999999999> /pause</channel>', dir);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[pause]');
+      expect(isPaused(hermit(dir)).paused).toBe(false);
+    }));
+
+    test('mention with no stored bot_user_id — silent no-op', withDir(async (dir) => {
+      // Default config carries no identity: an unknown id can never authorize
+      // its own address form.
+      const r = await run(`<channel source="discord" chat_id="1" user="U1"><@${SELF_ID}> /pause</channel>`, dir);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[pause]');
+      expect(isPaused(hermit(dir)).paused).toBe(false);
+    }));
+
+    test('a mention does not rescue a bare control word', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), withIdentity);
+      const r = await run(`<channel source="discord" chat_id="1" user="U1"><@${SELF_ID}> pause</channel>`, dir);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[pause]');
+      expect(isPaused(hermit(dir)).paused).toBe(false);
+    }));
+
+    test('mentioned snooze keeps its duration argument', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), withIdentity);
+      const r = await run(`<channel source="discord" chat_id="1" user="U1"><@${SELF_ID}> /snooze 2h</channel>`, dir);
+      expect(r.exitCode).toBe(0);
+      expect(isPaused(hermit(dir)).until).not.toBeNull();
+    }));
+
+    test('Telegram @handle mention before the command — acts', withDir(async (dir) => {
+      write(hermit(dir, 'config.json'), withIdentity);
+      const r = await run('<channel source="discord" chat_id="1" user="U1">@ourbot /pause</channel>', dir);
+      expect(r.exitCode).toBe(0);
+      expect(isPaused(hermit(dir)).paused).toBe(true);
+    }));
+  });
+
   // #634 regression: the harness injects a plugin-qualified source
   // (`plugin:discord:discord`) but config keys channels by the bare server
   // name — these pin the fix in lib/channel-auth.ts's channelEntry resolution.

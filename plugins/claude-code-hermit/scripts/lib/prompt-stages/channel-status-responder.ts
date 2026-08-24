@@ -20,7 +20,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { isAllowedSender, isTrustedController, channelBotUsername } from '../channel-auth';
+import { isAllowedSender, isTrustedController, channelBotIdentity } from '../channel-auth';
 import { resolveSlashCommand } from '../channel-slash-address';
 import { isPaused, pauseReasonLabel } from '../pause';
 import { resolveTimezone, budgetLine } from '../spend-status';
@@ -178,7 +178,7 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
 
   // Slash-only exact match, same rule as the pause and harness commands — a bare
   // "status" now falls through to the model, as every near-miss already did.
-  const addressed = resolveSlashCommand(envelope.body, channelBotUsername(config, envelope.source));
+  const addressed = resolveSlashCommand(envelope.body, channelBotIdentity(config, envelope.source));
   if (!addressed || addressed.command !== '/status' || addressed.rest.length > 0) return;
 
   if (!isAllowedSender(config, envelope.source, envelope.userId)) return;

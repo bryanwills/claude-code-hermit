@@ -213,25 +213,6 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
-  test('a bare "resume" during a pending shutdown is inert too', async () => {
-    const stub = startHttpStub();
-    try {
-      const wd = setupChannelWorkdir();
-      const pausePath = hermit(wd.dir, 'state', 'pause.json');
-      fs.mkdirSync(path.dirname(pausePath), { recursive: true });
-      fs.writeFileSync(pausePath, JSON.stringify({ paused: true, reason: 'operator', by: 'u1' }));
-      writeRuntime(wd, PENDING_SHUTDOWN);
-
-      const r = await run(wd, 'resume', stub.url);
-
-      expect(r.exitCode).toBe(0);
-      expect(JSON.parse(fs.readFileSync(pausePath, 'utf-8')).paused).toBe(true);
-      expect(r.stdout).not.toContain('[pause]');
-    } finally {
-      stub.stop();
-    }
-  });
-
   test('/resume during a pending shutdown does not clear an existing pause', async () => {
     const stub = startHttpStub();
     try {

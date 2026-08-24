@@ -28,7 +28,7 @@
 
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
-import { isTrustedController, channelBotUsername } from '../channel-auth';
+import { isTrustedController, channelBotIdentity } from '../channel-auth';
 import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal } from '../harness-command';
 import { resolveSlashCommand } from '../channel-slash-address';
 import type { StageContext, StageResult } from './types';
@@ -43,9 +43,9 @@ export function run(ctx: StageContext): StageResult | void {
 
   // Addressing runs BEFORE the grammar, not inside it: parseHarnessCommand stays a
   // pure harness parser that knows nothing about channels. Resolving here is what
-  // makes a Telegram group's `/clear@thebot` work, and keeps `/clear@someoneelse`
-  // a no-op.
-  const addressed = resolveSlashCommand(env.body, channelBotUsername(config, env.source));
+  // makes a Telegram group's `/clear@thebot` and a mention-gated `<@us> /clear`
+  // work, and keeps `/clear@someoneelse` a no-op.
+  const addressed = resolveSlashCommand(env.body, channelBotIdentity(config, env.source));
   if (!addressed) return;
 
   const parsed = parseHarnessCommand(`${addressed.command}${addressed.rest}`);

@@ -17,7 +17,7 @@
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
 import { setPause, clearPause, parseSnoozeDuration } from '../pause';
-import { isTrustedController, channelBotUsername } from '../channel-auth';
+import { isTrustedController, channelBotIdentity } from '../channel-auth';
 import { resolveSlashCommand } from '../channel-slash-address';
 import type { StageContext, StageResult } from './types';
 
@@ -36,19 +36,19 @@ export function run(ctx: StageContext): StageResult | void {
   if (!body) return;
 
   const dir = ctx.dir;
-  // Read before the match, not after: the handle is needed to resolve `@botname`
-  // addressing. config() is memoized per prompt (user-prompt-pipeline.ts), and
-  // channel-reply-reminder has already loaded it, so this costs nothing. A null
-  // config resolves to a null handle AND fails isTrustedController below, so an
+  // Read before the match, not after: the bot's own identity is needed to resolve
+  // both address forms. config() is memoized per prompt (user-prompt-pipeline.ts),
+  // and channel-reply-reminder has already loaded it, so this costs nothing. A null
+  // config resolves to an empty identity AND fails isTrustedController below, so an
   // unreadable config still means no control command works at all — unchanged.
   const config = ctx.config();
-  const botUsername = channelBotUsername(config, sourceRaw);
+  const identity = channelBotIdentity(config, sourceRaw);
 
   // Slash-only, exact-match: the same rule the harness commands (`/compact`,
   // `/clear`) already follow. A bare `pause`/`stop` is deliberately inert — a word
   // an operator might type in ordinary conversation must not freeze the hermit —
   // and so is prose that merely mentions one ("please pause and think about this").
-  const addressed = resolveSlashCommand(body, botUsername);
+  const addressed = resolveSlashCommand(body, identity);
   if (!addressed) return;
 
   // Argument grammar stays here, with its owner: `\s+` before a snooze duration
