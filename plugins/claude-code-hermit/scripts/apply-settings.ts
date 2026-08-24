@@ -107,10 +107,11 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run domain-hatch ensure-target *)',
   'Bash(.claude-code-hermit/bin/hermit-run domain-hatch sync-block *)',
   // The three routes above exist because a domain plugin can't resolve core's
-  // path. These three exist for a different reason: they are the scripts the
+  // path. The ones below exist for a different reason: they are the scripts the
   // MODEL invokes ad hoc mid-session rather than from a skill's verbatim command
-  // block. CLAUDE-APPEND names the first two, and its "log it in the Progress
-  // Log" rules lead to the third. Their `bun */scripts/*.ts*` twins above are
+  // block. CLAUDE-APPEND names channel-send and observations, its "log it in the
+  // Progress Log" rules lead to proposal shell-append, and the rc-gate skill's
+  // four verbs are asked for in chat. Their `bun */scripts/*.ts*` twins above are
   // wildcarded-interpreter rules, which auto mode suspends (docs/security.md
   // § Auto-mode Classifier) — so on the fleet's default permission mode the
   // model was left deriving a versioned plugin-cache path by hand, and the
@@ -124,6 +125,16 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
   'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
+  // The rc-gate skill's four verbs, invoked ad hoc from a chat turn rather than
+  // from a verbatim command block. Every verb is argless, so each grant is exact
+  // rather than prefixed — nothing follows the verb to widen it. `start` needs no
+  // tier above the everyday one: a spawned session is visible only to the
+  // claude.ai account signed in on this machine, so opening the gate changes
+  // where the operator can spawn from, never who can.
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server start)',
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server gc)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];
