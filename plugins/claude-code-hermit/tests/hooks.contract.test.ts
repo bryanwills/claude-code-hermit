@@ -409,6 +409,12 @@ const DENY_ROWS: DenyRow[] = [
   // Glob narrowing (`*/rm …`, not a bare `*rm`) must not fire on a command that
   // merely contains "rm" as a substring of another word.
   ['allow a command containing "rm" as a substring', bash('confirm -rf x'), 'allow'],
+
+  // Locks in the removal of the unanchored credential-word globs (see CHANGELOG);
+  // printenv/cat .env* above still block.
+  ['allow a grep for a token-named var', bash('grep -rn DISCORD_BOT_TOKEN plugins/'), 'allow'],
+  ['allow a grep for a token-named var (strict list)', bash('grep -rn DISCORD_BOT_TOKEN plugins/'), 'allow', STRICT_PATTERNS],
+  ['allow a commit message naming a secret var', bash('git commit -m "rename the SECRET env var"'), 'allow'],
 ];
 
 describe('enforce-deny-patterns (decide, in-process)', () => {
