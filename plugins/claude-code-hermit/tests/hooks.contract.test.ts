@@ -410,11 +410,25 @@ const DENY_ROWS: DenyRow[] = [
   // merely contains "rm" as a substring of another word.
   ['allow a command containing "rm" as a substring', bash('confirm -rf x'), 'allow'],
 
-  // Locks in the removal of the unanchored credential-word globs (see CHANGELOG);
-  // printenv/cat .env* above still block.
+  // Locks in the removal of the unanchored credential-word globs (see CHANGELOG).
+  // The anchored credential-path entries that carry the transcript-hygiene value
+  // must survive that removal — assert them here rather than leaving the claim
+  // to a comment (`printenv` is covered by the pipe row above).
+  ['block a dotenv read', bash('cat .env'), 'block'],
+  ['block a suffixed dotenv read', bash('cat .env.local'), 'block'],
+  ['block an ssh key read behind &&', bash('cd /tmp && cat ~/.ssh/id_rsa'), 'block'],
   ['allow a grep for a token-named var', bash('grep -rn DISCORD_BOT_TOKEN plugins/'), 'allow'],
   ['allow a grep for a token-named var (strict list)', bash('grep -rn DISCORD_BOT_TOKEN plugins/'), 'allow', STRICT_PATTERNS],
   ['allow a commit message naming a secret var', bash('git commit -m "rename the SECRET env var"'), 'allow'],
+
+  // The word globs were unanchored; these are anchored on the `$` sigil, so an
+  // expansion of a live credential blocks while every bare mention of the name
+  // stays allowed. Both spellings are needed — `${VAR}` does not contain `$VAR`.
+  ['block an expansion of the api-key var', bash('echo $ANTHROPIC_API_KEY'), 'block'],
+  ['block a braced expansion of the login-token var', bash('echo "${CLAUDE_CODE_OAUTH_TOKEN}"'), 'block'],
+  ['block a credential expansion later in a chain', bash('bun x.ts && echo $CLAUDE_CODE_OAUTH_TOKEN > /tmp/t'), 'block'],
+  ['allow a grep for the api-key var name', bash('grep -rn ANTHROPIC_API_KEY docs/'), 'allow'],
+  ['allow writing the api-key placeholder into .env', bash('echo ANTHROPIC_API_KEY=your-api-key-here >> .env'), 'allow'],
 ];
 
 describe('enforce-deny-patterns (decide, in-process)', () => {

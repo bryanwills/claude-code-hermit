@@ -4,6 +4,7 @@
 
 ### Changed
 - The `Bash(*API_KEY*)`, `Bash(*SECRET*)`, and `Bash(*TOKEN*)` deny patterns are gone from `deny-patterns.json` — trivially bypassable and blocking ordinary work (a grep, a commit message). The anchored `env`/`printenv`/`cat .env*`/`cat ~/.ssh/*`/`cat ~/.aws/*` entries stay; see `docs/security.md` for the full rationale.
+- Four sigil-anchored entries replace them: `Bash(*$ANTHROPIC_API_KEY*)` and `Bash(*$CLAUDE_CODE_OAUTH_TOKEN*)`, each in bare and `${…}` spelling. An expansion of a live credential (`echo $ANTHROPIC_API_KEY` while debugging auth) blocks; every bare mention of the name — a grep, a commit message, writing the placeholder into `.env` — stays allowed. The hook enforces them from the shipped template, so nothing needs adding to your settings file.
 
 ### Upgrade Instructions
 
