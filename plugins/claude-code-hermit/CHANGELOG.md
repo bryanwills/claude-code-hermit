@@ -6,6 +6,7 @@
 - The `doctor` and `daily-auto-close` routines ship with a builtin `precheck` gate, so a day with nothing to report or close no longer wakes the session. `"precheck": "doctor"` runs the 27 checks and their ledger writes once, in the gate itself, and SKIPs when nothing currently failing is still owed to the operator. `"precheck": "auto-close"` runs the same decision the `--scheduled` archive path already made, and SKIPs on `queued` or `noop` — WAKE only fires an actual close.
 - A hermit that never opened a session (`idle`, no active session id) no longer archives an empty nightly report. The `auto-close` gate stamps the daily context-reset marker itself on that branch, so the `/clear` the archive path used to trigger keeps firing on schedule either way.
 - The spawn gate's `start` and `stop` sit on the everyday authority tier instead of asking for an echoed confirmation code from the settings chat. A spawned session is bound to the claude.ai account signed in on the machine, so the gate changes where the operator can spawn from, not who can.
+- Adding or removing a routine from a channel writes one entry by index instead of rewriting the whole `routines` array, so it no longer asks for a confirmation code. Only an entry that carries a `precheck` still does.
 
 ### Upgrade Instructions
 
@@ -25,6 +26,7 @@
 
 ### Fixed
 - The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt that an unattended session cannot answer.
+- `settings-edit … unset routines.<n>` removed the entry but left a `null` in its place, which failed validation on every later settings write. Array indices now splice, and `set` at an index past the end of an array is refused instead of creating a hole.
 
 ## [1.2.47] - 2026-08-24
 
