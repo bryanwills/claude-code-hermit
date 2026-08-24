@@ -95,7 +95,10 @@ describe('rc-server.ts', () => {
       // clean, so the dirty guard waves it through — only -d keeps the commits.
       fs.writeFileSync(path.join(wt, 'done.txt'), 'finished work\n');
       git(wt, 'add', 'done.txt');
-      git(wt, 'commit', '-qm', 'work from a spawned session');
+      // Identity passed inline: CI runners have none configured, same reason
+      // setupGitWorkdir spells it out for its own commits.
+      git(wt, '-c', 'user.name=test', '-c', 'user.email=test@test', '-c', 'commit.gpgsign=false',
+        'commit', '-qm', 'work from a spawned session');
 
       const res = await rcServer(wd.dir, ['gc']);
       expect(res.exitCode).toBe(0);
