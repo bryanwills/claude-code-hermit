@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The `Bash(*API_KEY*)`, `Bash(*SECRET*)`, and `Bash(*TOKEN*)` deny patterns are gone from `deny-patterns.json` — trivially bypassable and blocking ordinary work (a grep, a commit message). The anchored `env`/`printenv`/`cat .env*`/`cat ~/.ssh/*`/`cat ~/.aws/*` entries stay; see `docs/security.md` for the full rationale.
+
+### Upgrade Instructions
+
+**Remove the three credential-word deny lines from your settings files, if present.** This is a settings write — from a terminal session, open `.claude/settings.json` and `.claude/settings.local.json` (whichever exist) and delete any `"Bash(*API_KEY*)"`, `"Bash(*SECRET*)"`, `"Bash(*TOKEN*)"` line from `permissions.deny`. On an unattended hermit, relay this as a step for the operator to do themselves rather than applying it — do not edit those files from an unattended session. Until it's done, those hermits keep denying commands containing those words even though the hook itself no longer enforces the pattern after this update.
+
 ## [1.2.48] - 2026-08-24
 
 ### Changed
