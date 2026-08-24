@@ -530,6 +530,52 @@ describe('channel-settings-gate — maintainer tier', () => {
     expect(r.exitCode).toBe(0);
   });
 
+  // The add/remove path hermit-settings uses: one entry at a time, so the value
+  // stays legible and only an armed gate escalates. Pins the tiers the skill's
+  // instructions depend on — a change here breaks routine editing from a channel.
+  describe('routines edited one entry at a time', () => {
+    const routines = [
+      { id: 'morning', schedule: '0 9 * * *', skill: 'claude-code-hermit:brief', enabled: true },
+      { id: 'reflect', schedule: '0 9 * * *', skill: 'claude-code-hermit:reflect', precheck: 'reflect' },
+    ];
+    const withRoutines = () => ({ ...configWithMaintainer(), routines });
+    const edit = (op: string, ...args: string[]) =>
+      ['bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json', op, ...args].join(' ');
+    const entry = (extra: any = {}) =>
+      `'${JSON.stringify({ id: 'added', schedule: '0 9 * * *', skill: 'claude-code-hermit:brief', ...extra })}'`;
+
+    test('removing one by index needs no code', async () => {
+      const { dir, transcript } = fixture(maintainerPrompt('remove the morning routine'), withRoutines());
+      const r = await runGate(
+        payload({ dir, transcript, tool: 'Bash', input: { command: edit('unset', 'routines.0') } }),
+        dir
+      );
+      expect(r.exitCode).toBe(0);
+    });
+
+    test('appending a gateless entry needs no code', async () => {
+      const { dir, transcript } = fixture(maintainerPrompt('add a routine'), withRoutines());
+      const r = await runGate(
+        payload({ dir, transcript, tool: 'Bash', input: { command: edit('set', 'routines.2', entry()) } }),
+        dir
+      );
+      expect(r.exitCode).toBe(0);
+    });
+
+    test('appending an entry that arms a precheck still needs the code', async () => {
+      const { dir, transcript } = fixture(maintainerPrompt('add a gated routine'), withRoutines());
+      const r = await runGate(
+        payload({
+          dir, transcript, tool: 'Bash',
+          input: { command: edit('set', 'routines.2', entry({ precheck: 'tools/gate.sh' })) },
+        }),
+        dir
+      );
+      expect(r.exitCode).toBe(2);
+      expect(r.stderr).toContain('Second factor required');
+    });
+  });
+
   test('the same write from the home chat is refused', async () => {
     const { dir, transcript } = fixture(
       maintainerPrompt('turn escalation on', { chatId: HOME_CHAT }),

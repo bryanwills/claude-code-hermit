@@ -2,7 +2,7 @@ import { describe, test, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { getPath, setPath, togglePath, renderShow, applyKnown } from '../scripts/settings-edit';
+import { getPath, setPath, unsetPath, togglePath, renderShow, applyKnown } from '../scripts/settings-edit';
 import { SETTINGS, tableSettings } from '../scripts/lib/settings/registry';
 import { freshDirFactory } from './helpers/workdir';
 
@@ -58,6 +58,54 @@ describe('getPath / setPath / togglePath', () => {
 
   test('togglePath throws on non-boolean current value', () => {
     expect(() => togglePath({ remote: 'yes' }, 'remote')).toThrow();
+  });
+
+  // Removing one routine by index is the whole point of `unset routines.<n>`: a
+  // `delete` would leave a hole that serializes as `null`, and validation then
+  // fails on an entry with no id for every later write.
+  test('unsetPath splices an array index, leaving the array dense', () => {
+    const obj: any = { routines: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] };
+    expect(unsetPath(obj, 'routines.1')).toBe(true);
+    expect(obj.routines).toEqual([{ id: 'a' }, { id: 'c' }]);
+  });
+
+  test('unsetPath leaves an out-of-range index alone', () => {
+    const obj: any = { routines: [{ id: 'a' }] };
+    expect(unsetPath(obj, 'routines.5')).toBe(false);
+    expect(unsetPath(obj, 'routines.x')).toBe(false);
+    expect(obj.routines).toEqual([{ id: 'a' }]);
+  });
+
+  test('unsetPath still deletes an object leaf', () => {
+    const obj: any = { channels: { discord: { enabled: true }, telegram: {} } };
+    expect(unsetPath(obj, 'channels.discord')).toBe(true);
+    expect(obj.channels).toEqual({ telegram: {} });
+  });
+
+  test('setPath appends at length but refuses a sparse index', () => {
+    const obj: any = { routines: [{ id: 'a' }] };
+    setPath(obj, 'routines.1', { id: 'b' });
+    expect(obj.routines).toEqual([{ id: 'a' }, { id: 'b' }]);
+    setPath(obj, 'routines.0.enabled', false);
+    expect(obj.routines[0]).toEqual({ id: 'a', enabled: false });
+    expect(() => setPath(obj, 'routines.7', { id: 'gap' })).toThrow(/0\.\.2/);
+    expect(obj.routines).toHaveLength(2);
+  });
+
+  // An interior index edits an entry that has to already exist, so `length` is out of
+  // range there too — otherwise the traversal creates it and the array grows holes.
+  test('setPath refuses an out-of-range index in the middle of a path', () => {
+    const obj: any = { routines: [{ id: 'a' }, { id: 'b' }] };
+    expect(() => setPath(obj, 'routines.2.enabled', false)).toThrow(/0\.\.1/);
+    expect(() => setPath(obj, 'routines.9.enabled', false)).toThrow(/0\.\.1/);
+    expect(obj.routines).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  test('setPath rejects a non-canonical array index', () => {
+    const obj: any = { routines: [{ id: 'a' }, { id: 'b' }] };
+    expect(() => setPath(obj, 'routines.01', { id: 'x' })).toThrow();
+    expect(unsetPath(obj, 'routines.01')).toBe(false);
+    expect(obj.routines).toEqual([{ id: 'a' }, { id: 'b' }]);
   });
 });
 
@@ -417,6 +465,50 @@ describe('settings-edit unset', () => {
     const r = await runScript('settings-edit.ts', { args: [file, 'unset', 'nope.not.here'] });
     expect(r.exitCode).toBe(0);
     expect(auditRows(dir)).toHaveLength(0);
+  });
+});
+
+// The add/remove path hermit-settings uses from a channel: one entry at a time,
+// so the gate sees a legible value and no confirmation code is asked for.
+describe('settings-edit routines by index', () => {
+  const routine = (id: string, extra: any = {}) => ({
+    id, schedule: '0 9 * * *', skill: 'claude-code-hermit:brief', enabled: true, ...extra,
+  });
+
+  test('unset removes one routine and leaves the rest writable', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({
+      routines: [routine('morning'), routine('gated', { precheck: 'reflect' }), routine('evening')],
+    }));
+    const r = await runScript('settings-edit.ts', { args: [file, 'unset', 'routines.1'] });
+    expect(r.exitCode).toBe(0);
+    expect(readConfig(file).routines.map((x: any) => x.id)).toEqual(['morning', 'evening']);
+
+    // The hole a `delete` used to leave made this next write fail validation.
+    const after = await runScript('settings-edit.ts', { args: [file, 'set', 'routines.1.enabled', 'false'] });
+    expect(after.exitCode).toBe(0);
+    expect(readConfig(file).routines[1]).toMatchObject({ id: 'evening', enabled: false });
+  });
+
+  test('set at the array length appends one routine', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({ routines: [routine('morning')] }));
+    const r = await runScript('settings-edit.ts', {
+      args: [file, 'set', 'routines.1', JSON.stringify(routine('evening'))],
+    });
+    expect(r.exitCode).toBe(0);
+    expect(readConfig(file).routines.map((x: any) => x.id)).toEqual(['morning', 'evening']);
+  });
+
+  test('set past the end is refused, naming the valid range', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({ routines: [routine('morning')] }));
+    const r = await runScript('settings-edit.ts', {
+      args: [file, 'set', 'routines.7', JSON.stringify(routine('gap'))],
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('0..1');
+    expect(readConfig(file).routines).toHaveLength(1);
   });
 });
 
