@@ -111,7 +111,7 @@ Read `.claude-code-hermit/config.json` and extract:
 - `agent_name`
 - Detect project path from `pwd`
 
-Do NOT set `AGENT_HOOK_PROFILE` in `config.json` `env` — it stays as `standard` (the host default). The strict profile is rendered into the docker-compose environment block at Step 7b.6 via the `agentHookProfile` render input.
+Do NOT set `AGENT_HOOK_PROFILE` in `config.json` `env` — leave it unset. The strict profile is rendered into the docker-compose environment block at Step 7b.6 via the `agentHookProfile` render input, which the launcher treats as an ambient value and honors over anything in config. Setting it in config as well only creates a second source to keep in sync.
 
 ### 4. Template inputs (rendering deferred to Step 7b.6)
 

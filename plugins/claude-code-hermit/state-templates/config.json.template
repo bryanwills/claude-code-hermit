@@ -29,7 +29,6 @@
   ],
   "monitors": [],
   "env": {
-    "AGENT_HOOK_PROFILE": "standard",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "65",
     "MAX_THINKING_TOKENS": "10000"
   },

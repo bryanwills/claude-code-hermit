@@ -195,14 +195,18 @@ A trusted channel sender can also pair the main model with an experimental [advi
 | **standard** (default) | + session quality checks                       | Day-to-day work                |
 | **strict**             | + safety hooks from hermits                    | Always-on, production-adjacent |
 
-Set in `config.json` `env` (written to `.claude/settings.local.json` at boot):
+You usually don't set this. With nothing configured, an always-on launch (tmux or Docker) resolves **strict** and an interactive one **standard**, so a managed hermit gets the safety hooks without being asked. The launch output's `Hook profile:` line tells you what was resolved and where it came from.
+
+To override — for instance to keep a managed hermit at `standard` because it does devops work over `ssh` or `docker`:
 
 ```bash
 /claude-code-hermit:hermit-settings env
-# Then: AGENT_HOOK_PROFILE strict
+# Then: AGENT_HOOK_PROFILE standard
 ```
 
-Or edit `config.json` directly: `"env": { "AGENT_HOOK_PROFILE": "strict" }`
+Or edit `config.json` directly: `"env": { "AGENT_HOOK_PROFILE": "standard" }`
+
+The value is process-scoped: it reaches the managed session through the tmux env file or the Docker compose environment block, and is never written to `.claude/settings.local.json`. A `claude` you launch by hand in the same project is unaffected by it.
 
 ---
 

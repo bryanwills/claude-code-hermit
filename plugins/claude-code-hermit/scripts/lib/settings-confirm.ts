@@ -27,17 +27,40 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { writeFileAtomic } from './md-write';
+import { sha256 } from './hash';
 
 /** A confirmation the operator has been asked for but has not yet echoed. */
 export interface PendingConfirm {
   token: string;
-  /** Dotted config path this token unlocks — a token is never target-portable. */
+  /**
+   * What the OPERATOR is shown: the dotted path, and the value only when it is
+   * not a credential (see the gate's label construction). Never compared to
+   * decide whether a retry is the same ask — a redacted display collapses two
+   * different secrets onto one string, so `binding` below is the identity.
+   */
   target: string;
+  /**
+   * What the token is BOUND to: a hash of the exact raw `path=value` mutation.
+   * Separate from `target` so the display can be redacted without weakening the
+   * guarantee that a code issued for one value cannot apply another. Hashed
+   * rather than stored, so an unconfirmed ask never leaves a credential on disk.
+   */
+  binding: string;
   sourceKey: string;
   chatId: string;
   userId: string | null;
   /** ms epoch. */
   created: number;
+}
+
+/**
+ * Token binding for one raw canonical mutation string (`path=value`).
+ *
+ * The raw value is hashed and discarded — this is what lets the pending record
+ * prove "same ask" without persisting the secret it was asked about.
+ */
+export function bindingFor(rawMutation: string): string {
+  return sha256(rawMutation);
 }
 
 /** Long enough that guessing is hopeless, short enough to retype on a phone. */
@@ -67,6 +90,10 @@ export function readPending(dir: string, now: number = Date.now()): PendingConfi
   try {
     const rec = JSON.parse(fs.readFileSync(confirmPath(dir), 'utf8'));
     if (!rec || typeof rec.token !== 'string' || typeof rec.target !== 'string') return null;
+    // A record written before the binding split carries no `binding`, and its
+    // `target` may hold a raw credential. Reading it as absent retires it: the
+    // gate issues a fresh, hashed ask instead of honoring a legacy one.
+    if (typeof rec.binding !== 'string' || !rec.binding) return null;
     // Every field the consumer compares against the live envelope is checked
     // before the cast: a schema-drifted record with an `undefined` chatId would
     // otherwise reach an equality test written to expect a string.
