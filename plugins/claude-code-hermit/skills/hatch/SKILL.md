@@ -572,7 +572,7 @@ questions: [
     question: "Planning always-on operation (Docker/tmux)? This determines which deny rules to apply.",
     options: [
       { label: "Yes — hardened", description: "Adds git push, npm publish, and unattended-operation protections" },
-      { label: "No — minimal", description: "Blocks destructive commands and credential exposure (default)" },
+      { label: "No — minimal", description: "Blocks destructive commands and casual credential dumps (default)" },
       { label: "Skip", description: "No deny rules — add later in settings.json" }
     ]
   }
