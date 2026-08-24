@@ -1,6 +1,6 @@
 ---
 name: brief
-description: Returns a 5-line executive summary of recent work. Checks active session first, falls back to latest report. Activates on messages like "brief", "what happened", "morning update", "overnight summary", "status", "progress", "what are you working on", "how's it going".
+description: Returns a 5-line executive summary of recent work. Checks active session first, falls back to latest report. Activates on messages like "brief", "what happened", "morning update", "overnight summary", "progress", "what are you working on", "how's it going".
 ---
 # Session Brief
 

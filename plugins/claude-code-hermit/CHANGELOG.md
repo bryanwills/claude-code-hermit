@@ -3,14 +3,23 @@
 ## [Unreleased]
 
 ### Changed
+- Channel control commands require a slash: `/pause`, `/stop`, `/resume`, `/snooze <dur>` and `/status`, matching `/compact` and `/clear`. The bare words they replace no longer bind — a word an operator might type in ordinary conversation can no longer freeze the hermit. A bare "stop" now reaches the model as a cooperative Emergency halt instead of an immediate one; `/stop` and `/pause` remain binding.
+- A command addressed to the hermit is accepted in either form a client produces: an `@yourbot` suffix (`/pause@yourbot`) or a leading mention (`@yourbot /pause`, and Discord's `<@id>` rendering of it). A command addressed to a different bot is ignored, and a mention on its own still doesn't make a bare word binding. Fixes mention-gated group and server channels, where every control command previously did nothing, and Telegram's rewrite of a command picked from the bot menu.
 - The `doctor` and `daily-auto-close` routines ship with a builtin `precheck` gate, so a day with nothing to report or close no longer wakes the session. `"precheck": "doctor"` runs the 27 checks and their ledger writes once, in the gate itself, and SKIPs when nothing currently failing is still owed to the operator. `"precheck": "auto-close"` runs the same decision the `--scheduled` archive path already made, and SKIPs on `queued` or `noop` — WAKE only fires an actual close.
 - A hermit that never opened a session (`idle`, no active session id) no longer archives an empty nightly report. The `auto-close` gate stamps the daily context-reset marker itself on that branch, so the `/clear` the archive path used to trigger keeps firing on schedule either way.
+- The spawn gate's `start` and `stop` sit on the everyday authority tier instead of asking for an echoed confirmation code from the settings chat. A spawned session is bound to the claude.ai account signed in on the machine, so the gate changes where the operator can spawn from, not who can.
 - Adding or removing a routine from a channel writes one entry by index instead of rewriting the whole `routines` array, so it no longer asks for a confirmation code. Only an entry that carries a `precheck` still does.
 - `boot_skill` and `shutdown_skill` moved from the settings-chat tier to the confirmation-code tier. They are the boot prompt and the teardown command of every session the hermit runs, so a chat-originated change now needs the echoed code that `permission_mode` and `env` already need. Setting them from a terminal, or at hatch from a domain hermit's manifest, is unchanged.
 - A confirmation-code request names the change it authorizes instead of sending the code alone, and a credential value is shown as `[set]`/`[cleared]` rather than repeated back. The code is bound to a hash of the exact value, so redacting the display does not let a code issued for one credential apply another. A whole-`env` write names each key it sets rather than collapsing to one marker, and a bare-integer value (`MAX_THINKING_TOKENS`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`) is shown as itself.
 - An always-on launch defaults to the `strict` hook profile on tmux as well as Docker, so the `config.json`, `OPERATOR.md` and settings-file guards documented under the strict profile now enforce on both. Set `env.AGENT_HOOK_PROFILE` to pin a different profile; an ambient value from Docker compose still outranks config.
+- The spawn gate is opened, closed and checked by you, not by the hermit. `/claude-code-hermit:rc-gate` no longer responds to a chat request or a phrase like "open the spawn gate" — run it yourself. The authority prose it used to carry is gone with it, since a spawned session was always bound to the claude.ai account signed in on the machine.
+- Claude Code `>=2.1.241` is now the minimum. `hermit-evolve` stops on an older CLI rather than upgrading.
 
 ### Upgrade Instructions
+
+**Claude Code 2.1.241 is required.** If `hermit-evolve` reports a version below that and stops, run `claude update` (or your package manager's equivalent), restart the session, and re-run `/claude-code-hermit:hermit-evolve`. There is no bypass.
+
+**Channel control commands now need a slash.** No config or state change — the matchers ship in the plugin. Tell the operator, once, that the words they used to send to stop and resume you have changed: it is now `/pause` (or `/stop`), `/resume`, `/snooze 2h` and `/status`, and the old bare words no longer stop you. Mention that a plain "stop" still gets your attention but only asks you to halt, where `/stop` blocks you outright. If they reach you somewhere they have to @mention you first, say the mention can stay in front of the command — `@you /pause` works, and so does the `/pause@you` form their client may produce on its own.
 
 **Doctor and daily-auto-close stop waking the session on a quiet day.** In `.claude-code-hermit/config.json`, for each of the `routines[]` entries with `"id": "doctor"` and `"id": "daily-auto-close"`: if its `skill` still starts with the shipped value (`claude-code-hermit:hermit-doctor` / `claude-code-hermit:session-close`) and it has **no** `precheck` key, add `"precheck": "doctor"` or `"precheck": "auto-close"` respectively. On the `doctor` entry also add `"precheck_timeout_s": 120` unless it already sets one — the gate runs the full check sweep, and the 30s default is not enough for an install whose docker or credential probes are slow. If the routine has been renamed, points at a different skill, or already has a `precheck`, leave it untouched and note that in the evolve report — an operator's own gate is never replaced. Removing the key later restores the old always-wake behavior.
 
@@ -31,6 +40,21 @@
 - An `AGENT_HOOK_PROFILE` supplied by the environment is validated and floored like any other source. It was previously written straight through: an ambient `minimal`, or a typo, bypassed both the validation and the always-on floor and became the profile the session actually ran at.
 - Setting a credential from chat no longer puts its value in the confirmation request or in `state/settings-confirm.json`. An ask the operator never echoed used to leave that value on disk indefinitely, since an expired record is treated as absent without being deleted.
 - A first always-on tmux boot after `hatch` resolves the same hook profile as every later boot. The profile was read from `config.always_on`, which is not written until the end of the boot, so a freshly hatched hermit resolved its first launch as interactive.
+**Suggest wake gates for routines that still wake the session on every fire.** Run this after the previous step.
+
+1. Run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts" health .claude-code-hermit --days 14` and read the JSON it prints. If its `source` is not `ok`, the routine ledger could not be read — record nothing, stop, and note in the evolve report that this audit could not run. Otherwise read its `routines[]` array.
+2. Read the configured routines with `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get routines`.
+3. Build the candidate list. An entry qualifies when all four hold: `enabled` is `true`; it has no `precheck` key; its `id` is none of `heartbeat-restart`, `reflect`, `scheduled-checks`, `weekly-review`, `daily-auto-close`, `doctor`, `morning`, `evening`; and its `fires` in the health report is 7 or more.
+4. If the list is empty, record nothing and stop: do not run steps 5-7.
+5. Change nothing in `config.json` in this pass — this step only surfaces candidates. A gate is added later, and only for the branch the operator picks, with `settings-edit.ts .claude-code-hermit/config.json set routines.<n>.precheck <value>`.
+6. Record one observation per candidate: run `.claude-code-hermit/bin/hermit-run observations observe .claude-code-hermit quick-deferral` with `routine-gate-candidate:<id>` on stdin.
+7. Record a deferred-migration block: `source: claude-code-hermit@<version>`, this "Suggest wake gates" entry's text (above, verbatim) as `instruction:`, `options:` naming each candidate id with its fire count and the two branches ("add a `precheck` gate" / "leave as-is"), and `skipped: skipped pending operator`.
+
+**Note:** a gate is a `SKIP`/`WAKE` script declared as the routine's `precheck` — see `docs/routine-authoring.md`. Setting one from chat takes the confirmation-code tier. Removing the key restores always-wake.
+
+### Fixed
+- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt. Auto mode suspends the wildcarded rules that used to cover them.
+- The spawn-gate skill no longer tells the hermit to sweep worktrees after closing the gate — `stop` already sweeps, so that was a wasted second call every time.
 - `settings-edit … unset routines.<n>` removed the entry but left a `null` in its place, which failed validation on every later settings write. Array indices now splice, and `set` at an index past the end of an array is refused instead of creating a hole.
 
 ## [1.2.47] - 2026-08-24

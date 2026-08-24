@@ -68,7 +68,7 @@ Yes. Docker is recommended for always-on mode but not required. Use `hermit-star
 
 ## Can I stop my assistant while it's mid-task?
 
-Send `stop` or `pause` from your channel and the assistant is blocked from every action except replying to you, until you send `resume`. Between turns this takes effect immediately. If the assistant is mid-task when your message lands, the rest of that task can run to completion before the block takes hold: Claude Code delivers a mid-task channel message to the assistant as steering rather than interrupting it, so a remote `stop` is reliable but not guaranteed to be an instant kill mid-task. (`snooze 2h` pauses for a set time; `resume` clears it.)
+Send `/stop` or `/pause` from your channel and the assistant is blocked from every action except replying to you, until you send `/resume`. Between turns this takes effect immediately. If the assistant is mid-task when your message lands, the rest of that task can run to completion before the block takes hold: Claude Code delivers a mid-task channel message to the assistant as steering rather than interrupting it, so a remote `/stop` is reliable but not guaranteed to be an instant kill mid-task. (`/snooze 2h` pauses for a set time; `/resume` clears it.)
 
 ---
 

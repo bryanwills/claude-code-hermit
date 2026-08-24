@@ -3,6 +3,9 @@
 // Every core skill is reachable from channel-responder's §2 classification
 // table (slash-command passthrough alone makes any skill reachable), so a
 // channel-tagged turn must never strand on a terminal-shaped ask. A skill
+// carrying `disable-model-invocation` (rc-gate) is unreachable from a channel
+// and so cannot strand one, but it is still scanned below: the flag is a
+// reachability choice that can be reverted, and the scan costs nothing. A skill
 // either carries the Step-0 "channel reply" marker (and routes its asks
 // through the reply tool / channel-safe ask bridge accordingly), or it must
 // contain no AskUserQuestion call and no interactive "Ask" line (both the

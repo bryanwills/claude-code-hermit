@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-[Claude Code](https://code.claude.com) v2.1.172+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3 — the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
+[Claude Code](https://code.claude.com) v2.1.241+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3 — the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
 
 ---
 
@@ -62,7 +62,7 @@ Behavioral "when X, do Y" rules belong in `CLAUDE.md`, not here — see [the FAQ
 
 Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, records its steps in the Progress Log, and waits for your go-ahead. As it works, `SHELL.md` tracks everything — the plan, progress log, blockers, findings. Cost is tracked separately in `.status.json` and injected into context at session start.
 
-Check status anytime — just type "status":
+Check status anytime — just type `/status`:
 
 ```
 Session S-001 | in_progress | feature, api

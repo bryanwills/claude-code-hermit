@@ -17,7 +17,8 @@
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
 import { setPause, clearPause, parseSnoozeDuration } from '../pause';
-import { isTrustedController } from '../channel-auth';
+import { isTrustedController, channelBotIdentity } from '../channel-auth';
+import { resolveSlashCommand } from '../channel-slash-address';
 import type { StageContext, StageResult } from './types';
 
 const MAX_BY_LEN = 64;
@@ -34,21 +35,35 @@ export function run(ctx: StageContext): StageResult | void {
   const body = env.body;
   if (!body) return;
 
-  // Exact-match only — no fuzzy matching, so ordinary conversational text
-  // ("please pause and think about this") never accidentally triggers a
-  // state change.
-  const keyword = body.toLowerCase();
-  const snoozeMatch = /^snooze\s+(\S+)$/.exec(keyword);
+  const dir = ctx.dir;
+  // Read before the match, not after: the bot's own identity is needed to resolve
+  // both address forms. config() is memoized per prompt (user-prompt-pipeline.ts),
+  // and channel-reply-reminder has already loaded it, so this costs nothing. A null
+  // config resolves to an empty identity AND fails isTrustedController below, so an
+  // unreadable config still means no control command works at all — unchanged.
+  const config = ctx.config();
+  const identity = channelBotIdentity(config, sourceRaw);
+
+  // Slash-only, exact-match: the same rule the harness commands (`/compact`,
+  // `/clear`) already follow. A bare `pause`/`stop` is deliberately inert — a word
+  // an operator might type in ordinary conversation must not freeze the hermit —
+  // and so is prose that merely mentions one ("please pause and think about this").
+  const addressed = resolveSlashCommand(body, identity);
+  if (!addressed) return;
+
+  // Argument grammar stays here, with its owner: `\s+` before a snooze duration
+  // is this family's rule, not a shared one (resolveSlashCommand hands `rest`
+  // back byte-for-byte precisely so it survives).
+  const snoozeMatch = /^\s+(\S+)$/.exec(addressed.rest);
 
   let action: 'pause' | 'resume' | 'snooze' | null = null;
   let durationRaw: string | null = null;
-  if (keyword === 'pause' || keyword === 'stop') action = 'pause';
-  else if (keyword === 'resume') action = 'resume';
-  else if (snoozeMatch) { action = 'snooze'; durationRaw = snoozeMatch[1]; }
+  const bare = addressed.rest.length === 0;
+  if (bare && (addressed.command === '/pause' || addressed.command === '/stop')) action = 'pause';
+  else if (bare && addressed.command === '/resume') action = 'resume';
+  else if (addressed.command === '/snooze' && snoozeMatch) { action = 'snooze'; durationRaw = snoozeMatch[1]; }
   if (!action) return;
 
-  const dir = ctx.dir;
-  const config = ctx.config();
   // Stricter gate than a plain reply: pausing is state-mutating, so an unconfigured
   // channel trusts only the operator's pinned home chat (chat_id === default_chat_id,
   // falling back to dm_channel_id until the pin is seeded), not accept-all.

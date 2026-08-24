@@ -24,6 +24,7 @@ import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { triggerPrompt } from './helpers/transcript';
+import { frontmatterBlock, isModelInvocationDisabled } from './helpers/skill-frontmatter';
 import { validateCronSchedule, validate } from '../scripts/validate-config';
 import { resolve, resolveMaintainerTarget } from '../scripts/resolve-outbound-channel';
 import { resolvePaths, checkConfig } from '../scripts/doctor-check';
@@ -1339,9 +1340,7 @@ describe('bootstrap skills', () => {
     const offenders: string[] = [];
     for (const skill of BOOTSTRAP_SKILLS) {
       const text = read(path.join(SKILLS, skill, 'SKILL.md'));
-      const parts = split3(text, '---\n');
-      const fm = parts.length === 3 ? parts[1] : '';
-      if (fm.includes('disable-model-invocation: true')) offenders.push(skill);
+      if (isModelInvocationDisabled(text)) offenders.push(skill);
     }
     expect(offenders).toEqual([]);
   });
@@ -1361,9 +1360,9 @@ describe('hermit-settings channel reachability', () => {
   const text = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
 
   test('is model-invocable, so its channel re-entries can run', () => {
-    const parts = split3(text, '---\n');
-    const fm = parts.length === 3 ? parts[1] : '';
-    expect(fm).not.toContain('disable-model-invocation');
+    // Broader than isModelInvocationDisabled on purpose: any value of the key
+    // here is a mistake, not just `true`.
+    expect(frontmatterBlock(text)).not.toContain('disable-model-invocation');
   });
 
   test('Step 0 fences the security tier and names the enforcing gate', () => {
@@ -1373,11 +1372,35 @@ describe('hermit-settings channel reachability', () => {
 });
 
 // ============================================================
+// Model-invocable inventory
+//
+// disable-model-invocation is a reachability flag, not a security control — the
+// guards above exist because both times it was applied to a machine-invoked
+// skill it silently broke a path. rc-gate is the one sanctioned use: the spawn
+// gate is opened by the operator, nothing programmatic invokes it, and the
+// flag also drops its description from the always-loaded context.
+//
+// Asserting the whole inventory (rather than rc-gate alone) is what catches the
+// flag spreading to a skill a routine or another skill reaches for.
+// ============================================================
+
+describe('model-invocable inventory', () => {
+  test('rc-gate is the only skill with model invocation disabled', () => {
+    const flagged = fs.readdirSync(SKILLS).filter((dir) => {
+      const skillPath = path.join(SKILLS, dir, 'SKILL.md');
+      return fs.existsSync(skillPath)
+        && isModelInvocationDisabled(fs.readFileSync(skillPath, 'utf8'));
+    });
+    expect(flagged).toEqual(['rc-gate']);
+  });
+});
+
+// ============================================================
 // channel-setup empty-channels branch (TestChannelSetupEmptyChannels)
 //
 // channel-setup used to hard-stop on `channels: {}` and point at
-// /hermit-settings, which carries disable-model-invocation and therefore
-// cannot be reached from a skill — leaving the operator to type it. The
+// /hermit-settings, which then carried disable-model-invocation and therefore
+// could not be reached from a skill — leaving the operator to type it. The
 // skill now creates the entry itself via hatch-config.ts --reinit.
 //
 // Coverage note: this is a static text scan of SKILL.md. It proves the
