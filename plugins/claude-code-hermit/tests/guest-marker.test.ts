@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { isGuest, markGuest, pruneGuestMarkers } from '../scripts/lib/guest-marker';
+import { clearGuest, isGuest, markGuest, pruneGuestMarkers } from '../scripts/lib/guest-marker';
 import { withDir } from './helpers/workdir';
 
 const stateOf = (dir: string) => path.join(dir, '.claude-code-hermit', 'state');
@@ -28,10 +28,26 @@ describe('guest-marker', () => {
     expect(fs.readdirSync(stateDir).filter(n => n.startsWith('.guest-'))).toEqual([]);
   }));
 
-  test('the marker survives outside a pre-created state dir', withDir(async (dir) => {
+  // isWorktreeProjection() (lib/cc-compat.ts) reads "no state/ dir" as "this is a
+  // worktree projection, walk past it" — creating one here would pin every later
+  // resolution to the decoy.
+  test('a missing state dir is never created just to mark a guest', withDir(async (dir) => {
     const stateDir = path.join(dir, 'fresh-state');
     markGuest(stateDir, 'sess-abc');
-    expect(isGuest(stateDir, 'sess-abc')).toBe(true);
+    expect(fs.existsSync(stateDir)).toBe(false);
+    expect(isGuest(stateDir, 'sess-abc')).toBe(false);
+  }));
+
+  test('clearing drops this session\'s marker and leaves the others alone', withDir(async (dir) => {
+    const stateDir = stateOf(dir);
+    markGuest(stateDir, 'sess-abc');
+    markGuest(stateDir, 'sess-other');
+
+    clearGuest(stateDir, 'sess-abc');
+
+    expect(isGuest(stateDir, 'sess-abc')).toBe(false);
+    expect(isGuest(stateDir, 'sess-other')).toBe(true);
+    expect(() => clearGuest(stateDir, 'sess-never-marked')).not.toThrow();
   }));
 
   test('pruning drops aged markers and keeps fresh ones', withDir(async (dir) => {

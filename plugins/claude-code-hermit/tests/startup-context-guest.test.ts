@@ -147,6 +147,23 @@ describe('startup-context.ts — guest marker', () => {
     }
   });
 
+  it('clears its own marker once the resident is gone', async () => {
+    const wd = setupWorkdir();
+    try {
+      const live = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 0 });
+      await run(wd.dir, { ...live, HERMIT_MANAGED: '' }, 'sess-guest');
+      expect(fs.existsSync(markerFor(wd.dir, 'sess-guest'))).toBe(true);
+
+      // Same session id, resident now dead — resume/clear/compact all re-fire SessionStart.
+      const dead = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 1 });
+      const res = await run(wd.dir, { ...dead, HERMIT_MANAGED: '' }, 'sess-guest');
+      expect(res.stdout).not.toContain('---Guest Session---');
+      expect(fs.existsSync(markerFor(wd.dir, 'sess-guest'))).toBe(false);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
   it('prunes a marker left behind by a long-gone session', async () => {
     const wd = setupWorkdir();
     try {

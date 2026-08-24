@@ -35,14 +35,33 @@ function markerPath(stateDir: string, sessionId: string | null | undefined): str
   return path.join(stateDir, PREFIX + safe);
 }
 
-/** Record that this session is a guest. Called once, from the SessionStart injection. */
+/**
+ * Record that this session is a guest. Called once, from the SessionStart injection.
+ *
+ * Deliberately does NOT mkdir the state dir. `isWorktreeProjection` (lib/cc-compat.ts)
+ * identifies a worktree's projected `.claude-code-hermit/` by the absence of `state/`,
+ * so a writer that creates it turns a projection the resolvers walk past into a
+ * permanent resolution target. A hatched folder always has `state/`; anywhere it is
+ * missing, failing to mark is the fail-open outcome we want anyway.
+ */
 export function markGuest(stateDir: string, sessionId: string | null | undefined): void {
   const file = markerPath(stateDir, sessionId);
   if (!file) return;
   try {
-    fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(file, new Date().toISOString() + '\n', 'utf-8');
   } catch { /* fail-open */ }
+}
+
+/**
+ * Drop this session's marker. The verdict is frozen for the life of a session, but
+ * SessionStart fires again on resume/clear/compact with the SAME session id — and if
+ * the resident is gone by then, this session is the resident. Without this the stale
+ * marker would keep the now-only session in the folder from signalling liveness.
+ */
+export function clearGuest(stateDir: string, sessionId: string | null | undefined): void {
+  const file = markerPath(stateDir, sessionId);
+  if (!file) return;
+  try { fs.unlinkSync(file); } catch { /* absent or unreadable — nothing to clear */ }
 }
 
 /** True only when this session was marked a guest at its start. */

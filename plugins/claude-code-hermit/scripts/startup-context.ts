@@ -22,7 +22,7 @@ import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-wr
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson } from './lib/runtime';
-import { markGuest, pruneGuestMarkers } from './lib/guest-marker';
+import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
 type Json = any;
 
@@ -228,6 +228,10 @@ function main(source: string | null, sessionId: string | null) {
     emitGuestBanner(AGENT_DIR);
     return;
   }
+  // No resident but a marker from an earlier SessionStart of this same session id
+  // (resume/clear/compact all reuse it): this session is the resident now, so drop
+  // the verdict rather than leave it silently muting its own liveness signal.
+  clearGuest(stateDir, sessionId);
   if (source === 'compact') {
     emitCompactCapsule();
   } else {
