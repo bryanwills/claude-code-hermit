@@ -169,6 +169,11 @@ describe('channelVerdict — policy', () => {
     // An opaque write must not buy a weaker tier than a legible one.
     expect(precheckSetChanged('not json', current)).toBe(true);
     expect(precheckSetChanged('{}', current)).toBe(true);
+
+    // The `routines.<n>` spelling: one routine object, judged as an array of one.
+    expect(precheckSetChanged(JSON.stringify({ id: 'brief', precheck: 'tools/evil.sh' }), current)).toBe(true);
+    expect(precheckSetChanged(JSON.stringify({ id: 'reflect', precheck: 'reflect' }), current)).toBe(false);
+    expect(precheckSetChanged(JSON.stringify({ id: 'brief' }), current)).toBe(false);
   });
 
   test('the enrollment root is terminal-only on every tier', () => {
@@ -1060,5 +1065,39 @@ describe('channel-settings-gate — confirmation nonce', () => {
       dir
     );
     expect(selfEcho.exitCode).toBe(2);
+  });
+
+  test('arming a gate through an indexed routine write still needs the code', async () => {
+    // `setPath` indexes arrays, so `set routines.0 <object>` replaces the whole
+    // routine — precheck and all — without the path ever naming the field. A
+    // leaf-only rule would land this on the maintainer tier, no code asked.
+    const config = configWithMaintainer();
+    config.routines = [{ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', enabled: true }];
+    const { dir, transcript } = fixture(maintainerPrompt('point the mail routine at my script'), config);
+    const command =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set routines.0 ' +
+      `'${JSON.stringify({ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', precheck: 'tools/gate.sh', enabled: true })}'`;
+    const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command } }), dir);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Second factor required');
+  });
+
+  test('a routines array write that touches no gate is not taxed with a code', async () => {
+    // The JSON the settings skill writes has spaces in it. Capturing the value
+    // only up to the first one left precheckSetChanged() parsing a fragment,
+    // failing, and escalating every routine add — the tax the value rule exists
+    // to avoid — while showing the operator a truncated label to confirm.
+    const config = configWithMaintainer();
+    config.routines = [{ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', enabled: true }];
+    const { dir, transcript } = fixture(maintainerPrompt('add a weekly digest routine'), config);
+    const next = [
+      { id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', enabled: true },
+      { id: 'digest', skill: 'x:digest', schedule: '0 18 * * 5', enabled: true },
+    ];
+    const command =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set routines ' +
+      `'${JSON.stringify(next, null, 1).replace(/\n\s*/g, ' ')}'`;
+    const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command } }), dir);
+    expect(r.exitCode).toBe(0);
   });
 });

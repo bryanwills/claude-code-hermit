@@ -19,8 +19,8 @@
 //   nonce          settings chat AND an echoed token: permission_mode, env.*,
 //                  monitors (each entry carries a shell command), and
 //                  routines.<n>.precheck (an executable the routine monitor runs
-//                  unattended) — plus a whole-array routines write that arms or
-//                  changes one
+//                  unattended) — plus a routines container write (the whole array
+//                  or one indexed entry) that arms or changes one
 //   terminal-only  the enrollment root, the two authority keys, and any
 //                  ancestor write that would replace them — never reachable
 //                  from a channel, on any tier
@@ -245,7 +245,15 @@ const NONCE_REQUIRED = /^(permission_mode|env|monitors)(\..+)?$/;
 const NONCE_ROUTINE_PRECHECK = /^routines\.\d+\.precheck(_timeout_s)?(\..+)?$/;
 
 /**
- * Does this whole-array `set routines <json>` add or change any `precheck`?
+ * The container spellings judged by value: the whole array, and one indexed entry.
+ * `setPath` splits on `.` and indexes arrays, so `set routines.0 '<object>'`
+ * replaces a whole routine, precheck included, without ever naming the field, which
+ * a leaf-only rule would wave through at the maintainer tier.
+ */
+const ROUTINES_CONTAINER = /^routines(\.\d+)?$/;
+
+/**
+ * Does this `set routines[.<n>] <json>` add or change any `precheck`?
  *
  * The add/edit flow in hermit-settings writes the entire array back, so a
  * field-level rule alone would be bypassed by every legitimate-looking array
@@ -259,13 +267,19 @@ export function precheckSetChanged(value: string, current: Json[]): boolean {
   for (const r of Array.isArray(current) ? current : []) {
     if (r && r.id) before.set(String(r.id), gateOf(r));
   }
-  let next: Json;
+  let parsed: Json;
   try {
-    next = JSON.parse(value);
+    parsed = JSON.parse(value);
   } catch {
     return true;
   }
-  if (!Array.isArray(next)) return true;
+  // A lone routine object (the `routines.<n>` spelling) is judged as an array of
+  // one. It has to carry an `id` to be read that way: anything else is not a
+  // routine write this can reason about, so it takes the strict answer.
+  const next: Json[] | null = Array.isArray(parsed) ? parsed
+    : (parsed && typeof parsed === 'object' && parsed.id) ? [parsed]
+    : null;
+  if (!next) return true;
   for (const r of next) {
     const gate = gateOf(r);
     if (gate === null) continue; // dropping a gate is a de-escalation, not an arming
@@ -402,8 +416,13 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
     return { verdict: 'terminal-only', target: 'config.json' };
   }
 
+  // The value alternation accepts a quoted argument before the bare-word form: a
+  // routines write carries a JSON array, which has spaces in it, and a bare `\S+`
+  // would capture only up to the first one. That truncation is not merely a cosmetic
+  // problem for the label the operator confirms — precheckSetChanged() would then be
+  // parsing a fragment, fail, and escalate every routine add to the nonce tier.
   const matches = [...command.matchAll(
-    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+(\S+))?/g
+    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+('[^']*'|"[^"]*"|\S+))?/g
   )];
   if (matches.length === 0) return null;
 
@@ -436,10 +455,10 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
     // theirs belongs to the shell (a `&&`, a redirect), not to the setting.
     const value = TAKES_VALUE.has(verb) ? strip(m[4]) : '';
     let v = channelVerdict(verb, t);
-    // Whole-array routines write: escalate only when it arms or changes a gate.
-    // Keeps the everyday add/edit/enable path on its existing tier while closing
-    // the bypass a container write would otherwise be.
-    if (v !== 'terminal-only' && resolveTarget(verb, t) === 'routines' && value
+    // Routines container write (whole array or one indexed entry): escalate only
+    // when it arms or changes a gate. Keeps the everyday add/edit/enable path on
+    // its existing tier while closing the bypass a container write would otherwise be.
+    if (v !== 'terminal-only' && ROUTINES_CONTAINER.test(resolveTarget(verb, t)) && value
         && precheckSetChanged(value, currentRoutines())) {
       v = 'nonce';
     }

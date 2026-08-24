@@ -302,7 +302,7 @@ describe('routine gate — reflect provider', () => {
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:reflect]');
     expect(readRows(dir).map((x) => x.event)).toEqual([]);
 
-    const parked = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'reflect-gate.json'), 'utf-8'));
+    const parked = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'reflect-gate.json'), 'utf-8')).reflect;
     expect(parked.mark).toBe(MARK);
     expect(parked.phases.startsWith('RUN|')).toBe(true);
     // The parked mark is what `routines.ts precheck` matches against before
@@ -329,7 +329,26 @@ describe('routine gate — reflect provider', () => {
     writeSchedule(dir, { reflect: { last_consumed_mark: '2026-07-16T09:00:00.000Z' } });
     fs.writeFileSync(
       hermit(dir, 'state', 'reflect-gate.json'),
-      JSON.stringify({ mark: '2026-07-15T09:00:00.000Z', phases: 'RUN|{"compute":true}' }),
+      JSON.stringify({ reflect: { mark: '2026-07-15T09:00:00.000Z', phases: 'RUN|{"compute":true}' } }),
+    );
+
+    const r = await runScript('routines.ts', {
+      args: ['precheck', 'reflect', 'false', 'monitor'],
+      cwd: dir,
+    });
+    expect(r.stdout.trim()).toBe('PROCEED');
+  }), 30000);
+
+  test('another routine on the same mark cannot consume this one\'s phases', withDir(async (dir) => {
+    // Nothing stops two routines from both declaring the builtin and coming due
+    // in the same minute. Keyed by mark alone, the second write would clobber the
+    // first and the mark check would still pass — one routine running on the
+    // other's phases. Keyed by id, a routine with no parked verdict gets none.
+    writeConfig(dir, [ROUTINE({ id: 'reflect', skill: 'claude-code-hermit:reflect', precheck: 'reflect' })]);
+    writeSchedule(dir, { reflect: { last_consumed_mark: '2026-07-16T09:00:00.000Z' } });
+    fs.writeFileSync(
+      hermit(dir, 'state', 'reflect-gate.json'),
+      JSON.stringify({ 'other-reflect': { mark: '2026-07-16T09:00:00.000Z', phases: 'RUN|{"compute":true}' } }),
     );
 
     const r = await runScript('routines.ts', {

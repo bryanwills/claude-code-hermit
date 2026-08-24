@@ -40,8 +40,16 @@ export type RoutineHistoryEntry = {
    * routine whose last activity predates the window by months into the digest.
    */
   open_attempt: boolean;
+  /** `started` rows in-window: one per wake, whatever it went on to do. */
+  starts: number;
   /** `skipped-*` rows: the routine was due but gated, so no attempt was made. */
   skips: number;
+  /**
+   * The `skipped-precheck` subset of `skips` — the only row that proves the wake
+   * gate answered. Counted apart because the other `skipped-*` reasons (paused,
+   * waiting) say nothing about whether the gate works.
+   */
+  precheck_skips: number;
   /**
    * `precheck-error` rows: the routine's declared wake gate could not answer, so
    * the fire woke the session anyway. Counted apart from `skips` because it is the
@@ -72,7 +80,9 @@ export function emptyEntry(id: string): RoutineHistoryEntry {
     incomplete: 0,
     orphan_terminals: 0,
     open_attempt: false,
+    starts: 0,
     skips: 0,
+    precheck_skips: 0,
     precheck_errors: 0,
     last_precheck_error: null,
     last_fire: null,
@@ -152,6 +162,7 @@ export function foldRoutineHistory(
       // one never reached `finish`. That is the signal the old subtraction was
       // reaching for, measured directly.
       if (open.has(row.id) && inWindow) entry.incomplete += 1;
+      if (inWindow) entry.starts += 1;
       open.set(row.id, row.ts);
       continue;
     }
@@ -179,8 +190,10 @@ export function foldRoutineHistory(
     // none. A precheck error is not a skip: the routine woke anyway, which is
     // exactly what makes it worth surfacing.
     if (!inWindow) continue;
-    if (row.event.startsWith('skipped-')) entry.skips += 1;
-    else if (row.event === 'precheck-error') {
+    if (row.event.startsWith('skipped-')) {
+      entry.skips += 1;
+      if (row.event === 'skipped-precheck') entry.precheck_skips += 1;
+    } else if (row.event === 'precheck-error') {
       entry.precheck_errors += 1;
       entry.last_precheck_error = { ts: row.tsRaw, detail: row.detail || 'unspecified' };
     }

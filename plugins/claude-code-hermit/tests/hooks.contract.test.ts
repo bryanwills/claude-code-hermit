@@ -1929,12 +1929,36 @@ describe('doctor-check', () => {
     expect(c.detail).toContain('timeout');
   }));
 
-  test('doctor-check routine-precheck: errors alongside real fires stay ok (transient)', withDir(async (dir) => {
+  test('doctor-check routine-precheck: errors alongside gate-driven wakes stay ok (transient)', withDir(async (dir) => {
     seedDoctor(dir, WITH_GATED);
+    // Two wakes, one error: the extra `started` is a fire the errors do not
+    // account for, so the gate answered WAKE at least once. That is transient.
     write(hermit(dir, 'state', 'routine-metrics.jsonl'),
-      [ledgerRow('precheck-error', { detail: 'exit:1' }), ledgerRow('started'), ledgerRow('fired')].join('\n') + '\n');
+      [ledgerRow('precheck-error', { detail: 'exit:1' }), ledgerRow('started'), ledgerRow('fired'),
+       ledgerRow('started'), ledgerRow('fired')].join('\n') + '\n');
     const c = checkById(await doctorReport(dir), 'routine-precheck');
     expect(c.status).toBe('ok');
+  }));
+
+  test('doctor-check routine-precheck: the fail-open wake an error causes does not suppress the warn', withDir(async (dir) => {
+    seedDoctor(dir, WITH_GATED);
+    // The regression this check exists for: a gate fails open, so EVERY error is
+    // followed by a wake and a `fired`. Counting fires would hide a gate that has
+    // never once worked behind the very wakes it failed to prevent.
+    write(hermit(dir, 'state', 'routine-metrics.jsonl'),
+      [ledgerRow('precheck-error', { detail: 'not-executable' }), ledgerRow('started'), ledgerRow('fired')].join('\n') + '\n');
+    const c = checkById(await doctorReport(dir), 'routine-precheck');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('not-executable');
+  }));
+
+  test('doctor-check routine-precheck: a paused stretch does not count as the gate working', withDir(async (dir) => {
+    seedDoctor(dir, WITH_GATED);
+    // `skipped-paused` says nothing about the gate — only `skipped-precheck` does.
+    write(hermit(dir, 'state', 'routine-metrics.jsonl'),
+      [ledgerRow('skipped-paused'), ledgerRow('precheck-error', { detail: 'timeout' })].join('\n') + '\n');
+    const c = checkById(await doctorReport(dir), 'routine-precheck');
+    expect(c.status).toBe('warn');
   }));
 
   test('doctor-check routine-precheck: fallback mode says gates cost a wake', withDir(async (dir) => {

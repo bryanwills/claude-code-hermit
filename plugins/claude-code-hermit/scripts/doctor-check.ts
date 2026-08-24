@@ -1495,10 +1495,13 @@ function checkRoutinePrecheck(p: DoctorPaths = PATHS) {
     for (const routine of gated) {
       const entry = byId.get(routine.id);
       if (!entry || entry.precheck_errors === 0) continue;
-      // Errors alongside real fires are transient (a flaky API, one slow poll).
-      // Errors with nothing else to show for the window is a gate that has never
-      // worked: every fire since has been a wake the operator meant to skip.
-      if (entry.fires > 0 || entry.skips > 0) continue;
+      // Deliberately NOT "did it fire": the gate fails open, so every error IS
+      // followed by a wake and a `fired` — a fire count would suppress this check
+      // in exactly the case it exists to catch. What counts is evidence the gate
+      // ever *answered*: a `skipped-precheck` row (a SKIP verdict), or a wake the
+      // errors do not account for (a WAKE verdict). Neither means it never worked,
+      // and every fire since has been one the operator meant to skip.
+      if (entry.precheck_skips > 0 || entry.starts > entry.precheck_errors) continue;
       broken.push(`${routine.id} (${entry.precheck_errors}x ${entry.last_precheck_error?.detail ?? 'unspecified'})`);
     }
 

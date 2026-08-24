@@ -79,7 +79,7 @@ function gateLine(routine: Json | null): string | null {
 
   if (delivery === 'monitor') {
     if (String(routine.precheck).trim() !== BUILTIN_REFLECT) return null;
-    const cached = readReflectGate(HERMIT_ROOT);
+    const cached = readReflectGate(HERMIT_ROOT, id);
     // No cache match means a monitor from before this feature, or a race with a
     // re-registered schedule. Falling through to a bare PROCEED is safe: the skill
     // still has its own precheck path for exactly that case.

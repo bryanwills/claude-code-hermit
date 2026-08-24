@@ -30,6 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { lastRoutineFire } from './history';
+import { writeFileAtomic } from '../md-write';
 
 type Json = any;
 
@@ -134,6 +135,26 @@ function gateEnv(routineId: string, hermitDir: string, lastFired: string | null)
 }
 
 /**
+ * The first MAX_GATE_STDOUT bytes of a file, without reading the rest into memory.
+ *
+ * Deliberately not `readFileSync(...).slice(...)`: the gate's stdout is a file, not
+ * a pipe, so nothing bounds how much a misbehaving gate writes before it exits or
+ * times out. Slicing after the read would still materialize the whole thing — an
+ * OOM in the routine monitor, which the operator sees as a dead monitor and a
+ * watchdog re-arm.
+ */
+function readBoundedPrefix(filePath: string): string {
+  const fh = fs.openSync(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(MAX_GATE_STDOUT);
+    const read = fs.readSync(fh, buf, 0, MAX_GATE_STDOUT, 0);
+    return buf.toString('utf-8', 0, read);
+  } finally {
+    fs.closeSync(fh);
+  }
+}
+
+/**
  * Run one command and return its first stdout line plus how it ended.
  *
  * stdout goes to a file, never a pipe. A gate that forks a background helper
@@ -160,14 +181,13 @@ function spawnGate(
       stdio: ['ignore', fd, 'ignore'],
       timeout: timeoutMs,
       killSignal: 'SIGKILL',
-      maxBuffer: MAX_GATE_STDOUT,
     });
     fs.closeSync(fd);
     fd = null;
 
     let firstLine = '';
     try {
-      firstLine = fs.readFileSync(outPath, 'utf-8').slice(0, MAX_GATE_STDOUT).split('\n')[0].trim();
+      firstLine = readBoundedPrefix(outPath).split('\n')[0].trim();
     } catch { /* no output is not an error by itself — the verdict check below decides */ }
 
     if (result.exitedDueToTimeout) return { firstLine, ok: false, detail: 'timeout' };
@@ -182,12 +202,19 @@ function spawnGate(
   }
 }
 
-/** Where the reflect provider parks its RUN phases for the awake skill. */
+/**
+ * Where the reflect provider parks its RUN phases for the awake skill.
+ *
+ * Keyed by routine id, not by cron mark alone: nothing stops two routines from both
+ * declaring `precheck: "reflect"` and coming due in the same minute, and a flat
+ * `{ mark, phases }` file would let the second overwrite the first — the mark check
+ * in precheck.ts passes for both, so one routine would consume the other's phases.
+ */
 export function reflectGatePath(hermitDir: string): string {
   return path.join(hermitDir, 'state', 'reflect-gate.json');
 }
 
-export function readReflectGate(hermitDir: string): { mark?: string; phases?: string } | null {
+function readReflectGateFile(hermitDir: string): Json {
   try {
     const parsed = JSON.parse(fs.readFileSync(reflectGatePath(hermitDir), 'utf-8'));
     return parsed && typeof parsed === 'object' ? parsed : null;
@@ -196,17 +223,23 @@ export function readReflectGate(hermitDir: string): { mark?: string; phases?: st
   }
 }
 
-function writeReflectGate(hermitDir: string, mark: string, phases: string): void {
+export function readReflectGate(hermitDir: string, routineId: string): { mark?: string; phases?: string } | null {
+  const entry = readReflectGateFile(hermitDir)?.[routineId];
+  return entry && typeof entry === 'object' ? entry : null;
+}
+
+function writeReflectGate(hermitDir: string, routineId: string, mark: string, phases: string): void {
   try {
     const p = reflectGatePath(hermitDir);
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    const tmp = `${p}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ mark, phases }, null, 2) + '\n', 'utf-8');
-    fs.renameSync(tmp, p);
+    // Read-modify-write is safe here: the routine monitor polls its due routines
+    // sequentially in one process, so there is no second writer to race.
+    const next = { ...(readReflectGateFile(hermitDir) || {}), [routineId]: { mark, phases } };
+    writeFileAtomic(p, JSON.stringify(next, null, 2) + '\n');
   } catch { /* the wake still happens; the skill falls back to running the precheck itself */ }
 }
 
-function runReflectGate(hermitDir: string, timeoutMs: number, mark: string): GateVerdict {
+function runReflectGate(hermitDir: string, routineId: string, timeoutMs: number, mark: string): GateVerdict {
   const pluginRoot = path.resolve(import.meta.dir, '../../..');
   const script = path.join(pluginRoot, 'scripts', 'reflect-precheck.ts');
   const projectRoot = projectRootOf(hermitDir);
@@ -224,7 +257,7 @@ function runReflectGate(hermitDir: string, timeoutMs: number, mark: string): Gat
   if (!ok) return { verdict: 'error', detail: detail || 'spawn' };
   if (firstLine === 'EMPTY') return { verdict: 'skip' };
   if (firstLine.startsWith('RUN|')) {
-    writeReflectGate(hermitDir, mark, firstLine);
+    writeReflectGate(hermitDir, routineId, mark, firstLine);
     return { verdict: 'wake', phases: firstLine };
   }
   return { verdict: 'error', detail: 'bad-verdict' };
@@ -243,7 +276,7 @@ export function runGate(routine: Json, hermitDir: string, mark: string): GateVer
   if (resolved.kind === 'invalid') return { verdict: 'error', detail: resolved.detail };
 
   const timeoutMs = gateTimeoutMs(routine);
-  if (resolved.kind === 'reflect') return runReflectGate(hermitDir, timeoutMs, mark);
+  if (resolved.kind === 'reflect') return runReflectGate(hermitDir, routine.id, timeoutMs, mark);
 
   const lastFired = (() => {
     try {
