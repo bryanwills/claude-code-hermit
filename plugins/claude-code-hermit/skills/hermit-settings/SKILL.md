@@ -236,12 +236,15 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Routines (config.json routines → routine monitor; CronCreate fallback where Monitor is unavailable):
 
-    #  ID           Schedule       Skill                                Status
-    1. morning      30 8 * * *     claude-code-hermit:brief --morning    enabled
-    2. evening      30 22 * * *    claude-code-hermit:brief --evening    enabled
-    3. weekly-deps  0 9 * * 1      claude-code-hermit:session-start ...  disabled
+    #  ID           Schedule       Skill                                Status    Gate
+    1. morning      30 8 * * *     claude-code-hermit:brief --morning    enabled   —
+    2. evening      30 22 * * *    claude-code-hermit:brief --evening    enabled   —
+    3. reflect      0 9 * * *      claude-code-hermit:reflect            enabled   reflect
+    4. weekly-deps  0 9 * * 1      claude-code-hermit:session-start ...  disabled  tools/deps-gate.sh
 
   (or "No routines configured" if empty)
+  Gate = the routine's `precheck`, run by the routine monitor before it wakes the session;
+  `—` means the routine always wakes it. Adding or changing one needs the confirmation code.
   ```
 - Ask: "Add / edit / remove / enable / disable? (or 'done')"
 - **Add wizard:** ask for:

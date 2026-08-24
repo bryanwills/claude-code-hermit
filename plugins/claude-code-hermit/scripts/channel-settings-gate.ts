@@ -17,7 +17,10 @@
 //                  (boot_skill, remote, escalation, docker.*,
 //                  artifacts.backend, and everything not named below)
 //   nonce          settings chat AND an echoed token: permission_mode, env.*,
-//                  monitors (each entry carries a shell command)
+//                  monitors (each entry carries a shell command), and
+//                  routines.<n>.precheck (an executable the routine monitor runs
+//                  unattended) — plus a routines container write (the whole array
+//                  or one indexed entry) that arms or changes one
 //   terminal-only  the enrollment root, the two authority keys, and any
 //                  ancestor write that would replace them — never reachable
 //                  from a channel, on any tier
@@ -74,6 +77,8 @@ import { readPending, writePending, clearPending, newToken, bodyEchoesToken } fr
 
 // Same window channel-hook.ts uses: enough to hold a turn, cheap to read.
 const TAIL_BYTES = 512 * 1024;
+
+type Json = any;
 
 const DENY_TERMINAL_ONLY =
   'Terminal-only hermit setting. Channel enrollment (allowed_users, default_chat_id, ' +
@@ -229,6 +234,60 @@ const AUTHORITY_KEYS = /^(operator_profile|settings_from_chat)(\..+)?$/;
  */
 const NONCE_REQUIRED = /^(permission_mode|env|monitors)(\..+)?$/;
 
+/**
+ * A routine's `precheck` is an executable the routine monitor runs unattended at
+ * fire time — the same trust class as a `monitors[]` command, and so the same tier.
+ * Only the precheck leaves are pinned here: `routines` is the container an operator
+ * edits from chat every day (add a routine, flip `enabled`), and putting the whole
+ * array behind a nonce would tax that daily work to protect one field. The
+ * container write is judged by value instead — see precheckSetChanged().
+ */
+const NONCE_ROUTINE_PRECHECK = /^routines\.\d+\.precheck(_timeout_s)?(\..+)?$/;
+
+/**
+ * The container spellings judged by value: the whole array, and one indexed entry.
+ * `setPath` splits on `.` and indexes arrays, so `set routines.0 '<object>'`
+ * replaces a whole routine, precheck included, without ever naming the field, which
+ * a leaf-only rule would wave through at the maintainer tier.
+ */
+const ROUTINES_CONTAINER = /^routines(\.\d+)?$/;
+
+/**
+ * Does this `set routines[.<n>] <json>` add or change any `precheck`?
+ *
+ * The add/edit flow in hermit-settings writes the entire array back, so a
+ * field-level rule alone would be bypassed by every legitimate-looking array
+ * write. Compared by id: a reordered array with the same gates is not a change.
+ * Unparseable input counts as changed — an opaque write must not buy a weaker
+ * tier than a legible one.
+ */
+export function precheckSetChanged(value: string, current: Json[]): boolean {
+  const gateOf = (r: Json) => (r && r.precheck != null ? `${String(r.precheck)} ${r.precheck_timeout_s ?? ''}` : null);
+  const before = new Map<string, string | null>();
+  for (const r of Array.isArray(current) ? current : []) {
+    if (r && r.id) before.set(String(r.id), gateOf(r));
+  }
+  let parsed: Json;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return true;
+  }
+  // A lone routine object (the `routines.<n>` spelling) is judged as an array of
+  // one. It has to carry an `id` to be read that way: anything else is not a
+  // routine write this can reason about, so it takes the strict answer.
+  const next: Json[] | null = Array.isArray(parsed) ? parsed
+    : (parsed && typeof parsed === 'object' && parsed.id) ? [parsed]
+    : null;
+  if (!next) return true;
+  for (const r of next) {
+    const gate = gateOf(r);
+    if (gate === null) continue; // dropping a gate is a de-escalation, not an arming
+    if (!r || !r.id || before.get(String(r.id)) !== gate) return true;
+  }
+  return false;
+}
+
 /** Increasing strictness — a chained command takes the strongest verdict. */
 export type Verdict = 'allowed' | 'maintainer' | 'nonce' | 'terminal-only';
 const STRICTNESS: Record<Verdict, number> = { allowed: 0, maintainer: 1, nonce: 2, 'terminal-only': 3 };
@@ -278,6 +337,7 @@ export function channelVerdict(verb: string, target: string): Verdict {
   if (ENROLLMENT_ROOT.test(dotted) || ENROLLMENT_ANCESTOR.test(dotted)) return 'terminal-only';
   if (AUTHORITY_KEYS.test(dotted)) return 'terminal-only';
   if (NONCE_REQUIRED.test(dotted)) return 'nonce';
+  if (NONCE_ROUTINE_PRECHECK.test(dotted)) return 'nonce';
   return 'maintainer';
 }
 
@@ -320,6 +380,22 @@ function targetsConfigFile(p: string): boolean {
 }
 
 /**
+ * The routines array as it stands on disk, for the value-aware precheck rule.
+ * An unreadable config yields an empty baseline, which makes every declared gate
+ * in the incoming write look new — the strict direction.
+ */
+function currentRoutines(): Json[] {
+  try {
+    const dir = hermitDir();
+    if (!dir) return [];
+    const config: any = readConfigRaw(dir);
+    return Array.isArray(config?.routines) ? config.routines : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Does this Bash command mutate hermit settings?
  *
  * Matches both invocation forms — the script path
@@ -340,8 +416,13 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
     return { verdict: 'terminal-only', target: 'config.json' };
   }
 
+  // The value alternation accepts a quoted argument before the bare-word form: a
+  // routines write carries a JSON array, which has spaces in it, and a bare `\S+`
+  // would capture only up to the first one. That truncation is not merely a cosmetic
+  // problem for the label the operator confirms — precheckSetChanged() would then be
+  // parsing a fragment, fail, and escalate every routine add to the nonce tier.
   const matches = [...command.matchAll(
-    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+(\S+))?/g
+    /(?:settings-edit(?:\.ts)?)\s+(\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+('[^']*'|"[^"]*"|\S+))?/g
   )];
   if (matches.length === 0) return null;
 
@@ -373,7 +454,14 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
     // `unset` and `toggle` take a path and nothing else, so the token after
     // theirs belongs to the shell (a `&&`, a redirect), not to the setting.
     const value = TAKES_VALUE.has(verb) ? strip(m[4]) : '';
-    const v = channelVerdict(verb, t);
+    let v = channelVerdict(verb, t);
+    // Routines container write (whole array or one indexed entry): escalate only
+    // when it arms or changes a gate. Keeps the everyday add/edit/enable path on
+    // its existing tier while closing the bypass a container write would otherwise be.
+    if (v !== 'terminal-only' && ROUTINES_CONTAINER.test(resolveTarget(verb, t)) && value
+        && precheckSetChanged(value, currentRoutines())) {
+      v = 'nonce';
+    }
     const label = value ? `${resolveTarget(verb, t)}=${value}` : resolveTarget(verb, t);
     if (STRICTNESS[v] > STRICTNESS[worst]) {
       worst = v;

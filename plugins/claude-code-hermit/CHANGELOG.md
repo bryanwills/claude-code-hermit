@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- Routines accept a `precheck` wake gate the routine monitor runs at fire time — the builtin `"reflect"`, or a project-relative script printing `SKIP` or `WAKE`. A `SKIP` consumes the fire and records `skipped-precheck` without waking the session; anything else fires the routine as before. `precheck_timeout_s` (default 30, max 300) bounds one run, and a new `routine-precheck` doctor check reports gates that never succeed.
+
+### Changed
+- The `reflect` routine ships with `"precheck": "reflect"`, so a day with nothing to reflect on no longer wakes the session.
+- Declaring or changing a routine `precheck` from a channel now takes the confirmation-code tier, matching `monitors[]`.
 - A session opened in a hermit folder while the managed hermit is running now gets a short guest banner instead of the full hermit framing — it is told not to answer channels, write session state, or start schedulers. Role assignment is mechanical (the existing `HERMIT_MANAGED` marker plus a tmux liveness check), not a judgment call.
 - `hermit-run rc-server <start|stop|status|gc>` and the `/claude-code-hermit:rc-gate` skill open a hermit-managed Remote Control spawn gate, so you can start new sessions in a project from your phone. Spawns land in isolated worktrees, and `gc` sweeps the locked worktrees left behind when a spawned session is archived from the app. Requires a claude.ai `/login` on the machine.
 
@@ -10,6 +15,11 @@
 - Two lifecycle-lock acquirers that both judged the same lock stale could each end up holding it — the takeover moved aside whatever sat at the lock path, including the winner's brand-new lock. Takeovers are now serialized by an exclusive marker naming the exact file being replaced, and that file is re-verified by identity before removal, so `hermit-start`, `hermit-stop`, and the watchdog can no longer run a lifecycle operation concurrently.
 - Notices asking for a decision or reply now always carry a plain-language client leg; the `maintainer` key supplements it with technical detail instead of replacing it. Heartbeat findings, inbox items, and pending-proposal digests were landing maintainer-only — or nowhere on non-technical installs with no maintainer chat configured.
 - Denying a direct `config.json` edit from a channel turn now points to the `settings-edit` recovery path instead of "terminal only", so channel-side settings changes (adding a routine, for example) can self-recover through the tiered script path.
+- Autonomous Progress Log appends to `sessions/SHELL.md` are serialized with a lock. Two overlapping appends each rewrote the whole file from their own stale read, so the loser silently reverted whatever the winner had just added.
+
+### Upgrade Instructions
+
+**Reflect stops waking the session on empty days.** In `.claude-code-hermit/config.json`, find the `routines[]` entry with `"id": "reflect"`. If it has no `precheck` key, add `"precheck": "reflect"`. If the key is already present with any value, leave the entry exactly as it is — this step is a no-op on a re-run, and an operator who changed the value keeps it. Do not add the key to any other routine; operator-authored routines are untouched. To opt back out later, delete the key.
 
 ## [1.2.46] - 2026-08-23
 

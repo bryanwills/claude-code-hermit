@@ -14,8 +14,10 @@
 // State model (state/routine-schedule.json): { "<id>": { "last_consumed_mark": "<ISO minute>" } }
 // A routine is due when a cron-matching minute mark exists in (last_consumed_mark, now],
 // lower-bounded at now-24h. Gate order per due routine: paused → waiting(!rdw) →
-// operator-turn-open (defer, no consume) → emit (consume). Missing entry inits to now,
-// fires nothing — exact CronCreate-death parity, no catch-up (operator-confirmed).
+// operator-turn-open (defer, no consume) → precheck (consume, no emit on SKIP) → emit
+// (consume). Missing entry inits to now, fires nothing — exact CronCreate-death parity,
+// no catch-up (operator-confirmed). The precheck is the routine's declared world-state
+// gate (lib/routines/gate.ts); it never changes what is emitted, only whether.
 //
 // heartbeat-restart is hardcoded excluded — it stays the CronCreate re-arm anchor.
 //
@@ -30,6 +32,7 @@ import { makeTzFormatter, partsFromFormatter, compileCron, cronMatchesCompiled }
 import { readJson as readJSON } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { logRoutineEvent } from './event';
+import { runGate } from './gate';
 import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown } from '../auto-close';
 
 type Json = any;
@@ -78,9 +81,9 @@ function writeLiveness(): void {
   writeJSONAtomic(livenessPath, { last_peek_at: new Date().toISOString() });
 }
 
-function stamp(id: string, event: string): void {
+function stamp(id: string, event: string, detail?: string): void {
   try {
-    logRoutineEvent(id, event, hermitDir, 'monitor');
+    logRoutineEvent(id, event, hermitDir, 'monitor', detail);
   } catch { /* fail-open — a stamp failure must not block the routine */ }
 }
 
@@ -130,7 +133,7 @@ let scheduleChanged = false;
 const dueIds: string[] = [];
 // Skip stamps are deferred and flushed only after the schedule persists — a failed persist
 // must not leave a skipped-* row whose cursor advance was rolled back (phantom ledger rows).
-const pendingStamps: Array<[string, string]> = [];
+const pendingStamps: Array<[string, string, string?]> = [];
 
 for (const routine of eligible) {
   const id: string = routine.id;
@@ -199,6 +202,28 @@ for (const routine of eligible) {
     continue;
   }
 
+  // World-state gate. The only check that can consume a fire without waking the
+  // session, and the only one that runs code the operator wrote. Placed after the
+  // turn-open defer on purpose: that branch does not consume, so a gate above it
+  // would re-run every poll for the whole open turn (a mail poll a minute).
+  if (routine.precheck !== undefined && routine.precheck !== null) {
+    const gate = runGate(routine, hermitDir, latestMatch.toISOString());
+    // A gate may legitimately take up to five minutes. Liveness is otherwise only
+    // written by finish(), so without this a slow gate reads as a dead monitor and
+    // earns a watchdog re-arm — a paid turn to recover from working as designed.
+    writeLiveness();
+    if (gate.verdict === 'skip') {
+      schedule[id] = { last_consumed_mark: latestMatch.toISOString() };
+      scheduleChanged = true;
+      pendingStamps.push([id, 'skipped-precheck']);
+      continue;
+    }
+    // error → fall through and wake: a broken gate must cost no more than no gate.
+    // The detail rides the ledger row so health/doctor can surface a gate that has
+    // been erroring on every fire (the operator is paying wakes they meant to skip).
+    if (gate.verdict === 'error') pendingStamps.push([id, 'precheck-error', gate.detail]);
+  }
+
   schedule[id] = { last_consumed_mark: latestMatch.toISOString() };
   scheduleChanged = true;
   dueIds.push(id);
@@ -224,7 +249,7 @@ if (scheduleChanged) {
 }
 
 // Persist succeeded (or nothing changed) — now flush the deferred skip stamps.
-for (const [id, event] of pendingStamps) stamp(id, event);
+for (const [id, event, detail] of pendingStamps) stamp(id, event, detail);
 
 // Pending-close drain. The daily-auto-close routine queues a close when the
 // operator is active at midnight; historically only the heartbeat tick drained

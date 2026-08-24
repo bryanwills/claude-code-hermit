@@ -30,6 +30,40 @@ describe('appendToProgressLog', () => {
   test('fail-open: missing file does not throw', () => {
     expect(() => appendToProgressLog('/nonexistent/dir/SHELL.md', '- [10:00] x')).not.toThrow();
   });
+
+  test('concurrent appends from separate processes all survive', async () => {
+    // The append rewrites the whole file from a buffer read a moment earlier, so
+    // an unserialized loser does not merely drop its own line — it writes back its
+    // stale read and reverts the winner's. Reachable on a schedule now that the
+    // reflect wake gate runs reflect-precheck.ts inside the routine monitor, where
+    // it can land on top of a watchdog or PreCompact flush.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-progresslog-race-'));
+    try {
+      const shellPath = path.join(dir, 'SHELL.md');
+      fs.writeFileSync(shellPath, '## Progress Log\n', 'utf-8');
+      const lib = path.resolve(import.meta.dir, '..', 'scripts', 'lib', 'progress-log.ts');
+      const writer = path.join(dir, 'writer.ts');
+      fs.writeFileSync(
+        writer,
+        `import { appendToProgressLog } from ${JSON.stringify(lib)};\n` +
+        'appendToProgressLog(process.argv[2], process.argv[3]);\n',
+        'utf-8',
+      );
+
+      const writers = Array.from({ length: 6 }, (_, i) =>
+        Bun.spawn({
+          cmd: [process.execPath, writer, shellPath, `- [10:0${i}] writer ${i}`],
+          stdout: 'ignore',
+          stderr: 'ignore',
+        }));
+      await Promise.all(writers.map((w) => w.exited));
+
+      const shell = fs.readFileSync(shellPath, 'utf-8');
+      for (let i = 0; i < writers.length; i++) expect(shell).toContain(`writer ${i}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
 });
 
 describe('flushResetBreadcrumb', () => {

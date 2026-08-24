@@ -5,8 +5,11 @@
 // which stays the single writer — the #464 dedup guard and JSONL schema live in exactly
 // one place.
 // Usage: bun routines.ts precheck <routine-id> <rdw:true|false> [delivery]
-// Output (stdout, one line): SKIP | PROCEED
-// Side effect: stamps skipped-waiting | skipped-paused | started via logRoutineEvent().
+// Output (stdout): SKIP | PROCEED, optionally followed by one `REFLECT RUN|<phases-json>`
+// line carrying the reflect gate's verdict so the skill does not re-run that script
+// (which would append its observation rows a second time).
+// Side effect: stamps skipped-waiting | skipped-paused | skipped-precheck |
+// precheck-error | started via logRoutineEvent().
 // Exit 0 always — fail-open to PROCEED on any read error (a malformed runtime.json must
 // never silently kill a routine).
 
@@ -18,6 +21,9 @@ import { isPaused } from '../pause';
 import { logRoutineEvent } from './event';
 import { clearRunRecord, resolveArtifactPath, statIdentity, validateExpectArtifact, writeRunRecord } from './run-record';
 import { utcISOStamp } from '../time';
+import { BUILTIN_REFLECT, readReflectGate, runGate } from './gate';
+
+type Json = any;
 
 function emit(verdict: string): never {
   process.stdout.write(verdict + '\n');
@@ -37,10 +43,68 @@ try {
   emit('PROCEED'); // fail-open: can't resolve the hermit dir → never silently kill the routine
 }
 
-function stamp(event: string): void {
+function stamp(event: string, detail?: string): void {
   try {
-    logRoutineEvent(id, event, HERMIT_ROOT, delivery);
+    logRoutineEvent(id, event, HERMIT_ROOT, delivery, detail);
   } catch { /* fail-open — a stamp failure must not block the routine */ }
+}
+
+/** The routine's config entry, or null when config is unreadable / the id is gone. */
+function routineEntry(): Json | null {
+  try {
+    const config: Json = readConfigRaw(HERMIT_ROOT);
+    if (!config || !Array.isArray(config.routines)) return null;
+    return config.routines.find((r: Json) => r && r.id === id) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The declared wake gate, at the point where it still has a say.
+ *
+ * Two deliveries, two different jobs:
+ *   monitor      — `due` already ran the gate before it emitted, so running it again
+ *                  here would be a second execution of operator code per fire. The
+ *                  only thing left to do is hand reflect its phases, which `due`
+ *                  parked keyed by the fire's cron mark.
+ *   cron-create  — there is no `due` in fallback mode, so this is the gate's only
+ *                  chance. The wake has already been paid for; behavior parity, not
+ *                  cost parity (the doctor says so out loud).
+ *
+ * Returns the extra line to print after PROCEED, or exits on a SKIP verdict.
+ */
+function gateLine(routine: Json | null): string | null {
+  if (!routine || routine.precheck === undefined || routine.precheck === null) return null;
+
+  if (delivery === 'monitor') {
+    if (String(routine.precheck).trim() !== BUILTIN_REFLECT) return null;
+    const cached = readReflectGate(HERMIT_ROOT, id);
+    // No cache match means a monitor from before this feature, or a race with a
+    // re-registered schedule. Falling through to a bare PROCEED is safe: the skill
+    // still has its own precheck path for exactly that case.
+    if (!cached || !cached.phases || cached.mark !== consumedMark()) return null;
+    return `REFLECT ${cached.phases}`;
+  }
+
+  const gate = runGate(routine, HERMIT_ROOT, consumedMark() || utcISOStamp());
+  if (gate.verdict === 'skip') {
+    stamp('skipped-precheck');
+    emit('SKIP');
+  }
+  if (gate.verdict === 'error') stamp('precheck-error', gate.detail);
+  return gate.phases ? `REFLECT ${gate.phases}` : null;
+}
+
+/** The cron mark `due` consumed for this fire — the key a cached reflect verdict is under. */
+function consumedMark(): string | null {
+  try {
+    const schedule = JSON.parse(fs.readFileSync(path.join(HERMIT_ROOT, 'state', 'routine-schedule.json'), 'utf-8'));
+    const mark = schedule?.[id]?.last_consumed_mark;
+    return typeof mark === 'string' ? mark : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -108,6 +172,10 @@ if (paused) {
   emit('SKIP');
 }
 
+// Runs before the `started` stamp: a gate SKIP means this fire never opened, so it
+// must not leave an attempt the ledger would later read as abandoned.
+const reflectLine = gateLine(routineEntry());
+
 stamp('started');
 captureArtifactBaseline();
-emit('PROCEED');
+emit(reflectLine ? `PROCEED\n${reflectLine}` : 'PROCEED');

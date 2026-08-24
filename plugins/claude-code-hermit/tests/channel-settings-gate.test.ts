@@ -7,7 +7,7 @@ import path from 'node:path';
 import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 import { triggerPrompt, assistantEntry } from './helpers/transcript';
-import { channelVerdict } from '../scripts/channel-settings-gate';
+import { channelVerdict, precheckSetChanged } from '../scripts/channel-settings-gate';
 import { SETTINGS } from '../scripts/lib/settings/registry';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-channel-settings-gate-');
@@ -129,6 +129,51 @@ describe('channelVerdict — policy', () => {
     // shell command cannot sit a tier below permission_mode.
     expect(channelVerdict('set', 'monitors')).toBe('nonce');
     expect(channelVerdict('set', 'monitors.0.command')).toBe('nonce');
+  });
+
+  test('a routine precheck is nonce-tier — the monitor runs it unattended', () => {
+    // Same class as monitors[].command: an executable named in config that a
+    // subprocess runs with no classifier in front of it.
+    expect(channelVerdict('set', 'routines.0.precheck')).toBe('nonce');
+    expect(channelVerdict('set', 'routines.2.precheck_timeout_s')).toBe('nonce');
+  });
+
+  test('the everyday routine fields keep their existing tier', () => {
+    // Adding a routine and flipping one on or off is daily operator work from
+    // chat; taxing it with a confirmation code to protect one field would be
+    // the wrong trade. The container write is judged by value instead.
+    expect(channelVerdict('set', 'routines.0.enabled')).not.toBe('nonce');
+    expect(channelVerdict('set', 'routines')).not.toBe('nonce');
+  });
+
+  test('precheckSetChanged only fires on a write that arms or changes a gate', () => {
+    // hermit-settings writes the whole array back for every add and edit, so
+    // this is what decides whether that write needs the code.
+    const current = [
+      { id: 'reflect', precheck: 'reflect' },
+      { id: 'brief' },
+    ];
+    const unchanged = JSON.stringify([{ id: 'reflect', precheck: 'reflect' }, { id: 'brief' }]);
+    const reordered = JSON.stringify([{ id: 'brief' }, { id: 'reflect', precheck: 'reflect' }]);
+    const added = JSON.stringify([{ id: 'reflect', precheck: 'reflect' }, { id: 'brief', precheck: 'tools/x.sh' }]);
+    const retargeted = JSON.stringify([{ id: 'reflect', precheck: 'tools/evil.sh' }, { id: 'brief' }]);
+    const dropped = JSON.stringify([{ id: 'reflect' }, { id: 'brief' }]);
+    const retimed = JSON.stringify([{ id: 'reflect', precheck: 'reflect', precheck_timeout_s: 300 }, { id: 'brief' }]);
+
+    expect(precheckSetChanged(unchanged, current)).toBe(false);
+    expect(precheckSetChanged(reordered, current)).toBe(false);
+    expect(precheckSetChanged(dropped, current)).toBe(false);   // de-escalation
+    expect(precheckSetChanged(added, current)).toBe(true);
+    expect(precheckSetChanged(retargeted, current)).toBe(true);
+    expect(precheckSetChanged(retimed, current)).toBe(true);
+    // An opaque write must not buy a weaker tier than a legible one.
+    expect(precheckSetChanged('not json', current)).toBe(true);
+    expect(precheckSetChanged('{}', current)).toBe(true);
+
+    // The `routines.<n>` spelling: one routine object, judged as an array of one.
+    expect(precheckSetChanged(JSON.stringify({ id: 'brief', precheck: 'tools/evil.sh' }), current)).toBe(true);
+    expect(precheckSetChanged(JSON.stringify({ id: 'reflect', precheck: 'reflect' }), current)).toBe(false);
+    expect(precheckSetChanged(JSON.stringify({ id: 'brief' }), current)).toBe(false);
   });
 
   test('the enrollment root is terminal-only on every tier', () => {
@@ -1020,5 +1065,39 @@ describe('channel-settings-gate — confirmation nonce', () => {
       dir
     );
     expect(selfEcho.exitCode).toBe(2);
+  });
+
+  test('arming a gate through an indexed routine write still needs the code', async () => {
+    // `setPath` indexes arrays, so `set routines.0 <object>` replaces the whole
+    // routine — precheck and all — without the path ever naming the field. A
+    // leaf-only rule would land this on the maintainer tier, no code asked.
+    const config = configWithMaintainer();
+    config.routines = [{ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', enabled: true }];
+    const { dir, transcript } = fixture(maintainerPrompt('point the mail routine at my script'), config);
+    const command =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set routines.0 ' +
+      `'${JSON.stringify({ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', precheck: 'tools/gate.sh', enabled: true })}'`;
+    const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command } }), dir);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Second factor required');
+  });
+
+  test('a routines array write that touches no gate is not taxed with a code', async () => {
+    // The JSON the settings skill writes has spaces in it. Capturing the value
+    // only up to the first one left precheckSetChanged() parsing a fragment,
+    // failing, and escalating every routine add — the tax the value rule exists
+    // to avoid — while showing the operator a truncated label to confirm.
+    const config = configWithMaintainer();
+    config.routines = [{ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', enabled: true }];
+    const { dir, transcript } = fixture(maintainerPrompt('add a weekly digest routine'), config);
+    const next = [
+      { id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', enabled: true },
+      { id: 'digest', skill: 'x:digest', schedule: '0 18 * * 5', enabled: true },
+    ];
+    const command =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set routines ' +
+      `'${JSON.stringify(next, null, 1).replace(/\n\s*/g, ' ')}'`;
+    const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command } }), dir);
+    expect(r.exitCode).toBe(0);
   });
 });

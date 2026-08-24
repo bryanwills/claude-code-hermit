@@ -3,6 +3,7 @@ import path from 'node:path';
 import { safeForLLM } from './lib/sanitize';
 import * as ENUM from './lib/settings/enums';
 import { validateExpectArtifact } from './lib/routines/run-record';
+import { validatePrecheckValue, validatePrecheckTimeout } from './lib/routines/gate';
 import { ENV_VAR_RE } from './lib/channel-config';
 
 type Json = any;
@@ -196,6 +197,22 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           errors.push(`routines[${i}]: model "${r.model}" not in [${VALID_ROUTINE_MODEL.join(', ')}] (omit to use session model)`);
         } else if (r.id === 'heartbeat-restart') {
           warnings.push(`routines[${i}]: model on "heartbeat-restart" is ignored — re-arm must run in the session`);
+        }
+      }
+      if (r.precheck !== undefined && r.precheck !== null) {
+        const preErr = validatePrecheckValue(r.precheck);
+        if (preErr) {
+          errors.push(`routines[${i}]: precheck ${preErr}`);
+        } else if (r.id === 'heartbeat-restart') {
+          warnings.push(`routines[${i}]: precheck on "heartbeat-restart" is ignored — the re-arm anchor never runs through the routine monitor`);
+        }
+      }
+      if (r.precheck_timeout_s !== undefined && r.precheck_timeout_s !== null) {
+        const toErr = validatePrecheckTimeout(r.precheck_timeout_s);
+        if (toErr) {
+          errors.push(`routines[${i}]: precheck_timeout_s ${toErr}`);
+        } else if (r.precheck === undefined || r.precheck === null) {
+          warnings.push(`routines[${i}]: precheck_timeout_s has no effect without "precheck"`);
         }
       }
       if (r.expect_artifact !== undefined && r.expect_artifact !== null) {

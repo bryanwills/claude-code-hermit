@@ -62,7 +62,7 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 
 A hermit watches what keeps going wrong across sessions, proposes a fix, and asks you yes or no. It won't propose the same thing twice.
 
-At natural pauses — session end, idle ticks, scheduled cadence — it reflects. Most reflections never reach the model: a precheck script gates whether any phase (compute, resolution check, cost spike, digest, newborn) is actually due. When one is, two subagents vet the candidate before it reaches you:
+At natural pauses — session end, idle ticks, scheduled cadence — it reflects. Most reflections never reach the model: a precheck script decides whether any phase (compute, resolution check, cost spike, digest, newborn) is actually due, and on the scheduled path it runs inside the routine monitor, so a day with nothing to reflect on costs nothing at all. When a phase is due, two subagents vet the candidate before it reaches you:
 
 - **`reflection-judge`** confirms the cited evidence actually exists in the session reports, so a proposal can't certify itself.
 - **`proposal-triage`** deduplicates against open proposals, cross-checks your `MEMORY.md` and `OPERATOR.md`, and applies a three-condition bar.
