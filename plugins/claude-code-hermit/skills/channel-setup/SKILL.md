@@ -292,10 +292,10 @@ Hi — I'm connected here now.
 A few basics:
 - Talk to me anytime, in plain language.
 - If I have a suggestion or need a decision, I'll ask, and you can just reply yes, later, or no.
-- Say "pause" to stop me and "resume" to continue — pausing really stops me until you say resume.
+- Send /pause to stop me and /resume to continue — they have to start with a slash, and pausing really stops me until you send /resume.
 - I track what I spend on AI usage and will tell you if it's getting close to any limit that's set.
 - If I ever go quiet, or something's confusing, reach out to whoever set me up for you — they can also give you the full written guide.
 HERMIT_WELCOME
 ```
 
-No file paths, slash commands, or internal jargon in this text — it's the owner's first message. If the send fails, note it in the summary above but don't block setup: "Welcome message couldn't be sent (`<error>`) — the channel is paired; let the owner know directly this time."
+No file paths or internal jargon in this text — it's the owner's first message. The only slash commands allowed are the five control commands `/pause`, `/stop`, `/resume`, `/snooze`, `/status`; every other slash command stays out. If the send fails, note it in the summary above but don't block setup: "Welcome message couldn't be sent (`<error>`) — the channel is paired; let the owner know directly this time."

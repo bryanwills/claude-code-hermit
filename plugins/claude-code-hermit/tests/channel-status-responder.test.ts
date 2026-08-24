@@ -54,12 +54,12 @@ async function run(wd: Workdir, body: string, stubUrl: string, user = 'u1') {
 }
 
 describe('channel-status-responder', () => {
-  test('exact "status" + allowed sender -> send-then-block', async () => {
+  test('exact "/status" + allowed sender -> send-then-block', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'writing the plan' }));
-      const r = await run(wd, 'status', stub.url);
+      const r = await run(wd, '/status', stub.url);
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
       expect(stub.requests.length).toBe(1);
@@ -75,7 +75,7 @@ describe('channel-status-responder', () => {
     const wd = setupChannelWorkdir();
     try {
       // Asked in a Telegram group: chat_id is the group id, distinct from dm_channel_id (12345).
-      const groupPayload = JSON.stringify({ prompt: envelope('status', 'u1', '-1001234567890') });
+      const groupPayload = JSON.stringify({ prompt: envelope('/status', 'u1', '-1001234567890') });
       const r = await runScript('user-prompt-pipeline.ts', {
         stdin: groupPayload,
         cwd: wd.dir,
@@ -95,9 +95,50 @@ describe('channel-status-responder', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await run(wd, '  STATUS  ', stub.url);
+      const r = await run(wd, '  /STATUS  ', stub.url);
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  // The cutover: the word that used to answer deterministically now reaches the
+  // model like any other message.
+  test('bare "status" falls through to the model (no block, no send)', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const r = await run(wd, 'status', stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[status]');
+      expect(stub.requests.length).toBe(0);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('"/status@ourbot" is answered; "/status@otherbot" is not ours', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir({
+      channels: {
+        telegram: {
+          enabled: true, dm_channel_id: '12345', allowed_users: ['u1'],
+          state_dir: '.claude.local/channels/telegram', bot_username: 'ourbot',
+        },
+      },
+    });
+    try {
+      const mine = await run(wd, '/status@ourbot', stub.url);
+      expect(JSON.parse(mine.stdout.trim())).toMatchObject({ decision: 'block' });
+
+      const sent = stub.requests.length;
+      const theirs = await run(wd, '/status@otherbot', stub.url);
+      expect(theirs.exitCode).toBe(0);
+      expect(theirs.stdout).not.toContain('[status]');
+      expect(stub.requests.length).toBe(sent);
     } finally {
       stub.stop();
       wd.cleanup();
@@ -122,7 +163,7 @@ describe('channel-status-responder', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await run(wd, 'status', stub.url, 'not-allowed');
+      const r = await run(wd, '/status', stub.url, 'not-allowed');
       expect(r.exitCode).toBe(0);
       expect(r.stdout).not.toContain('[status]');
       expect(stub.requests.length).toBe(0);
@@ -138,7 +179,7 @@ describe('channel-status-responder', () => {
   test('failed send -> injects composed status for the model to relay (not a blind fallthrough)', async () => {
     const wd = setupChannelWorkdir();
     try {
-      const r = await run(wd, 'status', 'http://127.0.0.1:1'); // dead listener -> send fails
+      const r = await run(wd, '/status', 'http://127.0.0.1:1'); // dead listener -> send fails
       expect(r.exitCode).toBe(0);
       expect(r.stdout).not.toContain('"decision":"block"'); // not blocked — model turn proceeds
       expect(r.stdout).toContain('[status]');               // relay instruction emitted
@@ -154,7 +195,7 @@ describe('channel-status-responder', () => {
     const wd = setupChannelWorkdir();
     try {
       const r = await runScript('user-prompt-pipeline.ts', {
-        stdin: JSON.stringify({ prompt: 'status' }),
+        stdin: JSON.stringify({ prompt: '/status' }),
         cwd: wd.dir,
         env: { HERMIT_TELEGRAM_API_URL: stub.url },
       });
@@ -177,7 +218,7 @@ describe('channel-status-responder', () => {
     const wd = setupChannelWorkdir();
     try {
       fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'PROP-020 implementation' }));
-      await run(wd, 'status', stub.url);
+      await run(wd, '/status', stub.url);
       const sent = stub.requests[0].body.text as string;
       expect(sent).not.toMatch(/S-\d{3}/);
     } finally {
@@ -194,7 +235,7 @@ describe('channel-status-responder', () => {
       write(hermit(wd.dir, 'state', 'pause.json'), JSON.stringify({
         paused: true, paused_until: null, reason: 'operator', by: 'test', ts: new Date().toISOString(),
       }));
-      const r = await run(wd, 'status', stub.url);
+      const r = await run(wd, '/status', stub.url);
       expect(r.exitCode).toBe(0);
       expect(stub.requests[0].body.text).toContain('Paused');
     } finally {
@@ -210,7 +251,7 @@ describe('channel-status-responder', () => {
       write(hermit(wd.dir, 'state', 'micro-proposals.json'), JSON.stringify({
         pending: [{ id: 'MP-20260705-0', status: 'pending', tier: 1, question: 'ok?' }],
       }));
-      await run(wd, 'status', stub.url);
+      await run(wd, '/status', stub.url);
       expect(stub.requests[0].body.text).toContain('MP-20260705-0');
     } finally {
       stub.stop();
@@ -222,7 +263,7 @@ describe('channel-status-responder', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir({ budget: { daily_usd: 5, weekly_usd: null, monthly_usd: null, action: 'alert' } });
     try {
-      await run(wd, 'status', stub.url);
+      await run(wd, '/status', stub.url);
       expect(stub.requests[0].body.text).toContain('$5.00 cap');
     } finally {
       stub.stop();
@@ -234,7 +275,7 @@ describe('channel-status-responder', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      await run(wd, 'status', stub.url);
+      await run(wd, '/status', stub.url);
       expect(stub.requests[0].body.text).toContain('All quiet');
     } finally {
       stub.stop();
@@ -256,7 +297,7 @@ describe('channel-status-responder', () => {
       write(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ task: 'secret-migration', status: 'in_progress' }));
       write(hermit(wd.dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [{ id: 'MP-20260705-0', status: 'pending', tier: 1, question: 'ok?' }] }));
 
-      const stranger = JSON.stringify({ prompt: '<channel source="telegram" chat_id="999" user="stranger">status</channel>' });
+      const stranger = JSON.stringify({ prompt: '<channel source="telegram" chat_id="999" user="stranger">/status</channel>' });
       const r = await runScript('user-prompt-pipeline.ts', { stdin: stranger, cwd: wd.dir, env: { HERMIT_TELEGRAM_API_URL: stub.url } });
       expect(r.exitCode).toBe(0);
       const text = stub.requests[0].body.text;
@@ -279,7 +320,7 @@ describe('channel-status-responder', () => {
       const wd = setupChannelWorkdir({ language: 'português' });
       try {
         fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'o plano' }));
-        await run(wd, 'status', stub.url);
+        await run(wd, '/status', stub.url);
         expect(stub.requests[0].body.text).toContain('A trabalhar em o plano.');
       } finally {
         stub.stop();
@@ -295,7 +336,7 @@ describe('channel-status-responder', () => {
         write(hermit(wd.dir, 'state', 'pause.json'), JSON.stringify({
           paused: true, paused_until: null, reason: 'operator', by: 'test', ts: new Date().toISOString(),
         }));
-        await run(wd, 'status', stub.url);
+        await run(wd, '/status', stub.url);
         expect(stub.requests[0].body.text).toContain('Em pausa (o seu pedido) até que a retome.');
       } finally {
         stub.stop();
@@ -307,7 +348,7 @@ describe('channel-status-responder', () => {
       const stub = startHttpStub();
       const wd = setupChannelWorkdir({ language: 'português' });
       try {
-        await run(wd, 'status', stub.url);
+        await run(wd, '/status', stub.url);
         expect(stub.requests[0].body.text).toContain('Tudo calmo — nada em curso, nada à espera.');
       } finally {
         stub.stop();
@@ -323,7 +364,7 @@ describe('channel-status-responder', () => {
       });
       try {
         fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'segredo' }));
-        const stranger = JSON.stringify({ prompt: '<channel source="telegram" chat_id="999" user="stranger">status</channel>' });
+        const stranger = JSON.stringify({ prompt: '<channel source="telegram" chat_id="999" user="stranger">/status</channel>' });
         const r = await runScript('user-prompt-pipeline.ts', { stdin: stranger, cwd: wd.dir, env: { HERMIT_TELEGRAM_API_URL: stub.url } });
         expect(r.exitCode).toBe(0);
         const text = stub.requests[0].body.text as string;
@@ -345,7 +386,7 @@ describe('channel-status-responder', () => {
     const wd = setupChannelWorkdir();
     try {
       fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'writing the plan' }));
-      const qualified = JSON.stringify({ prompt: '<channel source="plugin:telegram:telegram" chat_id="12345" user="u1">status</channel>' });
+      const qualified = JSON.stringify({ prompt: '<channel source="plugin:telegram:telegram" chat_id="12345" user="u1">/status</channel>' });
       const r = await runScript('user-prompt-pipeline.ts', { stdin: qualified, cwd: wd.dir, env: { HERMIT_TELEGRAM_API_URL: stub.url } });
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
