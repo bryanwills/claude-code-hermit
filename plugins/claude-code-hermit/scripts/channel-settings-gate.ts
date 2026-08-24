@@ -148,7 +148,8 @@ function denyNeedsNonce(target: string, token: string): string {
     `message MUST name the exact change \`${target}\` in the operator's language AND carry the ` +
     `code \`${token}\` verbatim, so the operator can see what they are authorizing before echoing ` +
     'it; a code with no change named is not a valid ask. Quote the change exactly as shown here — ' +
-    'a value rendered as [set] is a credential and must stay redacted. Do not retry the setting ' +
+    'a value rendered as [set] or [cleared] is withheld deliberately and must stay that way. ' +
+    'Do not retry the setting ' +
     'in this turn: it applies only after the operator echoes the code back in a maintainer-chat ' +
     'message. The code expires in 10 minutes.'
   );
@@ -252,9 +253,12 @@ const AUTHORITY_KEYS = /^(operator_profile|settings_from_chat)(\..+)?$/;
  * re-applied on every restart, unattended, at whatever permission_mode is set.
  * That outlives a single `env` write, so it cannot sit a tier below one. Domain
  * hermits set it from the terminal at hatch, so the everyday path is untouched;
- * only a chat-originated change pays the second factor.
+ * only a chat-originated change pays the second factor. `shutdown_skill` is the
+ * same reach in the other direction — session-close invokes it as a skill
+ * command on every full close, the `--auto` one included — so it is pinned
+ * alongside its counterpart rather than left on the maintainer tier.
  */
-const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill)(\..+)?$/;
+const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill)(\..+)?$/;
 
 /**
  * A routine's `precheck` is an executable the routine monitor runs unattended at
@@ -443,9 +447,48 @@ function currentRoutines(): Json[] {
  * Two literals are a cheaper coupling than that indirection; if they ever need
  * to be one, the shared thing is a marker constant, not this function.
  */
+function stripQuotes(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, '');
+}
+
 function presenceOf(value: string): string {
-  const v = value.trim().replace(/^['"]|['"]$/g, '');
+  const v = stripQuotes(value);
   return v === '' || v === 'none' || v === 'clear' ? '[cleared]' : '[set]';
+}
+
+/**
+ * A bare integer is not a credential, and the env knobs this plugin ships and
+ * documents (`MAX_THINKING_TOKENS`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`) are all
+ * integers. Withholding those would cost the operator the only thing the ask is
+ * for — `=[set]` reads identically for `20000` and `200` — and buy nothing, since
+ * the redaction exists to keep secrets out of the chat, not numbers.
+ */
+const BARE_INTEGER = /^\d+$/;
+
+/**
+ * What the operator is shown for one write, with any value config-audit refuses
+ * to log withheld.
+ *
+ * A container write (`set env '{"A":"x"}'`) is expanded to one marker per key it
+ * sets: redacting it whole yields a bare `env=[set]`, which names no key at all
+ * and is therefore the very "code with no change named" the notice calls invalid.
+ */
+function displayFor(dotted: string, value: string): string {
+  if (!isSecretPath(dotted)) return `${dotted}=${value}`;
+  const bare = stripQuotes(value);
+  if (BARE_INTEGER.test(bare)) return `${dotted}=${bare}`;
+  let parsed: Json;
+  try {
+    parsed = JSON.parse(bare);
+  } catch {
+    return `${dotted}=${presenceOf(value)}`;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return `${dotted}=${presenceOf(value)}`;
+  }
+  const keys = Object.keys(parsed);
+  if (keys.length === 0) return `${dotted}=[cleared]`;
+  return keys.map((k) => `${dotted}.${k}=${presenceOf(String(parsed[k] ?? ''))}`).join(', ');
 }
 
 function protectedMutation(
@@ -507,12 +550,13 @@ function protectedMutation(
     const dotted = resolveTarget(verb, t);
     // Two labels, deliberately: `raw` carries the exact value and is only ever
     // hashed into the token binding; `shown` is what reaches the operator, the
-    // model's context and the on-disk record. They diverge exactly on the paths
+    // model's context and the on-disk record. They diverge on the paths
     // config-audit already refuses to log a value for — every `env.*` leaf plus
     // anything named like a credential — so a chat-set API key is confirmable
-    // without being repeated back anywhere.
+    // without being repeated back anywhere. See displayFor() for what survives
+    // that redaction and why.
     const raw = value ? `${dotted}=${value}` : dotted;
-    const shown = value && isSecretPath(dotted) ? `${dotted}=${presenceOf(value)}` : raw;
+    const shown = value ? displayFor(dotted, value) : dotted;
     if (STRICTNESS[v] > STRICTNESS[worst]) {
       worst = v;
       targets = [shown];

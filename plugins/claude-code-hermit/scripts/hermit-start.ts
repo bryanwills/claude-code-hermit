@@ -94,11 +94,20 @@ function resolveHookProfile(
   }
 
   let warning: string | null = null;
-  let profile = typeof raw === 'string' ? raw : fallback;
-  if (source !== 'default' && !(profile in PROFILE_LEVELS)) {
-    warning = `[hermit] Warning: invalid AGENT_HOOK_PROFILE=${String(raw)} from ${source}, using ${fallback}`;
-    profile = fallback;
-    source = 'default';
+  let profile = fallback;
+  if (source !== 'default') {
+    // Normalized the way the hooks themselves read it (hook-input.ts
+    // hookProfile()), so an ambient `Strict` resolves to strict rather than
+    // being rejected as invalid and silently demoted to the mode default. A
+    // non-string config value has no normalized form and so falls through to
+    // the warning, rather than being mislabelled as the mode default.
+    const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    if (normalized in PROFILE_LEVELS) {
+      profile = normalized;
+    } else {
+      warning = `[hermit] Warning: invalid AGENT_HOOK_PROFILE=${String(raw)} from ${source}, using ${fallback}`;
+      source = 'default';
+    }
   }
 
   // The always-on floor, applied to every source rather than only to config.

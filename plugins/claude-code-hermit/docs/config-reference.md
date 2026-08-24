@@ -54,7 +54,7 @@ Written to `.claude/settings.local.json` at boot by `hermit-start`. Exported to 
 | `AGENT_HOOK_PROFILE` | _(unset)_ | Hook profile: `minimal`, `standard`, `strict`. Not seeded into a new config — with nothing set, a managed (always-on/Docker) launch resolves `strict` and an interactive one `standard`. Set it here to override; an ambient value in the environment outranks it. A managed launch is floored at `standard`, so `minimal` is raised. Never written to `settings.local.json`. |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | `"65"` | Auto-compact at this % of context window. |
 | `MAX_THINKING_TOKENS` | `"10000"` | Cap on thinking tokens per turn. |
-Modify with `/hermit-settings env`.
+Modify with `/hermit-settings env` — except `AGENT_HOOK_PROFILE`, which that command refuses; edit `config.json` directly for it.
 
 `*_STATE_DIR` vars are **not** stored in `env` — `hermit-start` derives them from `channels.<name>.state_dir` at boot.
 

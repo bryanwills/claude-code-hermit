@@ -139,6 +139,13 @@ describe('channelVerdict — policy', () => {
     expect(channelVerdict('apply-known', 'boot-skill')).toBe('nonce');
   });
 
+  test('shutdown_skill matches its counterpart — session-close invokes it unattended', () => {
+    // Same reach as boot_skill in the other direction: `--auto` close fires it
+    // as a skill command with no operator in the loop, so leaving it on the
+    // maintainer tier would be the bypass boot_skill's tier exists to close.
+    expect(channelVerdict('set', 'shutdown_skill')).toBe('nonce');
+  });
+
   test('a routine precheck is nonce-tier — the monitor runs it unattended', () => {
     // Same class as monitors[].command: an executable named in config that a
     // subprocess runs with no classifier in front of it.
@@ -883,6 +890,56 @@ describe('channel-settings-gate — confirmation nonce', () => {
       'utf8'
     );
     expect(raw).not.toContain(secret);
+  });
+
+  test('a numeric env knob keeps its value — [set] would make the ask unreadable', async () => {
+    // `env.MAX_THINKING_TOKENS=[set]` reads identically for 20000 and 200, so a
+    // blanket redaction costs the operator the one thing the ask is for. A bare
+    // integer is not a credential, so it is shown.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('raise the thinking budget'),
+      configWithMaintainer()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set env.MAX_THINKING_TOKENS '"20000"'`,
+        },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('env.MAX_THINKING_TOKENS=20000');
+  });
+
+  test('a container write names every key it sets, not a bare env=[set]', async () => {
+    // Redacting the container whole names no key at all, which is exactly the
+    // "code with no change named" the notice itself declares invalid.
+    const secret = 'sk-live-oughtnevertoappear';
+    const { dir, transcript } = fixture(
+      maintainerPrompt('set the env block'),
+      configWithMaintainer()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set env '{"OPENAI_KEY":"${secret}","MAX_THINKING_TOKENS":"20000"}'`,
+        },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('env.OPENAI_KEY=[set]');
+    expect(r.stderr).toContain('env.MAX_THINKING_TOKENS=[set]');
+    expect(r.stderr).not.toContain(secret);
   });
 
   test('two different credentials under one path do not share a code', async () => {

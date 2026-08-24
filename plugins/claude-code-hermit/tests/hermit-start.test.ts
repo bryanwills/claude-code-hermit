@@ -890,6 +890,30 @@ describe('writeSettingsEnv', () => {
     expect(readSettings().env ?? {}).not.toContainKey('AGENT_HOOK_PROFILE');
   });
 
+  test('a capitalized ambient AGENT_HOOK_PROFILE resolves, it is not "invalid"', () => {
+    // The hooks lowercase before comparing (hook-input.ts hookProfile), so
+    // `Strict` really does run strict. Rejecting it here would have the banner
+    // report `standard (default)` for a session whose hooks are at strict.
+    writeConfig({});
+    const config = loadConfig();
+    process.env.AGENT_HOOK_PROFILE = 'Strict';
+    const { result, out } = captureLog(() => writeSettingsEnv(config));
+    expect(result).toEqual({ profile: 'strict', source: 'ambient' });
+    expect(out).not.toContain('invalid AGENT_HOOK_PROFILE');
+  });
+
+  test('a non-string config AGENT_HOOK_PROFILE warns instead of passing silently', () => {
+    // The old guard tested the already-substituted fallback, so a number never
+    // tripped it: no warning, and the banner credited `config` for a value
+    // config never held.
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 3 } });
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    const { result, out } = captureLog(() => writeSettingsEnv(config));
+    expect(result).toEqual({ profile: 'standard', source: 'default' });
+    expect(out).toContain('invalid AGENT_HOOK_PROFILE=3 from config');
+  });
+
   test('the resolved profile is returned so the launch banner can report it', () => {
     // Returned, not stashed in a module variable: the banner is printed from a
     // point in main() that runs BEFORE this function, so a side-channel global
