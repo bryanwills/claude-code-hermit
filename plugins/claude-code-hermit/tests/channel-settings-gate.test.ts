@@ -109,7 +109,6 @@ async function runGate(stdin: string, dir: string, env: Record<string, string> =
 describe('channelVerdict — policy', () => {
   test('the security tier is maintainer-chat territory in both spellings', () => {
     expect(channelVerdict('apply-known', 'remote')).toBe('maintainer');
-    expect(channelVerdict('apply-known', 'boot-skill')).toBe('maintainer');
     expect(channelVerdict('apply-known', 'escalation')).toBe('maintainer');
     expect(channelVerdict('apply-known', 'artifact-backend')).toBe('maintainer');
     expect(channelVerdict('set', 'docker.packages')).toBe('maintainer');
@@ -129,6 +128,22 @@ describe('channelVerdict — policy', () => {
     // shell command cannot sit a tier below permission_mode.
     expect(channelVerdict('set', 'monitors')).toBe('nonce');
     expect(channelVerdict('set', 'monitors.0.command')).toBe('nonce');
+  });
+
+  test('boot_skill is nonce-tier — it is the boot prompt of every session', () => {
+    // Not shell (hermit-start shlex-quotes it into an argv element), but it
+    // becomes standing instructions re-applied on every restart, unattended, at
+    // whatever permission_mode is configured — a longer-lived reach than an
+    // `env` write, so it cannot sit a tier below one.
+    expect(channelVerdict('set', 'boot_skill')).toBe('nonce');
+    expect(channelVerdict('apply-known', 'boot-skill')).toBe('nonce');
+  });
+
+  test('shutdown_skill matches its counterpart — session-close invokes it unattended', () => {
+    // Same reach as boot_skill in the other direction: `--auto` close fires it
+    // as a skill command with no operator in the loop, so leaving it on the
+    // maintainer tier would be the bypass boot_skill's tier exists to close.
+    expect(channelVerdict('set', 'shutdown_skill')).toBe('nonce');
   });
 
   test('a routine precheck is nonce-tier — the monitor runs it unattended', () => {
@@ -841,6 +856,154 @@ describe('channel-settings-gate — confirmation nonce', () => {
       ask.dir
     );
     expect(second.exitCode).toBe(0);
+  });
+
+  test('a credential is confirmable without ever being repeated back', async () => {
+    // config-audit already refuses to log any env.* value (isSecretPath). The
+    // ask has to hold the same line: before this split the raw value went into
+    // the deny reason (so, the model's context) AND settings-confirm.json on
+    // disk, where an unconfirmed ask left it indefinitely.
+    const secret = 'sk-live-oughtnevertoappear';
+    const { dir, transcript } = fixture(
+      maintainerPrompt('set the openai key'),
+      configWithMaintainer()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set env.OPENAI_KEY ${secret}`,
+        },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    // Named, so the operator knows what they are approving...
+    expect(r.stderr).toContain('env.OPENAI_KEY=[set]');
+    // ...but the value itself reaches neither the model nor the disk.
+    expect(r.stderr).not.toContain(secret);
+    const raw = fs.readFileSync(
+      path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json'),
+      'utf8'
+    );
+    expect(raw).not.toContain(secret);
+  });
+
+  test('a numeric env knob keeps its value — [set] would make the ask unreadable', async () => {
+    // `env.MAX_THINKING_TOKENS=[set]` reads identically for 20000 and 200, so a
+    // blanket redaction costs the operator the one thing the ask is for. A bare
+    // integer is not a credential, so it is shown.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('raise the thinking budget'),
+      configWithMaintainer()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set env.MAX_THINKING_TOKENS '"20000"'`,
+        },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('env.MAX_THINKING_TOKENS=20000');
+  });
+
+  test('a container write names every key it sets, not a bare env=[set]', async () => {
+    // Redacting the container whole names no key at all, which is exactly the
+    // "code with no change named" the notice itself declares invalid.
+    const secret = 'sk-live-oughtnevertoappear';
+    const { dir, transcript } = fixture(
+      maintainerPrompt('set the env block'),
+      configWithMaintainer()
+    );
+    const r = await runGate(
+      payload({
+        dir,
+        transcript,
+        tool: 'Bash',
+        input: {
+          command:
+            `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set env '{"OPENAI_KEY":"${secret}","MAX_THINKING_TOKENS":"20000"}'`,
+        },
+      }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('env.OPENAI_KEY=[set]');
+    expect(r.stderr).toContain('env.MAX_THINKING_TOKENS=[set]');
+    expect(r.stderr).not.toContain(secret);
+  });
+
+  test('two different credentials under one path do not share a code', async () => {
+    // The display collapses both to `env.OPENAI_KEY=[set]`, so identity has to
+    // come from the binding — otherwise a code issued for one key would apply
+    // the other, which is exactly the guarantee the value binding exists for.
+    const setKey = (v: string) =>
+      `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set env.OPENAI_KEY ${v}`;
+    const { dir, transcript } = fixture(
+      maintainerPrompt('set the openai key'),
+      configWithMaintainer()
+    );
+    await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: setKey('sk-live-first') } }),
+      dir
+    );
+    const token = pendingToken(dir);
+
+    fs.writeFileSync(
+      transcript,
+      [
+        triggerPrompt(maintainerPrompt('set the openai key')),
+        assistantEntry(),
+        triggerPrompt(maintainerPrompt(`confirming: ${token}`)),
+      ].join('\n') + '\n'
+    );
+    const swapped = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: setKey('sk-live-second') } }),
+      dir
+    );
+    expect(swapped.exitCode).toBe(2);
+  });
+
+  test('a pending record from before the binding split is not honored', async () => {
+    // Legacy records hold a raw `path=value` target and no binding. Reading one
+    // as absent retires it instead of letting it authorize anything.
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode'),
+      configWithMaintainer()
+    );
+    await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    const p = path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json');
+    const rec = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const token = rec.token;
+    delete rec.binding;
+    rec.target = 'permission_mode=bypassPermissions';
+    fs.writeFileSync(p, JSON.stringify(rec));
+
+    fs.writeFileSync(
+      transcript,
+      [
+        triggerPrompt(maintainerPrompt('switch permission mode')),
+        assistantEntry(),
+        triggerPrompt(maintainerPrompt(`confirming: ${token}`)),
+      ].join('\n') + '\n'
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
   });
 
   test('a retry before the echo reuses the code already sent', async () => {

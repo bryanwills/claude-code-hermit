@@ -14,8 +14,8 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 The **settings chat** below means the chat configured as `maintainer_channel_id` — or, on an operator-run install (`operator_profile: technical`) that never configured one, the hermit's own home chat. A configured maintainer chat turns that fallback off rather than widening it.
 
-- **Settings chat only** — `boot-skill`, `remote`, `escalation`, `docker`, `artifact-backend`, and anything not named below. Changeable from the settings chat (allowlist-checked), or from a terminal. From any other chat: view-only.
-- **Settings chat plus a confirmation code** — `permissions` (permission mode), `env`, and `monitors` (each entry carries a shell command). The gate issues a short code and denies the write; send that code to the settings chat and stop. It applies only after the operator echoes it back in a message from that same chat. Don't retry the setting in the same turn.
+- **Settings chat only** — `remote`, `escalation`, `docker`, `artifact-backend`, and anything not named below. Changeable from the settings chat (allowlist-checked), or from a terminal. From any other chat: view-only.
+- **Settings chat plus a confirmation code** — `permissions` (permission mode), `env`, `monitors` (each entry carries a shell command), `boot-skill` (standing instructions re-applied at every restart) and `shutdown_skill` (its counterpart, invoked on every full close). The gate issues a short code and denies the write. Send the settings chat a message that names **the exact change** and carries the code, then stop — a bare code asks the operator to approve something they can't see. Quote the change exactly as the gate showed it: a value rendered `[set]` or `[cleared]` is withheld deliberately and stays that way. It applies only after the operator echoes the code back from that same chat. Don't retry the setting in the same turn.
 - **Terminal only, from every chat including the settings one** — `allowed_users`, `briefing_chat`, the DM chat, `maintainer_channel_id` itself, `operator_profile`, `settings_from_chat`, and any channel operation that replaces a channel wholesale (add/remove/primary). Show the current value, say plainly it changes only from a terminal session with `/claude-code-hermit:hermit-settings <argument>`, and change nothing.
 - **Switched off entirely** — when `settings_from_chat` is `false`, every tier above the everyday settings is terminal-only on every chat, the settings chat included. Say so plainly and name the terminal command.
 
@@ -283,11 +283,14 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Environment Variables (config.json env → .claude/settings.local.json)
 
-    AGENT_HOOK_PROFILE              standard
     CLAUDE_AUTOCOMPACT_PCT_OVERRIDE 65
     MAX_THINKING_TOKENS             10000
+
+  Hook profile (process-scoped, not written to settings.local.json)
+
+    AGENT_HOOK_PROFILE              (unset → strict on an always-on launch)
   ```
-- **Protected keys** that cannot be changed via this command: `AGENT_HOOK_PROFILE`. These are managed by the boot script and docker-setup. If the operator tries to set one, respond: "AGENT_HOOK_PROFILE is managed by the boot script (standard for interactive, strict for Docker). To change it, edit config.json directly — the boot script validates on next start."
+- **Protected keys** that cannot be changed via this command: `AGENT_HOOK_PROFILE`. If the operator tries to set one, respond: "The hook profile is resolved at boot — unset means strict for an always-on launch and standard for an interactive one, and an ambient value from Docker compose outranks config. To pin it, edit `config.json` `env` directly; the boot script validates it and floors an always-on launch at standard on the next start."
 - Ask: "Set, change, or remove an env var? (e.g., 'MAX_THINKING_TOKENS 20000', 'remove MAX_THINKING_TOKENS', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - If input targets a protected key: reject with the message above

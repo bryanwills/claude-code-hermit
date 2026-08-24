@@ -365,13 +365,15 @@ config.json "env"  →  hermit-start.ts  →  .claude/settings.local.json "env" 
 ```
 
 1. Operator configures env vars in `config.json` `env` (or via `/hermit-settings env`)
-2. `hermit-start.ts` writes all `config["env"]` values into `.claude/settings.local.json` `env`
+2. `hermit-start.ts` writes `config["env"]` values into `.claude/settings.local.json` `env` — except `AGENT_HOOK_PROFILE`, which is process-scoped (Bucket B below) and is stripped from that file so a hand-launched `claude` in the same project never inherits the managed session's profile
 3. Claude Code reads `settings.local.json` and exports `env` values to hooks and Bash tool calls
 4. For vars that MCP servers need (`*_STATE_DIR`), `hermit-start.ts` also forwards them as OS env vars (tmux temp file or Docker compose `environment:`) — MCP servers are separate processes that inherit shell env but do NOT read `settings.local.json`
 
 **Bucket A (shell env only):** `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY` — must be in shell env before `claude` starts. Forwarded via temp file in tmux, or Docker `environment:`. OAuth credentials live in `.credentials.json` (written by `claude /login`), not in env vars.
 
-**Bucket B (settings.local.json only):** `AGENT_HOOK_PROFILE`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `MAX_THINKING_TOKENS` — consumed by hooks and Claude Code itself.
+**Bucket B (settings.local.json only):** `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `MAX_THINKING_TOKENS` — consumed by hooks and Claude Code itself.
+
+**Bucket B′ (process env only, never persisted):** `AGENT_HOOK_PROFILE` — resolved per launch by `hermit-start` and delivered through the tmux env file (sourced then deleted) or the Docker compose `environment:` block. Deliberately stripped from `settings.local.json`, which is shared between host and container and read by every `claude` in the project: persisting it would hand a hand-launched interactive session the managed hermit's profile.
 
 **Bucket C (derived at boot, written to both):** `DISCORD_STATE_DIR`, `TELEGRAM_STATE_DIR` — derived by `hermit-start` from `channels.<name>.state_dir` in config.json (relative paths resolved against project root), or from `.claude.local/channels/<name>` on a bare-host boot when that key is absent. Written to `settings.local.json` for hooks and forwarded into the tmux shell env (or Docker compose `environment:`) for MCP servers (channel plugins), which inherit shell env but don't read `settings.local.json`.
 
@@ -381,7 +383,7 @@ config.json "env"  →  hermit-start.ts  →  .claude/settings.local.json "env" 
 | --------------------------------- | ---------- | -------------------------------------------------- |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | `65`       | Auto-compact at 65% context                        |
 | `MAX_THINKING_TOKENS`             | `10000`    | Cap thinking budget                                |
-| `AGENT_HOOK_PROFILE`              | `standard` | Active hook profile                                |
+| `AGENT_HOOK_PROFILE`              | _(unset)_  | Active hook profile. Not seeded — absence means "no preference", which resolves to `strict` on a managed launch and `standard` on an interactive one |
 | `DISCORD_STATE_DIR`               | (derived)  | Explicit channel path or bare-host project default |
 | `TELEGRAM_STATE_DIR`              | (derived)  | Explicit channel path or bare-host project default |
 

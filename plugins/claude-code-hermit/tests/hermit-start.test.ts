@@ -876,31 +876,144 @@ describe('writeSettingsEnv', () => {
     expect(stateDirEnv('DISCORD')).toBe('/container/state/discord');
   });
 
-  test('invalid AGENT_HOOK_PROFILE defaults to standard in process env', () => {
+  test('invalid AGENT_HOOK_PROFILE falls back to the mode default', () => {
+    // Fails safe per mode rather than to one global value: a garbled managed
+    // launch must not quietly end up weaker than a clean one.
     writeConfig({ env: { AGENT_HOOK_PROFILE: 'garbage' } });
     const config = loadConfig();
     delete process.env.AGENT_HOOK_PROFILE;
     captureLog(() => writeSettingsEnv(config));
     expect(profileEnv()).toBe('standard');
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('strict');
     expect(readSettings().env ?? {}).not.toContainKey('AGENT_HOOK_PROFILE');
   });
 
-  test('always_on forces minimal profile up to standard in process env', () => {
-    writeConfig({ always_on: true, env: { AGENT_HOOK_PROFILE: 'minimal' } });
+  test('a capitalized ambient AGENT_HOOK_PROFILE resolves, it is not "invalid"', () => {
+    // The hooks lowercase before comparing (hook-input.ts hookProfile), so
+    // `Strict` really does run strict. Rejecting it here would have the banner
+    // report `standard (default)` for a session whose hooks are at strict.
+    writeConfig({});
     const config = loadConfig();
-    expect(config.always_on).toBe(true);
+    process.env.AGENT_HOOK_PROFILE = 'Strict';
+    const { result, out } = captureLog(() => writeSettingsEnv(config));
+    expect(result).toEqual({ profile: 'strict', source: 'ambient' });
+    expect(out).not.toContain('invalid AGENT_HOOK_PROFILE');
+  });
+
+  test('a non-string config AGENT_HOOK_PROFILE warns instead of passing silently', () => {
+    // The old guard tested the already-substituted fallback, so a number never
+    // tripped it: no warning, and the banner credited `config` for a value
+    // config never held.
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 3 } });
+    const config = loadConfig();
     delete process.env.AGENT_HOOK_PROFILE;
-    captureLog(() => writeSettingsEnv(config));
+    const { result, out } = captureLog(() => writeSettingsEnv(config));
+    expect(result).toEqual({ profile: 'standard', source: 'default' });
+    expect(out).toContain('invalid AGENT_HOOK_PROFILE=3 from config');
+  });
+
+  test('the resolved profile is returned so the launch banner can report it', () => {
+    // Returned, not stashed in a module variable: the banner is printed from a
+    // point in main() that runs BEFORE this function, so a side-channel global
+    // is read while still unset and the line silently never appears.
+    writeConfig({});
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    let out: { profile: string; source: string } | undefined;
+    captureLog(() => {
+      out = writeSettingsEnv(config, 'tmux');
+    });
+    expect(out).toEqual({ profile: 'strict', source: 'default' });
+
+    process.env.AGENT_HOOK_PROFILE = 'standard';
+    captureLog(() => {
+      out = writeSettingsEnv(config, 'tmux');
+    });
+    expect(out).toEqual({ profile: 'standard', source: 'ambient' });
+  });
+
+  test('a managed launch with nothing configured defaults to strict', () => {
+    // The parity fix: a tmux always-on hermit gets what a Docker one always had.
+    // Neither the template nor DEFAULT_CONFIG seeds a profile any more, so this
+    // is the shape a freshly hatched hermit actually boots with.
+    writeConfig({});
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('strict');
+  });
+
+  test('an interactive launch with nothing configured stays standard', () => {
+    writeConfig({});
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config, 'interactive'));
+    expect(profileEnv()).toBe('standard');
+  });
+
+  test('a first tmux boot resolves strict even with always_on still false on disk', () => {
+    // config.always_on is not written until the end of the boot, so a hermit on
+    // its first managed launch has `false` on disk while it is starting. Keying
+    // the profile on the launch mode is what makes that boot match every later
+    // one instead of running a weaker profile exactly once.
+    writeConfig({ always_on: false });
+    const config = loadConfig();
+    expect(config.always_on).toBe(false);
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('strict');
+  });
+
+  test('an explicit config profile is honored on a managed launch', () => {
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 'standard' } });
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('standard');
+  });
+
+  test('an ambient profile outranks config, and is itself validated and floored', () => {
+    // Ambient is the deployment speaking (Docker compose, or a one-off env
+    // prefix) so it wins over a committed config value. Before this it won by
+    // accident: the resolved value was only written when process.env was empty,
+    // so an ambient `minimal` or typo bypassed validation and the floor and
+    // silently became the session's real profile.
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 'standard' } });
+    const config = loadConfig();
+
+    process.env.AGENT_HOOK_PROFILE = 'strict';
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('strict');
+
+    process.env.AGENT_HOOK_PROFILE = 'minimal';
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('standard'); // floored, not passed through
+
+    process.env.AGENT_HOOK_PROFILE = 'nonsense';
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
+    expect(profileEnv()).toBe('strict'); // mode default, not the raw value
+  });
+
+  // The floor keys on the LAUNCH, not on config.always_on: that flag is not
+  // written until long after the profile is resolved, so a first tmux boot after
+  // hatch would read last boot's answer. These pass the mode explicitly and no
+  // longer set always_on, which no longer participates in the decision.
+  test('a managed launch forces minimal profile up to standard in process env', () => {
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 'minimal' } });
+    const config = loadConfig();
+    delete process.env.AGENT_HOOK_PROFILE;
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
     expect(profileEnv()).toBe('standard');
     expect(readSettings().env ?? {}).not.toContainKey('AGENT_HOOK_PROFILE');
   });
 
-  test('always_on does not downgrade strict to standard (floor, not ceiling)', () => {
-    writeConfig({ always_on: true, env: { AGENT_HOOK_PROFILE: 'strict' } });
+  test('a managed launch does not downgrade strict to standard (floor, not ceiling)', () => {
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 'strict' } });
     const config = loadConfig();
-    expect(config.always_on).toBe(true);
     delete process.env.AGENT_HOOK_PROFILE;
-    captureLog(() => writeSettingsEnv(config));
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
     expect(profileEnv()).toBe('strict');
     expect(readSettings().env ?? {}).not.toContainKey('AGENT_HOOK_PROFILE');
   });
@@ -945,10 +1058,10 @@ describe('writeSettingsEnv', () => {
   // deny patterns off.
   test('malformed settings.local.json still exports the hook profile', () => {
     fs.writeFileSync('.claude/settings.local.json', '{ "env": { oops }');
-    writeConfig({ always_on: true, env: { AGENT_HOOK_PROFILE: 'strict' } });
+    writeConfig({ env: { AGENT_HOOK_PROFILE: 'strict' } });
     const config = loadConfig();
     delete process.env.AGENT_HOOK_PROFILE;
-    captureLog(() => writeSettingsEnv(config));
+    captureLog(() => writeSettingsEnv(config, 'tmux'));
     expect(profileEnv()).toBe('strict');
     expect(fs.readFileSync('.claude/settings.local.json', 'utf-8')).toBe('{ "env": { oops }');
   });

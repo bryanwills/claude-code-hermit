@@ -73,7 +73,8 @@ import { isSettingsController, isTrustedController } from './lib/channel-auth';
 import { readConfigRaw } from './lib/config-read';
 import { byArg } from './lib/settings/registry';
 import { runHook } from './lib/hook-input';
-import { readPending, writePending, clearPending, newToken, bodyEchoesToken } from './lib/settings-confirm';
+import { readPending, writePending, clearPending, newToken, bodyEchoesToken, bindingFor } from './lib/settings-confirm';
+import { isSecretPath } from './lib/config-audit';
 
 // Same window channel-hook.ts uses: enough to hold a turn, cheap to read.
 const TAIL_BYTES = 512 * 1024;
@@ -129,14 +130,28 @@ const DENY_SETTINGS_FROM_CHAT_OFF =
   '`/claude-code-hermit:hermit-settings <argument>` as the terminal command, and carry on with ' +
   'anything else that was asked.';
 
+// The operator-facing notice must carry the CHANGE as well as the code. The
+// token is bound to the exact mutation on disk, so a mismatched retry is
+// rejected either way — but the operator only ever sees what this turn chooses
+// to send them, and a bare code asks them to authorize something they cannot
+// name. Spelling the target into the notice is what makes the echo an informed
+// second factor rather than a reflex.
+//
+// `target` is already the redacted display (protectedMutation), so quoting it
+// verbatim can never move a credential into the chat.
 function denyNeedsNonce(target: string, token: string): string {
   return (
     `Second factor required for \`${target}\`. This setting reaches what the session may execute, ` +
-    'so the maintainer chat alone does not authorize it. Send exactly this confirmation code to ' +
-    `the maintainer chat now — \`.claude-code-hermit/bin/hermit-run channel-send ` +
-    `.claude-code-hermit --notice\` with {"maintainer": "...${token}..."} on stdin — then stop and ` +
-    'wait. Do not retry the setting in this turn: it applies only after the operator echoes the ' +
-    `code back in a maintainer-chat message. The code expires in 10 minutes.`
+    'so the maintainer chat alone does not authorize it. Send a confirmation request to the ' +
+    `maintainer chat now — \`.claude-code-hermit/bin/hermit-run channel-send ` +
+    `.claude-code-hermit --notice\` with {"maintainer": "..."} on stdin — then stop and wait. That ` +
+    `message MUST name the exact change \`${target}\` in the operator's language AND carry the ` +
+    `code \`${token}\` verbatim, so the operator can see what they are authorizing before echoing ` +
+    'it; a code with no change named is not a valid ask. Quote the change exactly as shown here — ' +
+    'a value rendered as [set] or [cleared] is withheld deliberately and must stay that way. ' +
+    'Do not retry the setting ' +
+    'in this turn: it applies only after the operator echoes the code back in a maintainer-chat ' +
+    'message. The code expires in 10 minutes.'
   );
 }
 
@@ -227,12 +242,23 @@ const AUTHORITY_KEYS = /^(operator_profile|settings_from_chat)(\..+)?$/;
  * `monitors[]` entry carries a `command` string the `watch` skill registers as
  * a Monitor subprocess at session start (validate-config.ts requires it) — a
  * config-declared shell command is at least as execution-adjacent as either of
- * the other two, so it cannot sit a tier below them. All three stay behind the
+ * the other two, so it cannot sit a tier below them. All stay behind the
  * confirmation nonce even from the maintainer chat — see lib/settings-confirm.ts
  * for what that second factor is worth. Each matches as both the whole
  * container and any leaf, because replacing the container is the broader write.
+ *
+ * `boot_skill` joins them on persistence rather than on reach. It is not shell
+ * (hermit-start shlex-quotes it into an argv element), but it becomes the boot
+ * *prompt* of every session the hermit starts — arbitrary standing instructions,
+ * re-applied on every restart, unattended, at whatever permission_mode is set.
+ * That outlives a single `env` write, so it cannot sit a tier below one. Domain
+ * hermits set it from the terminal at hatch, so the everyday path is untouched;
+ * only a chat-originated change pays the second factor. `shutdown_skill` is the
+ * same reach in the other direction — session-close invokes it as a skill
+ * command on every full close, the `--auto` one included — so it is pinned
+ * alongside its counterpart rather than left on the maintainer tier.
  */
-const NONCE_REQUIRED = /^(permission_mode|env|monitors)(\..+)?$/;
+const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill)(\..+)?$/;
 
 /**
  * A routine's `precheck` is an executable the routine monitor runs unattended at
@@ -409,11 +435,69 @@ function currentRoutines(): Json[] {
  * permission_mode bypassPermissions`), and a leading safe write must not
  * launder a protected one behind it.
  */
-function protectedMutation(command: string): { verdict: Verdict; target: string } | null {
+/**
+ * Display stand-in for a credential value — what it became, never what it was.
+ *
+ * Uses the same two words as the audit ledger's own marker (`presence` in
+ * lib/config-audit.ts) so a settings-history line and a confirmation ask read
+ * alike, but deliberately does not import it: that helper is ledger formatting,
+ * keyed on null/undefined/empty, and reaching it from here would mean mapping
+ * `'none'`/`'clear'` — settings-edit's spellings for a null write — onto an
+ * empty string first, which hides the decision this function exists to make.
+ * Two literals are a cheaper coupling than that indirection; if they ever need
+ * to be one, the shared thing is a marker constant, not this function.
+ */
+function stripQuotes(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, '');
+}
+
+function presenceOf(value: string): string {
+  const v = stripQuotes(value);
+  return v === '' || v === 'none' || v === 'clear' ? '[cleared]' : '[set]';
+}
+
+/**
+ * A bare integer is not a credential, and the env knobs this plugin ships and
+ * documents (`MAX_THINKING_TOKENS`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`) are all
+ * integers. Withholding those would cost the operator the only thing the ask is
+ * for — `=[set]` reads identically for `20000` and `200` — and buy nothing, since
+ * the redaction exists to keep secrets out of the chat, not numbers.
+ */
+const BARE_INTEGER = /^\d+$/;
+
+/**
+ * What the operator is shown for one write, with any value config-audit refuses
+ * to log withheld.
+ *
+ * A container write (`set env '{"A":"x"}'`) is expanded to one marker per key it
+ * sets: redacting it whole yields a bare `env=[set]`, which names no key at all
+ * and is therefore the very "code with no change named" the notice calls invalid.
+ */
+function displayFor(dotted: string, value: string): string {
+  if (!isSecretPath(dotted)) return `${dotted}=${value}`;
+  const bare = stripQuotes(value);
+  if (BARE_INTEGER.test(bare)) return `${dotted}=${bare}`;
+  let parsed: Json;
+  try {
+    parsed = JSON.parse(bare);
+  } catch {
+    return `${dotted}=${presenceOf(value)}`;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return `${dotted}=${presenceOf(value)}`;
+  }
+  const keys = Object.keys(parsed);
+  if (keys.length === 0) return `${dotted}=[cleared]`;
+  return keys.map((k) => `${dotted}.${k}=${presenceOf(String(parsed[k] ?? ''))}`).join(', ');
+}
+
+function protectedMutation(
+  command: string,
+): { verdict: Verdict; target: string; binding: string } | null {
   // An opaque write of the whole file can replace the enrollment root, so it
   // takes the strictest tier regardless of what it happens to contain.
   if (/>\s*\S*\.claude-code-hermit\/config\.json/.test(command)) {
-    return { verdict: 'terminal-only', target: 'config.json' };
+    return { verdict: 'terminal-only', target: 'config.json', binding: bindingFor('config.json') };
   }
 
   // The value alternation accepts a quoted argument before the bare-word form: a
@@ -442,6 +526,7 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
 
   let worst: Verdict = 'allowed';
   let targets: string[] = [];
+  let rawTargets: string[] = [];
   let sawWrite = false;
   for (const m of matches) {
     const verb = m[2];
@@ -462,12 +547,26 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
         && precheckSetChanged(value, currentRoutines())) {
       v = 'nonce';
     }
-    const label = value ? `${resolveTarget(verb, t)}=${value}` : resolveTarget(verb, t);
+    const dotted = resolveTarget(verb, t);
+    // Two labels, deliberately: `raw` carries the exact value and is only ever
+    // hashed into the token binding; `shown` is what reaches the operator, the
+    // model's context and the on-disk record. They diverge on the paths
+    // config-audit already refuses to log a value for — every `env.*` leaf plus
+    // anything named like a credential — so a chat-set API key is confirmable
+    // without being repeated back anywhere. See displayFor() for what survives
+    // that redaction and why.
+    const raw = value ? `${dotted}=${value}` : dotted;
+    const shown = value ? displayFor(dotted, value) : dotted;
     if (STRICTNESS[v] > STRICTNESS[worst]) {
       worst = v;
-      targets = [label];
-    } else if (v === worst && !targets.includes(label)) {
-      targets.push(label);
+      targets = [shown];
+      rawTargets = [raw];
+    } else if (v === worst) {
+      if (!targets.includes(shown)) targets.push(shown);
+      // Tracked separately from `targets`: two different secrets under one path
+      // collapse to the same `shown` string, and deduping the binding on the
+      // display would let a token issued for one apply to the other.
+      if (!rawTargets.includes(raw)) rawTargets.push(raw);
     }
   }
   // Safe-tier writes are returned too, not swallowed: `allowed` means "any
@@ -475,7 +574,11 @@ function protectedMutation(command: string): { verdict: Verdict; target: string 
   // own chat. Only a command with no write at all is none of the gate's
   // business.
   if (!sawWrite) return null;
-  return { verdict: worst, target: targets.sort().join(', ') };
+  return {
+    verdict: worst,
+    target: targets.sort().join(', '),
+    binding: bindingFor(rawTargets.sort().join(', ')),
+  };
 }
 
 /**
@@ -508,15 +611,18 @@ function main(payload: any): void {
   // and Write, and almost none of them are settings mutations. Same
   // cheap-checks-first ordering as ask-gate.ts.
   const input = payload?.tool_input ?? {};
-  let mutation: { verdict: Verdict; target: string } | null = null;
+  let mutation: { verdict: Verdict; target: string; binding: string } | null = null;
 
   if (tool === 'Bash') {
     mutation = protectedMutation(typeof input.command === 'string' ? input.command : '');
   } else {
     const fp = typeof input.file_path === 'string' ? input.file_path : '';
     // Edit/Write of config.json is opaque here — it can rewrite the enrollment
-    // root, so it takes the strictest tier.
-    mutation = targetsConfigFile(fp) ? { verdict: 'terminal-only', target: 'config.json' } : null;
+    // root, so it takes the strictest tier. The binding is carried for the type
+    // only: terminal-only denies before any token is ever issued.
+    mutation = targetsConfigFile(fp)
+      ? { verdict: 'terminal-only', target: 'config.json', binding: bindingFor('config.json') }
+      : null;
   }
 
   if (!mutation) return; // not a protected mutation (or not a settings call at all)
@@ -583,8 +689,11 @@ function main(payload: any): void {
   // bound to one target and one chat, single-use, and matched only against the
   // harness-written envelope body — never the model's own tool call.
   const pending = readPending(dir);
+  // Identity is the BINDING, never the display: a redacted `env.X=[set]` is the
+  // same string for every value of X, so comparing displays would let a code
+  // issued for one credential apply a different one.
   const sameAsk =
-    pending?.target === mutation.target &&
+    pending?.binding === mutation.binding &&
     pending?.sourceKey === envelope.sourceKey &&
     pending?.chatId === envelope.chatId;
 
@@ -603,6 +712,7 @@ function main(payload: any): void {
   writePending(dir, {
     token,
     target: mutation.target,
+    binding: mutation.binding,
     sourceKey: envelope.sourceKey,
     chatId: envelope.chatId,
     userId: envelope.userId,

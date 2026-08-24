@@ -36,6 +36,92 @@ type Json = any;
 const CONFIG_PATH = '.claude-code-hermit/config.json';
 const PROFILE_LEVELS: Record<string, number> = { minimal: 0, standard: 1, strict: 2 };
 
+/**
+ * Which launch this is. Decided once at `main()` from the tmux flag and tmux's
+ * availability, and passed down rather than re-derived — `config.always_on` is
+ * not written until much later in the boot, so anything reading that flag to
+ * decide launch behavior gets last boot's answer on a first run.
+ */
+type BootMode = 'interactive' | 'tmux';
+
+/**
+ * The hook profile a launch gets when nobody has said otherwise.
+ *
+ * A managed (tmux) hermit runs unattended, so it defaults to `strict` — that is
+ * what makes the config.json / OPERATOR.md / settings guards in
+ * deny-patterns.json actually enforce, and it is what a Docker hermit has always
+ * had via its compose environment block. An interactive launch stays `standard`:
+ * the operator is present, and the strict set is scoped to the unattended
+ * session by design — the native `permissions.deny` list is the one that reaches
+ * an operator's own sessions, which is why the two legitimately differ.
+ */
+function defaultProfileFor(bootMode: BootMode): string {
+  return bootMode === 'tmux' ? 'strict' : 'standard';
+}
+
+/**
+ * Resolve the hook profile for this launch, and say where it came from.
+ *
+ * Precedence is ambient > config > mode default. Ambient wins because it is the
+ * deployment speaking (Docker's compose block, or an operator's one-off
+ * `AGENT_HOOK_PROFILE=… hermit-start`), which is more specific than a value
+ * committed to config.json.
+ *
+ * Every source is validated and floored the same way. That is a change: the old
+ * code computed a profile, then only wrote it to `process.env` when nothing was
+ * already there — so an ambient `minimal`, or an ambient typo, bypassed both the
+ * validation and the "non-negotiable" always-on floor entirely and became what
+ * the session actually ran at. An invalid value falls back to the mode default
+ * rather than the global one, so a garbled managed launch fails safe (strict)
+ * instead of quietly weakening itself.
+ */
+function resolveHookProfile(
+  config: Json,
+  bootMode: BootMode,
+): { profile: string; source: 'ambient' | 'config' | 'default'; warning: string | null } {
+  const fallback = defaultProfileFor(bootMode);
+  const ambient = process.env.AGENT_HOOK_PROFILE;
+  const configured = (config?.env ?? {}).AGENT_HOOK_PROFILE;
+
+  let source: 'ambient' | 'config' | 'default' = 'default';
+  let raw: unknown = undefined;
+  if (ambient !== undefined && ambient !== '') {
+    source = 'ambient';
+    raw = ambient;
+  } else if (configured !== undefined && configured !== null && configured !== '') {
+    source = 'config';
+    raw = configured;
+  }
+
+  let warning: string | null = null;
+  let profile = fallback;
+  if (source !== 'default') {
+    // Normalized the way the hooks themselves read it (hook-input.ts
+    // hookProfile()), so an ambient `Strict` resolves to strict rather than
+    // being rejected as invalid and silently demoted to the mode default. A
+    // non-string config value has no normalized form and so falls through to
+    // the warning, rather than being mislabelled as the mode default.
+    const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    if (normalized in PROFILE_LEVELS) {
+      profile = normalized;
+    } else {
+      warning = `[hermit] Warning: invalid AGENT_HOOK_PROFILE=${String(raw)} from ${source}, using ${fallback}`;
+      source = 'default';
+    }
+  }
+
+  // The always-on floor, applied to every source rather than only to config.
+  if (bootMode === 'tmux') {
+    const floor = 'standard'; // non-negotiable minimum for a managed session
+    if (PROFILE_LEVELS[profile] < PROFILE_LEVELS[floor]) {
+      warning = `[hermit] Warning: AGENT_HOOK_PROFILE=${profile} below always-on floor, forcing to ${floor}`;
+      profile = floor;
+    }
+  }
+
+  return { profile, source, warning };
+}
+
 const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..');
 
 const DEFAULT_CONFIG: Json = {
@@ -68,8 +154,11 @@ const DEFAULT_CONFIG: Json = {
     { id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor --maintainer', model: 'haiku', run_during_waiting: true, enabled: true, precheck: 'doctor', precheck_timeout_s: 120 },
   ],
   monitors: [],
+  // No AGENT_HOOK_PROFILE here, and none in config.json.template either. Its
+  // absence is the signal that the operator has expressed no preference, which
+  // is what lets writeSettingsEnv default a managed launch to `strict`. Seeding
+  // it would make every hermit look like it had chosen `standard` deliberately.
   env: {
-    AGENT_HOOK_PROFILE: 'standard',
     CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '65',
     MAX_THINKING_TOKENS: '10000',
   },
@@ -692,7 +781,16 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
  * they must be in the shell env before claude launches. OAuth credentials
  * live in .credentials.json (written by `claude /login`).
  */
-function writeSettingsEnv(config: Json): void {
+/**
+ * Returns the resolved hook profile so the caller can report it. Returned rather
+ * than stashed in a module variable: the launch banner is printed before this
+ * runs, so a side-channel global is read while still unset and the line never
+ * appears.
+ */
+function writeSettingsEnv(
+  config: Json,
+  bootMode: BootMode = 'interactive',
+): { profile: string; source: string } {
   const settingsPath = '.claude/settings.local.json';
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
 
@@ -726,23 +824,13 @@ function writeSettingsEnv(config: Json): void {
   // AGENT_HOOK_PROFILE is process-scoped: forwarded via tmux env file or
   // docker-compose environment block. NOT written to settings.local.json,
   // which is shared between container and host via bind mount.
-  let profile = envVars.AGENT_HOOK_PROFILE;
   delete envVars.AGENT_HOOK_PROFILE;
-  profile = profile || (process.env.AGENT_HOOK_PROFILE ?? 'standard');
-  if (!(profile in PROFILE_LEVELS)) {
-    console.log(`[hermit] Warning: invalid AGENT_HOOK_PROFILE=${profile}, defaulting to standard`);
-    profile = 'standard';
-  }
-  if (pyTruthy(config.always_on)) {
-    const floor = 'standard'; // non-negotiable minimum for always-on
-    if (PROFILE_LEVELS[profile] < PROFILE_LEVELS[floor]) {
-      console.log(
-        `[hermit] Warning: AGENT_HOOK_PROFILE=${profile} below always-on floor, forcing to ${floor}`,
-      );
-      profile = floor;
-    }
-  }
-  if (process.env.AGENT_HOOK_PROFILE === undefined) process.env.AGENT_HOOK_PROFILE = profile;
+  const resolved = resolveHookProfile(config, bootMode);
+  if (resolved.warning) console.log(resolved.warning);
+  // Assigned unconditionally. The old `=== undefined` guard meant an ambient
+  // value was never re-written, so it escaped validation and the floor above and
+  // became the session's real profile whatever it said.
+  process.env.AGENT_HOOK_PROFILE = resolved.profile;
 
   if (pyTruthy(envVars)) {
     Object.assign(settings.env, envVars);
@@ -848,13 +936,20 @@ function writeSettingsEnv(config: Json): void {
   if (mirroredLanguage) settings.language = mirroredLanguage;
   else delete settings.language;
 
-  if (skipWrite) return; // malformed file — warned above, left byte-for-byte intact
+  // Malformed file — warned above, left byte-for-byte intact. The profile is
+  // still resolved and exported, so a bad settings file cannot silently drop the
+  // session to a weaker set of deny patterns.
+  if (skipWrite) return { profile: resolved.profile, source: resolved.source };
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 
   if (pyTruthy(envVars)) {
     console.log(`[hermit] Env: ${Object.keys(envVars).length} vars written to .claude/settings.local.json`);
   }
+
+  // Narrowed to the declared shape: `warning` is already consumed above, and
+  // handing it back would let a caller print it a second time.
+  return { profile: resolved.profile, source: resolved.source };
 }
 
 /**
@@ -994,7 +1089,7 @@ export function dockerHermitRunning(): boolean {
  * liveness signal. Skipped inside a container (the entrypoint owns that guard)
  * and when HERMIT_FORCE_BOOT=1 (split-state recovery).
  */
-export function shouldRefuseBoot(bootMode: 'tmux' | 'interactive'): string[] | null {
+export function shouldRefuseBoot(bootMode: BootMode): string[] | null {
   if (isContainer() || process.env.HERMIT_FORCE_BOOT === '1') return null;
   if (dockerHermitRunning()) {
     return [
@@ -1020,7 +1115,7 @@ export function shouldRefuseBoot(bootMode: 'tmux' | 'interactive'): string[] | n
   return null;
 }
 
-function refuseIfAnotherInstanceAlive(bootMode: 'tmux' | 'interactive'): void {
+function refuseIfAnotherInstanceAlive(bootMode: BootMode): void {
   const reason = shouldRefuseBoot(bootMode);
   if (reason) {
     for (const line of reason) console.log(`[hermit] ${line}`);
@@ -1160,7 +1255,11 @@ async function main(): Promise<void> {
   console.log(`[hermit] Chrome: ${pyTruthy(config.chrome) ? 'enabled' : 'disabled'}`);
   console.log(`[hermit] Permissions: ${config.permission_mode || 'auto'}`);
 
-  writeSettingsEnv(config);
+  const hookProfile = writeSettingsEnv(config, bootMode);
+  // Named at launch because it decides which deny patterns enforce, and a hermit
+  // that silently resolved a weaker profile than the operator expected is
+  // otherwise invisible until something gets through that should not have.
+  console.log(`[hermit] Hook profile: ${hookProfile.profile} (${hookProfile.source})`);
   applyArtifactGrant(config);
 
   if (noTmuxFlag || !pyTruthy(tools.tmux)) {
