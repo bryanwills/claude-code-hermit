@@ -179,13 +179,15 @@ describe('sealed registries', () => {
   });
 });
 
-// The ad-hoc model-invoked routes. Their `bun */scripts/<name>.ts` twins are
+// Literal-path resolver grants. Their `bun */scripts/<name>.ts` twins are
 // wildcarded-interpreter rules, which auto mode suspends — so on the fleet's
-// default permission mode these literal-path entries are the only pre-resolved
-// path to the scripts a model reaches for mid-session rather than from a
-// skill's verbatim command block.
-describe('ad-hoc hermit-run grants', () => {
-  const AD_HOC = [
+// default permission mode these entries are the only pre-resolved path to the
+// scripts behind them. The first three are reached ad hoc mid-session; the
+// `rc-server` four are reached through the rc-gate skill, which the operator
+// invokes (it carries `disable-model-invocation`) — the grant is still needed,
+// because the classifier judges the Bash call regardless of what reached it.
+describe('literal-path hermit-run grants', () => {
+  const LITERAL_PATH = [
     'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
     'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
     'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
@@ -195,7 +197,7 @@ describe('ad-hoc hermit-run grants', () => {
     'Bash(.claude-code-hermit/bin/hermit-run rc-server gc)',
   ];
 
-  for (const entry of AD_HOC) {
+  for (const entry of LITERAL_PATH) {
     test(`sealed: ${entry}`, () => {
       expect(HERMIT_ALLOW).toContain(entry);
     });
@@ -204,7 +206,7 @@ describe('ad-hoc hermit-run grants', () => {
   test('the allow op lands them in an operator target', withTarget(async (target) => {
     const r = await runScript('apply-settings.ts', { args: [target, 'allow'] });
     expect(r.exitCode).toBe(0);
-    for (const entry of AD_HOC) expect(readAllow(target)).toContain(entry);
+    for (const entry of LITERAL_PATH) expect(readAllow(target)).toContain(entry);
   }));
 
   // Narrowness is why these are enumerated rather than blanket: `proposal *` would

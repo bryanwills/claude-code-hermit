@@ -1,7 +1,9 @@
 // Channel-ask contract test (PROP-017).
 //
 // Every core skill is reachable from channel-responder's §2 classification
-// table (slash-command passthrough alone makes any skill reachable), so a
+// table (slash-command passthrough alone makes any skill reachable) — except
+// one carrying `disable-model-invocation`, which a channel turn cannot reach at
+// all (rc-gate). For everything else, a
 // channel-tagged turn must never strand on a terminal-shaped ask. A skill
 // either carries the Step-0 "channel reply" marker (and routes its asks
 // through the reply tool / channel-safe ask bridge accordingly), or it must

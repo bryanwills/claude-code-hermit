@@ -55,7 +55,7 @@ claude --permission-mode auto
 
 [Remote control](https://code.claude.com/docs/en/remote-control) connects from any browser or phone. Enable via config (`/hermit-settings remote`) or `--remote-control`. Connect at [claude.ai/code](https://claude.ai/code).
 
-To spawn *new* sessions into a project from your phone, ask the hermit to open the spawn gate (`/claude-code-hermit:rc-gate`), or supervise a standalone server per project with the systemd recipe in [Remote Endpoint](remote-endpoint.md). Both need a claude.ai `/login` on the machine.
+To spawn *new* sessions into a project from your phone, run `/claude-code-hermit:rc-gate` yourself — the hermit does not open the gate on its own — or supervise a standalone server per project with the systemd recipe in [Remote Endpoint](remote-endpoint.md). Both need a claude.ai `/login` on the machine.
 
 ---
 

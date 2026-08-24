@@ -110,9 +110,10 @@ const HERMIT_ALLOW = [
   // path. The ones below exist for a different reason: they are the scripts the
   // MODEL invokes ad hoc mid-session rather than from a skill's verbatim command
   // block. CLAUDE-APPEND names channel-send and observations, its "log it in the
-  // Progress Log" rules lead to proposal shell-append, and the rc-gate skill's
-  // four verbs are asked for in chat. Their `bun */scripts/*.ts*` twins above are
-  // wildcarded-interpreter rules, which auto mode suspends (docs/security.md
+  // Progress Log" rules lead to proposal shell-append, and the rc-gate skill
+  // runs its four verbs once the operator invokes it. Their `bun
+  // */scripts/*.ts*` twins above are wildcarded-interpreter rules, which auto
+  // mode suspends (docs/security.md
   // § Auto-mode Classifier) — so on the fleet's default permission mode the
   // model was left deriving a versioned plugin-cache path by hand, and the
   // shortenings it improvised (an env-var prefix) draw classifier denials AND
@@ -125,12 +126,13 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
   'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
-  // The rc-gate skill's four verbs, invoked ad hoc from a chat turn rather than
-  // from a verbatim command block. Every verb is argless, so each grant is exact
-  // rather than prefixed — nothing follows the verb to widen it. `start` needs no
-  // tier above the everyday one: a spawned session is visible only to the
-  // claude.ai account signed in on this machine, so opening the gate changes
-  // where the operator can spawn from, never who can.
+  // The rc-gate skill's four verbs. The skill is operator-invoked, but the Bash
+  // calls that it then makes still face the classifier, and their wildcarded twins are
+  // suspended there. Every verb is argless, so each grant is exact rather than
+  // prefixed — nothing follows the verb to widen it. `start` needs no tier above
+  // the everyday one: a spawned session is visible only to the claude.ai account
+  // signed in on this machine, so opening the gate changes where the operator can
+  // spawn from, never who can.
   'Bash(.claude-code-hermit/bin/hermit-run rc-server start)',
   'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
   'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',

@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { PLUGIN_ROOT } from './helpers/run';
+import { isModelInvocationDisabled } from './helpers/skill-frontmatter';
 
 const APPEND_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'CLAUDE-APPEND.md');
 const CHANNEL_RESPONDER = path.join(PLUGIN_ROOT, 'skills', 'channel-responder', 'SKILL.md');
@@ -185,6 +186,11 @@ describe('per-skill description tax (creep guard)', () => {
       const skillPath = path.join(SKILLS_DIR, dir, 'SKILL.md');
       if (!fs.existsSync(skillPath)) continue;
       const body = fs.readFileSync(skillPath, 'utf8');
+      // A skill carrying disable-model-invocation is removed from the model's
+      // context entirely, description included, so its bytes are not part of the
+      // tax this guard prices. Counting them would block edits over bytes that
+      // never reach a prompt.
+      if (isModelInvocationDisabled(body)) continue;
       const m = body.match(/^description:\s*(.*)$/m);
       if (m) total += Buffer.byteLength(m[1], 'utf8');
     }
@@ -206,4 +212,7 @@ describe('per-skill description tax (creep guard)', () => {
     // trim-before-raise rule on the line above still stands for the next bump.
     expect(total).toBeLessThanOrEqual(8600);
   });
+
+  // Which skills the exclusion above covers is pinned once, by the
+  // "model-invocable inventory" test in contracts.test.ts.
 });

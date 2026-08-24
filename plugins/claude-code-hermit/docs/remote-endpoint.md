@@ -6,9 +6,9 @@ the Claude app without anyone at the keyboard.
 
 This is the unattended sibling of the hermit's own spawn gate
 (`/claude-code-hermit:rc-gate`, backed by `hermit-run rc-server`). The gate is
-better when the hermit is running and you want conversational control; this
-recipe is better when nothing is running and you still want the machine
-reachable after a reboot or a network flap.
+better when you want to open and close it yourself, per session; this recipe is
+better when nothing is running and you still want the machine reachable after a
+reboot or a network flap.
 
 ## Prerequisites
 

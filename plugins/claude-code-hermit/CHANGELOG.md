@@ -6,14 +6,18 @@
 - The `doctor` and `daily-auto-close` routines ship with a builtin `precheck` gate, so a day with nothing to report or close no longer wakes the session. `"precheck": "doctor"` runs the 27 checks and their ledger writes once, in the gate itself, and SKIPs when nothing currently failing is still owed to the operator. `"precheck": "auto-close"` runs the same decision the `--scheduled` archive path already made, and SKIPs on `queued` or `noop` — WAKE only fires an actual close.
 - A hermit that never opened a session (`idle`, no active session id) no longer archives an empty nightly report. The `auto-close` gate stamps the daily context-reset marker itself on that branch, so the `/clear` the archive path used to trigger keeps firing on schedule either way.
 - Adding or removing a routine from a channel writes one entry by index instead of rewriting the whole `routines` array, so it no longer asks for a confirmation code. Only an entry that carries a `precheck` still does.
+- The spawn gate is opened, closed and checked by you, not by the hermit. `/claude-code-hermit:rc-gate` no longer responds to a chat request or a phrase like "open the spawn gate" — run it yourself. The authority prose it used to carry is gone with it, since a spawned session was always bound to the claude.ai account signed in on the machine.
+- Claude Code `>=2.1.241` is now the minimum. `hermit-evolve` stops on an older CLI rather than upgrading.
 
 ### Upgrade Instructions
 
+**Claude Code 2.1.241 is required.** If `hermit-evolve` reports a version below that and stops, run `claude update` (or your package manager's equivalent), restart the session, and re-run `/claude-code-hermit:hermit-evolve`. There is no bypass.
+
 **Doctor and daily-auto-close stop waking the session on a quiet day.** In `.claude-code-hermit/config.json`, for each of the `routines[]` entries with `"id": "doctor"` and `"id": "daily-auto-close"`: if its `skill` still starts with the shipped value (`claude-code-hermit:hermit-doctor` / `claude-code-hermit:session-close`) and it has **no** `precheck` key, add `"precheck": "doctor"` or `"precheck": "auto-close"` respectively. On the `doctor` entry also add `"precheck_timeout_s": 120` unless it already sets one — the gate runs the full check sweep, and the 30s default is not enough for an install whose docker or credential probes are slow. If the routine has been renamed, points at a different skill, or already has a `precheck`, leave it untouched and note that in the evolve report — an operator's own gate is never replaced. Removing the key later restores the old always-wake behavior.
-- The spawn gate's `start` and `stop` sit on the everyday authority tier instead of asking for an echoed confirmation code from the settings chat. A spawned session is bound to the claude.ai account signed in on the machine, so the gate changes where the operator can spawn from, not who can.
 
 ### Fixed
-- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt that an unattended session cannot answer.
+- The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt. Auto mode suspends the wildcarded rules that used to cover them.
+- The spawn-gate skill no longer tells the hermit to sweep worktrees after closing the gate — `stop` already sweeps, so that was a wasted second call every time.
 - `settings-edit … unset routines.<n>` removed the entry but left a `null` in its place, which failed validation on every later settings write. Array indices now splice, and `set` at an index past the end of an array is refused instead of creating a hole.
 
 ## [1.2.47] - 2026-08-24
