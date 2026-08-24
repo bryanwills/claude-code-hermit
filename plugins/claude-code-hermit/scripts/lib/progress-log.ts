@@ -77,10 +77,14 @@ function flushResetBreadcrumb(shellPath: string, opts: {
   trigger: string;
   hhmm: string;
   tokens?: number;
+  guest?: boolean;
 }): void {
   const verb = opts.kind === 'compacted' ? 'compacted' : 'cleared';
   const tokenSuffix = typeof opts.tokens === 'number' ? ` at ~${Math.round(opts.tokens / 1000)}k tokens` : '';
-  const line = `- [${opts.hhmm}] context ${verb} (${opts.trigger})${tokenSuffix} — arc may have unfinished work`;
+  // SHELL.md is one session's narrative, archived as that session's report — a guest's
+  // reset is a real event in the folder but not the resident's work, so it says so.
+  const guestSuffix = opts.guest ? ' — guest session' : '';
+  const line = `- [${opts.hhmm}] context ${verb} (${opts.trigger})${tokenSuffix}${guestSuffix} — arc may have unfinished work`;
   appendToProgressLog(shellPath, line);
 }
 

@@ -7,15 +7,17 @@ import { run as sessionDiff } from './session-diff';
 import { run as evaluateSession } from './evaluate-session';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir } from './lib/cc-compat';
 import { drainHarnessCommand } from './lib/harness-drain';
+import { isGuest } from './lib/guest-marker';
 import fs from 'node:fs';
 import path from 'node:path';
 
 type Json = any;
 
 const HERMIT_DIR = hermitDir();
-const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
-const SNAPSHOT_FILE = path.join(HERMIT_DIR, 'state', 'cc-stop-snapshot.json');
-const TURN_FILE = path.join(HERMIT_DIR, 'state', 'operator-turn-open.json');
+const STATE_DIR = path.join(HERMIT_DIR, 'state');
+const HEARTBEAT_FILE = path.join(STATE_DIR, '.heartbeat');
+const SNAPSHOT_FILE = path.join(STATE_DIR, 'cc-stop-snapshot.json');
+const TURN_FILE = path.join(STATE_DIR, 'operator-turn-open.json');
 
 async function main(): Promise<void> {
   // Read stdin once
@@ -75,8 +77,16 @@ async function main(): Promise<void> {
   try { drainHarnessCommand(HERMIT_DIR); }
   catch (e: any) { console.error(`[stop-pipeline] harness-command: ${e.message}`); }
 
-  // Guaranteed heartbeat touch — runs even if all stages fail
-  try { fs.writeFileSync(HEARTBEAT_FILE, new Date().toISOString() + '\n'); } catch {}
+  // Guaranteed heartbeat touch — runs even if all stages fail.
+  //
+  // Except in a guest session: .heartbeat is one of the resident's liveness signals
+  // and the watchdog reads its age for wedge detection. A guest refreshing it means a
+  // frozen resident never looks stale and is never restarted. The verdict was frozen
+  // at the guest's session start, so if the resident dies mid-session the file goes
+  // stale and the restart happens — which is the wanted outcome.
+  if (!isGuest(STATE_DIR, payload.session_id)) {
+    try { fs.writeFileSync(HEARTBEAT_FILE, new Date().toISOString() + '\n'); } catch {}
+  }
 
   // Write CC-stop-payload snapshot (tri-state, labeled with captured_at).
   // sole writer for state/cc-stop-snapshot.json. Fail-open.
