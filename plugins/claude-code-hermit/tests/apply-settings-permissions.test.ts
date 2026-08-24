@@ -189,6 +189,10 @@ describe('ad-hoc hermit-run grants', () => {
     'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
     'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
     'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
+    'Bash(.claude-code-hermit/bin/hermit-run rc-server start)',
+    'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
+    'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',
+    'Bash(.claude-code-hermit/bin/hermit-run rc-server gc)',
   ];
 
   for (const entry of AD_HOC) {
@@ -209,6 +213,13 @@ describe('ad-hoc hermit-run grants', () => {
   test('neither proposal nor observations is granted blanket', () => {
     expect(HERMIT_ALLOW).not.toContain('Bash(.claude-code-hermit/bin/hermit-run proposal *)');
     expect(HERMIT_ALLOW).not.toContain('Bash(.claude-code-hermit/bin/hermit-run observations *)');
+  });
+
+  // rc-server's four verbs are argless, so each grant ends at the verb. A
+  // blanket `rc-server *` would confer nothing extra today, but it would stop
+  // being exact the moment a verb grows an argument.
+  test('rc-server is granted per verb, never blanket', () => {
+    expect(HERMIT_ALLOW).not.toContain('Bash(.claude-code-hermit/bin/hermit-run rc-server *)');
   });
 
   // channel-send is the one mode-less grant, which is safe only because

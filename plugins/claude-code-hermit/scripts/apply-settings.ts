@@ -124,6 +124,16 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
   'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
+  // The rc-gate skill's four verbs, invoked ad hoc from a chat turn rather than
+  // from a verbatim command block. Every verb is argless, so each grant is exact
+  // rather than prefixed — nothing follows the verb to widen it. `start` needs no
+  // tier above the everyday one: a spawned session is visible only to the
+  // claude.ai account signed in on this machine, so opening the gate changes
+  // where the operator can spawn from, never who can.
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server start)',
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',
+  'Bash(.claude-code-hermit/bin/hermit-run rc-server gc)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];

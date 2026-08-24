@@ -28,18 +28,20 @@ opens or scans. Hand it over as a link, not as a command.
 
 ## Authority
 
-Opening the gate widens who can reach this machine, so treat it like an
-execution-adjacent setting, not an everyday one:
+All four verbs sit on the everyday tier, the same rule as pause, resume and
+status: the terminal, the operator's own chat, or the settings chat. Any other
+chat gets the current status and a pointer to the operator's own chat, nothing
+more.
 
-- **Terminal** — always fine.
-- **Chat** — only the settings chat, and only with an echoed confirmation code
-  (the `nonce` tier in `docs/security.md` § Tiered settings authority). Any other
-  chat: report the current status, say where to ask, and stop.
-- `status` and `gc` are reads/cleanup — the everyday `allowed` tier.
+The gate does not widen who can reach this machine. A spawned session is visible
+only to the claude.ai account signed in here, and the server refuses to start
+without that login, so the URL is safe to hand over and opening the gate grants
+nobody else access. What a stranger could do from a chat is disrupt: burn a
+session slot, or close a gate and archive sessions the operator still has open.
+That is why the everyday tier applies rather than something stricter.
 
-Be honest about what enforces this: `channel-settings-gate.ts` covers
-`settings-edit` writes, not this verb, so the fence here is your judgment. Do not
-route around a refusal by invoking the tmux command directly.
+Nothing enforces this beyond your own judgment, exactly as with pause and resume.
+Do not route around a refusal by invoking the tmux command directly.
 
 ## Behavior
 
