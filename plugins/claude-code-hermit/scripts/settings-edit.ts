@@ -86,6 +86,18 @@ export function getPath(obj: Json, dotted?: string): Json {
   return cur;
 }
 
+/** A dotted segment read as an array index: whole, non-negative, canonically spelled. */
+function arrayIndex(key: string): number | null {
+  return /^\d+$/.test(key) ? Number(key) : null;
+}
+
+/**
+ * Write one value at a dotted path.
+ *
+ * An index past the end of an array is refused rather than written: JS would grow the
+ * array with holes, and a `null` entry fails validation from then on. `=== length` is
+ * the append every add goes through, so it is allowed.
+ */
 export function setPath(obj: Json, dotted: string, value: Json): Json {
   const keys = dotted.split('.');
   const leaf = keys.pop()!;
@@ -94,11 +106,24 @@ export function setPath(obj: Json, dotted: string, value: Json): Json {
     if (typeof cur[key] !== 'object' || cur[key] === null) cur[key] = {};
     cur = cur[key];
   }
+  if (Array.isArray(cur)) {
+    const i = arrayIndex(leaf);
+    if (i === null || i > cur.length) {
+      throw new Error(`${dotted}: index out of range — valid indices are 0..${cur.length}, where ${cur.length} appends a new entry`);
+    }
+  }
   cur[leaf] = value;
   return obj;
 }
 
-/** Delete a leaf. Parent objects stay — an empty `channels` is still a valid config. */
+/**
+ * Delete a leaf. Parent objects stay — an empty `channels` is still a valid config.
+ *
+ * An array index splices instead: `delete arr[1]` leaves a hole that serializes as
+ * `null`, and every later write then fails validation on an entry with no `id`. The
+ * whole point of `unset routines.<n>` is removing one routine without rewriting the
+ * array, so it has to leave the array dense.
+ */
 export function unsetPath(obj: Json, dotted: string): boolean {
   const keys = dotted.split('.');
   const leaf = keys.pop()!;
@@ -106,6 +131,12 @@ export function unsetPath(obj: Json, dotted: string): boolean {
   for (const key of keys) {
     if (typeof cur[key] !== 'object' || cur[key] === null) return false;
     cur = cur[key];
+  }
+  if (Array.isArray(cur)) {
+    const i = arrayIndex(leaf);
+    if (i === null || i >= cur.length) return false;
+    cur.splice(i, 1);
+    return true;
   }
   if (!(leaf in cur)) return false;
   delete cur[leaf];
@@ -377,7 +408,12 @@ if (import.meta.main) {
       const dotted = rest[0];
       if (!dotted) { console.error('set requires a dotted.path argument'); process.exit(1); }
       if (rest.length < 2) { console.error('set requires a value argument'); process.exit(1); }
-      setPath(config, dotted, parseValue(rest[1]));
+      try {
+        setPath(config, dotted, parseValue(rest[1]));
+      } catch (err) {
+        console.error((err as Error).message);
+        process.exit(1);
+      }
       persist();
       break;
     }
