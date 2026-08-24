@@ -11,14 +11,14 @@
 
 **Doctor and daily-auto-close stop waking the session on a quiet day.** In `.claude-code-hermit/config.json`, for each of the `routines[]` entries with `"id": "doctor"` and `"id": "daily-auto-close"`: if its `skill` still starts with the shipped value (`claude-code-hermit:hermit-doctor` / `claude-code-hermit:session-close`) and it has **no** `precheck` key, add `"precheck": "doctor"` or `"precheck": "auto-close"` respectively. On the `doctor` entry also add `"precheck_timeout_s": 120` unless it already sets one — the gate runs the full check sweep, and the 30s default is not enough for an install whose docker or credential probes are slow. If the routine has been renamed, points at a different skill, or already has a `precheck`, leave it untouched and note that in the evolve report — an operator's own gate is never replaced. Removing the key later restores the old always-wake behavior.
 
-**Suggest wake gates for routines that still wake the session on every fire.** Run this after the previous step, so the routines it just gated are not re-flagged.
+**Suggest wake gates for routines that still wake the session on every fire.** Run this after the previous step.
 
-1. Run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts" health .claude-code-hermit --days 14` and read the `routines[]` array from the JSON it prints.
-2. Read the configured routines with `settings-edit.ts .claude-code-hermit/config.json get routines`.
-3. Build the candidate list. An entry qualifies when all four hold: `enabled` is not `false`; it has no `precheck` key; its `id` is none of `heartbeat-restart`, `reflect`, `scheduled-checks`, `weekly-review`, `daily-auto-close`, `doctor`, `morning`, `evening`; and its `fires` in the health report is 7 or more.
+1. Run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts" health .claude-code-hermit --days 14` and read the JSON it prints. If its `source` is not `ok`, the routine ledger could not be read — record nothing, stop, and note in the evolve report that this audit could not run. Otherwise read its `routines[]` array.
+2. Read the configured routines with `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get routines`.
+3. Build the candidate list. An entry qualifies when all four hold: `enabled` is `true`; it has no `precheck` key; its `id` is none of `heartbeat-restart`, `reflect`, `scheduled-checks`, `weekly-review`, `daily-auto-close`, `doctor`, `morning`, `evening`; and its `fires` in the health report is 7 or more.
 4. If the list is empty, record nothing and stop: do not run steps 5-7.
-5. Change nothing in `config.json`.
-6. Record one observation per candidate: run `.claude-code-hermit/bin/hermit-run observations observe .claude-code-hermit routine-gate-candidate` with `routine-gate-candidate:<id>` on stdin.
+5. Change nothing in `config.json` in this pass — this step only surfaces candidates. A gate is added later, and only for the branch the operator picks, with `settings-edit.ts .claude-code-hermit/config.json set routines.<n>.precheck <value>`.
+6. Record one observation per candidate: run `.claude-code-hermit/bin/hermit-run observations observe .claude-code-hermit quick-deferral` with `routine-gate-candidate:<id>` on stdin.
 7. Record a deferred-migration block: `source: claude-code-hermit@<version>`, this "Suggest wake gates" entry's text (above, verbatim) as `instruction:`, `options:` naming each candidate id with its fire count and the two branches ("add a `precheck` gate" / "leave as-is"), and `skipped: skipped pending operator`.
 
 **Note:** a gate is a `SKIP`/`WAKE` script declared as the routine's `precheck` — see `docs/routine-authoring.md`. Setting one from chat takes the confirmation-code tier. Removing the key restores always-wake.
