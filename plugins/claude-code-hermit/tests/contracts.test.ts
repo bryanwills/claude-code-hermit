@@ -563,8 +563,10 @@ describe('routine precheck validation', () => {
   const withPrecheck = (extra: Record<string, unknown>) =>
     runValidate({ routines: [{ ...ROUTINE, ...extra }] });
 
-  test('the builtin provider and a project-relative path are accepted', () => {
+  test('every builtin provider and a project-relative path are accepted', () => {
     expect(withPrecheck({ precheck: 'reflect' }).errors).toEqual([]);
+    expect(withPrecheck({ precheck: 'doctor' }).errors).toEqual([]);
+    expect(withPrecheck({ precheck: 'auto-close' }).errors).toEqual([]);
     expect(withPrecheck({ precheck: 'tools/mail-gate.sh' }).errors).toEqual([]);
   });
 
@@ -598,6 +600,14 @@ describe('routine precheck validation', () => {
     });
     expect(out.errors).toEqual([]);
     expect(out.warnings.join(' ')).toContain('heartbeat-restart');
+  });
+
+  test('the shipped daily-auto-close and doctor routines default to their builtin gates', () => {
+    const template = readJson(path.join(TEMPLATES, 'config.json.template'));
+    const byId = (id: string) => template.routines.find((r: any) => r.id === id);
+    expect(byId('daily-auto-close').precheck).toBe('auto-close');
+    expect(byId('doctor').precheck).toBe('doctor');
+    expect(runValidate({ routines: template.routines }).errors).toEqual([]);
   });
 });
 

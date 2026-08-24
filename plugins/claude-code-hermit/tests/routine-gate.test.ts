@@ -359,9 +359,113 @@ describe('routine gate — reflect provider', () => {
   }), 30000);
 });
 
+describe('routine gate — doctor builtin', () => {
+  const runDoctor = (dir: string, args: string[] = []) =>
+    runScript('doctor-check.ts', { args: [hermit(dir), ...args] });
+
+  // The fixture config (writeConfig's {timezone, routines}) is missing every
+  // other required key, so checkConfig fails deterministically — guaranteeing
+  // at least one unconfirmed finding on a hermit's first ever doctor run.
+  test('an unconfirmed finding on a fresh hermit → WAKE', withDir(async (dir) => {
+    writeConfig(dir, [ROUTINE({ id: 'doctor', precheck: 'doctor' })]);
+    writeSchedule(dir, { doctor: { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
+
+    const r = await runDue(dir);
+    expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:doctor]');
+    expect(readRows(dir)).toEqual([]);
+  }), 30000);
+
+  test('everything owed already confirmed delivered → SKIP', withDir(async (dir) => {
+    writeConfig(dir, [ROUTINE({ id: 'doctor', precheck: 'doctor' })]);
+    writeSchedule(dir, { doctor: { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
+
+    // Seed the ledger the way the gate's own first run would, then confirm
+    // delivery of everything owed — this fire's gate run must then see nothing new.
+    const seeded = JSON.parse((await runDoctor(dir)).stdout);
+    const owedIds = seeded.escalation.new.map((f: any) => f.id);
+    expect(owedIds.length).toBeGreaterThan(0); // sanity: this fixture has something owed
+    const marked = await runDoctor(dir, ['--mark-notified', ...owedIds]);
+    expect(JSON.parse(marked.stdout).marked).toBe(true);
+
+    const r = await runDue(dir);
+    expect(r.stdout.trim()).toBe('');
+    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
+  }), 30000);
+
+  test('--gate prints a bare verdict, never the checks JSON', withDir(async (dir) => {
+    writeConfig(dir, [ROUTINE({ id: 'doctor', precheck: 'doctor' })]);
+    const r = await runDoctor(dir, ['--gate']);
+    expect(['SKIP', 'WAKE']).toContain(r.stdout.trim());
+  }), 30000);
+});
+
+describe('routine gate — auto-close builtin', () => {
+  const stateFile = (dir: string, name: string) => hermit(dir, 'state', name);
+  const writeStateJSON = (dir: string, name: string, value: any) =>
+    fs.writeFileSync(stateFile(dir, name), JSON.stringify(value));
+  const AUTO_CLOSE_NOW = '2026-07-15T09:30:00Z';
+  const seed = (dir: string) => {
+    writeConfig(dir, [ROUTINE({ id: 'daily-auto-close', precheck: 'auto-close' })]);
+    writeSchedule(dir, { 'daily-auto-close': { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
+  };
+
+  test('idle, no active session → SKIP, and the gate stamps the daily context reset itself', withDir(async (dir) => {
+    seed(dir);
+    writeStateJSON(dir, 'runtime.json', { session_state: 'idle' });
+
+    const r = await runDue(dir, AUTO_CLOSE_NOW);
+    expect(r.stdout.trim()).toBe('');
+    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
+    expect(fs.existsSync(stateFile(dir, 'pending-close.json'))).toBe(false);
+    const marker = JSON.parse(fs.readFileSync(stateFile(dir, 'clear-requested.json'), 'utf-8'));
+    expect(marker.reason).toBe('daily-boundary');
+  }));
+
+  // A non-resting noop (waiting session, missing/unreadable runtime) leaves live
+  // context in place. Stamping the marker there would have the watchdog read it as
+  // "a close just happened" and `/clear` a session nothing archived.
+  test('a waiting session → SKIP (noop) but NO clear-requested marker', withDir(async (dir) => {
+    // `run_during_waiting` mirrors the shipped daily-auto-close, so the gate — not
+    // due.ts's waiting check — is what decides this fire.
+    writeConfig(dir, [ROUTINE({ id: 'daily-auto-close', precheck: 'auto-close', run_during_waiting: true })]);
+    writeSchedule(dir, { 'daily-auto-close': { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
+    writeStateJSON(dir, 'runtime.json', { session_state: 'waiting', session_id: 'S-001' });
+
+    const r = await runDue(dir, AUTO_CLOSE_NOW);
+    expect(r.stdout.trim()).toBe('');
+    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
+    expect(fs.existsSync(stateFile(dir, 'clear-requested.json'))).toBe(false);
+  }));
+
+  test('operator active inside the lull → SKIP (queued), no clear-requested marker', withDir(async (dir) => {
+    seed(dir);
+    writeStateJSON(dir, 'runtime.json', { session_state: 'in_progress' });
+    writeStateJSON(dir, 'last-operator-action.json', { at: '2026-07-15T09:25:00Z' }); // 5min lull
+
+    const r = await runDue(dir, AUTO_CLOSE_NOW);
+    expect(r.stdout.trim()).toBe('');
+    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
+    const pending = JSON.parse(fs.readFileSync(stateFile(dir, 'pending-close.json'), 'utf-8'));
+    expect(pending.queued_by).toBe('daily-auto-close');
+    expect(fs.existsSync(stateFile(dir, 'clear-requested.json'))).toBe(false);
+  }));
+
+  test('operator idle beyond the lull → WAKE (close-now)', withDir(async (dir) => {
+    seed(dir);
+    writeStateJSON(dir, 'runtime.json', { session_state: 'in_progress' });
+    writeStateJSON(dir, 'last-operator-action.json', { at: '2026-07-15T09:15:00Z' }); // 15min lull
+
+    const r = await runDue(dir, AUTO_CLOSE_NOW);
+    expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:daily-auto-close]');
+    expect(readRows(dir)).toEqual([]);
+  }));
+});
+
 describe('precheck validation (pure)', () => {
-  test('accepts the builtin and project-relative paths', () => {
+  test('accepts every builtin and project-relative paths', () => {
     expect(validatePrecheckValue('reflect')).toBeNull();
+    expect(validatePrecheckValue('doctor')).toBeNull();
+    expect(validatePrecheckValue('auto-close')).toBeNull();
     expect(validatePrecheckValue('tools/gate.sh')).toBeNull();
   });
 
@@ -380,7 +484,9 @@ describe('precheck validation (pure)', () => {
     expect(validatePrecheckTimeout(1.5)).toContain('integer');
   });
 
-  test('resolveGate names the builtin without touching the filesystem', () => {
-    expect(resolveGate('reflect', '/nonexistent')).toEqual({ kind: 'reflect' });
+  test('resolveGate names each builtin without touching the filesystem', () => {
+    expect(resolveGate('reflect', '/nonexistent')).toEqual({ kind: 'builtin', name: 'reflect' });
+    expect(resolveGate('doctor', '/nonexistent')).toEqual({ kind: 'builtin', name: 'doctor' });
+    expect(resolveGate('auto-close', '/nonexistent')).toEqual({ kind: 'builtin', name: 'auto-close' });
   });
 });

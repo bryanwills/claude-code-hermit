@@ -1235,14 +1235,25 @@ describe('auto-close-decision verb', () => {
     expect(new Date(pending.queued_at).getTime()).toBe(Date.parse(NOW));
   }));
 
-  test('idle + 15min lull → close-now', withTmp(async (dir) => {
+  test('idle, no active session → noop regardless of lull (nothing to close)', withTmp(async (dir) => {
     writeState(dir, 'runtime.json', '{"session_state":"idle"}');
+    lastOpAt(dir, '2026-05-20T22:30:00+00:00');
+    const result = await decide(dir);
+    expect(result.decision).toBe('noop');
+    expect(result.reason).toContain('no active session');
+  }));
+
+  // The idle-archive rollover path (closeFinalUpdates) stamps a fresh session_id on
+  // idle, and nulls it only on a real close — so idle WITH a session_id is still a
+  // session worth closing, not the "nothing to close" rest state above.
+  test('idle + active session_id + 15min lull → close-now', withTmp(async (dir) => {
+    writeState(dir, 'runtime.json', '{"session_state":"idle","session_id":"S-001"}');
     lastOpAt(dir, '2026-05-20T22:30:00+00:00');
     expect((await decide(dir)).decision).toBe('close-now');
   }));
 
-  test('idle + 5min lull → queued', withTmp(async (dir) => {
-    writeState(dir, 'runtime.json', '{"session_state":"idle"}');
+  test('idle + active session_id + 5min lull → queued', withTmp(async (dir) => {
+    writeState(dir, 'runtime.json', '{"session_state":"idle","session_id":"S-001"}');
     lastOpAt(dir, '2026-05-20T22:40:00+00:00');
     expect((await decide(dir)).decision).toBe('queued');
   }));
