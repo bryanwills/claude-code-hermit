@@ -91,6 +91,22 @@ describe('getPath / setPath / togglePath', () => {
     expect(() => setPath(obj, 'routines.7', { id: 'gap' })).toThrow(/0\.\.2/);
     expect(obj.routines).toHaveLength(2);
   });
+
+  // An interior index edits an entry that has to already exist, so `length` is out of
+  // range there too — otherwise the traversal creates it and the array grows holes.
+  test('setPath refuses an out-of-range index in the middle of a path', () => {
+    const obj: any = { routines: [{ id: 'a' }, { id: 'b' }] };
+    expect(() => setPath(obj, 'routines.2.enabled', false)).toThrow(/0\.\.1/);
+    expect(() => setPath(obj, 'routines.9.enabled', false)).toThrow(/0\.\.1/);
+    expect(obj.routines).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
+
+  test('setPath rejects a non-canonical array index', () => {
+    const obj: any = { routines: [{ id: 'a' }, { id: 'b' }] };
+    expect(() => setPath(obj, 'routines.01', { id: 'x' })).toThrow();
+    expect(unsetPath(obj, 'routines.01')).toBe(false);
+    expect(obj.routines).toEqual([{ id: 'a' }, { id: 'b' }]);
+  });
 });
 
 // --- CLI integration tests (subprocess) ---

@@ -250,6 +250,10 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   whole `routines` array: the settings gate reads the value of a container write, and a value it cannot parse
   (`$(cat …)`, a heredoc, a shell variable) escalates to the confirmation code even when nothing is gated.
   Entry JSON goes inline, single-quoted, in the command itself.
+- **Indices are only valid until the next add or remove.** An add appends and a remove closes the gap, so the
+  numbers from the listing above are stale the moment either lands. Re-run `get routines` and re-show the
+  table after every add and every remove, and derive the next index from that fresh listing — a stale index
+  is an in-range write that silently replaces or edits the wrong routine, with nothing to refuse it.
 - Ask: "Add / edit / remove / enable / disable? (or 'done')"
 - **Add wizard:** ask for:
   - ID (unique name, e.g., "weekly-deps")
@@ -262,11 +266,12 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     - Custom → operator types raw cron
   - Skill to run (full slash-command name, e.g. `claude-code-hermit:brief` for plugin skills, `ha-refresh-context` for local project skills)
   - Enabled (yes/no, default yes)
-  - Append it with `set routines.<count> '<entry as JSON>'`, where `<count>` is the number of routines just
-    listed (the first free index). A duplicate id is only a warning, so check the id against the listed ones
-    before writing; an invalid cron is refused by the script — relay its error rather than retrying.
+  - Append it with `set routines.<count> '<entry as JSON>'`, where `<count>` is the number of routines in the
+    latest listing (the first free index). A duplicate id is only a warning, so check the id against the
+    listed ones before writing; an invalid cron is refused by the script — relay its error rather than
+    retrying. Then re-list before the next write.
 - **Edit:** select by number, then `set routines.<index>.<field> <value>` (one call per changed field; siblings are preserved).
-- **Remove:** select by number, then `unset routines.<index>` — one call, and the remaining entries close the gap (their numbers shift, so re-list before a second removal).
+- **Remove:** select by number, then `unset routines.<index>` — one call, and the remaining entries close the gap (so re-list before the next write).
 - **Enable/disable:** select by number, `set routines.<index>.enabled true|false`.
 - Loop until operator says "done".
 - **After all edits are written**, invoke `/claude-code-hermit:hermit-routines load` via the Skill tool to apply the new schedule live (no restart). Surface the result inline:

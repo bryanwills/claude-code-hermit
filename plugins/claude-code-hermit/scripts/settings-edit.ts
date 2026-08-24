@@ -86,9 +86,23 @@ export function getPath(obj: Json, dotted?: string): Json {
   return cur;
 }
 
-/** A dotted segment read as an array index: whole, non-negative, canonically spelled. */
+/**
+ * A dotted segment read as an array index: whole, non-negative, canonically spelled.
+ * Leading zeros are rejected rather than normalized — `routines.01` is a typo, and
+ * silently splicing index 1 for it is worse than refusing.
+ */
 function arrayIndex(key: string): number | null {
-  return /^\d+$/.test(key) ? Number(key) : null;
+  return /^(0|[1-9]\d*)$/.test(key) ? Number(key) : null;
+}
+
+/** The range error both the leaf and the traversal raise, so they read the same. */
+function indexRangeError(dotted: string, key: string, len: number, appendable: boolean): Error {
+  const max = appendable ? len : len - 1;
+  if (max < 0) return new Error(`${dotted}: "${key}" indexes an empty array`);
+  return new Error(
+    `${dotted}: index out of range — valid indices are 0..${max}` +
+      (appendable ? `, where ${len} appends a new entry` : ''),
+  );
 }
 
 /**
@@ -96,21 +110,25 @@ function arrayIndex(key: string): number | null {
  *
  * An index past the end of an array is refused rather than written: JS would grow the
  * array with holes, and a `null` entry fails validation from then on. `=== length` is
- * the append every add goes through, so it is allowed.
+ * the append every add goes through, so it is allowed at the LEAF only — an interior
+ * segment (`routines.<n>.enabled`) is editing an entry that has to already exist, so
+ * there `length` is out of range like anything past it.
  */
 export function setPath(obj: Json, dotted: string, value: Json): Json {
   const keys = dotted.split('.');
   const leaf = keys.pop()!;
   let cur = obj;
   for (const key of keys) {
+    if (Array.isArray(cur)) {
+      const i = arrayIndex(key);
+      if (i === null || i >= cur.length) throw indexRangeError(dotted, key, cur.length, false);
+    }
     if (typeof cur[key] !== 'object' || cur[key] === null) cur[key] = {};
     cur = cur[key];
   }
   if (Array.isArray(cur)) {
     const i = arrayIndex(leaf);
-    if (i === null || i > cur.length) {
-      throw new Error(`${dotted}: index out of range — valid indices are 0..${cur.length}, where ${cur.length} appends a new entry`);
-    }
+    if (i === null || i > cur.length) throw indexRangeError(dotted, leaf, cur.length, true);
   }
   cur[leaf] = value;
   return obj;
