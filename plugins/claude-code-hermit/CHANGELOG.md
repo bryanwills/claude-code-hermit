@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.47] - 2026-08-24
 
 ### Added
 - Routines accept a `precheck` wake gate the routine monitor runs at fire time — the builtin `"reflect"`, or a project-relative script printing `SKIP` or `WAKE`. A `SKIP` consumes the fire and records `skipped-precheck` without waking the session; anything else fires the routine as before. `precheck_timeout_s` (default 30, max 300) bounds one run, and a new `routine-precheck` doctor check reports gates that never succeed.
