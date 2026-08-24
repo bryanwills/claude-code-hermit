@@ -4,7 +4,8 @@
 // separate leg from the hermit's own `--remote-control` flag (which makes the
 // hermit itself reachable). The server runs as a hermit-owned tmux child so
 // open/close/status are ordinary chat verbs, and never auto-starts: opening
-// remote spawn is a deliberate, settings-authority-tier act.
+// remote spawn is a deliberate act the operator asks for. It sits on the
+// everyday authority tier — see skills/rc-gate/SKILL.md § Authority for why.
 //
 // Launched with `--spawn worktree --no-create-session-in-dir` so the project
 // folder stays single-session and every phone spawn lands in its own worktree.

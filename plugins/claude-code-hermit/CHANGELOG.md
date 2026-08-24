@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- The spawn gate's `start` and `stop` sit on the everyday authority tier instead of asking for an echoed confirmation code from the settings chat. A spawned session is bound to the claude.ai account signed in on the machine, so the gate changes where the operator can spawn from, not who can.
+
 ### Fixed
 - The `hermit-run rc-server` verbs (`start`, `stop`, `status`, `gc`) are in the sealed allow-list, so opening or checking the spawn gate no longer hits a permission prompt that an unattended session cannot answer.
 

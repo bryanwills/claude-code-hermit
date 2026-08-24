@@ -107,10 +107,11 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run domain-hatch ensure-target *)',
   'Bash(.claude-code-hermit/bin/hermit-run domain-hatch sync-block *)',
   // The three routes above exist because a domain plugin can't resolve core's
-  // path. These three exist for a different reason: they are the scripts the
+  // path. The ones below exist for a different reason: they are the scripts the
   // MODEL invokes ad hoc mid-session rather than from a skill's verbatim command
-  // block. CLAUDE-APPEND names the first two, and its "log it in the Progress
-  // Log" rules lead to the third. Their `bun */scripts/*.ts*` twins above are
+  // block. CLAUDE-APPEND names channel-send and observations, its "log it in the
+  // Progress Log" rules lead to proposal shell-append, and the rc-gate skill's
+  // four verbs are asked for in chat. Their `bun */scripts/*.ts*` twins above are
   // wildcarded-interpreter rules, which auto mode suspends (docs/security.md
   // § Auto-mode Classifier) — so on the fleet's default permission mode the
   // model was left deriving a versioned plugin-cache path by hand, and the

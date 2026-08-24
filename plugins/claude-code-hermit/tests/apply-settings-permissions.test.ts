@@ -181,8 +181,8 @@ describe('sealed registries', () => {
 
 // The ad-hoc model-invoked routes. Their `bun */scripts/<name>.ts` twins are
 // wildcarded-interpreter rules, which auto mode suspends — so on the fleet's
-// default permission mode these literal-prefix entries are the only pre-resolved
-// path to the three scripts a model reaches for mid-session rather than from a
+// default permission mode these literal-path entries are the only pre-resolved
+// path to the scripts a model reaches for mid-session rather than from a
 // skill's verbatim command block.
 describe('ad-hoc hermit-run grants', () => {
   const AD_HOC = [

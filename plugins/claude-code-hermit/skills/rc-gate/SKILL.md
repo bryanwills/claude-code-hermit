@@ -26,12 +26,16 @@ All four are `.claude-code-hermit/bin/hermit-run rc-server <verb>`:
 `start` prints the `claude.ai/code?environment=…` URL — that is what the operator
 opens or scans. Hand it over as a link, not as a command.
 
+Run each verb bare. The grant for these four is an exact command match, so a
+pipe, a redirect, or a `timeout`/`cd` wrapper falls outside it and re-prompts —
+in an unattended session that prompt is a dead end.
+
 ## Authority
 
-All four verbs sit on the everyday tier, the same rule as pause, resume and
-status: the terminal, the operator's own chat, or the settings chat. Any other
-chat gets the current status and a pointer to the operator's own chat, nothing
-more.
+All four verbs sit on the everyday `allowed` tier (`docs/security.md` § Tiered
+settings authority): the terminal, the operator's own chat, or the settings
+chat. Any other chat gets the current status and a pointer to the operator's own
+chat, nothing more.
 
 The gate does not widen who can reach this machine. A spawned session is visible
 only to the claude.ai account signed in here, and the server refuses to start
@@ -40,8 +44,10 @@ nobody else access. What a stranger could do from a chat is disrupt: burn a
 session slot, or close a gate and archive sessions the operator still has open.
 That is why the everyday tier applies rather than something stricter.
 
-Nothing enforces this beyond your own judgment, exactly as with pause and resume.
-Do not route around a refusal by invoking the tmux command directly.
+Be honest about what enforces this: nothing does. Pause and resume are checked
+deterministically before the model sees them; these verbs are not covered by
+`channel-settings-gate.ts` either, so the fence here is your judgment alone. Do
+not route around a refusal by invoking the tmux command directly.
 
 ## Behavior
 
