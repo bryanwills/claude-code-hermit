@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-[Claude Code](https://code.claude.com) v2.1.172+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3 — the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
+[Claude Code](https://code.claude.com) v2.1.241+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3 — the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
 
 ---
 

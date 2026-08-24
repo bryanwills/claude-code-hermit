@@ -6,11 +6,15 @@
 // unflagged and pass vacuously, so the match lives here instead and is shared by
 // every test that needs it.
 
-/** The YAML frontmatter block, or '' when the file has none. */
+/**
+ * The YAML frontmatter block, or '' when the file has none. The delimiters are
+ * matched as whole lines (CRLF tolerated) rather than by a fixed offset: a
+ * `slice(4, indexOf('\n---'))` reads the wrong bytes on a CRLF file and would
+ * report every skill as unflagged, which is the vacuous pass this file exists
+ * to avoid.
+ */
 export function frontmatterBlock(body: string): string {
-  if (!body.startsWith('---')) return '';
-  const end = body.indexOf('\n---', 3);
-  return end === -1 ? '' : body.slice(4, end);
+  return body.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/)?.[1] ?? '';
 }
 
 /**
