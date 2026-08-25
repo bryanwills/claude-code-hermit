@@ -11,6 +11,9 @@
 - The `Bash(*API_KEY*)`, `Bash(*SECRET*)`, and `Bash(*TOKEN*)` deny patterns are gone from `deny-patterns.json` — trivially bypassable and blocking ordinary work (a grep, a commit message). The anchored `env`/`printenv`/`cat .env*`/`cat ~/.ssh/*`/`cat ~/.aws/*` entries stay; see `docs/security.md` for the full rationale.
 - Four sigil-anchored entries replace them: `Bash(*$ANTHROPIC_API_KEY*)` and `Bash(*$CLAUDE_CODE_OAUTH_TOKEN*)`, each in bare and `${…}` spelling. An expansion of a live credential (`echo $ANTHROPIC_API_KEY` while debugging auth) blocks; every bare mention of the name — a grep, a commit message, writing the placeholder into `.env` — stays allowed. The hook enforces them from the shipped template, so nothing needs adding to your settings file.
 
+### Fixed
+- Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
+
 ### Upgrade Instructions
 
 **Migrate `settings_from_chat` to per-channel `settings_policy`.** `settings_policy` is terminal-only, so **this block runs only on a terminal-typed turn** — on a channel-arrived or unattended turn the gate denies step 2. Relay it to the operator as a step for them to run themselves instead, and skip steps 2 and 3; the retired key keeps applying as `deny` until they do, so nothing is reopened by waiting. Read the current value with `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get settings_from_chat`, and the channels with `… get channels`.

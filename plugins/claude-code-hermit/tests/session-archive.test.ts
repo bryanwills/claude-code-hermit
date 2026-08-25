@@ -368,6 +368,67 @@ describe('idle vs. close reset semantics', () => {
 });
 
 // =============================================================================
+describe('Progress Log preservation in ## Completed', () => {
+  const COMPLETED_PLACEHOLDER =
+    '<!-- What was accomplished (narrative). Durable outputs must also be listed under ## Artifacts. -->';
+  const AUTO_PAYLOAD =
+    'Status: completed\nBlockers: none\nLessons: none\nChanged: none\nArtifacts: none\nClosed Via: auto\nNext Start Point: Fresh start.\n';
+
+  function seedProgressLog(dir: string, body: string) {
+    let shell = readShell(dir);
+    shell = shell.replace(/(## Progress Log\n)([\s\S]*?)(?=\n## )/, `$1${body}\n\n`);
+    writeShell(dir, shell);
+  }
+
+  function completedSection(report: string): string {
+    return report.split('## Completed\n')[1]?.split('\n## ')[0] ?? '';
+  }
+
+  test('auto archive copies a populated Progress Log into ## Completed, then resets SHELL', withTmp(async (dir) => {
+    await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
+    seedProgressLog(dir,
+      '<!-- Primary record of work -->\n<!-- Format: [HH:MM] Did X — result/outcome -->\n[09:00] shipped the thing');
+    await archive(dir, 'auto', AUTO_PAYLOAD, '2026-07-09T13:00:00Z');
+    const report = fs.readFileSync(path.join(sessionsDir(dir), 'S-001-REPORT.md'), 'utf-8');
+    expect(completedSection(report)).toContain('[09:00] shipped the thing');
+    expect(completedSection(report)).not.toContain(COMPLETED_PLACEHOLDER);
+    expect(readShell(dir)).not.toContain('shipped the thing');
+  }));
+
+  test('auto archive of a placeholder-only Progress Log keeps the Completed template comment', withTmp(async (dir) => {
+    await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
+    await archive(dir, 'auto', AUTO_PAYLOAD, '2026-07-09T13:00:00Z');
+    const report = fs.readFileSync(path.join(sessionsDir(dir), 'S-001-REPORT.md'), 'utf-8');
+    expect(completedSection(report).trim()).toBe(COMPLETED_PLACEHOLDER);
+  }));
+
+  test('idle archive copies a populated Progress Log into ## Completed, then resets the section', withTmp(async (dir) => {
+    await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
+    seedProgressLog(dir,
+      '<!-- Primary record of work -->\n<!-- Format: [HH:MM] Did X — result/outcome -->\n[09:00] shipped the thing');
+    await archive(dir, 'idle', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    const report = fs.readFileSync(path.join(sessionsDir(dir), 'S-001-REPORT.md'), 'utf-8');
+    expect(completedSection(report)).toContain('[09:00] shipped the thing');
+    const after = readShell(dir);
+    expect(after).not.toContain('shipped the thing');
+    expect(after).toContain('<!-- Primary record of work -->');
+  }));
+
+  test('close archive copies a populated Progress Log into ## Completed, then resets SHELL', withTmp(async (dir) => {
+    await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
+    seedProgressLog(dir,
+      '<!-- Primary record of work -->\n<!-- Format: [HH:MM] Did X — result/outcome -->\n[09:00] shipped the thing');
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    const report = fs.readFileSync(path.join(sessionsDir(dir), 'S-001-REPORT.md'), 'utf-8');
+    expect(completedSection(report)).toContain('[09:00] shipped the thing');
+    expect(completedSection(report)).not.toContain(COMPLETED_PLACEHOLDER);
+    const after = readShell(dir);
+    expect(after).not.toContain('shipped the thing');
+    expect(after).toContain('<!-- Primary record of work -->');
+  }));
+});
+
+// =============================================================================
 describe('compaction roll-up', () => {
   test('rolls up Monitoring entries past the threshold into a bucketed [Earlier] line', withTmp(async (dir) => {
     await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');

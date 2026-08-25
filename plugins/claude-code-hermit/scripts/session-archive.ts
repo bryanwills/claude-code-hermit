@@ -528,7 +528,8 @@ function buildReport(opts: {
   sections.push(`# Session Report: ${sessionId}`);
   sections.push(`## Overview\n${task || '<!-- One-line task description -->'}`);
   if (payload.plan) sections.push(`## Plan\n${payload.plan}`);
-  sections.push('## Completed\n<!-- What was accomplished (narrative). Durable outputs must also be listed under ## Artifacts. -->');
+  const completed = stripPlaceholders(extractSection(shell, 'Progress Log'));
+  sections.push(`## Completed\n${completed || '<!-- What was accomplished (narrative). Durable outputs must also be listed under ## Artifacts. -->'}`);
   sections.push(`## Changed\n${changed || '<!-- Files modified/created/deleted -->'}`);
   sections.push(`## Artifacts\n${artifacts || '<!-- Links to durable outputs written to compiled/ (cite as [[compiled/<type>-<slug>-<date>]]) -->'}`);
   sections.push(`## Blockers\n${blockers || '<!-- What couldn\'t be resolved -->'}`);
