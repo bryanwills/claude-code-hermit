@@ -2,11 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+- `channels.<name>.settings_policy` (`allow` | `ask` | `deny`, terminal-only) decides how far chat-side settings authority reaches on that channel: `allow` applies every chat-reachable tier on the first message, `ask` keeps the echoed confirmation code for execution-adjacent settings, `deny` keeps everything above the everyday settings terminal-only there. A new channel entry ships `allow`, or `ask` when it already names a `maintainer_channel_id` or allowlists more than one id; an absent or unrecognised value reads as `ask`. Edit it from a terminal with `/claude-code-hermit:hermit-settings channels` → `edit <name>` → `settings_policy`.
+
 ### Changed
+- Execution-adjacent settings (`permission_mode`, `env`, `monitors`, `boot_skill`, `shutdown_skill`, a routine `precheck`) no longer ask for a confirmation code on a channel whose `settings_policy` is `allow`. The code exists to separate someone who can read the settings chat from someone who can post in it; where one person can do both it only cost a round trip. Set `ask` on any channel more than one person can post in.
+- `settings_from_chat` is retired. Its `false` becomes `settings_policy: deny` on every channel; `hermit-evolve` migrates it, and until it does, a leftover `false` still holds every channel with no policy of its own at `deny` so an upgrade cannot reopen the opt-out. A leftover key warns instead of failing validation.
 - The `Bash(*API_KEY*)`, `Bash(*SECRET*)`, and `Bash(*TOKEN*)` deny patterns are gone from `deny-patterns.json` — trivially bypassable and blocking ordinary work (a grep, a commit message). The anchored `env`/`printenv`/`cat .env*`/`cat ~/.ssh/*`/`cat ~/.aws/*` entries stay; see `docs/security.md` for the full rationale.
 - Four sigil-anchored entries replace them: `Bash(*$ANTHROPIC_API_KEY*)` and `Bash(*$CLAUDE_CODE_OAUTH_TOKEN*)`, each in bare and `${…}` spelling. An expansion of a live credential (`echo $ANTHROPIC_API_KEY` while debugging auth) blocks; every bare mention of the name — a grep, a commit message, writing the placeholder into `.env` — stays allowed. The hook enforces them from the shipped template, so nothing needs adding to your settings file.
 
 ### Upgrade Instructions
+
+**Migrate `settings_from_chat` to per-channel `settings_policy`.** `settings_policy` is terminal-only, so **this block runs only on a terminal-typed turn** — on a channel-arrived or unattended turn the gate denies step 2. Relay it to the operator as a step for them to run themselves instead, and skip steps 2 and 3; the retired key keeps applying as `deny` until they do, so nothing is reopened by waiting. Read the current value with `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get settings_from_chat`, and the channels with `… get channels`.
+
+1. For each key under `channels` except `primary` that has no `settings_policy` yet, decide its value: `deny` if `settings_from_chat` was `false`; else `ask` if that entry names a `maintainer_channel_id` or its `allowed_users` is an array naming two or more ids; else `allow`.
+2. Write each one: `.claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json set channels.<name>.settings_policy <value>`.
+3. Only once every channel in step 2 was written, remove the retired key: `.claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json unset settings_from_chat`. Leave it in place if any write was refused — while it is present, a `false` still holds every unmigrated channel at `deny`.
+4. Delete `.claude-code-hermit/state/settings-confirm.json` if it exists — a code issued before this upgrade must not survive into a channel that no longer asks for one.
+5. Tell the operator once which value each channel got. On `allow`, say plainly that changing permission mode, `env`, monitors or the boot/shutdown skills from that chat no longer asks for a confirmation code, and that `ask` restores it — from a terminal, via `/claude-code-hermit:hermit-settings channels` → `edit <name>` → `settings_policy`.
 
 **Remove the three credential-word deny lines from your settings files, if present.** This is a settings write — from a terminal session, open `.claude/settings.json` and `.claude/settings.local.json` (whichever exist) and delete any `"Bash(*API_KEY*)"`, `"Bash(*SECRET*)"`, `"Bash(*TOKEN*)"` line from `permissions.deny`. On an unattended hermit, relay this as a step for the operator to do themselves rather than applying it — do not edit those files from an unattended session. Until it's done, those hermits keep denying commands containing those words even though the hook itself no longer enforces the pattern after this update.
 
