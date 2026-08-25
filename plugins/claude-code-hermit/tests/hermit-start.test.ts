@@ -68,6 +68,7 @@ let origCwd = '';
 let origProfile: string | undefined;
 let origContainer: string | undefined;
 let origPath: string | undefined;
+let origConfigDir: string | undefined;
 // writeSettingsEnv hydrates <CHANNEL>_STATE_DIR into process.env, so any test
 // that configures a channel state_dir leaks it into the next one without this.
 // Swept generically: the hydration is per-channel, not a fixed set of names.
@@ -78,6 +79,7 @@ beforeEach(() => {
   origProfile = process.env.AGENT_HOOK_PROFILE;
   origContainer = process.env.container;
   origPath = process.env.PATH;
+  origConfigDir = process.env.CLAUDE_CONFIG_DIR;
   origStateDirs = Object.fromEntries(
     Object.keys(process.env)
       .filter((k) => k.endsWith('_STATE_DIR'))
@@ -87,6 +89,11 @@ beforeEach(() => {
   process.chdir(tmpdir);
   fs.mkdirSync('.claude-code-hermit/state', { recursive: true });
   fs.mkdirSync('.claude', { recursive: true });
+  // resolvePersistedStyle() reads CLAUDE_CONFIG_DIR/settings.json for the user
+  // scope — point it at a directory that doesn't exist so readJson sees ENOENT
+  // and every pre-existing test's implicit "no user scope" assumption holds.
+  // A test that wants a user-scope style writes into this dir itself.
+  process.env.CLAUDE_CONFIG_DIR = path.join(tmpdir, '.claude-user-config');
 });
 
 afterEach(() => {
@@ -99,6 +106,7 @@ afterEach(() => {
   restore('AGENT_HOOK_PROFILE', origProfile);
   restore('container', origContainer);
   restore('PATH', origPath);
+  restore('CLAUDE_CONFIG_DIR', origConfigDir);
   const stateDirKeys = new Set([
     ...Object.keys(process.env).filter((k) => k.endsWith('_STATE_DIR')),
     ...Object.keys(origStateDirs),
@@ -1124,6 +1132,22 @@ describe('writeSettingsEnv voice carrier', () => {
     expect(readSettings()).not.toContainKey('outputStyle');
   });
 
+  // A user-scope /config pick is invisible to a target-file-only check — the
+  // whole reason resolvePersistedStyle() walks scopes rather than reading the
+  // project file directly.
+  test('a style set only in user scope is not reclaimed by local scope', () => {
+    seedVoiceFile();
+    fs.mkdirSync(path.join(tmpdir, '.claude-user-config'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpdir, '.claude-user-config', 'settings.json'),
+      JSON.stringify({ outputStyle: 'Explanatory' }),
+    );
+    writeSettings({});
+    writeConfig({});
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings()).not.toContainKey('outputStyle');
+  });
+
   test('language mirrors config.json into the native key', () => {
     writeSettings({});
     writeConfig({ language: 'pt-PT' });
@@ -1267,6 +1291,9 @@ describe('renderClassifierOverlay', () => {
     expect(entry).not.toContain('*/scripts/');
 
     for (const op of SEALED_SETTINGS_OPS) expect(entry).toContain(op);
+    // output-style-set is real but deliberately outside this grant — reachable only
+    // from an explicit terminal choice, never boot's unattended path.
+    expect(entry).not.toContain('output-style-set');
     expect(entry).toContain('VOID IF');
     expect(entry).toContain('NOT COVERED');
     expect(entry).toContain('.claude-code-hermit/config.json');

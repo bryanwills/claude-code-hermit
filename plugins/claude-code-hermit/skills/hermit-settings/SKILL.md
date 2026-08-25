@@ -132,16 +132,23 @@ Then re-sync the artifact-chrome translation table (the dashboard/proposals page
 - New value is `en`: delete `.claude-code-hermit/state/artifact-strings.json` if it exists (absent file ⇒ English chrome).
 
 **If argument is "voice":**
-The hermit's tone lives in `.claude/output-styles/hermit-voice.md`, a native Claude Code output style loaded into the system prompt at session start.
+The hermit's tone lives in a native Claude Code output style — either a built-in (`default`/`Concise`/`Explanatory`/...) picked at the settings level, or a custom `.claude/output-styles/hermit-voice.md` this hermit renders — loaded into the system prompt at session start either way.
 
-**Terminal-only.** On a channel-tagged turn, do not edit the file — reply that voice changes are made from a terminal session (`/claude-code-hermit:hermit-settings voice`) and stop. This file shapes every future session's system prompt, so it is not something a remote message gets to rewrite.
+**Terminal-only.** On a channel-tagged turn, do not change it — reply that voice changes are made from a terminal session (`/claude-code-hermit:hermit-settings voice`) and stop. This shapes every future session's system prompt, so it is not something a remote message gets to rewrite.
 
 In a terminal session:
-- Show the current voice prose (skip the frontmatter and the Precedence section) and ask what should change.
-- If the file doesn't exist yet, render it from `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` — same as hatch Phase 4b — then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style` and report whether it printed `applied` or `kept:<value>`.
-- Edit the prose in place. Keep the frontmatter and the Precedence section as they are, keep it about tone rather than work context, and keep it short — it costs tokens on every API call.
+- Read `outputStyle` from the settings file for the stamped hatch target (and its sibling — local outranks project) to show the operator their current style. Ask: "How should I change it? (Default / Concise / Explanatory / something else)"
+- **Default / Concise / Explanatory** — a built-in. Run:
+  ```
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style-set <style>
+  ```
+  `<style>` is `default` (lowercase — the picker shows "Default" but persists the lowercase literal), `Concise`, or `Explanatory`. `output-style-set` replaces whatever was there, including an existing `hermit-voice`. If `.claude/output-styles/hermit-voice.md` exists, leave it on disk — switching away doesn't delete it, so the operator can switch back later.
+- **Something else** — if `.claude/output-styles/hermit-voice.md` doesn't exist yet, render it from `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` — same as hatch Phase 4b, using the operator's own wording verbatim or with only mechanical wrapping, never a paraphrase. If it already exists, show the current prose (skip the frontmatter and the Precedence section) and edit it in place — keep the frontmatter and the Precedence section as they are, keep it about tone rather than work context, and keep it short — it costs tokens on every API call. Either way, then run:
+  ```
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style-set hermit-voice
+  ```
 - Tell the operator it takes effect in the next session (the system prompt is built at session start).
-- **Under `AGENT_HOOK_PROFILE=strict`** (Docker and always-on boots) the deny patterns block `Edit`/`Write` on this file, same as `OPERATOR.md`. Don't retry: show the operator the exact prose to use and let them edit `.claude/output-styles/hermit-voice.md` themselves.
+- **Under `AGENT_HOOK_PROFILE=strict`** (Docker and always-on boots) the deny patterns block `Edit`/`Write` on the voice file, same as `OPERATOR.md`. Don't retry: for a custom-style change, show the operator the exact prose to use and let them edit `.claude/output-styles/hermit-voice.md` themselves; a built-in switch still goes through `apply-settings.ts` (a script write, not `Edit`/`Write`) and is unaffected.
 
 **If argument is "channels":**
 Show current channel configuration from `config.json` → `channels` object. The `channels.primary` key (if set) is a magic pointer to the preferred outbound channel, not a channel itself — display it on its own line above the channel list:

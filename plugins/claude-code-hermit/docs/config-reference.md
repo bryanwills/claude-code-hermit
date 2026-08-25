@@ -494,21 +494,25 @@ Modify with `/hermit-settings docker`.
 
 ---
 
-## Voice — `.claude/output-styles/hermit-voice.md`
+## Voice — a Claude Code output style
 
-How the hermit talks to you is not in `config.json`. It's a native Claude Code [output style](https://code.claude.com/docs/en/output-styles): a markdown file that Claude Code builds into the **system prompt** at session start, which is why it holds for a whole session and survives compaction, where session-start context fades.
+How the hermit talks to you is not in `config.json`. It's a native Claude Code [output style](https://code.claude.com/docs/en/output-styles): built into the **system prompt** at session start, which is why it holds for a whole session and survives compaction, where session-start context fades.
 
-| Piece | Where | Who owns it |
+`hatch` asks once, after `OPERATOR.md` is already written, and routes the answer one of two ways:
+
+| Choice | Where the tone lives | Who owns it |
 |-------|-------|-------------|
-| The tone itself | `.claude/output-styles/hermit-voice.md` | You. Edit it directly, or run `/claude-code-hermit:hermit-settings voice` from a terminal session. |
-| The activation | `outputStyle` in `.claude/settings.json` or `.claude/settings.local.json` | Written once by `hatch`; boot re-adds it only if it goes missing. |
+| A Claude Code built-in (`Default`/`Concise`/`Explanatory`) | Nothing on disk — a name in the `outputStyle` setting | Claude Code. `hermit-settings voice` can switch it, but there's no file to edit. |
+| Something else | `.claude/output-styles/hermit-voice.md`, a custom style this hermit renders from your own words | You. Edit it directly, or run `/claude-code-hermit:hermit-settings voice` from a terminal session. |
+
+Either way, the activation is `outputStyle` in `.claude/settings.json` or `.claude/settings.local.json` (or `~/.claude/settings.json` at user scope). `hatch` seeds it once via `apply-settings.ts output-style` — only when no scope already owns the key; `hermit-settings voice` switches it via the separate `output-style-set` op, which replaces an existing value on purpose. Note the one asymmetry: Claude Code's `/config` picker displays "Default" but persists the lowercase `default`.
 
 Notes:
 
-- **Your own `/config` choice wins.** If you pick a different output style, neither `hatch` nor boot overwrites it — `hermit-doctor`'s `voice-carrier` check just tells you the hermit voice is inactive. Local scope beats project scope, as in Claude Code itself.
+- **Your own `/config` choice wins.** If you pick a style yourself, in any scope, neither `hatch` nor boot overwrites it — `hermit-doctor`'s `voice-carrier` check reports what's persisted instead. Local scope beats project scope beats user scope, as in Claude Code itself.
 - **Changes apply next session.** The system prompt is built at session start.
-- **Terminal only.** A channel message can't edit this file; it shapes every future session's system prompt.
-- **It is gitignored**, so it does not travel with a clone — `/claude-code-hermit:migrate` treats it as must-migrate, and it's listed in `.worktreeinclude` so worktrees keep it.
+- **Terminal only.** A channel message can't change it; it shapes every future session's system prompt.
+- **A custom voice file is gitignored**, so it does not travel with a clone — `/claude-code-hermit:migrate` treats it as must-migrate, and it's listed in `.worktreeinclude` so worktrees keep it. A built-in has nothing to migrate.
 - **Tone only.** Project focus, constraints and approvals stay in `OPERATOR.md`; channel routing rules ship with the plugin.
 
 ---

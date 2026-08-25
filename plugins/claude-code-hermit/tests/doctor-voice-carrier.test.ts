@@ -8,9 +8,14 @@ const PLUGIN_ROOT = path.resolve(import.meta.dir, '..');
 const { freshDir, cleanup } = freshDirFactory('hermit-voice-carrier-');
 afterAll(cleanup);
 
-type Fixture = { voiceFile?: boolean; local?: any; project?: any };
+type Fixture = { voiceFile?: boolean; local?: any; project?: any; user?: any };
 
-function scenario({ voiceFile, local, project }: Fixture) {
+// checkVoiceCarrier runs in-process and resolvePersistedStyle() reads
+// CLAUDE_CONFIG_DIR/settings.json for the user scope — so every scenario pins
+// CLAUDE_CONFIG_DIR to an isolated directory for the duration of the call and
+// restores it after. Without this, these tests would read whatever real
+// ~/.claude/settings.json happens to exist on the machine running the suite.
+function scenario({ voiceFile, local, project, user }: Fixture) {
   const dir = freshDir();
   fs.mkdirSync(path.join(dir, '.claude-code-hermit'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
@@ -28,7 +33,19 @@ function scenario({ voiceFile, local, project }: Fixture) {
   if (local !== undefined) writeSettings('settings.local.json', local);
   if (project !== undefined) writeSettings('settings.json', project);
 
-  return checkVoiceCarrier(resolvePaths(path.join(dir, '.claude-code-hermit'), PLUGIN_ROOT));
+  const userConfigDir = freshDir();
+  if (user !== undefined) {
+    fs.writeFileSync(path.join(userConfigDir, 'settings.json'), JSON.stringify(user, null, 2));
+  }
+
+  const prevConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = userConfigDir;
+  try {
+    return checkVoiceCarrier(resolvePaths(path.join(dir, '.claude-code-hermit'), PLUGIN_ROOT));
+  } finally {
+    if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
+  }
 }
 
 // The voice only reaches the system prompt when BOTH halves line up: the style
@@ -48,7 +65,34 @@ describe('doctor voice-carrier check', () => {
     expect(r.detail).toContain('voice active');
   });
 
-  test("an operator's own style is reported as inactive voice, not as an error to fix", () => {
+  test('a recognized built-in with no voice file is a deliberate choice, not a default fallback', () => {
+    const r = scenario({ local: { outputStyle: 'Concise' } });
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('persisted style "Concise"');
+    expect(r.detail).toContain('.claude/settings.local.json');
+  });
+
+  test('the lowercase Default literal is recognized as a built-in too', () => {
+    const r = scenario({ local: { outputStyle: 'default' } });
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('persisted style "default"');
+  });
+
+  test('a user-scope built-in is reported with its source', () => {
+    const r = scenario({ user: { outputStyle: 'Explanatory' } });
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('persisted style "Explanatory"');
+    expect(r.detail).toContain('user');
+  });
+
+  test("an operator's own unrecognized custom style is reported as inactive voice, not as an error to fix", () => {
+    const r = scenario({ voiceFile: true, local: { outputStyle: 'my-custom-style' } });
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('my-custom-style');
+    expect(r.detail).toContain("or leave it if that's intended");
+  });
+
+  test('switching to a built-in while a hermit voice file still exists reports it inactive, not ok', () => {
     const r = scenario({ voiceFile: true, local: { outputStyle: 'Concise' } });
     expect(r.status).toBe('warn');
     expect(r.detail).toContain('Concise');
@@ -91,13 +135,31 @@ describe('doctor voice-carrier check', () => {
     expect(r.detail).toContain('.claude/settings.json');
   });
 
+  test('both project files win over a user-scope style', () => {
+    const r = scenario({
+      voiceFile: true,
+      project: { outputStyle: 'hermit-voice' },
+      user: { outputStyle: 'Concise' },
+    });
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('.claude/settings.json');
+  });
+
   test('an unparseable settings file does not throw the check', () => {
     const dir = freshDir();
     fs.mkdirSync(path.join(dir, '.claude-code-hermit'), { recursive: true });
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), '{ broken');
 
-    const r = checkVoiceCarrier(resolvePaths(path.join(dir, '.claude-code-hermit'), PLUGIN_ROOT));
-    expect(r.status).toBe('ok');
+    const userConfigDir = freshDir();
+    const prevConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = userConfigDir;
+    try {
+      const r = checkVoiceCarrier(resolvePaths(path.join(dir, '.claude-code-hermit'), PLUGIN_ROOT));
+      expect(r.status).toBe('ok');
+    } finally {
+      if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
+    }
   });
 });

@@ -16,10 +16,18 @@
  *   artifact-allow           Merge just ["Artifact"] into permissions.allow — kept as its
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
- *   output-style             Set outputStyle to the sealed "hermit-voice" value, but only when
- *                            the key is absent. An operator's own /config choice is preserved
- *                            untouched (file left byte-identical); prints "applied" or
- *                            "kept:<value>" so callers can report the mismatch.
+ *   output-style [style]     Seed outputStyle to [style] (default "hermit-voice"), but only
+ *                            when no persisted scope (local/project/user) already owns the
+ *                            key. [style] must be one of SEALED_OUTPUT_STYLES. An operator's
+ *                            own /config choice is preserved untouched (file left
+ *                            byte-identical); prints "applied" or "kept:<value>" so callers
+ *                            can report the mismatch. Cannot switch an already-set style —
+ *                            use output-style-set for that.
+ *   output-style-set <style> Replace outputStyle with <style> unconditionally, for an
+ *                            explicit terminal choice (hermit-settings voice). <style> must
+ *                            be one of SEALED_OUTPUT_STYLES. Deliberately NOT in
+ *                            SEALED_SETTINGS_OPS — not preauthorized for the auto-mode
+ *                            classifier, only ever reached from an explicit operator ask.
  *   automode-seed            RETIRED — exits 1. The classifier stopped reading autoMode from any
  *                            project settings file in Claude Code 2.1.207, so this verb's writes
  *                            were silently ignored. The sealed entries now ship in the per-session
@@ -30,8 +38,9 @@
  * Rules:
  * - Never removes existing keys or array entries — except channel-env, which strips
  *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings),
- *   and permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
- *   registry below (scripts this plugin itself shipped and has since deleted).
+ *   permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
+ *   registry below (scripts this plugin itself shipped and has since deleted), and
+ *   output-style-set, which replaces outputStyle by design.
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
  */
@@ -40,8 +49,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
 import { channelStateDirKey } from './lib/channel-config';
-import { HERMIT_OUTPUT_STYLE } from './lib/voice';
-import { SEALED_SETTINGS_OPS } from './lib/settings/automode-entries';
+import { HERMIT_OUTPUT_STYLE, SEALED_OUTPUT_STYLES, isSealedOutputStyle, resolvePersistedStyle } from './lib/voice';
+import { SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from './lib/settings/automode-entries';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -339,15 +348,35 @@ switch (op) {
   }
 
   case 'output-style': {
-    // Only-if-absent, and the value is the sealed constant — never caller text.
-    // A style the operator chose in /config is their decision: this op leaves it
-    // (and the file's bytes) alone and prints what it found, so hatch and
-    // hermit-doctor can surface the mismatch rather than the hermit silently
-    // reclaiming the key on every boot.
-    const current = settings.outputStyle;
-    if (current === undefined) settings.outputStyle = HERMIT_OUTPUT_STYLE;
+    // Only-if-absent across every persisted scope, and the value is validated against
+    // the sealed list — never arbitrary caller text. A style the operator chose in
+    // /config (in any scope) is their decision: this op leaves the target file (and
+    // its bytes) alone and prints what it found, so hatch and hermit-doctor can
+    // surface the mismatch rather than the hermit silently reclaiming the key.
+    const style = rest[0] ?? HERMIT_OUTPUT_STYLE;
+    if (!isSealedOutputStyle(style)) {
+      console.error(`output-style: "${style}" is not a sealed style. Valid: ${SEALED_OUTPUT_STYLES.join(', ')}`);
+      process.exit(1);
+    }
+    const projectRoot = path.dirname(path.dirname(path.resolve(targetFile)));
+    const persisted = resolvePersistedStyle(projectRoot);
+    if (persisted.value === null) settings.outputStyle = style;
     else readOnly = true;
-    console.log(current === undefined ? 'applied' : `kept:${current}`);
+    console.log(persisted.value === null ? 'applied' : `kept:${persisted.value}`);
+    break;
+  }
+
+  case 'output-style-set': {
+    // Explicit replacement — the seed op above cannot switch an already-set style,
+    // and hermit-settings voice needs to. Unconditional: this is only ever reached
+    // from an operator's own terminal choice, never boot or hatch's seed path.
+    const style = rest[0];
+    if (!style || !isSealedOutputStyle(style)) {
+      console.error(`output-style-set: requires one of ${SEALED_OUTPUT_STYLES.join(', ')}, got: ${style ?? '(none)'}`);
+      process.exit(1);
+    }
+    settings.outputStyle = style;
+    console.log('applied');
     break;
   }
 
@@ -405,7 +434,8 @@ switch (op) {
   }
 
   default: {
-    console.error(`Unknown operation: ${op}. Valid ops: ${SEALED_SETTINGS_OPS.join(', ')}`);
+    const validOps = [...SEALED_SETTINGS_OPS, ...TERMINAL_ONLY_SETTINGS_OPS];
+    console.error(`Unknown operation: ${op}. Valid ops: ${validOps.join(', ')}`);
     process.exit(1);
   }
 }

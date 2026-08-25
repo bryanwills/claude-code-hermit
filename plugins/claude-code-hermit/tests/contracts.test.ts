@@ -3256,10 +3256,12 @@ describe('voice carrier contract', () => {
     expect(text).not.toContain('PROP-NNN');
   });
 
-  test('OPERATOR.md template points tone at the voice file instead of owning it', () => {
+  test('OPERATOR.md template points tone at Claude Code output styles instead of owning it, and does not overclaim its own question count', () => {
     const operator = read(path.join(TEMPLATES, 'OPERATOR.md'));
     expect(operator).toContain('.claude/output-styles/hermit-voice.md');
     expect(operator).not.toContain('Comms style:');
+    expect(operator).toContain('three questions');
+    expect(operator).not.toContain('four questions');
   });
 
   // The file feeds the next session's system prompt, so a remote message must
@@ -3271,10 +3273,35 @@ describe('voice carrier contract', () => {
     expect(settings).toContain('Terminal-only.');
   });
 
-  test('hatch routes the comms-style answer to the voice file, not OPERATOR.md', () => {
+  test('hatch asks about style only after OPERATOR.md is final, so the leak the file guarded against cannot recur', () => {
     const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
+    const call1 = hatch.slice(hatch.indexOf('Call 1 — always sent'), hatch.indexOf('Call 2 —'));
+    // The batch that runs before OPERATOR.md is drafted must not carry a
+    // communication-style question — that's the structural fix for the leak.
+    expect(call1).not.toMatch(/comms style|communicate/i);
+
+    const operatorWriteIdx = hatch.indexOf('Write the final version to `.claude-code-hermit/OPERATOR.md`.');
+    const styleStepIdx = hatch.indexOf('#### Phase 4b — Style');
+    expect(operatorWriteIdx).toBeGreaterThan(-1);
+    expect(styleStepIdx).toBeGreaterThan(operatorWriteIdx);
+  });
+
+  test('hatch offers Claude Code built-ins before falling back to the custom voice file', () => {
+    const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
+    expect(hatch).toContain('Default / Concise / Explanatory / Other');
+    expect(hatch).toContain('style = default');
     expect(hatch).toContain('hermit-voice.md.template');
-    expect(hatch).toContain('apply-settings.ts <resolved-settings-file> output-style');
+    expect(hatch).toContain('apply-settings.ts <resolved-settings-file> output-style <style>');
+  });
+
+  // hatch's unattended seed and hermit-settings' explicit terminal switch are
+  // different ops on purpose (seed can't switch an already-set style) — both
+  // must exist and both must reach the same script.
+  test('hatch and hermit-settings reach apply-settings.ts, via the seed and explicit-set ops respectively', () => {
+    const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
+    const settings = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
+    expect(hatch).toContain('apply-settings.ts <resolved-settings-file> output-style <style>');
+    expect(settings).toContain('apply-settings.ts <settings-file for the stamped hatch target> output-style-set');
   });
 
   // The voice file is operator-curated and gitignored — which is exactly the

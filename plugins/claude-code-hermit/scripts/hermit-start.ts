@@ -27,7 +27,7 @@ import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
-import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
+import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolvePersistedStyle } from './lib/voice';
 import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
 import { writeFileAtomic } from './lib/md-write';
 
@@ -921,7 +921,7 @@ function writeSettingsEnv(
   // the key into committed settings.json, and seeding a duplicate here would
   // put a local-scope copy in front of it that outranks — and permanently
   // shadows — any later /config change made at project scope.
-  if (!skipWrite && voiceFileExists() && resolveEffectiveStyle().value === null) {
+  if (!skipWrite && voiceFileExists() && resolvePersistedStyle().value === null) {
     settings.outputStyle = HERMIT_OUTPUT_STYLE;
     console.log(`[hermit] Voice: outputStyle set to ${HERMIT_OUTPUT_STYLE} in ${settingsPath}`);
   }

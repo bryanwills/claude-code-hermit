@@ -14,7 +14,7 @@ import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } fr
 import { costLogPath } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
-import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
+import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolvePersistedStyle, BUILTIN_OUTPUT_STYLES } from './lib/voice';
 import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
@@ -2019,9 +2019,12 @@ function checkVoiceCarrier(p: DoctorPaths = PATHS) {
   try {
     const projectRoot = path.dirname(p.hermitDir);
     const hasFile = voiceFileExists(projectRoot);
-    const { value, source } = resolveEffectiveStyle(projectRoot);
+    const { value, source } = resolvePersistedStyle(projectRoot);
 
     if (!hasFile && value !== HERMIT_OUTPUT_STYLE) {
+      if (value !== null && (BUILTIN_OUTPUT_STYLES as readonly string[]).includes(value)) {
+        return { id, status: 'ok', detail: `persisted style "${value}" (${source})` };
+      }
       return { id, status: 'ok', detail: 'no hermit voice file (using Claude Code defaults)' };
     }
     if (!hasFile) {

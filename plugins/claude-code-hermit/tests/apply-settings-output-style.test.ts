@@ -7,24 +7,37 @@ import { freshDirFactory } from './helpers/workdir';
 const { freshDir, cleanup } = freshDirFactory('hermit-output-style-');
 afterAll(cleanup);
 
-function seedSettings(dir: string, settings: any): string {
+function seedSettings(dir: string, name: string, settings: any): string {
   const claude = path.join(dir, '.claude');
   fs.mkdirSync(claude, { recursive: true });
-  const file = path.join(claude, 'settings.local.json');
+  const file = path.join(claude, name);
   fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
   return file;
 }
 
 const readRaw = (file: string) => fs.readFileSync(file, 'utf8');
 
+// resolvePersistedStyle() also reads the user scope (CLAUDE_CONFIG_DIR/settings.json),
+// and runScript's subprocess inherits this test runner's full environment — so every
+// call here pins CLAUDE_CONFIG_DIR to an empty scratch dir. Without it these tests
+// would silently read whatever machine happens to run the suite.
+function emptyConfigDir(): string {
+  return freshDir();
+}
+
 // The voice carrier is a settings key the operator can also set themselves via
-// /config. This op therefore has to be strictly one-way: it seeds the key when
-// nothing owns it, and otherwise keeps its hands off — including leaving the
-// file's bytes (and mtime) alone, since hermit-start runs it on every boot.
-describe('apply-settings.ts output-style', () => {
-  test('seeds outputStyle when the key is absent', async () => {
-    const file = seedSettings(freshDir(), { permissions: { allow: ['Bash(ls:*)'] } });
-    const r = await runScript('apply-settings.ts', { args: [file, 'output-style'] });
+// /config, in any persisted scope. output-style therefore has to be strictly
+// one-way: it seeds the key when no scope owns it, and otherwise keeps its hands
+// off the target file — including leaving its bytes (and mtime) alone, since
+// hermit-start runs it on every boot. output-style-set is the separate, explicit
+// replacement op for hermit-settings voice.
+describe('apply-settings.ts output-style (seed)', () => {
+  test('seeds outputStyle when the key is absent everywhere', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', { permissions: { allow: ['Bash(ls:*)'] } });
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
 
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('applied');
@@ -34,10 +47,48 @@ describe('apply-settings.ts output-style', () => {
     expect(after.permissions.allow).toEqual(['Bash(ls:*)']);
   });
 
-  test("preserves an operator's own style and rewrites nothing", async () => {
-    const file = seedSettings(freshDir(), { outputStyle: 'Concise' });
+  test('seeds an explicit sealed built-in style', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', {});
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style', 'Concise'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('applied');
+    expect(JSON.parse(readRaw(file)).outputStyle).toBe('Concise');
+  });
+
+  test('seeds the lowercase Default literal, not the display label', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', {});
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style', 'default'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(readRaw(file)).outputStyle).toBe('default');
+  });
+
+  test('rejects an unsealed style and writes nothing', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', { permissions: { allow: ['Bash(ls:*)'] } });
     const before = readRaw(file);
-    const r = await runScript('apply-settings.ts', { args: [file, 'output-style'] });
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style', 'Bogus'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(1);
+    expect(readRaw(file)).toBe(before);
+  });
+
+  test("preserves an operator's own style in the target file and rewrites nothing", async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', { outputStyle: 'Concise' });
+    const before = readRaw(file);
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
 
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('kept:Concise');
@@ -45,20 +96,115 @@ describe('apply-settings.ts output-style', () => {
   });
 
   test('is idempotent when the key is already the hermit style', async () => {
-    const file = seedSettings(freshDir(), { outputStyle: 'hermit-voice' });
+    const file = seedSettings(freshDir(), 'settings.local.json', { outputStyle: 'hermit-voice' });
     const before = readRaw(file);
-    const r = await runScript('apply-settings.ts', { args: [file, 'output-style'] });
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
 
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('kept:hermit-voice');
     expect(readRaw(file)).toBe(before);
   });
 
+  test("won't seed local scope over a style already set in the project's shared settings.json", async () => {
+    const dir = freshDir();
+    seedSettings(dir, 'settings.json', { outputStyle: 'Explanatory' });
+    const localFile = seedSettings(dir, 'settings.local.json', {});
+    const before = readRaw(localFile);
+    const r = await runScript('apply-settings.ts', {
+      args: [localFile, 'output-style'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('kept:Explanatory');
+    expect(readRaw(localFile)).toBe(before);
+  });
+
+  test("won't seed over a style set only in a relocated CLAUDE_CONFIG_DIR user scope", async () => {
+    const projectFile = seedSettings(freshDir(), 'settings.local.json', {});
+    const before = readRaw(projectFile);
+    const userConfigDir = freshDir();
+    fs.writeFileSync(
+      path.join(userConfigDir, 'settings.json'),
+      JSON.stringify({ outputStyle: 'Learning' }, null, 2) + '\n',
+    );
+    const r = await runScript('apply-settings.ts', {
+      args: [projectFile, 'output-style'],
+      env: { CLAUDE_CONFIG_DIR: userConfigDir },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('kept:Learning');
+    expect(readRaw(projectFile)).toBe(before);
+  });
+
   test('the op is advertised in the unknown-operation error', async () => {
-    const file = seedSettings(freshDir(), {});
-    const r = await runScript('apply-settings.ts', { args: [file, 'no-such-op'] });
+    const file = seedSettings(freshDir(), 'settings.local.json', {});
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'no-such-op'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
 
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('output-style');
+    expect(r.stderr).toContain('output-style-set');
+  });
+});
+
+describe('apply-settings.ts output-style-set (explicit replacement)', () => {
+  test('replaces an already-set style', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', {
+      outputStyle: 'hermit-voice',
+      permissions: { allow: ['Bash(ls:*)'] },
+    });
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style-set', 'Concise'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('applied');
+    const after = JSON.parse(readRaw(file));
+    expect(after.outputStyle).toBe('Concise');
+    // Additive elsewhere: unrelated keys survive untouched.
+    expect(after.permissions.allow).toEqual(['Bash(ls:*)']);
+  });
+
+  test('sets when the key was absent', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', {});
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style-set', 'Explanatory'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(JSON.parse(readRaw(file)).outputStyle).toBe('Explanatory');
+  });
+
+  test('rejects an unsealed style and writes nothing', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', { outputStyle: 'hermit-voice' });
+    const before = readRaw(file);
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style-set', 'Bogus'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(1);
+    expect(readRaw(file)).toBe(before);
+  });
+
+  test('requires a style argument', async () => {
+    const file = seedSettings(freshDir(), 'settings.local.json', { outputStyle: 'hermit-voice' });
+    const before = readRaw(file);
+    const r = await runScript('apply-settings.ts', {
+      args: [file, 'output-style-set'],
+      env: { CLAUDE_CONFIG_DIR: emptyConfigDir() },
+    });
+
+    expect(r.exitCode).toBe(1);
+    expect(readRaw(file)).toBe(before);
   });
 });

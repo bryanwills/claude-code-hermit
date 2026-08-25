@@ -4,10 +4,18 @@
 
 ### Changed
 - The `Bash(*API_KEY*)`, `Bash(*SECRET*)`, and `Bash(*TOKEN*)` deny patterns are gone from `deny-patterns.json` — trivially bypassable and blocking ordinary work (a grep, a commit message). The anchored `env`/`printenv`/`cat .env*`/`cat ~/.ssh/*`/`cat ~/.aws/*` entries stay; see `docs/security.md` for the full rationale.
+- `hatch` asks about communication style once, after `OPERATOR.md` is already written, and offers Claude Code's own built-in output styles (`Default`/`Concise`/`Explanatory`) before falling back to a custom `.claude/output-styles/hermit-voice.md` — a built-in creates no file at all. `hermit-settings voice` offers the same choice, and can now switch an already-set style instead of only seeding an absent one.
+- `apply-settings.ts`'s `output-style` op now checks every persisted scope (local, project, and user via `CLAUDE_CONFIG_DIR`) before seeding, not just its target file, and takes an optional style argument validated against Claude Code's known built-ins plus `hermit-voice`. A new `output-style-set` op does the explicit replacement `hermit-settings voice` needs; it is deliberately outside the auto-mode classifier's preauthorized op list, reachable only from a live terminal choice.
+
+### Fixed
+- A fresh hatch could end up with the operator's communication-style answer in both `OPERATOR.md` prose and the native voice mechanism — the template's stale "four questions" header invited a fourth item, and nothing excluded the answer from the final `OPERATOR.md` write. Asking about style only after that write closes the leak structurally rather than by scrubbing prose.
+- `apply-settings.ts output-style` (and `hermit-doctor`'s `voice-carrier` check) only ever looked at local and project settings, so a style set at user scope (`~/.claude/settings.json` or a relocated `CLAUDE_CONFIG_DIR`) was invisible and could get silently outranked by a hermit seeding the key into a lower-precedence project file.
 
 ### Upgrade Instructions
 
 **Remove the three credential-word deny lines from your settings files, if present.** This is a settings write — from a terminal session, open `.claude/settings.json` and `.claude/settings.local.json` (whichever exist) and delete any `"Bash(*API_KEY*)"`, `"Bash(*SECRET*)"`, `"Bash(*TOKEN*)"` line from `permissions.deny`. On an unattended hermit, relay this as a step for the operator to do themselves rather than applying it — do not edit those files from an unattended session. Until it's done, those hermits keep denying commands containing those words even though the hook itself no longer enforces the pattern after this update.
+
+**Voice: announce, don't rewrite.** An already-hatched hermit with a custom `.claude/output-styles/hermit-voice.md` keeps it untouched — this only changes what a *fresh* hatch offers and what `hermit-settings voice` can now switch to. Tell the operator, once: they can now point their voice at a Claude Code built-in instead of the custom file, any time, by running `/claude-code-hermit:hermit-settings voice` from a terminal session.
 
 ## [1.2.48] - 2026-08-24
 

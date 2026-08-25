@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
-import { SEALED_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
+import { SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-automode-seed-');
 afterAll(cleanup);
@@ -53,19 +53,24 @@ describe('apply-settings.ts automode-seed (retired)', () => {
 });
 
 // The classifier's allow entry names the ops it covers, so an op added to the
-// dispatch without reaching SEALED_SETTINGS_OPS would run unattended under a
-// policy that never mentioned it. RETIRED_OPS are dispatched only to exit 1.
+// dispatch without reaching SEALED_SETTINGS_OPS (or being declared terminal-only
+// or retired) would run unattended under a policy that never mentioned it.
+// RETIRED_OPS are dispatched only to exit 1. TERMINAL_ONLY_SETTINGS_OPS are real
+// but deliberately outside the classifier grant — reachable only from an
+// explicit terminal choice.
 describe('apply-settings.ts op registry', () => {
   const RETIRED_OPS = ['automode-seed'];
 
-  test('every dispatched op is either sealed or retired', () => {
+  test('every dispatched op is sealed, terminal-only, or retired', () => {
     const src = fs.readFileSync(
       path.join(import.meta.dir, '..', 'scripts', 'apply-settings.ts'),
       'utf8',
     );
     const dispatched = [...src.matchAll(/^  case '([a-z-]+)':/gm)].map((m) => m[1]);
     expect(dispatched.length).toBeGreaterThan(0);
-    expect(dispatched.sort()).toEqual([...SEALED_SETTINGS_OPS, ...RETIRED_OPS].sort());
+    expect(dispatched.sort()).toEqual(
+      [...SEALED_SETTINGS_OPS, ...TERMINAL_ONLY_SETTINGS_OPS, ...RETIRED_OPS].sort(),
+    );
   });
 
   test('the usage message advertises exactly the sealed ops', async () => {

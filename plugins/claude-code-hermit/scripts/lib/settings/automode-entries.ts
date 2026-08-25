@@ -27,6 +27,12 @@ export const SEALED_SETTINGS_OPS = [
   'channel-env',
 ] as const;
 
+// Ops apply-settings.ts dispatches but deliberately does NOT expose to the classifier
+// grant below — reachable only from an explicit terminal choice (hermit-settings voice),
+// never boot or hatch's unattended seed path. Kept separate from SEALED_SETTINGS_OPS so
+// the auto-mode allow entry's enumerated op list stays exactly what it always was.
+export const TERMINAL_ONLY_SETTINGS_OPS = ['output-style-set'] as const;
+
 /**
  * Build the allow entry at overlay-render time so the path anchor is a concrete prefix
  * rather than a bare glob.
