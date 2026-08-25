@@ -236,6 +236,12 @@ if (Object.hasOwn(answers, 'channels')) {
     // only from the terminal. A configured pin rides the ...existing spread.
     if (!Object.hasOwn(merged, 'default_chat_id')) merged.default_chat_id = null;
     if (!Object.hasOwn(merged, 'state_dir')) merged.state_dir = `.claude.local/channels/${name}`;
+    // How much settings authority a chat on this channel carries
+    // (lib/channel-auth.ts settingsPolicy). `allow` because a freshly paired
+    // channel is one operator on their own chat, and the confirmation code has
+    // nobody to separate there. Written once, never re-asserted: an operator who
+    // moved it to `ask` or `deny` rides the ...existing spread through re-init.
+    if (!Object.hasOwn(merged, 'settings_policy')) merged.settings_policy = 'allow';
     if (Object.hasOwn(ans, 'allowed_users')) merged.allowed_users = ans.allowed_users;
     // Outbound-only second destination for maintainer-tier alerts; a freshly
     // answered value must survive re-init (existing values ride the ...existing spread).

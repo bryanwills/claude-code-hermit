@@ -503,17 +503,48 @@ describe('push_notifications validation', () => {
   });
 });
 
-describe('settings_from_chat validation', () => {
-  test('true and false are both valid', () => {
-    for (const val of [true, false]) {
+describe('settings_from_chat retirement', () => {
+  // A leftover key is inert, not dangerous: nothing reads it since it became
+  // per-channel `settings_policy`. Erroring would stop a half-migrated hermit
+  // from booting over a key that no longer does anything.
+  test('a leftover key warns rather than erroring, whatever its value', () => {
+    for (const val of [true, false, 'off']) {
       const out = runValidate({ settings_from_chat: val });
       expect(out.errors.some((e: string) => e.includes('settings_from_chat'))).toBe(false);
+      expect(out.warnings.some((w: string) => w.includes('settings_from_chat'))).toBe(true);
     }
   });
 
-  test('must be a boolean — a truthy string would read as "on" and is rejected', () => {
-    const out = runValidate({ settings_from_chat: 'off' });
-    expect(out.errors.some((e: string) => e.includes('settings_from_chat'))).toBe(true);
+  test('an absent key says nothing at all', () => {
+    const out = runValidate({});
+    expect(out.warnings.some((w: string) => w.includes('settings_from_chat'))).toBe(false);
+  });
+});
+
+describe('channels.<name>.settings_policy validation', () => {
+  const withPolicy = (settings_policy: unknown, extra: Record<string, unknown> = {}) =>
+    ({ channels: { discord: { enabled: true, settings_policy, ...extra } } });
+
+  test('the three literals are accepted', () => {
+    for (const val of ['allow', 'ask', 'deny']) {
+      const out = runValidate(withPolicy(val));
+      expect(out.errors.some((e: string) => e.includes('settings_policy'))).toBe(false);
+    }
+  });
+
+  test('an unrecognised value is rejected rather than resolved to ask', () => {
+    const out = runValidate(withPolicy('open'));
+    expect(out.errors.some((e: string) => e.includes('settings_policy'))).toBe(true);
+  });
+
+  test('allow with an allowlist naming several people warns', () => {
+    const out = runValidate(withPolicy('allow', { allowed_users: ['u1', 'u2'] }));
+    expect(out.warnings.some((w: string) => w.includes('settings_policy'))).toBe(true);
+  });
+
+  test('allow with a single allowed user is silent', () => {
+    const out = runValidate(withPolicy('allow', { allowed_users: ['u1'] }));
+    expect(out.warnings.some((w: string) => w.includes('settings_policy'))).toBe(false);
   });
 });
 

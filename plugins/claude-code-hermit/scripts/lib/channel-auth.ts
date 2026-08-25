@@ -160,9 +160,9 @@ export function isMaintainerController(
  * An operator who named a settings chat meant that one — not that one plus the
  * home chat — and the narrower reading is the one they can predict.
  *
- * The `settings_from_chat: false` opt-out is enforced by the gate, not here:
- * this answers "is this chat the authority", the gate answers "may any chat
- * hold it at all".
+ * The `settings_policy` dial is enforced by the gate, not here: this answers
+ * "is this chat the authority", the gate answers "how much authority does a
+ * chat on this channel carry at all" (settingsPolicy below).
  *
  * Caveat worth stating, because the fallback inherits it wholesale: when
  * `allowed_users` IS configured, isTrustedController defers to the allowlist and
@@ -187,4 +187,35 @@ export function isSettingsController(
   // future profile value — anything but a known operator-run install declines.
   if ((config?.operator_profile ?? 'technical') !== 'technical') return false;
   return isTrustedController(config, source, userId, chatId);
+}
+
+/**
+ * How much settings authority a chat on this channel carries, per
+ * `channels.<name>.settings_policy`. Claude Code's own decision vocabulary
+ * (`permissions.allow|ask|deny`), because this answers the same question about
+ * the same kind of subject:
+ *
+ *   allow  the settings chat applies every chat-reachable tier on the first
+ *          message. On the install with one operator on their own DM the
+ *          confirmation code separates nobody from nobody, so it is skipped.
+ *   ask    execution-adjacent settings need the echoed code (lib/settings-confirm.ts).
+ *          Anything that can post in the settings chat besides the operator makes
+ *          that second factor real again.
+ *   deny   nothing above the safe tier from this channel, terminal only. Replaces
+ *          the retired top-level `settings_from_chat: false`, per channel.
+ *
+ * Two different defaults, on purpose. The value hatch-config writes into a new
+ * channel entry is `allow`: a freshly paired channel is one operator, and a
+ * grant is something setup writes down. The value resolved here for a key that
+ * is absent or unrecognised is `ask`, the fail-safe direction and the one Claude
+ * Code itself falls back to. A healthy install never reaches it.
+ *
+ * The gate holds `settings_policy` terminal-only alongside the enrollment root:
+ * a chat that could raise its own policy would hand itself the tier.
+ */
+export type SettingsPolicy = 'allow' | 'ask' | 'deny';
+
+export function settingsPolicy(config: Json, source: string): SettingsPolicy {
+  const value = channelEntry(config, source)?.settings_policy;
+  return value === 'allow' || value === 'deny' ? value : 'ask';
 }

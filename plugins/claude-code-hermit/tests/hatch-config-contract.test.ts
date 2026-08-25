@@ -69,7 +69,7 @@ describe('hatch-config.ts', () => {
         { id: 'md-revise', plugin: 'claude-md-management', skill: '/claude-md-management:revise-claude-md', enabled: true, trigger: 'session' },
       ],
       channels: {
-        discord: { enabled: true, dm_channel_id: null, default_chat_id: null, state_dir: '.claude.local/channels/discord', allowed_users: ['12345'], morning_brief: { enabled: true, time: '07:00' } },
+        discord: { enabled: true, dm_channel_id: null, default_chat_id: null, state_dir: '.claude.local/channels/discord', settings_policy: 'allow', allowed_users: ['12345'], morning_brief: { enabled: true, time: '07:00' } },
       },
     };
 
@@ -301,6 +301,7 @@ describe('hatch-config.ts', () => {
       dm_channel_id: null,
       default_chat_id: null,
       state_dir: '.claude.local/channels/telegram',
+      settings_policy: 'allow',
     });
     // nothing else moved
     expect(out.agent_name).toBe('Keeper');
@@ -320,6 +321,7 @@ describe('hatch-config.ts', () => {
           default_chat_id: 'T42',
           state_dir: '.claude.local/channels/telegram',
           allowed_users: ['777'],
+          settings_policy: 'ask',
         },
       },
     };
@@ -334,6 +336,8 @@ describe('hatch-config.ts', () => {
     expect(out.channels.telegram.default_chat_id).toBe('T42');
     expect(out.channels.telegram.allowed_users).toEqual(['777']);
     expect(out.channels.telegram.state_dir).toBe('.claude.local/channels/telegram');
+    // A tightened policy is an operator decision, not a default to re-assert.
+    expect(out.channels.telegram.settings_policy).toBe('ask');
   });
 
   test('duplicate plugin in scheduled_checks_plugins does not produce duplicate check ids', async () => {

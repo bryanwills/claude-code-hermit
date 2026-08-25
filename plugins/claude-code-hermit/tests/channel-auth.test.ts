@@ -10,6 +10,7 @@ import { describe, test, expect } from 'bun:test';
 import { normalizeChannelSource } from '../scripts/lib/channel-envelope';
 import {
   isAllowedSender, isTrustedController, isMaintainerController, isSettingsController,
+  settingsPolicy,
 } from '../scripts/lib/channel-auth';
 
 describe('normalizeChannelSource', () => {
@@ -211,5 +212,39 @@ describe('isSettingsController — home-chat fallback', () => {
   test('an unconfigured channel grants nothing', () => {
     const config = { operator_profile: 'technical', channels: {} };
     expect(isSettingsController(config, 'discord', 'U1', 'ANY')).toBe(false);
+  });
+});
+
+describe('settingsPolicy', () => {
+  const withPolicy = (settings_policy: unknown) => ({
+    channels: { discord: { default_chat_id: 'HOME', settings_policy } },
+  });
+
+  test('the three literals round-trip', () => {
+    expect(settingsPolicy(withPolicy('allow'), 'discord')).toBe('allow');
+    expect(settingsPolicy(withPolicy('ask'), 'discord')).toBe('ask');
+    expect(settingsPolicy(withPolicy('deny'), 'discord')).toBe('deny');
+  });
+
+  test('an absent key resolves to ask, never to allow', () => {
+    expect(settingsPolicy({ channels: { discord: { default_chat_id: 'HOME' } } }, 'discord')).toBe('ask');
+  });
+
+  test('an unconfigured channel and an absent channels object resolve to ask', () => {
+    expect(settingsPolicy({ channels: {} }, 'discord')).toBe('ask');
+    expect(settingsPolicy({}, 'discord')).toBe('ask');
+  });
+
+  // The fail-safe direction is what makes a hand-edited or half-migrated config
+  // safe: only the two literals that relax or tighten deliberately are honored,
+  // and everything else keeps the confirmation code.
+  test('a garbage value resolves to ask rather than being coerced', () => {
+    for (const bad of [null, true, false, 0, 'open', 'ALLOW', 'allowed', {}, []]) {
+      expect(settingsPolicy(withPolicy(bad), 'discord')).toBe('ask');
+    }
+  });
+
+  test('the plugin-qualified source resolves like the bare name', () => {
+    expect(settingsPolicy(withPolicy('allow'), 'plugin:discord:discord')).toBe('allow');
   });
 });

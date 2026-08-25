@@ -259,16 +259,17 @@ describe('channelVerdict — policy', () => {
     expect(channelVerdict('frobnicate', 'model')).toBe('terminal-only');
   });
 
-  test('the two authority keys are terminal-only, container and leaf alike', () => {
+  test('the authority keys are terminal-only, container and leaf alike', () => {
     // They decide who holds the tier — operator_profile gates the home-chat
-    // fallback, settings_from_chat switches every tier above `allowed` off — so
-    // a chat able to write either could grant itself authority or re-arm an
-    // opt-out the operator set. Same unrevocability as the enrollment root.
+    // fallback, settings_policy decides how far the tiers reach on a channel —
+    // so a chat able to write either could grant itself authority or drop its
+    // own second factor. Same unrevocability as the enrollment root.
     expect(channelVerdict('set', 'operator_profile')).toBe('terminal-only');
-    expect(channelVerdict('set', 'settings_from_chat')).toBe('terminal-only');
-    expect(channelVerdict('unset', 'settings_from_chat')).toBe('terminal-only');
-    expect(channelVerdict('toggle', 'settings_from_chat')).toBe('terminal-only');
-    expect(channelVerdict('set', 'settings_from_chat.anything')).toBe('terminal-only');
+    expect(channelVerdict('set', 'operator_profile.anything')).toBe('terminal-only');
+    expect(channelVerdict('set', 'channels.discord.settings_policy')).toBe('terminal-only');
+    expect(channelVerdict('unset', 'channels.discord.settings_policy')).toBe('terminal-only');
+    expect(channelVerdict('toggle', 'channels.discord.settings_policy')).toBe('terminal-only');
+    expect(channelVerdict('set', 'channels.discord.settings_policy.anything')).toBe('terminal-only');
   });
 
   test('read verbs are always allowed', () => {
@@ -742,7 +743,7 @@ describe('channel-settings-gate — home-chat fallback', () => {
   });
 
   test('the authority keys stay terminal-only under the fallback', async () => {
-    for (const cmd of ['set operator_profile technical', 'set settings_from_chat true']) {
+    for (const cmd of ['set operator_profile technical', 'set channels.discord.settings_policy allow']) {
       const { dir, transcript } = fixture(CHANNEL_PROMPT, configHomeOnly());
       const r = await runGate(
         payload({
@@ -768,24 +769,86 @@ describe('channel-settings-gate — home-chat fallback', () => {
   });
 });
 
-describe('channel-settings-gate — settings_from_chat opt-out', () => {
-  test('false collapses the security tier to terminal-only, maintainer chat included', async () => {
+describe('channel-settings-gate — settings_policy', () => {
+  /** A discord entry carrying `settings_policy`, on the home-only shape. */
+  const homeWithPolicy = (settings_policy: string) => ({
+    channels: { discord: { default_chat_id: HOME_CHAT, settings_policy } },
+  });
+  const confirmPath = (dir: string) =>
+    path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json');
+
+  test('allow applies the nonce tier on the first message, with no code issued', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode', { chatId: HOME_CHAT }),
+      homeWithPolicy('allow')
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(confirmPath(dir))).toBe(false);
+  });
+
+  test('allow reaches the configured maintainer chat too', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode'),
+      configWithMaintainer({ settings_policy: 'allow' })
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(confirmPath(dir))).toBe(false);
+  });
+
+  test('ask keeps the confirmation code', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode', { chatId: HOME_CHAT }),
+      homeWithPolicy('ask')
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Second factor required');
+    expect(fs.existsSync(confirmPath(dir))).toBe(true);
+  });
+
+  // The fail-safe direction: only a deliberate `allow` drops the second factor,
+  // so a typo or a hand-edited value can never relax the gate by accident.
+  test('an unrecognised value behaves as ask, not as allow', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode', { chatId: HOME_CHAT }),
+      homeWithPolicy('open')
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Second factor required');
+  });
+
+  test('deny collapses the security tier to terminal-only, maintainer chat included', async () => {
     const { dir, transcript } = fixture(
       maintainerPrompt('turn escalation on'),
-      { ...configWithMaintainer(), settings_from_chat: false }
+      configWithMaintainer({ settings_policy: 'deny' })
     );
     const r = await runGate(
       payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
       dir
     );
     expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain('switched off for this hermit');
+    expect(r.stderr).toContain('switched off');
   });
 
-  test('false blocks the nonce tier without issuing a code', async () => {
+  test('deny blocks the nonce tier without issuing a code', async () => {
     const { dir, transcript } = fixture(
       maintainerPrompt('switch permission mode'),
-      { ...configWithMaintainer(), settings_from_chat: false }
+      configWithMaintainer({ settings_policy: 'deny' })
     );
     const r = await runGate(
       payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
@@ -793,16 +856,11 @@ describe('channel-settings-gate — settings_from_chat opt-out', () => {
     );
     expect(r.exitCode).toBe(2);
     expect(r.stderr).not.toContain('Second factor required');
-    expect(
-      fs.existsSync(path.join(dir, '.claude-code-hermit', 'state', 'settings-confirm.json'))
-    ).toBe(false);
+    expect(fs.existsSync(confirmPath(dir))).toBe(false);
   });
 
-  test('false leaves the everyday settings alone from the operator\'s own chat', async () => {
-    const { dir, transcript } = fixture(
-      CHANNEL_PROMPT,
-      configHomeOnly({ settings_from_chat: false })
-    );
+  test('deny leaves the everyday settings alone from the operator\'s own chat', async () => {
+    const { dir, transcript } = fixture(CHANNEL_PROMPT, homeWithPolicy('deny'));
     const r = await runGate(
       payload({
         dir,
@@ -818,13 +876,61 @@ describe('channel-settings-gate — settings_from_chat opt-out', () => {
   test('the identical blocked write still lands from a terminal turn', async () => {
     const { dir, transcript } = fixture(
       TERMINAL_PROMPT,
-      { ...configWithMaintainer(), settings_from_chat: false }
+      configWithMaintainer({ settings_policy: 'deny' })
     );
     const r = await runGate(
       payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }),
       dir
     );
     expect(r.exitCode).toBe(0);
+  });
+
+  // The policy is a property of the channel, so a chat that holds no authority
+  // on a denied channel is told the channel is closed rather than sent to a
+  // settings chat that could not help it either.
+  test('deny answers a non-settings chat before the authority check does', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode', { chatId: 'SOME-OTHER-CHAT' }),
+      homeWithPolicy('deny')
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('switched off');
+  });
+
+  test('allow does not reach a chat that holds no settings authority', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('switch permission mode', { chatId: 'SOME-OTHER-CHAT' }),
+      homeWithPolicy('allow')
+    );
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: SET_PERMISSION_MODE } }),
+      dir
+    );
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Security-tier hermit setting');
+  });
+
+  // Raising your own channel's policy is the self-extension the enrollment root
+  // exists to block, so `allow` must not hand a chat the key that granted it.
+  test('the policy itself stays terminal-only under allow', async () => {
+    for (const target of ['channels.discord.settings_policy deny', 'channels.discord.allowed_users \'["x"]\'']) {
+      const { dir, transcript } = fixture(CHANNEL_PROMPT, homeWithPolicy('allow'));
+      const r = await runGate(
+        payload({
+          dir,
+          transcript,
+          tool: 'Bash',
+          input: { command: `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set ${target}` },
+        }),
+        dir
+      );
+      expect(r.exitCode).toBe(2);
+      expect(r.stderr).toContain('Terminal-only hermit setting');
+    }
   });
 });
 
