@@ -247,4 +247,29 @@ describe('settingsPolicy', () => {
   test('the plugin-qualified source resolves like the bare name', () => {
     expect(settingsPolicy(withPolicy('allow'), 'plugin:discord:discord')).toBe('allow');
   });
+
+  // The migration is a model-executed hermit-evolve step, so there is a window
+  // where the retired key is the only record of the operator's opt-out. Reading
+  // that window as `ask` would reopen tiers they deliberately closed.
+  describe('retired settings_from_chat floor', () => {
+    test('a legacy false holds an unmigrated channel at deny', () => {
+      const config = { settings_from_chat: false, channels: { discord: { default_chat_id: 'HOME' } } };
+      expect(settingsPolicy(config, 'discord')).toBe('deny');
+    });
+
+    test('an explicit per-channel value outranks the floor, which is how the migration lifts it', () => {
+      const config = {
+        settings_from_chat: false,
+        channels: { discord: { settings_policy: 'allow' }, telegram: { settings_policy: 'ask' } },
+      };
+      expect(settingsPolicy(config, 'discord')).toBe('allow');
+      expect(settingsPolicy(config, 'telegram')).toBe('ask');
+    });
+
+    test('only a literal false floors — a truthy or absent key changes nothing', () => {
+      for (const val of [true, undefined, 'false', 0, null]) {
+        expect(settingsPolicy({ settings_from_chat: val, channels: { discord: {} } }, 'discord')).toBe('ask');
+      }
+    });
+  });
 });

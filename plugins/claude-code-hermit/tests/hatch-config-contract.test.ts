@@ -340,6 +340,48 @@ describe('hatch-config.ts', () => {
     expect(out.channels.telegram.settings_policy).toBe('ask');
   });
 
+  // An entry that predates the key is held at the resolver's fail-safe `ask`.
+  // Stamping `allow` onto it here would relax a live channel on a re-init the
+  // operator ran for some unrelated reason.
+  test('re-init: a channel entry with no settings_policy is not given one', async () => {
+    const dir = freshDir();
+    seedConfig(dir, {
+      ...JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8')),
+      channels: {
+        telegram: { enabled: false, dm_channel_id: 'T42', default_chat_id: 'T42', state_dir: '.claude.local/channels/telegram' },
+      },
+    });
+
+    const r = await runHatchConfig(dir, { channels: { telegram: { enabled: true } } }, true);
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+
+    expect(out.channels.telegram.enabled).toBe(true);
+    expect(out.channels.telegram.settings_policy).toBeUndefined();
+  });
+
+  // `allow` drops the confirmation code on the assumption of a single poster.
+  // A named maintainer chat (usually a group or server channel) and a
+  // multi-name allowlist both say otherwise, so a new entry carrying either
+  // starts at `ask` instead.
+  test('a new entry with a second poster starts at ask, not allow', async () => {
+    const dir = freshDir();
+    const r = await runHatchConfig(dir, {
+      project_name: 'my-project',
+      channels: {
+        discord: { enabled: true, maintainer_channel_id: 'OPS' },
+        telegram: { enabled: true, allowed_users: ['1', '2'] },
+        imessage: { enabled: true, allowed_users: ['1'] },
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+
+    expect(out.channels.discord.settings_policy).toBe('ask');
+    expect(out.channels.telegram.settings_policy).toBe('ask');
+    expect(out.channels.imessage.settings_policy).toBe('allow');
+  });
+
   test('duplicate plugin in scheduled_checks_plugins does not produce duplicate check ids', async () => {
     const dir = freshDir();
     const r = await runHatchConfig(dir, {

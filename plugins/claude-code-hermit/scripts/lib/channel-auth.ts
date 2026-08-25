@@ -204,9 +204,20 @@ export function isSettingsController(
  *   deny   nothing above the safe tier from this channel, terminal only. Replaces
  *          the retired top-level `settings_from_chat: false`, per channel.
  *
+ * That replacement carries a migration floor. `settings_from_chat: false` was an
+ * opt-out an operator deliberately set, and the per-channel key that supersedes
+ * it is written by hermit-evolve's Upgrade Instructions — a model-executed step,
+ * not a mechanical template merge. Between the plugin update and that step the
+ * channels have no key of their own, so resolving them to `ask` would silently
+ * reopen the tiers the operator closed. The legacy `false` therefore still reads
+ * as `deny` for any channel that has no `settings_policy` yet; an explicit
+ * per-channel value outranks it, which is how the migration lifts it.
+ *
  * Two different defaults, on purpose. The value hatch-config writes into a new
- * channel entry is `allow`: a freshly paired channel is one operator, and a
- * grant is something setup writes down. The value resolved here for a key that
+ * single-operator channel entry is `allow`: a freshly paired channel with no
+ * second poster is one operator, and a grant is something setup writes down.
+ * A new entry that already names a `maintainer_channel_id` or allowlists more
+ * than one id starts at `ask` instead. The value resolved here for a key that
  * is absent or unrecognised is `ask`, the fail-safe direction and the one Claude
  * Code itself falls back to. A healthy install never reaches it.
  *
@@ -217,5 +228,13 @@ export type SettingsPolicy = 'allow' | 'ask' | 'deny';
 
 export function settingsPolicy(config: Json, source: string): SettingsPolicy {
   const value = channelEntry(config, source)?.settings_policy;
-  return value === 'allow' || value === 'deny' ? value : 'ask';
+  // Every recognised literal outranks the floor below — an explicit `ask` is a
+  // migration decision as much as an explicit `allow` is, so it must not be
+  // re-tightened by the key it was written to replace.
+  if (value === 'allow' || value === 'ask' || value === 'deny') return value;
+  // Migration floor for the retired opt-out (see above). Only a literal `false`
+  // counts, matching what the gate used to test for — a truthy non-boolean must
+  // not read as "closed" any more than it used to read as "open".
+  if (config?.settings_from_chat === false) return 'deny';
+  return 'ask';
 }

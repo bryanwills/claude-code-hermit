@@ -50,7 +50,9 @@
 // message, `ask` keeps the echoed token, `deny` collapses everything above the
 // safe tier to terminal-only for that channel, the configured maintainer chat
 // included. Absent or unrecognised reads as `ask`, so only a deliberate value
-// relaxes anything. It replaces the retired global `settings_from_chat`.
+// relaxes anything — except that a retired `settings_from_chat: false` still
+// floors an unmigrated channel at `deny`, so an upgrade never reopens an
+// opt-out the operator set. It replaces that retired global key.
 //
 // The decision keys on the CURRENT TURN's opening prompt, not on the session:
 // an operator typing in the managed hermit's own tmux pane is a terminal turn
@@ -302,7 +304,7 @@ const ROUTINES_CONTAINER = /^routines(\.\d+)?$/;
  * tier than a legible one.
  */
 export function precheckSetChanged(value: string, current: Json[]): boolean {
-  const gateOf = (r: Json) => (r && r.precheck != null ? `${String(r.precheck)} ${r.precheck_timeout_s ?? ''}` : null);
+  const gateOf = (r: Json) => (r && r.precheck != null ? `${String(r.precheck)}\u0000${r.precheck_timeout_s ?? ''}` : null);
   const before = new Map<string, string | null>();
   for (const r of Array.isArray(current) ? current : []) {
     if (r && r.id) before.set(String(r.id), gateOf(r));

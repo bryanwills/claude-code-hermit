@@ -638,13 +638,17 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     errors.push('ask_gate: must be a boolean');
   }
 
-  // Retired in favour of per-channel `channels.<name>.settings_policy`. Nothing
-  // reads it any more, so a leftover key is inert rather than dangerous — warn
-  // (so doctor reports it and hermit-evolve's migration is visibly pending)
-  // instead of erroring, which would stop a half-migrated hermit from booting.
+  // Retired in favour of per-channel `channels.<name>.settings_policy`. A
+  // leftover key is not inert: `settingsPolicy` still honors a literal `false`
+  // as `deny` on any channel with no policy of its own, so the operator's
+  // opt-out survives an unmigrated upgrade. Warn (so doctor reports it and the
+  // pending migration is visible) rather than erroring, which would stop a
+  // half-migrated hermit from booting.
   if (config.settings_from_chat !== undefined) {
     warnings.push(
-      'settings_from_chat is retired and no longer read — run /claude-code-hermit:hermit-evolve to move it to channels.<name>.settings_policy, or unset it',
+      config.settings_from_chat === false
+        ? 'settings_from_chat is retired — its `false` still applies as settings_policy "deny" on every channel that has none of its own, but only until you migrate: run /claude-code-hermit:hermit-evolve to move it to channels.<name>.settings_policy'
+        : 'settings_from_chat is retired and no longer read — run /claude-code-hermit:hermit-evolve to move it to channels.<name>.settings_policy, or unset it',
     );
   }
 

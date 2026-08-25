@@ -82,7 +82,7 @@ Per-channel keys (under `channels.<name>`):
 | `bot_username` | string | _(absent)_ | The bot's own `@handle`, captured alongside `bot_user_id`. Telegram mentions carry the handle rather than the numeric id, so the self-mention match needs both. It is also what lets a control command addressed to the bot be accepted, in either form — the `/pause@handle` suffix, or a leading `@handle /pause` mention — on any channel with a stored handle, not just Telegram, though it's Telegram that produces both. Unlike the id, a handle can be reassigned — `hermit-doctor` warns when the bot has been renamed, because a stale handle stops matching (including suffixed commands, which stop working) and can start matching whoever claimed the freed name. |
 | `state_dir` | string | `.claude.local/channels/<name>` | Path to channel plugin state dir — relative to project root or absolute. `hermit-start` resolves relative paths against `cwd`; on a bare-host boot, an omitted value uses the project-local default shown here. It derives and exports `<NAME>_STATE_DIR` at boot in either case. |
 | `marketplace` | string | _(absent)_ | Marketplace name for third-party channel plugins. When set, `hermit-start` builds `--channels plugin:<name>@<marketplace>` instead of using the built-in `claude-plugins-official` mapping. Required for any channel other than `discord`/`telegram`/`imessage`. |
-| `settings_policy` | string | `"allow"` on a new entry, `"ask"` when absent | How much settings authority a chat on this channel carries: `allow`, `ask`, or `deny`. See [`settings_policy`](#settings_policy) below. Terminal-only to change. |
+| `settings_policy` | string | `"allow"` on a new single-operator entry, `"ask"` when absent | How much settings authority a chat on this channel carries: `allow`, `ask`, or `deny`. See [`settings_policy`](#settings_policy) below. Terminal-only to change. |
 | `morning_brief` | object | `null` | `{ "enabled": true, "time": "07:00" }` to deliver morning brief via this channel. |
 
 Example:
@@ -174,7 +174,7 @@ Set to `false` to opt out entirely, or launch a one-off session with `HERMIT_ASK
 
 ## `settings_policy`
 
-Per channel: `channels.<name>.settings_policy`, one of `"allow"`, `"ask"`, `"deny"`. Replaces the retired top-level `settings_from_chat` boolean (`false` became `"deny"` on every channel; `hermit-evolve` migrates it). New channel entries ship `"allow"`; a key that is absent or unrecognised is read as `"ask"`.
+Per channel: `channels.<name>.settings_policy`, one of `"allow"`, `"ask"`, `"deny"`. Replaces the retired top-level `settings_from_chat` boolean (`false` became `"deny"` on every channel; `hermit-evolve` migrates it, and until it does a leftover `false` still holds every channel with no policy of its own at `"deny"`). A new channel entry ships `"allow"`, or `"ask"` when it already names a `maintainer_channel_id` or allowlists more than one id; a key that is absent or unrecognised is read as `"ask"`.
 
 Settings can be changed from chat, tiered by which chat asks (`scripts/channel-settings-gate.ts`, a `PreToolUse` hook — the full table is in [`docs/security.md`](security.md) § Tiered settings authority):
 
