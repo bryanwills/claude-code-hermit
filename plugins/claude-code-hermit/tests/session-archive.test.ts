@@ -413,6 +413,19 @@ describe('Progress Log preservation in ## Completed', () => {
     expect(after).not.toContain('shipped the thing');
     expect(after).toContain('<!-- Primary record of work -->');
   }));
+
+  test('close archive copies a populated Progress Log into ## Completed, then resets SHELL', withTmp(async (dir) => {
+    await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
+    seedProgressLog(dir,
+      '<!-- Primary record of work -->\n<!-- Format: [HH:MM] Did X — result/outcome -->\n[09:00] shipped the thing');
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    const report = fs.readFileSync(path.join(sessionsDir(dir), 'S-001-REPORT.md'), 'utf-8');
+    expect(completedSection(report)).toContain('[09:00] shipped the thing');
+    expect(completedSection(report)).not.toContain(COMPLETED_PLACEHOLDER);
+    const after = readShell(dir);
+    expect(after).not.toContain('shipped the thing');
+    expect(after).toContain('<!-- Primary record of work -->');
+  }));
 });
 
 // =============================================================================
