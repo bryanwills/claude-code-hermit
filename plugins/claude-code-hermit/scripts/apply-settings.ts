@@ -17,8 +17,9 @@
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
  *   output-style [style]     Seed outputStyle to [style] (default "hermit-voice"), but only
- *                            when no persisted scope (local/project/user) already owns the
- *                            key. [style] must be one of SEALED_OUTPUT_STYLES. An operator's
+ *                            when neither project scope (local, project) already owns the
+ *                            key — user scope ranks below both and never vetoes the seed.
+ *                            [style] must be one of SEALED_OUTPUT_STYLES. An operator's
  *                            own /config choice is preserved untouched (file left
  *                            byte-identical); prints "applied" or "kept:<value>" so callers
  *                            can report the mismatch. Cannot switch an already-set style —
@@ -49,7 +50,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
 import { channelStateDirKey } from './lib/channel-config';
-import { HERMIT_OUTPUT_STYLE, SEALED_OUTPUT_STYLES, isSealedOutputStyle, resolvePersistedStyle } from './lib/voice';
+import { HERMIT_OUTPUT_STYLE, SEALED_OUTPUT_STYLES, isSealedOutputStyle, resolveProjectStyle } from './lib/voice';
 import { SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from './lib/settings/automode-entries';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
@@ -348,21 +349,26 @@ switch (op) {
   }
 
   case 'output-style': {
-    // Only-if-absent across every persisted scope, and the value is validated against
+    // Only-if-absent across the two project scopes, and the value is validated against
     // the sealed list — never arbitrary caller text. A style the operator chose in
-    // /config (in any scope) is their decision: this op leaves the target file (and
+    // /config at project scope is their decision: this op leaves the target file (and
     // its bytes) alone and prints what it found, so hatch and hermit-doctor can
     // surface the mismatch rather than the hermit silently reclaiming the key.
+    //
+    // User scope is deliberately NOT a veto. It ranks below both project scopes, so a
+    // value there cannot shadow this write — treating it as ownership would refuse a
+    // seed that would have won, leaving hatch's freshly-rendered voice file inert.
+    // hermit-doctor reports user scope via resolvePersistedStyle instead.
     const style = rest[0] ?? HERMIT_OUTPUT_STYLE;
     if (!isSealedOutputStyle(style)) {
       console.error(`output-style: "${style}" is not a sealed style. Valid: ${SEALED_OUTPUT_STYLES.join(', ')}`);
       process.exit(1);
     }
     const projectRoot = path.dirname(path.dirname(path.resolve(targetFile)));
-    const persisted = resolvePersistedStyle(projectRoot);
-    if (persisted.value === null) settings.outputStyle = style;
+    const owned = resolveProjectStyle(projectRoot);
+    if (owned.value === null) settings.outputStyle = style;
     else readOnly = true;
-    console.log(persisted.value === null ? 'applied' : `kept:${persisted.value}`);
+    console.log(owned.value === null ? 'applied' : `kept:${owned.value}`);
     break;
   }
 

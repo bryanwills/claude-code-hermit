@@ -27,7 +27,7 @@ import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
-import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolvePersistedStyle } from './lib/voice';
+import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolveProjectStyle } from './lib/voice';
 import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
 import { writeFileAtomic } from './lib/md-write';
 
@@ -916,12 +916,14 @@ function writeSettingsEnv(
   // actually present (an install that never adopted it stays untouched) and
   // only when nothing owns the key — a style the operator chose in /config is
   // their decision, and hermit-doctor reports the mismatch rather than boot
-  // silently reclaiming it every restart. The absence test is the EFFECTIVE
-  // style across both scopes, not just this file's key: hatch may have stamped
-  // the key into committed settings.json, and seeding a duplicate here would
-  // put a local-scope copy in front of it that outranks — and permanently
-  // shadows — any later /config change made at project scope.
-  if (!skipWrite && voiceFileExists() && resolvePersistedStyle().value === null) {
+  // silently reclaiming it every restart. The absence test spans both project
+  // scopes, not just this file's key: hatch may have stamped the key into
+  // committed settings.json, and seeding a duplicate here would put a
+  // local-scope copy in front of it that outranks — and permanently shadows —
+  // any later /config change made at project scope. It stops there: user scope
+  // ranks below both, so a value there cannot shadow this write and must not
+  // block a repair that would have taken effect.
+  if (!skipWrite && voiceFileExists() && resolveProjectStyle().value === null) {
     settings.outputStyle = HERMIT_OUTPUT_STYLE;
     console.log(`[hermit] Voice: outputStyle set to ${HERMIT_OUTPUT_STYLE} in ${settingsPath}`);
   }

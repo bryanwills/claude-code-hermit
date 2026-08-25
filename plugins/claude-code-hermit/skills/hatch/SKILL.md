@@ -455,13 +455,17 @@ The hermit's tone lives in a native Claude Code output style, so it reaches the 
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> output-style <style>
    ```
 
-   Prints `applied`, or `kept:<value>` when a different style already owns the key in some persisted scope (local, project, or user) — in that case tell the operator their existing choice was left alone and this one wasn't activated.
+   Prints `applied`, or `kept:<value>` when a different style already owns the key at project scope (`.claude/settings.local.json` or `.claude/settings.json`). Carry that result into Phase 5 — on `kept:` the operator's answer was **not** applied, and saying otherwise is the one thing this step must not do.
 
 #### Phase 5 — Confirm
 
-Tell the operator: "OPERATOR.md is ready. You can review it at `.claude-code-hermit/OPERATOR.md`. Refine anytime — just tell me what changed." Then, for the style:
+Tell the operator: "OPERATOR.md is ready. You can review it at `.claude-code-hermit/OPERATOR.md`. Refine anytime — just tell me what changed." Then report the style from what Phase 4b step 4 actually printed:
+
+**On `applied`:**
 - **Built-in** (`default`/`Concise`/`Explanatory`): "Communication style is set to `<style>`. Change it anytime with `/config`."
 - **Custom** (`hermit-voice`): "How you talk to them is at `.claude/output-styles/hermit-voice.md`, editable directly or from a terminal session (`/claude-code-hermit:hermit-settings voice`), and it takes effect on the next session."
+
+**On `kept:<value>`:** say plainly that their answer was not applied, that `<value>` was already set for this project and was left alone, and that `/claude-code-hermit:hermit-settings voice` from a terminal session switches it. If a custom voice file was rendered in step 3, mention it exists but is inactive until that switch. Never report the answered style as if it took effect.
 
 ### 6. Append session discipline to CLAUDE.md or CLAUDE.local.md
 

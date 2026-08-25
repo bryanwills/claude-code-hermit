@@ -17,10 +17,11 @@ function seedSettings(dir: string, name: string, settings: any): string {
 
 const readRaw = (file: string) => fs.readFileSync(file, 'utf8');
 
-// resolvePersistedStyle() also reads the user scope (CLAUDE_CONFIG_DIR/settings.json),
-// and runScript's subprocess inherits this test runner's full environment — so every
-// call here pins CLAUDE_CONFIG_DIR to an empty scratch dir. Without it these tests
-// would silently read whatever machine happens to run the suite.
+// runScript's subprocess inherits this test runner's full environment, so every call
+// here pins CLAUDE_CONFIG_DIR to an empty scratch dir rather than letting the host
+// machine's user scope reach the script. The seed op ignores user scope by design,
+// but the tests below assert exactly that, and they can only do so against a scope
+// they control.
 function emptyConfigDir(): string {
   return freshDir();
 }
@@ -123,9 +124,12 @@ describe('apply-settings.ts output-style (seed)', () => {
     expect(readRaw(localFile)).toBe(before);
   });
 
-  test("won't seed over a style set only in a relocated CLAUDE_CONFIG_DIR user scope", async () => {
+  // User scope ranks below both project scopes, so a value there cannot shadow this
+  // write. Treating it as ownership would refuse a seed that would have won, leaving
+  // a freshly-rendered voice file inert on every install whose operator ever picked a
+  // style in /config at user scope.
+  test('seeds over a style set only in a relocated CLAUDE_CONFIG_DIR user scope', async () => {
     const projectFile = seedSettings(freshDir(), 'settings.local.json', {});
-    const before = readRaw(projectFile);
     const userConfigDir = freshDir();
     fs.writeFileSync(
       path.join(userConfigDir, 'settings.json'),
@@ -137,8 +141,8 @@ describe('apply-settings.ts output-style (seed)', () => {
     });
 
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('kept:Learning');
-    expect(readRaw(projectFile)).toBe(before);
+    expect(r.stdout.trim()).toBe('applied');
+    expect(JSON.parse(readRaw(projectFile)).outputStyle).toBe('hermit-voice');
   });
 
   test('the op is advertised in the unknown-operation error', async () => {

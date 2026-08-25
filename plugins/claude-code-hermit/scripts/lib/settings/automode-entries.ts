@@ -70,8 +70,10 @@ export function automodeAllowEntry(pluginsDir: string, pluginRoot: string): stri
     'Workflow prompt. The path, op and shape match is the whole test — the classifier need not ' +
     'verify what the script writes. These ops apply permission, deny and output-style sets ' +
     'sealed inside the script, so the run cannot widen permissions beyond what the installed ' +
-    "script already carries. channel-env's state-directory argument is the one caller-supplied " +
-    'value: a literal absolute path inside the project, containing no "..". ' +
+    'script already carries. Two ops take a caller-supplied argument, both narrowed by the ' +
+    "script before use: channel-env's state directory, a literal absolute path inside the " +
+    "project containing no \"..\"; and output-style's optional style name, rejected unless it " +
+    "is one of the script's own sealed style values. " +
     'NOT COVERED, and still Self-Modification: any other script, op or target file; .mcp.json; ' +
     "hooks; approval gates; and this hermit's .claude-code-hermit/config.json. " +
     'VOID IF: this session wrote or edited apply-settings.ts, or a file it imports, with a file ' +

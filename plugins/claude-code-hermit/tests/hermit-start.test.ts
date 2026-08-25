@@ -89,10 +89,9 @@ beforeEach(() => {
   process.chdir(tmpdir);
   fs.mkdirSync('.claude-code-hermit/state', { recursive: true });
   fs.mkdirSync('.claude', { recursive: true });
-  // resolvePersistedStyle() reads CLAUDE_CONFIG_DIR/settings.json for the user
-  // scope — point it at a directory that doesn't exist so readJson sees ENOENT
-  // and every pre-existing test's implicit "no user scope" assumption holds.
-  // A test that wants a user-scope style writes into this dir itself.
+  // Point CLAUDE_CONFIG_DIR at a directory that doesn't exist, so the host
+  // machine's own user scope never reaches a test. Boot repair ignores user
+  // scope by design; the test that asserts that writes into this dir itself.
   process.env.CLAUDE_CONFIG_DIR = path.join(tmpdir, '.claude-user-config');
 });
 
@@ -1132,10 +1131,10 @@ describe('writeSettingsEnv voice carrier', () => {
     expect(readSettings()).not.toContainKey('outputStyle');
   });
 
-  // A user-scope /config pick is invisible to a target-file-only check — the
-  // whole reason resolvePersistedStyle() walks scopes rather than reading the
-  // project file directly.
-  test('a style set only in user scope is not reclaimed by local scope', () => {
+  // Boot repair stops its absence test at project scope. A user-scope value ranks
+  // below local scope, so it cannot shadow this write — letting it block the repair
+  // would leave the voice file on disk and permanently unreferenced.
+  test('a style set only in user scope does not block the local-scope repair', () => {
     seedVoiceFile();
     fs.mkdirSync(path.join(tmpdir, '.claude-user-config'), { recursive: true });
     fs.writeFileSync(
@@ -1145,7 +1144,7 @@ describe('writeSettingsEnv voice carrier', () => {
     writeSettings({});
     writeConfig({});
     captureLog(() => writeSettingsEnv(loadConfig()));
-    expect(readSettings()).not.toContainKey('outputStyle');
+    expect(readSettings().outputStyle).toBe('hermit-voice');
   });
 
   test('language mirrors config.json into the native key', () => {

@@ -56,19 +56,6 @@ export type PersistedStyle = {
   source: typeof SETTINGS_SCOPES[number] | null;
 };
 
-/**
- * Resolve the outputStyle a session in `projectRoot` reads from disk.
- *
- * Local scope wins over project scope, then user scope, matching Claude Code's own
- * precedence among the scopes this function can see. It does NOT see managed settings
- * or a launch-time `--settings` overlay — both outrank every scope here, and
- * hermit-start ships such an overlay for the classifier — so this reports what is
- * persisted, not necessarily what a given session's system prompt ends up using.
- *
- * Checking only the hermit's own hatch target would miss the case that matters most:
- * a hermit that wrote the key to committed settings.json while the operator's /config
- * pick sits in settings.local.json (or user scope) and silently outranks it.
- */
 // readJson returns null for a missing, unreadable or malformed file, so a broken
 // settings file falls through to the next scope rather than taking the whole
 // check down.
@@ -77,11 +64,39 @@ function readOutputStyle(settingsFile: string): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
-export function resolvePersistedStyle(projectRoot = '.'): PersistedStyle {
+/**
+ * Resolve the outputStyle set in the two project scopes, local over project.
+ *
+ * This is the seed question — "would writing the key here actually take effect?" —
+ * so it deliberately stops at project scope. Both scopes here outrank user scope,
+ * so a user-scope value cannot shadow a write to either and must not veto one.
+ *
+ * Checking only the hermit's own hatch target would miss the case that matters:
+ * a hermit that wrote the key to committed settings.json while the operator's
+ * /config pick sits in settings.local.json and silently outranks it.
+ */
+export function resolveProjectStyle(projectRoot = '.'): PersistedStyle {
   for (const rel of PROJECT_SETTINGS_SCOPES) {
     const value = readOutputStyle(path.join(projectRoot, rel));
     if (value !== null) return { value, source: rel };
   }
+  return { value: null, source: null };
+}
+
+/**
+ * Resolve the outputStyle a session in `projectRoot` reads from disk, across every
+ * persisted scope in Claude Code's precedence order: local, then project, then user.
+ *
+ * This is the reporting question — "what is this install actually going to use?" —
+ * and is for hermit-doctor, not for deciding whether to write. It does NOT see
+ * managed settings or a launch-time `--settings` overlay; both outrank every scope
+ * here, and hermit-start ships such an overlay for the classifier, so this reports
+ * what is persisted, not necessarily what a given session's system prompt ends up
+ * using.
+ */
+export function resolvePersistedStyle(projectRoot = '.'): PersistedStyle {
+  const project = resolveProjectStyle(projectRoot);
+  if (project.value !== null) return project;
   const userValue = readOutputStyle(path.join(defaultConfigDir(), 'settings.json'));
   if (userValue !== null) return { value: userValue, source: USER_SETTINGS_SCOPE };
   return { value: null, source: null };
