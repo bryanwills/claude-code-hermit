@@ -159,7 +159,11 @@ describe('sealed registries', () => {
 
   // Regression guard for the lint shape itself: no HERMIT_ALLOW entry should have a
   // fully-literal argument following a wildcard-containing argument, else Claude Code
-  // warns at every hermit session start.
+  // warns at every hermit session start. Option-shaped arguments are exempt — Claude
+  // Code's own check skips them, so flagging one here would fail CI on a rule it
+  // accepts. Otherwise deliberately stricter than the real check (which also spares a
+  // rule whose first token is wildcarded, or that ends in `:*`): a narrower shape rule
+  // is cheaper to keep than a faithful port of someone else's linter.
   test('no allow rule has a literal argument trailing a wildcard-containing argument', () => {
     const offenders = HERMIT_ALLOW.filter((rule) => {
       const inner = rule.match(/^[A-Za-z]+\((.*)\)$/)?.[1];
@@ -167,7 +171,9 @@ describe('sealed registries', () => {
       const args = inner.split(' ');
       const firstWildcardIdx = args.findIndex((a) => a.includes('*'));
       if (firstWildcardIdx === -1) return false;
-      return args.slice(firstWildcardIdx + 1).some((a) => a.length > 0 && !a.includes('*'));
+      return args
+        .slice(firstWildcardIdx + 1)
+        .some((a) => a.length > 0 && !a.includes('*') && !a.startsWith('-'));
     });
     expect(offenders).toEqual([]);
   });

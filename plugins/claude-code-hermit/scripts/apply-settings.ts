@@ -148,8 +148,9 @@ const HERMIT_ALLOW = [
 // Entries this plugin itself shipped in an earlier version and has since retired.
 // permissions-sync removes these from an operator's settings; nothing else is ever
 // removed, so an operator's own rules cannot be caught by a shape or prefix match.
-// Append here in the same change that deletes a permissioned script — this registry
-// is what makes a deletion reach already-hatched hermits.
+// Append here in the same change that deletes a permissioned script, or that respells
+// an entry still in HERMIT_ALLOW — this registry is what makes a deletion or a respelling
+// reach already-hatched hermits.
 const HERMIT_OBSOLETE = [
   'Bash(python3:*)',
   'Bash(node:*)',
