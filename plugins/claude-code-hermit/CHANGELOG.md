@@ -14,6 +14,7 @@
 ### Fixed
 - Cost corruption alerts now keep point-in-time spend out of persistent dashboard warnings, and interrupted cost-log tails no longer consume the next valid appended record.
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
+- Session archive now uses one recorded factual baseline for every archive mode: Task, Findings, Blockers, and current-session compiled Artifacts survive unattended close; close payloads can add missing Blockers and compiled links or mark recorded blockers resolved without deleting their text; and a duration with no provably owned runtime window is reported as unknown instead of zero.
 
 ### Upgrade Instructions
 
