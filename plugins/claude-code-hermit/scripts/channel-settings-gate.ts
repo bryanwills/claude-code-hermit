@@ -20,10 +20,12 @@
 //                  monitors (each entry carries a shell command), and
 //                  routines.<n>.precheck (an executable the routine monitor runs
 //                  unattended) — plus a routines container write (the whole array
-//                  or one indexed entry) that arms or changes one
-//   terminal-only  the enrollment root, the two authority keys, and any
-//                  ancestor write that would replace them — never reachable
-//                  from a channel, on any tier
+//                  or one indexed entry) that arms or changes one. The token is
+//                  asked for only when the channel's settings_policy is `ask`;
+//                  on `allow` the tier applies on the first message
+//   terminal-only  the enrollment root (settings_policy included),
+//                  operator_profile, and any ancestor write that would replace
+//                  them — never reachable from a channel, on any tier
 //
 // The maintainer tier exists because the hermit that most needs these decisions
 // is the unattended one, and its operator is reachable on a channel, not at a
@@ -36,16 +38,21 @@
 // home chat belongs to the client, so only a `technical` install extends it.
 //
 // The enrollment root (allowed_users, default_chat_id, dm_channel_id,
-// maintainer_channel_id) is the deliberate hole in that: a settings chat that
-// could add an allowed user or re-point itself would turn one compromise into
-// a permanent, self-extending one, instead of something an operator with
-// terminal access can revoke. `operator_profile` and `settings_from_chat` join
-// it for the same reason — both decide who holds the tier, so a chat that could
-// write them could grant itself authority or re-arm an opt-out the operator set.
+// maintainer_channel_id, settings_policy) is the deliberate hole in that: a
+// settings chat that could add an allowed user, re-point itself, or raise its
+// own policy would turn one compromise into a permanent, self-extending one,
+// instead of something an operator with terminal access can revoke.
+// `operator_profile` joins it for the same reason — it decides who holds the
+// tier, so a chat that could write it could grant itself authority.
 //
-// `settings_from_chat: false` is that opt-out: it collapses everything above
-// the safe tier to terminal-only on every chat, the configured maintainer one
-// included. Absent or true, the tiers above apply.
+// `channels.<name>.settings_policy` (lib/channel-auth.ts settingsPolicy) is how
+// far the tiers above reach on that channel: `allow` applies them on the first
+// message, `ask` keeps the echoed token, `deny` collapses everything above the
+// safe tier to terminal-only for that channel, the configured maintainer chat
+// included. Absent or unrecognised reads as `ask`, so only a deliberate value
+// relaxes anything — except that a retired `settings_from_chat: false` still
+// floors an unmigrated channel at `deny`, so an upgrade never reopens an
+// opt-out the operator set. It replaces that retired global key.
 //
 // The decision keys on the CURRENT TURN's opening prompt, not on the session:
 // an operator typing in the managed hermit's own tmux pane is a terminal turn
@@ -69,7 +76,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir, transcriptPath, readTailLines, turnPromptText, dropSidechainLines } from './lib/cc-compat';
 import { parseChannelEnvelope, type ChannelEnvelope } from './lib/channel-envelope';
-import { isSettingsController, isTrustedController } from './lib/channel-auth';
+import { isSettingsController, isTrustedController, settingsPolicy } from './lib/channel-auth';
 import { readConfigRaw } from './lib/config-read';
 import { byArg } from './lib/settings/registry';
 import { runHook } from './lib/hook-input';
@@ -83,9 +90,10 @@ type Json = any;
 
 const DENY_TERMINAL_ONLY =
   'Terminal-only hermit setting. Channel enrollment (allowed_users, default_chat_id, ' +
-  'dm_channel_id, maintainer_channel_id) decides who is allowed to talk to this hermit, so it ' +
-  'changes only on the operator\'s own terminal-typed request — the maintainer chat cannot grant ' +
-  'itself more reach. Writing a parent object counts, and so does editing config.json directly. ' +
+  'dm_channel_id, maintainer_channel_id, settings_policy) decides who is allowed to talk to this ' +
+  'hermit and how much a chat there may change, so it changes only on the operator\'s own ' +
+  'terminal-typed request — the maintainer chat cannot grant itself more reach. Writing a parent ' +
+  'object counts, and so does editing config.json directly. ' +
   'Do not retry. Reply in the operator\'s language that this one has to be done from a terminal ' +
   'session with `/claude-code-hermit:hermit-settings <argument>`, and carry on with anything else ' +
   'that was asked.';
@@ -122,13 +130,13 @@ const DENY_NEEDS_TRUSTED =
   'change has to come from their own chat with the hermit, and carry on with anything else that ' +
   'was asked.';
 
-const DENY_SETTINGS_FROM_CHAT_OFF =
-  'Settings changes from chat are switched off for this hermit (`settings_from_chat` is false), so ' +
-  'anything beyond the everyday settings changes only from a terminal session — from every chat, ' +
-  'including the maintainer one. Do not retry, and do not edit config.json directly. Reply in the ' +
-  'operator\'s language that this hermit is set to terminal-only for settings of this kind, name ' +
-  '`/claude-code-hermit:hermit-settings <argument>` as the terminal command, and carry on with ' +
-  'anything else that was asked.';
+const DENY_POLICY_DENY =
+  'Settings changes from this channel are switched off (its `settings_policy` is `deny`), so ' +
+  'anything beyond the everyday settings changes only from a terminal session — from every chat ' +
+  'on it, the maintainer one included. Do not retry, and do not edit config.json directly. Reply ' +
+  'in the operator\'s language that this hermit is set to terminal-only for settings of this kind, ' +
+  'name `/claude-code-hermit:hermit-settings <argument>` as the terminal command, and carry on ' +
+  'with anything else that was asked.';
 
 // The operator-facing notice must carry the CHANGE as well as the code. The
 // token is bound to the exact mutation on disk, so a mismatched retry is
@@ -142,7 +150,8 @@ const DENY_SETTINGS_FROM_CHAT_OFF =
 function denyNeedsNonce(target: string, token: string): string {
   return (
     `Second factor required for \`${target}\`. This setting reaches what the session may execute, ` +
-    'so the maintainer chat alone does not authorize it. Send a confirmation request to the ' +
+    'so on a channel whose `settings_policy` is `ask` the maintainer chat alone does not ' +
+    'authorize it. Send a confirmation request to the ' +
     `maintainer chat now — \`.claude-code-hermit/bin/hermit-run channel-send ` +
     `.claude-code-hermit --notice\` with {"maintainer": "..."} on stdin — then stop and wait. That ` +
     `message MUST name the exact change \`${target}\` in the operator's language AND carry the ` +
@@ -201,12 +210,18 @@ const ALLOWED_PATTERNS: RegExp[] = [
 ];
 
 /**
- * The enrollment root: who may talk to this hermit, and which chat holds the
- * maintainer tier. Terminal-only on every turn, maintainer chat included —
- * these four keys are what the maintainer tier is *anchored on*, so letting
- * that chat write them would make a single compromise self-extending and
- * unrevokable. Everything else in the security tier is recoverable by an
- * operator who can still reach a terminal; this is the part that would not be.
+ * The enrollment root: who may talk to this hermit, which chat holds the
+ * maintainer tier, and how much authority a chat on that channel carries.
+ * Terminal-only on every turn, maintainer chat included — these keys are what
+ * the maintainer tier is *anchored on*, so letting that chat write them would
+ * make a single compromise self-extending and unrevokable. Everything else in
+ * the security tier is recoverable by an operator who can still reach a
+ * terminal; this is the part that would not be.
+ *
+ * `settings_policy` (lib/channel-auth.ts settingsPolicy) sits here for exactly
+ * that reason: a chat that could raise its own channel from `ask` to `allow`
+ * would drop its own second factor, and one that could lift `deny` would undo
+ * the operator's opt-out.
  *
  * Matches the leaf AND anything beneath it. `settings-edit`'s setPath treats a
  * dotted path as a plain traversal and arrays are objects, so
@@ -216,7 +231,7 @@ const ALLOWED_PATTERNS: RegExp[] = [
  * Indexed paths are a real spelling here, not a hypothetical: ALLOWED_PATTERNS
  * above depends on them for `routines.<n>.enabled`.
  */
-const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_channel_id|maintainer_channel_id)(\..+)?$/;
+const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_channel_id|maintainer_channel_id|settings_policy)(\..+)?$/;
 
 /**
  * `channels` and `channels.<platform>` — writing either replaces the enrollment
@@ -227,14 +242,15 @@ const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_cha
 const ENROLLMENT_ANCESTOR = /^channels(\.[^.]+)?$/;
 
 /**
- * The two keys that decide who holds settings authority at all, rather than
- * what one may change. `operator_profile` gates the home-chat fallback
- * (lib/channel-auth.ts isSettingsController) and `settings_from_chat` switches
- * every tier above `allowed` off — so a chat able to write either could grant
- * itself the tier or re-arm an opt-out the operator deliberately set. Same
- * unrevocability argument as the enrollment root, so the same answer.
+ * The key that decides who holds settings authority at all, rather than what
+ * one may change: `operator_profile` gates the home-chat fallback
+ * (lib/channel-auth.ts isSettingsController), so a chat able to write it could
+ * flip a client install to `technical` and grant itself the tier. Same
+ * unrevocability argument as the enrollment root, so the same answer. The
+ * per-channel half of this rule is `settings_policy`, which lives in
+ * ENROLLMENT_ROOT above because it is spelled under `channels.<name>`.
  */
-const AUTHORITY_KEYS = /^(operator_profile|settings_from_chat)(\..+)?$/;
+const AUTHORITY_KEYS = /^operator_profile(\..+)?$/;
 
 /**
  * Execution-adjacent: `permission_mode` can be flipped to bypassPermissions,
@@ -288,7 +304,7 @@ const ROUTINES_CONTAINER = /^routines(\.\d+)?$/;
  * tier than a legible one.
  */
 export function precheckSetChanged(value: string, current: Json[]): boolean {
-  const gateOf = (r: Json) => (r && r.precheck != null ? `${String(r.precheck)} ${r.precheck_timeout_s ?? ''}` : null);
+  const gateOf = (r: Json) => (r && r.precheck != null ? `${String(r.precheck)}\u0000${r.precheck_timeout_s ?? ''}` : null);
   const before = new Map<string, string | null>();
   for (const r of Array.isArray(current) ? current : []) {
     if (r && r.id) before.set(String(r.id), gateOf(r));
@@ -674,16 +690,27 @@ function main(payload: any): void {
     return;
   }
 
-  // The operator's opt-out, checked before authority: with settings_from_chat
-  // false there is no chat that holds these tiers, so naming one in the deny
-  // would send the operator somewhere that cannot help either.
-  if (config?.settings_from_chat === false) deny(DENY_SETTINGS_FROM_CHAT_OFF);
+  // How far the tiers reach on THIS channel. Read once: `deny` and `allow` are
+  // the two ends of the same dial, and reading it twice would let a rewrite of
+  // config.json mid-turn answer the two questions differently.
+  const policy = settingsPolicy(config, envelope.source);
+
+  // The operator's opt-out, checked before authority: with `deny` there is no
+  // chat on this channel that holds these tiers, so naming one in the deny would
+  // send the operator somewhere that cannot help either.
+  if (policy === 'deny') deny(DENY_POLICY_DENY);
 
   if (!isSettingsController(config, envelope.source, envelope.userId, envelope.chatId)) {
     deny(DENY_NEEDS_MAINTAINER);
   }
 
   if (mutation.verdict === 'maintainer') return; // the settings chat carries this tier
+
+  // `allow`: the settings chat on this channel has a single poster, so the code
+  // would only ever be echoed by the person who just asked for the change. The
+  // tier still required the settings chat to get here — this drops the second
+  // factor, never the first.
+  if (policy === 'allow') return;
 
   // Nonce tier: the maintainer chat asks, the operator confirms. A token is
   // bound to one target and one chat, single-use, and matched only against the

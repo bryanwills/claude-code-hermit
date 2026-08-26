@@ -31,15 +31,15 @@ When invoked with `--auto` by heartbeat, skip steps 1â€“5 and jump directly to s
 
 ```
 Status: completed
-Blockers: none
+Blockers: <optional additions, ~ <prefix> to mark a recorded blocker resolved, or none>
 Lessons: none
 Changed: <from session-diff.json if available, else none>
-Artifacts: none
+Artifacts: <optional [[compiled/...]] additions, or none>
 Closed Via: auto
 Next Start Point: Fresh start.
 ```
 
-Write `Auto-closed by heartbeat.` as the first line of `## Overview` in the session report.
+SHELL.md remains the factual floor. `Blockers:` can add facts but cannot erase its `## Blockers`; a `~ <prefix>` line marks the first trimmed, case-insensitive SHELL blocker prefix as `- [resolved] <recorded text>` in the report. An unmatched `~` line is kept as an ordinary blocker with the tilde removed. `Artifacts:` accepts only `[[compiled/...]]` links not already recorded in SHELL.md or found by the session-stamped scan.
 
 If step 7 returns `ok === false`, no markers were written and `pending-close.json` is left in place automatically, so a later tick retries the drain. Both drainers share a backoff marker (`state/pending-close-drain.json`) and defer while an operator turn is open, so the retry is the first eligible heartbeat tick or routine poll after that window. The backoff is 30 minutes for the 60-second routine poll; the heartbeat drainer halves it once `heartbeat.every` reaches 30 minutes, so a slow heartbeat retries on its next tick rather than the one after it.
 
@@ -62,9 +62,10 @@ This path is intentionally silent: no operator notification on queue or drain â€
 
 ---
 
-1. Compile final session data **in context** â€” do NOT write to SHELL.md yet. `session-archive.ts` owns the final write. Gather:
+1. Finalize the factual record on disk, then compile judgment and handoff data **in context**. `session-archive.ts` owns the report write and reads the same factual baseline in every archive mode:
+   - Ensure SHELL.md `## Task`, `## Findings`, and `## Blockers` reflect the final recorded state. These sections remain the factual floor. Payload Blockers can add missing facts or annotate a recorded blocker as resolved, but cannot erase recorded text.
    - `Status:` one of `completed` | `partial` | `blocked`
-   - `Blockers:` one line each, enough context for a cold start
+   - `Blockers:` optional additions, one line each. Use `~ <prefix>` to mark the first trimmed, case-insensitive prefix match in SHELL.md `## Blockers` resolved. The report keeps the full recorded text as `- [resolved] <recorded text>`; an unmatched `~` line becomes an ordinary addition with the tilde removed.
    - `Lessons:` only genuinely useful ones. Before compiling, run the close debrief â€” answer three self-directed questions:
      1. *"What did I build ad-hoc this session (throwaway scripts, repeated manual procedures, long waits a tool would remove) that should persist?"*
      2. *"What did I have to re-derive or re-discover that a compiled note or memory entry should have told me?"*
@@ -81,7 +82,7 @@ This path is intentionally silent: no operator notification on queue or drain â€
    - `Artifacts:` if this session produced a durable output, route it by shape:
      - **Evolving subject** the hermit will touch again (a monitored domain, a recurring decision area, accumulated know-how): **update or create** `compiled/topic-<slug>.md`. Merge new findings into the existing sections rather than appending a dated copy; bump `updated`, refresh the one-line `summary`, keep the page under 150 lines (compact older material when merging), and cross-link related pages with `[[wikilinks]]`.
      - **One-off output** (point-in-time research note, decision doc, audit summary): write `compiled/<type>-<slug>-<date>.md` as before.
-     Either way include `session: S-NNN` in the frontmatter and list the wikilink here. Don't leave domain output wedged in SHELL.md Findings or a proposal body.
+     Either way include `session: S-NNN` in the frontmatter. The archive discovers that exact session stamp, plus any `[[compiled/...]]` links already recorded in SHELL.md, and deduplicates them. The optional payload field accepts only `[[compiled/...]]` additions. Don't leave domain output wedged in SHELL.md Findings or a proposal body.
 2. Ensure the Progress Log reflects each step's final state (done, partial, blocked)
 3. Confirm the "Next Start Point" is clear enough for a fresh session to resume without questions
 4. If any high-leverage improvements were discovered during work, create proposals via the `claude-code-hermit:proposal-create` skill
@@ -93,15 +94,15 @@ This path is intentionally silent: no operator notification on queue or drain â€
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts archive --mode=close --state-dir=.claude-code-hermit <<'HERMIT_PAYLOAD'
    Status: <completed|partial|blocked>
-   Blockers: <one line each, or none>
+   Blockers: <optional additions, ~ <prefix> resolutions, or none>
    Lessons: <one line each, or none>
    Changed: <file list, or none>
-   Artifacts: <wikilinks to compiled/ outputs produced this session, or none>
+   Artifacts: <optional [[compiled/...]] additions, or none>
    Closed Via: <operator|auto>
    Next Start Point: <one line>
    HERMIT_PAYLOAD
    ```
-   Parse the single line of JSON printed to stdout. **`ok === false`** means the archive did NOT happen â€” no markers were written; surface the returned `reason` to the operator and retry once before giving up.
+   Parse the single line of JSON printed to stdout. On success, `merged_payload_fields` lists which optional `Blockers` or `Artifacts` fields added report content; `[]` means SHELL.md and the stamped artifact scan already contained everything. **`ok === false`** means the archive did NOT happen: no markers were written. Surface the returned `reason` to the operator and retry once before giving up.
 8. **Pending-close cleanup** *(now automatic)*. `session-archive.ts` deletes `state/pending-close.json` itself on close/auto archive success (reported in its `markers` output field) â€” any pending midnight-drain flag is invalidated by a successful close, regardless of trigger. Nothing to do here.
 9. **Context-reset marker** *(now automatic, `--auto` only)*. On auto archive success the script writes `state/clear-requested.json` itself. The watchdog reads it on the next tick and sends `/clear` when the session is still alive + idle + unattended, resetting stale conversation context before the next scheduled wake incurs a cold cache-write. `/clear` preserves CronCreate routines and Monitor tasks; no re-arm is needed.
 
@@ -116,7 +117,7 @@ Verify these before proceeding with close (applies to both modes):
 - [ ] All changed files are listed in the Changed section
 - [ ] Blockers are described with enough context for a cold start
 - [ ] Cost data is recorded (if available from the cost-tracker hook)
-- [ ] If `## Completed` claims a deliverable that a skill persists to `compiled/` (e.g. a deep-dive, briefing, or decision doc), confirm it appears in `## Artifacts`. If it doesn't, verify whether the output actually reached `compiled/`: if it did, add it to `## Artifacts`; if it didn't, the deliverable was dropped, so record it in `## Blockers` rather than leaving `## Completed` asserting success.
+- [ ] If `## Completed` claims a deliverable that a skill persists to `compiled/` (e.g. a deep-dive, briefing, or decision doc), confirm the file exists with `session: S-NNN` frontmatter or is linked from SHELL.md. If it does not exist, the deliverable was dropped, so record that in `## Blockers` rather than leaving `## Completed` asserting success.
 - [ ] If status is `blocked`: have you run `/debug` to check for tool/hook failures? Include diagnosis in blockers if relevant
 
 **Full shutdown only:**

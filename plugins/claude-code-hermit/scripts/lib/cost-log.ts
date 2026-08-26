@@ -447,7 +447,22 @@ function buildSubagentCostRow(o: SubagentCostObservation): Json {
  */
 function appendCostRows(costLogFile: string, rows: Json[]): void {
   if (!rows.length) return;
-  fs.appendFileSync(costLogFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+
+  const serializedRows = rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  const fd = fs.openSync(costLogFile, 'a+');
+  try {
+    let needsSeparator = false;
+    const size = fs.fstatSync(fd).size;
+    if (size > 0) {
+      const lastByte = Buffer.allocUnsafe(1);
+      needsSeparator = fs.readSync(fd, lastByte, 0, 1, size - 1) === 1
+        && lastByte[0] !== 0x0a;
+    }
+
+    fs.appendFileSync(fd, (needsSeparator ? '\n' : '') + serializedRows, 'utf-8');
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 // Per-routine cost inside a time window, for the routine-health digest.

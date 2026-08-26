@@ -410,11 +410,25 @@ const DENY_ROWS: DenyRow[] = [
   // merely contains "rm" as a substring of another word.
   ['allow a command containing "rm" as a substring', bash('confirm -rf x'), 'allow'],
 
-  // Locks in the removal of the unanchored credential-word globs (see CHANGELOG);
-  // printenv/cat .env* above still block.
+  // Locks in the removal of the unanchored credential-word globs (see CHANGELOG).
+  // The anchored credential-path entries that carry the transcript-hygiene value
+  // must survive that removal — assert them here rather than leaving the claim
+  // to a comment (`printenv` is covered by the pipe row above).
+  ['block a dotenv read', bash('cat .env'), 'block'],
+  ['block a suffixed dotenv read', bash('cat .env.local'), 'block'],
+  ['block an ssh key read behind &&', bash('cd /tmp && cat ~/.ssh/id_rsa'), 'block'],
   ['allow a grep for a token-named var', bash('grep -rn DISCORD_BOT_TOKEN plugins/'), 'allow'],
   ['allow a grep for a token-named var (strict list)', bash('grep -rn DISCORD_BOT_TOKEN plugins/'), 'allow', STRICT_PATTERNS],
   ['allow a commit message naming a secret var', bash('git commit -m "rename the SECRET env var"'), 'allow'],
+
+  // The word globs were unanchored; these are anchored on the `$` sigil, so an
+  // expansion of a live credential blocks while every bare mention of the name
+  // stays allowed. Both spellings are needed — `${VAR}` does not contain `$VAR`.
+  ['block an expansion of the api-key var', bash('echo $ANTHROPIC_API_KEY'), 'block'],
+  ['block a braced expansion of the login-token var', bash('echo "${CLAUDE_CODE_OAUTH_TOKEN}"'), 'block'],
+  ['block a credential expansion later in a chain', bash('bun x.ts && echo $CLAUDE_CODE_OAUTH_TOKEN > /tmp/t'), 'block'],
+  ['allow a grep for the api-key var name', bash('grep -rn ANTHROPIC_API_KEY docs/'), 'allow'],
+  ['allow writing the api-key placeholder into .env', bash('echo ANTHROPIC_API_KEY=your-api-key-here >> .env'), 'allow'],
 ];
 
 describe('enforce-deny-patterns (decide, in-process)', () => {
@@ -857,6 +871,72 @@ describe('startup-context', () => {
     expect(r.stdout).toContain('No active session');
   }));
 
+  test('startup-context (populated Findings → present after Monitoring)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n\n## Monitoring\n- [10:05] watch tick\n\n## Findings\nsomething unexpected was discovered\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('## Findings (last 5)');
+    expect(r.stdout).toContain('something unexpected was discovered');
+    const monIdx = r.stdout.indexOf('## Monitoring');
+    const findIdx = r.stdout.indexOf('## Findings');
+    expect(monIdx).toBeGreaterThan(-1);
+    expect(findIdx).toBeGreaterThan(monIdx);
+  }));
+
+  test('startup-context (placeholder-only Findings → absent)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n\n## Findings\n<!-- Anything unexpected found during work. -->\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('## Findings');
+  }));
+
+  test('startup-context (no ## Findings heading at all → absent, exit 0)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n## Blockers\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('## Findings');
+  }));
+
+  test('startup-context (bare-bullet Blockers/Findings after placeholder strip → both sections absent)', withDir(async (dir) => {
+    // Comment-only bullets collapse to a bare "-" once stripPlaceholders runs —
+    // must not surface as "## Blockers\n-" / "## Findings (last 5)\n-".
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n- <!-- resolved: fixed already -->\n\n## Findings\n- <!-- nothing yet -->\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('## Blockers');
+    expect(r.stdout).not.toContain('## Findings');
+  }));
+
+  test('startup-context (Findings with more than 5 lines → only the last 5)', withDir(async (dir) => {
+    const findings = Array.from({ length: 8 }, (_, i) => `- finding ${i}`).join('\n');
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      `# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n## Blockers\n\n## Findings\n${findings}\n`);
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('finding 7');
+    expect(r.stdout).toContain('finding 3');
+    expect(r.stdout).not.toContain('finding 0');
+    expect(r.stdout).not.toContain('finding 2');
+  }));
+
+  test('startup-context (oversized Progress Log alone → Findings dropped, the first of the five sections lost)', withDir(async (dir) => {
+    const progress = Array.from({ length: 10 }, (_, i) => `[10:${String(i).padStart(2, '0')}] ${'P'.repeat(340)}`).join('\n');
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      `# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n${progress}\n\n` +
+      '## Blockers\nwaiting on review\n\n## Monitoring\n- [10:05] watch tick\n\n## Findings\nsomething unexpected was discovered\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('## Findings');
+    expect(r.stdout).not.toContain('something unexpected was discovered');
+  }));
+
   test('startup-context (section priority)', withDir(async (dir) => {
     write(hermit(dir, 'OPERATOR.md'), '# Operator\n' + ('x'.repeat(80) + '\n').repeat(22));
     const extra = Array.from({ length: 200 },
@@ -1086,6 +1166,88 @@ Rota body.
     expect(r.stdout).not.toContain('session_state:');
     expect(r.stdout).not.toContain('pending micro-proposals:');
     expect(r.stdout).not.toContain('outbound channel:');
+    // Fixture's ## Blockers is placeholder-only — no blockers: line.
+    expect(r.stdout).not.toMatch(/^blockers: /m);
+  }));
+
+  test('startup-context (source=compact, populated Blockers → bounded blockers: pointer after last progress)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\nwaiting on review\n\n## Findings\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/^blockers: waiting on review$/m);
+    // Ordered after last progress, before the trailing "Full state" instruction.
+    const lastProgressIdx = r.stdout.indexOf('last progress:');
+    const blockersIdx = r.stdout.indexOf('blockers:');
+    expect(lastProgressIdx).toBeGreaterThan(-1);
+    expect(blockersIdx).toBeGreaterThan(lastProgressIdx);
+  }));
+
+  test('startup-context (source=compact, placeholder-only Blockers → no blockers: line)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n<!-- What\'s preventing progress? -->\n\n## Findings\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toMatch(/^blockers: /m);
+  }));
+
+  test('startup-context (source=compact, multi-line Blockers → last 2 entries only, joined)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n- oldest blocker\n- middle blocker\n- newest blocker\n\n## Findings\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/^blockers: middle blocker \| newest blocker$/m);
+    expect(r.stdout).not.toContain('oldest blocker');
+  }));
+
+  test('startup-context (source=compact, two verbose Blockers → newest survives the cap, not just the oldest)', withDir(async (dir) => {
+    // The char cap applies per entry: capping the joined string would spend the
+    // whole budget on the older blocker and truncate the newest one away.
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      `## Blockers\n- OLD ${'o'.repeat(200)}\n- NEW ${'n'.repeat(200)}\n\n## Findings\n`);
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    const line = r.stdout.split('\n').find(l => l.startsWith('blockers: '))!;
+    expect(line).toContain('OLD ');
+    expect(line).toContain('NEW ');
+    expect(line.length).toBeLessThanOrEqual('blockers: '.length + 240);
+  }));
+
+  test('startup-context (source=compact, bare-bullet Blockers after placeholder strip → no blockers: line)', withDir(async (dir) => {
+    // A resolved-blocker comment on its own bullet collapses to a bare "-" once
+    // stripPlaceholders removes the comment — must not surface as "blockers: -".
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n- <!-- resolved: fixed already -->\n\n## Findings\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toMatch(/^blockers: /m);
+  }));
+
+  test('startup-context (source=compact, populated Findings → never emitted in the compact capsule)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n\n## Findings\nsomething unexpected was discovered\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('## Findings');
+    expect(r.stdout).not.toContain('something unexpected was discovered');
   }));
 
   test('startup-context (source=startup → pointer section never emitted, even with state present)', withDir(async (dir) => {
@@ -1256,6 +1418,26 @@ Rota body.
     // The trailing line is cut mid-sentence, proving the capsule hit the cap here.
     expect(r.stdout).not.toContain('to reconstruct context.');
     expect(r.stdout).toContain('operator language: pt (reply in this language)');
+    // Line-boundary truncation: every emitted pointer line is intact, not a
+    // partial fragment of the field that follows it.
+    for (const line of r.stdout.trimEnd().split('\n').slice(1)) {
+      expect(line).toMatch(/^(operator language|session_state|task|last progress|blockers|pending micro-proposals|outbound channel|latest report|operator context|proposals dir): /);
+    }
+  }));
+
+  test('startup-context (source=compact, single oversized field → capsule collapses to nothing, not a garbled line)', withDir(async (dir) => {
+    // No operator language configured, so the unbounded session_state line is
+    // first and alone exceeds the slice budget — there is no earlier newline
+    // to cut back to.
+    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
+      session_state: 'waiting', waiting_reason: 'x'.repeat(2000),
+    }));
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('---Compaction Pointers---');
+    expect(r.stdout).not.toContain('session_state:');
   }));
 
   test('startup-context (source=compact, language-only state → capsule still emits)', withDir(async (dir) => {
@@ -1740,6 +1922,24 @@ describe('doctor-check', () => {
     const c = checkById(await doctorReport(dir), 'cost');
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('today');
+  }));
+
+  test('doctor-check (corrupt cost lines keep the snapshot out of the persistent alert)', withDir(async (dir) => {
+    seedDoctor(dir,
+      '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}');
+    const today = new Date().toISOString().slice(0, 10);
+    write(path.join(dir, '.claude', 'cost-log.jsonl'),
+      `{"timestamp":"${today}T10:00:00.000Z","total_tokens":350,"cache_read_tokens":200,"estimated_cost_usd":0.0012}\n`);
+    write(hermit(dir, 'state', 'cost-index.json'),
+      JSON.stringify({ version: 3, skipped_corrupt_lines: 2 }));
+
+    const c = checkById(await doctorReport(dir), 'cost');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('today $0.0012');
+    expect(c.detail).toContain('2 corrupt cost-log lines skipped; recorded spend may be understated');
+    expect(c.alert_detail).toBe('2 corrupt cost-log lines skipped; recorded spend may be understated');
+    expect(c.alert_detail).not.toContain('today $');
+    expect(c.alert_detail).not.toContain('tokens');
   }));
 
   test('doctor-check (cost visibility — warn when no cost-log)', withDir(async (dir) => {

@@ -175,6 +175,11 @@ describe('reflect: skill-correction:* graduation routing', () => {
   test('reflect: Component Health Skills bullet references ledger graduation as backing', () => {
     expect(reflect).toContain('skill-correction:*` ledger graduation in step 3b');
   });
+
+  test('reflect: Component Health subject reflection-judge is not a candidate', () => {
+    expect(reflect).toContain('this flag is **not a candidate**');
+    expect(reflect).toContain('not sent through the judge');
+  });
 });
 
 // ── 3b. channel-responder: correction → ledger row prose pins ───────────────

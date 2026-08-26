@@ -35,6 +35,7 @@ const VALID_QUALITY_GATE_TIER = ENUM.QUALITY_GATE_TIER;
 const VALID_ROUTINE_MODEL = ENUM.ROUTINE_MODEL;
 const VALID_IDLE_BEHAVIOR = ENUM.IDLE_BEHAVIOR;
 const VALID_OPERATOR_PROFILE = ENUM.OPERATOR_PROFILE;
+const VALID_SETTINGS_POLICY: readonly string[] = ENUM.SETTINGS_POLICY;
 const VALID_BUDGET_ACTION = ENUM.BUDGET_ACTION;
 const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -310,6 +311,25 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       }
       if (ch.default_chat_id !== undefined && ch.default_chat_id !== null && typeof ch.default_chat_id !== 'string') {
         errors.push(`channels.${name}.default_chat_id: must be string or null`);
+      }
+      // Reject rather than coerce: channel-settings-gate resolves an
+      // unrecognised value to `ask`, so a typo would silently keep the
+      // confirmation code an operator meant to switch off (or, worse, read as
+      // relaxed when they meant to lock the channel down).
+      if (ch.settings_policy !== undefined &&
+          !VALID_SETTINGS_POLICY.includes(ch.settings_policy)) {
+        errors.push(
+          `channels.${name}.settings_policy: "${ch.settings_policy}" not in [${VALID_SETTINGS_POLICY.join(', ')}]`,
+        );
+      }
+      // `allow` drops the confirmation code because the settings chat is assumed
+      // to have one poster. An allowlist naming several people says otherwise on
+      // the operator's own authority, so surface the contradiction rather than
+      // guessing which of the two they meant.
+      if (ch.settings_policy === 'allow' && Array.isArray(ch.allowed_users) && ch.allowed_users.length > 1) {
+        warnings.push(
+          `channels.${name}.settings_policy is "allow" but allowed_users names ${ch.allowed_users.length} people — execution-adjacent settings apply from any of them with no confirmation code; set it to "ask" if that is not what you want`,
+        );
       }
       // The pinned proactive home must not be the maintainer chat: unlike
       // dm_channel_id, nothing re-learns this field, so a collision here sends
@@ -618,11 +638,18 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     errors.push('ask_gate: must be a boolean');
   }
 
-  // Only a literal `false` opts out (channel-settings-gate.ts tests for it), so
-  // a truthy non-boolean here would read as "on" and quietly leave the security
-  // tier open to chat. Reject rather than coerce.
-  if (config.settings_from_chat !== undefined && typeof config.settings_from_chat !== 'boolean') {
-    errors.push('settings_from_chat: must be a boolean');
+  // Retired in favour of per-channel `channels.<name>.settings_policy`. A
+  // leftover key is not inert: `settingsPolicy` still honors a literal `false`
+  // as `deny` on any channel with no policy of its own, so the operator's
+  // opt-out survives an unmigrated upgrade. Warn (so doctor reports it and the
+  // pending migration is visible) rather than erroring, which would stop a
+  // half-migrated hermit from booting.
+  if (config.settings_from_chat !== undefined) {
+    warnings.push(
+      config.settings_from_chat === false
+        ? 'settings_from_chat is retired — its `false` still applies as settings_policy "deny" on every channel that has none of its own, but only until you migrate: run /claude-code-hermit:hermit-evolve to move it to channels.<name>.settings_policy'
+        : 'settings_from_chat is retired and no longer read — run /claude-code-hermit:hermit-evolve to move it to channels.<name>.settings_policy, or unset it',
+    );
   }
 
   if (config.artifacts !== undefined) {

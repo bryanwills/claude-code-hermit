@@ -45,15 +45,17 @@ When the work is done, or the operator decides to move on (even if partial or bl
 
 **Completion notification is the final step of this flow, not a substitute for it.** Skipping the idle transition (step 5 below) leaves the session `in_progress`, which triggers stale-session heartbeat alerts and delays report archival until the time-based backstops kick in.
 
-1. Compile final session data **in context** — do NOT write to SHELL.md at this point. `session-archive.ts` owns the final write. Gather:
+1. Finalize the factual record on disk, then compile judgment data **in context**. `session-archive.ts` owns the report write and reads the same factual baseline in every archive mode:
+   - Ensure SHELL.md `## Blockers` reflects the final recorded state. It remains the factual floor. Payload Blockers can add missing facts or annotate a recorded blocker as resolved, but cannot erase recorded text.
    - `Status:` one of `completed` | `partial` | `blocked`
-   - `Blockers:` one line each, enough context for a cold start
+   - `Blockers:` optional additions, one line each. Use `~ <prefix>` to mark the first trimmed, case-insensitive prefix match in SHELL.md `## Blockers` resolved. The report keeps the full recorded text as `- [resolved] <recorded text>`; an unmatched `~` line becomes an ordinary addition with the tilde removed.
    - `Lessons:` only genuinely useful ones
    - `Changed:` list of files modified
+   - `Artifacts:` optional `[[compiled/...]]` links not already recorded in SHELL.md or found by the session-stamped scan
 2. Verify quality in-context before archiving:
    - Task status is one of `completed` | `partial` | `blocked`
    - Changed files are identified
-   - Blockers have enough context for a cold start
+   - SHELL.md `## Blockers` has enough context for a cold start
 3. Create proposals for any high-leverage improvements discovered during work
 4. **Reflect (with debounce).** Read `state/reflection-state.json` for `last_reflection`. Only invoke the `claude-code-hermit:reflect` skill if `last_reflection` is null or older than 4 hours. For quick tasks (single-step, under 5 minutes), skip entirely — progress log is sufficient.
 4b. **Session-triggered scheduled checks.** For each `scheduled_checks` entry (from config already loaded) with `trigger: "session"` and `enabled: true`, invoke the skill. If a skill is unavailable or errors, skip it and continue — never block session finalization on a scheduled check failure. For each check that completed successfully, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts .claude-code-hermit/state/reflection-state.json --scheduled-check-run <id>` (writes only that check's `last_run`; fail-open). Do not run it for failed checks.
@@ -62,12 +64,13 @@ When the work is done, or the operator decides to move on (even if partial or bl
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts archive --mode=idle --state-dir=.claude-code-hermit <<'HERMIT_PAYLOAD'
    Status: <completed|partial|blocked>
-   Blockers: <one line each, or none>
+   Blockers: <optional additions, ~ <prefix> resolutions, or none>
    Lessons: <one line each, or none>
    Changed: <file list, or none>
+   Artifacts: <optional [[compiled/...]] additions, or none>
    HERMIT_PAYLOAD
    ```
-   Parse the single line of JSON the script prints to stdout. **Gate every following step on the returned `ok` field.** `ok === true` → the transition succeeded, continue to step 6. `ok === false` → the archive did NOT happen — do not proceed as if it did. Append the returned `reason` to SHELL.md `## Findings` and retry once; if it fails again, notify the operator and leave the session `in_progress` rather than silently losing the report.
+   Parse the single line of JSON the script prints to stdout. On success, `merged_payload_fields` lists which optional `Blockers` or `Artifacts` fields added report content; `[]` means SHELL.md and the stamped artifact scan already contained everything. **Gate every following step on the returned `ok` field.** `ok === true` → the transition succeeded, continue to step 6. `ok === false` → the archive did NOT happen, so do not proceed as if it did. Append the returned `reason` to SHELL.md `## Findings` and retry once; if it fails again, notify the operator and leave the session `in_progress` rather than silently losing the report.
 6. If `heartbeat.enabled` is true in config and heartbeat is not already running: start it (`/claude-code-hermit:heartbeat start`)
 6b. **Compaction boundary marker** *(now automatic)*. The step-5 idle archive itself wrote `state/compact-requested.json` (see `markers.compact_requested` in its output) — the archived arc is fully on disk, so the watchdog's routine-hygiene compactor (`maybeContextCompact`) may waive its interval cooldown on the next tick. The marker is self-reaping: `maybeContextCompact` consumes it when the compaction fires and deletes it stale-on-read past `COMPACT_MARKER_TTL_SECS`, and `session-start` step 3 unconditionally deletes any survivor on boot as a backstop. Nothing to do here.
 7. After the idle transition (step 5) succeeds (`ok === true`), check `.claude-code-hermit/sessions/NEXT-TASK.md` and read `escalation` from config:

@@ -155,6 +155,14 @@ describe('artifact-cited evidence: vocabulary coverage', () => {
     expect(judge).toContain('never suppressed `covered-by-memory`');
   });
 
+  test('[agents/reflection-judge.md]: skips §1 when Artifact cites observations.jsonl', () => {
+    expect(judge).toContain('Skip §§ 0.5, 1, and 1.6');
+  });
+
+  test('[agents/reflection-judge.md]: ledger §1.4 is a bounded Grep, not a whole-file Read', () => {
+    expect(judge).toContain('Never `Read` the ledger whole');
+  });
+
   // artifact-cited vocabulary must appear in every gate file (reflect + judge
   // are also covered by the block above)
   for (const { label, content } of GATE_FILES) {

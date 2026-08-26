@@ -144,7 +144,7 @@ The `gate` verb fails closed by construction: an unrecognized, malformed, or emp
 
 ### Component Health signal ladder
 
-For Component Health findings (SKILL.md § Component Health): weak signal (one-off or ambiguous) → no action. Moderate (pattern across 2-3 sessions) → create a proposal via `/claude-code-hermit:proposal-create` with the evidence (subject to the Three-Condition Rule). Strong (clear, repeated pattern) → create a proposal via `/claude-code-hermit:proposal-create` whose body carries a `## Skill Improvement` (or `## Agent Improvement`) section listing the component name, observed failures, and suggested eval criteria; when accepted via `proposal-act`, implement via `/skill-creator:skill-creator eval` + `improve`, or apply the changes to the component's definition file directly if skill-creator is unavailable.
+For Component Health findings (SKILL.md § Component Health): a finding whose **subject** is `reflection-judge` is not a candidate and is not sent through the judge — Progress Log only (SKILL.md). Weak signal (one-off or ambiguous) → no action. Moderate (pattern across 2-3 sessions) → create a proposal via `/claude-code-hermit:proposal-create` with the evidence (subject to the Three-Condition Rule). Strong (clear, repeated pattern) → create a proposal via `/claude-code-hermit:proposal-create` whose body carries a `## Skill Improvement` (or `## Agent Improvement`) section listing the component name, observed failures, and suggested eval criteria; when accepted via `proposal-act`, implement via `/skill-creator:skill-creator eval` + `improve`, or apply the changes to the component's definition file directly if skill-creator is unavailable.
 
 ### Proposal Tier Classification
 

@@ -150,6 +150,22 @@ describe('reflect-precheck: drift capture', () => {
     }
   });
 
+  test('session_id resolves to last-archived S-NNN when runtime.session_id is null', async () => {
+    const hermitDir = makeTmpHermit({ lastRunAt: null });
+    try {
+      fs.writeFileSync(path.join(hermitDir, 'sessions', 'S-010-REPORT.md'), '# S-010\n');
+      fs.mkdirSync(path.join(hermitDir, 'reports'));
+
+      await runPrecheck(hermitDir);
+
+      const rows = readObservations(hermitDir);
+      const driftRow = rows.find(r => typeof r.pattern === 'string' && r.pattern.startsWith('storage-drift:'));
+      expect(driftRow?.session_id).toBe('S-010');
+    } finally {
+      fs.rmSync(hermitDir, { recursive: true, force: true });
+    }
+  });
+
   test('dedup by pattern: same session does not write duplicate rows', async () => {
     const hermitDir = makeTmpHermit({ lastRunAt: null });
     try {
@@ -495,6 +511,17 @@ describe('reflection-judge: §1.4 config-agnostic ledger verification', () => {
   test('judge is config-agnostic (does not re-count threshold)', () => {
     expect(judge).toContain('config-agnostic');
   });
+
+  test('judge skips §1 when Artifact cites observations.jsonl', () => {
+    expect(judge).toContain('Skip §§ 0.5, 1, and 1.6');
+    expect(judge).toContain('`state/observations.jsonl`');
+  });
+
+  test('judge §1.4 greps the ledger instead of Reading it whole', () => {
+    expect(judge).toContain('Never `Read` the ledger whole');
+    expect(judge).toContain('head_limit: 200');
+    expect(judge).not.toContain('Glob and Read `.claude-code-hermit/state/observations.jsonl`');
+  });
 });
 
 // ── Section: behavior phase (transcript-digest weekly cadence) ─────────────────
@@ -552,9 +579,10 @@ describe('reflect-precheck: behavior phase', () => {
 // spike day. The label is date-scoped and the figures ride as fields instead.
 
 describe('reflect-precheck: cost-spike observation', () => {
-  // The cost log resolves as a sibling of `.claude-code-hermit`, so the hermit dir
-  // must be named that for the walk-up to land inside this test's own tmp tree.
-  function makeSpikeProject(todayTotals: number[]): string {
+  // checkCostSpike reads state/cost-index.json (whole-day totals), not the raw
+  // cost log — so the fixture writes the index directly. Three quiet prior days
+  // at $1 give a median of $1; todayTotal is the figure under test.
+  function makeSpikeProject(todayTotal: number, priorDayCosts: number[] = [1, 1, 1]): string {
     const project = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-spike-'));
     const hermitDir = path.join(project, '.claude-code-hermit');
     const stateDir = path.join(hermitDir, 'state');
@@ -570,25 +598,28 @@ describe('reflect-precheck: cost-spike observation', () => {
     fs.writeFileSync(path.join(hermitDir, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
     fs.writeFileSync(path.join(stateDir, 'observations.jsonl'), '', 'utf-8');
 
-    writeCostLog(project, todayTotals);
+    writeCostIndex(hermitDir, todayTotal, priorDayCosts);
     return hermitDir;
   }
 
-  // Two quiet prior days at $1 give a median of $1; today's total is the spike.
-  function writeCostLog(project: string, todayTotals: number[]): void {
+  function writeCostIndex(hermitDir: string, todayTotal: number, priorDayCosts: number[]): void {
     const today = new Date().toISOString().slice(0, 10);
     const day = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
-    const rows = [
-      { timestamp: `${day(2)}T10:00:00Z`, estimated_cost_usd: 1 },
-      { timestamp: `${day(1)}T10:00:00Z`, estimated_cost_usd: 1 },
-      ...todayTotals.map((amt, i) => ({ timestamp: `${today}T1${i}:00:00Z`, estimated_cost_usd: amt })),
-    ];
-    fs.writeFileSync(path.join(project, '.claude', 'cost-log.jsonl'),
-      rows.map(r => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+    const by_date: Record<string, { cost: number; tokens: number; session_ids: string[] }> = {
+      [today]: { cost: todayTotal, tokens: 0, session_ids: [] },
+    };
+    priorDayCosts.forEach((cost, i) => {
+      by_date[day(priorDayCosts.length - i)] = { cost, tokens: 0, session_ids: [] };
+    });
+    fs.writeFileSync(path.join(hermitDir, 'state', 'cost-index.json'), JSON.stringify({
+      version: 3, byte_offset: 0, total_cost_usd: 0, total_tokens: 0, total_sessions: 0,
+      last_session_id: null, by_source: {}, by_date, by_week: {}, by_month: {},
+      skipped_corrupt_lines: 0, updated_at: new Date().toISOString(),
+    }), 'utf-8');
   }
 
   test('writes one date-scoped row carrying the figures as fields', async () => {
-    const hermitDir = makeSpikeProject([10]);
+    const hermitDir = makeSpikeProject(10);
     const r = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
     expect(r.exitCode).toBe(0);
 
@@ -603,13 +634,13 @@ describe('reflect-precheck: cost-spike observation', () => {
   });
 
   test('a second run the same day with a higher running total still writes only one row', async () => {
-    const hermitDir = makeSpikeProject([10]);
+    const hermitDir = makeSpikeProject(10);
     await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
 
     // Spend continues: today's total moves 10 → 25. Under a value-bearing label this
     // would be a brand-new pattern and a second row; under the date-scoped label the
     // dedup holds.
-    writeCostLog(path.dirname(hermitDir), [10, 15]);
+    writeCostIndex(hermitDir, 25, [1, 1, 1]);
     await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
 
     const spikes = readObservations(hermitDir).filter(o => o.source === 'cost-spike');
@@ -617,8 +648,50 @@ describe('reflect-precheck: cost-spike observation', () => {
     expect(spikes[0].today_total).toBe(10); // the first run's figures, not re-stamped
   });
 
+  // A whole-day total stays above the baseline for the rest of the day, so the
+  // measurement alone can't gate the phase — it would emit RUN|{cost_spike} on every
+  // tick until midnight, each one an LLM run whose cost_spike step has nothing to read
+  // (the row is already written). The phase is gated on the row's absence instead.
+  test('a spike day costs exactly one RUN, not one per tick', async () => {
+    const hermitDir = makeSpikeProject(10);
+    // last_run_at recent + no session reports → `compute` and `observations_fresh` stay
+    // quiet, so cost_spike is the only phase that can force a RUN.
+    const bumpLastRun = () => fs.writeFileSync(
+      path.join(hermitDir, 'state', 'reflection-state.json'),
+      JSON.stringify({
+        counters: { last_run_at: new Date().toISOString() },
+        last_behavior_digest_at: new Date().toISOString(),
+      }), 'utf-8');
+
+    bumpLastRun();
+    const first = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
+    expect(JSON.parse(first.stdout.trim().slice(4)).cost_spike).toBe(true);
+
+    bumpLastRun();
+    const second = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
+    expect(second.stdout.trim()).toBe('EMPTY');
+  });
+
   test('no row when today is not a spike', async () => {
-    const hermitDir = makeSpikeProject([1]);
+    const hermitDir = makeSpikeProject(1);
+    await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
+    expect(readObservations(hermitDir).filter(o => o.source === 'cost-spike')).toHaveLength(0);
+  });
+
+  // Whole-day totals mean entry count plays no part in detection: a spike fires the
+  // same whether the day behind each total was 1 entry or 400.
+  test('fires on a busy-install spike regardless of entry count', async () => {
+    const hermitDir = makeSpikeProject(1266.72, [100, 100, 100, 100]);
+    await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
+
+    const spikes = readObservations(hermitDir).filter(o => o.source === 'cost-spike');
+    expect(spikes).toHaveLength(1);
+    expect(spikes[0].today_total).toBe(1266.72);
+    expect(spikes[0].median_7d).toBe(100);
+  });
+
+  test('no row when fewer than 3 complete prior days exist', async () => {
+    const hermitDir = makeSpikeProject(100, [1, 1]);
     await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
     expect(readObservations(hermitDir).filter(o => o.source === 'cost-spike')).toHaveLength(0);
   });
