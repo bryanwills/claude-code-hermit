@@ -1580,6 +1580,23 @@ Rota body.
     expect(r.stdout).not.toContain('## Overview');
   }));
 
+  // The archived report keeps a cleared blocker as `[resolved] <text>` — that is the
+  // record, not a current fact. Naming it in the Last Report pointer would hand the
+  // next session a blocker the last one cleared, on the one surface the resolved-blocker
+  // filters did not cover.
+  test('startup-context (source=startup, resolved report blockers are not named)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'S-001-REPORT.md'),
+      '---\nid: S-001\nstatus: completed\nblockers: ["[resolved] waiting on review", "infra blocked"]\n' +
+      'next_start: "pick up the migration script"\ntask: "ship the thing"\n---\n' +
+      '# Session Report: S-001\n\n## Overview\nship the thing\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'startup', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('blockers: infra blocked');
+    expect(r.stdout).not.toContain('waiting on review');
+  }));
+
   test('startup-context (source=startup, legacy report with no next_start key → Overview fallback preserved)', withDir(async (dir) => {
     write(hermit(dir, 'sessions', 'S-001-REPORT.md'), '---\nid: S-001\nstatus: completed\n---\n# Report\n## Overview\nPrev session overview.\n');
     const r = await runScript('startup-context.ts', {

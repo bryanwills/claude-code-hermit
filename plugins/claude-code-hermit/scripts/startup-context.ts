@@ -565,7 +565,11 @@ function emitFullContext(source: string | null) {
           // Overview body entirely.
           reportExcerpt += `status=${fm.status || 'unknown'} ${fm.task || ''}`.trimEnd();
           if (fm.next_start) reportExcerpt += `\nnext: ${fm.next_start}`;
-          const blockers = Array.isArray(fm.blockers) ? fm.blockers : [];
+          // The report's blockers row keeps resolved entries as `[resolved] <text>` —
+          // that is the record. Naming one here would hand the next session a blocker
+          // the last one cleared, which is the whole failure the mark exists to stop.
+          const blockers = (Array.isArray(fm.blockers) ? fm.blockers : [])
+            .filter((b: string) => !isResolvedBlockerLine(b));
           if (blockers.length > 0) {
             const extra = blockers.length > 1 ? ` (+${blockers.length - 1} more)` : '';
             reportExcerpt += `\nblockers: ${blockers[0]}${extra}`;

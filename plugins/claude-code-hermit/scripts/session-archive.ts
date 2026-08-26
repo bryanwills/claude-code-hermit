@@ -36,7 +36,7 @@ import { costLogPath, pinStateDirOrExit } from './lib/cc-compat';
 import { computeSessionCost } from './lib/session-cost';
 import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
 import { readSettledConfig } from './lib/config-read';
-import { extractSection as sectionBody, firstContentLine, isResolvedBlockerLine, replaceSectionInPlace, stripPlaceholders } from './lib/md-write';
+import { extractSection as sectionBody, firstContentLine, isResolvedBlockerLine, replaceSectionInPlace, stripPlaceholders, stripResolvedMarker } from './lib/md-write';
 import { isResetBreadcrumb } from './lib/progress-log';
 
 type Json = any;
@@ -515,7 +515,7 @@ function mergeRecordedBlockers(
   // A recorded line already marked resolved was cleared during the session; strip the
   // marker for matching and display, and seed `resolved` with it so the payload doesn't
   // have to repeat what SHELL.md already says.
-  const recordedText = recordedLines.map(line => blockerText(line).replace(/^(?:~|\[resolved\])\s*/i, ''));
+  const recordedText = recordedLines.map(line => stripResolvedMarker(blockerText(line)));
   const seen = new Set(recordedText.map(line => line.toLowerCase()));
   const resolved = new Set<number>(
     recordedLines.map((line, i) => (isResolvedBlockerLine(line) ? i : -1)).filter(i => i !== -1),
@@ -632,9 +632,9 @@ function resolveDuration(
 function buildReport(opts: {
   sessionId: string; mode: 'idle' | 'close' | 'auto'; now: Date;
   payload: Record<string, string> & { plan?: string }; shell: string; stateDir: string; config: Json;
-  runtimeSessionId?: string; openedAt?: string; durationClosedAt?: string; costClosedAt?: string; recoveryBlockers?: string;
+  openedAt?: string; durationClosedAt?: string; costClosedAt?: string; recoveryBlockers?: string;
 }): { content: string; statusNote: string | null; cost: { cost_usd: number; tokens: number }; mergedPayloadFields: MergedPayloadField[]; blockersCarryForward: string } {
-  const { sessionId, mode, now, payload, shell, stateDir, config, runtimeSessionId, openedAt, durationClosedAt, costClosedAt, recoveryBlockers } = opts;
+  const { sessionId, mode, now, payload, shell, stateDir, config, openedAt, durationClosedAt, costClosedAt, recoveryBlockers } = opts;
   const sessionsDir = path.join(stateDir, 'sessions');
   const timezone = resolveTimezone(config);
   const { status, note: statusNote } = normalizeStatus(payload['Status'] || '');
@@ -644,6 +644,7 @@ function buildReport(opts: {
   const tags = extractTags(shell);
   const proposalsCreated = extractProposalIds(shell);
   const recordedTask = firstContentLine(extractSection(shell, 'Task'), 120);
+  const payloadTask = firstContentLine(payload['Task'] ?? '', 120);
   const task = recordedTask || firstRecordedTask(shell, payload['Task']);
   const escalation = resolveEscalation(config);
   const operatorTurns = resolveOperatorTurns(sessionsDir);
@@ -665,8 +666,9 @@ function buildReport(opts: {
   if (blockersMerge.contributed) mergedPayloadFields.push('Blockers');
   if (artifactsMerge.contributed) mergedPayloadFields.push('Artifacts');
   // Only when it actually filled an empty recorded Task — a payload Task alongside a
-  // recorded one contributed nothing and must not claim it did.
-  if (!recordedTask && task && payload['Task']) {
+  // recorded one contributed nothing and must not claim it did, and neither did a
+  // `Task:` that held only a placeholder comment (the Progress Log named the work).
+  if (!recordedTask && payloadTask) {
     mergedPayloadFields.push('Task');
   }
   // Idle-mode payloads may still carry a stale 'Next Start Point:' line (it isn't
@@ -887,7 +889,6 @@ function verbArchive(
   if (!setTransition.ok) return { ok: false, reason: setTransition.reason };
 
   const config = readConfig(stateDir);
-  const runtimeSessionId = typeof runtimeBefore.session_id === 'string' ? runtimeBefore.session_id : undefined;
   const openedAt = typeof runtimeBefore.opened_at === 'string' ? runtimeBefore.opened_at : undefined;
   // Cost aggregation keeps its prior positive-window requirement. Preserve a raw zero or
   // inverted bound for honest duration reporting, but let cost resolution end at `now`.
@@ -895,7 +896,7 @@ function verbArchive(
   const costClosedAt = rawClosedAt && Date.parse(rawClosedAt) > Date.parse(openedAt ?? '') ? rawClosedAt : undefined;
   const { content: reportContent, cost: reportCost, mergedPayloadFields, blockersCarryForward } = buildReport({
     sessionId, mode, now, payload, shell, stateDir, config,
-    runtimeSessionId, openedAt, durationClosedAt: rawClosedAt, costClosedAt,
+    openedAt, durationClosedAt: rawClosedAt, costClosedAt,
     recoveryBlockers: opts.recoveryBlockers,
   });
 

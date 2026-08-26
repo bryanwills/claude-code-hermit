@@ -22,9 +22,12 @@
 // patterns. Bare (no value) still stamps now, for callers with nothing to preserve.
 //
 // --reset-counters zeroes the judge verdict tallies and restarts their window
-// (counters.judge_accept/judge_suppress = 0, counters.since = now). Nothing else is
-// touched. The ratio these feed is cumulative from install day, so one bad stretch
-// pins the Component Health flag on forever; this is the only way to clear it.
+// (counters.judge_accept/judge_downgrade/judge_suppress = 0, judge_suppress_by_code
+// emptied, counters.judge_since = now). The ratio these feed is cumulative from install
+// day, so one bad stretch pins the Component Health flag on forever; this is the only
+// way to clear it. It deliberately does NOT touch counters.since: that is the hatch
+// stamp the reflect phase ladder (newborn/juvenile/adult) and doctor's run-rate line
+// are measured from, and moving it would make an established install newborn again.
 //
 // --scheduled-check-run is the session skill's step-4b cursor: it writes ONLY
 // scheduled_checks.<id>.last_run (today's date), preserving sibling per-check
@@ -108,8 +111,10 @@ if (arg3 === '--reset-counters') {
   try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')); } catch { /* first run */ }
   if (!state.counters || typeof state.counters !== 'object') state.counters = {};
   state.counters.judge_accept = 0;
+  state.counters.judge_downgrade = 0;
   state.counters.judge_suppress = 0;
-  state.counters.since = new Date().toISOString();
+  state.counters.judge_suppress_by_code = {};
+  state.counters.judge_since = new Date().toISOString();
   try {
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
   } catch (err: any) {

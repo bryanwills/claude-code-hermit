@@ -541,6 +541,19 @@ describe('recorded factual baseline', () => {
     expect(nextShell).toContain('- needs approval');
   }));
 
+  // `~` marks a resolution only when it is the whole token. A blocker that opens on a
+  // home path is an ordinary live blocker — treating it as resolved would retire it
+  // silently and mangle its text in the report.
+  test('a blocker opening on a home path is not read as resolved', withTmp(async (dir) => {
+    await open(dir, 'Task: blockers\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Blockers', '- ~/.claude/settings.json is read-only');
+    await archive(dir, 'auto', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).blockers)
+      .toEqual(['~/.claude/settings.json is read-only']);
+    expect(readShell(dir)).toContain('- ~/.claude/settings.json is read-only');
+  }));
+
   test('payload artifact order is SHELL, payload-only, then stamped, with exact contribution reporting', withTmp(async (dir) => {
     await open(dir, 'Task: artifacts\n', '2026-07-09T12:00:00Z');
     seedShellSection(dir, 'Findings', '- [[compiled/shell-declared]]');
