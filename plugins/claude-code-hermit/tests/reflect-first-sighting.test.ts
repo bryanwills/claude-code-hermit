@@ -648,6 +648,30 @@ describe('reflect-precheck: cost-spike observation', () => {
     expect(spikes[0].today_total).toBe(10); // the first run's figures, not re-stamped
   });
 
+  // A whole-day total stays above the baseline for the rest of the day, so the
+  // measurement alone can't gate the phase — it would emit RUN|{cost_spike} on every
+  // tick until midnight, each one an LLM run whose cost_spike step has nothing to read
+  // (the row is already written). The phase is gated on the row's absence instead.
+  test('a spike day costs exactly one RUN, not one per tick', async () => {
+    const hermitDir = makeSpikeProject(10);
+    // last_run_at recent + no session reports → `compute` and `observations_fresh` stay
+    // quiet, so cost_spike is the only phase that can force a RUN.
+    const bumpLastRun = () => fs.writeFileSync(
+      path.join(hermitDir, 'state', 'reflection-state.json'),
+      JSON.stringify({
+        counters: { last_run_at: new Date().toISOString() },
+        last_behavior_digest_at: new Date().toISOString(),
+      }), 'utf-8');
+
+    bumpLastRun();
+    const first = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
+    expect(JSON.parse(first.stdout.trim().slice(4)).cost_spike).toBe(true);
+
+    bumpLastRun();
+    const second = await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
+    expect(second.stdout.trim()).toBe('EMPTY');
+  });
+
   test('no row when today is not a spike', async () => {
     const hermitDir = makeSpikeProject(1);
     await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);

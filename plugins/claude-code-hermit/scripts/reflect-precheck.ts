@@ -130,10 +130,11 @@ function daysSince(isoStr: string | null) {
 // Reads whole-day totals from state/cost-index.json (maintained by cost-tracker.ts's
 // Stop hook and subagent-cost.ts's SubagentStop hook) instead of tailing the raw log —
 // a busy install's day is hundreds of entries, so a fixed-line tail spans at most one
-// or two dates and can never assemble a real baseline. The index already keeps today
-// plus 7 complete prior days (BY_DATE_RETENTION_DAYS in lib/cost-log.ts), tz-bucketed
-// the same way `today` is computed here, so the two keys can't disagree across an
-// offset.
+// or two dates and can never assemble a real baseline. The index retains today plus 8
+// prior days (BY_DATE_RETENTION_DAYS in lib/cost-log.ts) — the trailing 7 complete days
+// are the baseline taken here — tz-bucketed the same way `today` is computed here (the
+// writers pass the same config.timezone and rebuild the whole index on a tz change), so
+// the two keys can't disagree across an offset.
 //
 // Returns the two figures rather than a boolean so this script can record the
 // observation itself. It previously computed them, discarded them, and set a phase
@@ -147,11 +148,15 @@ function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: num
     const today = todayYMD(timezone);
     const todayTotal = index.by_date?.[today]?.cost ?? 0;
 
+    // `date < today`, not `!== today`: a bucket keyed past today (an old-tz key still
+    // sitting in the index between a config.timezone edit and the next cost write) is
+    // not a complete prior day, and letting it into the trailing-7 slice would drop a
+    // real one and drag the baseline.
     const priorDays = Object.entries(index.by_date ?? {})
-      .filter(([date]) => date !== today)
+      .filter(([date]) => date < today)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .slice(-7)
-      .map(([, bucket]) => (bucket as { cost: number }).cost);
+      .map(([, bucket]) => (bucket as { cost?: number }).cost ?? 0);
     if (priorDays.length < 3) return null;
 
     const sorted = [...priorDays].sort((a, b) => a - b);
@@ -163,6 +168,21 @@ function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: num
   } catch {
     return null;
   }
+}
+
+// True once the day's cost-spike row is in the observations ledger. The measurement
+// stays true for the rest of a spike day (todayTotal only climbs), so the row — not the
+// measurement — is what gates the phase: reflect's cost_spike step has nothing to read
+// or record once the row exists, and flagging it again would buy an LLM run per tick.
+function hasCostSpikeRow(ledgerPath: string, date: string): boolean {
+  const label = `cost-spike:${date}`;
+  try {
+    for (const line of fs.readFileSync(ledgerPath, 'utf-8').split('\n')) {
+      if (!line) continue;
+      try { if (JSON.parse(line).pattern === label) return true; } catch {}
+    }
+  } catch { /* no ledger yet → no row */ }
+  return false;
 }
 
 function hasAcceptedProposals(stateDir: string) {
@@ -235,6 +255,8 @@ const sessionState = runtime.session_state ?? 'idle';
 const config = readSettledConfig(stateDir);
 const timezone = config.timezone ?? 'UTC';
 
+const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
+
 const phases: Record<string, boolean> = {};
 
 // Cheaper checks first: compute (short-circuits on in_progress/null lastRunAt),
@@ -251,9 +273,12 @@ if (hasAcceptedProposals(stateDir) && daysSince(lastResolutionCheck) > 7) {
 // silently suppress the cost-spike phase. Absolute (as tests pass) is verbatim.
 const costHermitRoot = path.isAbsolute(stateDir) ? stateDir : resolveHermitRoot();
 const costSpike = checkCostSpike(costHermitRoot, timezone);
-// The phase still flags the spike for the skill's narrative step; the row itself is
-// written below, from these figures, rather than re-derived from prose.
-if (costSpike) phases.cost_spike = true;
+// The phase flags the spike for the skill's narrative step on the one run that writes
+// the row; the row itself is written below, from these figures, rather than re-derived
+// from prose. Gated on the row's absence so a spike day costs exactly one RUN and not
+// one per tick — the old log-tail path leaned on a lastRunAt recency check for that,
+// which whole-day index totals (true all day) no longer provide.
+if (costSpike && !hasCostSpikeRow(ledgerPath, costSpike.date)) phases.cost_spike = true;
 
 // Behavioral-telemetry digest — weekly for every hermit (not age-gated like
 // `digest` below): reflect's evidence step reads ground-truth transcript counters
@@ -317,8 +342,6 @@ if (pluginRoot && daysSince(runtime.last_raw_archive_at) >= 7) {
     } catch { /* fail-open */ }
   } catch { /* fail-open */ }
 }
-
-const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
 
 // --- Drift capture: write storage/schema drift rows to observations ledger ---
 // Drift is structural (a dir/type is present or absent), not a recurring behavior, so
