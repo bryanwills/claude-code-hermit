@@ -14,6 +14,8 @@
 ### Fixed
 - Cost corruption alerts now keep point-in-time spend out of persistent dashboard warnings, and interrupted cost-log tails no longer consume the next valid appended record.
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
+- Observations written with a null `runtime.session_id` stamp the last archived `S-NNN` instead of the shared `"unknown"` sentinel, so `graduation_min_sessions` counts distinct sessions. Ledger graduation skips `"unknown"` rows and promotes a pattern only when it has a row newer than `last_run_at`.
+- `reflection-judge` skips per-report confirmation when `Artifact:` cites `state/observations.jsonl`. A Component Health flag whose subject is `reflection-judge` stays on the Progress Log and is not a candidate.
 
 ### Upgrade Instructions
 

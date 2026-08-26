@@ -65,6 +65,10 @@ Check `Evidence Source:` first — it overrides the session-based flow.
 - **Quote check (required):** the evidence must cite a memory topic filename and the verbatim endpoint line. Grep that file for the quoted line (bounded — never Read the memory dir whole). Found → run § 1.5, then § 2. Missing file or line → `SUPPRESS: <title> — no-evidence: quoted endpoint not found in cited memory file`.
 - Emit the verdict tagged `(settled-memory)`.
 
+**If `Artifact:` cites `state/observations.jsonl`:**
+- Skip §§ 0.5, 1, and 1.6 (the ledger is the evidence; reports do not restate sub-threshold patterns).
+- Run § 1.4, then § 1.5, then go to § 2 Tier check.
+
 **Otherwise** (`archived-session` or `current-session`, or field absent): continue to § 0.5.
 
 ### 0.5. Sessions: none check
