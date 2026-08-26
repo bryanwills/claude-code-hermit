@@ -50,10 +50,11 @@ describe('reflect routing (step 3b + branches)', () => {
     expect(reflectSkill.includes('exclude rows with source `skill-preference-applied`')).toBe(true);
   });
 
-  test('step 3b skips unknown session_id and promotes only on a row newer than last_run_at', () => {
+  test('step 3b skips unknown session_id and promotes only on a row newer than last_graduation_at', () => {
     expect(reflectSkill.includes('session_id === "unknown"')).toBe(true);
     expect(reflectSkill.includes('remaining ids')).toBe(true);
-    expect(reflectSkill.includes('last_run_at')).toBe(true);
+    expect(reflectSkill.includes('last_graduation_at')).toBe(true);
+    expect(reflectSkill.includes('--graduation-cursor')).toBe(true);
   });
 
   test('branches.md carries the skill-preference routing section', () => {

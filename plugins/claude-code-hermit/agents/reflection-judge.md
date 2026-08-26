@@ -98,8 +98,7 @@ A session "confirms" the pattern if:
 
 **Observations ledger.** When an `Artifact:` line cites `state/observations.jsonl` (the path reflect's ledger graduation uses), verify the ledger instead of requiring each session report to restate the pattern — sub-threshold patterns live only in the ledger by design:
 
-- Glob and Read `.claude-code-hermit/state/observations.jsonl`. Parse lines best-effort (skip unparseable ones).
-- Verify that the ledger contains ≥1 matching entry per session in the candidate's cited `Sessions:` list — i.e. every `session_id` in the `Sessions:` field has at least one ledger row whose `pattern` matches the cited label. (The graduation threshold is operator-configured; the judge stays config-agnostic by verifying the cited evidence exists, not by re-counting the threshold.)
+- Never `Read` the ledger whole — it grows without bound (the 30-day pruner keeps a pattern's full history while any row is fresh). Use the Grep tool on `.claude-code-hermit/state/observations.jsonl` for the cited pattern label (content mode, `head_limit: 200`). From those matches only, confirm every `session_id` in the candidate's cited `Sessions:` list appears on at least one matching line. (The graduation threshold is operator-configured; the judge stays config-agnostic by verifying the cited evidence exists, not by re-counting the threshold.)
 - **Verified** → this substitutes for the per-report pattern confirmation in §1; proceed to §1.5.
 - **Missing file, no matching pattern, or cited session missing from ledger** → `SUPPRESS: <title> — no-evidence: artifact does not confirm citation`.
 

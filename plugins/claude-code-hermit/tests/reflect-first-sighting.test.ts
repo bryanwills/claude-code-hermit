@@ -516,6 +516,12 @@ describe('reflection-judge: §1.4 config-agnostic ledger verification', () => {
     expect(judge).toContain('Skip §§ 0.5, 1, and 1.6');
     expect(judge).toContain('`state/observations.jsonl`');
   });
+
+  test('judge §1.4 greps the ledger instead of Reading it whole', () => {
+    expect(judge).toContain('Never `Read` the ledger whole');
+    expect(judge).toContain('head_limit: 200');
+    expect(judge).not.toContain('Glob and Read `.claude-code-hermit/state/observations.jsonl`');
+  });
 });
 
 // ── Section: behavior phase (transcript-digest weekly cadence) ─────────────────
