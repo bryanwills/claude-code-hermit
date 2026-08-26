@@ -517,7 +517,10 @@ describe('channel-settings-gate — enforcement', () => {
       tool: 'Bash',
       input: { command: 'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set permission_mode auto' },
     });
-    const attended = await runGate(call, dir);
+    // Explicit override, not ambient absence: this suite may itself run inside a
+    // managed hermit's own shell (HERMIT_MANAGED=1 already in process.env), which
+    // runScript inherits before overlaying test env.
+    const attended = await runGate(call, dir, { HERMIT_MANAGED: '' });
     expect(attended.exitCode).toBe(0);
     const managed = await runGate(call, dir, { HERMIT_MANAGED: '1' });
     expect(managed.exitCode).toBe(2);

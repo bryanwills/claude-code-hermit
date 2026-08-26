@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.49] - 2026-08-26
 
 ### Added
 - `channels.<name>.settings_policy` (`allow` | `ask` | `deny`, terminal-only) decides how far chat-side settings authority reaches on that channel: `allow` applies every chat-reachable tier on the first message, `ask` keeps the echoed confirmation code for execution-adjacent settings, `deny` keeps everything above the everyday settings terminal-only there. A new channel entry ships `allow`, or `ask` when it already names a `maintainer_channel_id` or allowlists more than one id; an absent or unrecognised value reads as `ask`. Edit it from a terminal with `/claude-code-hermit:hermit-settings channels` → `edit <name>` → `settings_policy`.
