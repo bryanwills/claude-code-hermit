@@ -37,6 +37,9 @@ const shellPath = (dir: string) => hermit(dir, 'sessions', 'SHELL.md');
 const SHELL_TEMPLATE = fs.readFileSync(
   path.join(import.meta.dir, '..', 'state-templates', 'SHELL.md.template'), 'utf-8'
 );
+const REPORT_TEMPLATE = fs.readFileSync(
+  path.join(import.meta.dir, '..', 'state-templates', 'SESSION-REPORT.md.template'), 'utf-8'
+);
 
 interface Tmp { dir: string; cleanup(): void }
 
@@ -529,6 +532,24 @@ describe('recorded factual baseline', () => {
     expect(result.merged_payload_fields).toEqual(['Artifacts']);
   }));
 
+  test('retained SHELL history does not contribute artifacts to a later task', withTmp(async (dir) => {
+    await open(dir, 'Task: current task\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Findings', '- [[compiled/current-finding]]');
+    seedShellSection(dir, 'Monitoring', '- old monitor cited [[compiled/old-monitor]]');
+    seedShellSection(dir, 'Session Summary', '**S-000**: old task cited [[compiled/old-summary]]');
+
+    const result = await archive(
+      dir,
+      'idle',
+      'Status: completed\nBlockers: none\nArtifacts: none\nChanged: none\n',
+      '2026-07-09T13:00:00Z',
+    );
+    const reportPath = path.join(sessionsDir(dir), 'S-001-REPORT.md');
+
+    expect(readFrontmatter(reportPath).artifacts).toEqual(['[[compiled/current-finding]]']);
+    expect(result.merged_payload_fields).toEqual([]);
+  }));
+
   test('a payload artifact already found by the stamped scan is not a contribution', withTmp(async (dir) => {
     await open(dir, 'Task: artifacts\n', '2026-07-09T12:00:00Z');
     fs.mkdirSync(hermit(dir, 'compiled'));
@@ -855,6 +876,12 @@ describe('structural equivalence with the session-mgr.md spec', () => {
     '## Overview', '## Completed', '## Findings', '## Changed', '## Artifacts',
     '## Blockers', '## Lessons', '## Proposals Created',
   ];
+
+  test('shipped report template includes every generated body section', () => {
+    for (const section of [...REQUIRED_SECTIONS, '## Next Start Point']) {
+      expect(REPORT_TEMPLATE).toContain(section);
+    }
+  });
 
   test('close-mode report has every frontmatter key and body section the template defines', withTmp(async (dir) => {
     await open(dir, 'Task: full structural check\n', '2026-07-09T12:00:00Z');

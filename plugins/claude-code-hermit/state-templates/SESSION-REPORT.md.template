@@ -20,6 +20,9 @@ closed_via: operator  # operator | auto
 ## Completed
 <!-- What was accomplished (narrative). Durable outputs must also be listed under ## Artifacts. -->
 
+## Findings
+<!-- Anything unexpected found during work. Proposal-worthy items get their own file. -->
+
 ## Changed
 <!-- Files modified/created/deleted -->
 

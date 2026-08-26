@@ -557,7 +557,10 @@ function recordedArtifacts(
   stateDir: string,
   sessionId: string,
 ): { content: string; contributed: boolean } {
-  const shellLinks = shell.match(/\[\[compiled\/[^\]\r\n]+\]\]/g) || [];
+  const taskScopedShell = ['Task', 'Progress Log', 'Blockers', 'Findings', 'Changed']
+    .map(heading => extractSection(shell, heading))
+    .join('\n');
+  const shellLinks = taskScopedShell.match(/\[\[compiled\/[^\]\r\n]+\]\]/g) || [];
   const stampedLinks = globDir(path.join(stateDir, 'compiled'), /^[^.].*\.md$/)
     .filter(file => readFrontmatter(file)?.session === sessionId)
     .map(file => `[[compiled/${path.basename(file, '.md')}]]`);
