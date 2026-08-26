@@ -18,6 +18,7 @@
 ### Fixed
 - A fresh hatch could end up with the operator's communication-style answer in both `OPERATOR.md` prose and the voice mechanism. `OPERATOR.md` is now drafted from the focus/constraints/approval answers alone, and the template no longer advertises a fourth question.
 - `hermit-doctor`'s `voice-carrier` check reported "using Claude Code defaults" for an install whose style was set at user scope, and warned on every run once a voice file sat alongside a built-in style. It now compares `config.voice` against what is persisted across all three scopes: they disagree only until the next restart, an unset voice is reported rather than warned about, and a leftover voice file is inert, not a finding.
+- The observations-writer allow rule no longer trips Claude Code 2.1.246's "wildcard before the rest of the command" startup warning; `permissions-sync` retires the old entry on upgrade.
 - Reflect's cost-spike detector now measures whole-day totals from the cost index instead of the last 20 cost-log entries, so it can actually fire on an install busy enough to have a cost problem — the fixed-line tail spanned at most one or two dates and could never assemble a baseline. A spike day flags exactly one reflect run, not one per tick.
 - Cost corruption alerts now keep point-in-time spend out of persistent dashboard warnings, and interrupted cost-log tails no longer consume the next valid appended record.
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
