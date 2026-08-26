@@ -18,15 +18,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { currentHHMM } from './lib/time';
+import { currentHHMM, todayYMD } from './lib/time';
 import { observationLine } from './lib/observations';
 import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
 import { appendToProgressLog } from './lib/progress-log';
 import { extractSection, stripPlaceholders } from './lib/md-write';
-import { pinStateDirOrExit, costLogPath as resolveCostLog, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { pinStateDirOrExit, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
+import { costIndexPath, readCostIndex } from './lib/cost-log';
 
 type Json = any;
 
@@ -126,48 +127,38 @@ function daysSince(isoStr: string | null) {
   return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
 }
 
-// Uses the full 20-entry tail for a stable median, but short-circuits if no entries
-// exist after lastRunAt (no recent spend → no spike to detect).
+// Reads whole-day totals from state/cost-index.json (maintained by cost-tracker.ts's
+// Stop hook and subagent-cost.ts's SubagentStop hook) instead of tailing the raw log —
+// a busy install's day is hundreds of entries, so a fixed-line tail spans at most one
+// or two dates and can never assemble a real baseline. The index already keeps today
+// plus 7 complete prior days (BY_DATE_RETENTION_DAYS in lib/cost-log.ts), tz-bucketed
+// the same way `today` is computed here, so the two keys can't disagree across an
+// offset.
 //
 // Returns the two figures rather than a boolean so this script can record the
 // observation itself. It previously computed them, discarded them, and set a phase
 // flag that asked the skill to re-read the same log and redo the same arithmetic —
 // a round trip through prose that, across the live fleet, never once produced a row.
-function checkCostSpike(costLogPath: string, lastRunAt: string | null): { todayTotal: number; median: number; date: string } | null {
+function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: number; median: number; date: string } | null {
   try {
-    const content = fs.readFileSync(costLogPath, 'utf-8').trim();
-    if (!content) return null;
+    const index = readCostIndex(costIndexPath(hermitRoot));
+    if (!index) return null;
 
-    const lines = content.split('\n').slice(-20);
-    const entries = lines
-      .map(l => { try { return JSON.parse(l); } catch { return null; } })
-      .filter(Boolean);
+    const today = todayYMD(timezone);
+    const todayTotal = index.by_date?.[today]?.cost ?? 0;
 
-    const cutoff = lastRunAt ? new Date(lastRunAt) : null;
-    const hasRecentEntries = cutoff
-      ? entries.some(e => e.timestamp && new Date(e.timestamp) > cutoff)
-      : entries.length > 0;
-    if (!hasRecentEntries) return null;
+    const priorDays = Object.entries(index.by_date ?? {})
+      .filter(([date]) => date !== today)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .slice(-7)
+      .map(([, bucket]) => (bucket as { cost: number }).cost);
+    if (priorDays.length < 3) return null;
 
-    const byDate: Record<string, number> = {};
-    for (const e of entries) {
-      const date = (e.timestamp || '').slice(0, 10);
-      if (!date) continue;
-      byDate[date] = (byDate[date] || 0) + (e.estimated_cost_usd || 0);
-    }
-
-    const values = Object.values(byDate);
-    if (values.length < 2) return null;
-
-    const sorted = [...values].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    const today = new Date().toISOString().slice(0, 10);
-    const todayTotal = byDate[today] || 0;
+    const sorted = [...priorDays].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 
     if (!(median > 0 && todayTotal > 0 && todayTotal > 2 * median)) return null;
-    // `today` is the same UTC key the cost buckets above are grouped by — the row's
-    // dedup label must name the bucket the spike was measured in, not a locally
-    // formatted date that could disagree with it either side of midnight.
     return { todayTotal, median, date: today };
   } catch {
     return null;
@@ -255,11 +246,11 @@ if (hasAcceptedProposals(stateDir) && daysSince(lastResolutionCheck) > 7) {
   phases.resolution_check = true;
 }
 
-// Anchor cost-log resolution: a relative stateDir (real invocation passes
+// Anchor cost-index resolution: a relative stateDir (real invocation passes
 // `.claude-code-hermit`) would otherwise resolve against a drifted cwd and
 // silently suppress the cost-spike phase. Absolute (as tests pass) is verbatim.
-const costLogPath = resolveCostLog(path.isAbsolute(stateDir) ? stateDir : resolveHermitRoot());
-const costSpike = checkCostSpike(costLogPath, lastRunAt);
+const costHermitRoot = path.isAbsolute(stateDir) ? stateDir : resolveHermitRoot();
+const costSpike = checkCostSpike(costHermitRoot, timezone);
 // The phase still flags the spike for the skill's narrative step; the row itself is
 // written below, from these figures, rather than re-derived from prose.
 if (costSpike) phases.cost_spike = true;

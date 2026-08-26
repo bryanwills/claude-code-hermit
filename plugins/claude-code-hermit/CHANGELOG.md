@@ -12,6 +12,7 @@
 - Four sigil-anchored entries replace them: `Bash(*$ANTHROPIC_API_KEY*)` and `Bash(*$CLAUDE_CODE_OAUTH_TOKEN*)`, each in bare and `${…}` spelling. An expansion of a live credential (`echo $ANTHROPIC_API_KEY` while debugging auth) blocks; every bare mention of the name — a grep, a commit message, writing the placeholder into `.env` — stays allowed. The hook enforces them from the shipped template, so nothing needs adding to your settings file.
 
 ### Fixed
+- Reflect's cost-spike detector now measures whole-day totals from the cost index instead of the last 20 cost-log entries, so it can actually fire on an install busy enough to have a cost problem — the fixed-line tail spanned at most one or two dates and could never assemble a baseline.
 - Cost corruption alerts now keep point-in-time spend out of persistent dashboard warnings, and interrupted cost-log tails no longer consume the next valid appended record.
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
 - Session archive now uses one recorded factual baseline for every archive mode: Task, Findings, Blockers, and current-session compiled Artifacts survive unattended close; close payloads can add missing Blockers and compiled links or mark recorded blockers resolved without deleting their text; and a duration with no provably owned runtime window is reported as unknown instead of zero.
