@@ -37,6 +37,7 @@ const VALID_IDLE_BEHAVIOR = ENUM.IDLE_BEHAVIOR;
 const VALID_OPERATOR_PROFILE = ENUM.OPERATOR_PROFILE;
 const VALID_SETTINGS_POLICY: readonly string[] = ENUM.SETTINGS_POLICY;
 const VALID_BUDGET_ACTION = ENUM.BUDGET_ACTION;
+const VALID_VOICE_STYLE: readonly string[] = ENUM.VOICE_STYLE;
 const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
 const TIME_RE = /^\d{2}:\d{2}$/;
 // Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with lib/routines/due.ts.
@@ -156,6 +157,28 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
   if (config.quality_gate && typeof config.quality_gate === 'object' && config.quality_gate.tier !== undefined) {
     if (!VALID_QUALITY_GATE_TIER.includes(config.quality_gate.tier)) {
       errors.push(`quality_gate.tier: "${config.quality_gate.tier}" not in [${VALID_QUALITY_GATE_TIER.join(', ')}]`);
+    }
+  }
+
+  // `voice.style` decides what apply-settings' voice-render op writes; `custom`
+  // additionally names voice.prose as the body it renders. A `custom` with no prose
+  // is refused here rather than at render time: the render runs unattended at every
+  // boot, where an exit 1 is a warning line nobody reads.
+  if (config.voice !== undefined && config.voice !== null) {
+    if (typeof config.voice !== 'object' || Array.isArray(config.voice)) {
+      errors.push(`voice: expected object, got ${Array.isArray(config.voice) ? 'array' : typeof config.voice}`);
+    } else {
+      const style = config.voice.style;
+      if (style !== undefined && style !== null && !VALID_VOICE_STYLE.includes(style)) {
+        errors.push(`voice.style: "${style}" not in [${VALID_VOICE_STYLE.join(', ')}]`);
+      }
+      const prose = config.voice.prose;
+      if (prose !== undefined && prose !== null && typeof prose !== 'string') {
+        errors.push(`voice.prose: expected string, got ${typeof prose}`);
+      }
+      if (style === 'custom' && (typeof prose !== 'string' || prose.trim() === '')) {
+        errors.push('voice.style: "custom" needs voice.prose — set the prose first, then the style');
+      }
     }
   }
 

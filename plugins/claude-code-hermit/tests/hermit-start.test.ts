@@ -32,6 +32,7 @@ import {
   iterChannelConfigs,
   writeSettingsEnv,
   applyArtifactGrant,
+  applyVoiceRender,
   renderClassifierOverlay,
   applyAlwaysOnDoctorSchedule,
   clearShutdownStampsOnBoot,
@@ -43,7 +44,7 @@ import {
   checkForUpgrade,
 } from '../scripts/hermit-start';
 import { readRuntimeState } from '../scripts/lib/runtime';
-import { automodeAllowEntry, SEALED_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
+import { automodeAllowEntry, SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
 import { TOKEN_ENV_VAR } from '../scripts/lib/setup-token';
 
 // The top-level beforeEach/afterEach below process.chdir()s into a fresh
@@ -68,6 +69,7 @@ let origCwd = '';
 let origProfile: string | undefined;
 let origContainer: string | undefined;
 let origPath: string | undefined;
+let origConfigDir: string | undefined;
 // writeSettingsEnv hydrates <CHANNEL>_STATE_DIR into process.env, so any test
 // that configures a channel state_dir leaks it into the next one without this.
 // Swept generically: the hydration is per-channel, not a fixed set of names.
@@ -78,6 +80,7 @@ beforeEach(() => {
   origProfile = process.env.AGENT_HOOK_PROFILE;
   origContainer = process.env.container;
   origPath = process.env.PATH;
+  origConfigDir = process.env.CLAUDE_CONFIG_DIR;
   origStateDirs = Object.fromEntries(
     Object.keys(process.env)
       .filter((k) => k.endsWith('_STATE_DIR'))
@@ -87,6 +90,10 @@ beforeEach(() => {
   process.chdir(tmpdir);
   fs.mkdirSync('.claude-code-hermit/state', { recursive: true });
   fs.mkdirSync('.claude', { recursive: true });
+  // Point CLAUDE_CONFIG_DIR at a directory that doesn't exist, so the host
+  // machine's own user scope never reaches a test. Boot repair ignores user
+  // scope by design; the test that asserts that writes into this dir itself.
+  process.env.CLAUDE_CONFIG_DIR = path.join(tmpdir, '.claude-user-config');
 });
 
 afterEach(() => {
@@ -99,6 +106,7 @@ afterEach(() => {
   restore('AGENT_HOOK_PROFILE', origProfile);
   restore('container', origContainer);
   restore('PATH', origPath);
+  restore('CLAUDE_CONFIG_DIR', origConfigDir);
   const stateDirKeys = new Set([
     ...Object.keys(process.env).filter((k) => k.endsWith('_STATE_DIR')),
     ...Object.keys(origStateDirs),
@@ -1076,54 +1084,60 @@ describe('writeSettingsEnv', () => {
 });
 
 // ============================================================
-// Voice carrier: outputStyle repair + language mirror
+// Voice carrier: config.voice render + language mirror
 // ============================================================
 
-describe('writeSettingsEnv voice carrier', () => {
+// The render itself is covered in apply-settings-voice-render.test.ts; these
+// assert the boot wiring — that config.json reaches the settings file at every
+// start, and that an install with no voice configured is left byte-identical.
+describe('applyVoiceRender', () => {
   const voiceFile = '.claude/output-styles/hermit-voice.md';
-  const seedVoiceFile = () => {
-    fs.mkdirSync('.claude/output-styles', { recursive: true });
-    fs.writeFileSync(voiceFile, '---\nname: hermit-voice\n---\n');
-  };
 
-  test('seeds outputStyle when the voice file exists and nothing owns the key', () => {
-    seedVoiceFile();
+  test('renders a configured built-in into the settings key', () => {
     writeSettings({});
-    writeConfig({});
-    captureLog(() => writeSettingsEnv(loadConfig()));
-    expect(readSettings().outputStyle).toBe('hermit-voice');
-  });
-
-  // The evolve path is opt-in: an install that never adopted the voice file must
-  // come back byte-for-byte unchanged, or "upgrade changes nothing until you ask"
-  // stops being true.
-  test('writes no outputStyle when the voice file is absent', () => {
-    writeSettings({});
-    writeConfig({});
-    captureLog(() => writeSettingsEnv(loadConfig()));
-    expect(readSettings()).not.toContainKey('outputStyle');
-  });
-
-  test("an operator's own /config style is never reclaimed", () => {
-    seedVoiceFile();
-    writeSettings({ outputStyle: 'Concise' });
-    writeConfig({});
-    captureLog(() => writeSettingsEnv(loadConfig()));
+    writeConfig({ voice: { style: 'Concise', prose: null } });
+    captureLog(() => applyVoiceRender(loadConfig()));
     expect(readSettings().outputStyle).toBe('Concise');
   });
 
-  // hatch stamps the key into whichever scope it resolved. When that is the
-  // committed settings.json, seeding a local-scope duplicate here would outrank
-  // it forever — and permanently shadow any later /config change made there.
-  test('a key already set in project scope is not duplicated into local scope', () => {
-    seedVoiceFile();
-    fs.writeFileSync('.claude/settings.json', JSON.stringify({ outputStyle: 'hermit-voice' }));
+  test('renders a custom voice into both the key and the style file', () => {
     writeSettings({});
-    writeConfig({});
-    captureLog(() => writeSettingsEnv(loadConfig()));
-    expect(readSettings()).not.toContainKey('outputStyle');
+    writeConfig({ voice: { style: 'custom', prose: 'Lead with the answer.' } });
+    captureLog(() => applyVoiceRender(loadConfig()));
+    expect(readSettings().outputStyle).toBe('hermit-voice');
+    expect(fs.readFileSync(voiceFile, 'utf8')).toContain('Lead with the answer.');
   });
 
+  // "Upgrade changes nothing until you ask" — an install that never answered the
+  // voice question must come back byte-for-byte unchanged, /config pick included.
+  test("no voice configured leaves the operator's own style untouched", () => {
+    writeSettings({ outputStyle: 'Explanatory' });
+    writeConfig({});
+    const before = fs.readFileSync('.claude/settings.local.json', 'utf8');
+    captureLog(() => applyVoiceRender(loadConfig()));
+    expect(fs.readFileSync('.claude/settings.local.json', 'utf8')).toBe(before);
+  });
+
+  // config.json is the truth: a chat operator who changed their voice gets it
+  // applied at the next restart with nothing else to run.
+  test('a configured style supersedes a different persisted one at every boot', () => {
+    writeSettings({ outputStyle: 'Explanatory' });
+    writeConfig({ voice: { style: 'Concise', prose: null } });
+    captureLog(() => applyVoiceRender(loadConfig()));
+    expect(readSettings().outputStyle).toBe('Concise');
+  });
+
+  // Fail-open: a bad render must never take the boot down with it.
+  test('a broken voice block warns and lets boot continue', () => {
+    writeSettings({});
+    writeConfig({ voice: { style: 'custom', prose: '' } });
+    const { out } = captureLog(() => applyVoiceRender(loadConfig()));
+    expect(out).toContain('WARNING');
+    expect(readSettings()).not.toContainKey('outputStyle');
+  });
+});
+
+describe('writeSettingsEnv language mirror', () => {
   test('language mirrors config.json into the native key', () => {
     writeSettings({});
     writeConfig({ language: 'pt-PT' });
@@ -1267,6 +1281,10 @@ describe('renderClassifierOverlay', () => {
     expect(entry).not.toContain('*/scripts/');
 
     for (const op of SEALED_SETTINGS_OPS) expect(entry).toContain(op);
+    // voice-render is a real op deliberately outside this grant: the decision it
+    // applies was already tiered when it was written to config, and boot reaches
+    // it as a plain OS process, outside the classifier entirely.
+    for (const op of TERMINAL_ONLY_SETTINGS_OPS) expect(entry).not.toContain(op);
     expect(entry).toContain('VOID IF');
     expect(entry).toContain('NOT COVERED');
     expect(entry).toContain('.claude-code-hermit/config.json');

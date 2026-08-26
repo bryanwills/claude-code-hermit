@@ -6,6 +6,10 @@
   "escalation": "balanced",
   "operator_profile": "technical",
   "sign_off": null,
+  "voice": {
+    "style": null,
+    "prose": null
+  },
   "channels": {},
   "remote": true,
   "model": "sonnet",

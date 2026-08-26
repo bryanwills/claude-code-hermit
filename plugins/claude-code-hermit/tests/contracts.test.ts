@@ -3287,25 +3287,74 @@ describe('voice carrier contract', () => {
     expect(text).not.toContain('PROP-NNN');
   });
 
-  test('OPERATOR.md template points tone at the voice file instead of owning it', () => {
+  test('OPERATOR.md template points tone at Claude Code output styles instead of owning it, and does not overclaim its own question count', () => {
     const operator = read(path.join(TEMPLATES, 'OPERATOR.md'));
     expect(operator).toContain('.claude/output-styles/hermit-voice.md');
     expect(operator).not.toContain('Comms style:');
+    expect(operator).toContain('three questions');
+    expect(operator).not.toContain('four questions');
   });
 
-  // The file feeds the next session's system prompt, so a remote message must
-  // not be able to rewrite it — the same reasoning that keeps OPERATOR.md and
-  // the settings files off the channel path.
-  test('hermit-settings keeps the voice operation terminal-only', () => {
+  // Operators run these hermits from a chat, so the voice is reachable there —
+  // but split by what the value carries: three sealed style names are everyday
+  // settings, while free prose feeds the next session's system prompt and stays
+  // in the class the confirmation code exists for.
+  test('hermit-settings tiers the voice rather than holding all of it at the terminal', () => {
     const settings = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
     expect(settings).toContain('**If argument is "voice":**');
-    expect(settings).toContain('Terminal-only.');
+    expect(settings).toContain('Tiered, not terminal-only.');
+    // The nonce bullet must name the prose leaf, not the whole setting.
+    expect(settings).toContain('`voice.prose` (free text');
   });
 
-  test('hatch routes the comms-style answer to the voice file, not OPERATOR.md', () => {
+  test('hatch asks the comms question in the batch but keeps the answer out of OPERATOR.md', () => {
     const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
-    expect(hatch).toContain('hermit-voice.md.template');
-    expect(hatch).toContain('apply-settings.ts <resolved-settings-file> output-style');
+    // The question rides the batch the operator is already answering — a separate
+    // dialog for it was a third blocking prompt at the end of hatch.
+    const call1 = hatch.slice(hatch.indexOf('Call 1 — always sent'), hatch.indexOf('Call 2 —'));
+    expect(call1).toMatch(/comms style|communicate/i);
+
+    // What keeps the answer out of the file is now a stated constraint on the
+    // draft, not the ordering of the question.
+    const draft = hatch.slice(hatch.indexOf('#### Phase 4 — Write final OPERATOR.md'), hatch.indexOf('#### Phase 4b — Style'));
+    expect(draft).toContain('Draft from Q1–Q3');
+    expect(draft).toContain('must not reach this file');
+
+    // Phase 4b still runs after the file is written — it applies an answer, so
+    // there is nothing left to leak into a draft that is already on disk.
+    const operatorWriteIdx = hatch.indexOf('Write the final version to `.claude-code-hermit/OPERATOR.md`.');
+    const styleStepIdx = hatch.indexOf('#### Phase 4b — Style');
+    expect(operatorWriteIdx).toBeGreaterThan(-1);
+    expect(styleStepIdx).toBeGreaterThan(operatorWriteIdx);
+  });
+
+  test('hatch offers the two rendered built-ins and falls back to the operator\'s own words', () => {
+    const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
+    expect(hatch).toContain('Default / Concise');
+    // The other Claude Code built-ins are coding-tool styles; a hermit renders
+    // only these two, and anything else is the operator's own /config choice.
+    expect(hatch).not.toContain('style = Explanatory');
+    expect(hatch).toContain('apply-known voice default');
+    expect(hatch).toContain('apply-known voice Concise');
+    // Free text goes to config, prose before style — the reverse order is invalid.
+    const proseIdx = hatch.indexOf('set voice.prose');
+    const styleIdx = hatch.indexOf('apply-known voice custom');
+    expect(proseIdx).toBeGreaterThan(-1);
+    expect(styleIdx).toBeGreaterThan(proseIdx);
+  });
+
+  // One renderer owns config.voice -> outputStyle + the style file. hatch and
+  // hermit-settings both write the config through settings-edit and then call it;
+  // boot calls the same op. A second writer is how the key and the file drifted.
+  test('hatch and hermit-settings both render through the one voice-render op', () => {
+    const hatch = read(path.join(SKILLS, 'hatch', 'SKILL.md'));
+    const settings = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
+    for (const text of [hatch, settings]) {
+      expect(text).toContain('apply-settings.ts .claude/settings.local.json voice-render');
+    }
+    // Local scope is not incidental: it is where /config writes, and a custom
+    // voice file is gitignored, so a committed pointer would name a missing file.
+    expect(hatch).not.toContain('<resolved-settings-file> voice-render');
   });
 
   // The voice file is operator-curated and gitignored — which is exactly the

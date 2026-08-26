@@ -27,7 +27,7 @@ import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
-import { HERMIT_OUTPUT_STYLE, voiceFileExists, resolveEffectiveStyle } from './lib/voice';
+import { outputStyleFor } from './lib/voice';
 import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
 import { writeFileAtomic } from './lib/md-write';
 
@@ -132,6 +132,7 @@ const DEFAULT_CONFIG: Json = {
   escalation: 'balanced',
   operator_profile: 'technical',
   sign_off: null,
+  voice: { style: null, prose: null },
   channels: {},
   remote: true,
   model: 'sonnet',
@@ -911,19 +912,10 @@ function writeSettingsEnv(
     delete settings.sandbox;
   }
 
-  // Voice carrier. Seed the style key only when the hermit's voice file is
-  // actually present (an install that never adopted it stays untouched) and
-  // only when nothing owns the key — a style the operator chose in /config is
-  // their decision, and hermit-doctor reports the mismatch rather than boot
-  // silently reclaiming it every restart. The absence test is the EFFECTIVE
-  // style across both scopes, not just this file's key: hatch may have stamped
-  // the key into committed settings.json, and seeding a duplicate here would
-  // put a local-scope copy in front of it that outranks — and permanently
-  // shadows — any later /config change made at project scope.
-  if (!skipWrite && voiceFileExists() && resolveEffectiveStyle().value === null) {
-    settings.outputStyle = HERMIT_OUTPUT_STYLE;
-    console.log(`[hermit] Voice: outputStyle set to ${HERMIT_OUTPUT_STYLE} in ${settingsPath}`);
-  }
+  // The voice carrier is NOT written here — applyVoiceRender() below runs the
+  // same `apply-settings.ts voice-render` op hatch and hermit-settings run, so
+  // one renderer owns config.voice → outputStyle and the style file. Keeping a
+  // second in-process writer here is how the key and the file drifted apart.
 
   // Language mirror. config.json stays authoritative — it is what the
   // deterministic senders (watchdog, cost alerts, deny notices) localize from,
@@ -974,6 +966,38 @@ function applyArtifactGrant(config: Json): void {
     return;
   }
   console.log('[hermit] Artifact publish grant ensured (permissions.allow in .claude/settings.local.json)');
+}
+
+/**
+ * Render config.voice into the settings key and (for a custom voice) the style
+ * file, every boot.
+ *
+ * config.json is the truth and this is its render, the same relationship
+ * config.env has with the settings env block — so an operator who changed their
+ * voice from a chat gets it applied at the next restart with nothing else to run.
+ * The op no-ops when `voice.style` is unset, which is what leaves an operator's
+ * own /config pick alone on an install that never answered the voice question.
+ *
+ * Runs as a plain OS process before the session exists, so it is outside the
+ * auto-mode classifier entirely — the same property applyArtifactGrant relies on.
+ */
+function applyVoiceRender(config: Json): void {
+  // Gate in-process, like applyArtifactGrant does: an unset voice.style is a
+  // no-op in the op anyway, and most installs never answer the voice question —
+  // no reason to pay a bun startup and a second config read to learn that on
+  // every boot. The gate asks the shared resolver, so there is still exactly one
+  // place that decides what a voice block means.
+  if (outputStyleFor(config.voice) === null) return;
+  const script = path.join(PLUGIN_ROOT, 'scripts', 'apply-settings.ts');
+  const r = spawnSync('bun', [script, '.claude/settings.local.json', 'voice-render'], { stdio: 'pipe', encoding: 'utf-8' });
+  if (r.status !== 0) {
+    console.log(`[hermit] WARNING: voice render failed: ${(r.stderr || '').trim()} — continuing boot.`);
+    return;
+  }
+  const out = (r.stdout || '').trim();
+  if (out.startsWith('applied:')) {
+    console.log(`[hermit] Voice: outputStyle set to ${out.slice('applied:'.length)} in .claude/settings.local.json`);
+  }
 }
 
 /**
@@ -1259,6 +1283,9 @@ async function main(): Promise<void> {
   // that silently resolved a weaker profile than the operator expected is
   // otherwise invisible until something gets through that should not have.
   console.log(`[hermit] Hook profile: ${hookProfile.profile} (${hookProfile.source})`);
+  // After writeSettingsEnv — both write .claude/settings.local.json, and the
+  // render must land on the file that call already rewrote, not be overwritten by it.
+  applyVoiceRender(config);
   applyArtifactGrant(config);
 
   if (noTmuxFlag || !pyTruthy(tools.tmux)) {
@@ -1488,6 +1515,7 @@ export {
   buildClaudeCommand,
   renderClassifierOverlay,
   writeSettingsEnv,
+  applyVoiceRender,
   applyArtifactGrant,
   shlexQuote,
   shlexJoin,
