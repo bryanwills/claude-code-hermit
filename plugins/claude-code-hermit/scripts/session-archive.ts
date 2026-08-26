@@ -80,7 +80,10 @@ function zonedISOStamp(timezone: string, ref: Date): string {
 }
 
 function formatDuration(ms: number): string {
-  const totalMin = Math.max(0, Math.round(ms / 60000));
+  if (ms < 0) return 'unknown';
+  if (ms === 0) return '0m';
+  if (ms < 60000) return '<1m';
+  const totalMin = Math.round(ms / 60000);
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -481,12 +484,95 @@ function firstRecordedTask(shell: string): string {
   return '';
 }
 
-function recordedArtifacts(shell: string, stateDir: string, sessionId: string): string {
-  const links = shell.match(/\[\[compiled\/[^\]\r\n]+\]\]/g) || [];
-  const stamped = globDir(path.join(stateDir, 'compiled'), /^[^.].*\.md$/)
+type MergedPayloadField = 'Blockers' | 'Artifacts';
+
+function blockerText(line: string): string {
+  return line.trim().replace(/^-\s+/, '').trim();
+}
+
+function mergeRecordedBlockers(
+  recorded: string,
+  payload: string,
+  recoveryBlockers: string | undefined,
+  statusNote: string | null,
+): { content: string; contributed: boolean } {
+  const recordedLines = recorded.split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  const recordedText = recordedLines.map(blockerText);
+  const seen = new Set(recordedText.map(line => line.toLowerCase()));
+  const resolved = new Set<number>();
+  const additions: string[] = [];
+  let contributed = false;
+
+  for (const rawLine of payload.split('\n')) {
+    const line = rawLine.trim();
+    if (!line || /^none$/i.test(line)) continue;
+
+    if (line.startsWith('~')) {
+      const resolution = blockerText(line.slice(1));
+      if (!resolution || /^none$/i.test(resolution)) continue;
+      const prefix = resolution.toLowerCase();
+      const match = recordedText.findIndex(candidate => candidate.toLowerCase().startsWith(prefix));
+      if (match !== -1) {
+        if (!resolved.has(match)) {
+          resolved.add(match);
+          contributed = true;
+        }
+        continue;
+      }
+
+      const key = resolution.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      additions.push(resolution);
+      contributed = true;
+      continue;
+    }
+
+    const key = blockerText(line).toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    additions.push(line);
+    contributed = true;
+  }
+
+  const shellLines = recordedLines.map((line, index) => (
+    resolved.has(index) ? `- [resolved] ${recordedText[index]}` : line
+  ));
+  return {
+    content: [
+      ...shellLines,
+      ...additions,
+      recoveryBlockers,
+      statusNote,
+    ].filter(Boolean).join('\n'),
+    contributed,
+  };
+}
+
+function recordedArtifacts(
+  shell: string,
+  payload: string,
+  stateDir: string,
+  sessionId: string,
+): { content: string; contributed: boolean } {
+  const shellLinks = shell.match(/\[\[compiled\/[^\]\r\n]+\]\]/g) || [];
+  const stampedLinks = globDir(path.join(stateDir, 'compiled'), /^[^.].*\.md$/)
     .filter(file => readFrontmatter(file)?.session === sessionId)
     .map(file => `[[compiled/${path.basename(file, '.md')}]]`);
-  return Array.from(new Set([...links, ...stamped])).map(link => `- ${link}`).join('\n');
+  const recorded = new Set([...shellLinks, ...stampedLinks]);
+  const payloadOnly: string[] = [];
+  for (const link of payload.match(/\[\[compiled\/[^\]\r\n]+\]\]/g) || []) {
+    if (recorded.has(link)) continue;
+    recorded.add(link);
+    payloadOnly.push(link);
+  }
+  const links = Array.from(new Set([...shellLinks, ...payloadOnly, ...stampedLinks]));
+  return {
+    content: links.map(link => `- ${link}`).join('\n'),
+    contributed: payloadOnly.length > 0,
+  };
 }
 
 function resolveDuration(
@@ -496,25 +582,25 @@ function resolveDuration(
   closedAt: string | undefined,
   now: Date,
 ): string {
-  if (runtimeSessionId !== sessionId || !openedAt) return '0m';
+  if (runtimeSessionId !== sessionId || !openedAt) return 'unknown';
   const start = Date.parse(openedAt);
-  if (!Number.isFinite(start)) return '0m';
+  if (!Number.isFinite(start)) return 'unknown';
   const parsedEnd = closedAt ? Date.parse(closedAt) : NaN;
-  const end = Number.isFinite(parsedEnd) && parsedEnd > start ? parsedEnd : now.getTime();
+  const end = Number.isFinite(parsedEnd) ? parsedEnd : now.getTime();
   return formatDuration(end - start);
 }
 
 function buildReport(opts: {
   sessionId: string; mode: 'idle' | 'close' | 'auto'; now: Date;
   payload: Record<string, string> & { plan?: string }; shell: string; stateDir: string; config: Json;
-  runtimeSessionId?: string; openedAt?: string; closedAt?: string; recoveryBlockers?: string;
-}): { content: string; statusNote: string | null; cost: { cost_usd: number; tokens: number } } {
-  const { sessionId, mode, now, payload, shell, stateDir, config, runtimeSessionId, openedAt, closedAt, recoveryBlockers } = opts;
+  runtimeSessionId?: string; openedAt?: string; durationClosedAt?: string; costClosedAt?: string; recoveryBlockers?: string;
+}): { content: string; statusNote: string | null; cost: { cost_usd: number; tokens: number }; mergedPayloadFields: MergedPayloadField[] } {
+  const { sessionId, mode, now, payload, shell, stateDir, config, runtimeSessionId, openedAt, durationClosedAt, costClosedAt, recoveryBlockers } = opts;
   const sessionsDir = path.join(stateDir, 'sessions');
   const timezone = resolveTimezone(config);
   const { status, note: statusNote } = normalizeStatus(payload['Status'] || '');
-  const duration = resolveDuration(sessionId, runtimeSessionId, openedAt, closedAt, now);
-  const cost = resolveCost(payload, { logPath: costLogPath(stateDir), openedAt, closedAt: closedAt ?? localISOStamp(now) });
+  const duration = resolveDuration(sessionId, runtimeSessionId, openedAt, durationClosedAt, now);
+  const cost = resolveCost(payload, { logPath: costLogPath(stateDir), openedAt, closedAt: costClosedAt ?? localISOStamp(now) });
   const { cost_usd, tokens } = cost;
   const tags = extractTags(shell);
   const proposalsCreated = extractProposalIds(shell);
@@ -523,15 +609,21 @@ function buildReport(opts: {
   const operatorTurns = resolveOperatorTurns(sessionsDir);
   const closedVia = payload['Closed Via'] || (mode === 'auto' ? 'auto' : 'operator');
 
-  const blockers = [
+  const blockersMerge = mergeRecordedBlockers(
     stripPlaceholders(extractSection(shell, 'Blockers')),
+    payload['Blockers'] || '',
     recoveryBlockers,
     statusNote,
-  ].filter(Boolean).join('\n');
+  );
+  const blockers = blockersMerge.content;
   const changed = mergeSessionDiff(payload['Changed'] || '', stateDir);
-  const artifacts = recordedArtifacts(shell, stateDir, sessionId);
+  const artifactsMerge = recordedArtifacts(shell, payload['Artifacts'] || '', stateDir, sessionId);
+  const artifacts = artifactsMerge.content;
   const findings = stripPlaceholders(extractSection(shell, 'Findings'));
   const lessons = payload['Lessons'] || '';
+  const mergedPayloadFields: MergedPayloadField[] = [];
+  if (blockersMerge.contributed) mergedPayloadFields.push('Blockers');
+  if (artifactsMerge.contributed) mergedPayloadFields.push('Artifacts');
   // Idle-mode payloads may still carry a stale 'Next Start Point:' line (it isn't
   // part of the idle contract, same as the omitted body section below) — force it
   // empty so frontmatter and body agree.
@@ -574,7 +666,7 @@ function buildReport(opts: {
     sections.push(`## Next Start Point\n${nextStart || '<!-- Exactly what the next session should do first -->'}`);
   }
 
-  return { content: fm + '\n\n' + sections.join('\n\n') + '\n', statusNote, cost };
+  return { content: fm + '\n\n' + sections.join('\n\n') + '\n', statusNote, cost, mergedPayloadFields };
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +795,11 @@ function applyPostArchiveMarkers(stateDir: string, mode: 'idle' | 'close' | 'aut
 // Verb: archive
 // ---------------------------------------------------------------------------
 
-function verbArchive(flags: Record<string, string | true>, stdin: string, opts: { skipMarkerWrites?: boolean; recoveryBlockers?: string } = {}): Json {
+function verbArchive(
+  flags: Record<string, string | true>,
+  stdin: string,
+  opts: { skipMarkerWrites?: boolean; recoveryBlockers?: string; includeMergedPayloadFields?: boolean } = {},
+): Json {
   const mode = flags['mode'];
   if (mode !== 'idle' && mode !== 'close' && mode !== 'auto') {
     return { ok: false, reason: `archive requires --mode=idle|close|auto, got: ${mode ?? '(none)'}` };
@@ -735,14 +831,14 @@ function verbArchive(flags: Record<string, string | true>, stdin: string, opts: 
   const config = readConfig(stateDir);
   const runtimeSessionId = typeof runtimeBefore.session_id === 'string' ? runtimeBefore.session_id : undefined;
   const openedAt = typeof runtimeBefore.opened_at === 'string' ? runtimeBefore.opened_at : undefined;
-  // A closed_at at or before opened_at is a stale bound left by an earlier arc. Passing
-  // it through would measure an inverted window, which sums to a silent zero — drop it
-  // so the window ends at `now` instead (buildReport's `closedAt ?? localISOStamp(now)`).
+  // Cost aggregation keeps its prior positive-window requirement. Preserve a raw zero or
+  // inverted bound for honest duration reporting, but let cost resolution end at `now`.
   const rawClosedAt = typeof runtimeBefore.closed_at === 'string' ? runtimeBefore.closed_at : undefined;
-  const closedAt = rawClosedAt && Date.parse(rawClosedAt) > Date.parse(openedAt ?? '') ? rawClosedAt : undefined;
-  const { content: reportContent, cost: reportCost } = buildReport({
+  const costClosedAt = rawClosedAt && Date.parse(rawClosedAt) > Date.parse(openedAt ?? '') ? rawClosedAt : undefined;
+  const { content: reportContent, cost: reportCost, mergedPayloadFields } = buildReport({
     sessionId, mode, now, payload, shell, stateDir, config,
-    runtimeSessionId, openedAt, closedAt, recoveryBlockers: opts.recoveryBlockers,
+    runtimeSessionId, openedAt, durationClosedAt: rawClosedAt, costClosedAt,
+    recoveryBlockers: opts.recoveryBlockers,
   });
 
   const reportPath = path.join(sessionsDir, `${sessionId}-REPORT.md`);
@@ -774,7 +870,9 @@ function verbArchive(flags: Record<string, string | true>, stdin: string, opts: 
   if (!clearTransition.ok) return { ok: false, reason: clearTransition.reason };
 
   const markers = applyPostArchiveMarkers(stateDir, mode, now, !!opts.skipMarkerWrites);
-  return { ok: true, archived: true, session_id: sessionId, report_path: reportPath, mode, markers };
+  const result: Json = { ok: true, archived: true, session_id: sessionId, report_path: reportPath, mode, markers };
+  if (opts.includeMergedPayloadFields !== false) result.merged_payload_fields = mergedPayloadFields;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -868,7 +966,7 @@ function verbRecover(flags: Record<string, string | true>): Json {
     const result = verbArchive(
       { mode, 'state-dir': stateDir },
       syntheticPayload,
-      { skipMarkerWrites: true, recoveryBlockers: blockers },
+      { skipMarkerWrites: true, recoveryBlockers: blockers, includeMergedPayloadFields: false },
     );
     if (!result.ok) {
       // Re-archive couldn't complete (e.g. SHELL.md itself is gone, so buildReport

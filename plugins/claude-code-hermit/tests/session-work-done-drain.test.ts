@@ -26,11 +26,15 @@ describe('session work-done NEXT-TASK drain', () => {
     expect(skill).toContain('escalation');
   });
 
-  test('idle finalization records blockers in SHELL rather than the archive payload', () => {
-    expect(skill).toContain('Ensure SHELL.md `## Blockers` reflects the final recorded state');
+  test('idle finalization keeps SHELL as the factual floor and allows additive payload facts', () => {
+    expect(skill).toContain('It remains the factual floor');
+    expect(skill).toContain('cannot erase recorded text');
+    expect(skill).toContain('Use `~ <prefix>`');
     const payload = skill.match(/archive --mode=idle[^\n]*<<'HERMIT_PAYLOAD'\n([\s\S]*?)\n\s*HERMIT_PAYLOAD/)?.[1] ?? '';
     expect(payload).toContain('Status: <completed|partial|blocked>');
-    expect(payload).not.toContain('Blockers:');
+    expect(payload).toContain('Blockers: <optional additions, ~ <prefix> resolutions, or none>');
+    expect(payload).toContain('Artifacts: <optional [[compiled/...]] additions, or none>');
+    expect(skill).toContain('merged_payload_fields');
   });
 
   test('balanced/autonomous auto-starts the queued task as the terminal action', () => {
