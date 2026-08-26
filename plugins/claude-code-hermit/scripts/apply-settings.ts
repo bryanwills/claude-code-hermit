@@ -16,10 +16,16 @@
  *   artifact-allow           Merge just ["Artifact"] into permissions.allow — kept as its
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
- *   output-style             Set outputStyle to the sealed "hermit-voice" value, but only when
- *                            the key is absent. An operator's own /config choice is preserved
- *                            untouched (file left byte-identical); prints "applied" or
- *                            "kept:<value>" so callers can report the mismatch.
+ *   voice-render             Render config.json's `voice` block into what Claude Code
+ *                            reads: the `outputStyle` key here, plus (style "custom")
+ *                            .claude/output-styles/hermit-voice.md from voice.prose,
+ *                            verbatim. Target must be settings.local.json. Prints
+ *                            "applied:<style>", or "skipped:unset" and writes nothing
+ *                            when voice.style is unset — which is how an operator's own
+ *                            /config pick stays theirs. Takes no arguments: the operator's
+ *                            answer travels in config.json, written and audited by
+ *                            settings-edit, never as caller text. Deliberately NOT in
+ *                            SEALED_SETTINGS_OPS.
  *   automode-seed            RETIRED — exits 1. The classifier stopped reading autoMode from any
  *                            project settings file in Claude Code 2.1.207, so this verb's writes
  *                            were silently ignored. The sealed entries now ship in the per-session
@@ -30,8 +36,9 @@
  * Rules:
  * - Never removes existing keys or array entries — except channel-env, which strips
  *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings),
- *   and permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
- *   registry below (scripts this plugin itself shipped and has since deleted).
+ *   permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
+ *   registry below (scripts this plugin itself shipped and has since deleted), and
+ *   voice-render, which replaces outputStyle by design — config.json owns that key.
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
  */
@@ -39,9 +46,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
+import { readSettledConfig } from './lib/config-read';
 import { channelStateDirKey } from './lib/channel-config';
-import { HERMIT_OUTPUT_STYLE } from './lib/voice';
-import { SEALED_SETTINGS_OPS } from './lib/settings/automode-entries';
+import { VOICE_FILE_REL, outputStyleFor } from './lib/voice';
+import { writeFileAtomic } from './lib/md-write';
+import { SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from './lib/settings/automode-entries';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -57,10 +66,15 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/reflect-precheck.ts*)',
   'Bash(bun */scripts/archive-shell.ts*)',
   'Bash(bun */scripts/evaluate-session.ts*)',
-  // Verb-scoped: `observe` is the only thing this script does, and pinning it keeps
-  // the grant from widening if it ever grows a second verb. Replaces the old
+  // Verb-scoped: `observe` is the only thing this script does. No space before the
+  // trailing `*` — CC 2.1.246 warns at startup on a fully-literal argument following
+  // a wildcard-containing one (e.g. `observe *`), so this mirrors the other
+  // verb-pinned `bun */scripts/…` entries below (`tz-shift*`, `precheck*`, etc).
+  // `observations.ts:32` still hard-rejects any verb but `observe`, so `observe*`
+  // matching a hypothetical `observeXYZ` reaches a script that refuses it — the
+  // grant is not actually widened by dropping the space. Replaces the old
   // append-metrics.ts entry, which granted "write any JSON to any path".
-  'Bash(bun */scripts/observations.ts observe *)',
+  'Bash(bun */scripts/observations.ts observe*)',
   'Bash(bun */scripts/proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',
   'Bash(bun */scripts/update-reflection-state.ts*)',
@@ -143,8 +157,9 @@ const HERMIT_ALLOW = [
 // Entries this plugin itself shipped in an earlier version and has since retired.
 // permissions-sync removes these from an operator's settings; nothing else is ever
 // removed, so an operator's own rules cannot be caught by a shape or prefix match.
-// Append here in the same change that deletes a permissioned script — this registry
-// is what makes a deletion reach already-hatched hermits.
+// Append here in the same change that deletes a permissioned script, or that respells
+// an entry still in HERMIT_ALLOW — this registry is what makes a deletion or a respelling
+// reach already-hatched hermits.
 const HERMIT_OBSOLETE = [
   'Bash(python3:*)',
   'Bash(node:*)',
@@ -172,6 +187,9 @@ const HERMIT_OBSOLETE = [
   'Bash(bun */scripts/routine-precheck.ts*)',
   'Bash(bun */scripts/cron-registry.ts*)',
   'Bash(bun */scripts/cron-tz-shift.ts*)',
+  // Superseded by the no-space form above — CC 2.1.246 warns at startup on this shape
+  // (fully-literal `observe` argument following the `*/scripts/…` wildcard).
+  'Bash(bun */scripts/observations.ts observe *)',
 ];
 
 // Hardened extras — a subset of always_on patterns safe to persist to settings.
@@ -338,16 +356,57 @@ switch (op) {
     break;
   }
 
-  case 'output-style': {
-    // Only-if-absent, and the value is the sealed constant — never caller text.
-    // A style the operator chose in /config is their decision: this op leaves it
-    // (and the file's bytes) alone and prints what it found, so hatch and
-    // hermit-doctor can surface the mismatch rather than the hermit silently
-    // reclaiming the key on every boot.
-    const current = settings.outputStyle;
-    if (current === undefined) settings.outputStyle = HERMIT_OUTPUT_STYLE;
-    else readOnly = true;
-    console.log(current === undefined ? 'applied' : `kept:${current}`);
+  case 'voice-render': {
+    // Renders config.voice — the operator's answer, written through settings-edit's
+    // validated and audited path — into the two artifacts Claude Code actually reads:
+    // the `outputStyle` key, and (for `custom`) the style file it names. config is the
+    // truth; these are its render targets, the same relationship config.env has with
+    // this file's env block. So this op is unconditional where the retired seed op was
+    // only-if-absent: a style the operator picked in /config is not silently preserved
+    // here, it is superseded by whatever they last told the hermit — and `style: null`
+    // means "not the hermit's key", which leaves the operator's own pick untouched.
+    //
+    // Local scope only, deliberately: it is the scope Claude Code's own /config picker
+    // writes and the one that outranks committed settings.json, and the voice file is
+    // gitignored — a committed outputStyle would ship a pointer to a file a teammate
+    // does not have. (Harmless, probed: a missing style file starts silently as
+    // Default. Still not something to ship on purpose.)
+    if (path.basename(targetFile) !== 'settings.local.json') {
+      console.error(`voice-render: refusing ${path.basename(targetFile)} — the voice renders to .claude/settings.local.json only`);
+      process.exit(1);
+    }
+    const projectRoot = path.dirname(path.dirname(path.resolve(targetFile)));
+    const voice = readSettledConfig(path.join(projectRoot, '.claude-code-hermit')).voice;
+    const style = outputStyleFor(voice);
+    if (style === null) {
+      console.log('skipped:unset');
+      readOnly = true;
+      break;
+    }
+    if (voice.style === 'custom') {
+      // validate-config refuses `custom` without prose, so reaching here with none
+      // means the config was hand-edited around that path. Fail loudly rather than
+      // render an empty voice.
+      const prose = typeof voice.prose === 'string' ? voice.prose.trim() : '';
+      if (prose === '') {
+        console.error('voice-render: voice.style is "custom" but voice.prose is empty — set the prose first');
+        process.exit(1);
+      }
+      const template = fs.readFileSync(
+        path.join(PLUGIN_ROOT, 'state-templates', 'hermit-voice.md.template'),
+        'utf8',
+      );
+      // Verbatim: the operator's own words are the whole point of `custom`, and a
+      // paraphrase here is the bug this replaced. Only the placeholder moves.
+      // The replacement is a function, not a string: a string replacement expands
+      // `$&`, `` $` ``, `$'` and `$1` inside the prose, so a voice mentioning `$&`
+      // would render with the placeholder pasted back into it.
+      const voiceFile = path.join(projectRoot, VOICE_FILE_REL);
+      fs.mkdirSync(path.dirname(voiceFile), { recursive: true });
+      writeFileAtomic(voiceFile, template.replace('{{VOICE_PROSE}}', () => prose));
+    }
+    settings.outputStyle = style;
+    console.log(`applied:${style}`);
     break;
   }
 
@@ -405,7 +464,8 @@ switch (op) {
   }
 
   default: {
-    console.error(`Unknown operation: ${op}. Valid ops: ${SEALED_SETTINGS_OPS.join(', ')}`);
+    const validOps = [...SEALED_SETTINGS_OPS, ...TERMINAL_ONLY_SETTINGS_OPS];
+    console.error(`Unknown operation: ${op}. Valid ops: ${validOps.join(', ')}`);
     process.exit(1);
   }
 }

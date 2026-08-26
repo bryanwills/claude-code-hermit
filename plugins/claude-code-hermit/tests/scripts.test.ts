@@ -1555,7 +1555,7 @@ describe('observations.ts observe', () => {
   }));
 
   // observations.ts is reachable through a pre-approved
-  // `Bash(bun */scripts/observations.ts observe *)` grant that covers every
+  // `Bash(bun */scripts/observations.ts observe*)` grant that covers every
   // argument after the verb (docs/security.md § Script Argument Trust).
   test('state-dir pin: refuses a ledger belonging to another project', withDir(async (mine) => {
     await withDir(async (victim) => {

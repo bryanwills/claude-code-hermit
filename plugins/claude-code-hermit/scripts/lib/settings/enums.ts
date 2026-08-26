@@ -19,6 +19,15 @@ export const OPERATOR_PROFILE = ['technical', 'non-technical'] as const;
 // vocabulary on purpose: this answers the same question its permission rules do.
 export const SETTINGS_POLICY = ['allow', 'ask', 'deny'] as const;
 export const BUDGET_ACTION = ['alert', 'pause'] as const;
+// `voice.style`. Deliberately narrower than Claude Code's built-in set: the other
+// built-ins are coding-tool styles (Explanatory and Learning inject "Insights" and
+// TODO(human) markers into what a hermit sends to a chat; Proactive is autonomy
+// guidance, which belongs behind permission_mode's tier, not a tone dial). An
+// operator who wants one still picks it in /config — the hermit reports it and
+// never reclaims the key. `custom` means: render voice.prose into the voice file.
+// "default" is lowercase on purpose: Claude Code's picker displays "Default" but
+// persists the lowercase key (read off the shipped binary — the docs never state it).
+export const VOICE_STYLE = ['default', 'Concise', 'custom'] as const;
 export const TELEMETRY_DEST = ['webhook'] as const;
 
 // Not validated by validate-config.ts: Claude Code owns the permission-mode set

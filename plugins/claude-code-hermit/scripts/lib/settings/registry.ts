@@ -15,7 +15,7 @@
 // because `show` must render it, but the skill keeps its prose too — changing it
 // retranslates `state/artifact-strings.json`, which no table can express.
 
-import { ESCALATION, IDLE_BEHAVIOR, PERMISSION_MODE, QUALITY_GATE_TIER } from './enums';
+import { ESCALATION, IDLE_BEHAVIOR, PERMISSION_MODE, QUALITY_GATE_TIER, VOICE_STYLE } from './enums';
 
 export type Kind = 'string' | 'boolean' | 'enum' | 'int';
 
@@ -51,6 +51,12 @@ export const SETTINGS: readonly Setting[] = [
     label: 'Escalation', hint: 'how much it acts without asking' },
   { arg: 'sign-off', path: 'sign_off', kind: 'string', nullable: true, group: 'Identity',
     label: 'Sign-off', hint: "closing line on channel messages, or 'none'" },
+  // `custom` needs voice.prose written first and renders a file, so the skill keeps
+  // its own branch — but the row is real: `show` renders it, and `apply-known voice
+  // <style>` is how the branch writes a built-in.
+  { arg: 'voice', path: 'voice.style', kind: 'enum', values: VOICE_STYLE, nullable: true,
+    group: 'Identity', label: 'Voice', hint: 'how it talks to you', tableExempt: true,
+    applies: 'next session (a terminal run renders it now; boot renders it otherwise)' },
 
   { arg: 'remote', path: 'remote', kind: 'boolean', group: 'Operational',
     label: 'Remote control', hint: 'connect from claude.ai/code or phone',

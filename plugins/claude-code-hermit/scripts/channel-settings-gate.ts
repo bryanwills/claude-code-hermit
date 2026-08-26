@@ -196,6 +196,12 @@ const ALLOWED_EXACT = new Set([
   // that needs this decision is the unattended one, and the ask reaches its
   // operator over the channel.
   'artifacts.publish_authorized',
+  // Which of three sealed values renders into outputStyle. `default` and `Concise`
+  // are Claude Code's own styles and `custom` merely points at voice.prose, which
+  // is gated a tier up — so this leaf carries no text of its own. Operators run
+  // these hermits from a chat; how it talks to them is the first thing they want
+  // to change, and holding the whole voice at the terminal made that unreachable.
+  'voice.style',
 ]);
 
 const ALLOWED_PATTERNS: RegExp[] = [
@@ -273,8 +279,17 @@ const AUTHORITY_KEYS = /^operator_profile(\..+)?$/;
  * same reach in the other direction — session-close invokes it as a skill
  * command on every full close, the `--auto` one included — so it is pinned
  * alongside its counterpart rather than left on the maintainer tier.
+ *
+ * `voice` joins them on the same persistence argument as `boot_skill`: its `prose`
+ * is free text rendered verbatim into `.claude/output-styles/hermit-voice.md`, which
+ * Claude Code builds into the SYSTEM PROMPT of every future session. That is the
+ * longest-lived instruction surface a chat can reach, and content the hermit merely
+ * *read* (a fetched page, an issue body) must not be able to write it. The container
+ * is listed rather than the leaf so `set voice '<object>'` cannot smuggle prose past
+ * a leaf-only rule; `voice.style` is caught by ALLOWED_EXACT first, which is the
+ * whole point — the three sealed style values carry no text.
  */
-const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill)(\..+)?$/;
+const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill|voice)(\..+)?$/;
 
 /**
  * A routine's `precheck` is an executable the routine monitor runs unattended at
