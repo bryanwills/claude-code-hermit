@@ -12,6 +12,7 @@
 - Four sigil-anchored entries replace them: `Bash(*$ANTHROPIC_API_KEY*)` and `Bash(*$CLAUDE_CODE_OAUTH_TOKEN*)`, each in bare and `${…}` spelling. An expansion of a live credential (`echo $ANTHROPIC_API_KEY` while debugging auth) blocks; every bare mention of the name — a grep, a commit message, writing the placeholder into `.env` — stays allowed. The hook enforces them from the shipped template, so nothing needs adding to your settings file.
 
 ### Fixed
+- Cost corruption alerts now keep point-in-time spend out of persistent dashboard warnings, and interrupted cost-log tails no longer consume the next valid appended record.
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
 
 ### Upgrade Instructions
