@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { currentHHMM, todayYMD } from './lib/time';
-import { observationLine, resolveSessionId } from './lib/observations';
+import { observationLine, readLedgerRows, resolveSessionId } from './lib/observations';
 import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
@@ -170,19 +170,19 @@ function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: num
   }
 }
 
+// Date-scoped, never value-bearing: the dedup below matches on exact string equality,
+// so the check and the writer must build the label the same way or the row is written
+// again every tick.
+function costSpikeLabel(date: string): string {
+  return `cost-spike:${date}`;
+}
+
 // True once the day's cost-spike row is in the observations ledger. The measurement
 // stays true for the rest of a spike day (todayTotal only climbs), so the row — not the
 // measurement — is what gates the phase: reflect's cost_spike step has nothing to read
 // or record once the row exists, and flagging it again would buy an LLM run per tick.
-function hasCostSpikeRow(ledgerPath: string, date: string): boolean {
-  const label = `cost-spike:${date}`;
-  try {
-    for (const line of fs.readFileSync(ledgerPath, 'utf-8').split('\n')) {
-      if (!line) continue;
-      try { if (JSON.parse(line).pattern === label) return true; } catch {}
-    }
-  } catch { /* no ledger yet → no row */ }
-  return false;
+function hasCostSpikeRow(existingPatterns: Set<string>, date: string): boolean {
+  return existingPatterns.has(costSpikeLabel(date));
 }
 
 function hasAcceptedProposals(stateDir: string) {
@@ -257,6 +257,14 @@ const timezone = config.timezone ?? 'UTC';
 
 const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
 
+// Every pattern label in the ledger, read once and shared by the cost-spike row check
+// below and the drift-capture dedup further down — both ask the same question of the
+// same file, and on a spike day the cost-spike check runs on every tick until midnight.
+const existingPatterns = new Set<string>();
+for (const row of readLedgerRows(ledgerPath)) {
+  if (typeof row.pattern === 'string') existingPatterns.add(row.pattern);
+}
+
 const phases: Record<string, boolean> = {};
 
 // Cheaper checks first: compute (short-circuits on in_progress/null lastRunAt),
@@ -276,9 +284,8 @@ const costSpike = checkCostSpike(costHermitRoot, timezone);
 // The phase flags the spike for the skill's narrative step on the one run that writes
 // the row; the row itself is written below, from these figures, rather than re-derived
 // from prose. Gated on the row's absence so a spike day costs exactly one RUN and not
-// one per tick — the old log-tail path leaned on a lastRunAt recency check for that,
-// which whole-day index totals (true all day) no longer provide.
-if (costSpike && !hasCostSpikeRow(ledgerPath, costSpike.date)) phases.cost_spike = true;
+// one per tick.
+if (costSpike && !hasCostSpikeRow(existingPatterns, costSpike.date)) phases.cost_spike = true;
 
 // Behavioral-telemetry digest — weekly for every hermit (not age-gated like
 // `digest` below): reflect's evidence step reads ground-truth transcript counters
@@ -355,19 +362,9 @@ let wroteNewRows = false;
 try {
   const sessionId = resolveSessionId(stateDir);
 
-  // Load existing pattern labels to dedup-on-write. Drift slugs are namespaced
-  // (storage-drift:/schema-drift:), so scanning all patterns can't collide with
-  // reflect-noticed/cost-spike rows.
-  const existingPatterns = new Set<string>();
-  try {
-    for (const line of fs.readFileSync(ledgerPath, 'utf-8').trim().split('\n').filter(Boolean)) {
-      try {
-        const row = JSON.parse(line);
-        if (row.pattern) existingPatterns.add(row.pattern);
-      } catch {}
-    }
-  } catch {}
-
+  // `existingPatterns` (loaded once above) dedups the writes below. Drift slugs are
+  // namespaced (storage-drift:/schema-drift:), so scanning all patterns can't collide
+  // with reflect-noticed/cost-spike rows.
   const newRows: string[] = [];
   // Rows go through the shared constructor so this writer and observations.ts
   // cannot drift apart on field order, timestamp format, or origin rules.
@@ -396,12 +393,11 @@ try {
     capture(`schema-drift:${type}`);
   }
 
-  // Cost spike — the label is date-scoped, never value-bearing. `todayTotal` climbs
-  // through the day, so embedding it (as the prose row used to) would defeat the
-  // dedup above and write a fresh row on every precheck run of a spike day. The
-  // figures ride as fields instead, where a reader can still get at them.
+  // Cost spike — `todayTotal` climbs through the day, so embedding it in the label
+  // would defeat the dedup above and write a fresh row on every precheck run of a
+  // spike day. The figures ride as fields instead, where a reader can still get at them.
   if (costSpike) {
-    capture(`cost-spike:${costSpike.date}`, 'cost-spike', {
+    capture(costSpikeLabel(costSpike.date), 'cost-spike', {
       today_total: Number(costSpike.todayTotal.toFixed(4)),
       median_7d: Number(costSpike.median.toFixed(4)),
     });
@@ -425,21 +421,19 @@ try {
 if (wroteNewRows) {
   // Rows just appended carry ts = now > last_run_at by construction — skip the re-read.
   phases.observations_fresh = true;
-} else try {
-  const content = fs.readFileSync(ledgerPath, 'utf-8').trim();
-  if (content) {
-    // null last_run_at (fresh hermit) → cutoff = 0 → any valid ts triggers
-    const cutoff = lastRunAt ? new Date(lastRunAt).getTime() : 0;
-    const hasFresh = content.split('\n').filter(Boolean).some(line => {
-      try {
-        const row = JSON.parse(line);
-        const rowTime = new Date(row.ts).getTime();
-        return !isNaN(rowTime) && rowTime > cutoff && row.source !== 'skill-preference-applied';
-      } catch { return false; }
-    });
-    if (hasFresh) phases.observations_fresh = true;
-  }
-} catch { /* fail-open: scan error → skip trigger, don't force RUN */ }
+} else {
+  // Deliberately re-reads rather than reusing the pattern scan at the top of the
+  // script: the rows appended above land between the two, and another session sharing
+  // this folder can append at any point, so the gate reads the ledger as it stands now.
+  // A read error fail-opens to no rows — skip the trigger, don't force RUN.
+  // null last_run_at (fresh hermit) → cutoff = 0 → any valid ts triggers
+  const cutoff = lastRunAt ? new Date(lastRunAt).getTime() : 0;
+  const hasFresh = readLedgerRows(ledgerPath).some(row => {
+    const rowTime = new Date(row.ts as string).getTime();
+    return !isNaN(rowTime) && rowTime > cutoff && row.source !== 'skill-preference-applied';
+  });
+  if (hasFresh) phases.observations_fresh = true;
+}
 
 if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify(phases));
 

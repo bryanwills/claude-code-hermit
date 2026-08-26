@@ -11,6 +11,7 @@
 // deterministic source, so a computed row cannot be forged from prose, and the
 // script that owns a fact is the only thing that can record it.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { appendJsonlLine } from './append-jsonl';
 import { readJson } from './cli';
@@ -38,6 +39,21 @@ const MAX_PATTERN = 200;
 
 function observationsPath(stateDir: string): string {
   return path.join(stateDir, 'state', 'observations.jsonl');
+}
+
+// Every parsed row in the ledger. Missing file, empty file, and unparseable line all
+// fold to the same outcome (row dropped) so callers get one fail-open read instead of
+// each hand-rolling readFileSync + split + JSON.parse with its own catch.
+function readLedgerRows(ledgerPath: string): Record<string, unknown>[] {
+  try {
+    return fs.readFileSync(ledgerPath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .filter((row): row is Record<string, unknown> => row !== null);
+  } catch {
+    return [];
+  }
 }
 
 // runtime.json is optional and carries a null session_id between sessions
@@ -117,6 +133,7 @@ export {
   DETERMINISTIC_SOURCES,
   MAX_PATTERN,
   observationsPath,
+  readLedgerRows,
   resolveSessionId,
   observationRow,
   observationLine,

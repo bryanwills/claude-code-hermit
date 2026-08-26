@@ -678,11 +678,8 @@ describe('reflect-precheck: cost-spike observation', () => {
     expect(readObservations(hermitDir).filter(o => o.source === 'cost-spike')).toHaveLength(0);
   });
 
-  // The bug this fixes: a busy install's day is hundreds of log entries, so a
-  // fixed-line tail of the raw log could never see more than one or two dates.
-  // Reading whole-day totals from the index instead means entry count plays no
-  // part — a spike fires the same whether the day behind each total was 1 entry
-  // or 400.
+  // Whole-day totals mean entry count plays no part in detection: a spike fires the
+  // same whether the day behind each total was 1 entry or 400.
   test('fires on a busy-install spike regardless of entry count', async () => {
     const hermitDir = makeSpikeProject(1266.72, [100, 100, 100, 100]);
     await runPinnedScript('reflect-precheck.ts', hermitDir, [hermitDir, PLUGIN_ROOT]);
