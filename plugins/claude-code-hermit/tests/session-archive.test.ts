@@ -27,6 +27,7 @@ import path from 'node:path';
 
 import { runScript, runPinnedScript } from './helpers/run';
 import { readFrontmatter } from '../scripts/lib/frontmatter';
+import { replaceSectionInPlace } from '../scripts/lib/md-write';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const sessionsDir = (dir: string) => hermit(dir, 'sessions');
@@ -90,6 +91,10 @@ function writeShell(dir: string, content: string) {
 }
 function readShell(dir: string): string {
   return fs.readFileSync(shellPath(dir), 'utf-8');
+}
+function seedShellSection(dir: string, heading: string, body: string) {
+  const shell = readShell(dir);
+  writeShell(dir, replaceSectionInPlace(shell, heading, `\n${body}\n\n`));
 }
 
 const BASIC_CLOSE_PAYLOAD =
@@ -429,6 +434,93 @@ describe('Progress Log preservation in ## Completed', () => {
 });
 
 // =============================================================================
+describe('recorded factual baseline', () => {
+  const CONFLICTING_PAYLOAD =
+    'Status: completed\nTask: payload task\nBlockers: payload blocker\nLessons: none\nChanged: none\n' +
+    'Artifacts: [[compiled/payload-only]]\nClosed Via: auto\nNext Start Point: Fresh start.\n';
+
+  for (const mode of ['idle', 'close', 'auto'] as const) {
+    test(`${mode} archive uses the same on-disk facts and ignores factual payload overrides`, withTmp(async (dir) => {
+      await open(dir, 'Task: recorded task\n', '2026-07-09T12:00:00Z');
+      seedShellSection(dir, 'Progress Log', '[12:10] completed recorded work');
+      seedShellSection(dir, 'Findings', '- found recorded evidence\n- [[compiled/shell-declared]]');
+      seedShellSection(dir, 'Blockers', '- waiting on recorded dependency');
+
+      fs.mkdirSync(hermit(dir, 'compiled'));
+      fs.writeFileSync(hermit(dir, 'compiled', 'shell-declared.md'), '---\nsession: S-001\n---\n');
+      fs.writeFileSync(hermit(dir, 'compiled', 'stamped-only.md'), '---\nsession: S-001\n---\n');
+      fs.writeFileSync(hermit(dir, 'compiled', 'stale.md'), '---\nsession: S-000\n---\n');
+      fs.writeFileSync(hermit(dir, 'compiled', 'mtime-only.md'), '---\ntype: note\n---\n');
+
+      await archive(dir, mode, CONFLICTING_PAYLOAD, '2026-07-09T13:00:00Z');
+      const reportPath = path.join(sessionsDir(dir), 'S-001-REPORT.md');
+      const report = fs.readFileSync(reportPath, 'utf-8');
+      const fm = readFrontmatter(reportPath);
+
+      expect(fm.task).toBe('recorded task');
+      expect(fm.blockers).toEqual(['waiting on recorded dependency']);
+      expect(fm.artifacts).toEqual(['[[compiled/shell-declared]]', '[[compiled/stamped-only]]']);
+      expect(report).toContain('## Findings\n- found recorded evidence\n- [[compiled/shell-declared]]');
+      expect(report).toContain('## Blockers\n- waiting on recorded dependency');
+      const artifactsBody = report.split('## Artifacts\n')[1]?.split('\n## ')[0] ?? '';
+      expect(artifactsBody.match(/\[\[compiled\/shell-declared\]\]/g)).toHaveLength(1);
+      expect(report).not.toContain('payload task');
+      expect(report).not.toContain('payload blocker');
+      expect(report).not.toContain('payload-only');
+      expect(report).not.toContain('[[compiled/stale]]');
+      expect(report).not.toContain('[[compiled/mtime-only]]');
+    }));
+  }
+
+  test('empty Task falls back to the first work entry, not reset or snapshot breadcrumbs', withTmp(async (dir) => {
+    await open(dir, 'Task: none\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Progress Log',
+      '<!-- snapshot @ 2026-07-09T12:00:00Z -->\n' +
+      '- [archived] previous entries → snapshots/SHELL-2026-07-09.md\n' +
+      '- [12:00] context compacted (auto) — arc may have unfinished work\n' +
+      '- [12:01] context cleared (watchdog) — arc may have unfinished work\n' +
+      '[12:02] investigated the failing deployment');
+    await archive(dir, 'auto', CONFLICTING_PAYLOAD, '2026-07-09T13:00:00Z');
+    const reportPath = path.join(sessionsDir(dir), 'S-001-REPORT.md');
+    const report = fs.readFileSync(reportPath, 'utf-8');
+    expect(readFrontmatter(reportPath).task).toBe('[12:02] investigated the failing deployment');
+    expect(report).toContain('## Overview\n[12:02] investigated the failing deployment');
+  }));
+});
+
+// =============================================================================
+describe('duration ownership', () => {
+  test('matching runtime arc measures from opened_at to archive time', withTmp(async (dir) => {
+    await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('1h 0m');
+  }));
+
+  test('matching runtime arc uses a valid closed_at as its end', withTmp(async (dir) => {
+    await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
+    writeRuntime(dir, { ...readRuntime(dir), closed_at: '2026-07-09T12:45:00Z' });
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('45m');
+  }));
+
+  test('an unowned runtime arc records 0m even when SHELL Started is parseable', withTmp(async (dir) => {
+    await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
+    const { session_id, ...unownedRuntime } = readRuntime(dir);
+    writeRuntime(dir, unownedRuntime);
+    writeShell(dir, readShell(dir).replace('YYYY-MM-DD HH:MM', '2026-07-09 12:00'));
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('0m');
+  }));
+
+  test('an invalid matching opened_at records 0m', withTmp(async (dir) => {
+    await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
+    writeRuntime(dir, { ...readRuntime(dir), opened_at: 'not-a-date' });
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('0m');
+  }));
+});
+
+// =============================================================================
 describe('compaction roll-up', () => {
   test('rolls up Monitoring entries past the threshold into a bucketed [Earlier] line', withTmp(async (dir) => {
     await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
@@ -659,7 +751,7 @@ describe('structural equivalence with the session-mgr.md spec', () => {
     'escalation', 'operator_turns', 'closed_via',
   ];
   const REQUIRED_SECTIONS = [
-    '## Overview', '## Completed', '## Changed', '## Artifacts',
+    '## Overview', '## Completed', '## Findings', '## Changed', '## Artifacts',
     '## Blockers', '## Lessons', '## Proposals Created',
   ];
 
@@ -698,18 +790,20 @@ describe('structural equivalence with the session-mgr.md spec', () => {
 describe('structured report frontmatter', () => {
   test('multi-line prose fields round-trip as arrays via the shared frontmatter parser', withTmp(async (dir) => {
     await open(dir, 'Task: structured fields\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Blockers', 'waiting on review, needs sign-off\nstill blocked on infra');
+    fs.mkdirSync(hermit(dir, 'compiled'));
+    fs.writeFileSync(hermit(dir, 'compiled', 'report-1.md'), '---\nsession: S-001\n---\n');
+    fs.writeFileSync(hermit(dir, 'compiled', 'report-2.md'), '---\nsession: S-001\n---\n');
     const payload =
       'Status: completed\n' +
-      'Blockers: waiting on review, needs sign-off\nstill blocked on infra\n' +
       'Lessons: cache invalidation matters\nretry logic needs backoff\n' +
-      'Artifacts: compiled/report-1.md\ncompiled/report-2.md\n' +
       'Changed: none\n' +
       'Next Start Point: pick up the migration script\n';
     await archive(dir, 'close', payload, '2026-07-09T13:00:00Z');
     const fm = readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md'));
     expect(fm.blockers).toEqual(['waiting on review, needs sign-off', 'still blocked on infra']);
     expect(fm.lessons).toEqual(['cache invalidation matters', 'retry logic needs backoff']);
-    expect(fm.artifacts).toEqual(['compiled/report-1.md', 'compiled/report-2.md']);
+    expect(fm.artifacts).toEqual(['[[compiled/report-1]]', '[[compiled/report-2]]']);
     expect(fm.next_start).toBe('pick up the migration script');
   }));
 
@@ -726,7 +820,8 @@ describe('structured report frontmatter', () => {
 
   test('YAML-hostile characters and internal commas in a blocker line stay parseable as one item', withTmp(async (dir) => {
     await open(dir, 'Task: hostile chars\n', '2026-07-09T12:00:00Z');
-    const payload = 'Status: completed\nBlockers: #urgent fix, needs {infra} and [approval]\nChanged: none\n';
+    seedShellSection(dir, 'Blockers', '#urgent fix, needs {infra} and [approval]');
+    const payload = 'Status: completed\nChanged: none\n';
     await archive(dir, 'close', payload, '2026-07-09T13:00:00Z');
     const fm = readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md'));
     expect(fm.blockers).toEqual(['#urgent fix, needs {infra} and [approval]']);

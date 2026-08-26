@@ -13,6 +13,7 @@
 
 ### Fixed
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
+- Session archive now uses one recorded factual baseline for every archive mode: Task, Findings, Blockers, current-session compiled Artifacts, and the matching runtime duration survive unattended close and remain available to briefs and recall.
 
 ### Upgrade Instructions
 
