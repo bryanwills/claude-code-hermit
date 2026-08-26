@@ -146,8 +146,30 @@ describe('sealed registries', () => {
   // JSON to an arbitrary path, so it has to be actively retired from existing
   // installs, not merely dropped from the canonical list.
   test('the observations writer is granted and its arbitrary-path predecessor retired', () => {
-    expect(HERMIT_ALLOW).toContain('Bash(bun */scripts/observations.ts observe *)');
+    expect(HERMIT_ALLOW).toContain('Bash(bun */scripts/observations.ts observe*)');
     expect(HERMIT_OBSOLETE).toContain('Bash(bun */scripts/append-metrics.ts*)');
+  });
+
+  // CC 2.1.246 warns at startup on a fully-literal argument following a
+  // wildcard-containing one (e.g. `Bash(bun */scripts/x.ts observe *)`). The
+  // space-before-verb form was retired in favor of the no-space form above.
+  test('the observations writer\'s space-before-verb predecessor is retired', () => {
+    expect(HERMIT_OBSOLETE).toContain('Bash(bun */scripts/observations.ts observe *)');
+  });
+
+  // Regression guard for the lint shape itself: no HERMIT_ALLOW entry should have a
+  // fully-literal argument following a wildcard-containing argument, else Claude Code
+  // warns at every hermit session start.
+  test('no allow rule has a literal argument trailing a wildcard-containing argument', () => {
+    const offenders = HERMIT_ALLOW.filter((rule) => {
+      const inner = rule.match(/^[A-Za-z]+\((.*)\)$/)?.[1];
+      if (!inner) return false;
+      const args = inner.split(' ');
+      const firstWildcardIdx = args.findIndex((a) => a.includes('*'));
+      if (firstWildcardIdx === -1) return false;
+      return args.slice(firstWildcardIdx + 1).some((a) => a.length > 0 && !a.includes('*'));
+    });
+    expect(offenders).toEqual([]);
   });
 
   test('the routine Monitor subprocess is granted without widening to arbitrary shell scripts', () => {
