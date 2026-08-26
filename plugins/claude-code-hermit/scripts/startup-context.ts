@@ -91,6 +91,13 @@ function emitArtifacts(artifacts: Json[], budget: number, headerFn: (a: Json) =>
   }
 }
 
+// Drops the bare "-" a comment-only bullet ("- <!-- resolved ... -->") leaves
+// behind once stripPlaceholders removes the comment. A dash-only line is never
+// a real entry, and injecting it reads as an unnamed blocker or finding.
+function dropBulletResidue(text: string): string {
+  return text.split('\n').filter(l => !/^\s*-+\s*$/.test(l)).join('\n').trim();
+}
+
 // Return last N non-empty lines from a string.
 function lastLines(text: string, n: number): string {
   const lines = text.split('\n').filter(l => l.trim());
@@ -142,13 +149,17 @@ function buildCompactionPointers(agentDir: string): string {
       ? progress.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('<!--')).pop()
       : null;
     if (lastEntry) parts.push(`last progress: ${guarded('sessions/SHELL.md', lastEntry.slice(0, 200))}`);
-    // stripPlaceholders trims the whole section, so a comment-only bullet line
-    // ("- <!-- resolved ... -->") collapses to a bare "-" by the time it's
-    // split — reject that explicitly rather than emitting "blockers: -".
-    const blockerLines = stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '')
-      .split('\n').map(l => l.trim().replace(/^-\s+/, '').trim()).filter(l => l && !/^-+$/.test(l));
+    // dropBulletResidue first: stripPlaceholders trims the whole section, so a
+    // comment-only bullet ("- <!-- resolved ... -->") would otherwise reach here
+    // as a bare "-" and surface as "blockers: -".
+    const blockerLines = dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? ''))
+      .split('\n').map(l => l.trim().replace(/^-\s+/, '').trim()).filter(Boolean);
     if (blockerLines.length) {
-      parts.push(`blockers: ${guarded('sessions/SHELL.md', blockerLines.slice(-2).join(' | ').slice(0, 240))}`);
+      // Cap each entry, not the joined string: one verbose blocker would
+      // otherwise eat the whole budget and truncate away the newest one, which
+      // is the entry `slice(-2)` exists to preserve.
+      const blockers = blockerLines.slice(-2).map(l => l.slice(0, 118)).join(' | ');
+      parts.push(`blockers: ${guarded('sessions/SHELL.md', blockers.slice(0, 240))}`);
     }
   } catch {}
 
@@ -265,7 +276,9 @@ function emitCompactCapsule(): void {
     }
     // Truncated: cut back to the last complete line rather than emit a
     // garbled partial one; drop entirely when even the first line doesn't fit.
-    const sliced = pointers.slice(0, maxBody);
+    // maxBody + 1 so a line whose terminator sits exactly at maxBody still
+    // counts as fitting — slicing at maxBody would hide it and drop the line.
+    const sliced = pointers.slice(0, maxBody + 1);
     const cut = sliced.lastIndexOf('\n');
     if (cut <= 0) return;
     process.stdout.write(header + sliced.slice(0, cut) + '\n');
@@ -341,7 +354,7 @@ function emitFullContext(source: string | null) {
       parts.push(`## Progress Log (last 10)\n${recent}`);
     }
 
-    const blockers = stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '');
+    const blockers = dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? ''));
     if (blockers) {
       parts.push(`## Blockers\n${blockers}`);
     }
@@ -354,7 +367,7 @@ function emitFullContext(source: string | null) {
       }
     }
 
-    const findingsRaw = stripPlaceholders(extractSection(shellContent, 'Findings') ?? '');
+    const findingsRaw = dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Findings') ?? ''));
     if (findingsRaw) {
       parts.push(`## Findings (last 5)\n${lastLines(findingsRaw, 5).slice(0, 600)}`);
     }

@@ -902,6 +902,18 @@ describe('startup-context', () => {
     expect(r.stdout).not.toContain('## Findings');
   }));
 
+  test('startup-context (bare-bullet Blockers/Findings after placeholder strip → both sections absent)', withDir(async (dir) => {
+    // Comment-only bullets collapse to a bare "-" once stripPlaceholders runs —
+    // must not surface as "## Blockers\n-" / "## Findings (last 5)\n-".
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n- <!-- resolved: fixed already -->\n\n## Findings\n- <!-- nothing yet -->\n');
+    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('## Blockers');
+    expect(r.stdout).not.toContain('## Findings');
+  }));
+
   test('startup-context (Findings with more than 5 lines → only the last 5)', withDir(async (dir) => {
     const findings = Array.from({ length: 8 }, (_, i) => `- finding ${i}`).join('\n');
     write(hermit(dir, 'sessions', 'SHELL.md'),
@@ -1195,6 +1207,22 @@ Rota body.
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toMatch(/^blockers: middle blocker \| newest blocker$/m);
     expect(r.stdout).not.toContain('oldest blocker');
+  }));
+
+  test('startup-context (source=compact, two verbose Blockers → newest survives the cap, not just the oldest)', withDir(async (dir) => {
+    // The char cap applies per entry: capping the joined string would spend the
+    // whole budget on the older blocker and truncate the newest one away.
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      `## Blockers\n- OLD ${'o'.repeat(200)}\n- NEW ${'n'.repeat(200)}\n\n## Findings\n`);
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    const line = r.stdout.split('\n').find(l => l.startsWith('blockers: '))!;
+    expect(line).toContain('OLD ');
+    expect(line).toContain('NEW ');
+    expect(line.length).toBeLessThanOrEqual('blockers: '.length + 240);
   }));
 
   test('startup-context (source=compact, bare-bullet Blockers after placeholder strip → no blockers: line)', withDir(async (dir) => {
