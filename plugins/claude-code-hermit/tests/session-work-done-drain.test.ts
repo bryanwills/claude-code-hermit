@@ -26,6 +26,13 @@ describe('session work-done NEXT-TASK drain', () => {
     expect(skill).toContain('escalation');
   });
 
+  test('idle finalization records blockers in SHELL rather than the archive payload', () => {
+    expect(skill).toContain('Ensure SHELL.md `## Blockers` reflects the final recorded state');
+    const payload = skill.match(/archive --mode=idle[^\n]*<<'HERMIT_PAYLOAD'\n([\s\S]*?)\n\s*HERMIT_PAYLOAD/)?.[1] ?? '';
+    expect(payload).toContain('Status: <completed|partial|blocked>');
+    expect(payload).not.toContain('Blockers:');
+  });
+
   test('balanced/autonomous auto-starts the queued task as the terminal action', () => {
     expect(skill).toContain('balanced` or `autonomous`');
     expect(skill).toContain('Starting on [NEXT-TASK.md summary] next');

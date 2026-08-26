@@ -45,15 +45,15 @@ When the work is done, or the operator decides to move on (even if partial or bl
 
 **Completion notification is the final step of this flow, not a substitute for it.** Skipping the idle transition (step 5 below) leaves the session `in_progress`, which triggers stale-session heartbeat alerts and delays report archival until the time-based backstops kick in.
 
-1. Compile final session data **in context** — do NOT write to SHELL.md at this point. `session-archive.ts` owns the final write. Gather:
+1. Finalize the factual record on disk, then compile judgment data **in context**. `session-archive.ts` owns the report write and reads the same factual baseline in every archive mode:
+   - Ensure SHELL.md `## Blockers` reflects the final recorded state. A correction is authoritative only after it is written there; payload prose cannot replace or erase this section.
    - `Status:` one of `completed` | `partial` | `blocked`
-   - `Blockers:` one line each, enough context for a cold start
    - `Lessons:` only genuinely useful ones
    - `Changed:` list of files modified
 2. Verify quality in-context before archiving:
    - Task status is one of `completed` | `partial` | `blocked`
    - Changed files are identified
-   - Blockers have enough context for a cold start
+   - SHELL.md `## Blockers` has enough context for a cold start
 3. Create proposals for any high-leverage improvements discovered during work
 4. **Reflect (with debounce).** Read `state/reflection-state.json` for `last_reflection`. Only invoke the `claude-code-hermit:reflect` skill if `last_reflection` is null or older than 4 hours. For quick tasks (single-step, under 5 minutes), skip entirely — progress log is sufficient.
 4b. **Session-triggered scheduled checks.** For each `scheduled_checks` entry (from config already loaded) with `trigger: "session"` and `enabled: true`, invoke the skill. If a skill is unavailable or errors, skip it and continue — never block session finalization on a scheduled check failure. For each check that completed successfully, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts .claude-code-hermit/state/reflection-state.json --scheduled-check-run <id>` (writes only that check's `last_run`; fail-open). Do not run it for failed checks.
@@ -62,7 +62,6 @@ When the work is done, or the operator decides to move on (even if partial or bl
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts archive --mode=idle --state-dir=.claude-code-hermit <<'HERMIT_PAYLOAD'
    Status: <completed|partial|blocked>
-   Blockers: <one line each, or none>
    Lessons: <one line each, or none>
    Changed: <file list, or none>
    HERMIT_PAYLOAD
