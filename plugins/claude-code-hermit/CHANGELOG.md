@@ -16,6 +16,7 @@
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
 - Observations written with a null `runtime.session_id` stamp the last archived `S-NNN` instead of the shared `"unknown"` sentinel, so `graduation_min_sessions` counts distinct sessions. Ledger graduation skips `"unknown"` rows and promotes a pattern only when it has a row newer than `last_run_at`.
 - `reflection-judge` skips per-report confirmation when `Artifact:` cites `state/observations.jsonl`. A Component Health flag whose subject is `reflection-judge` stays on the Progress Log and is not a candidate.
+- Session archive now uses one recorded factual baseline for every archive mode: Task, Findings, Blockers, and current-session compiled Artifacts survive unattended close; close payloads can add missing Blockers and compiled links or mark recorded blockers resolved without deleting their text; and a duration with no provably owned runtime window is reported as unknown instead of zero.
 
 ### Upgrade Instructions
 
