@@ -61,6 +61,7 @@ const TABLE: Record<string, Spec> = {
   escalation: str('balanced'),
   operator_profile: str('technical'),
   sign_off: str(null),
+  voice: shape({ style: str(null), prose: str(null) }),
   channels: map,
   remote: bool(true),
   model: str('sonnet'),

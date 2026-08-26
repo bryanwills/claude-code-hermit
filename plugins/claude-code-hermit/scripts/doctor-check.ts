@@ -14,7 +14,7 @@ import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } fr
 import { costLogPath } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
-import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolvePersistedStyle, BUILTIN_OUTPUT_STYLES } from './lib/voice';
+import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolvePersistedStyle, outputStyleFor } from './lib/voice';
 import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
@@ -2004,50 +2004,59 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
 }
 
 /**
- * Voice carrier — is the hermit's tone actually reaching the system prompt?
+ * Voice carrier — has config.voice actually reached the system prompt?
  *
- * The two halves (the style file and the settings key) are owned by different
- * parties: hatch writes the key, but the operator can change it in /config at
- * any time, and boot deliberately does not reclaim it. That's a respected
- * choice, not a bug — but it silently turns the voice off, so it has to surface
- * somewhere, and this is that somewhere.
+ * A drift check, not an ownership one: `config.voice` is the operator's answer and
+ * `apply-settings voice-render` writes it into the settings key (and, for a custom
+ * voice, the style file). Both are re-rendered at every boot, so a mismatch means
+ * one of two things — the hermit has not restarted since the change, or something
+ * outside the hermit took the key. Either way the remedy is the same, and neither
+ * is a reason for the hermit to reclaim anything on its own.
  *
- * Resolution uses local-over-project precedence rather than reading the hermit's
- * own hatch target: the case worth catching is a hermit whose key sits in
- * committed settings.json while a /config pick in settings.local.json outranks
- * it — where the hermit's own file looks perfectly correct.
+ * `voice.style` unset means the hermit does not own the key at all. A style the
+ * operator picked in /config is then simply reported, never warned about — that
+ * includes the Claude Code built-ins this hermit does not render itself.
+ *
+ * Resolution spans local, project and user scope rather than reading the hermit's
+ * own hatch target: the case worth catching is a hermit whose key sits in committed
+ * settings.json while a /config pick in settings.local.json outranks it — where the
+ * hermit's own file looks perfectly correct.
  */
 function checkVoiceCarrier(p: DoctorPaths = PATHS) {
   const id = 'voice-carrier';
   try {
     const projectRoot = path.dirname(p.hermitDir);
-    const hasFile = voiceFileExists(projectRoot);
+    const config = readSettledConfig(p.hermitDir);
+    const want = outputStyleFor(config.voice);
     const { value, source } = resolvePersistedStyle(projectRoot);
 
-    if (!hasFile && value !== HERMIT_OUTPUT_STYLE) {
-      if (value !== null && (BUILTIN_OUTPUT_STYLES as readonly string[]).includes(value)) {
-        return { id, status: 'ok', detail: `persisted style "${value}" (${source})` };
-      }
-      return { id, status: 'ok', detail: 'no hermit voice file (using Claude Code defaults)' };
-    }
-    if (!hasFile) {
+    if (want === null) {
       return {
-        id, status: 'warn',
-        detail: `outputStyle is "${HERMIT_OUTPUT_STYLE}" (${source}) but ${VOICE_FILE_REL} is missing — run: /claude-code-hermit:hermit-settings voice`,
+        id, status: 'ok',
+        detail: value === null
+          ? 'no voice configured (Claude Code defaults)'
+          : `no voice configured; outputStyle "${value}" (${source}) is your own`,
       };
     }
-    if (value === HERMIT_OUTPUT_STYLE) {
-      return { id, status: 'ok', detail: `voice active from ${VOICE_FILE_REL} (${source})` };
-    }
-    if (value === null) {
+
+    const remedy = 'restart the hermit, or run: /claude-code-hermit:hermit-settings voice';
+    if (value !== want) {
       return {
         id, status: 'warn',
-        detail: `${VOICE_FILE_REL} exists but no outputStyle key points at it — run: /claude-code-hermit:hermit-settings voice`,
+        detail: `config.voice wants "${want}" but outputStyle is ${value === null ? 'unset' : `"${value}" (${source})`} — ${remedy}`,
+      };
+    }
+    if (want === HERMIT_OUTPUT_STYLE && !voiceFileExists(projectRoot)) {
+      return {
+        id, status: 'warn',
+        detail: `outputStyle is "${HERMIT_OUTPUT_STYLE}" (${source}) but ${VOICE_FILE_REL} is missing — ${remedy}`,
       };
     }
     return {
-      id, status: 'warn',
-      detail: `outputStyle is "${value}" (${source}), so the hermit voice file is inactive — set it to "${HERMIT_OUTPUT_STYLE}" in /config to re-enable, or leave it if that's intended`,
+      id, status: 'ok',
+      detail: want === HERMIT_OUTPUT_STYLE
+        ? `voice active from ${VOICE_FILE_REL} (${source})`
+        : `voice active: "${want}" (${source})`,
     };
   } catch (e: any) {
     return { id, status: 'warn', detail: `check failed: ${e.message}` };

@@ -122,6 +122,18 @@ describe('channelVerdict — policy', () => {
     expect(channelVerdict('set', 'env.MAX_THINKING_TOKENS')).toBe('nonce');
   });
 
+  test('the voice style is everyday-tier, its prose is not', () => {
+    // Three sealed values that carry no text — the change a chat operator most
+    // wants, and the one the terminal-only rule used to make unreachable.
+    expect(channelVerdict('apply-known', 'voice')).toBe('allowed');
+    expect(channelVerdict('set', 'voice.style')).toBe('allowed');
+    // Free text that becomes every future session's system prompt.
+    expect(channelVerdict('set', 'voice.prose')).toBe('nonce');
+    expect(channelVerdict('unset', 'voice.prose')).toBe('nonce');
+    // The container write is the broader one — it can carry prose without naming it.
+    expect(channelVerdict('set', 'voice')).toBe('nonce');
+  });
+
   test('monitors are nonce-tier — every entry carries a shell command', () => {
     // validate-config.ts requires `monitors[].command`, and the watch skill
     // registers it as a Monitor subprocess at session start. A config-declared

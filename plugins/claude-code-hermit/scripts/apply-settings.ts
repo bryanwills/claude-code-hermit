@@ -16,19 +16,16 @@
  *   artifact-allow           Merge just ["Artifact"] into permissions.allow — kept as its
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
- *   output-style [style]     Seed outputStyle to [style] (default "hermit-voice"), but only
- *                            when neither project scope (local, project) already owns the
- *                            key — user scope ranks below both and never vetoes the seed.
- *                            [style] must be one of SEALED_OUTPUT_STYLES. An operator's
- *                            own /config choice is preserved untouched (file left
- *                            byte-identical); prints "applied" or "kept:<value>" so callers
- *                            can report the mismatch. Cannot switch an already-set style —
- *                            use output-style-set for that.
- *   output-style-set <style> Replace outputStyle with <style> unconditionally, for an
- *                            explicit terminal choice (hermit-settings voice). <style> must
- *                            be one of SEALED_OUTPUT_STYLES. Deliberately NOT in
- *                            SEALED_SETTINGS_OPS — not preauthorized for the auto-mode
- *                            classifier, only ever reached from an explicit operator ask.
+ *   voice-render             Render config.json's `voice` block into what Claude Code
+ *                            reads: the `outputStyle` key here, plus (style "custom")
+ *                            .claude/output-styles/hermit-voice.md from voice.prose,
+ *                            verbatim. Target must be settings.local.json. Prints
+ *                            "applied:<style>", or "skipped:unset" and writes nothing
+ *                            when voice.style is unset — which is how an operator's own
+ *                            /config pick stays theirs. Takes no arguments: the operator's
+ *                            answer travels in config.json, written and audited by
+ *                            settings-edit, never as caller text. Deliberately NOT in
+ *                            SEALED_SETTINGS_OPS.
  *   automode-seed            RETIRED — exits 1. The classifier stopped reading autoMode from any
  *                            project settings file in Claude Code 2.1.207, so this verb's writes
  *                            were silently ignored. The sealed entries now ship in the per-session
@@ -41,7 +38,7 @@
  *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings),
  *   permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
  *   registry below (scripts this plugin itself shipped and has since deleted), and
- *   output-style-set, which replaces outputStyle by design.
+ *   voice-render, which replaces outputStyle by design — config.json owns that key.
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
  */
@@ -49,8 +46,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { auditConfigChange } from './lib/config-audit';
+import { readSettledConfig } from './lib/config-read';
 import { channelStateDirKey } from './lib/channel-config';
-import { HERMIT_OUTPUT_STYLE, SEALED_OUTPUT_STYLES, isSealedOutputStyle, resolveProjectStyle } from './lib/voice';
+import { VOICE_FILE_REL, outputStyleFor } from './lib/voice';
+import { writeFileAtomic } from './lib/md-write';
 import { SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from './lib/settings/automode-entries';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
@@ -348,41 +347,57 @@ switch (op) {
     break;
   }
 
-  case 'output-style': {
-    // Only-if-absent across the two project scopes, and the value is validated against
-    // the sealed list — never arbitrary caller text. A style the operator chose in
-    // /config at project scope is their decision: this op leaves the target file (and
-    // its bytes) alone and prints what it found, so hatch and hermit-doctor can
-    // surface the mismatch rather than the hermit silently reclaiming the key.
+  case 'voice-render': {
+    // Renders config.voice — the operator's answer, written through settings-edit's
+    // validated and audited path — into the two artifacts Claude Code actually reads:
+    // the `outputStyle` key, and (for `custom`) the style file it names. config is the
+    // truth; these are its render targets, the same relationship config.env has with
+    // this file's env block. So this op is unconditional where the retired seed op was
+    // only-if-absent: a style the operator picked in /config is not silently preserved
+    // here, it is superseded by whatever they last told the hermit — and `style: null`
+    // means "not the hermit's key", which leaves the operator's own pick untouched.
     //
-    // User scope is deliberately NOT a veto. It ranks below both project scopes, so a
-    // value there cannot shadow this write — treating it as ownership would refuse a
-    // seed that would have won, leaving hatch's freshly-rendered voice file inert.
-    // hermit-doctor reports user scope via resolvePersistedStyle instead.
-    const style = rest[0] ?? HERMIT_OUTPUT_STYLE;
-    if (!isSealedOutputStyle(style)) {
-      console.error(`output-style: "${style}" is not a sealed style. Valid: ${SEALED_OUTPUT_STYLES.join(', ')}`);
+    // Local scope only, deliberately: it is the scope Claude Code's own /config picker
+    // writes and the one that outranks committed settings.json, and the voice file is
+    // gitignored — a committed outputStyle would ship a pointer to a file a teammate
+    // does not have. (Harmless, probed: a missing style file starts silently as
+    // Default. Still not something to ship on purpose.)
+    if (path.basename(targetFile) !== 'settings.local.json') {
+      console.error(`voice-render: refusing ${path.basename(targetFile)} — the voice renders to .claude/settings.local.json only`);
       process.exit(1);
     }
     const projectRoot = path.dirname(path.dirname(path.resolve(targetFile)));
-    const owned = resolveProjectStyle(projectRoot);
-    if (owned.value === null) settings.outputStyle = style;
-    else readOnly = true;
-    console.log(owned.value === null ? 'applied' : `kept:${owned.value}`);
-    break;
-  }
-
-  case 'output-style-set': {
-    // Explicit replacement — the seed op above cannot switch an already-set style,
-    // and hermit-settings voice needs to. Unconditional: this is only ever reached
-    // from an operator's own terminal choice, never boot or hatch's seed path.
-    const style = rest[0];
-    if (!style || !isSealedOutputStyle(style)) {
-      console.error(`output-style-set: requires one of ${SEALED_OUTPUT_STYLES.join(', ')}, got: ${style ?? '(none)'}`);
-      process.exit(1);
+    const voice = readSettledConfig(path.join(projectRoot, '.claude-code-hermit')).voice;
+    const style = outputStyleFor(voice);
+    if (style === null) {
+      console.log('skipped:unset');
+      readOnly = true;
+      break;
+    }
+    if (voice.style === 'custom') {
+      // validate-config refuses `custom` without prose, so reaching here with none
+      // means the config was hand-edited around that path. Fail loudly rather than
+      // render an empty voice.
+      const prose = typeof voice.prose === 'string' ? voice.prose.trim() : '';
+      if (prose === '') {
+        console.error('voice-render: voice.style is "custom" but voice.prose is empty — set the prose first');
+        process.exit(1);
+      }
+      const template = fs.readFileSync(
+        path.join(PLUGIN_ROOT, 'state-templates', 'hermit-voice.md.template'),
+        'utf8',
+      );
+      // Verbatim: the operator's own words are the whole point of `custom`, and a
+      // paraphrase here is the bug this replaced. Only the placeholder moves.
+      // The replacement is a function, not a string: a string replacement expands
+      // `$&`, `` $` ``, `$'` and `$1` inside the prose, so a voice mentioning `$&`
+      // would render with the placeholder pasted back into it.
+      const voiceFile = path.join(projectRoot, VOICE_FILE_REL);
+      fs.mkdirSync(path.dirname(voiceFile), { recursive: true });
+      writeFileAtomic(voiceFile, template.replace('{{VOICE_PROSE}}', () => prose));
     }
     settings.outputStyle = style;
-    console.log('applied');
+    console.log(`applied:${style}`);
     break;
   }
 

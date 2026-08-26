@@ -15,7 +15,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 The **settings chat** below means the chat configured as `maintainer_channel_id` — or, on an operator-run install (`operator_profile: technical`) that never configured one, the hermit's own home chat. A configured maintainer chat turns that fallback off rather than widening it.
 
 - **Settings chat only** — `remote`, `escalation`, `docker`, `artifact-backend`, and anything not named below. Changeable from the settings chat (allowlist-checked), or from a terminal. From any other chat: view-only.
-- **Settings chat, plus a confirmation code on an `ask` channel** — `permissions` (permission mode), `env`, `monitors` (each entry carries a shell command), `boot-skill` (standing instructions re-applied at every restart) and `shutdown_skill` (its counterpart, invoked on every full close). On a channel whose `settings_policy` is `allow` these apply from the settings chat like the tier above, no code. On `ask`, the gate issues a short code and denies the write: send the settings chat a message that names **the exact change** and carries the code, then stop — a bare code asks the operator to approve something they can't see. Quote the change exactly as the gate showed it: a value rendered `[set]` or `[cleared]` is withheld deliberately and stays that way. It applies only after the operator echoes the code back from that same chat. Don't retry the setting in the same turn.
+- **Settings chat, plus a confirmation code on an `ask` channel** — `permissions` (permission mode), `env`, `monitors` (each entry carries a shell command), `boot-skill` (standing instructions re-applied at every restart), `shutdown_skill` (its counterpart, invoked on every full close) and `voice.prose` (free text that becomes every future session's system prompt; the style *name* is everyday-tier). On a channel whose `settings_policy` is `allow` these apply from the settings chat like the tier above, no code. On `ask`, the gate issues a short code and denies the write: send the settings chat a message that names **the exact change** and carries the code, then stop — a bare code asks the operator to approve something they can't see. Quote the change exactly as the gate showed it: a value rendered `[set]` or `[cleared]` is withheld deliberately and stays that way. It applies only after the operator echoes the code back from that same chat. Don't retry the setting in the same turn.
 - **Terminal only, from every chat including the settings one** — `allowed_users`, `briefing_chat`, the DM chat, `maintainer_channel_id` itself, `settings_policy` itself, `operator_profile`, and any channel operation that replaces a channel wholesale (add/remove/primary). Show the current value, say plainly it changes only from a terminal session with `/claude-code-hermit:hermit-settings <argument>`, and change nothing.
 - **Switched off for that channel** — when its `settings_policy` is `deny`, every tier above the everyday settings is terminal-only there, the settings chat included. Say so plainly and name the terminal command.
 
@@ -29,7 +29,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings              — show all current settings
 /claude-code-hermit:hermit-settings name          — set agent name
 /claude-code-hermit:hermit-settings language       — set preferred language
-/claude-code-hermit:hermit-settings voice          — edit how the hermit talks (terminal only)
+/claude-code-hermit:hermit-settings voice          — edit how the hermit talks (style: everyday; custom prose: needs the code)
 /claude-code-hermit:hermit-settings timezone       — set timezone
 /claude-code-hermit:hermit-settings escalation     — set escalation threshold
 /claude-code-hermit:hermit-settings sign-off       — set sign-off line
@@ -132,23 +132,38 @@ Then re-sync the artifact-chrome translation table (the dashboard/proposals page
 - New value is `en`: delete `.claude-code-hermit/state/artifact-strings.json` if it exists (absent file ⇒ English chrome).
 
 **If argument is "voice":**
-The hermit's tone lives in a native Claude Code output style — either a built-in (`default`/`Concise`/`Explanatory`/...) picked at the settings level, or a custom `.claude/output-styles/hermit-voice.md` this hermit renders — loaded into the system prompt at session start either way.
+The hermit's tone lives in a native Claude Code output style, loaded into the system prompt at session start. `config.json`'s `voice` block is what you own; the `outputStyle` key and, for a custom voice, `.claude/output-styles/hermit-voice.md` are rendered from it — at boot, and immediately when this runs in a terminal.
 
-**Terminal-only.** On a channel-tagged turn, do not change it — reply that voice changes are made from a terminal session (`/claude-code-hermit:hermit-settings voice`) and stop. This shapes every future session's system prompt, so it is not something a remote message gets to rewrite.
+**Tiered, not terminal-only.** Picking a built-in is an everyday setting (three sealed values, no text). Writing custom prose is nonce-tier: it becomes every future session's system prompt, which is the class the confirmation code exists for. Both go through `settings-edit`, so the gate applies the tier — relay a denial rather than looking for another route.
 
-In a terminal session:
-- Show the operator their current style before asking. Read `outputStyle` from `.claude/settings.local.json`, then `.claude/settings.json`, then user scope (`$CLAUDE_CONFIG_DIR/settings.json`, defaulting to `~/.claude/settings.json`) and report the first one set — that precedence order is Claude Code's own. A value found at user scope applies to every project, and the write below lands at project scope and will outrank it here; say so rather than presenting it as this project's setting. Then ask: "How should I change it? (Default / Concise / Explanatory / something else)"
-- **Default / Concise / Explanatory** — a built-in. Run:
+- Show the current value first: `settings-edit ... get voice`. If it is unset, say so plainly and add what is actually persisted (`/hermit-doctor`'s `voice-carrier` line reports that, across every scope) — a style the operator picked in `/config` themselves is theirs, and this command would take the key over.
+- Ask: "How should I talk to you? (Default / Concise / describe it in your own words)". Describe Concise as it behaves — leads with the result, skips narration, keeps error and security detail in full.
+- **Default / Concise** →
+
+  ```bash
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json apply-known voice <default|Concise>
   ```
-  bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style-set <style>
+
+  `default` is lowercase; the `/config` picker displays "Default" but persists the lowercase literal. Neither writes a file. If a `hermit-voice.md` exists it stays on disk, inert — switching back is one command.
+- **Their own words** → write the prose first, then the style (the reverse order is refused — `custom` without prose is invalid):
+
+  ```bash
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json set voice.prose '"<their words>"'
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json apply-known voice custom
   ```
-  `<style>` is `default` (lowercase — the picker shows "Default" but persists the lowercase literal), `Concise`, or `Explanatory`. `output-style-set` replaces whatever was there, including an existing `hermit-voice`. If `.claude/output-styles/hermit-voice.md` exists, leave it on disk — switching away doesn't delete it, so the operator can switch back later.
-- **Something else** — if `.claude/output-styles/hermit-voice.md` doesn't exist yet, render it from `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` — same as hatch Phase 4b, using the operator's own wording verbatim or with only mechanical wrapping, never a paraphrase. If it already exists, show the current prose (skip the frontmatter and the Precedence section) and edit it in place — keep the frontmatter and the Precedence section as they are, keep it about tone rather than work context, and keep it short — it costs tokens on every API call. Either way, then run:
+
+  Use their wording verbatim, or with only mechanical wrapping into instructions-to-yourself form. Keep it about tone, not work context (that's `OPERATOR.md`), and keep it short — it costs tokens on every API call. When editing an existing custom voice, show the current `voice.prose` and edit that text, not the rendered file.
+- **Anything else they name** (`Explanatory`, `Learning`, a style of their own): the hermit doesn't render those. Say so and point at `/config`, which sets `outputStyle` directly — the hermit will report it and leave it alone.
+- **Then render it**, terminal turns only:
+
+  ```bash
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json voice-render
   ```
-  bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file for the stamped hatch target> output-style-set hermit-voice
-  ```
-- Tell the operator it takes effect in the next session (the system prompt is built at session start).
-- **Under `AGENT_HOOK_PROFILE=strict`** (Docker and always-on boots) the deny patterns block `Edit`/`Write` on the voice file, same as `OPERATOR.md`. Don't retry: for a custom-style change, show the operator the exact prose to use and let them edit `.claude/output-styles/hermit-voice.md` themselves; a built-in switch still goes through `apply-settings.ts` (a script write, not `Edit`/`Write`) and is unaffected.
+
+  Local scope by design, whatever the hatch target: it is the scope `/config` writes and outranks committed settings, and the voice file is gitignored. The op refuses any other target. On a channel-tagged turn **don't run it** — say the change applies at the next restart, the same as an `env` change. Either way the config write already landed.
+- Tell the operator it takes effect in the next session — the system prompt is built at session start.
+- **Clearing the voice** (`apply-known voice none`) stops the hermit managing the key; it does not undo the last render. Say so: the current style stays until they pick another one here or in `/config`.
+- The voice file is a render of `config.json`, so a hand-edit is overwritten at the next boot. If they want to edit prose directly, that is `voice.prose`.
 
 **If argument is "channels":**
 Show current channel configuration from `config.json` → `channels` object. The `channels.primary` key (if set) is a magic pointer to the preferred outbound channel, not a channel itself — display it on its own line above the channel list:

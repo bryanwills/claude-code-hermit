@@ -401,6 +401,82 @@ describe('settings-edit apply-known', () => {
   });
 });
 
+// --- voice: the one enum whose `custom` value depends on a sibling key ---
+
+describe('settings-edit voice', () => {
+  test('writes a built-in style through the registry row', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { agent_name: 'Atlas', voice: { style: null, prose: null } });
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'voice', 'Concise'] });
+    expect(r.exitCode).toBe(0);
+    const cfg = readConfig(file);
+    expect(cfg.voice.style).toBe('Concise');
+    expect(cfg.voice.prose).toBeNull();
+    expect(cfg.agent_name).toBe('Atlas');
+  });
+
+  test('refuses a Claude Code built-in this hermit does not render', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { voice: { style: 'Concise', prose: null } });
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'voice', 'Explanatory'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('custom');
+    expect(readConfig(file).voice.style).toBe('Concise');
+  });
+
+  // `default` is a real value here, not the "inherit Claude Code's default"
+  // shorthand every other nullable row gives it: Claude Code's picker persists
+  // the lowercase literal. Swallowing it to null would leave the style unset and
+  // the previously rendered outputStyle in place forever.
+  test('"default" persists as the literal, not as a cleared value', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { voice: { style: 'Concise', prose: null } });
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'voice', 'default'] });
+    expect(r.exitCode).toBe(0);
+    expect(readConfig(file).voice.style).toBe('default');
+  });
+
+  test('style is nullable — clearing it stops the hermit managing the key', () => {
+    // Clearing means "stop rendering", not "revert": the last rendered outputStyle
+    // stays in settings until the operator changes it themselves. Nothing records
+    // which scope's key the hermit wrote, so deleting it could clobber their own pick.
+    const cfg: any = { voice: { style: 'Concise', prose: null } };
+    expect(applyKnown(cfg, 'voice', 'none').ok).toBe(true);
+    expect(cfg.voice.style).toBeNull();
+  });
+
+  test('custom without prose is refused, so the boot render can never fail on it', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { voice: { style: null, prose: null } });
+    const r = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'voice', 'custom'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('voice.prose');
+    expect(readConfig(file).voice.style).toBeNull();
+  });
+
+  test('prose first, then custom — the order the skill writes them in', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { voice: { style: null, prose: null } });
+    const p = await runScript('settings-edit.ts', {
+      args: [file, 'set', 'voice.prose', '"Lead with the answer. No preamble."'],
+    });
+    expect(p.exitCode).toBe(0);
+    const s = await runScript('settings-edit.ts', { args: [file, 'apply-known', 'voice', 'custom'] });
+    expect(s.exitCode).toBe(0);
+    const cfg = readConfig(file);
+    expect(cfg.voice.style).toBe('custom');
+    expect(cfg.voice.prose).toBe('Lead with the answer. No preamble.');
+  });
+
+  test('prose must be a string — a bare number is refused', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, { voice: { style: null, prose: null } });
+    const r = await runScript('settings-edit.ts', { args: [file, 'set', 'voice.prose', '42'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('voice.prose');
+  });
+});
+
 // --- Audit ledger, unset, history ---
 
 function auditRows(dir: string): any[] {

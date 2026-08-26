@@ -284,7 +284,12 @@ export function coerce(setting: Setting, raw: string): { ok: true; value: Json }
   // On a nullable row, "default" means "inherit Claude Code's default", not a
   // value: storing the literal string would send `--model default` on the next
   // `hermit-start`. Only nullable rows — `permission_mode` has a real `default`.
-  if (setting.nullable && raw === 'default') return { ok: true, value: null };
+  // An enum that lists `default` among its own values is the other exception:
+  // `voice` persists the lowercase literal Claude Code's picker writes, so
+  // swallowing it here would leave the style unset and the last rendered
+  // `outputStyle` in place forever.
+  const enumHasDefault = setting.kind === 'enum' && (setting.values ?? []).includes('default');
+  if (setting.nullable && raw === 'default' && !enumHasDefault) return { ok: true, value: null };
   switch (setting.kind) {
     case 'boolean': {
       const truthy = ['true', 'yes', 'on', 'enable', 'enabled'];

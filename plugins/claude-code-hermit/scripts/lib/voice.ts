@@ -5,8 +5,10 @@
 // session-start context — the system prompt is re-read on every API call and
 // survives compaction, while injected context ages and is dropped.
 //
-// Three surfaces need these values (apply-settings' sealed op, hermit-start's
-// boot repair, and the hermit-doctor check), so they are defined once here.
+// Two surfaces need these values — apply-settings' voice-render op (which writes
+// both artifacts) and the hermit-doctor check (which compares them to config) —
+// so they are defined once here. The operator's answer itself lives in
+// config.json's `voice` block; nothing in this file holds tone.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -17,19 +19,18 @@ import { defaultConfigDir } from './setup-token';
 export const HERMIT_OUTPUT_STYLE = 'hermit-voice';
 
 /**
- * Claude Code's built-in output styles, exactly as the installed CLI persists them
- * (extracted from the shipped binary's style registry, not the docs — the docs never
- * state the persisted value for Default). Every literal here matches its display name
- * except "default": the picker shows "Default" but writes the lowercase key.
+ * The `outputStyle` value config's `voice` block resolves to, or null when the hermit
+ * does not own the key.
+ *
+ * Null is the load-bearing case: it means the operator never answered the voice
+ * question (or cleared it), so whatever they picked in /config is theirs and the
+ * render leaves the settings key alone. `custom` is the only value that implies a
+ * file — every other one names a style Claude Code ships.
  */
-export const BUILTIN_OUTPUT_STYLES = ['default', 'Concise', 'Explanatory', 'Learning', 'Proactive'] as const;
-
-/** Every outputStyle value this plugin's tooling accepts as caller input. */
-export const SEALED_OUTPUT_STYLES = [...BUILTIN_OUTPUT_STYLES, HERMIT_OUTPUT_STYLE] as const;
-
-/** Type guard: is `style` one of SEALED_OUTPUT_STYLES? Centralizes the readonly-tuple cast. */
-export function isSealedOutputStyle(style: string): style is typeof SEALED_OUTPUT_STYLES[number] {
-  return (SEALED_OUTPUT_STYLES as readonly string[]).includes(style);
+export function outputStyleFor(voice: unknown): string | null {
+  const style = (voice as { style?: unknown } | null | undefined)?.style;
+  if (typeof style !== 'string' || style.trim() === '') return null;
+  return style === 'custom' ? HERMIT_OUTPUT_STYLE : style;
 }
 
 /** Project-relative path of the style file hatch renders. */
@@ -64,18 +65,9 @@ function readOutputStyle(settingsFile: string): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
-/**
- * Resolve the outputStyle set in the two project scopes, local over project.
- *
- * This is the seed question — "would writing the key here actually take effect?" —
- * so it deliberately stops at project scope. Both scopes here outrank user scope,
- * so a user-scope value cannot shadow a write to either and must not veto one.
- *
- * Checking only the hermit's own hatch target would miss the case that matters:
- * a hermit that wrote the key to committed settings.json while the operator's
- * /config pick sits in settings.local.json and silently outranks it.
- */
-export function resolveProjectStyle(projectRoot = '.'): PersistedStyle {
+/** The two project scopes, local over project — the half of the precedence chain
+ * that outranks user scope. Only resolvePersistedStyle calls it. */
+function resolveProjectStyle(projectRoot = '.'): PersistedStyle {
   for (const rel of PROJECT_SETTINGS_SCOPES) {
     const value = readOutputStyle(path.join(projectRoot, rel));
     if (value !== null) return { value, source: rel };

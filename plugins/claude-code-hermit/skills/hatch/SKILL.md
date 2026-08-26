@@ -326,7 +326,7 @@ with the answers payload as JSON on stdin. The script reads the template (or, on
 
 **Re-initialization** is `--reinit` on the same call — the script reads the existing config as its base (never the template), so any field the payload doesn't mention (custom operator keys, `push_notifications`, `docker`, `monitors`, ...) survives untouched, `_hermit_versions` entries are never advanced (only added if a slug is newly absent), and `scheduled_checks`/`channels`/`routines` are reconciled/merged by id rather than replaced wholesale. `shutdown_skill` is never written by this script — leave it `null`; the operator sets it via config edit if they run always-on services that need stopping on full close.
 
-**Template-only fields** (the wizard never asks about these — they come straight from `config.json.template`, and `hatch-config.ts` never touches them; the operator can tune them via `/hermit-settings` later): `model`, `effort`, `auto_session`, `always_on`, `chrome`, `monitors`, `compact`, `heartbeat`, `knowledge`, `env`, `quality_gate`, `watchdog`, `budget`, `telemetry_export`, `artifacts`, `context_hygiene`, `reflection`, `routine_wake_lint`, `doctor`, `storage_drift`, `post_close_clear`, `ask_gate`, `operator_profile`.
+**Template-only fields** (the wizard never asks about these — they come straight from `config.json.template`, and `hatch-config.ts` never touches them; the operator can tune them via `/hermit-settings` later): `model`, `effort`, `auto_session`, `always_on`, `chrome`, `monitors`, `compact`, `heartbeat`, `knowledge`, `env`, `quality_gate`, `watchdog`, `budget`, `telemetry_export`, `artifacts`, `context_hygiene`, `reflection`, `routine_wake_lint`, `doctor`, `storage_drift`, `post_close_clear`, `ask_gate`, `operator_profile`. `voice` is the one exception in the other direction: the template ships it unset and **Phase 4b** writes it through `settings-edit`, not through this payload — the questionnaire that asks for it runs after this step.
 
 `operator_profile` ships `"technical"` (the operator on the channel is the person who runs the box, so technical/ops/spend detail may reach the primary chat). A **client-facing install** (where the person on the channel is a client or end-user, not the maintainer) sets it to `"non-technical"`, which forces technical alerts and spend figures to a `maintainer_channel_id` (or SHELL.md Findings when none is set) and deflects client-chat spend questions. It also decides settings authority: on a `technical` install with no `maintainer_channel_id`, the hermit's own home chat carries the security tier, while a `non-technical` install keeps that tier terminal-only until a maintainer chat is configured — so it changes only from a terminal session. When a channel is configured, the plain framing for choosing this is "who reads this chat — you, or a client/end-user?"; a client answer means `non-technical`. Set it in `config.json` directly or via `/hermit-settings`; `hatch-config.ts` leaves the template default in place. The Quick branch and Advanced wizard both leave these at template defaults. `routine_wake_lint.max_windows` (default 6) is the wake-clustering lint threshold — `hermit-routines load` warns when enabled routines' fire-times spread across more than this many distinct 30-min windows. `doctor.routine_cost_floor_usd` (default 2) is the noise floor for the `routine-cost` doctor check: a routine warns only when its `$/run` exceeds both 3× the peer median (the other routines' median) and this floor, so a lone or uniformly-priced fleet never warns. `budget` ships inert (all caps `null`, `action: "alert"`) — see [`docs/config-reference.md`](../../docs/config-reference.md#budget) for daily/weekly/monthly USD caps and the `alert`/`pause` enforcement action. `telemetry_export` ships disabled (`enabled: false`, `destination.url: null`) — opt-in webhook export of a sanitized health/cost bundle from the watchdog tick, see [`docs/config-reference.md`](../../docs/config-reference.md#telemetry_export). `artifacts.dashboard`/`artifacts.proposals`/`artifacts.weekly_review` ship enabled (`true`) — three script-rendered, hash-gated Artifact pages (dashboard, open-proposals, weekly-review), refreshed by `brief`/`weekly-review`/`proposal-create`/`proposal-act`; see [`docs/artifacts.md`](../../docs/artifacts.md) and [`docs/config-reference.md`](../../docs/config-reference.md#artifacts). Publish authorization for unattended sessions is Step 9c below. `ask_gate` ships enabled (`true`) — on an `always_on` session with a reachable channel, it denies `AskUserQuestion` and redirects the model to the channel reply tool plus a durable micro-proposal entry; set to `false` to opt out, see [`docs/config-reference.md`](../../docs/config-reference.md#ask_gate). Settings authority from chat is per channel, not template-wide: `hatch-config.ts` stamps `channels.<name>.settings_policy: "allow"` on a channel entry it creates for a single operator (`"ask"` when that entry already names a `maintainer_channel_id` or allowlists more than one id; a pre-existing entry is left alone, so re-init never relaxes one), so the operator's own chat can change security-tier settings (permission mode, `env`, monitors, boot skill, remote, escalation, Docker, artifact backend) without a confirmation code. Set it to `"ask"` when more than one person can post in that chat, or `"deny"` to keep everything above the safe tier terminal-only there — both from a terminal, see [`docs/config-reference.md`](../../docs/config-reference.md#settings_policy).
 
@@ -388,7 +388,7 @@ Collect findings silently. Do NOT print scan results to the operator.
 Using the scan results, write a concise context document. Follow these rules:
 
 1. **Never duplicate CLAUDE.md content.** If CLAUDE.md already covers a topic (testing, conventions, build commands), don't repeat it.
-2. **Never duplicate `config.json` fields.** `routines`, `channels` (including Discord/Telegram user IDs and `morning_brief`), `permission_mode`, `agent_name`, `sign_off`, `escalation`, `idle_behavior`, `boot_skill`, `shutdown_skill`, and `_hermit_versions` are already loaded structurally — do not restate them as prose. OPERATOR.md is for context the model can't infer from config (project focus, constraints, approval gates, project rationale). Tone and comms style have their own home — the voice file, Phase 4b.
+2. **Never duplicate `config.json` fields.** `routines`, `channels` (including Discord/Telegram user IDs and `morning_brief`), `permission_mode`, `agent_name`, `sign_off`, `escalation`, `idle_behavior`, `boot_skill`, `shutdown_skill`, and `_hermit_versions` are already loaded structurally — do not restate them as prose. OPERATOR.md is for context the model can't infer from config (project focus, constraints, approval gates, project rationale). Tone and comms style have their own home — `config.json`'s `voice` block, written in Phase 4b.
 3. **Only include high-confidence inferences.** If the scan clearly reveals something (e.g., package.json shows Node.js, README describes the project), include it. If uncertain, leave it for Phase 3 questions.
 4. **Keep it under 50 lines.** OPERATOR.md is loaded every session-start — bloat costs tokens. Write concise prose, not documentation.
 5. **No rigid sections required.** Use headers if they help organize, but don't create empty sections. The goal is a useful context document, not a filled-in form.
@@ -397,17 +397,18 @@ Write the draft to `.claude-code-hermit/OPERATOR.md`.
 
 #### Phase 3 — Targeted questions (AskUserQuestion batch)
 
-Questions are split into two `AskUserQuestion` calls (max 4 per call). Q1–Q3 are never skipped and always form the first call. Q5–Q7 are conditional and form a second call only if any are included. Communication style is asked separately in Phase 4b, after `OPERATOR.md` is final — not here — so the answer is never in the conversation while that file gets written.
+Questions are split into two `AskUserQuestion` calls (max 4 per call). Q1–Q4 are never skipped and always form the first call. Q5–Q7 are conditional and form a second call only if any are included.
 
-**Call 1 — always sent (3 questions):**
+**Call 1 — always sent (4 questions):**
 
 | #   | Header      | Question                                                                | Options (+ Other for free text)                  |
 | --- | ----------- | ----------------------------------------------------------------------- | ------------------------------------------------ |
 | 1   | Focus       | "What should I focus on in this project?"                               | Active development / Stabilization / Exploration |
 | 2   | Constraints | "Are there hard rules or areas I should avoid touching without asking?" | None / Config files                              |
 | 3   | Approval    | "What actions require your explicit approval before I proceed?"         | Deploys only / Breaking changes / Nothing extra  |
+| 4   | Comms style | "How do you prefer I communicate?"                                      | Default / Concise                                |
 
-Accept any answer including free-text via Other. Expand these into OPERATOR.md prose in Phase 4 — don't take options too literally.
+Accept any answer including free-text via Other. Expand Q1–Q3 into OPERATOR.md prose in Phase 4 — don't take options too literally. Q4 is not OPERATOR.md material: it feeds Phase 4b and nothing else.
 
 **Call 2 — only if any of Q5–Q7 apply (skip conditions below):**
 
@@ -435,37 +436,43 @@ Incorporate the operator's answers into the draft:
 - Keep the document under 50 lines total
 - For hermit-specific context, append after the core content
 
+**Draft from Q1–Q3 and the Phase 1 scan only.** Q4 (comms style) has its own home — `config.json`'s `voice` block, written in Phase 4b — so it must not reach this file in any form. Tone in `OPERATOR.md` is a second, weaker copy of something the system prompt already carries.
+
 **Before writing, scrub the draft for `config.json` mirroring.** Re-scan and remove any sentence that restates a `config.json` field (routine schedules, Discord/Telegram user IDs, `morning_brief` time, `permission_mode`, `agent_name`, `sign_off`, `escalation`, `idle_behavior`, `boot_skill`, `shutdown_skill`). If removing a sentence leaves a paragraph hollow, drop the paragraph. Those facts are already loaded from config.json on every session-start — duplicating them in OPERATOR.md is pure token tax and drifts when config changes.
 
 Write the final version to `.claude-code-hermit/OPERATOR.md`.
 
 #### Phase 4b — Style
 
-The hermit's tone lives in a native Claude Code output style, so it reaches the **system prompt** instead of session-start context — it holds for the whole session and survives compaction. Asked here, after `OPERATOR.md` is already written, so the answer is never in play while that file is drafted.
+No dialog here — this applies the Q4 answer from Phase 3. The hermit's tone lives in a native Claude Code output style, so it reaches the **system prompt** instead of session-start context: it holds for the whole session and survives compaction. `config.json`'s `voice` block is what the operator owns; the style key and the style file are rendered from it, at hatch and again at every boot.
 
-1. If `.claude/output-styles/hermit-voice.md` already exists, it's operator-owned — leave it alone, skip the question in step 2, and go straight to step 4 with `style = hermit-voice`.
-2. Otherwise ask (`AskUserQuestion`, single question): "How do you prefer I communicate?" — options Default / Concise / Explanatory / Other (free text).
-3. Resolve `style` from the answer:
-   - **Default** → `style = default` — lowercase. Claude Code's `/config` picker displays "Default" but persists the lowercase literal; the two are not interchangeable.
-   - **Concise** → `style = Concise`. **Explanatory** → `style = Explanatory`. Describe Explanatory as it actually behaves — educational insights alongside the work — not as a synonym for "detailed". None of the three built-ins write a file or create `.claude/output-styles/`.
-   - **Other (free text)** → render `${CLAUDE_PLUGIN_ROOT}/state-templates/hermit-voice.md.template` to `.claude/output-styles/hermit-voice.md` first (write the file before applying the key, so a failure leaves an inert file rather than an active pointer to a missing one), replacing `{{VOICE_PROSE}}` with tone guidance written from the operator's own words — instructions to yourself about how to talk to them: depth, cadence, how much reasoning to show, when to lead with the answer. Use their wording verbatim or with only mechanical wrapping; never paraphrase it into something weaker than a built-in already provides — that's the bug this phase exists to not repeat. Keep the frontmatter and the Precedence section exactly as the template has them. Don't restate channel-routing rules (they ship with the plugin), don't put work context here (that's OPERATOR.md), and keep it short — every line costs tokens on every API call. Then `style = hermit-voice`.
-4. Apply it (target from step 2a):
+1. If `.claude/output-styles/hermit-voice.md` already exists, its prose is the operator's — adopt it instead of asking again. Take the text between the closing `-->` of its comment block and the `## Precedence` heading and write it into `voice.prose`, then set `style = custom` (the two commands in step 2's Other branch, in that order). The next render reproduces that prose verbatim. Skip the Q4 answer entirely and go to step 3.
+2. Otherwise write the Q4 answer:
+   - **Default** → `apply-known voice default`. **Concise** → `apply-known voice Concise`. Neither writes a file.
+   - **Other (free text)** → the operator's own words become the voice, verbatim. Write the prose **first**, then the style (the reverse order is refused — `custom` without prose is invalid):
+
+     ```
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json set voice.prose '"<their words>"'
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json apply-known voice custom
+     ```
+
+     Pass their wording through unchanged, or with only mechanical wrapping into instructions-to-yourself form (depth, cadence, how much reasoning to show, when to lead with the answer). Never paraphrase it into something weaker than a built-in already provides — that is the bug this phase exists to not repeat. Don't restate channel-routing rules (they ship with the plugin), don't put work context here (that's OPERATOR.md), and keep it short: it costs tokens on every API call.
+3. Render it:
 
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> output-style <style>
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json voice-render
    ```
 
-   Prints `applied`, or `kept:<value>` when a different style already owns the key at project scope (`.claude/settings.local.json` or `.claude/settings.json`). Carry that result into Phase 5 — on `kept:` the operator's answer was **not** applied, and saying otherwise is the one thing this step must not do.
+   **Local scope, not the hatch target** — that is the scope Claude Code's own `/config` picker writes and the one that outranks committed settings, and a custom voice file is gitignored, so a committed pointer would name a file a teammate doesn't have. The op refuses any other target. It prints `applied:<style>`; carry that into Phase 5.
 
 #### Phase 5 — Confirm
 
-Tell the operator: "OPERATOR.md is ready. You can review it at `.claude-code-hermit/OPERATOR.md`. Refine anytime — just tell me what changed." Then report the style from what Phase 4b step 4 actually printed:
+Tell the operator: "OPERATOR.md is ready. You can review it at `.claude-code-hermit/OPERATOR.md`. Refine anytime — just tell me what changed." Then report the style from what Phase 4b step 3 printed:
 
-**On `applied`:**
-- **Built-in** (`default`/`Concise`/`Explanatory`): "Communication style is set to `<style>`. Change it anytime with `/config`."
-- **Custom** (`hermit-voice`): "How you talk to them is at `.claude/output-styles/hermit-voice.md`, editable directly or from a terminal session (`/claude-code-hermit:hermit-settings voice`), and it takes effect on the next session."
+- **A built-in** (`applied:default` / `applied:Concise`): "Communication style is set to `<style>`. Change it any time with `/claude-code-hermit:hermit-settings voice` — from a chat too, once a channel is set up."
+- **A custom voice** (`applied:hermit-voice`): "How I talk to you is your own wording, at `.claude/output-styles/hermit-voice.md`. Change it with `/claude-code-hermit:hermit-settings voice`; it takes effect next session."
 
-**On `kept:<value>`:** say plainly that their answer was not applied, that `<value>` was already set for this project and was left alone, and that `/claude-code-hermit:hermit-settings voice` from a terminal session switches it. If a custom voice file was rendered in step 3, mention it exists but is inactive until that switch. Never report the answered style as if it took effect.
+Either way the file is a render of `config.json` — say so if the operator asks about editing it directly, so they don't lose an edit at the next restart.
 
 ### 6. Append session discipline to CLAUDE.md or CLAUDE.local.md
 
@@ -799,6 +806,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Advanced Phase 3 equivalent | escalation, remote | template defaults (balanced, true) — don't override |
 | Advanced Phase 4 equivalent | plugins + scheduled_checks | install all 4; write 3 scheduled_checks entries per Phase 4 mapping |
 | Advanced Phase 4b equivalent | `.baseline-pending` marker | same eligibility check as Advanced |
+| Advanced 5a Phase 4b equivalent | `voice` | Quick Turn 4 runs 5a verbatim, so the comms question and the render happen there too |
 | Step 5b | artifact chrome localization | run verbatim — generate the translated table only when `language` is set and not `en`; skip silently otherwise |
 | Advanced Phase 5 equivalent | channels.<name>.* | state_dir + enabled + dm_channel_id=null + default_chat_id=null; omit allowed_users + morning_brief |
 | Quick Turn 3 idle choice | idle_behavior | set to answer (`discover` / `wait`) |
