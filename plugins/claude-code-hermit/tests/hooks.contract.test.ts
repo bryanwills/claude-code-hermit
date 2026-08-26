@@ -1756,6 +1756,24 @@ describe('doctor-check', () => {
     expect(c.detail).toContain('today');
   }));
 
+  test('doctor-check (corrupt cost lines keep the snapshot out of the persistent alert)', withDir(async (dir) => {
+    seedDoctor(dir,
+      '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}');
+    const today = new Date().toISOString().slice(0, 10);
+    write(path.join(dir, '.claude', 'cost-log.jsonl'),
+      `{"timestamp":"${today}T10:00:00.000Z","total_tokens":350,"cache_read_tokens":200,"estimated_cost_usd":0.0012}\n`);
+    write(hermit(dir, 'state', 'cost-index.json'),
+      JSON.stringify({ version: 3, skipped_corrupt_lines: 2 }));
+
+    const c = checkById(await doctorReport(dir), 'cost');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('today $0.0012');
+    expect(c.detail).toContain('2 corrupt cost-log lines skipped; recorded spend may be understated');
+    expect(c.alert_detail).toBe('2 corrupt cost-log lines skipped; recorded spend may be understated');
+    expect(c.alert_detail).not.toContain('today $');
+    expect(c.alert_detail).not.toContain('tokens');
+  }));
+
   test('doctor-check (cost visibility — warn when no cost-log)', withDir(async (dir) => {
     seedDoctor(dir,
       '{"agent_name":"test","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true},"routines":[]}');

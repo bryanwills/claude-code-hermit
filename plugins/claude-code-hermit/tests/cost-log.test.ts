@@ -333,6 +333,55 @@ describe('cost row builders', () => {
     expect(JSON.parse(lines[0]).subagent).toBeUndefined();
     expect(JSON.parse(lines[1]).subagent).toBe(true);
   }));
+
+  test('appendCostRows preserves new rows after an unterminated partial tail', withTmpdir((dir) => {
+    const logPath = path.join(dir, 'cost-log.jsonl');
+    const idxPath = path.join(dir, 'cost-index.json');
+    const partial = '{"timestamp":"interrupted"';
+    const main = buildMainCostRow(mainBase);
+    const sub = buildSubagentCostRow(subBase);
+    fs.writeFileSync(logPath, partial);
+
+    appendCostRows(logPath, [main, sub]);
+
+    const lines = fs.readFileSync(logPath, 'utf-8').trimEnd().split('\n');
+    expect(lines[0]).toBe(partial);
+    expect(JSON.parse(lines[1]).subagent).toBeUndefined();
+    expect(JSON.parse(lines[2]).subagent).toBe(true);
+
+    const idx = updateCostIndex(logPath, idxPath, 'UTC');
+    expect(idx.skipped_corrupt_lines).toBe(1);
+    expect(idx.total_cost_usd).toBeCloseTo(main.estimated_cost_usd + sub.estimated_cost_usd, 8);
+    expect(idx.total_tokens).toBe(main.total_tokens + sub.total_tokens);
+  }));
+
+  test('appendCostRows adds no extra separator to healthy, empty, or missing files', withTmpdir((dir) => {
+    const row = buildMainCostRow(mainBase);
+    const serialized = `${JSON.stringify(row)}\n`;
+    const missingPath = path.join(dir, 'missing.jsonl');
+    const emptyPath = path.join(dir, 'empty.jsonl');
+    const healthyPath = path.join(dir, 'healthy.jsonl');
+    fs.writeFileSync(emptyPath, '');
+    fs.writeFileSync(healthyPath, `${serialized}`);
+
+    appendCostRows(missingPath, [row]);
+    appendCostRows(emptyPath, [row]);
+    appendCostRows(healthyPath, [row]);
+
+    expect(fs.readFileSync(missingPath, 'utf-8')).toBe(serialized);
+    expect(fs.readFileSync(emptyPath, 'utf-8')).toBe(serialized);
+    expect(fs.readFileSync(healthyPath, 'utf-8')).toBe(serialized + serialized);
+  }));
+
+  test('appendCostRows leaves an unterminated tail untouched when no rows are provided', withTmpdir((dir) => {
+    const logPath = path.join(dir, 'cost-log.jsonl');
+    const partial = '{"timestamp":"interrupted"';
+    fs.writeFileSync(logPath, partial);
+
+    appendCostRows(logPath, []);
+
+    expect(fs.readFileSync(logPath, 'utf-8')).toBe(partial);
+  }));
 });
 
 describe('scanRoutineCostWindow', () => {

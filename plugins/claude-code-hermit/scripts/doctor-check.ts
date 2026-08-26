@@ -246,10 +246,13 @@ function checkCost(p: DoctorPaths = PATHS) {
     try {
       const idx = readCostIndex(costIndexPath(hermitDir));
       if (idx && idx.skipped_corrupt_lines > 0) {
+        const corruptCount = idx.skipped_corrupt_lines;
+        const corruptDetail = `${corruptCount} corrupt cost-log ${corruptCount === 1 ? 'line' : 'lines'} skipped; recorded spend may be understated`;
         return {
           id: 'cost',
           status: 'warn',
-          detail: `${detail} — ${idx.skipped_corrupt_lines} corrupt cost-log line(s) skipped; budget figures may be stale`,
+          detail: `${detail}; ${corruptDetail}`,
+          alert_detail: corruptDetail,
         };
       }
     } catch {
@@ -2131,10 +2134,11 @@ function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir)
     const applied = mutateOwnedAlerts(ledgerPath, (alerts) => {
       for (const [key, c] of failing) {
         const prev = alerts[key];
+        const message = c.alert_detail ?? c.detail;
         alerts[key] = prev
-          ? { ...prev, status: c.status, message: c.detail, last_seen: nowIso,
+          ? { ...prev, status: c.status, message, last_seen: nowIso,
               count: (typeof prev.count === 'number' ? prev.count : 0) + 1 }
-          : { first_seen: nowIso, last_seen: nowIso, status: c.status, message: c.detail,
+          : { first_seen: nowIso, last_seen: nowIso, status: c.status, message,
               suppressed: false, notified: false, count: 1 };
         // Anything not yet confirmed delivered is still owed to the operator.
         if (alerts[key].notified !== true) pending.push({ id: c.id, status: c.status, detail: c.detail });

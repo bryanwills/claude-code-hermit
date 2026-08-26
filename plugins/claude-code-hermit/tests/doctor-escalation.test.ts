@@ -43,7 +43,12 @@ const { escalate: escalateIn, markNotified: markNotifiedIn } =
 const escalate = (checks: any[], nowIso: string) => escalateIn(checks, nowIso, hermit);
 const markNotified = (ids: string[]) => markNotifiedIn(ids, hermit);
 
-const check = (id: string, status: string, detail = `${id} detail`) => ({ id, status, detail });
+const check = (id: string, status: string, detail = `${id} detail`, alertDetail?: string) => ({
+  id,
+  status,
+  detail,
+  ...(alertDetail ? { alert_detail: alertDetail } : {}),
+});
 const readLedger = () => JSON.parse(fs.readFileSync(ledger, 'utf-8')).alerts;
 
 describe('escalate — episode lifecycle', () => {
@@ -93,6 +98,25 @@ describe('escalate — episode lifecycle', () => {
     expect(entry.status).toBe('fail');          // status refreshed
     expect(entry.message).toBe('ports published'); // detail refreshed
     expect(entry.first_seen).toBe('2026-08-01T10:00:00Z');
+  });
+
+  test.serial('alert detail is persisted while the full detail is offered for notification', async () => {
+    const fullDetail = 'today $12.3400; 2 corrupt cost-log lines skipped; recorded spend may be understated';
+    const alertDetail = '2 corrupt cost-log lines skipped; recorded spend may be understated';
+    const first = escalate([check('cost', 'warn', fullDetail, alertDetail)], '2026-08-01T10:00:00Z');
+
+    expect(readLedger()['doctor:cost'].message).toBe(alertDetail);
+    expect(first.new).toEqual([{ id: 'cost', status: 'warn', detail: fullDetail }]);
+
+    markNotified(['cost']);
+    const second = escalate([
+      check('cost', 'warn', 'today $20.0000; 3 corrupt cost-log lines skipped; recorded spend may be understated',
+        '3 corrupt cost-log lines skipped; recorded spend may be understated'),
+    ], '2026-08-02T10:00:00Z');
+
+    expect(second.new).toEqual([]);
+    expect(readLedger()['doctor:cost'].message)
+      .toBe('3 corrupt cost-log lines skipped; recorded spend may be understated');
   });
 
   test.serial('resolution deletes the key and reports it; recurrence is new again', async () => {
