@@ -1490,6 +1490,13 @@ describe('observations.ts observe', () => {
     expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).session_id).toBe('unknown');
   }));
 
+  test('observations (null session_id + S-010-REPORT.md → session_id S-010)', withDir(async (dir) => {
+    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_id: null }));
+    fs.writeFileSync(hermit(dir, 'sessions', 'S-010-REPORT.md'), '# S-010\n');
+    await observe(hermit(dir), 'quick-deferral', 'a label');
+    expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).session_id).toBe('S-010');
+  }));
+
   test('observations (deterministic sources are not invocable from the CLI)', withDir(async (dir) => {
     // cost-spike/behavior-digest/startup-drift are derived from data the model does
     // not hold; only the scripts that compute them may write them.

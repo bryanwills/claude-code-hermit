@@ -3,12 +3,18 @@
 // Zero npm dependencies, Node stdlib only. Always exits 0 on I/O failure (fail-open).
 // Usage: bun update-reflection-state.ts <state-file-path> '<json-payload>'
 //    or: bun update-reflection-state.ts <state-file-path> --quick-hash <hash>
+//    or: bun update-reflection-state.ts <state-file-path> --graduation-cursor
 //    or: bun update-reflection-state.ts <state-file-path> --scheduled-check-run <id>
 //
 // --quick-hash is a distinct write path for the reflect --quick cursor: it writes ONLY
 // the top-level last_quick_hash key and does not touch last_run_at/last_reflection/counters
 // below — mutating those would suppress the next scheduled reflect (see reflect/SKILL.md's
 // quick-mode note on why it never calls the counter-incrementing path below).
+//
+// --graduation-cursor is step 3b's promote cursor: it writes ONLY
+// counters.last_graduation_at and does not touch last_run_at. 3b must stamp this
+// before Candidate processing appends reflect-noticed rows, or those rows would
+// be older than last_run_at on the next run and never graduate.
 //
 // --scheduled-check-run is the session skill's step-4b cursor: it writes ONLY
 // scheduled_checks.<id>.last_run (today's date), preserving sibling per-check
@@ -53,6 +59,23 @@ if (arg3 === '--quick-hash') {
   let state: Json = {};
   try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')); } catch { /* first run before state file exists */ }
   state.last_quick_hash = hash;
+  try {
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+  } catch (err: any) {
+    console.error(`update-reflection-state: write failed: ${err.message}`);
+  }
+  process.exit(0);
+}
+
+if (arg3 === '--graduation-cursor') {
+  if (!stateFile) {
+    console.error('Usage: bun update-reflection-state.ts <state-file-path> --graduation-cursor');
+    process.exit(1);
+  }
+  let state: Json = {};
+  try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')); } catch { /* first run */ }
+  if (!state.counters || typeof state.counters !== 'object') state.counters = {};
+  state.counters.last_graduation_at = new Date().toISOString();
   try {
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
   } catch (err: any) {
