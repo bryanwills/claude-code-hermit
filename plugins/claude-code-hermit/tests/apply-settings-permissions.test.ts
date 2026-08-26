@@ -27,6 +27,7 @@ function sealedArray(name: string): string[] {
 
 const HERMIT_ALLOW = sealedArray('HERMIT_ALLOW');
 const HERMIT_OBSOLETE = sealedArray('HERMIT_OBSOLETE');
+const HERMIT_OBSOLETE_DENY = sealedArray('HERMIT_OBSOLETE_DENY');
 
 function withTarget(fn: (target: string) => Promise<void>) {
   return async () => {
@@ -47,6 +48,10 @@ function readAllow(target: string): string[] {
   return JSON.parse(fs.readFileSync(target, 'utf-8')).permissions.allow;
 }
 
+function readDeny(target: string): string[] {
+  return JSON.parse(fs.readFileSync(target, 'utf-8')).permissions.deny;
+}
+
 async function run(target: string, op: string) {
   const r = await runScript('apply-settings.ts', { args: [target, op] });
   expect(r.exitCode).toBe(0);
@@ -58,6 +63,7 @@ describe('apply-settings permissions-plan', () => {
     const plan = await run(target, 'permissions-plan');
     expect(plan.missing).toEqual(HERMIT_ALLOW);
     expect(plan.obsolete).toEqual([]);
+    expect(plan.obsolete_deny).toEqual([]);
   }));
 
   test('writes nothing — the target stays absent', withTarget(async (target) => {
@@ -68,7 +74,7 @@ describe('apply-settings permissions-plan', () => {
   test('reports an empty plan once the target is in sync', withTarget(async (target) => {
     seed(target, { permissions: { allow: HERMIT_ALLOW } });
     const plan = await run(target, 'permissions-plan');
-    expect(plan).toEqual({ missing: [], obsolete: [] });
+    expect(plan).toEqual({ missing: [], obsolete: [], obsolete_deny: [] });
   }));
 
   test('names retired entries the target still carries', withTarget(async (target) => {
@@ -77,6 +83,13 @@ describe('apply-settings permissions-plan', () => {
     const plan = await run(target, 'permissions-plan');
     expect(plan.obsolete).toEqual([stale]);
     expect(plan.missing).toEqual([]);
+  }));
+
+  test('names retired deny entries the target still carries', withTarget(async (target) => {
+    seed(target, { permissions: { allow: HERMIT_ALLOW, deny: [...HERMIT_OBSOLETE_DENY, 'Bash(*PASSWORD*)'] } });
+    const plan = await run(target, 'permissions-plan');
+    expect(plan.obsolete_deny).toEqual(HERMIT_OBSOLETE_DENY);
+    expect(plan.obsolete).toEqual([]);
   }));
 });
 
@@ -100,6 +113,21 @@ describe('apply-settings permissions-sync', () => {
     for (const entry of HERMIT_ALLOW) expect(allow).toContain(entry);
   }));
 
+  test('removes the retired credential-word deny globs and keeps the operator\'s own', withTarget(async (target) => {
+    // The three word globs were seeded by the `deny` op in an earlier version, so a
+    // hand edit is the only other way they leave an unattended hermit's settings —
+    // and a strict-profile hermit cannot make one. The operator's own deny rule is
+    // structurally safe: removal is filtered by the sealed registry.
+    const custom = 'Bash(*PASSWORD*)';
+    seed(target, { permissions: { allow: HERMIT_ALLOW, deny: [custom, ...HERMIT_OBSOLETE_DENY] } });
+
+    const plan = await run(target, 'permissions-sync');
+    const deny = readDeny(target);
+
+    expect(plan.obsolete_deny).toEqual(HERMIT_OBSOLETE_DENY);
+    expect(deny).toEqual([custom]);
+  }));
+
   test('leaves unrelated settings untouched', withTarget(async (target) => {
     seed(target, { env: { FOO: 'bar' }, permissions: { deny: ['Bash(rm:*)'] } });
     await run(target, 'permissions-sync');
@@ -113,7 +141,7 @@ describe('apply-settings permissions-sync', () => {
     seed(target, {});
     await run(target, 'permissions-sync');
     const second = await run(target, 'permissions-sync');
-    expect(second).toEqual({ missing: [], obsolete: [] });
+    expect(second).toEqual({ missing: [], obsolete: [], obsolete_deny: [] });
   }));
 
   test('a no-op sync does not rewrite the file', withTarget(async (target) => {
@@ -124,7 +152,7 @@ describe('apply-settings permissions-sync', () => {
 
     const plan = await run(target, 'permissions-sync');
 
-    expect(plan).toEqual({ missing: [], obsolete: [] });
+    expect(plan).toEqual({ missing: [], obsolete: [], obsolete_deny: [] });
     expect(fs.readFileSync(target, 'utf-8')).toBe(original);
   }));
 

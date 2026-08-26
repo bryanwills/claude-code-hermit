@@ -18,7 +18,8 @@ import { safe, safeForLLMMultiline, scanInjected } from './lib/sanitize';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { readSettledConfig } from './lib/config-read';
-import { extractSection, firstContentLine, stripPlaceholders } from './lib/md-write';
+import { extractSection, firstContentLine, isResolvedBlockerLine, stripPlaceholders } from './lib/md-write';
+import { isResetBreadcrumb } from './lib/progress-log';
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson } from './lib/runtime';
@@ -98,6 +99,16 @@ function dropBulletResidue(text: string): string {
   return text.split('\n').filter(l => !/^\s*-+\s*$/.test(l)).join('\n').trim();
 }
 
+// Drops blockers the session already cleared (see isResolvedBlockerLine for the two
+// spellings). Injecting one makes a resumed or compacted session re-attempt work that is
+// already unblocked — the exact failure the blockers line exists to prevent.
+function dropResolvedBlockers(text: string): string {
+  return text.split('\n')
+    .filter(l => !isResolvedBlockerLine(l))
+    .join('\n')
+    .trim();
+}
+
 // Return last N non-empty lines from a string.
 function lastLines(text: string, n: number): string {
   const lines = text.split('\n').filter(l => l.trim());
@@ -140,27 +151,29 @@ function buildCompactionPointers(agentDir: string): string {
     }
   } catch {}
 
+  // Read once, process per field: the two SHELL.md-derived pointers are emitted at
+  // opposite ends of the capsule (see the ordering note below), but a second read of the
+  // same path in the same synchronous pass buys no extra fail-open — it fails
+  // identically. Each field keeps its own try/catch so a malformed section still can't
+  // blank the other.
+  let shellContent: string | null = null;
+  try { shellContent = fs.readFileSync(path.resolve(agentDir, 'sessions', 'SHELL.md'), 'utf-8'); } catch {}
+
   try {
-    const shellContent = fs.readFileSync(path.resolve(agentDir, 'sessions', 'SHELL.md'), 'utf-8');
+    if (shellContent === null) throw new Error('no shell');
     const firstLine = firstContentLine(extractSection(shellContent, 'Task') ?? '', 300);
     if (firstLine) parts.push(`task: ${guarded('sessions/SHELL.md', firstLine)}`);
     const progress = extractSection(shellContent, 'Progress Log');
+    // Skip the reset breadcrumbs: the PreCompact hook appends "context compacted (…)"
+    // immediately before this capsule is built, so the newest entry is always that
+    // stamp — 200 characters of a budget this tight, saying only that the thing that
+    // just happened happened. The last real entry is what "last progress" means.
     const lastEntry = progress
-      ? progress.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('<!--')).pop()
+      ? progress.split('\n').map(l => l.trim())
+          .filter(l => l && !l.startsWith('<!--') && !isResetBreadcrumb(l))
+          .pop()
       : null;
     if (lastEntry) parts.push(`last progress: ${guarded('sessions/SHELL.md', lastEntry.slice(0, 200))}`);
-    // dropBulletResidue first: stripPlaceholders trims the whole section, so a
-    // comment-only bullet ("- <!-- resolved ... -->") would otherwise reach here
-    // as a bare "-" and surface as "blockers: -".
-    const blockerLines = dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? ''))
-      .split('\n').map(l => l.trim().replace(/^-\s+/, '').trim()).filter(Boolean);
-    if (blockerLines.length) {
-      // Cap each entry, not the joined string: one verbose blocker would
-      // otherwise eat the whole budget and truncate away the newest one, which
-      // is the entry `slice(-2)` exists to preserve.
-      const blockers = blockerLines.slice(-2).map(l => l.slice(0, 118)).join(' | ');
-      parts.push(`blockers: ${guarded('sessions/SHELL.md', blockers.slice(0, 240))}`);
-    }
   } catch {}
 
   try {
@@ -180,6 +193,26 @@ function buildCompactionPointers(agentDir: string): string {
     const config = readSettledConfig(agentDir);
     const route = resolveOutboundChannel(config.channels);
     if (route) parts.push(`outbound channel: ${safe(route.id)} (chat_id: ${safe(route.chat_id)})`);
+  } catch {}
+
+  // Ordered after the channel route deliberately. Both are re-seed facts, but a hermit
+  // that loses its route stops being reachable at all, while one that loses the blockers
+  // line re-reads SHELL.md. The capsule is hard-capped, so whichever sits last is what a
+  // long task line plus a full micro-proposal queue push out first.
+  try {
+    if (shellContent === null) throw new Error('no shell');
+    // dropBulletResidue first: stripPlaceholders trims the whole section, so a
+    // comment-only bullet ("- <!-- resolved ... -->") would otherwise reach here
+    // as a bare "-" and surface as "blockers: -".
+    const blockerLines = dropResolvedBlockers(dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '')))
+      .split('\n').map(l => l.trim().replace(/^-\s+/, '').trim()).filter(Boolean);
+    if (blockerLines.length) {
+      // Cap each entry, not the joined string: one verbose blocker would
+      // otherwise eat the whole budget and truncate away the newest one, which
+      // is the entry `slice(-2)` exists to preserve.
+      const blockers = blockerLines.slice(-2).map(l => l.slice(0, 118)).join(' | ');
+      parts.push(`blockers: ${guarded('sessions/SHELL.md', blockers.slice(0, 240))}`);
+    }
   } catch {}
 
   try {
@@ -354,7 +387,7 @@ function emitFullContext(source: string | null) {
       parts.push(`## Progress Log (last 10)\n${recent}`);
     }
 
-    const blockers = dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? ''));
+    const blockers = dropResolvedBlockers(dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '')));
     if (blockers) {
       parts.push(`## Blockers\n${blockers}`);
     }

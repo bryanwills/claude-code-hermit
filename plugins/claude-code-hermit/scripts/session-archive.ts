@@ -36,7 +36,8 @@ import { costLogPath, pinStateDirOrExit } from './lib/cc-compat';
 import { computeSessionCost } from './lib/session-cost';
 import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
 import { readSettledConfig } from './lib/config-read';
-import { extractSection as sectionBody, firstContentLine, replaceSectionInPlace, stripPlaceholders } from './lib/md-write';
+import { extractSection as sectionBody, firstContentLine, isResolvedBlockerLine, replaceSectionInPlace, stripPlaceholders } from './lib/md-write';
+import { isResetBreadcrumb } from './lib/progress-log';
 
 type Json = any;
 
@@ -469,39 +470,56 @@ function contentLines(s: string): string[] {
     .map(l => l.length > maxLen ? l.slice(0, maxLen - 1) + '…' : l);
 }
 
-function firstRecordedTask(shell: string): string {
+// Recorded SHELL.md Task first, then the close payload's `Task:`, then the first real
+// Progress Log entry. The payload can fill an empty recorded Task — a session that
+// never wrote one still did something nameable — but never overwrite one: what the
+// session recorded while working outranks what the model says about it at close.
+function firstRecordedTask(shell: string, payloadTask?: string): string {
   const task = firstContentLine(extractSection(shell, 'Task'), 120);
   if (task) return task;
+
+  const fromPayload = firstContentLine(payloadTask ?? '', 120);
+  if (fromPayload) return fromPayload;
 
   const progress = stripPlaceholders(extractSection(shell, 'Progress Log'));
   for (const line of progress.split('\n')) {
     const candidate = line.trim().replace(/^-\s+/, '');
-    if (!candidate) continue;
-    if (/^\[archived\]\s+previous entries\b/i.test(candidate)) continue;
-    if (/^\[\d{2}:\d{2}\]\s+context (?:compacted|cleared)\b/i.test(candidate)) continue;
+    if (!candidate || isResetBreadcrumb(candidate)) continue;
     return candidate.slice(0, 120);
   }
   return '';
 }
 
-type MergedPayloadField = 'Blockers' | 'Artifacts';
+type MergedPayloadField = 'Blockers' | 'Artifacts' | 'Task';
 
 function blockerText(line: string): string {
   return line.trim().replace(/^-\s+/, '').trim();
 }
+
+// The one convention for "this blocker cleared": a `~` in front of its text — the same
+// sigil the close payload uses (`Blockers: ~ <prefix>`), so there is one thing to learn.
+// It marks rather than deletes: the text stays legible in SHELL.md until the archive,
+// which is what keeps a recorded fact recorded. The report renders it as `[resolved]`,
+// the next session's SHELL.md drops it, and startup-context skips it when naming current
+// blockers — see isResolvedBlockerLine, which both sides share.
 
 function mergeRecordedBlockers(
   recorded: string,
   payload: string,
   recoveryBlockers: string | undefined,
   statusNote: string | null,
-): { content: string; contributed: boolean } {
+): { content: string; contributed: boolean; carryForward: string } {
   const recordedLines = recorded.split('\n')
     .map(line => line.trim())
     .filter(Boolean);
-  const recordedText = recordedLines.map(blockerText);
+  // A recorded line already marked resolved was cleared during the session; strip the
+  // marker for matching and display, and seed `resolved` with it so the payload doesn't
+  // have to repeat what SHELL.md already says.
+  const recordedText = recordedLines.map(line => blockerText(line).replace(/^(?:~|\[resolved\])\s*/i, ''));
   const seen = new Set(recordedText.map(line => line.toLowerCase()));
-  const resolved = new Set<number>();
+  const resolved = new Set<number>(
+    recordedLines.map((line, i) => (isResolvedBlockerLine(line) ? i : -1)).filter(i => i !== -1),
+  );
   const additions: string[] = [];
   let contributed = false;
 
@@ -540,6 +558,10 @@ function mergeRecordedBlockers(
   const shellLines = recordedLines.map((line, index) => (
     resolved.has(index) ? `- [resolved] ${recordedText[index]}` : line
   ));
+  // What the next session inherits: the same recorded lines minus the resolved ones,
+  // and nothing else. Payload additions, the recovery note and the status note are
+  // report-only — a session that has already ended is not handing itself new blockers.
+  const carryForward = recordedLines.filter((_, index) => !resolved.has(index)).join('\n');
   return {
     content: [
       ...shellLines,
@@ -548,6 +570,7 @@ function mergeRecordedBlockers(
       statusNote,
     ].filter(Boolean).join('\n'),
     contributed,
+    carryForward,
   };
 }
 
@@ -578,18 +601,31 @@ function recordedArtifacts(
   };
 }
 
+// Duration is the runtime's cost arc, the same [opened_at, closed_at] window
+// resolveCost sums against — so the two figures in a report can never describe
+// different spans. cost-tracker re-stamps opened_at whenever the transcript changes
+// (lib maintainOpenedAt), which is what makes the window provably this runtime's.
+//
+// It deliberately does NOT require runtime.session_id to equal the archived id.
+// close/auto null the id — that null is the auto-close gate's "resting, nothing to
+// close" state — so requiring the match reported `unknown` for every archive after the
+// first on exactly the always-on installs that archive nightly. `unknown` now means
+// what it says: no arc was ever opened, or the window is inverted (a crash or a
+// recovered close that never got a real bound).
 function resolveDuration(
-  sessionId: string,
-  runtimeSessionId: string | undefined,
   openedAt: string | undefined,
   closedAt: string | undefined,
   now: Date,
 ): string {
-  if (runtimeSessionId !== sessionId || !openedAt) return 'unknown';
+  if (!openedAt) return 'unknown';
   const start = Date.parse(openedAt);
   if (!Number.isFinite(start)) return 'unknown';
   const parsedEnd = closedAt ? Date.parse(closedAt) : NaN;
   const end = Number.isFinite(parsedEnd) ? parsedEnd : now.getTime();
+  // An end before the start is not a short session, it is a broken window — the same
+  // condition the cost path already refuses to sum over. Report it as unknown rather
+  // than as a negative or a rounded-to-zero span.
+  if (end < start) return 'unknown';
   return formatDuration(end - start);
 }
 
@@ -597,17 +633,18 @@ function buildReport(opts: {
   sessionId: string; mode: 'idle' | 'close' | 'auto'; now: Date;
   payload: Record<string, string> & { plan?: string }; shell: string; stateDir: string; config: Json;
   runtimeSessionId?: string; openedAt?: string; durationClosedAt?: string; costClosedAt?: string; recoveryBlockers?: string;
-}): { content: string; statusNote: string | null; cost: { cost_usd: number; tokens: number }; mergedPayloadFields: MergedPayloadField[] } {
+}): { content: string; statusNote: string | null; cost: { cost_usd: number; tokens: number }; mergedPayloadFields: MergedPayloadField[]; blockersCarryForward: string } {
   const { sessionId, mode, now, payload, shell, stateDir, config, runtimeSessionId, openedAt, durationClosedAt, costClosedAt, recoveryBlockers } = opts;
   const sessionsDir = path.join(stateDir, 'sessions');
   const timezone = resolveTimezone(config);
   const { status, note: statusNote } = normalizeStatus(payload['Status'] || '');
-  const duration = resolveDuration(sessionId, runtimeSessionId, openedAt, durationClosedAt, now);
+  const duration = resolveDuration(openedAt, durationClosedAt, now);
   const cost = resolveCost(payload, { logPath: costLogPath(stateDir), openedAt, closedAt: costClosedAt ?? localISOStamp(now) });
   const { cost_usd, tokens } = cost;
   const tags = extractTags(shell);
   const proposalsCreated = extractProposalIds(shell);
-  const task = firstRecordedTask(shell);
+  const recordedTask = firstContentLine(extractSection(shell, 'Task'), 120);
+  const task = recordedTask || firstRecordedTask(shell, payload['Task']);
   const escalation = resolveEscalation(config);
   const operatorTurns = resolveOperatorTurns(sessionsDir);
   const closedVia = payload['Closed Via'] || (mode === 'auto' ? 'auto' : 'operator');
@@ -627,6 +664,11 @@ function buildReport(opts: {
   const mergedPayloadFields: MergedPayloadField[] = [];
   if (blockersMerge.contributed) mergedPayloadFields.push('Blockers');
   if (artifactsMerge.contributed) mergedPayloadFields.push('Artifacts');
+  // Only when it actually filled an empty recorded Task — a payload Task alongside a
+  // recorded one contributed nothing and must not claim it did.
+  if (!recordedTask && task && payload['Task']) {
+    mergedPayloadFields.push('Task');
+  }
   // Idle-mode payloads may still carry a stale 'Next Start Point:' line (it isn't
   // part of the idle contract, same as the omitted body section below) — force it
   // empty so frontmatter and body agree.
@@ -669,7 +711,11 @@ function buildReport(opts: {
     sections.push(`## Next Start Point\n${nextStart || '<!-- Exactly what the next session should do first -->'}`);
   }
 
-  return { content: fm + '\n\n' + sections.join('\n\n') + '\n', statusNote, cost, mergedPayloadFields };
+  return {
+    content: fm + '\n\n' + sections.join('\n\n') + '\n',
+    statusNote, cost, mergedPayloadFields,
+    blockersCarryForward: blockersMerge.carryForward,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -712,15 +758,24 @@ function idleReset(shell: string, sessionId: string, now: Date, payload: Record<
   return out;
 }
 
-function closeReset(templatePath: string, shell: string): string {
+// `blockers` is what the next session inherits: the merge's carry-forward list (recorded
+// lines minus the ones resolved this session) from the archive path, or the raw SHELL
+// section from the recover path, which has no merge to draw on. Resolved lines are
+// filtered here either way — a blocker the operator or the close payload marked cleared
+// must not come back, or the next session, and every compaction capsule after it,
+// resumes believing it is still blocked.
+function closeReset(templatePath: string, blockers: string): string {
   let template: string;
   try { template = fs.readFileSync(templatePath, 'utf-8'); }
   catch {
     template = '# Active Session\n\n## Session Info\n- **ID:** S-NNN (assigned on close)\n- **Started:** YYYY-MM-DD HH:MM\n- **Tags:** \n- **Tasks Completed:** 0\n- **Session Mode:** \n\n## Task\n\n## Progress Log\n\n## Blockers\n\n## Findings\n\n## Changed\n\n## Monitoring\n\n## Session Summary\n';
   }
-  const blockers = extractSection(shell, 'Blockers');
-  if (blockers) {
-    template = replaceSectionInPlace(template, 'Blockers', '\n' + blockers + '\n\n');
+  const carried = blockers.split('\n')
+    .filter(line => !line.trim() || !isResolvedBlockerLine(line))
+    .join('\n')
+    .trim();
+  if (carried) {
+    template = replaceSectionInPlace(template, 'Blockers', '\n' + carried + '\n\n');
   }
   return template;
 }
@@ -838,7 +893,7 @@ function verbArchive(
   // inverted bound for honest duration reporting, but let cost resolution end at `now`.
   const rawClosedAt = typeof runtimeBefore.closed_at === 'string' ? runtimeBefore.closed_at : undefined;
   const costClosedAt = rawClosedAt && Date.parse(rawClosedAt) > Date.parse(openedAt ?? '') ? rawClosedAt : undefined;
-  const { content: reportContent, cost: reportCost, mergedPayloadFields } = buildReport({
+  const { content: reportContent, cost: reportCost, mergedPayloadFields, blockersCarryForward } = buildReport({
     sessionId, mode, now, payload, shell, stateDir, config,
     runtimeSessionId, openedAt, durationClosedAt: rawClosedAt, costClosedAt,
     recoveryBlockers: opts.recoveryBlockers,
@@ -858,7 +913,7 @@ function verbArchive(
   if (mode === 'idle') {
     newShell = idleReset(shell, sessionId, now, payload, resolveCompactConfig(config), reportCost);
   } else {
-    newShell = closeReset(path.join(stateDir, 'templates', 'SHELL.md.template'), shell);
+    newShell = closeReset(path.join(stateDir, 'templates', 'SHELL.md.template'), blockersCarryForward);
   }
   try {
     writeFileAtomic(path.join(sessionsDir, 'SHELL.md'), newShell);
@@ -1014,7 +1069,7 @@ function verbRecover(flags: Record<string, string | true>): Json {
       ? shell
       : idleReset(shell, sessionId, now, {}, resolveCompactConfig(config), recoveredReportCost(targetPath));
   } else {
-    newShell = closeReset(path.join(stateDir, 'templates', 'SHELL.md.template'), shell);
+    newShell = closeReset(path.join(stateDir, 'templates', 'SHELL.md.template'), extractSection(shell, 'Blockers') ?? '');
   }
   try {
     writeFileAtomic(path.join(sessionsDir, 'SHELL.md'), newShell);

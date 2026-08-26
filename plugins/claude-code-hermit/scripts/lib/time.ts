@@ -32,6 +32,14 @@ function todayYMD(timezone: string, ref: Date = new Date()): string {
   }
 }
 
+// Returns the calendar day before today (or before `ref`) as 'YYYY-MM-DD' in the given
+// timezone. Subtracting 24h from the instant and re-formatting in the zone is correct
+// across DST: a 23h or 25h local day still lands inside the previous calendar date
+// everywhere the offset shift is under an hour, which is every IANA zone in use.
+function yesterdayYMD(timezone: string, ref: Date = new Date()): string {
+  return todayYMD(timezone, new Date(ref.getTime() - 24 * 60 * 60 * 1000));
+}
+
 // Returns the 'YYYY-MM' (year-month) for `ref` in the given timezone.
 function thisMonthYYYYMM(timezone: string, ref: Date = new Date()): string {
   return todayYMD(timezone, ref).slice(0, 7);
@@ -240,4 +248,4 @@ function resolveHermitNowMs(): number {
   return Date.now();
 }
 
-export { currentHHMM, currentHHMMOrUTC, nowHHMMSS, zonedISOStamp, todayYMD, thisWeekKey, thisMonthYYYYMM, nextBoundaryISO, localISOStamp, utcISOStamp, parseDuration, parseSimpleCronTime, friendlyBoundary, resolveHermitNowMs, elapsedSinceHHMM };
+export { currentHHMM, currentHHMMOrUTC, nowHHMMSS, zonedISOStamp, todayYMD, yesterdayYMD, thisWeekKey, thisMonthYYYYMM, nextBoundaryISO, localISOStamp, utcISOStamp, parseDuration, parseSimpleCronTime, friendlyBoundary, resolveHermitNowMs, elapsedSinceHHMM };

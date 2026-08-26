@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { currentHHMM, todayYMD } from './lib/time';
+import { currentHHMM, todayYMD, yesterdayYMD } from './lib/time';
 import { observationLine, readLedgerRows, resolveSessionId } from './lib/observations';
 import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
@@ -131,29 +131,42 @@ function daysSince(isoStr: string | null) {
 // Stop hook and subagent-cost.ts's SubagentStop hook) instead of tailing the raw log —
 // a busy install's day is hundreds of entries, so a fixed-line tail spans at most one
 // or two dates and can never assemble a real baseline. The index retains today plus 8
-// prior days (BY_DATE_RETENTION_DAYS in lib/cost-log.ts) — the trailing 7 complete days
-// are the baseline taken here — tz-bucketed the same way `today` is computed here (the
-// writers pass the same config.timezone and rebuild the whole index on a tz change), so
-// the two keys can't disagree across an offset.
+// prior days (BY_DATE_RETENTION_DAYS in lib/cost-log.ts): yesterday plus the 7 days
+// before it, which is exactly what this measures. Buckets are tz-keyed the same way the
+// dates are computed here (the writers pass the same config.timezone and rebuild the
+// whole index on a tz change), so the two keys can't disagree across an offset.
+//
+// The measured day is YESTERDAY, not today. The shipped reflect schedule is 09:00, so
+// today's bucket is at most nine hours of spend — usually near zero after an idle night
+// — and comparing that partial against a median of full days can only fire when a spike
+// happens to be front-loaded before the routine runs. Yesterday is complete by the time
+// this reads it, and a spike day is worth one reflect run the morning after.
 //
 // Returns the two figures rather than a boolean so this script can record the
 // observation itself. It previously computed them, discarded them, and set a phase
 // flag that asked the skill to re-read the same log and redo the same arithmetic —
 // a round trip through prose that, across the live fleet, never once produced a row.
-function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: number; median: number; date: string } | null {
+
+// Below this, a day is too cheap for a "spike" to mean anything: a fresh hatch's first
+// days are near zero, so any normal working day is trivially 2x them. Notional USD,
+// deliberately not a config key — it is the floor of what a cost problem can look like,
+// not a preference.
+const SPIKE_MEDIAN_FLOOR_USD = 1;
+
+function checkCostSpike(hermitRoot: string, timezone: string): { dayTotal: number; median: number; date: string } | null {
   try {
     const index = readCostIndex(costIndexPath(hermitRoot));
     if (!index) return null;
 
-    const today = todayYMD(timezone);
-    const todayTotal = index.by_date?.[today]?.cost ?? 0;
+    const date = yesterdayYMD(timezone);
+    const dayTotal = index.by_date?.[date]?.cost ?? 0;
 
-    // `date < today`, not `!== today`: a bucket keyed past today (an old-tz key still
-    // sitting in the index between a config.timezone edit and the next cost write) is
-    // not a complete prior day, and letting it into the trailing-7 slice would drop a
-    // real one and drag the baseline.
+    // `< date`, not `!== date`: today's partial bucket is excluded by construction, and
+    // so is a bucket keyed past today (an old-tz key still sitting in the index between
+    // a config.timezone edit and the next cost write) — letting either into the
+    // trailing-7 slice would drop a real day and drag the baseline.
     const priorDays = Object.entries(index.by_date ?? {})
-      .filter(([date]) => date < today)
+      .filter(([d]) => d < date)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .slice(-7)
       .map(([, bucket]) => (bucket as { cost?: number }).cost ?? 0);
@@ -163,8 +176,8 @@ function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: num
     const mid = Math.floor(sorted.length / 2);
     const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 
-    if (!(median > 0 && todayTotal > 0 && todayTotal > 2 * median)) return null;
-    return { todayTotal, median, date: today };
+    if (!(median >= SPIKE_MEDIAN_FLOOR_USD && dayTotal > 2 * median)) return null;
+    return { dayTotal, median, date };
   } catch {
     return null;
   }
@@ -177,9 +190,9 @@ function costSpikeLabel(date: string): string {
   return `cost-spike:${date}`;
 }
 
-// True once the day's cost-spike row is in the observations ledger. The measurement
-// stays true for the rest of a spike day (todayTotal only climbs), so the row — not the
-// measurement — is what gates the phase: reflect's cost_spike step has nothing to read
+// True once the day's cost-spike row is in the observations ledger. The row — not the
+// measurement — is what gates the phase: the measurement stays true for every tick that
+// still reads the same completed day, so reflect's cost_spike step has nothing to read
 // or record once the row exists, and flagging it again would buy an LLM run per tick.
 function hasCostSpikeRow(existingPatterns: Set<string>, date: string): boolean {
   return existingPatterns.has(costSpikeLabel(date));
@@ -393,12 +406,13 @@ try {
     capture(`schema-drift:${type}`);
   }
 
-  // Cost spike — `todayTotal` climbs through the day, so embedding it in the label
-  // would defeat the dedup above and write a fresh row on every precheck run of a
-  // spike day. The figures ride as fields instead, where a reader can still get at them.
+  // Cost spike — the label carries the measured date only. Embedding a figure would
+  // defeat the dedup above the moment the index is rebuilt or a late row lands, writing
+  // a second row for the same day. The figures ride as fields instead, where a reader
+  // can still get at them.
   if (costSpike) {
     capture(costSpikeLabel(costSpike.date), 'cost-spike', {
-      today_total: Number(costSpike.todayTotal.toFixed(4)),
+      day_total: Number(costSpike.dayTotal.toFixed(4)),
       median_7d: Number(costSpike.median.toFixed(4)),
     });
   }

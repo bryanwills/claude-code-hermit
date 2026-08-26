@@ -88,4 +88,16 @@ function flushResetBreadcrumb(shellPath: string, opts: {
   appendToProgressLog(shellPath, line);
 }
 
-export { appendToProgressLog, flushResetBreadcrumb };
+// True for a Progress Log line that records a context reset rather than work: the
+// `context compacted|cleared` breadcrumb written above, and the `[archived] previous
+// entries` pointer archive-shell.ts leaves when it snapshots the log. Readers that ask
+// "what was this session actually doing" (the archived report's Task line, the
+// compaction capsule's `last progress`) must skip both — they are the newest entries
+// exactly when the question is asked, and neither names any work.
+function isResetBreadcrumb(line: string): boolean {
+  const text = line.trim().replace(/^-\s+/, '');
+  return /^\[archived\]\s+previous entries\b/i.test(text)
+    || /^\[\d{2}:\d{2}\]\s+context (?:compacted|cleared)\b/i.test(text);
+}
+
+export { appendToProgressLog, flushResetBreadcrumb, isResetBreadcrumb };

@@ -3,7 +3,8 @@
 // Zero npm dependencies, Node stdlib only. Always exits 0 on I/O failure (fail-open).
 // Usage: bun update-reflection-state.ts <state-file-path> '<json-payload>'
 //    or: bun update-reflection-state.ts <state-file-path> --quick-hash <hash>
-//    or: bun update-reflection-state.ts <state-file-path> --graduation-cursor
+//    or: bun update-reflection-state.ts <state-file-path> --graduation-cursor [<iso>]
+//    or: bun update-reflection-state.ts <state-file-path> --reset-counters
 //    or: bun update-reflection-state.ts <state-file-path> --scheduled-check-run <id>
 //
 // --quick-hash is a distinct write path for the reflect --quick cursor: it writes ONLY
@@ -12,9 +13,18 @@
 // quick-mode note on why it never calls the counter-incrementing path below).
 //
 // --graduation-cursor is step 3b's promote cursor: it writes ONLY
-// counters.last_graduation_at and does not touch last_run_at. 3b must stamp this
-// before Candidate processing appends reflect-noticed rows, or those rows would
-// be older than last_run_at on the next run and never graduate.
+// counters.last_graduation_at and does not touch last_run_at. The value is the
+// timestamp 3b captured *before* Candidate processing appended its reflect-noticed
+// rows — passed explicitly, because the write happens later, at State Update, and only
+// on a clean run. Stamping it inside 3b instead meant a candidate that then hit
+// GATE_FAILED was gone until a brand-new row arrived, breaking the fail-closed
+// "re-surfaces on the next reflect cycle" promise for exactly the best-evidenced
+// patterns. Bare (no value) still stamps now, for callers with nothing to preserve.
+//
+// --reset-counters zeroes the judge verdict tallies and restarts their window
+// (counters.judge_accept/judge_suppress = 0, counters.since = now). Nothing else is
+// touched. The ratio these feed is cumulative from install day, so one bad stretch
+// pins the Component Health flag on forever; this is the only way to clear it.
 //
 // --scheduled-check-run is the session skill's step-4b cursor: it writes ONLY
 // scheduled_checks.<id>.last_run (today's date), preserving sibling per-check
@@ -68,14 +78,38 @@ if (arg3 === '--quick-hash') {
 }
 
 if (arg3 === '--graduation-cursor') {
+  const explicit = process.argv[4];
   if (!stateFile) {
-    console.error('Usage: bun update-reflection-state.ts <state-file-path> --graduation-cursor');
+    console.error('Usage: bun update-reflection-state.ts <state-file-path> --graduation-cursor [<iso>]');
+    process.exit(1);
+  }
+  if (explicit && Number.isNaN(Date.parse(explicit))) {
+    console.error(`update-reflection-state: --graduation-cursor value is not an ISO timestamp: ${explicit}`);
     process.exit(1);
   }
   let state: Json = {};
   try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')); } catch { /* first run */ }
   if (!state.counters || typeof state.counters !== 'object') state.counters = {};
-  state.counters.last_graduation_at = new Date().toISOString();
+  state.counters.last_graduation_at = explicit ?? new Date().toISOString();
+  try {
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+  } catch (err: any) {
+    console.error(`update-reflection-state: write failed: ${err.message}`);
+  }
+  process.exit(0);
+}
+
+if (arg3 === '--reset-counters') {
+  if (!stateFile) {
+    console.error('Usage: bun update-reflection-state.ts <state-file-path> --reset-counters');
+    process.exit(1);
+  }
+  let state: Json = {};
+  try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')); } catch { /* first run */ }
+  if (!state.counters || typeof state.counters !== 'object') state.counters = {};
+  state.counters.judge_accept = 0;
+  state.counters.judge_suppress = 0;
+  state.counters.since = new Date().toISOString();
   try {
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
   } catch (err: any) {

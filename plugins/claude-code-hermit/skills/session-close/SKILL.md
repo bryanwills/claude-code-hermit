@@ -39,7 +39,7 @@ Closed Via: auto
 Next Start Point: Fresh start.
 ```
 
-SHELL.md remains the factual floor. `Blockers:` can add facts but cannot erase its `## Blockers`; a `~ <prefix>` line marks the first trimmed, case-insensitive SHELL blocker prefix as `- [resolved] <recorded text>` in the report. An unmatched `~` line is kept as an ordinary blocker with the tilde removed. `Artifacts:` accepts only `[[compiled/...]]` links not already recorded in SHELL.md or found by the session-stamped scan.
+SHELL.md remains the factual floor. `Blockers:` can add facts but cannot erase its `## Blockers`; a `~ <prefix>` line marks the first trimmed, case-insensitive SHELL blocker prefix as `- [resolved] <recorded text>` in the report, and the next session does not inherit it. A blocker already marked `~ ` in SHELL.md is read the same way with no payload line at all — which is how an unattended close resolves one. An unmatched `~` line is kept as an ordinary blocker with the tilde removed. `Artifacts:` accepts only `[[compiled/...]]` links not already recorded in SHELL.md or found by the session-stamped scan.
 
 If step 7 returns `ok === false`, no markers were written and `pending-close.json` is left in place automatically, so a later tick retries the drain. Both drainers share a backoff marker (`state/pending-close-drain.json`) and defer while an operator turn is open, so the retry is the first eligible heartbeat tick or routine poll after that window. The backoff is 30 minutes for the 60-second routine poll; the heartbeat drainer halves it once `heartbeat.every` reaches 30 minutes, so a slow heartbeat retries on its next tick rather than the one after it.
 
@@ -63,9 +63,10 @@ This path is intentionally silent: no operator notification on queue or drain �
 ---
 
 1. Finalize the factual record on disk, then compile judgment and handoff data **in context**. `session-archive.ts` owns the report write and reads the same factual baseline in every archive mode:
-   - Ensure SHELL.md `## Task`, `## Findings`, and `## Blockers` reflect the final recorded state. These sections remain the factual floor. Payload Blockers can add missing facts or annotate a recorded blocker as resolved, but cannot erase recorded text.
+   - Ensure SHELL.md `## Task`, `## Findings`, and `## Blockers` reflect the final recorded state. These sections remain the factual floor. Payload Blockers can add missing facts or annotate a recorded blocker as resolved, but cannot erase recorded text. A blocker already marked `~ ` in SHELL.md needs no payload line — the archive reads the mark.
    - `Status:` one of `completed` | `partial` | `blocked`
-   - `Blockers:` optional additions, one line each. Use `~ <prefix>` to mark the first trimmed, case-insensitive prefix match in SHELL.md `## Blockers` resolved. The report keeps the full recorded text as `- [resolved] <recorded text>`; an unmatched `~` line becomes an ordinary addition with the tilde removed.
+   - `Blockers:` optional additions, one line each. Use `~ <prefix>` to mark the first trimmed, case-insensitive prefix match in SHELL.md `## Blockers` resolved. The report keeps the full recorded text as `- [resolved] <recorded text>` and the next session does not inherit it; an unmatched `~` line becomes an ordinary addition with the tilde removed. Additions are report-only — an ended session does not hand itself a new blocker.
+   - `Task:` optional. It fills an empty recorded `## Task` (and is reported in `merged_payload_fields` when it does); a recorded Task always wins.
    - `Lessons:` only genuinely useful ones. Before compiling, run the close debrief — answer three self-directed questions:
      1. *"What did I build ad-hoc this session (throwaway scripts, repeated manual procedures, long waits a tool would remove) that should persist?"*
      2. *"What did I have to re-derive or re-discover that a compiled note or memory entry should have told me?"*

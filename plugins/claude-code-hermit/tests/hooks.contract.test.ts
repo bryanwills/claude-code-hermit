@@ -424,11 +424,23 @@ const DENY_ROWS: DenyRow[] = [
   // The word globs were unanchored; these are anchored on the `$` sigil, so an
   // expansion of a live credential blocks while every bare mention of the name
   // stays allowed. Both spellings are needed — `${VAR}` does not contain `$VAR`.
+  // The braced entry stops at the name, not at `}`, so every parameter-expansion
+  // modifier (`:-`, `:0:8`, `#`, `%`) is covered by the same glob.
   ['block an expansion of the api-key var', bash('echo $ANTHROPIC_API_KEY'), 'block'],
   ['block a braced expansion of the login-token var', bash('echo "${CLAUDE_CODE_OAUTH_TOKEN}"'), 'block'],
   ['block a credential expansion later in a chain', bash('bun x.ts && echo $CLAUDE_CODE_OAUTH_TOKEN > /tmp/t'), 'block'],
+  ['block a default-value expansion of the api-key var', bash('echo ${ANTHROPIC_API_KEY:-}'), 'block'],
+  ['block a substring expansion of the api-key var', bash('echo ${ANTHROPIC_API_KEY:0:8}'), 'block'],
+  // `${#VAR}` and `${!VAR}` put a sigil between `${` and the name, so the glob
+  // misses them by construction. `${#VAR}` prints a length, not the value, and
+  // indirection is already listed as an accepted bypass in docs/security.md —
+  // neither is a dump of a credential, which is what these entries are for.
+  ['allow a length expansion of the login-token var', bash('echo ${#CLAUDE_CODE_OAUTH_TOKEN}'), 'allow'],
+  ['block a targeted printenv dump', bash('printenv ANTHROPIC_API_KEY'), 'block'],
+  ['block an expansion of the telemetry token', bash('echo $HERMIT_TELEMETRY_TOKEN'), 'block'],
   ['allow a grep for the api-key var name', bash('grep -rn ANTHROPIC_API_KEY docs/'), 'allow'],
   ['allow writing the api-key placeholder into .env', bash('echo ANTHROPIC_API_KEY=your-api-key-here >> .env'), 'allow'],
+  ['allow a grep for the telemetry token var name', bash('grep -rn HERMIT_TELEMETRY_TOKEN docs/'), 'allow'],
 ];
 
 describe('enforce-deny-patterns (decide, in-process)', () => {
@@ -1170,7 +1182,7 @@ Rota body.
     expect(r.stdout).not.toMatch(/^blockers: /m);
   }));
 
-  test('startup-context (source=compact, populated Blockers → bounded blockers: pointer after last progress)', withDir(async (dir) => {
+  test('startup-context (source=compact, populated Blockers → bounded blockers: pointer last)', withDir(async (dir) => {
     write(hermit(dir, 'sessions', 'SHELL.md'),
       '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
       '## Blockers\nwaiting on review\n\n## Findings\n');
@@ -1184,6 +1196,59 @@ Rota body.
     const blockersIdx = r.stdout.indexOf('blockers:');
     expect(lastProgressIdx).toBeGreaterThan(-1);
     expect(blockersIdx).toBeGreaterThan(lastProgressIdx);
+  }));
+
+  // The capsule is hard-capped, so field order decides what a state-heavy hermit loses
+  // first. A hermit that loses its outbound route stops being reachable at all; one
+  // that loses the blockers line re-reads SHELL.md. Blockers yields.
+  test('startup-context (source=compact, blockers ordered after the outbound channel)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\nwaiting on review\n\n## Findings\n');
+    write(hermit(dir, 'config.json'),
+      '{"channels":{"primary":"discord","discord":{"enabled":true,"dm_channel_id":"999888"}}}');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    const channelIdx = r.stdout.indexOf('outbound channel:');
+    const blockersIdx = r.stdout.indexOf('blockers:');
+    expect(channelIdx).toBeGreaterThan(-1);
+    expect(blockersIdx).toBeGreaterThan(channelIdx);
+  }));
+
+  // `~` is the mid-session mark for a blocker that cleared; `[resolved]` is the
+  // archived report's rendering of the same thing. Re-injecting either makes a
+  // compacted session resume believing it is still blocked.
+  test('startup-context (source=compact, resolved blockers are not injected)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
+      '## Blockers\n- ~ waiting on review\n- [resolved] vendor key\n- needs approval\n\n## Findings\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/^blockers: needs approval$/m);
+    expect(r.stdout).not.toContain('waiting on review');
+    expect(r.stdout).not.toContain('vendor key');
+  }));
+
+  // The PreCompact hook appends the breadcrumb immediately before this capsule is
+  // built, so without the filter `last progress` is always "context compacted (…)" —
+  // 200 characters of a tight budget saying only that the thing that just happened
+  // happened.
+  test('startup-context (source=compact, last progress skips the compaction breadcrumb)', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n' +
+      '- [10:00] traced the failing deploy\n' +
+      '- [10:05] context compacted (auto) — arc may have unfinished work\n\n' +
+      '## Blockers\n\n## Findings\n');
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/^last progress: - \[10:00\] traced the failing deploy$/m);
+    expect(r.stdout).not.toContain('context compacted');
   }));
 
   test('startup-context (source=compact, placeholder-only Blockers → no blockers: line)', withDir(async (dir) => {

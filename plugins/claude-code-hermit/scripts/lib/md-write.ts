@@ -97,6 +97,17 @@ export function stripPlaceholders(text: string): string {
   return text.replace(/<!--[\s\S]*?-->/g, '').trim();
 }
 
+// True for a blocker line already marked resolved. Two spellings, one convention:
+// `~ <text>` is the mid-session mark an operator or the model writes into SHELL.md the
+// moment a blocker clears, and `- [resolved] <text>` is how the archived report renders
+// it. Neither is a current blocker. Shared so the two sides of that convention cannot
+// drift — session-archive decides what a report and the next session carry, while
+// startup-context decides what a resumed or compacted session is told it is blocked on;
+// if those disagree, a cleared blocker comes back from whichever side is behind.
+export function isResolvedBlockerLine(line: string): boolean {
+  return /^\s*-?\s*(?:~|\[resolved\])/i.test(line);
+}
+
 // First non-empty, non-placeholder line of a section body, optionally clipped.
 // '' when the section holds nothing but blanks and placeholders.
 export function firstContentLine(section: string, maxLen?: number): string {
