@@ -15,7 +15,7 @@ Test task for hook validation
 - [10:00] Started test session
 
 ## Blockers
-None
+<!-- What's preventing progress? Include enough context for the next session. -->
 
 ## Findings
 <!-- none -->

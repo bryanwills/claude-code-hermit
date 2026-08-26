@@ -142,6 +142,14 @@ function buildCompactionPointers(agentDir: string): string {
       ? progress.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('<!--')).pop()
       : null;
     if (lastEntry) parts.push(`last progress: ${guarded('sessions/SHELL.md', lastEntry.slice(0, 200))}`);
+    // stripPlaceholders trims the whole section, so a comment-only bullet line
+    // ("- <!-- resolved ... -->") collapses to a bare "-" by the time it's
+    // split — reject that explicitly rather than emitting "blockers: -".
+    const blockerLines = stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '')
+      .split('\n').map(l => l.trim().replace(/^-\s+/, '').trim()).filter(l => l && !/^-+$/.test(l));
+    if (blockerLines.length) {
+      parts.push(`blockers: ${guarded('sessions/SHELL.md', blockerLines.slice(-2).join(' | ').slice(0, 240))}`);
+    }
   } catch {}
 
   try {
@@ -250,8 +258,17 @@ function emitCompactCapsule(): void {
     const pointers = buildCompactionPointers(AGENT_DIR);
     if (!pointers) return;
     const header = '---Compaction Pointers---\n';
-    const body = pointers.slice(0, COMPACT_CAP - header.length - 1);
-    process.stdout.write(header + body + '\n');
+    const maxBody = COMPACT_CAP - header.length - 1;
+    if (pointers.length <= maxBody) {
+      process.stdout.write(header + pointers + '\n');
+      return;
+    }
+    // Truncated: cut back to the last complete line rather than emit a
+    // garbled partial one; drop entirely when even the first line doesn't fit.
+    const sliced = pointers.slice(0, maxBody);
+    const cut = sliced.lastIndexOf('\n');
+    if (cut <= 0) return;
+    process.stdout.write(header + sliced.slice(0, cut) + '\n');
   } catch {
     // fail-open — a broken capsule must never block startup
   }
@@ -335,6 +352,11 @@ function emitFullContext(source: string | null) {
       if (monLines.length > 0) {
         parts.push(`## Monitoring (last 5)\n${monLines.slice(-5).join('\n')}`);
       }
+    }
+
+    const findingsRaw = stripPlaceholders(extractSection(shellContent, 'Findings') ?? '');
+    if (findingsRaw) {
+      parts.push(`## Findings (last 5)\n${lastLines(findingsRaw, 5).slice(0, 600)}`);
     }
 
     const sessionOutput = parts.join('\n\n');

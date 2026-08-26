@@ -18,6 +18,7 @@
 - Observations written with a null `runtime.session_id` stamp the last archived `S-NNN` instead of the shared `"unknown"` sentinel, so `graduation_min_sessions` counts distinct sessions. Ledger graduation skips `"unknown"` rows and promotes a pattern only when it has a row newer than `counters.last_graduation_at` (stamped at the end of step 3b, not by `last_run_at`).
 - `reflection-judge` skips per-report confirmation when `Artifact:` cites `state/observations.jsonl`, and verifies the ledger with a bounded Grep instead of reading the file whole. A Component Health flag whose subject is `reflection-judge` stays on the Progress Log and is not a candidate.
 - Session archive now uses one recorded factual baseline for every archive mode: Task, Findings, Blockers, and current-session compiled Artifacts survive unattended close; close payloads can add missing Blockers and compiled links or mark recorded blockers resolved without deleting their text; and a duration with no provably owned runtime window is reported as unknown instead of zero.
+- Post-compaction context now carries a bounded current blockers line when SHELL.md has one recorded, and a full startup or post-clear context now carries bounded recent Findings, so a compacted or cleared session no longer resumes blind to what was blocking it or what it had just discovered.
 
 ### Upgrade Instructions
 
