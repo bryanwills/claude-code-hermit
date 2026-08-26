@@ -12,6 +12,7 @@
 - Four sigil-anchored entries replace them: `Bash(*$ANTHROPIC_API_KEY*)` and `Bash(*$CLAUDE_CODE_OAUTH_TOKEN*)`, each in bare and `${…}` spelling. An expansion of a live credential (`echo $ANTHROPIC_API_KEY` while debugging auth) blocks; every bare mention of the name — a grep, a commit message, writing the placeholder into `.env` — stays allowed. The hook enforces them from the shipped template, so nothing needs adding to your settings file.
 
 ### Fixed
+- Reflect's cost-spike detector now measures whole-day totals from the cost index instead of the last 20 cost-log entries, so it can actually fire on an install busy enough to have a cost problem — the fixed-line tail spanned at most one or two dates and could never assemble a baseline. A spike day flags exactly one reflect run, not one per tick.
 - Cost corruption alerts now keep point-in-time spend out of persistent dashboard warnings, and interrupted cost-log tails no longer consume the next valid appended record.
 - Session archive copies the Progress Log into the report `## Completed` before resetting SHELL.md, so an auto-close no longer drops the day's work record.
 - Observations written with a null `runtime.session_id` stamp the last archived `S-NNN` instead of the shared `"unknown"` sentinel, so `graduation_min_sessions` counts distinct sessions. Ledger graduation skips `"unknown"` rows and promotes a pattern only when it has a row newer than `counters.last_graduation_at` (stamped at the end of step 3b, not by `last_run_at`).

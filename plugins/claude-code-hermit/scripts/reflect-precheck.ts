@@ -18,15 +18,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { currentHHMM } from './lib/time';
-import { observationLine, resolveSessionId } from './lib/observations';
+import { currentHHMM, todayYMD } from './lib/time';
+import { observationLine, readLedgerRows, resolveSessionId } from './lib/observations';
 import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
 import { appendToProgressLog } from './lib/progress-log';
 import { extractSection, stripPlaceholders } from './lib/md-write';
-import { pinStateDirOrExit, costLogPath as resolveCostLog, hermitDir as resolveHermitRoot } from './lib/cc-compat';
+import { pinStateDirOrExit, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
+import { costIndexPath, readCostIndex } from './lib/cost-log';
 
 type Json = any;
 
@@ -126,52 +127,62 @@ function daysSince(isoStr: string | null) {
   return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
 }
 
-// Uses the full 20-entry tail for a stable median, but short-circuits if no entries
-// exist after lastRunAt (no recent spend → no spike to detect).
+// Reads whole-day totals from state/cost-index.json (maintained by cost-tracker.ts's
+// Stop hook and subagent-cost.ts's SubagentStop hook) instead of tailing the raw log —
+// a busy install's day is hundreds of entries, so a fixed-line tail spans at most one
+// or two dates and can never assemble a real baseline. The index retains today plus 8
+// prior days (BY_DATE_RETENTION_DAYS in lib/cost-log.ts) — the trailing 7 complete days
+// are the baseline taken here — tz-bucketed the same way `today` is computed here (the
+// writers pass the same config.timezone and rebuild the whole index on a tz change), so
+// the two keys can't disagree across an offset.
 //
 // Returns the two figures rather than a boolean so this script can record the
 // observation itself. It previously computed them, discarded them, and set a phase
 // flag that asked the skill to re-read the same log and redo the same arithmetic —
 // a round trip through prose that, across the live fleet, never once produced a row.
-function checkCostSpike(costLogPath: string, lastRunAt: string | null): { todayTotal: number; median: number; date: string } | null {
+function checkCostSpike(hermitRoot: string, timezone: string): { todayTotal: number; median: number; date: string } | null {
   try {
-    const content = fs.readFileSync(costLogPath, 'utf-8').trim();
-    if (!content) return null;
+    const index = readCostIndex(costIndexPath(hermitRoot));
+    if (!index) return null;
 
-    const lines = content.split('\n').slice(-20);
-    const entries = lines
-      .map(l => { try { return JSON.parse(l); } catch { return null; } })
-      .filter(Boolean);
+    const today = todayYMD(timezone);
+    const todayTotal = index.by_date?.[today]?.cost ?? 0;
 
-    const cutoff = lastRunAt ? new Date(lastRunAt) : null;
-    const hasRecentEntries = cutoff
-      ? entries.some(e => e.timestamp && new Date(e.timestamp) > cutoff)
-      : entries.length > 0;
-    if (!hasRecentEntries) return null;
+    // `date < today`, not `!== today`: a bucket keyed past today (an old-tz key still
+    // sitting in the index between a config.timezone edit and the next cost write) is
+    // not a complete prior day, and letting it into the trailing-7 slice would drop a
+    // real one and drag the baseline.
+    const priorDays = Object.entries(index.by_date ?? {})
+      .filter(([date]) => date < today)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .slice(-7)
+      .map(([, bucket]) => (bucket as { cost?: number }).cost ?? 0);
+    if (priorDays.length < 3) return null;
 
-    const byDate: Record<string, number> = {};
-    for (const e of entries) {
-      const date = (e.timestamp || '').slice(0, 10);
-      if (!date) continue;
-      byDate[date] = (byDate[date] || 0) + (e.estimated_cost_usd || 0);
-    }
-
-    const values = Object.values(byDate);
-    if (values.length < 2) return null;
-
-    const sorted = [...values].sort((a, b) => a - b);
-    const median = sorted[Math.floor(sorted.length / 2)];
-    const today = new Date().toISOString().slice(0, 10);
-    const todayTotal = byDate[today] || 0;
+    const sorted = [...priorDays].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 
     if (!(median > 0 && todayTotal > 0 && todayTotal > 2 * median)) return null;
-    // `today` is the same UTC key the cost buckets above are grouped by — the row's
-    // dedup label must name the bucket the spike was measured in, not a locally
-    // formatted date that could disagree with it either side of midnight.
     return { todayTotal, median, date: today };
   } catch {
     return null;
   }
+}
+
+// Date-scoped, never value-bearing: the dedup below matches on exact string equality,
+// so the check and the writer must build the label the same way or the row is written
+// again every tick.
+function costSpikeLabel(date: string): string {
+  return `cost-spike:${date}`;
+}
+
+// True once the day's cost-spike row is in the observations ledger. The measurement
+// stays true for the rest of a spike day (todayTotal only climbs), so the row — not the
+// measurement — is what gates the phase: reflect's cost_spike step has nothing to read
+// or record once the row exists, and flagging it again would buy an LLM run per tick.
+function hasCostSpikeRow(existingPatterns: Set<string>, date: string): boolean {
+  return existingPatterns.has(costSpikeLabel(date));
 }
 
 function hasAcceptedProposals(stateDir: string) {
@@ -244,6 +255,16 @@ const sessionState = runtime.session_state ?? 'idle';
 const config = readSettledConfig(stateDir);
 const timezone = config.timezone ?? 'UTC';
 
+const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
+
+// Every pattern label in the ledger, read once and shared by the cost-spike row check
+// below and the drift-capture dedup further down — both ask the same question of the
+// same file, and on a spike day the cost-spike check runs on every tick until midnight.
+const existingPatterns = new Set<string>();
+for (const row of readLedgerRows(ledgerPath)) {
+  if (typeof row.pattern === 'string') existingPatterns.add(row.pattern);
+}
+
 const phases: Record<string, boolean> = {};
 
 // Cheaper checks first: compute (short-circuits on in_progress/null lastRunAt),
@@ -255,14 +276,16 @@ if (hasAcceptedProposals(stateDir) && daysSince(lastResolutionCheck) > 7) {
   phases.resolution_check = true;
 }
 
-// Anchor cost-log resolution: a relative stateDir (real invocation passes
+// Anchor cost-index resolution: a relative stateDir (real invocation passes
 // `.claude-code-hermit`) would otherwise resolve against a drifted cwd and
 // silently suppress the cost-spike phase. Absolute (as tests pass) is verbatim.
-const costLogPath = resolveCostLog(path.isAbsolute(stateDir) ? stateDir : resolveHermitRoot());
-const costSpike = checkCostSpike(costLogPath, lastRunAt);
-// The phase still flags the spike for the skill's narrative step; the row itself is
-// written below, from these figures, rather than re-derived from prose.
-if (costSpike) phases.cost_spike = true;
+const costHermitRoot = path.isAbsolute(stateDir) ? stateDir : resolveHermitRoot();
+const costSpike = checkCostSpike(costHermitRoot, timezone);
+// The phase flags the spike for the skill's narrative step on the one run that writes
+// the row; the row itself is written below, from these figures, rather than re-derived
+// from prose. Gated on the row's absence so a spike day costs exactly one RUN and not
+// one per tick.
+if (costSpike && !hasCostSpikeRow(existingPatterns, costSpike.date)) phases.cost_spike = true;
 
 // Behavioral-telemetry digest — weekly for every hermit (not age-gated like
 // `digest` below): reflect's evidence step reads ground-truth transcript counters
@@ -327,8 +350,6 @@ if (pluginRoot && daysSince(runtime.last_raw_archive_at) >= 7) {
   } catch { /* fail-open */ }
 }
 
-const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
-
 // --- Drift capture: write storage/schema drift rows to observations ledger ---
 // Drift is structural (a dir/type is present or absent), not a recurring behavior, so
 // dedup by pattern alone: a standing unresolved drift writes exactly one row and then
@@ -341,19 +362,9 @@ let wroteNewRows = false;
 try {
   const sessionId = resolveSessionId(stateDir);
 
-  // Load existing pattern labels to dedup-on-write. Drift slugs are namespaced
-  // (storage-drift:/schema-drift:), so scanning all patterns can't collide with
-  // reflect-noticed/cost-spike rows.
-  const existingPatterns = new Set<string>();
-  try {
-    for (const line of fs.readFileSync(ledgerPath, 'utf-8').trim().split('\n').filter(Boolean)) {
-      try {
-        const row = JSON.parse(line);
-        if (row.pattern) existingPatterns.add(row.pattern);
-      } catch {}
-    }
-  } catch {}
-
+  // `existingPatterns` (loaded once above) dedups the writes below. Drift slugs are
+  // namespaced (storage-drift:/schema-drift:), so scanning all patterns can't collide
+  // with reflect-noticed/cost-spike rows.
   const newRows: string[] = [];
   // Rows go through the shared constructor so this writer and observations.ts
   // cannot drift apart on field order, timestamp format, or origin rules.
@@ -382,12 +393,11 @@ try {
     capture(`schema-drift:${type}`);
   }
 
-  // Cost spike — the label is date-scoped, never value-bearing. `todayTotal` climbs
-  // through the day, so embedding it (as the prose row used to) would defeat the
-  // dedup above and write a fresh row on every precheck run of a spike day. The
-  // figures ride as fields instead, where a reader can still get at them.
+  // Cost spike — `todayTotal` climbs through the day, so embedding it in the label
+  // would defeat the dedup above and write a fresh row on every precheck run of a
+  // spike day. The figures ride as fields instead, where a reader can still get at them.
   if (costSpike) {
-    capture(`cost-spike:${costSpike.date}`, 'cost-spike', {
+    capture(costSpikeLabel(costSpike.date), 'cost-spike', {
       today_total: Number(costSpike.todayTotal.toFixed(4)),
       median_7d: Number(costSpike.median.toFixed(4)),
     });
@@ -411,21 +421,19 @@ try {
 if (wroteNewRows) {
   // Rows just appended carry ts = now > last_run_at by construction — skip the re-read.
   phases.observations_fresh = true;
-} else try {
-  const content = fs.readFileSync(ledgerPath, 'utf-8').trim();
-  if (content) {
-    // null last_run_at (fresh hermit) → cutoff = 0 → any valid ts triggers
-    const cutoff = lastRunAt ? new Date(lastRunAt).getTime() : 0;
-    const hasFresh = content.split('\n').filter(Boolean).some(line => {
-      try {
-        const row = JSON.parse(line);
-        const rowTime = new Date(row.ts).getTime();
-        return !isNaN(rowTime) && rowTime > cutoff && row.source !== 'skill-preference-applied';
-      } catch { return false; }
-    });
-    if (hasFresh) phases.observations_fresh = true;
-  }
-} catch { /* fail-open: scan error → skip trigger, don't force RUN */ }
+} else {
+  // Deliberately re-reads rather than reusing the pattern scan at the top of the
+  // script: the rows appended above land between the two, and another session sharing
+  // this folder can append at any point, so the gate reads the ledger as it stands now.
+  // A read error fail-opens to no rows — skip the trigger, don't force RUN.
+  // null last_run_at (fresh hermit) → cutoff = 0 → any valid ts triggers
+  const cutoff = lastRunAt ? new Date(lastRunAt).getTime() : 0;
+  const hasFresh = readLedgerRows(ledgerPath).some(row => {
+    const rowTime = new Date(row.ts as string).getTime();
+    return !isNaN(rowTime) && rowTime > cutoff && row.source !== 'skill-preference-applied';
+  });
+  if (hasFresh) phases.observations_fresh = true;
+}
 
 if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify(phases));
 

@@ -139,8 +139,11 @@ bun test
   (everything a hook prints on success is injected into context). Skills must not `Read`
   unbounded surfaces (`cost-log.jsonl`, `*.jsonl` event logs, the channel DB) directly —
   front them with a script that returns a bounded summary (the `cost-report.ts` /
-  `heartbeat.ts precheck` / `lib/search.ts` pattern); a bounded slice (e.g. reflect's
-  tail-20 of cost-log) is the ceiling, not the norm. Session-start injection
+  `heartbeat.ts precheck` / `lib/search.ts` pattern); a fixed-line tail of a log is the
+  ceiling, not the norm, and it is the wrong shape whenever the question is per-period
+  (reflect's cost-spike detector reads `state/cost-index.json` day totals for exactly
+  that reason — a 20-line tail of `cost-log.jsonl` spans one date on a busy install).
+  Session-start injection
   (`startup-context.ts`, `generate-summary.ts`) is the largest recurring cost — a new
   section there must justify its per-session tokens against how often it changes behavior.
   No numeric budgets: this is a boundary rule (where digestion happens), not a size quota.
