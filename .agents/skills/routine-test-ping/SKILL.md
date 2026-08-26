@@ -4,7 +4,7 @@ Proof-of-life for the routine monitor — confirms a routine still fires correct
 
 ## Steps
 
-Append one line to `.Codex-hermit/sessions/SHELL.md` under `## Monitoring`:
+Append one line to `.claude-code-hermit/sessions/SHELL.md` under `## Monitoring`:
 
 ```
 [HH:MM] routine-test-ping: fired.

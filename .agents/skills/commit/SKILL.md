@@ -14,7 +14,7 @@ Detect which plugin's scope this change belongs to, append a changelog line in t
 - Never `--amend`, `--no-verify`, force-push, or create tags here.
 - Never use `git add -A` or `git add .` — staging is path-scoped per step 0.
 - If a pre-commit hook fails, fix the root cause and create a new commit — don't bypass the hook.
-- **`main` is the default base for everyday work.** Codex's `/plugin update` only fires when `version` in `plugin.json` changes, so commits merged to `main` between releases are invisible to operators on the standard install path — `[Unreleased]` accumulates until `/release` ships them.
+- **`main` is the default base for everyday work.** Claude Code's `/plugin update` only fires when `version` in `plugin.json` changes, so commits merged to `main` between releases are invisible to operators on the standard install path — `[Unreleased]` accumulates until `/release` ships them.
 
 ## Steps
 
@@ -23,7 +23,7 @@ Detect which plugin's scope this change belongs to, append a changelog line in t
 Run `git status --porcelain` and partition the changed paths:
 
 - Paths matching `plugins/<X>/...` → group by `<X>` (the slug).
-- Paths outside `plugins/` (root README, `.github/`, `.Codex/`, `.Codex-plugin/marketplace.json`, root configs) → "root-scope" paths.
+- Paths outside `plugins/` (root README, `.github/`, `.claude/`, `.claude-plugin/marketplace.json`, root configs) → "root-scope" paths.
 
 Then decide:
 
@@ -49,7 +49,7 @@ For `$SCOPE = root`: skip this step entirely. Root-scope edits (CI tweaks, root 
 
 For `$SCOPE = plugin`: open `$PLUGIN_DIR/CHANGELOG.md`. Find the `## [Unreleased]` section at the top. Under the correct sub-section (`### Added`, `### Changed`, or `### Fixed`), append one or more bullets that describe what changed and why. Create the sub-section header if it's missing. If `[Unreleased]` itself is missing, prepend it immediately after the `# Changelog` header.
 
-Follow the changelog-bullet format defined canonically in root `AGENTS.md` §Commits: a plain sentence-case line under the category header (`### Added`/`### Changed`/`### Fixed`), with no `**component:**` prefix and no leading Fixed/Added verb — the header carries the category. Backticks for commands/paths/flags; 1–2 lines each. Content that doesn't obviously affect operator behavior belongs in the commit message body, not here. The verbose form is reserved for `### Upgrade Instructions` (added by `/release`, not here), which `hermit-evolve` reads imperative-step-by-step.
+Follow the changelog-bullet format defined canonically in root `CLAUDE.md` §Commits: a plain sentence-case line under the category header (`### Added`/`### Changed`/`### Fixed`), with no `**component:**` prefix and no leading Fixed/Added verb — the header carries the category. Backticks for commands/paths/flags; 1–2 lines each. Content that doesn't obviously affect operator behavior belongs in the commit message body, not here. The verbose form is reserved for `### Upgrade Instructions` (added by `/release`, not here), which `hermit-evolve` reads imperative-step-by-step.
 
 **One header per section.** `[Unreleased]` contains at most one each of `### Added`, `### Changed`, `### Fixed` (and `### Removed`/`### Security` when used). Append bullets under the existing header — never create a second copy of a header that already exists. Parallel worktree branches each adding their own headers is how the section fragments at merge time; if you find duplicate headers already present (left by earlier merges), consolidate them into one while you're in the file — same for a duplicated `### Upgrade Instructions` list (merge, dedupe, renumber). `/release-status` flags this as `fragmented changelog`.
 

@@ -37,7 +37,7 @@ load-bearing.
 ## Dispatch
 
 - **Issue number** ("tackle issue 99", "#42", "owner/repo#N"):
-  `gh issue view <N> --repo <owner/repo from input, default gtapps/Codex-hermit> --json title,body,labels,comments,author,state,url`
+  `gh issue view <N> --repo <owner/repo from input, default gtapps/claude-code-hermit> --json title,body,labels,comments,author,state,url`
   Read the comments: they often say "already fixed" or change scope, and they override the body.
   Pull referenced issues/PRs when the body leans on them. Closed issue → surface that and ask
   before continuing. Also run `gh pr list --repo <repo> --state open --search "<N>"`: an open PR
@@ -51,22 +51,22 @@ load-bearing.
   plan sections on positive verdicts, then stop. No branch, no tasks.
 
 **PROP-NNN references**: for issues in this repo, read the matching
-`.Codex-hermit/proposals/PROP-NNN-*` file and fold its `## Problem` /
+`.claude-code-hermit/proposals/PROP-NNN-*` file and fold its `## Problem` /
 `## Proposed Solution` into the evidence. Never dereference PROP ids from other repos
 (numbering is per-repo).
 
-**Handoff applies only to gtapps/Codex-hermit issues.** Cross-repo issues get the triage
+**Handoff applies only to gtapps/claude-code-hermit issues.** Cross-repo issues get the triage
 report only.
 
 ## Picker
 
-1. `gh issue list --repo gtapps/Codex-hermit --label ready --state open --json number,title,labels,updatedAt --limit 30`.
+1. `gh issue list --repo gtapps/claude-code-hermit --label ready --state open --json number,title,labels,updatedAt --limit 30`.
    Zero results → "No ready-labelled open issues; label issues `ready` to opt in." Stop.
 2. Drop issues referenced by open PRs:
-   `gh pr list --repo gtapps/Codex-hermit --state open --json number,body,headRefName --limit 100`,
+   `gh pr list --repo gtapps/claude-code-hermit --state open --json number,body,headRefName --limit 100`,
    matching `#N` in bodies and `(feat|fix|chore)/N-` in head branch names.
 3. Drop issues with a `skip` event in the last 7 days or a `defer` event in the last 24h in
-   `.Codex/state/tackle-issue-log.jsonl` (read at most the last 100 lines; missing file = no
+   `.claude/state/tackle-issue-log.jsonl` (read at most the last 100 lines; missing file = no
    exclusions).
 4. Sort `priority:high` first, then `updatedAt` descending. Take the first. Empty after
    filters → say so and stop.
@@ -82,9 +82,9 @@ Run against current code before forming any verdict.
 3. **Are cited paths, symbols, and behaviors current?** Renames silently invalidate issue bodies.
 4. **Did the situation change after filing?** `git log` on cited files,
    `git log -S "<symbol>"` for named symbols.
-5. **Load-bearing claims about live Codex behavior get probed, not recalled.** "The hook
-   doesn't receive X" can't be falsified with Read/Grep. Use a tmux `Codex --model haiku` probe
-   per root AGENTS.md § Verification (a probe doesn't mutate the repo; it stays inside the
+5. **Load-bearing claims about live Claude Code behavior get probed, not recalled.** "The hook
+   doesn't receive X" can't be falsified with Read/Grep. Use a tmux `claude --model haiku` probe
+   per root CLAUDE.md § Verification (a probe doesn't mutate the repo; it stays inside the
    read-only posture). Only for load-bearing claims; most issues don't need one.
 
 Skim sibling tests for the existing behavior contract. Every load-bearing claim gets an evidence
@@ -151,7 +151,7 @@ risk). If you can't name one, don't pad the section.
 ## Handoff
 
 Runs only when: recommendation is SHIP or SHIP WITH CAVEAT, input was a
-gtapps/Codex-hermit issue number, and `--investigate-only` was not passed.
+gtapps/claude-code-hermit issue number, and `--investigate-only` was not passed.
 
 **Guardrails**: dirty tree (any branch) → stop, point at `/commit`. Mid-rebase, mid-merge, or
 detached HEAD → stop. On a feature branch with commits ahead of base → AskUserQuestion: continue
@@ -172,7 +172,7 @@ AskUserQuestion (header "Tackle issue"):
 - **stop** — exit with no log entry (analysis-only, no cooldown)
 
 Log terminal choices (go/skip/defer only, nothing before the answer) to
-`.Codex/state/tackle-issue-log.jsonl`:
+`.claude/state/tackle-issue-log.jsonl`:
 `{"ts":"<iso>","issue":N,"action":"go|skip|defer","branch":"…","verdict":"…","recommendation":"…"}`
 (branch/verdict fields on go only).
 
@@ -187,14 +187,14 @@ git checkout -b <branch> origin/$BASE
 If the branch already exists locally: `git checkout <branch>` and warn.
 
 `TaskCreate` one task per plan bullet, then three trailing tasks: run
-`/Codex-dev-hermit:dev-quality`, run `/commit`, run `/Codex-dev-hermit:dev-pr`.
+`/claude-code-dev-hermit:dev-quality`, run `/commit`, run `/claude-code-dev-hermit:dev-pr`.
 Report "On branch <branch>, ready to implement" and stop. No code edits, no commits, no PR.
 
 ## Never
 
 - Call ExitPlanMode.
 - Commit, push, open PRs, comment on issues, change labels, or close issues.
-- Write to `.Codex-hermit/` (hermit-runtime state, not workflow state).
+- Write to `.claude-code-hermit/` (hermit-runtime state, not workflow state).
 - Pick more than one issue per invocation.
 - Verify by paraphrasing the issue: evidence lines describe what the code showed, not what the
   issue said.

@@ -11,11 +11,11 @@ Read-only diagnostic — `git status` for the release pipeline. No mutations.
 
 ### 1. Collect plugin data
 
-Glob `plugins/*/.Codex-plugin/plugin.json`. For each slug:
+Glob `plugins/*/.claude-plugin/plugin.json`. For each slug:
 
 ```bash
 # version
-jq -r .version plugins/<slug>/.Codex-plugin/plugin.json
+jq -r .version plugins/<slug>/.claude-plugin/plugin.json
 
 # last tag (double-dash format)
 git tag --list "<slug>--v*" | sort -V | tail -1
@@ -46,17 +46,17 @@ For plugins with no `plugin.json` version or no recognizable tags: mark as `unst
 ### 2. Get latest core reference
 
 ```bash
-git tag --list "Codex-hermit--v*" | sort -V | tail -1
+git tag --list "claude-code-hermit--v*" | sort -V | tail -1
 ```
 
-Extract just the version number (strip `Codex-hermit--v`). Call it `latest_core_version`.
+Extract just the version number (strip `claude-code-hermit--v`). Call it `latest_core_version`.
 
 ### 3. Read dependency constraints (domain plugins only)
 
-For each plugin that has `plugins/<slug>/.Codex-plugin/hermit-meta.json`:
+For each plugin that has `plugins/<slug>/.claude-plugin/hermit-meta.json`:
 
 ```bash
-jq -r .required_core_version plugins/<slug>/.Codex-plugin/hermit-meta.json
+jq -r .required_core_version plugins/<slug>/.claude-plugin/hermit-meta.json
 ```
 
 ### 4. Determine status per plugin
@@ -82,10 +82,10 @@ Parse the version floor from `required_core_version` (the number after `>=`). Co
 
 ```
 Plugin                            Version   Last Tag   Ahead  Status         Core Req
-Codex-hermit                1.0.22    1.0.21     2      awaiting-tag   —
-Codex-dev-hermit            0.2.2     0.2.1      2      awaiting-tag   >=1.0.22 ✓
-Codex-homeassistant-hermit  0.0.6     0.0.6      0      up-to-date     >=1.0.21 ⚠ stale (core: 1.0.22)
-Codex-fitness-hermit        —         —          —      unstructured (skip)
+claude-code-hermit                1.0.22    1.0.21     2      awaiting-tag   —
+claude-code-dev-hermit            0.2.2     0.2.1      2      awaiting-tag   >=1.0.22 ✓
+claude-code-homeassistant-hermit  0.0.6     0.0.6      0      up-to-date     >=1.0.21 ⚠ stale (core: 1.0.22)
+claude-code-fitness-hermit        —         —          —      unstructured (skip)
 ```
 
 After the table:

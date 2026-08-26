@@ -14,15 +14,15 @@ Run plugin test suites and report a concise summary. Operates on a single plugin
 `/test-run <plugin-slug>` — run tests for just that plugin.
 
 Examples:
-- `/test-run Codex-hermit`
-- `/test-run Codex-homeassistant-hermit`
+- `/test-run claude-code-hermit`
+- `/test-run claude-code-homeassistant-hermit`
 
 ## Steps
 
 ### 0. Resolve target slugs
 
 - If no slug arg was passed, run `bash scripts/test-all.sh` from the repo root (launches every plugin's suite in parallel; wall time is bounded by the slowest suite instead of their sum) and report its summary table directly — skip Steps 0-1 below entirely.
-- If a slug arg was passed, validate `plugins/<slug>/.Codex-plugin/plugin.json` exists. If not, abort with: `Plugin 'plugins/<slug>/' not found. Available: <comma-separated slugs>.` Then continue to Step 1 for that single plugin.
+- If a slug arg was passed, validate `plugins/<slug>/.claude-plugin/plugin.json` exists. If not, abort with: `Plugin 'plugins/<slug>/' not found. Available: <comma-separated slugs>.` Then continue to Step 1 for that single plugin.
 
 ### 1. Run the suite (single-plugin arg only)
 

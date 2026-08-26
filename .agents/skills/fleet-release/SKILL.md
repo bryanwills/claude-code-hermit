@@ -25,7 +25,7 @@ Run `git branch --show-current`. If not on `main` or the repo's default branch: 
 
 ### 2. Determine target plugins
 
-**Explicit slugs:** validate each exists at `plugins/<slug>/.Codex-plugin/plugin.json`. For any unknown slug, abort and list available slugs.
+**Explicit slugs:** validate each exists at `plugins/<slug>/.claude-plugin/plugin.json`. For any unknown slug, abort and list available slugs.
 
 **Auto-detect (no args):** discover all slugs from `ls plugins/` (never hardcode or rely on session context), then collect plugins where both:
 1. Files under `plugins/<slug>/` changed on this branch vs base: `git diff <base>..HEAD --name-only -- plugins/<slug>/` is non-empty
@@ -38,7 +38,7 @@ If condition 1 holds but condition 2 does not (branch changes but version not bu
 ### 3. Determine release order
 
 Rule — not a graph:
-1. `Codex-hermit` goes first if present
+1. `claude-code-hermit` goes first if present
 2. Remaining plugins in the order the operator specified, or alphabetical for auto-detect
 
 ### 4. Determine version bumps and confirm upfront
@@ -51,11 +51,11 @@ Present the full plan at once before touching any file:
 
 ```
 Release plan:
-  Codex-hermit       1.0.22 → 1.0.23  (patch)
-  Codex-dev-hermit   already prepped at 0.2.2
+  claude-code-hermit       1.0.22 → 1.0.23  (patch)
+  claude-code-dev-hermit   already prepped at 0.2.2
 
 Dep sync after core prep:
-  Codex-dev-hermit   required_core_version: >=1.0.22 → >=1.0.23
+  claude-code-dev-hermit   required_core_version: >=1.0.22 → >=1.0.23
 
 Confirm? [Yes / Adjust versions]
 ```
@@ -66,29 +66,29 @@ With `--dry-run`: stop here. Print the plan and exit without touching anything.
 
 ### 5. Run `/release` for core (if in fleet)
 
-Invoke the full `/release Codex-hermit` skill logic through the commit step, then:
+Invoke the full `/release claude-code-hermit` skill logic through the commit step, then:
 
 ```bash
 git push origin main
 ```
 
-Then run tag and push (`Codex plugin tag --push`) and `gh release create`. The branch push must happen before tagging so the release commit is on the remote before the tag points to it.
+Then run tag and push (`claude plugin tag --push`) and `gh release create`. The branch push must happen before tagging so the release commit is on the remote before the tag points to it.
 
 ### 6. Inject cross-plugin dep sync
 
 Immediately after core's release commit and tag, before any domain plugin runs:
 
 ```bash
-NEW_CORE=$(jq -r .version plugins/Codex-hermit/.Codex-plugin/plugin.json)
+NEW_CORE=$(jq -r .version plugins/claude-code-hermit/.claude-plugin/plugin.json)
 ```
 
-For each domain plugin **in the fleet** that has `plugins/<slug>/.Codex-plugin/hermit-meta.json`:
+For each domain plugin **in the fleet** that has `plugins/<slug>/.claude-plugin/hermit-meta.json`:
 
 ```bash
 jq --arg v ">=$NEW_CORE" '
   .required_core_version = $v |
-  .requires["Codex-hermit"] = $v
-' plugins/<slug>/.Codex-plugin/hermit-meta.json > tmp && mv tmp plugins/<slug>/.Codex-plugin/hermit-meta.json
+  .requires["claude-code-hermit"] = $v
+' plugins/<slug>/.claude-plugin/hermit-meta.json > tmp && mv tmp plugins/<slug>/.claude-plugin/hermit-meta.json
 ```
 
 These changes will be staged and committed as part of each domain plugin's `/release` run in step 7 — no separate commit needed.
@@ -103,12 +103,12 @@ For each domain plugin in order, invoke the full `/release <slug>` skill logic t
 git push origin main
 ```
 
-Then tag and push (`Codex plugin tag --push`) and `gh release create`. Always push the branch before tagging — same rule as step 5. The updated `hermit-meta.json` from step 6 will be included in the files that release commit touches.
+Then tag and push (`claude plugin tag --push`) and `gh release create`. Always push the branch before tagging — same rule as step 5. The updated `hermit-meta.json` from step 6 will be included in the files that release commit touches.
 
 ### 8. Report
 
 ```
 Fleet release complete:
-  Codex-hermit      v1.0.23  (commit abc1234, tag Codex-hermit--v1.0.23)
-  Codex-dev-hermit  v0.2.3   (commit def5678, tag Codex-dev-hermit--v0.2.3)
+  claude-code-hermit      v1.0.23  (commit abc1234, tag claude-code-hermit--v1.0.23)
+  claude-code-dev-hermit  v0.2.3   (commit def5678, tag claude-code-dev-hermit--v0.2.3)
 ```

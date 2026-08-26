@@ -4,19 +4,19 @@ description: Bump a plugin's version, write a detailed changelog entry for the u
 ---
 # Release
 
-Bump version, write changelog, commit, and push for a single plugin in the monorepo. The changelog entry is critical because the upgrade skill (`skills/hermit-evolve/SKILL.md`) reads it to know what to tell hermits during `/Codex-hermit:hermit-evolve`.
+Bump version, write changelog, commit, and push for a single plugin in the monorepo. The changelog entry is critical because the upgrade skill (`skills/hermit-evolve/SKILL.md`) reads it to know what to tell hermits during `/claude-code-hermit:hermit-evolve`.
 
 ## Usage
 
 `/release <plugin-slug>` — release the plugin at `plugins/<plugin-slug>/`.
 
 Examples:
-- `/release Codex-hermit` — release the core plugin
-- `/release Codex-dev-hermit` — release the dev hermit
-- `/release Codex-homeassistant-hermit` — release the HA hermit
+- `/release claude-code-hermit` — release the core plugin
+- `/release claude-code-dev-hermit` — release the dev hermit
+- `/release claude-code-homeassistant-hermit` — release the HA hermit
 - `/release laravel-forge-hermit` — release the Laravel Forge hermit
 
-If invoked without a slug, list all `plugins/<name>/` directories that contain `.Codex-plugin/plugin.json` and ask the operator which one via AskUserQuestion before proceeding.
+If invoked without a slug, list all `plugins/<name>/` directories that contain `.claude-plugin/plugin.json` and ask the operator which one via AskUserQuestion before proceeding.
 
 ## Steps
 
@@ -24,9 +24,9 @@ If invoked without a slug, list all `plugins/<name>/` directories that contain `
 
 Resolve the plugin slug:
 - If the user passed `<slug>` as argument, use that.
-- Otherwise, glob `plugins/*/.Codex-plugin/plugin.json`, collect the directory names, and ask via AskUserQuestion: "Which plugin to release?" with one option per slug.
+- Otherwise, glob `plugins/*/.claude-plugin/plugin.json`, collect the directory names, and ask via AskUserQuestion: "Which plugin to release?" with one option per slug.
 
-Validate `plugins/<slug>/.Codex-plugin/plugin.json` exists. If it does not, abort: `Plugin 'plugins/<slug>/' not found.` Suggest the available slugs.
+Validate `plugins/<slug>/.claude-plugin/plugin.json` exists. If it does not, abort: `Plugin 'plugins/<slug>/' not found.` Suggest the available slugs.
 
 Throughout the rest of this skill, `$PLUGIN_DIR` refers to `plugins/<slug>/`.
 
@@ -36,7 +36,7 @@ Run before anything else. Abort the release if any step fails.
 
 1. **Run the native plugin validator (CLI form):**
    ```bash
-   Codex plugin validate plugins/<slug> 2>&1
+   claude plugin validate plugins/<slug> 2>&1
    ```
    Abort on any error other than `Unrecognized keys` — that one means an incomplete hermit-meta.json migration; fix the migration elsewhere, then resume. Background on the migration lives in each plugin's `CONTRIBUTING.md`.
 
@@ -55,8 +55,8 @@ Run before anything else. Abort the release if any step fails.
    If any test fails, stop and fix before releasing.
 
 3. **Run the release-auditor agent** to cross-reference plugin integrity. Pass it the plugin path explicitly so it knows which plugin to audit:
-   - Skills in `plugins/<slug>/AGENTS.md` / `state-templates/Codex-APPEND.md` match actual `plugins/<slug>/skills/` directories
-   - Agents in `plugins/<slug>/AGENTS.md` match actual `plugins/<slug>/agents/` files
+   - Skills in `plugins/<slug>/CLAUDE.md` / `state-templates/CLAUDE-APPEND.md` match actual `plugins/<slug>/skills/` directories
+   - Agents in `plugins/<slug>/CLAUDE.md` match actual `plugins/<slug>/agents/` files
    - Hook scripts referenced in `plugins/<slug>/hooks/hooks.json` exist in `plugins/<slug>/scripts/`
    - State-template JSON files parse correctly
    - `config.json.template` keys are in sync with `DEFAULT_CONFIG` in `plugins/<slug>/scripts/hermit-start.ts` (core only)
@@ -89,7 +89,7 @@ git tag --list "<slug>--v*" | sort -V | tail -1
 
 Compare its version to `plugin.json`. If `plugin.json` is already ahead (e.g. tag is `dev-hermit--v0.2.0`, plugin.json says `0.3.0`), the version was bumped on a plugin branch that has since merged to main. Skip steps 2–7 entirely — the CHANGELOG, version files, and commit are already done. Jump directly to step 8.
 
-**Normal path:** Read `plugins/<slug>/.Codex-plugin/plugin.json` for the current version and `plugins/<slug>/CHANGELOG.md` for recent entries.
+**Normal path:** Read `plugins/<slug>/.claude-plugin/plugin.json` for the current version and `plugins/<slug>/CHANGELOG.md` for recent entries.
 
 Review the uncommitted or recently committed changes (`git diff` and/or `git log` since the last `<slug>--v<version>` tag — fall back to `<slug>-v<version>` for pre-migration releases, then `v<version>` for the legacy unprefixed scheme).
 
@@ -104,7 +104,7 @@ Present the suggested version and rationale. Wait for confirmation before procee
 
 Prepend a new entry to `plugins/<slug>/CHANGELOG.md` immediately after the `# Changelog` header, before the previous version entry. If a `[Unreleased]` section already exists, rename it to `[X.Y.Z] - YYYY-MM-DD` instead of prepending a new one — the entry has been accumulating during development.
 
-**Docs-only double-check (do this before promoting/writing the entry).** Read every narrative bullet about to ship in this version and confirm each describes a real code/behavior change an operator experiences. Drop any bullet whose only change is documentation — README, `docs/`, `AGENTS.md`, or code comments — including bullets that pair a docs correction onto an otherwise-code entry (keep the code half, cut the docs half). Docs corrections belong in the commit message and PR description, never the CHANGELOG. Cross-check against the actual diff: `git diff <last-tag>..HEAD -- plugins/<slug>` — if a bullet's only backing changes are `.md` or comment edits, it should not be in the changelog. This mirrors the root `AGENTS.md` §Commits rule.
+**Docs-only double-check (do this before promoting/writing the entry).** Read every narrative bullet about to ship in this version and confirm each describes a real code/behavior change an operator experiences. Drop any bullet whose only change is documentation — README, `docs/`, `CLAUDE.md`, or code comments — including bullets that pair a docs correction onto an otherwise-code entry (keep the code half, cut the docs half). Docs corrections belong in the commit message and PR description, never the CHANGELOG. Cross-check against the actual diff: `git diff <last-tag>..HEAD -- plugins/<slug>` — if a bullet's only backing changes are `.md` or comment edits, it should not be in the changelog. This mirrors the root `CLAUDE.md` §Commits rule.
 
 **Format**:
 
@@ -118,7 +118,7 @@ Prepend a new entry to `plugins/<slug>/CHANGELOG.md` immediately after the `# Ch
 
 ### Upgrade Instructions
 
-Run `/Codex-hermit:hermit-evolve`. The evolve skill handles:
+Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
 1. **Imperative step title** — what to do, in one sentence.
 
@@ -127,7 +127,7 @@ No `config.json` changes required.
 
 **Template constraints (enforce these):**
 
-1. **Narrative bullets (Added / Changed / Fixed)** — canonical format lives in root `AGENTS.md` §Commits; enforce it here: a plain sentence-case line under the category header, no `**component:**` prefix and no leading Fixed/Added verb (the header carries the category). Backticks for commands/paths/flags. Target 1–2 lines, ~40 words max. If a bullet wants to grow longer, the surplus belongs in the PR description, not here.
+1. **Narrative bullets (Added / Changed / Fixed)** — canonical format lives in root `CLAUDE.md` §Commits; enforce it here: a plain sentence-case line under the category header, no `**component:**` prefix and no leading Fixed/Added verb (the header carries the category). Backticks for commands/paths/flags. Target 1–2 lines, ~40 words max. If a bullet wants to grow longer, the surplus belongs in the PR description, not here.
    - Do NOT list internal refactors, helper extractions, test scaffolding, or renamed variables — those are visible in `git diff`.
    - **Recovery procedures, migration shell snippets, and breaking-change steps belong in `### Upgrade Instructions`, never in the narrative bullet.** Write a tight summary ("changed default X to Y") and let that section carry the imperative steps — `hermit-evolve` reads them step-by-step.
 
@@ -149,55 +149,55 @@ No `config.json` changes required.
 
 For each new skill, agent, or hook added since the last release of this plugin, detect missing entries and add them in one pass:
 
-- `plugins/<slug>/AGENTS.md` quick reference list (skills) and subagent table (agents)
-- `plugins/<slug>/state-templates/Codex-APPEND.md` quick reference (if the template exists for this plugin)
+- `plugins/<slug>/CLAUDE.md` quick reference list (skills) and subagent table (agents)
+- `plugins/<slug>/state-templates/CLAUDE-APPEND.md` quick reference (if the template exists for this plugin)
 - `plugins/<slug>/docs/skills.md` (if the doc exists)
-- Hook descriptions in `plugins/<slug>/AGENTS.md` if the hook surface area changed
+- Hook descriptions in `plugins/<slug>/CLAUDE.md` if the hook surface area changed
 
 Skip the step entirely if nothing was added. The release-auditor (Step 1.3) covers structural integrity; this step is about narrative references.
 
 ### 5. Bump version in all locations
 
 Update the version string in:
-- `plugins/<slug>/.Codex-plugin/plugin.json` → `"version"` field
-- `.Codex-plugin/marketplace.json` → find the entry in `plugins[]` where `"name" == "<slug>"` and update its `"version"` field. Other plugin entries are untouched.
-- `plugins/<slug>/README.md` → version badge if present: both the `img.shields.io` URL slug (`version-X.Y.Z-green.svg`) and the `alt` text (`Version X.Y.Z`). Confirm with `grep "version-" plugins/<slug>/README.md` that the new version appears and the old one does not. Skip silently if the README has no version badge. (For `Codex-hermit`, skip this direct edit — the sync block below re-derives the whole file from root, picking up the updated badge automatically.)
-- If `<slug>` is `Codex-hermit`: also update the root `README.md` badge — `version-OLD-green.svg` → `version-NEW-green.svg` and `Version OLD` → `Version NEW`. This is the only plugin whose version the root README tracks.
+- `plugins/<slug>/.claude-plugin/plugin.json` → `"version"` field
+- `.claude-plugin/marketplace.json` → find the entry in `plugins[]` where `"name" == "<slug>"` and update its `"version"` field. Other plugin entries are untouched.
+- `plugins/<slug>/README.md` → version badge if present: both the `img.shields.io` URL slug (`version-X.Y.Z-green.svg`) and the `alt` text (`Version X.Y.Z`). Confirm with `grep "version-" plugins/<slug>/README.md` that the new version appears and the old one does not. Skip silently if the README has no version badge. (For `claude-code-hermit`, skip this direct edit — the sync block below re-derives the whole file from root, picking up the updated badge automatically.)
+- If `<slug>` is `claude-code-hermit`: also update the root `README.md` badge — `version-OLD-green.svg` → `version-NEW-green.svg` and `Version OLD` → `Version NEW`. This is the only plugin whose version the root README tracks.
 
-**Sync plugin README from root (Codex-hermit only):** `plugins/Codex-hermit/README.md` is a path-adjusted derivative of the root `README.md`. After updating version badges, re-derive it by applying these substitutions to the root README content:
+**Sync plugin README from root (claude-code-hermit only):** `plugins/claude-code-hermit/README.md` is a path-adjusted derivative of the root `README.md`. After updating version badges, re-derive it by applying these substitutions to the root README content:
 
 | In root `README.md`                              | In plugin `README.md`                          |
 |--------------------------------------------------|------------------------------------------------|
 | `href="LICENSE"`                                 | `href="../../LICENSE"`                         |
 | `[MIT](LICENSE)`                                 | `[MIT](../../LICENSE)`                         |
-| `href="plugins/Codex-hermit/CHANGELOG.md"` | `href="CHANGELOG.md"`                          |
-| `src="plugins/Codex-hermit/assets/`        | `src="assets/`                                 |
-| `](plugins/Codex-hermit/docs/`             | `](docs/`                                      |
-| `](plugins/Codex-dev-hermit/`              | `](../Codex-dev-hermit/`                 |
-| `](plugins/Codex-homeassistant-hermit/`    | `](../Codex-homeassistant-hermit/`       |
-| `](plugins/Codex-fitness-hermit/`          | `](../Codex-fitness-hermit/`             |
+| `href="plugins/claude-code-hermit/CHANGELOG.md"` | `href="CHANGELOG.md"`                          |
+| `src="plugins/claude-code-hermit/assets/`        | `src="assets/`                                 |
+| `](plugins/claude-code-hermit/docs/`             | `](docs/`                                      |
+| `](plugins/claude-code-dev-hermit/`              | `](../claude-code-dev-hermit/`                 |
+| `](plugins/claude-code-homeassistant-hermit/`    | `](../claude-code-homeassistant-hermit/`       |
+| `](plugins/claude-code-fitness-hermit/`          | `](../claude-code-fitness-hermit/`             |
 | `](plugins/laravel-forge-hermit/`                | `](../laravel-forge-hermit/`                   |
 
-Write the result to `plugins/Codex-hermit/README.md`.
+Write the result to `plugins/claude-code-hermit/README.md`.
 
 After editing, verify the manifest and marketplace are in sync — the plugin manifest wins silently if they differ:
 ```bash
-jq -r '.version' plugins/<slug>/.Codex-plugin/plugin.json
-jq -r --arg slug "<slug>" '.plugins[] | select(.name == $slug) | .version' .Codex-plugin/marketplace.json
+jq -r '.version' plugins/<slug>/.claude-plugin/plugin.json
+jq -r --arg slug "<slug>" '.plugins[] | select(.name == $slug) | .version' .claude-plugin/marketplace.json
 ```
-Both must print the same string. If they differ, fix `.Codex-plugin/marketplace.json` before continuing.
+Both must print the same string. If they differ, fix `.claude-plugin/marketplace.json` before continuing.
 
 ### 6. Final validation
 
 Steps 3–5 only edit Markdown and JSON, so re-running the test suite is unnecessary. Confirm:
 
 ```bash
-jq -e . plugins/<slug>/.Codex-plugin/plugin.json > /dev/null
-jq -e . .Codex-plugin/marketplace.json > /dev/null
+jq -e . plugins/<slug>/.claude-plugin/plugin.json > /dev/null
+jq -e . .claude-plugin/marketplace.json > /dev/null
 git status --short
 ```
 
-Both `jq` checks must succeed and `git status` must show only the files this release touched (CHANGELOG, plugin.json, marketplace.json, optional AGENTS.md / README badge / state-templates updates). Any unexpected entry → investigate before committing.
+Both `jq` checks must succeed and `git status` must show only the files this release touched (CHANGELOG, plugin.json, marketplace.json, optional CLAUDE.md / README badge / state-templates updates). Any unexpected entry → investigate before committing.
 
 ### 7. Commit and push
 
@@ -222,18 +222,18 @@ Run `git branch --show-current` and compare to `main` (or the repo's default bra
 
 ### 9. Tag and publish
 
-The tag format is **plugin-prefixed with double-dash separator**: `<slug>--v<X.Y.Z>`. This is the format Codex's native dependency resolver requires to find matching versions for `dependencies` entries.
+The tag format is **plugin-prefixed with double-dash separator**: `<slug>--v<X.Y.Z>`. This is the format Claude Code's native dependency resolver requires to find matching versions for `dependencies` entries.
 
-Run `Codex plugin tag --push` from the plugin directory — it validates plugin contents, confirms `plugin.json` and `marketplace.json` versions agree, requires a clean working tree, and refuses if the tag already exists:
+Run `claude plugin tag --push` from the plugin directory — it validates plugin contents, confirms `plugin.json` and `marketplace.json` versions agree, requires a clean working tree, and refuses if the tag already exists:
 
 ```bash
-(cd plugins/<slug> && Codex plugin tag --push)
+(cd plugins/<slug> && claude plugin tag --push)
 ```
 
 Then create the GitHub release pointing to the new double-dash tag. Source the release notes from the CHANGELOG section we just wrote — `--generate-notes` would otherwise interleave commits from sibling-plugin releases that landed since the last core tag.
 
 ```bash
-VERSION=$(jq -r '.version' plugins/<slug>/.Codex-plugin/plugin.json)
+VERSION=$(jq -r '.version' plugins/<slug>/.claude-plugin/plugin.json)
 TAG="<slug>--v$VERSION"
 NOTES_FILE=$(mktemp)
 awk -v ver="$VERSION" '
@@ -246,7 +246,7 @@ gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
 rm "$NOTES_FILE"
 ```
 
-**Note on legacy tags:** the core plugin (`Codex-hermit`) historically released under the unprefixed `v<X.Y.Z>` format (e.g. `v1.0.18`) and the prefixed single-dash format (e.g. `Codex-hermit-v1.0.20`). Those tags remain in place. From this point forward, all plugins use the double-dash format (`<slug>--v<X.Y.Z>`). Existing single-dash release tags were backfilled with double-dash aliases in April 2026.
+**Note on legacy tags:** the core plugin (`claude-code-hermit`) historically released under the unprefixed `v<X.Y.Z>` format (e.g. `v1.0.18`) and the prefixed single-dash format (e.g. `claude-code-hermit-v1.0.20`). Those tags remain in place. From this point forward, all plugins use the double-dash format (`<slug>--v<X.Y.Z>`). Existing single-dash release tags were backfilled with double-dash aliases in April 2026.
 
 ### 10. Report
 
