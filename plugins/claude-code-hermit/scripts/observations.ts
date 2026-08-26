@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   }
 
   // The state dir is not caller-chosen. Reachable through a pre-approved
-  // `Bash(bun */scripts/observations.ts observe *)` grant that covers every
+  // `Bash(bun */scripts/observations.ts observe*)` grant that covers every
   // argument after the verb, so an unvalidated root let one such call append
   // model-authored rows to another project's observations ledger — the same
   // mis-invocation class, and refused the same way. See cc-compat.ts.

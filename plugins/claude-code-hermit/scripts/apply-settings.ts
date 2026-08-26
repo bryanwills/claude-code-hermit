@@ -57,10 +57,15 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/reflect-precheck.ts*)',
   'Bash(bun */scripts/archive-shell.ts*)',
   'Bash(bun */scripts/evaluate-session.ts*)',
-  // Verb-scoped: `observe` is the only thing this script does, and pinning it keeps
-  // the grant from widening if it ever grows a second verb. Replaces the old
+  // Verb-scoped: `observe` is the only thing this script does. No space before the
+  // trailing `*` — CC 2.1.246 warns at startup on a fully-literal argument following
+  // a wildcard-containing one (e.g. `observe *`), so this mirrors the other
+  // verb-pinned `bun */scripts/…` entries below (`tz-shift*`, `precheck*`, etc).
+  // `observations.ts:32` still hard-rejects any verb but `observe`, so `observe*`
+  // matching a hypothetical `observeXYZ` reaches a script that refuses it — the
+  // grant is not actually widened by dropping the space. Replaces the old
   // append-metrics.ts entry, which granted "write any JSON to any path".
-  'Bash(bun */scripts/observations.ts observe *)',
+  'Bash(bun */scripts/observations.ts observe*)',
   'Bash(bun */scripts/proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',
   'Bash(bun */scripts/update-reflection-state.ts*)',
@@ -143,8 +148,9 @@ const HERMIT_ALLOW = [
 // Entries this plugin itself shipped in an earlier version and has since retired.
 // permissions-sync removes these from an operator's settings; nothing else is ever
 // removed, so an operator's own rules cannot be caught by a shape or prefix match.
-// Append here in the same change that deletes a permissioned script — this registry
-// is what makes a deletion reach already-hatched hermits.
+// Append here in the same change that deletes a permissioned script, or that respells
+// an entry still in HERMIT_ALLOW — this registry is what makes a deletion or a respelling
+// reach already-hatched hermits.
 const HERMIT_OBSOLETE = [
   'Bash(python3:*)',
   'Bash(node:*)',
@@ -172,6 +178,9 @@ const HERMIT_OBSOLETE = [
   'Bash(bun */scripts/routine-precheck.ts*)',
   'Bash(bun */scripts/cron-registry.ts*)',
   'Bash(bun */scripts/cron-tz-shift.ts*)',
+  // Superseded by the no-space form above — CC 2.1.246 warns at startup on this shape
+  // (fully-literal `observe` argument following the `*/scripts/…` wildcard).
+  'Bash(bun */scripts/observations.ts observe *)',
 ];
 
 // Hardened extras — a subset of always_on patterns safe to persist to settings.
