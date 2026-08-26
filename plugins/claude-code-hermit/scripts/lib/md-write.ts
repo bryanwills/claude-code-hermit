@@ -97,6 +97,32 @@ export function stripPlaceholders(text: string): string {
   return text.replace(/<!--[\s\S]*?-->/g, '').trim();
 }
 
+// True for a blocker line already marked resolved. Two spellings, one convention:
+// `~ <text>` is the mid-session mark an operator or the model writes into SHELL.md the
+// moment a blocker clears, and `- [resolved] <text>` is how the archived report renders
+// it. Neither is a current blocker. Shared so the two sides of that convention cannot
+// drift — session-archive decides what a report and the next session carry, while
+// startup-context decides what a resumed or compacted session is told it is blocked on;
+// if those disagree, a cleared blocker comes back from whichever side is behind.
+// The tilde must be followed by whitespace or end-of-line — `~ <text>` is the whole
+// convention. Matching a bare `~` would swallow any blocker that opens on a home path
+// ("- ~/.claude/settings.json is read-only"), silently retiring a live blocker and
+// mangling its text in the archived report.
+// One marker source for both the test and the strip: session-archive needs the text
+// without the marker, and re-spelling the pattern there is how the two last drifted.
+const RESOLVED_MARKER = String.raw`(?:~(?=\s|$)|\[resolved\])`;
+const RESOLVED_LINE_RE = new RegExp(String.raw`^\s*-?\s*${RESOLVED_MARKER}`, 'i');
+const RESOLVED_PREFIX_RE = new RegExp(String.raw`^${RESOLVED_MARKER}\s*`, 'i');
+
+export function isResolvedBlockerLine(line: string): boolean {
+  return RESOLVED_LINE_RE.test(line);
+}
+
+// Drops a leading resolved marker, leaving the blocker's own text. No-op when unmarked.
+export function stripResolvedMarker(text: string): string {
+  return text.replace(RESOLVED_PREFIX_RE, '');
+}
+
 // First non-empty, non-placeholder line of a section body, optionally clipped.
 // '' when the section holds nothing but blanks and placeholders.
 export function firstContentLine(section: string, maxLen?: number): string {

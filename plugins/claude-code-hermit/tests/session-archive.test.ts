@@ -510,6 +510,48 @@ describe('recorded factual baseline', () => {
       '## Blockers\n- [resolved] Waiting on CI for Linux\n- Waiting on CI for macOS\n- Needs approval\nmissing vendor reply',
     );
     expect(result.merged_payload_fields).toEqual(['Blockers']);
+
+    // The whole point of resolving one: it must not come back. The report keeps the
+    // text (marked), the next session's SHELL.md does not carry it, and the two
+    // unresolved blockers do.
+    const nextShell = readShell(dir);
+    expect(nextShell).not.toContain('Waiting on CI for Linux');
+    expect(nextShell).toContain('- Waiting on CI for macOS');
+    expect(nextShell).toContain('- Needs approval');
+    // Payload additions are report-only — a session that has ended does not hand
+    // itself a new blocker.
+    expect(nextShell).not.toContain('missing vendor reply');
+  }));
+
+  // The mid-session convention: the model or operator marks a blocker `~` in SHELL.md
+  // the moment it clears, and the archive agrees with that mark without needing the
+  // close payload to repeat it. On an unattended close there is no payload at all.
+  test('a SHELL blocker already marked ~ is archived as resolved and dropped from the next session', withTmp(async (dir) => {
+    await open(dir, 'Task: blockers\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Blockers', '- ~ waiting on the vendor key\n- needs approval');
+    await archive(dir, 'auto', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    const reportPath = path.join(sessionsDir(dir), 'S-001-REPORT.md');
+
+    expect(readFrontmatter(reportPath).blockers).toEqual([
+      '[resolved] waiting on the vendor key',
+      'needs approval',
+    ]);
+    const nextShell = readShell(dir);
+    expect(nextShell).not.toContain('vendor key');
+    expect(nextShell).toContain('- needs approval');
+  }));
+
+  // `~` marks a resolution only when it is the whole token. A blocker that opens on a
+  // home path is an ordinary live blocker — treating it as resolved would retire it
+  // silently and mangle its text in the report.
+  test('a blocker opening on a home path is not read as resolved', withTmp(async (dir) => {
+    await open(dir, 'Task: blockers\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Blockers', '- ~/.claude/settings.json is read-only');
+    await archive(dir, 'auto', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).blockers)
+      .toEqual(['~/.claude/settings.json is read-only']);
+    expect(readShell(dir)).toContain('- ~/.claude/settings.json is read-only');
   }));
 
   test('payload artifact order is SHELL, payload-only, then stamped, with exact contribution reporting', withTmp(async (dir) => {
@@ -568,11 +610,33 @@ describe('recorded factual baseline', () => {
       '- [12:00] context compacted (auto) — arc may have unfinished work\n' +
       '- [12:01] context cleared (watchdog) — arc may have unfinished work\n' +
       '[12:02] investigated the failing deployment');
-    await archive(dir, 'auto', ADDITIVE_PAYLOAD, '2026-07-09T13:00:00Z');
+    // No `Task:` in this payload — the unattended case, where nothing but the log
+    // can name the work.
+    await archive(dir, 'auto', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
     const reportPath = path.join(sessionsDir(dir), 'S-001-REPORT.md');
     const report = fs.readFileSync(reportPath, 'utf-8');
     expect(readFrontmatter(reportPath).task).toBe('[12:02] investigated the failing deployment');
     expect(report).toContain('## Overview\n[12:02] investigated the failing deployment');
+  }));
+
+  // The payload sits between the two recorded sources: it can name a session that
+  // never wrote a Task, and it is reported as a merge when it does, but a recorded
+  // Task still outranks it (asserted by the three-mode baseline test above).
+  test('payload Task fills an empty recorded Task and is reported as a merge', withTmp(async (dir) => {
+    await open(dir, 'Task: none\n', '2026-07-09T12:00:00Z');
+    seedShellSection(dir, 'Progress Log', '- [12:00] context compacted (auto) — arc may have unfinished work');
+    const result = await archive(dir, 'auto', ADDITIVE_PAYLOAD, '2026-07-09T13:00:00Z');
+
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).task).toBe('payload task');
+    expect(result.merged_payload_fields).toContain('Task');
+  }));
+
+  test('payload Task never overwrites a recorded Task and claims no merge', withTmp(async (dir) => {
+    await open(dir, 'Task: recorded task\n', '2026-07-09T12:00:00Z');
+    const result = await archive(dir, 'auto', ADDITIVE_PAYLOAD, '2026-07-09T13:00:00Z');
+
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).task).toBe('recorded task');
+    expect(result.merged_payload_fields).not.toContain('Task');
   }));
 });
 
@@ -591,16 +655,26 @@ describe('duration ownership', () => {
     expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('45m');
   }));
 
-  test('an unowned runtime arc records unknown even when SHELL Started is parseable', withTmp(async (dir) => {
+  // close/auto null runtime.session_id — that null is the auto-close gate's "resting,
+  // nothing to close" state, not a lost arc. Requiring the id to match the archived
+  // session made every archive after the first report `unknown` on exactly the
+  // always-on installs that archive nightly. The arc is what is measured.
+  test('an arc whose session id was already cleared is still measured', withTmp(async (dir) => {
     await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
-    const { session_id, ...unownedRuntime } = readRuntime(dir);
-    writeRuntime(dir, unownedRuntime);
-    writeShell(dir, readShell(dir).replace('YYYY-MM-DD HH:MM', '2026-07-09 12:00'));
+    const { session_id, ...clearedIdRuntime } = readRuntime(dir);
+    writeRuntime(dir, clearedIdRuntime);
+    await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('1h 0m');
+  }));
+
+  test('an inverted window records unknown', withTmp(async (dir) => {
+    await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
+    writeRuntime(dir, { ...readRuntime(dir), closed_at: '2026-07-09T11:00:00Z' });
     await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
     expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('unknown');
   }));
 
-  test('a missing matching opened_at records unknown', withTmp(async (dir) => {
+  test('a missing opened_at records unknown', withTmp(async (dir) => {
     await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
     const { opened_at, ...runtimeWithoutOpenedAt } = readRuntime(dir);
     writeRuntime(dir, runtimeWithoutOpenedAt);
@@ -608,7 +682,7 @@ describe('duration ownership', () => {
     expect(readFrontmatter(path.join(sessionsDir(dir), 'S-001-REPORT.md')).duration).toBe('unknown');
   }));
 
-  test('an invalid matching opened_at records unknown', withTmp(async (dir) => {
+  test('an invalid opened_at records unknown', withTmp(async (dir) => {
     await open(dir, 'Task: duration\n', '2026-07-09T12:00:00Z');
     writeRuntime(dir, { ...readRuntime(dir), opened_at: 'not-a-date' });
     await archive(dir, 'close', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');

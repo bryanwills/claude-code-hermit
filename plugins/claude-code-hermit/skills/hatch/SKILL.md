@@ -536,8 +536,9 @@ only copy (its sealed `HERMIT_ALLOW`); ask it what the target file is missing:
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> permissions-plan
 ```
 
-It writes nothing and prints one JSON line: `{"missing":[...],"obsolete":[...]}` — the sealed
-entries the target lacks, and any entries from retired plugin versions it still carries.
+It writes nothing and prints one JSON line: `{"missing":[...],"obsolete":[...],"obsolete_deny":[...]}` — the
+sealed entries the target lacks, and any entries from retired plugin versions it still carries in
+`permissions.allow` and `permissions.deny` respectively.
 
 **What the permissions buy:**
 
@@ -552,8 +553,8 @@ entries the target lacks, and any entries from retired plugin versions it still 
 **Steps:**
 
 1. Run `permissions-plan` (command above) against the resolved settings file and parse the JSON line.
-2. If both `missing` and `obsolete` are empty: skip silently.
-3. Otherwise show the operator the entries — what will be added, and what retired entries will be removed — and ask with `AskUserQuestion` (header: "Hook perms") — options: **Yes — add** (merge so hooks run without prompting, default) / **No — skip** (you'll be prompted during sessions).
+2. If `missing`, `obsolete` and `obsolete_deny` are all empty: skip silently.
+3. Otherwise show the operator the entries — what will be added, and what retired entries will be removed from `permissions.allow` (`obsolete`) and `permissions.deny` (`obsolete_deny`) — and ask with `AskUserQuestion` (header: "Hook perms") — options: **Yes — add** (merge so hooks run without prompting, default) / **No — skip** (you'll be prompted during sessions).
 4. If the operator confirms: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> permissions-sync`
    (Adds every missing sealed entry and removes only entries from retired plugin versions. Operator-authored rules are never touched.)
    (No auto-mode step here: the classifier reads `autoMode` only from user scope, managed settings, or `--settings`, so there is nothing useful to seed into a project settings file. `hermit-start` renders the hermit's classifier policy into a per-session overlay at every boot and launches with `--settings`.)

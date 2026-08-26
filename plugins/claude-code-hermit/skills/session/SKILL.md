@@ -37,7 +37,7 @@ Once I know what to work on:
 Work through tasks using whatever tools, skills, and agents are available:
 - Use the tools best suited to each step
 - Append a timestamped `.claude-code-hermit/sessions/SHELL.md` Progress Log entry as each step lands — one entry per significant step, so the plan and its progress stay legible after compaction or a restart
-- If a step is blocked, document the blocker in SHELL.md and ask the operator how to proceed
+- If a step is blocked, document the blocker in SHELL.md `## Blockers` and ask the operator how to proceed. When it clears, **prefix that line with `~ ` — never delete it**: the tilde is what stops it being re-injected as current after a compaction or on the next session, and the archive turns it into `- [resolved] <text>` in the report so the record survives
 
 ### 6. Work done
 

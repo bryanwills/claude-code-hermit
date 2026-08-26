@@ -256,7 +256,7 @@ bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> permissions
 
 where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.claude/settings.json` (committed) per `hatch_target`, and `<plugin_root>` is the baked absolute plugin root.
 
-**Delegated mode: run it without asking** (a missing `bun` permission breaks hooks, so this is non-optional). It adds every sealed entry the target lacks and removes only entries this plugin shipped in a previous version and has since retired — an operator's own rules are never touched, and a target that is already current is not rewritten at all. Parse its one JSON line, `{"missing":[...],"obsolete":[...]}`, and report the two counts in the step-10 report. Both empty means the target was already current; say nothing.
+**Delegated mode: run it without asking** (a missing `bun` permission breaks hooks, so this is non-optional). It adds every sealed entry the target lacks and removes only entries this plugin shipped in a previous version and has since retired — an operator's own rules are never touched, and a target that is already current is not rewritten at all. Parse its one JSON line, `{"missing":[...],"obsolete":[...],"obsolete_deny":[...]}`, and report the three counts in the step-10 report — naming each `obsolete_deny` entry verbatim, since those are `permissions.deny` rules the operator may have wanted and can re-add by hand. All three empty means the target was already current; say nothing.
 
 (On a hermit whose allow-list predates `apply-settings.ts` itself, this command may hit a permission gate inside this subagent, which can't prompt — relay that to the step-10 report so the operator can add `Bash(bun */scripts/apply-settings.ts*)` and re-run, rather than wedging.)
 

@@ -5,14 +5,18 @@
  *
  * Operations:
  *   allow                    Merge hermit's fixed permissions.allow list
- *   permissions-plan         Print {"missing":[],"obsolete":[]} for the target — read-only,
- *                            writes nothing. `missing` is the sealed HERMIT_ALLOW entries the
- *                            target lacks; `obsolete` is the sealed HERMIT_OBSOLETE entries it
- *                            still carries. Callers (hatch, hermit-evolve) show this diff.
- *   permissions-sync         Apply that plan: add every missing HERMIT_ALLOW entry and remove
- *                            only entries listed in HERMIT_OBSOLETE. Prints the applied plan.
+ *   permissions-plan         Print {"missing":[],"obsolete":[],"obsolete_deny":[]} for the
+ *                            target — read-only, writes nothing. `missing` is the sealed
+ *                            HERMIT_ALLOW entries the target lacks; `obsolete` is the sealed
+ *                            HERMIT_OBSOLETE entries it still carries in permissions.allow;
+ *                            `obsolete_deny` the sealed HERMIT_OBSOLETE_DENY entries it still
+ *                            carries in permissions.deny. Callers (hatch, hermit-evolve) show
+ *                            this diff.
+ *   permissions-sync         Apply that plan: add every missing HERMIT_ALLOW entry, remove
+ *                            only entries listed in HERMIT_OBSOLETE (allow) and
+ *                            HERMIT_OBSOLETE_DENY (deny). Prints the applied plan.
  *                            Operator-authored entries are structurally untouchable — removal
- *                            is filtered by the sealed registry, never by shape or heuristic.
+ *                            is filtered by the sealed registries, never by shape or heuristic.
  *   artifact-allow           Merge just ["Artifact"] into permissions.allow — kept as its
  *                            own op (not folded into `allow`) so declining the Artifact
  *                            publish-authorization ask never touches hook permissions.
@@ -36,8 +40,9 @@
  * Rules:
  * - Never removes existing keys or array entries — except channel-env, which strips
  *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings),
- *   permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE
- *   registry below (scripts this plugin itself shipped and has since deleted), and
+ *   permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE /
+ *   HERMIT_OBSOLETE_DENY registries below (rules this plugin itself seeded and has
+ *   since retired), and
  *   voice-render, which replaces outputStyle by design — config.json owns that key.
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
@@ -192,6 +197,18 @@ const HERMIT_OBSOLETE = [
   'Bash(bun */scripts/observations.ts observe *)',
 ];
 
+// The deny half of the same registry. Same rule: only entries this plugin itself
+// seeded (via the `deny` op) and has since retired, matched as exact strings, so an
+// operator's own deny rules cannot be caught. These three were unanchored credential
+// word globs — trivially bypassable, and they blocked ordinary work (a grep, a commit
+// message). The hook stopped enforcing them from the template; this is what reaches
+// the copy `deny` wrote into already-hatched hermits' settings.
+const HERMIT_OBSOLETE_DENY = [
+  'Bash(*API_KEY*)',
+  'Bash(*SECRET*)',
+  'Bash(*TOKEN*)',
+];
+
 // Hardened extras — a subset of always_on patterns safe to persist to settings.
 // Excludes docker/kubectl/ssh: valid in devops contexts on the host; hook-enforced at runtime.
 // Matches what hatch Step 9 "hardened" option produces.
@@ -260,23 +277,30 @@ function mergeAllow(settings: Json, entries: string[]): string[] {
 interface PermissionsPlan {
   missing: string[];
   obsolete: string[];
+  obsolete_deny: string[];
 }
 
-// Read-only diff of the target against the two sealed registries above.
+// Read-only diff of the target against the three sealed registries above.
 function planPermissions(settings: Json): PermissionsPlan {
   const allow: string[] = Array.isArray(settings?.permissions?.allow) ? settings.permissions.allow : [];
   const existing = new Set<string>(allow);
+  const deny: string[] = Array.isArray(settings?.permissions?.deny) ? settings.permissions.deny : [];
+  const existingDeny = new Set<string>(deny);
   return {
     missing: HERMIT_ALLOW.filter((e) => !existing.has(e)),
     obsolete: HERMIT_OBSOLETE.filter((e) => existing.has(e)),
+    obsolete_deny: HERMIT_OBSOLETE_DENY.filter((e) => existingDeny.has(e)),
   };
 }
 
-// Removes exactly the entries handed in — always a subset of HERMIT_OBSOLETE.
-function removeAllow(settings: Json, entries: string[]): void {
-  if (entries.length === 0 || !Array.isArray(settings?.permissions?.allow)) return;
+// Removes exactly the entries handed in from `permissions.<key>` — always a subset of
+// the matching sealed registry (HERMIT_OBSOLETE for allow, HERMIT_OBSOLETE_DENY for
+// deny). That subset relationship is what makes an operator's own rules structurally
+// safe: removal is by exact string from a shipped list, never by shape or prefix.
+function removePermissions(settings: Json, key: 'allow' | 'deny', entries: string[]): void {
+  if (entries.length === 0 || !Array.isArray(settings?.permissions?.[key])) return;
   const drop = new Set(entries);
-  settings.permissions.allow = settings.permissions.allow.filter((e: string) => !drop.has(e));
+  settings.permissions[key] = settings.permissions[key].filter((e: string) => !drop.has(e));
 }
 
 function mergeDeny(settings: Json, entries: string[]): void {
@@ -342,10 +366,11 @@ switch (op) {
     // Nothing to do — don't rewrite the file. hermit-evolve runs this on every
     // upgrade, and a target that is already current must not come back reformatted
     // (or with a fresh mtime) just for having been checked.
-    if (plan.missing.length === 0 && plan.obsolete.length === 0) readOnly = true;
+    if (plan.missing.length === 0 && plan.obsolete.length === 0 && plan.obsolete_deny.length === 0) readOnly = true;
     else {
       mergeAllow(settings, HERMIT_ALLOW);
-      removeAllow(settings, plan.obsolete);
+      removePermissions(settings, 'allow', plan.obsolete);
+      removePermissions(settings, 'deny', plan.obsolete_deny);
     }
     console.log(JSON.stringify(plan));
     break;

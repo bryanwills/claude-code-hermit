@@ -32,6 +32,17 @@ function todayYMD(timezone: string, ref: Date = new Date()): string {
   }
 }
 
+// Returns the calendar day before today (or before `ref`) as 'YYYY-MM-DD' in the given
+// timezone. Resolve the local date first, then step back one calendar day on the date
+// parts — never by subtracting 24h from the instant. A spring-forward day is only 23
+// real hours, so instant arithmetic lands two calendar days back whenever the local
+// time of day is smaller than the offset shift (00:30 local on the day after a
+// forward jump). Date.UTC handles month and year rollover.
+function yesterdayYMD(timezone: string, ref: Date = new Date()): string {
+  const [y, m, d] = todayYMD(timezone, ref).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+}
+
 // Returns the 'YYYY-MM' (year-month) for `ref` in the given timezone.
 function thisMonthYYYYMM(timezone: string, ref: Date = new Date()): string {
   return todayYMD(timezone, ref).slice(0, 7);
@@ -240,4 +251,4 @@ function resolveHermitNowMs(): number {
   return Date.now();
 }
 
-export { currentHHMM, currentHHMMOrUTC, nowHHMMSS, zonedISOStamp, todayYMD, thisWeekKey, thisMonthYYYYMM, nextBoundaryISO, localISOStamp, utcISOStamp, parseDuration, parseSimpleCronTime, friendlyBoundary, resolveHermitNowMs, elapsedSinceHHMM };
+export { currentHHMM, currentHHMMOrUTC, nowHHMMSS, zonedISOStamp, todayYMD, yesterdayYMD, thisWeekKey, thisMonthYYYYMM, nextBoundaryISO, localISOStamp, utcISOStamp, parseDuration, parseSimpleCronTime, friendlyBoundary, resolveHermitNowMs, elapsedSinceHHMM };
