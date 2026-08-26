@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { currentHHMM, todayYMD } from './lib/time';
-import { observationLine } from './lib/observations';
+import { observationLine, resolveSessionId } from './lib/observations';
 import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
@@ -330,8 +330,7 @@ const ledgerPath = path.join(stateDir, 'state', 'observations.jsonl');
 // before the freshness gate so a first-sighting row triggers RUN on the same invocation.
 let wroteNewRows = false;
 try {
-  // runtime.session_id is commonly null (written at startup, cleared on shutdown) — treat null as 'unknown'
-  const sessionId = (runtime.session_id ?? 'unknown') as string;
+  const sessionId = resolveSessionId(stateDir);
 
   // Load existing pattern labels to dedup-on-write. Drift slugs are namespaced
   // (storage-drift:/schema-drift:), so scanning all patterns can't collide with

@@ -78,6 +78,28 @@ describe('update-reflection-state --scheduled-check-run', () => {
   }));
 });
 
+describe('update-reflection-state --graduation-cursor', () => {
+  async function runGrad(stateFile: string) {
+    return runPinnedScript('update-reflection-state.ts', rootOf(stateFile), [stateFile, '--graduation-cursor']);
+  }
+
+  test('writes only counters.last_graduation_at, leaves last_run_at and last_quick_hash', withTmp(async (stateFile) => {
+    const existing = {
+      last_quick_hash: 'abc123',
+      counters: { total_runs: 5, last_run_at: '2026-07-01T09:00:00.000Z' },
+    };
+    fs.writeFileSync(stateFile, JSON.stringify(existing, null, 2) + '\n');
+    const r = await runGrad(stateFile);
+    expect(r.exitCode).toBe(0);
+    const after = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    expect(after.last_quick_hash).toBe('abc123');
+    expect(after.counters.total_runs).toBe(5);
+    expect(after.counters.last_run_at).toBe('2026-07-01T09:00:00.000Z');
+    expect(typeof after.counters.last_graduation_at).toBe('string');
+    expect(after.counters.last_graduation_at).not.toBe(existing.counters.last_run_at);
+  }));
+});
+
 // update-reflection-state.ts is reachable through a pre-approved
 // `Bash(bun */scripts/update-reflection-state.ts*)` grant that covers every
 // argument — the worst-shaped instance of this defect class, since its argv

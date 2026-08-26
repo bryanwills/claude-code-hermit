@@ -150,6 +150,22 @@ describe('reflect-precheck: drift capture', () => {
     }
   });
 
+  test('session_id resolves to last-archived S-NNN when runtime.session_id is null', async () => {
+    const hermitDir = makeTmpHermit({ lastRunAt: null });
+    try {
+      fs.writeFileSync(path.join(hermitDir, 'sessions', 'S-010-REPORT.md'), '# S-010\n');
+      fs.mkdirSync(path.join(hermitDir, 'reports'));
+
+      await runPrecheck(hermitDir);
+
+      const rows = readObservations(hermitDir);
+      const driftRow = rows.find(r => typeof r.pattern === 'string' && r.pattern.startsWith('storage-drift:'));
+      expect(driftRow?.session_id).toBe('S-010');
+    } finally {
+      fs.rmSync(hermitDir, { recursive: true, force: true });
+    }
+  });
+
   test('dedup by pattern: same session does not write duplicate rows', async () => {
     const hermitDir = makeTmpHermit({ lastRunAt: null });
     try {
@@ -494,6 +510,17 @@ describe('reflection-judge: §1.4 config-agnostic ledger verification', () => {
 
   test('judge is config-agnostic (does not re-count threshold)', () => {
     expect(judge).toContain('config-agnostic');
+  });
+
+  test('judge skips §1 when Artifact cites observations.jsonl', () => {
+    expect(judge).toContain('Skip §§ 0.5, 1, and 1.6');
+    expect(judge).toContain('`state/observations.jsonl`');
+  });
+
+  test('judge §1.4 greps the ledger instead of Reading it whole', () => {
+    expect(judge).toContain('Never `Read` the ledger whole');
+    expect(judge).toContain('head_limit: 200');
+    expect(judge).not.toContain('Glob and Read `.claude-code-hermit/state/observations.jsonl`');
   });
 });
 
