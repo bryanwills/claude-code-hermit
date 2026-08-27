@@ -2186,9 +2186,9 @@ describe('proposal-act dispatch contract', () => {
   const skill = read(path.join(SKILLS, 'proposal-act', 'SKILL.md'));
 
   test('falsification gate runs for every code-edit implementation', () => {
-    // missing → skill-improvement-without-skill-creator dispatches with no PROCEED file list
-    expect(skill).toContain('Skip only when the body contains `## Skill Improvement` **and** `/skill-creator:skill-creator` is in the available-skills list');
-    expect(skill).toContain('the gate runs to produce a `PROCEED` file list for the dispatch');
+    // skill-authoring bodies (Skill Improvement / Skill Draft) skip the gate; everything else runs it
+    expect(skill).toContain('Skip when the body contains `## Skill Improvement` or `## Skill Draft`');
+    expect(skill).toContain('both are skill-authoring, handled in-main');
     // dispatch block is labelled by what gates it, not the stale "no skill marker"
     expect(skill).toContain('Dispatch (falsification gate returned PROCEED, no in-main skill handler)');
   });

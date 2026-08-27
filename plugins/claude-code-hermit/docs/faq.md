@@ -153,7 +153,7 @@ Both modes run the heartbeat if enabled. Change with `/hermit-settings idle`.
 
 ## What are scheduled checks?
 
-Automatic invocations of skills on a cadence — either from installed plugins (e.g., `claude-md-management:claude-md-improver`) or from your own hermit. They run during idle reflection at configurable intervals and must conform to the [scheduled-check contract](../skills/reflect/SKILL.md) (idempotent, returns findings or nothing, no self-scheduling). Configure with `/hermit-settings scheduled-checks`. See [Config Reference](config-reference.md#scheduled_checks) for the schema.
+Automatic invocations of skills on a cadence — either from a plugin you installed (e.g., `my-plugin:my-audit-skill`) or from your own hermit. They run during idle reflection at configurable intervals and must conform to the [scheduled-check contract](../skills/reflect/SKILL.md) (idempotent, returns findings or nothing, no self-scheduling). Configure with `/hermit-settings scheduled-checks`. See [Config Reference](config-reference.md#scheduled_checks) for the schema.
 
 ---
 
@@ -163,7 +163,6 @@ Automatic invocations of skills on a cadence — either from installed plugins (
 
 - Starting a focused work block on a project with active hermit state (recent compiled/ outputs, updated OPERATOR.md, open proposals).
 - Returning after a gap — OPERATOR.md context fades across conversations; session-start reloads it explicitly.
-- Working on a fresh hatch — baseline audits only fire on the first session-start after hatch.
 
 Skip it for quick one-off tasks, sessions under ~5 minutes, or any time the upfront context load isn't justified by the length of the work.
 

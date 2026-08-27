@@ -177,7 +177,7 @@ describe('proposal-act: ## Skill Draft install branch', () => {
     expect(fs.existsSync(PROPOSAL_ACT)).toBe(true);
   });
 
-  test('proposal-act: falsification gate skips ## Skill Draft (delegates to /skill-creator)', () => {
+  test('proposal-act: falsification gate skips ## Skill Draft (authored in-main)', () => {
     expect(proposalAct).toContain('Skill Draft');
   });
 
@@ -189,10 +189,9 @@ describe('proposal-act: ## Skill Draft install branch', () => {
     expect(proposalAct).toContain('Procedure-capture install flow');
   });
 
-  test('proposal-act: install flow invokes /skill-creator', () => {
-    // bash: grep -c '/skill-creator' must be >= 2 (matching-line count)
-    const count = proposalAct.split('\n').filter((l) => l.includes('/skill-creator')).length;
-    expect(count).toBeGreaterThanOrEqual(2);
+  test('proposal-act: install flow authors the SKILL.md from source_artifact in-main', () => {
+    expect(proposalAct).toContain('author the SKILL.md');
+    expect(proposalAct).not.toContain('/skill-creator');
   });
 
   test('proposal-act: second confirmation gate present (operator approves artifact)', () => {

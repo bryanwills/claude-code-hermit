@@ -44,7 +44,6 @@ describe('hatch-config.ts', () => {
       agent_name: 'Aria', language: 'en', timezone: 'Europe/London', sign_off: 'Aria out.',
       escalation: 'balanced', remote: true, idle_behavior: 'discover', permission_mode: 'auto',
       routines: { enabled: true, morning_time: '08:30', evening_time: '22:30' },
-      scheduled_checks_plugins: ['claude-code-setup', 'claude-md-management'],
       channels: { discord: { enabled: true, allowed_users: ['12345'], morning_brief_time: '07:00' } },
     };
     const r = await runHatchConfig(dir, answers);
@@ -62,11 +61,6 @@ describe('hatch-config.ts', () => {
         ...template.routines,
         { id: 'morning', schedule: '30 8 * * *', skill: 'claude-code-hermit:brief --morning', enabled: true, run_during_waiting: true },
         { id: 'evening', schedule: '30 22 * * *', skill: 'claude-code-hermit:brief --evening', enabled: true, run_during_waiting: true },
-      ],
-      scheduled_checks: [
-        { id: 'automation-recommender', plugin: 'claude-code-setup', skill: '/claude-code-setup:claude-automation-recommender', enabled: true, trigger: 'interval', interval_days: 7 },
-        { id: 'md-audit', plugin: 'claude-md-management', skill: '/claude-md-management:claude-md-improver', enabled: true, trigger: 'interval', interval_days: 7 },
-        { id: 'md-revise', plugin: 'claude-md-management', skill: '/claude-md-management:revise-claude-md', enabled: true, trigger: 'session' },
       ],
       channels: {
         discord: { enabled: true, dm_channel_id: null, default_chat_id: null, state_dir: '.claude.local/channels/discord', settings_policy: 'allow', allowed_users: ['12345'], morning_brief: { enabled: true, time: '07:00' } },
@@ -121,7 +115,6 @@ describe('hatch-config.ts', () => {
     const answers = {
       agent_name: 'Aria2',
       routines: { enabled: true, morning_time: '09:00', evening_time: '21:00' },
-      scheduled_checks_plugins: ['claude-code-setup'],
       channels: { discord: { allowed_users: ['999'] } },
       activated_hermit: { slug: 'claude-code-dev-hermit', version: '2.0.0', boot_skill: '/claude-code-dev-hermit:dev-boot' },
     };
@@ -145,7 +138,7 @@ describe('hatch-config.ts', () => {
     expect(out.channels.mycustom).toEqual(seed.channels.mycustom);
     expect(out.channels.primary).toBe('discord');
 
-    // scheduled_checks: custom check preserved, core-owned reconciled to selection
+    // scheduled_checks: untouched by hatch-config re-init (no plugin-seeding logic remains)
     const ids = out.scheduled_checks.map((c: any) => c.id).sort();
     expect(ids).toEqual(['automation-recommender', 'my-custom-check'].sort());
 
@@ -243,17 +236,20 @@ describe('hatch-config.ts', () => {
     }
   });
 
-  test('null channels / scheduled_checks_plugins payloads are refused cleanly, not crashed', async () => {
-    for (const answers of [
-      { project_name: 'x', channels: null },
-      { project_name: 'x', scheduled_checks_plugins: null },
-    ]) {
-      const dir = freshDir();
-      const r = await runHatchConfig(dir, answers);
-      expect(r.exitCode).not.toBe(0);
-      expect(r.stderr).toContain('hatch-config:');
-      expect(fs.existsSync(configPathFor(dir))).toBe(false);
-    }
+  test('null channels payload is refused cleanly, not crashed', async () => {
+    const dir = freshDir();
+    const r = await runHatchConfig(dir, { project_name: 'x', channels: null });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('hatch-config:');
+    expect(fs.existsSync(configPathFor(dir))).toBe(false);
+  });
+
+  test('an unknown answers key (e.g. a retired scheduled_checks_plugins) is ignored, not an error', async () => {
+    const dir = freshDir();
+    const r = await runHatchConfig(dir, { project_name: 'x', scheduled_checks_plugins: ['claude-md-management'] });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+    expect(out.scheduled_checks).toEqual([]);
   });
 
   test('a null per-channel entry is tolerated (treated as empty)', async () => {
@@ -382,15 +378,4 @@ describe('hatch-config.ts', () => {
     expect(out.channels.imessage.settings_policy).toBe('allow');
   });
 
-  test('duplicate plugin in scheduled_checks_plugins does not produce duplicate check ids', async () => {
-    const dir = freshDir();
-    const r = await runHatchConfig(dir, {
-      project_name: 'x',
-      scheduled_checks_plugins: ['claude-md-management', 'claude-md-management'],
-    });
-    expect(r.exitCode).toBe(0);
-    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
-    const ids = out.scheduled_checks.map((c: any) => c.id).sort();
-    expect(ids).toEqual(['md-audit', 'md-revise']);
-  });
 });

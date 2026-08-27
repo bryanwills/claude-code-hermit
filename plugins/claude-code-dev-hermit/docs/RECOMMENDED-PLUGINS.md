@@ -1,22 +1,8 @@
 # Recommended Plugins
 
-The `/claude-code-dev-hermit:hatch` wizard offers these during setup. All are official plugins from `claude-plugins-official` — install individually or accept them all at once.
+The `/claude-code-dev-hermit:hatch` wizard offers this during setup — an official plugin from `claude-plugins-official`.
 
-> **Note:** `/code-review` is built into Claude Code since v2.1.150. No plugin install needed — invoke it directly for PR-level review with git-blame context.
-
----
-
-## feature-dev
-
-GitHub: [anthropics/feature-dev](https://github.com/anthropics/claude-code/tree/main/plugins/feature-dev)
-
-```bash
-claude plugin install feature-dev@claude-plugins-official --scope project
-```
-
-Official Anthropic plugin — guided feature development with codebase exploration (`code-explorer`), multi-option architecture design (`code-architect`), and quality review (`code-reviewer`). Use it when the task touches unfamiliar code paths or framework internals — features, refactors, or bugfixes alike. Skip for doc/config edits, single-line fixes, and changes you already know how to make.
-
-`feature-dev` doesn't ship a code-writing implementer of its own — it's research and planning. Pair it with the native `Agent` tool (or your own subagent) for the actual writing. Either way, the agent reads dev-hermit's CLAUDE-APPEND rules and follows them.
+> **Note:** `/code-review` is built into Claude Code since v2.1.150. No plugin install needed — invoke it directly for PR-level review with git-blame context. Guided codebase exploration and architecture design are also native now, via the built-in `Plan`/`Explore` agents — no plugin install needed there either.
 
 ---
 

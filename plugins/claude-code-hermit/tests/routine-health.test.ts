@@ -19,6 +19,15 @@ const DAY = 86400000;
 /** `daysAgo(1.5)` → an ISO stamp 36h before NOW. */
 const daysAgo = (n: number) => new Date(NOW - n * DAY).toISOString();
 
+/**
+ * Same, but anchored to the real clock. The in-process tests inject `new Date(NOW)`
+ * as the window end; the CLI tests spawn `routines.ts`, which has no such seam and
+ * reads the wall clock. A fixture stamped off the frozen NOW therefore falls out of
+ * the health window once the real date drifts past NOW + window_days — a time bomb
+ * that turns green tests red on a calendar date, with no code change.
+ */
+const realDaysAgo = (n: number) => new Date(Date.now() - n * DAY).toISOString();
+
 const row = (id: string, event: string, ts: string, delivery = 'monitor') =>
   JSON.stringify({ ts, routine_id: id, event, delivery });
 
@@ -263,7 +272,7 @@ describe('routines.ts health — CLI', () => {
   const ANCHOR_ENV = { CLAUDE_PROJECT_DIR: '', AGENT_DIR: '' };
 
   test('prints parseable JSON with the documented top-level keys', withDir(async (dir) => {
-    writeMetrics(dir, [row('brief', 'started', daysAgo(1)), row('brief', 'fired', daysAgo(1))]);
+    writeMetrics(dir, [row('brief', 'started', realDaysAgo(1)), row('brief', 'fired', realDaysAgo(1))]);
     const r = await runScript('routines.ts', { args: ['health', '.claude-code-hermit'], cwd: dir, env: ANCHOR_ENV });
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout);
@@ -275,7 +284,7 @@ describe('routines.ts health — CLI', () => {
   }));
 
   test('--days is honoured', withDir(async (dir) => {
-    writeMetrics(dir, [row('brief', 'fired', daysAgo(10))]);
+    writeMetrics(dir, [row('brief', 'fired', realDaysAgo(10))]);
     const r = await runScript('routines.ts', { args: ['health', '.claude-code-hermit', '--days', '7'], cwd: dir, env: ANCHOR_ENV });
     const out = JSON.parse(r.stdout);
     expect(out.window_days).toBe(7);
@@ -303,7 +312,7 @@ describe('routines.ts health — cwd drift', () => {
   /** Fixture root with a hatched hermit, plus a nested cwd to run from. */
   function drifted(dir: string): string {
     writeConfig(dir, {});
-    writeMetrics(dir, [row('brief', 'started', daysAgo(1)), row('brief', 'fired', daysAgo(1))]);
+    writeMetrics(dir, [row('brief', 'started', realDaysAgo(1)), row('brief', 'fired', realDaysAgo(1))]);
     const nested = path.join(dir, 'packages', 'app');
     fs.mkdirSync(nested, { recursive: true });
     return nested;

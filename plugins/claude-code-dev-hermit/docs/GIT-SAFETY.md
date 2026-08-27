@@ -8,7 +8,7 @@ Two layers of protection: prose rules in `state-templates/CLAUDE-APPEND.md` (alw
 
 Injected into the project's `CLAUDE.md` by `/hatch`. The §Git Safety section is the single source for the four rules: never `git push` from agent context (the sanctioned path is `/claude-code-dev-hermit:dev-pr`), never `--no-verify`, never commit to a `claude-code-dev-hermit.protected_branches` branch, and never force-push (with the narrow `--force-with-lease` carve-out). For the authoritative wording, including the `/dev-pr` push carve-out and the lease nuance, see `state-templates/CLAUDE-APPEND.md` §Git Safety.
 
-These apply to whatever agent the operator uses — native `Agent` tool, `feature-dev`'s research/architect agents, custom subagents, the main session. They depend on the agent reading and following the rules; LLMs sometimes ignore prose. That's what the hook is for.
+These apply to whatever agent the operator uses — native `Agent` tool, the built-in `Plan`/`Explore` research agents, custom subagents, the main session. They depend on the agent reading and following the rules; LLMs sometimes ignore prose. That's what the hook is for.
 
 ---
 

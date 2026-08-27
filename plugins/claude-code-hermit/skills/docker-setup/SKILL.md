@@ -231,7 +231,7 @@ Mirror host-installed plugins into the container so the container starts with th
    Host-installed plugins detected (project + local scope only):
 
    Safelisted (trusted sources):
-     - claude-code-setup @ anthropics/claude-plugins-official (project)
+     - context7 @ anthropics/claude-plugins-official (project)
      - claude-code-homeassistant-hermit @ gtapps/claude-code-homeassistant-hermit (project)
 
    Third-party (require individual opt-in):
@@ -273,8 +273,6 @@ The entrypoint resolves the canonical marketplace name at boot via `claude plugi
 **Legacy config note.** Re-running this skill against a pre-v1.0.34 config rebuilds `docker.recommended_plugins` from scratch from the current host plugin list — legacy entries (e.g. `marketplace == "claude-plugins-official"` literal) are replaced cleanly. The entrypoint warns and skips any legacy entry whose `marketplace` is not an `org/repo` until the operator re-runs this skill once.
 
 **On container-side `claude plugin marketplace add` / `plugin install` failure (either in entrypoint logs or when re-running the command manually after boot):** if the error mentions SSH auth, HTTPS credentials, `gh` not found, or `.gitconfig` read-only, **stop immediately — do not attempt workarounds inside the container.** The container has no SSH client, no `gh` CLI, and `.gitconfig` is bind-mounted read-only by design. Iterating on `GIT_CONFIG_NOSYSTEM`, `git config --global url...insteadOf`, or similar is guaranteed to fail and wastes the operator's time. Surface the error to the operator verbatim and move on — no retry unless the operator changes something host-side (makes the repo public, mirrors it, etc.) and asks to retry.
-
-If the operator selected plugins that have corresponding `scheduled_checks` entries in hatch Phase 4 (claude-code-setup, claude-md-management, skill-creator, feature-dev), also record those `scheduled_checks` entries if not already present.
 
 ### 7b.packages: Plugin-declared apt dependencies
 

@@ -1,60 +1,12 @@
 # Recommended Plugins
 
-Plugins that complement Hermit's autonomous operation. These are optional — Hermit works fine without them — but they add capabilities that improve self-learning and self-improvement over time.
+How Hermit handles third-party plugins. Hermit ships no standing recommendations — this page covers the mechanism for the plugins *you* choose to install alongside it.
 
 > **Disclaimer:** Hermit does not vet, audit, or take responsibility for any plugin — including official ones. Plugins run with the same permissions as Hermit. Operators who use `bypassPermissions` for fully unattended Docker operation grant plugins full unrestricted execution. You are responsible for evaluating any plugin you install. Review the plugin's source, understand what it does, and only install plugins you trust.
 
-Nothing is pre-shipped or pre-configured. During `/docker-setup`, you're asked whether to install each recommended plugin. Only plugins you explicitly opt into are added to your config and installed on container boot. You can manage them anytime with `/hermit-settings docker`.
+Nothing is pre-shipped or pre-configured. During `/docker-setup`, you're asked whether to mirror each plugin already installed on the host into the container. Only plugins you explicitly opt into are added to your config and installed on container boot. You can manage them anytime with `/hermit-settings docker`.
 
----
-
-## Official Plugins
-
-### claude-code-setup
-
-**Source:** [claude.com/plugins/claude-code-setup](https://claude.com/plugins/claude-code-setup)
-**Marketplace:** `claude-plugins-official` (no marketplace add needed)
-**Install:** `claude plugin install claude-code-setup@claude-plugins-official`
-
-Analyzes your codebase and recommends Claude Code automations — skills, hooks, MCP servers, subagents, and slash commands. Detects your tech stack (package.json, language files, directory structure) and surfaces the highest-value recommendations.
-
-**Why it matters for Hermit:** Hermit already reflects on its own experience and proposes improvements. With claude-code-setup installed, it can also analyze your project structure and recommend automations it wouldn't discover through reflection alone — like MCP servers for your database, or hooks for your CI pipeline. This feeds the learning loop: better tooling leads to better sessions, which leads to better proposals.
-
-### claude-md-management
-
-**Source:** [claude.com/plugins/claude-md-management](https://claude.com/plugins/claude-md-management)
-**Marketplace:** `claude-plugins-official` (no marketplace add needed)
-**Install:** `claude plugin install claude-md-management@claude-plugins-official`
-
-Audits and improves CLAUDE.md files across your project. Scans for all variants, grades quality (A–F), identifies gaps in command documentation, architectural clarity, and project patterns, then proposes targeted fixes — dense, actionable, no generic advice.
-
-Two capabilities:
-- **`claude-md-improver`** (skill) — full audit and quality grading. Invoked periodically via scheduled checks (default: weekly).
-- **`revise-claude-md`** (command) — lightweight session-end revision, captures learnings into CLAUDE.md. Invoked automatically at task completion.
-
-**Why it matters for Hermit:** CLAUDE.md is Hermit's primary project context. Better CLAUDE.md means better sessions — fewer misunderstandings, less wasted context asking about project structure.
-
-### skill-creator
-
-**Source:** [claude.com/plugins/skill-creator](https://claude.com/plugins/skill-creator)
-**Marketplace:** `claude-plugins-official` (no marketplace add needed)
-**Install:** `claude plugin install skill-creator@claude-plugins-official`
-
-Builds, tests, and refines new skills through structured iteration — from intent capture through benchmarked, production-ready deployment. Includes performance testing with parallel subagent runs and optimization loops.
-
-**Why it matters for Hermit:** When Hermit's reflect skill notices "this workflow keeps repeating" and creates a proposal, skill-creator gives it the tools to actually build and validate a new skill from that proposal. Closes the loop from observation to automation.
-
-### feature-dev
-
-**Source:** [github.com/anthropics/claude-code/tree/main/plugins/feature-dev](https://github.com/anthropics/claude-code/tree/main/plugins/feature-dev)
-**Marketplace:** `claude-plugins-official` (no marketplace add needed)
-**Install:** `claude plugin install feature-dev@claude-plugins-official`
-
-Orchestrates a 7-phase implementation workflow via `/feature-dev:feature-dev`: discovery → codebase exploration → clarifying questions → architecture design → implementation → quality review → summary. Backed by three read-only Sonnet agents — `code-architect` (implementation blueprints with file-level specifics), `code-explorer` (traces execution paths and dependencies), and `code-reviewer` (flags only 80+ confidence issues). The command gates on operator approval before Phase 5 (implementation) and presents multiple architecture options before coding.
-
-**Why it matters for Hermit:** Complements `skill-creator` for accepted-proposal implementation work — skill-creator builds new skills, feature-dev handles arbitrary code changes (hooks, scripts, refactors). After accepting a proposal, invoke `/feature-dev:feature-dev` when the work touches unfamiliar code paths in the host repo or calls for design-first scaffolding before writing code.
-
-**When not to use:** Per feature-dev's README: "Don't use for: single-line bug fixes, trivial changes, well-defined simple tasks, urgent hotfixes."
+**Hermit recommends no plugins by default.** Earlier versions offered a set of official Anthropic plugins at hatch (a codebase-automation recommender, a CLAUDE.md auditor, a skill builder, a feature-development scaffold). Claude Code now covers the same ground natively: the built-in `Plan`/`Explore` agents handle codebase research, auto-memory captures session learnings without touching CLAUDE.md, `/doctor` proposes CLAUDE.md trims once a file grows unwieldy, and the model authors a new skill directly from a procedure brief. Every installed plugin's skill descriptions are also paid on every API call an always-on hermit makes, so the bar for a standing recommendation is high. If you want one of the retired plugins anyway, install it yourself and register its skill with `/hermit-settings scheduled-checks` — the mechanism below is unchanged.
 
 ---
 
@@ -107,15 +59,12 @@ See [Config Reference](config-reference.md#recommended_plugins-entry-schema) for
 
 ## Scheduled Checks (Automatic Invocation)
 
-When you accept a recommended plugin during `/hatch` or `/docker-setup`, Hermit adds corresponding `scheduled_checks` entries to `config.json`:
+Hatch no longer seeds `scheduled_checks` for you — `config.json` starts with an empty list. Register any installed plugin's skill yourself with `/hermit-settings scheduled-checks`, either interval-triggered (runs during idle reflection) or session-triggered (runs at task completion):
 
-| Plugin | Check ID | Skill Invoked | Trigger | Cadence |
-|--------|----------|---------------|---------|---------|
-| `claude-code-setup` | `automation-recommender` | `/claude-code-setup:claude-automation-recommender` | `interval` | 7 days |
-| `claude-md-management` | `md-audit` | `/claude-md-management:claude-md-improver` | `interval` | 7 days |
-| `claude-md-management` | `md-revise` | `/claude-md-management:revise-claude-md` | `session` | At task completion |
-| `skill-creator` | _(none)_ | Event-driven via `proposal-act` | — | On demand |
-| `feature-dev` | _(none)_ | Manual via `/feature-dev:feature-dev` | — | On demand |
+```
+add <id> <plugin> <skill> interval [days]
+add <id> <plugin> <skill> session
+```
 
 **Interval checks** run during idle reflection. If a check is due (past its `interval_days`), reflect invokes the skill, evaluates the output, and routes actionable findings through the proposal pipeline. One check per reflect cycle.
 

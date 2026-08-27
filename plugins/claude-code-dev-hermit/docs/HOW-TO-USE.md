@@ -34,8 +34,6 @@ After `/hatch`, every code-writing agent in the project reads the rules in your 
 
 Break the task into ordered steps in the Progress Log. Skip for trivial single-step work.
 
-If `/feature-dev:feature-dev` is installed and the code path is unfamiliar (framework lifecycle hooks, ORM internals, build-tool plugins, auth middleware) — run it first. The trigger is **unfamiliarity, not urgency**.
-
 ### 2. Branch and implement
 
 Per `§Branch Discipline` in the injected CLAUDE.md:
@@ -98,7 +96,7 @@ Or set up a recurring routine via `/claude-code-hermit:hermit-routines` if you w
 
 ## Companion Plugins
 
-The setup wizard offers companion plugins from `claude-plugins-official`. See [Recommended Plugins](RECOMMENDED-PLUGINS.md) for details on each.
+The setup wizard offers `context7` from `claude-plugins-official`. See [Recommended Plugins](RECOMMENDED-PLUGINS.md) for details.
 
 ---
 

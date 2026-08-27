@@ -360,13 +360,13 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Recommended Plugins (config.json docker.recommended_plugins)
 
-    [enabled]  claude-code-setup (claude-plugins-official) — auto-installed on boot
+    [enabled]  context7 (claude-plugins-official) — auto-installed on boot
     [enabled]  claude-code-homeassistant-hermit (claude-code-homeassistant-hermit) — auto-installed on boot
 
   (or "No recommended plugins configured" if empty)
   ```
   Display each entry as `[enabled/disabled]  <plugin> (<marketplace>)` — show the `org/repo` (the `marketplace` field) in parens.
-- Ask: "Enable, disable, add, or remove recommended plugins? (e.g., 'enable claude-code-setup', 'add claude-code-setup', 'add superpowers obra/superpowers-marketplace', 'remove superpowers', or 'done') [done]"
+- Ask: "Enable, disable, add, or remove recommended plugins? (e.g., 'enable context7', 'add context7', 'add superpowers obra/superpowers-marketplace', 'remove superpowers', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - `enable <PLUGIN>`: `set docker.recommended_plugins.<index>.enabled true`
   - `disable <PLUGIN>`: `set docker.recommended_plugins.<index>.enabled false`
@@ -381,14 +381,13 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Scheduled Checks (config.json scheduled_checks)
 
-    #  ID                      Plugin               Trigger   Interval  Last Run    Status
-    1. automation-recommender  claude-code-setup     interval  7 days    2026-04-01  enabled
-    2. md-audit                claude-md-management  interval  7 days    (never)     enabled
-    3. md-revise               claude-md-management  session   —         2026-04-06  enabled
+    #   ID                Plugin     Trigger   Interval  Last Run    Status
+    1.  my-check          my-plugin  interval  7 days    2026-04-01  enabled
+    2.  my-session-check  my-plugin  session   —         2026-04-06  enabled
 
   (or "No scheduled checks configured" if empty)
   ```
-- Ask: "Enable, disable, add, remove, or change interval? (e.g., 'disable md-audit', 'interval automation-recommender 14', 'add my-check my-plugin /my-plugin:my-skill interval 7', 'add my-check my-plugin /my-plugin:my-skill session', or 'done') [done]"
+- Ask: "Enable, disable, add, remove, or change interval? (e.g., 'disable my-check', 'interval my-check 14', 'add my-check my-plugin /my-plugin:my-skill interval 7', 'add my-check my-plugin /my-plugin:my-skill session', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - `enable <id>` / `disable <id>`: `set scheduled_checks.<index>.enabled true|false`
   - `interval <id> <days>`: `set scheduled_checks.<index>.interval_days <days>` (only valid for `trigger: "interval"`)

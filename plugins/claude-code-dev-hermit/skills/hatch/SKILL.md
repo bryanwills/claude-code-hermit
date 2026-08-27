@@ -7,7 +7,7 @@ description: Activate the dev hermit in the current project. Appends the dev saf
 
 Set up the language-agnostic safety layer for this project. Requires `claude-code-hermit` core to be initialized first.
 
-The plugin's identity in v0.3.0+: a thin wrapper around (a) `git-push-guard` strict-profile hook, (b) a CLAUDE-APPEND template (safety or standard) injected into the project's CLAUDE.md, (c) dev workflow skills (`/dev-pr`, `/dev-quality`, `/dev-test`) available but only prescribed in standard mode. There is no built-in implementer agent — operators use the native `Agent` tool, `feature-dev`, or custom subagents, all governed by the injected rules.
+The plugin's identity in v0.3.0+: a thin wrapper around (a) `git-push-guard` strict-profile hook, (b) a CLAUDE-APPEND template (safety or standard) injected into the project's CLAUDE.md, (c) dev workflow skills (`/dev-pr`, `/dev-quality`, `/dev-test`) available but only prescribed in standard mode. There is no built-in implementer agent — operators use the native `Agent` tool, or custom subagents, all governed by the injected rules.
 
 ## Plan
 
@@ -203,20 +203,19 @@ questions: [
     ]
   },
   {
-    header: "Plugins",
-    question: "Install companion plugins?",
-    multiSelect: true,
+    header: "Docs MCP",
+    question: "Install context7? Live library docs via MCP — no always-loaded cost.",
     options: [
-      { label: "feature-dev", description: "Architect/explorer/reviewer agents for guided feature dev" },
-      { label: "context7", description: "Live docs lookup for framework APIs" }
+      { label: "Yes", description: "claude plugin install context7@claude-plugins-official" },
+      { label: "No", description: "Skip — add it later with claude plugin install" }
     ]
   }
 ]
 ```
 
-In `safety` mode, skip the `PR cmd`, `PR template`, and `Base branch` questions; do not write `commands.pr_create`, `pr_template_path`, or `pr_base_branch` to config (these feed `/dev-pr` which is not prescribed in safety mode). Keep `Hook` and `Plugins`.
+In `safety` mode, skip the `PR cmd`, `PR template`, and `Base branch` questions; do not write `commands.pr_create`, `pr_template_path`, or `pr_base_branch` to config (these feed `/dev-pr` which is not prescribed in safety mode). Keep `Hook` and `Docs MCP`.
 
-Filter the Plugins `options` array to only those NOT already installed (per the `claude plugin list` detection above). If the filtered list is empty, skip the Plugins question entirely.
+Skip the `Docs MCP` question entirely if `context7` is already installed (per the `claude plugin list` detection above).
 
 If `OPERATOR.md` exists and does NOT contain a `## Development Conventions` section, append the answers under that heading.
 
@@ -240,7 +239,7 @@ In `standard` mode only, also write:
 - `claude-code-dev-hermit.pr_template_path` — optional, from Round 2.
 - `claude-code-dev-hermit.pr_base_branch` — write only if the chosen branch (from the Round 2 `Base branch` question, or `AUTO_BASE` from the single-match case) differs from `FALLBACK_BASE`. If equal or not set, leave the key absent so `/dev-pr`'s fallback chain operates undisturbed.
 
-For each selected companion plugin: `claude plugin install <plugin>@claude-plugins-official --scope project`.
+If the operator answered "Yes" to `Docs MCP`: `claude plugin install context7@claude-plugins-official --scope project`.
 
 ### 6. Report results
 
@@ -268,8 +267,7 @@ Updated:
   OPERATOR.md — dev conventions [added / already present / skipped]
   PR template: <path or 'none'>  [standard mode only]
 
-Companion plugins:
-  [installed: feature-dev, context7  /  partial  /  none]
+Companion plugin: context7 [installed / already present / skipped]
 
 Available skills:
   /claude-code-dev-hermit:hatch    — re-run to update settings (idempotent)
@@ -280,7 +278,7 @@ Available skills:
 Conventions are in CLAUDE.md (§Git Safety, §Branch Discipline). [safety]
 Conventions are in CLAUDE.md (§Git Safety, §Branch Discipline,
 §Implementation Flow). [standard]
-Any agent doing dev work in this project — native Agent, feature-dev, custom — must follow them.
+Any agent doing dev work in this project — native Agent, custom subagent — must follow them.
 ```
 
 ## Docker network requirements

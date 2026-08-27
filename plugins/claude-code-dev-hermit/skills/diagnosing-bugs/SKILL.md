@@ -1,6 +1,6 @@
 ---
 name: diagnosing-bugs
-description: "Diagnosis loop for hard bugs and performance regressions. Builds a red-capable feedback loop and runs it before hypothesising — complements feature-dev:code-reviewer (which finds bugs by static code reading) by running actual repros. Use when the user says 'diagnose'/'debug this', or reports something broken/throwing/failing/slow."
+description: "Diagnosis loop for hard bugs and performance regressions. Builds a red-capable feedback loop and runs it before hypothesising — complements static code review (which finds bugs by reading) by running actual repros. Use when the user says 'diagnose'/'debug this', or reports something broken/throwing/failing/slow."
 ---
 
 # Diagnosing Bugs

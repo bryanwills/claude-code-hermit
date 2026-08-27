@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Hatch now offers only `context7` as a companion plugin (single yes/no); `feature-dev` is retired — Claude Code's native `Plan`/`Explore` agents cover the same research-and-planning ground. The standard-mode `§Implementation Flow` no longer suggests `/feature-dev:feature-dev` for unfamiliar code paths.
+
+### Upgrade Instructions
+- The CLAUDE.md dev block is re-synced by `hermit-evolve`'s existing block sync — nothing to do by hand. If `feature-dev` is installed and no longer wanted, core's own upgrade step (this release's `claude-code-hermit` CHANGELOG) offers to remove it alongside the other retired plugins.
+
 ## [0.4.10] - 2026-08-17
 
 ### Changed

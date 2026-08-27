@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator`, or `feature-dev`, and no longer seeds their `scheduled_checks` entries — Claude Code's native `Plan`/`Explore` agents, auto-memory, and `/doctor` CLAUDE.md trims cover the same ground, and every loaded skill description is paid on every API call of an always-on hermit. The `scheduled_checks` mechanism itself is unchanged; register any plugin's skill with `/hermit-settings scheduled-checks`.
+- `proposal-act` authors `## Skill Improvement` and `## Skill Draft` bodies in-main from the source brief instead of delegating to `skill-creator`; the falsification gate's read-only pass always uses the native `Plan` agent instead of `feature-dev:code-explorer`.
+- The first-session baseline audit offer (`.baseline-pending`) is removed along with the plugins it audited.
+
+### Upgrade Instructions
+- **Decide whether to keep the plugins hatch used to recommend.** Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator` or `feature-dev`; Claude Code covers them natively (see `${CLAUDE_PLUGIN_ROOT}/docs/recommended-plugins.md`). Nothing is removed for you. First, unconditionally delete `.claude-code-hermit/.baseline-pending` if it exists. Then inventory: `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get scheduled_checks` for entries whose `plugin` is `claude-code-setup` or `claude-md-management`; `… get docker.recommended_plugins` for entries naming any of the four; `claude plugin list` for any of the four installed. If all three are empty, skip silently. Otherwise this is the operator's decision with no default: **defer per SKILL.md Step 10** with `options: ["Keep", "Remove"]` and no `on_resolve`; the choice is applied in attended Step 10 only.
+  **Keep:** change nothing; tell the operator once that the listed checks keep running and that `/claude-code-hermit:hermit-settings scheduled-checks` disables or removes them later.
+  **Remove (attended only, never unattended):** (1) `… set scheduled_checks '<the array without those entries>'` (whole array, other entries preserved), then remove each dropped id from `state/reflection-state.json → scheduled_checks`, as `/hermit-settings scheduled-checks remove <id>` does; (2) `… set docker.recommended_plugins '<the array without those entries>'`; (3) for each installed plugin run `claude plugin uninstall <plugin>@claude-plugins-official --scope <scope shown by claude plugin list>`; if a call is refused, print the exact command for the operator instead; (4) report what was removed and that a Docker hermit needs `.claude-code-hermit/bin/hermit-docker update` to drop them from the image. Re-runnable: a second run finds nothing and skips.
+  **Unattended relay** must add: from chat, "disable <id>" through `/claude-code-hermit:hermit-settings scheduled-checks` is accepted (the `enabled` flag is channel-writable); full removal and plugin uninstall need a terminal session.
+
 ## [1.2.49] - 2026-08-26
 
 ### Added
