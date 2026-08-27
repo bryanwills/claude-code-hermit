@@ -1,10 +1,10 @@
 # Recommended Plugins
 
-Plugins that complement Hermit's autonomous operation. These are optional — Hermit works fine without them — but they add capabilities that improve self-learning and self-improvement over time.
+How Hermit handles third-party plugins. Hermit ships no standing recommendations — this page covers the mechanism for the plugins *you* choose to install alongside it.
 
 > **Disclaimer:** Hermit does not vet, audit, or take responsibility for any plugin — including official ones. Plugins run with the same permissions as Hermit. Operators who use `bypassPermissions` for fully unattended Docker operation grant plugins full unrestricted execution. You are responsible for evaluating any plugin you install. Review the plugin's source, understand what it does, and only install plugins you trust.
 
-Nothing is pre-shipped or pre-configured. During `/docker-setup`, you're asked whether to install each recommended plugin. Only plugins you explicitly opt into are added to your config and installed on container boot. You can manage them anytime with `/hermit-settings docker`.
+Nothing is pre-shipped or pre-configured. During `/docker-setup`, you're asked whether to mirror each plugin already installed on the host into the container. Only plugins you explicitly opt into are added to your config and installed on container boot. You can manage them anytime with `/hermit-settings docker`.
 
 **Hermit recommends no plugins by default.** Earlier versions offered a set of official Anthropic plugins at hatch (a codebase-automation recommender, a CLAUDE.md auditor, a skill builder, a feature-development scaffold). Claude Code now covers the same ground natively: the built-in `Plan`/`Explore` agents handle codebase research, auto-memory captures session learnings without touching CLAUDE.md, `/doctor` proposes CLAUDE.md trims once a file grows unwieldy, and the model authors a new skill directly from a procedure brief. Every installed plugin's skill descriptions are also paid on every API call an always-on hermit makes, so the bar for a standing recommendation is high. If you want one of the retired plugins anyway, install it yourself and register its skill with `/hermit-settings scheduled-checks` — the mechanism below is unchanged.
 

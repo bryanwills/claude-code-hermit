@@ -36,11 +36,11 @@ claude plugin install claude-code-dev-hermit@claude-code-hermit --scope local
 
 **Git safety, two layers.** Prose rules apply at every profile via CLAUDE-APPEND.md (no push, no `--no-verify`, no commits to protected branches, no force-push). At strict profile, `git-push-guard` backs them with hard `bash`-time blocking.
 
-**Works with any agent.** The CLAUDE-APPEND.md template, injected into your project's `CLAUDE.md`, gives every code-writing agent the same rules: clean tree before starting, branch from `protected_branches[0]`, name as `<prefix>/<slug>`, run the configured test command before declaring done, re-run after the `/claude-code-hermit:simplify` cleanup pass, revert on regression. Native `Agent` tool, `feature-dev:code-architect`, your own subagent — they all read the same rules.
+**Works with any agent.** The CLAUDE-APPEND.md template, injected into your project's `CLAUDE.md`, gives every code-writing agent the same rules: clean tree before starting, branch from `protected_branches[0]`, name as `<prefix>/<slug>`, run the configured test command before declaring done, re-run after the `/claude-code-hermit:simplify` cleanup pass, revert on regression. Native `Agent` tool, the built-in `Plan`/`Explore` agents, your own subagent — they all read the same rules.
 
 **Optional workflow scaffolding.** For greenfield projects without their own commit/PR/release conventions: `/dev-pr` pushes the branch and opens a PR assembled from commits + last test result + screenshots (`gh pr create` for GitHub, `glab mr create` for GitLab, or a custom command). `/dev-quality` runs `/claude-code-hermit:simplify` for a cleanup pass on the working tree and re-runs `commands.test` before you commit. `/dev-test` runs the configured suite and records the result so `/dev-pr` only opens PRs after tests pass at the current commit. If your project already has its own `/commit`, `/create-pr`, or `/release` skills, skip these — `/hatch` detects them and defaults to safety mode.
 
-**Engineering discipline skills.** Two autonomous skills for recurring dev situations: `diagnosing-bugs` builds a tight, red-capable feedback loop before hypothesising (complements `feature-dev:code-reviewer`'s static reading — neither runs repros); `resolving-merge-conflicts` resolves in-progress git conflicts autonomously in 5 steps — never `--abort`, always runs project checks after.
+**Engineering discipline skills.** Two autonomous skills for recurring dev situations: `diagnosing-bugs` builds a tight, red-capable feedback loop before hypothesising (complements `/code-review`'s static reading — it doesn't run repros); `resolving-merge-conflicts` resolves in-progress git conflicts autonomously in 5 steps — never `--abort`, always runs project checks after.
 
 That's it. One hook + one template, with optional workflow and engineering skills on top. Whatever you don't need — gone.
 
@@ -148,7 +148,7 @@ See [docs/GIT-SAFETY.md](docs/GIT-SAFETY.md) for the full safety model and the t
 
 **Engineering discipline skills** (autonomous — no user prompts required):
 
-- **`diagnosing-bugs` skill** — Diagnosis loop for hard bugs and performance regressions. Builds a tight, red-capable feedback loop before hypothesising. Reads `.claude-code-hermit/compiled/` for architectural context; drops diagnostic artifacts (logs, repro snapshots) in `.claude-code-hermit/raw/`. Complements `feature-dev:code-reviewer` (static read) — neither runs repros; this one does.
+- **`diagnosing-bugs` skill** — Diagnosis loop for hard bugs and performance regressions. Builds a tight, red-capable feedback loop before hypothesising. Reads `.claude-code-hermit/compiled/` for architectural context; drops diagnostic artifacts (logs, repro snapshots) in `.claude-code-hermit/raw/`. Complements `/code-review` (static read) — that one doesn't run repros; this one does.
 - **`resolving-merge-conflicts` skill** — Resolves in-progress git merge/rebase conflicts in 5 steps. Never `--abort`; runs project automated checks (typecheck, tests, format) after resolving; stages and commits to finish.
 
 ---

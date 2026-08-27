@@ -360,13 +360,13 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Recommended Plugins (config.json docker.recommended_plugins)
 
-    [enabled]  claude-code-setup (claude-plugins-official) — auto-installed on boot
+    [enabled]  context7 (claude-plugins-official) — auto-installed on boot
     [enabled]  claude-code-homeassistant-hermit (claude-code-homeassistant-hermit) — auto-installed on boot
 
   (or "No recommended plugins configured" if empty)
   ```
   Display each entry as `[enabled/disabled]  <plugin> (<marketplace>)` — show the `org/repo` (the `marketplace` field) in parens.
-- Ask: "Enable, disable, add, or remove recommended plugins? (e.g., 'enable claude-code-setup', 'add claude-code-setup', 'add superpowers obra/superpowers-marketplace', 'remove superpowers', or 'done') [done]"
+- Ask: "Enable, disable, add, or remove recommended plugins? (e.g., 'enable context7', 'add context7', 'add superpowers obra/superpowers-marketplace', 'remove superpowers', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - `enable <PLUGIN>`: `set docker.recommended_plugins.<index>.enabled true`
   - `disable <PLUGIN>`: `set docker.recommended_plugins.<index>.enabled false`

@@ -124,7 +124,7 @@ Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 
 `Evidence Origin:` defaults to `own-work` if omitted. Set to `external-content` when the evidence derives from web fetches, `raw/` third-party captures, or a channel finding with an `[origin: external]` marker. The two fields are orthogonal: a candidate can be `archived-session` + `external-content`.
 
-`scheduled-check/<id>` and `operator-request` share the same bypass policy at every gate (skip recurrence, enforce consequence + actionability). They are **kept distinct on purpose**: `scheduled-check/<id>` carries the check identifier for telemetry and debugging; `operator-request` marks human-initiated flows (e.g. baseline audits in `session-start`). Future routing will read them as different provenance classes. Do not collapse them into one value.
+`scheduled-check/<id>` and `operator-request` share the same bypass policy at every gate (skip recurrence, enforce consequence + actionability). They are **kept distinct on purpose**: `scheduled-check/<id>` carries the check identifier for telemetry and debugging; `operator-request` marks human-initiated flows (a proposal the operator asked for directly). Future routing will read them as different provenance classes. Do not collapse them into one value.
 
 The judge returns one verdict line per candidate, matched by `<title>`. For each candidate, record its line:
 ```bash

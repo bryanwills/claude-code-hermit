@@ -231,7 +231,7 @@ Mirror host-installed plugins into the container so the container starts with th
    Host-installed plugins detected (project + local scope only):
 
    Safelisted (trusted sources):
-     - claude-code-setup @ anthropics/claude-plugins-official (project)
+     - context7 @ anthropics/claude-plugins-official (project)
      - claude-code-homeassistant-hermit @ gtapps/claude-code-homeassistant-hermit (project)
 
    Third-party (require individual opt-in):
