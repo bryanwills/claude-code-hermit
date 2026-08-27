@@ -163,7 +163,7 @@ describe('reflect: skill-correction:* graduation routing', () => {
   });
 
   test('reflect: no brief found path produces moderate plain proposal (no ## Skill Improvement)', () => {
-    expect(reflect).toContain('plain Tier 2 improvement proposal (no `## Skill Improvement`, no skill-creator). The candidate carries `Artifact: state/observations.jsonl`');
+    expect(reflect).toContain('plain Tier 2 improvement proposal (no `## Skill Improvement`). The candidate carries `Artifact: state/observations.jsonl`');
   });
 
   test('reflect: both paths carry Artifact: state/observations.jsonl for judge §1.4', () => {
@@ -210,7 +210,7 @@ describe('channel-responder: resolved correction routes to ledger row', () => {
 
 describe('proposal-act: ## Skill Improvement anchor handling', () => {
   test('proposal-act: parses source_artifact from ## Skill Improvement body', () => {
-    expect(proposalAct).toContain('parse the `source_artifact:` line from the `## Skill Improvement` body');
+    expect(proposalAct).toContain('Parse the `source_artifact:` line from the `## Skill Improvement` body');
   });
 
   test('proposal-act: anchor lookup searches compiled/ then compiled/.archive/', () => {
@@ -226,7 +226,7 @@ describe('proposal-act: ## Skill Improvement anchor handling', () => {
     expect(proposalAct).toContain('unlike `## Skill Draft` which hard-rejects stale paths');
   });
 
-  test('proposal-act: brief content passed as input context to skill-creator improve', () => {
-    expect(proposalAct).toContain('pass its content as input context to skill-creator improve');
+  test('proposal-act: brief content used as input context for the in-main revision', () => {
+    expect(proposalAct).toContain('use its content as input context for the revision');
   });
 });

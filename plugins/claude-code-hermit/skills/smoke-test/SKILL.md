@@ -109,7 +109,7 @@ Output each check result as exactly one line:
 ```
 PASS  config.json parsed and version matches plugin (0.3.4)
 WARN  OPERATOR.md contains unfilled {{ placeholders
-WARN  scheduled_checks[0]: claude-code-setup:claude-automation-recommender not loaded — install the plugin or remove the entry
+WARN  scheduled_checks[0]: my-plugin:my-check not loaded — install the plugin or remove the entry
 PASS  routine "heartbeat-restart" valid (0 4 * * *, claude-code-hermit:hermit-routines load)
 PASS  routine "morning" valid (0 9 * * *, claude-code-hermit:reflect)
 FAIL  routine "bad" uses legacy "time" field — migrate to "schedule" (5-field cron)

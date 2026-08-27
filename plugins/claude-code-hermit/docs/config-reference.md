@@ -588,12 +588,12 @@ A realistic `config.json` for an always-on Docker hermit with Discord:
     "MAX_THINKING_TOKENS": "10000"
   },
   "scheduled_checks": [
-    {"id": "claude-md-check", "plugin": "claude-md-management", "skill": "claude-md-management:claude-md-improver", "enabled": true, "trigger": "interval", "interval_days": 7}
+    {"id": "my-check", "plugin": "my-plugin", "skill": "my-plugin:my-audit-skill", "enabled": true, "trigger": "interval", "interval_days": 7}
   ],
   "docker": {
     "packages": ["python3", "python3-pip"],
     "recommended_plugins": [
-      {"plugin": "claude-code-setup", "marketplace": "anthropics/claude-plugins-official", "scope": "project", "enabled": true}
+      {"plugin": "my-plugin", "marketplace": "anthropics/claude-plugins-official", "scope": "project", "enabled": true}
     ]
   },
   "compact": {

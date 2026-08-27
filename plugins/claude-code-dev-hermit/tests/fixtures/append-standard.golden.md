@@ -32,7 +32,6 @@ If the project's own CLAUDE.md or skills define a commit/test/PR sequence, follo
 - Cleanup edits from `/claude-code-dev-hermit:dev-quality` must land **before** the commit — that ordering is why the quality gate runs first. `/claude-code-dev-hermit:dev-pr` Gate 0 then enforces a fresh passing test at the current HEAD sha mechanically; don't restate its checks, just run it.
 - Never declare the task done with broken tests.
 - Working inside a nested git repo (submodule, Composer path package, npm/pnpm path workspace, vendored dep)? Pass the same `--cwd <relative/path>` to `/claude-code-dev-hermit:dev-quality` and `/claude-code-dev-hermit:dev-pr`. State stays under the parent's `.claude-code-hermit/`.
-- If `/feature-dev:feature-dev` is installed, run it first when the code path is genuinely unfamiliar (framework lifecycle hooks, ORM internals, build-tool plugins, auth middleware). The trigger is unfamiliarity, not urgency.
 
 ## Technical Constraints
 

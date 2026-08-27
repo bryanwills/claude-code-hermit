@@ -136,65 +136,6 @@ Ask all three in a single `AskUserQuestion` call (the option marked `(default)` 
 
 Record: `escalation` (conservative/balanced/autonomous), `remote` (true/false), `idle_behavior` (wait/discover).
 
-#### Phase 4 — Recommended plugins (AskUserQuestion, single multiSelect question)
-
-<!-- Compatible-plugin list is mirrored in hatch Phase 4 options, Phase 4b eligibility, and session-start step 5b. Update all three when adding. -->
-
-Before calling `AskUserQuestion`, print this one-line preamble to the operator:
-
-> All are official Anthropic plugins from the `claude-plugins-official` marketplace (https://claude.com/plugins).
-
-Then ask:
-
-```
-questions: [
-  {
-    header: "Plugins",
-    question: "Which recommended plugins should be installed?",
-    options: [
-      { label: "claude-code-setup", description: "Analyzes codebase, recommends automations (skills, hooks, MCP servers, subagents)" },
-      { label: "claude-md-management", description: "Audits and improves CLAUDE.md files — grades quality, proposes fixes" },
-      { label: "skill-creator", description: "Builds and refines new skills from proposals" },
-      { label: "feature-dev", description: "Designs, explores, and reviews code for accepted-PROP implementation work" }
-    ],
-    multiSelect: true
-  }
-]
-```
-
-Note: `multiSelect: true` is intentional — all four plugins can be selected at once.
-
-- All plugins are selected by default — deselect to skip
-- If no plugins are selected, skip all plugin installs
-- For each selected plugin, install it immediately at the hermit's scope (`core_install_scope` from Step 2; fall back to `project` when null):
-  `claude plugin install <plugin>@claude-plugins-official --scope <core_install_scope>`
-
-For each accepted plugin, also add the corresponding `scheduled_checks` entries to config.json:
-
-- `claude-code-setup` → `{"id":"automation-recommender","plugin":"claude-code-setup","skill":"/claude-code-setup:claude-automation-recommender","enabled":true,"trigger":"interval","interval_days":7}`
-- `claude-md-management` → two entries:
-  - `{"id":"md-audit","plugin":"claude-md-management","skill":"/claude-md-management:claude-md-improver","enabled":true,"trigger":"interval","interval_days":7}`
-  - `{"id":"md-revise","plugin":"claude-md-management","skill":"/claude-md-management:revise-claude-md","enabled":true,"trigger":"session"}`
-- `skill-creator` → no entry (event-driven via proposal-act, not scheduled)
-- `feature-dev` → no entry (manual on-demand via /feature-dev:feature-dev, not scheduled)
-
-For each plugin the operator declines, skip silently. Note: "You can add it later with `/claude-code-hermit:hermit-settings`."
-
-#### Phase 4b — Baseline audit marker (conditional)
-
-<!-- Compatible-plugin list is mirrored in hatch Phase 4 options, Phase 4b eligibility, and session-start step 5b. Update all three when adding. -->
-
-Create `.claude-code-hermit/.baseline-pending` (empty file) ONLY if **all three** are true:
-
-1. This is a **fresh init**, not a re-init. (Step 1 of hatch branches on an existing `.claude-code-hermit/`; skip this phase on re-init.)
-2. Phase 4 accepted **either** `claude-md-management` **or** `claude-code-setup`.
-3. The project is an **existing codebase** — at least one of the following files exists at the project root:
-   - `package.json`, `requirements.txt`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `Gemfile`, `composer.json`, `pom.xml`, `build.gradle`
-
-`README.md` and `CLAUDE.md` alone do NOT qualify. If none of the eligibility conditions hold, skip silently — no operator prompt here.
-
-The marker's existence is the entire state model. No JSON, no timestamp, no content.
-
 #### Phase 5 — Channels (AskUserQuestion, single question)
 
 ```
@@ -312,14 +253,12 @@ with the answers payload as JSON on stdin. The script reads the template (or, on
   "escalation": "...", "remote": true, "idle_behavior": "...",
   "permission_mode": "...",
   "routines": { "enabled": true, "morning_time": "08:30", "evening_time": "22:30" },
-  "scheduled_checks_plugins": ["claude-code-setup", "claude-md-management"],
   "channels": { "discord": { "enabled": true, "allowed_users": ["<id>"], "morning_brief_time": "07:00" } }
 }
 ```
 
 - **Phase 2** → `agent_name`, `language`, `timezone`, `sign_off`.
 - **Phase 3** → `escalation`, `remote`, `idle_behavior`.
-- **Phase 4** → `scheduled_checks_plugins`: only `claude-code-setup` and `claude-md-management` contribute entries (3 total when both selected); `skill-creator` and `feature-dev` contribute none — omit them from the list.
 - **Phase 5** → `channels.<name>`: `enabled`, `allowed_users` (omit if the operator skipped access control), `morning_brief_time` (omit if declined; on re-init, send it as `null` to turn off a brief the operator previously enabled). The script fills in `dm_channel_id: null`, `default_chat_id: null`, and `state_dir: .claude.local/channels/<name>` on first creation and preserves all three (plus any other channel it doesn't recognize, `channels.primary`, and third-party `marketplace` channels) on re-init merge. Do **not** include `push_notifications` in the payload — the script never touches it; it stays at the template default (`true`) or, on re-init, whatever value is already on disk. The runtime channel-first/push-fallback guard in CLAUDE-APPEND.md already prevents double-notification.
 - **Phase 6** → `permission_mode`, `routines` (morning/evening only — `heartbeat-restart` and the other infrastructure routines are already in the template and are never touched by this payload).
 - **Step 3 hermit activation** → `activated_hermit`. `version` is read from `<activated_hermit.installPath>/.claude-plugin/plugin.json`; `boot_skill` is read from `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json`'s `hermit.boot_skill` field (or `null` if absent).
@@ -666,7 +605,7 @@ Read, immediately delete, then invoke the named skill via the Skill tool.
 
 ## Quick Branch
 
-Replaces Steps 3-4 with batched turns + confirm; resumes shared Steps 5-9 after approval. Same files written, same `config.json` fields populated, same OPERATOR.md questionnaire, same security gates, same `.baseline-pending` eligibility — Quick just defaults incidental decisions and shows the resolved bundle before any config writes.
+Replaces Steps 3-4 with batched turns + confirm; resumes shared Steps 5-9 after approval. Same files written, same `config.json` fields populated, same OPERATOR.md questionnaire, same security gates — Quick just defaults incidental decisions and shows the resolved bundle before any config writes.
 
 **Entry condition:** Step 1.6 returned `Quick` AND `is_reinit` is `false` (re-init forces Advanced).
 
@@ -805,8 +744,6 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Source | Field | Quick value |
 |---|---|---|
 | Advanced Phase 3 equivalent | escalation, remote | template defaults (balanced, true) — don't override |
-| Advanced Phase 4 equivalent | plugins + scheduled_checks | install all 4; write 3 scheduled_checks entries per Phase 4 mapping |
-| Advanced Phase 4b equivalent | `.baseline-pending` marker | same eligibility check as Advanced |
 | Advanced 5a Phase 4b equivalent | `voice` | Quick Turn 4 runs 5a verbatim, so the comms question and the render happen there too |
 | Step 5b | artifact chrome localization | run verbatim — generate the translated table only when `language` is set and not `en`; skip silently otherwise |
 | Advanced Phase 5 equivalent | channels.<name>.* | state_dir + enabled + dm_channel_id=null + default_chat_id=null; omit allowed_users + morning_brief |

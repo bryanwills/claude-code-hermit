@@ -381,14 +381,13 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Scheduled Checks (config.json scheduled_checks)
 
-    #  ID                      Plugin               Trigger   Interval  Last Run    Status
-    1. automation-recommender  claude-code-setup     interval  7 days    2026-04-01  enabled
-    2. md-audit                claude-md-management  interval  7 days    (never)     enabled
-    3. md-revise               claude-md-management  session   —         2026-04-06  enabled
+    #   ID                Plugin     Trigger   Interval  Last Run    Status
+    1.  my-check          my-plugin  interval  7 days    2026-04-01  enabled
+    2.  my-session-check  my-plugin  session   —         2026-04-06  enabled
 
   (or "No scheduled checks configured" if empty)
   ```
-- Ask: "Enable, disable, add, remove, or change interval? (e.g., 'disable md-audit', 'interval automation-recommender 14', 'add my-check my-plugin /my-plugin:my-skill interval 7', 'add my-check my-plugin /my-plugin:my-skill session', or 'done') [done]"
+- Ask: "Enable, disable, add, remove, or change interval? (e.g., 'disable my-check', 'interval my-check 14', 'add my-check my-plugin /my-plugin:my-skill interval 7', 'add my-check my-plugin /my-plugin:my-skill session', or 'done') [done]"
 - Loop until operator says "done", "skip", or presses Enter:
   - `enable <id>` / `disable <id>`: `set scheduled_checks.<index>.enabled true|false`
   - `interval <id> <days>`: `set scheduled_checks.<index>.interval_days <days>` (only valid for `trigger: "interval"`)

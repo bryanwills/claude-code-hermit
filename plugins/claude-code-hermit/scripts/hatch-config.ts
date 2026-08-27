@@ -174,52 +174,6 @@ if (Object.hasOwn(answers, 'activated_hermit')) {
   config.boot_skill = answers.activated_hermit ? (answers.activated_hermit.boot_skill ?? null) : null;
 }
 
-// --- scheduled_checks: reconcile core-owned ids, preserve custom/domain entries ---
-// Canonical mapping — mirrors hatch/SKILL.md Phase 4 and its answers-payload note
-// (the two `scheduled_checks` blocks in hatch/SKILL.md); update both there when a new
-// scheduled-check-contributing plugin is added.
-const SCHEDULED_CHECK_MAP: Record<string, Json[]> = {
-  'claude-code-setup': [
-    {
-      id: 'automation-recommender', plugin: 'claude-code-setup',
-      skill: '/claude-code-setup:claude-automation-recommender',
-      enabled: true, trigger: 'interval', interval_days: 7,
-    },
-  ],
-  'claude-md-management': [
-    {
-      id: 'md-audit', plugin: 'claude-md-management',
-      skill: '/claude-md-management:claude-md-improver',
-      enabled: true, trigger: 'interval', interval_days: 7,
-    },
-    {
-      id: 'md-revise', plugin: 'claude-md-management',
-      skill: '/claude-md-management:revise-claude-md',
-      enabled: true, trigger: 'session',
-    },
-  ],
-};
-const CORE_OWNED_SCHEDULED_CHECK_IDS = new Set(
-  Object.values(SCHEDULED_CHECK_MAP).flat().map((e) => e.id),
-);
-
-if (Object.hasOwn(answers, 'scheduled_checks_plugins')) {
-  const selected = answers.scheduled_checks_plugins;
-  if (!Array.isArray(selected)) die('scheduled_checks_plugins must be an array');
-  config.scheduled_checks = Array.isArray(config.scheduled_checks) ? config.scheduled_checks : [];
-  // Drop any existing core-owned entries, then re-add per the (possibly changed)
-  // selection — this reconciles additions/removals while leaving any custom/domain
-  // entry (an id outside CORE_OWNED_SCHEDULED_CHECK_IDS) untouched.
-  config.scheduled_checks = config.scheduled_checks.filter(
-    (c: Json) => !CORE_OWNED_SCHEDULED_CHECK_IDS.has(c?.id),
-  );
-  // dedup the selection so a repeated plugin can't push duplicate check ids
-  for (const plugin of new Set(selected)) {
-    const entries = SCHEDULED_CHECK_MAP[plugin as string];
-    if (entries) config.scheduled_checks.push(...entries);
-  }
-}
-
 // --- channels: field-level merge, preserve learned/unknown state on re-init ---
 if (Object.hasOwn(answers, 'channels')) {
   const answerChannels = answers.channels;
