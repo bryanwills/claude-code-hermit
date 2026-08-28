@@ -168,7 +168,7 @@ try {
 
 const now = new Date().toISOString();
 
-// Retain whole runs covering at least the latest 20 judge verdicts.
+// Ring of the last 20 judge verdicts as a/d/s letters. An old runs array is folded in once.
 const WINDOW_VERDICTS = 20;
 
 const c: Json = (state.counters && typeof state.counters === 'object') ? { ...state.counters } : {};
@@ -212,6 +212,15 @@ const judgeRun = {
   suppress: intOf(payload.judge_suppress),
 };
 const judgeVerdicts = judgeRun.accept + judgeRun.downgrade + judgeRun.suppress;
+// Only the last WINDOW_VERDICTS characters can survive the slice below, so each letter
+// run is capped there: an absurd count (garbled payload, corrupted on-disk run) would
+// otherwise throw RangeError out of String.repeat and abort the whole state write.
+// Capping is lossless — a run longer than the window already drops everything before it.
+const RING_RE = new RegExp(`^[ads]{1,${WINDOW_VERDICTS}}$`);
+const letters = (run: Json) =>
+  'a'.repeat(Math.min(intOf(run.accept), WINDOW_VERDICTS)) +
+  'd'.repeat(Math.min(intOf(run.downgrade), WINDOW_VERDICTS)) +
+  's'.repeat(Math.min(intOf(run.suppress), WINDOW_VERDICTS));
 if (judgeVerdicts > 0) {
   const storedRuns = Array.isArray(c.judge_window?.runs) && c.judge_window.runs.every((run: Json) =>
     run && typeof run === 'object' && !Array.isArray(run) &&
@@ -220,34 +229,17 @@ if (judgeVerdicts > 0) {
       typeof run[key] === 'number' && Number.isFinite(run[key]) && run[key] >= 0
     )
   ) ? c.judge_window.runs : [];
-  const runs = storedRuns.map((run: Json) => ({
-    at: run.at,
-    accept: intOf(run.accept),
-    downgrade: intOf(run.downgrade),
-    suppress: intOf(run.suppress),
-  }));
-  runs.push(judgeRun);
-
-  let verdicts = runs.reduce((sum: number, run: Json) =>
-    sum + run.accept + run.downgrade + run.suppress, 0);
-  while (runs.length > 1) {
-    const first = runs[0];
-    const firstVerdicts = first.accept + first.downgrade + first.suppress;
-    if (verdicts - firstVerdicts < WINDOW_VERDICTS) break;
-    runs.shift();
-    verdicts -= firstVerdicts;
-  }
-
-  const totals = runs.reduce((sum: Json, run: Json) => ({
-    accept: sum.accept + run.accept,
-    downgrade: sum.downgrade + run.downgrade,
-    suppress: sum.suppress + run.suppress,
-  }), { accept: 0, downgrade: 0, suppress: 0 });
+  const priorRing = typeof c.judge_window?.ring === 'string' && RING_RE.test(c.judge_window.ring)
+    ? c.judge_window.ring
+    : storedRuns.map(letters).join('');
+  const ring = (priorRing + letters(judgeRun))
+    .slice(-WINDOW_VERDICTS);
   c.judge_window = {
-    runs,
-    ...totals,
-    verdicts,
-    since: runs[0].at,
+    ring,
+    accept: ring.split('a').length - 1,
+    downgrade: ring.split('d').length - 1,
+    suppress: ring.split('s').length - 1,
+    verdicts: ring.length,
   };
 }
 
