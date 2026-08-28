@@ -88,6 +88,24 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
+  test('an allowlisted channel message blocked by pending shutdown does not open the turn marker', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, PENDING_SHUTDOWN);
+
+      const r = await run(wd, 'any updates?', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(false);
+      // The other half of the contract: the message is still operator activity.
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
+    } finally {
+      stub.stop();
+    }
+  });
+
   test('/status during a pending shutdown with a FAILED send → shutdown relay only, status never answers', async () => {
     const wd = setupChannelWorkdir();
     writeRuntime(wd, PENDING_SHUTDOWN);
@@ -363,6 +381,22 @@ describe('user-prompt-pipeline: fail-open contract', () => {
     expect(r.stdout).toContain('[Now:');
     expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
     expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(true);
+  });
+
+  test('allowlisted channel /status records activity without opening the turn marker', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+
+      const r = await run(wd, '/status', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(false);
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
+    } finally {
+      stub.stop();
+    }
   });
 
   // Issue #835: a channel-only conversation left last-operator-action.json frozen (the

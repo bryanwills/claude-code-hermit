@@ -3,10 +3,10 @@ process.stdout.on('error', () => {});
 // UserPromptSubmit + SessionStart hook — records when an operator prompt is received.
 // Writes state/last-operator-action.json so `heartbeat.ts precheck` can gate AUTO_CLOSE
 // on genuine operator silence rather than SHELL.md mtime (which routine writes reset).
-// Also opens state/operator-turn-open.json on the same kept prompts (plus --force) so
-// `routines.ts due` can defer monitor-mode routines only while a real operator turn is in
-// flight; stop-pipeline.ts clears it at Stop (issue #617 — session_state alone starved
-// routines indefinitely because it never resets on its own).
+// The pipeline opens state/operator-turn-open.json at hook exit for kept, non-blocked prompts;
+// direct invocation and --force open it immediately. `routines.ts due` then defers monitor-mode
+// routines only while a real operator turn is in flight; stop-pipeline.ts clears it at Stop
+// (issue #617 — session_state alone starved routines indefinitely because it never resets).
 //
 // Invocation modes:
 //   (stdin) UserPromptSubmit — JSON payload with `prompt`. Filter applied, write if kept.
@@ -68,10 +68,10 @@ function write() {
   writeMarker(TMP_PATH, STATE_PATH);
 }
 
-// Marks "an operator turn is in flight" for `routines.ts due`'s defer gate. Cleared by
-// stop-pipeline.ts at Stop; `routines.ts due` applies a 60-min TTL as an orphaned-marker
-// backstop (a failed Stop must not starve routines forever).
-function openTurnMarker() {
+// Marks "an operator turn is in flight" for `routines.ts due`'s defer gate. The pipeline
+// calls this at hook exit for kept, non-blocked prompts; stop-pipeline.ts clears it at Stop,
+// with a 60-min TTL as a backstop so a failed Stop cannot starve routines forever.
+export function openTurnMarker() {
   writeMarker(TURN_TMP, TURN_PATH);
 }
 
@@ -188,17 +188,18 @@ function appendSkillUsage(name: string): void {
 
 // The UserPromptSubmit half, callable in-process by user-prompt-pipeline.ts.
 // `channel` feeds the channel allowlist gate only — see ChannelGateInputs.
-export function run(prompt: string, channel?: ChannelGateInputs): void {
-  if (!isRoutinePrompt(prompt, channel)) {
-    // Skill-usage capture is operator-activity only — hermit's own injected
-    // slash commands (INJECTED_EXACT) are routine prompts, so gating on the
-    // same filter keeps automated heartbeat/session-close/routines fires out
-    // of the usage ledger (they'd otherwise log as source:'prompt' skill use).
-    const skillName = extractSkillName(prompt);
-    if (skillName) appendSkillUsage(skillName);
-    write();
-    openTurnMarker();
-  }
+export function run(prompt: string, channel?: ChannelGateInputs, opts: { openTurn?: boolean } = {}): boolean {
+  if (isRoutinePrompt(prompt, channel)) return false;
+
+  // Skill-usage capture is operator-activity only — hermit's own injected
+  // slash commands (INJECTED_EXACT) are routine prompts, so gating on the
+  // same filter keeps automated heartbeat/session-close/routines fires out
+  // of the usage ledger (they'd otherwise log as source:'prompt' skill use).
+  const skillName = extractSkillName(prompt);
+  if (skillName) appendSkillUsage(skillName);
+  write();
+  if (opts.openTurn !== false) openTurnMarker();
+  return true;
 }
 
 function main(raw: string): void {
