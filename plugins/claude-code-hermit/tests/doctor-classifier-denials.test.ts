@@ -53,11 +53,32 @@ describe('doctor classifier-denials check', () => {
     expect(result.detail).toContain('check failed');
   });
 
-  test('a malformed line is skipped and the good rows still count', () => {
+  test('a malformed line is skipped, the good rows still count, and it is named', () => {
     const good = spread(3, 60);
     const result = scenario(good.map(r => JSON.stringify(r)).join('\n') + '\n{torn\n');
     expect(result.status).toBe('warn');
     expect(result.detail).toContain('3 denials in 7d');
+    expect(result.detail).toContain('1 unreadable row(s)');
+  });
+
+  test('a window of only malformed lines warns instead of reporting a clean all-ok', () => {
+    // The regression that matters: skipping torn lines silently would report
+    // "no classifier denials" over a damaged log — a false all-clear on the one
+    // check whose job is to not under-report.
+    const result = scenario('{torn\nnot json at all\n{"ts":"nope","tool":"Bash"}\n');
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('no readable classifier denials in 7d');
+    expect(result.detail).toContain('3 unreadable row(s)');
+  });
+
+  test('a well-formed row that is merely out of window is not counted as unreadable', () => {
+    const result = scenario([
+      ...spread(3, 60),
+      { ts: daysAgo(9), tool: 'Bash', prog: 'bun' },
+    ]);
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('3 denials in 7d');
+    expect(result.detail).not.toContain('unreadable');
   });
 
   test('below the reporting floor stays ok but still renders the count', () => {

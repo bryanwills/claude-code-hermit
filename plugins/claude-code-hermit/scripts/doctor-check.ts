@@ -2196,8 +2196,14 @@ function checkClassifierDenials(p: DoctorPaths = PATHS) {
     if ('error' in read) {
       return { id, status: 'warn', detail: `check failed: permission-denied-events.jsonl unreadable (${read.error})` };
     }
+    // Before the empty-window return, not after: a log whose every line is torn
+    // would otherwise report a clean all-ok over a damaged file, which is the
+    // exact failure this count exists to prevent.
+    const damaged = read.malformed > 0 ? `; ${read.malformed} unreadable row(s)` : '';
     if (read.rows.length === 0) {
-      return { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
+      return read.malformed > 0
+        ? { id, status: 'warn', detail: `no readable classifier denials in 7d${damaged}` }
+        : { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
     }
 
     const byTool = new Map<string, { total: number; programs: Record<string, number> }>();
@@ -2228,6 +2234,7 @@ function checkClassifierDenials(p: DoctorPaths = PATHS) {
     // half — past the cap and truncate it away.
     const head = `${grand} denials in 7d — `;
     const tail = `; largest cluster ${cluster} in 10 min`
+      + damaged
       // A cluster is not the documented consecutive-denial count (see CLUSTER_MS),
       // so this correlates rather than asserting that the session actually stalled.
       + (status === 'fail'

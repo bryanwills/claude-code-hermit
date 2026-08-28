@@ -49,38 +49,54 @@ export function appendDenial(stateDir: string, tool: string, prog: string | null
 }
 
 /**
- * Rows at or newer than `sinceMs`. A JSONL ledger has no whole-file corrupt state,
- * so a torn or malformed line is skipped rather than failing the read; only an
- * unreadable file is an error the caller should surface.
+ * Rows at or newer than `sinceMs`, plus how many lines could not be read as a
+ * denial. A JSONL ledger has no whole-file corrupt state, so a torn or malformed
+ * line is skipped rather than failing the read; only an unreadable file is an
+ * error the caller should surface.
+ *
+ * `malformed` exists because skipping silently is an undercount with no signal —
+ * a torn write (ENOSPC, or an interleaved append on a filesystem that does not
+ * serialize concurrent `O_APPEND` writes) would otherwise just make denials
+ * vanish from a check whose whole job is to not under-report. An in-range row
+ * that is simply older than the window is not malformed and is not counted.
  */
 export function readDenials(
   stateDir: string,
   sinceMs: number,
-): { rows: DenialRow[] } | { error: string } {
+): { rows: DenialRow[]; malformed: number } | { error: string } {
   let raw: string;
   try {
     raw = fs.readFileSync(denialLogPath(stateDir), 'utf-8');
   } catch (err: any) {
-    if (err?.code === 'ENOENT') return { rows: [] };
+    if (err?.code === 'ENOENT') return { rows: [], malformed: 0 };
     return { error: err?.code ?? 'unreadable' };
   }
   const rows: DenialRow[] = [];
+  let malformed = 0;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     let parsed: any;
     try {
       parsed = JSON.parse(line);
     } catch {
+      malformed++;
       continue;
     }
-    if (!parsed || typeof parsed.ts !== 'string' || typeof parsed.tool !== 'string') continue;
+    if (!parsed || typeof parsed.ts !== 'string' || typeof parsed.tool !== 'string') {
+      malformed++;
+      continue;
+    }
     const ts = Date.parse(parsed.ts);
-    if (Number.isNaN(ts) || ts < sinceMs) continue;
+    if (Number.isNaN(ts)) {
+      malformed++;
+      continue;
+    }
+    if (ts < sinceMs) continue; // aged out, not damaged
     rows.push({
       ts: parsed.ts,
       tool: parsed.tool,
       ...(typeof parsed.prog === 'string' && parsed.prog ? { prog: parsed.prog } : {}),
     });
   }
-  return { rows };
+  return { rows, malformed };
 }

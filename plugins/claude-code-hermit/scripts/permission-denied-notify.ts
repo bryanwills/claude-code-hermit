@@ -111,12 +111,17 @@ function writeAlerts(dir: string, alerts: Record<string, DenyWindow>): void {
 }
 
 /**
- * Advisory lock around the alerts file's read-modify-write. Claude Code does not
- * serialise hook invocations, so two denials in one assistant turn can otherwise
- * each overwrite the whole map with its own stale copy, dropping a peer tool's
- * open window. Best-effort by design, the same posture as lib/progress-log.ts's
+ * Advisory lock over both of this hook's writes — the alerts file's
+ * read-modify-write and the event-log append. Claude Code does not serialise hook
+ * invocations, so two denials in one assistant turn can otherwise each overwrite
+ * the whole alerts map with its own stale copy, dropping a peer tool's open
+ * window. Best-effort by design, the same posture as lib/progress-log.ts's
  * SHELL.md lock: waiting out a contended lock is not worth stalling a denied tool
  * call inside a 12s hook timeout, so we proceed unlocked instead.
+ *
+ * The lock file is named for the alerts file though it now guards both; renaming
+ * it would leave an upgrading install with one process on each name, briefly
+ * unprotected, for no functional gain.
  */
 function withAlertsLock<T>(dir: string, fn: () => T): T {
   const lockPath = `${alertsPath(dir)}.lock`;
@@ -138,13 +143,19 @@ function withAlertsLock<T>(dir: string, fn: () => T): T {
 }
 
 /**
- * Open or extend this tool's 30-minute window. Returns whether this denial opens a
- * window (and so sends), plus how many the previous window absorbed — the only
- * place that count can be truthful, since a burst's size isn't known when the
- * window opens.
+ * Record the denial and open or extend this tool's 30-minute window, in one
+ * critical section. Returns whether this denial opens a window (and so sends),
+ * plus how many the previous window absorbed — the only place that count can be
+ * truthful, since a burst's size isn't known when the window opens.
+ *
+ * The append rides inside the lock rather than outside it so the record does not
+ * depend on the filesystem serializing concurrent `O_APPEND` writes. Linux does;
+ * a FUSE-backed mount (a bind-mounted project tree under Docker Desktop for macOS)
+ * is not guaranteed to, and an interleaved line is a denial silently lost.
  */
-function claimWindow(dir: string, key: string, now: number): { send: boolean; suppressed: number } {
+function recordDenial(dir: string, key: string, prog: string | null, now: number): { send: boolean; suppressed: number } {
   return withAlertsLock(dir, () => {
+    appendDenial(dir, key, prog); // swallows its own errors — never breaks the claim below
     const alerts = readAlerts(dir);
 
     // Prune before reading this tool's window, so a stale one can neither hold the
@@ -210,11 +221,7 @@ async function main(raw: string): Promise<void> {
   const reason = typeof payload.reason === 'string' ? safe(payload.reason).slice(0, REASON_MAX_LEN) : '';
 
   const now = Date.now();
-  // The record is append-only and needs no lock; only the dedup window is a
-  // read-modify-write.
-  appendDenial(dir, key, bashProgram(payload));
-
-  const claim = claimWindow(dir, key, now);
+  const claim = recordDenial(dir, key, bashProgram(payload), now);
   if (!claim.send) return; // inside an open window — counted, and stays quiet
 
   const locale = resolveLocale(config.language);
