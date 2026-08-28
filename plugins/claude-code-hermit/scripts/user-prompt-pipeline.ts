@@ -35,7 +35,7 @@ import { readConfigRaw } from './lib/config-read';
 import { readRuntimeJson } from './lib/runtime';
 import type { StageContext, StageResult } from './lib/prompt-stages/types';
 
-import { run as recordOperatorAction } from './record-operator-action';
+import { openTurnMarker, run as recordOperatorAction } from './record-operator-action';
 import { run as promptContext } from './lib/prompt-stages/prompt-context';
 import { run as channelReplyReminder } from './lib/prompt-stages/channel-reply-reminder';
 import { run as pauseKeyword } from './lib/prompt-stages/pause-keyword';
@@ -50,6 +50,7 @@ const MAX_STDIN_BYTES = 1024 * 1024;
 
 const out: string[] = [];
 let blockReason: string | null = null;
+let operatorActivityKept = false;
 
 async function stage(name: string, fn: (ctx: StageContext) => any, ctx: StageContext): Promise<void> {
   if (blockReason) return; // a disposition is already settled
@@ -113,7 +114,7 @@ async function main(raw: string): Promise<void> {
   // shutdown — the operator's message is still recorded and the reply reminder
   // still names the chat to answer on.
   await stage('record-operator-action',
-    () => { recordOperatorAction(prompt, { envelope: ctx.envelope, config: ctx.config() }); }, ctx);
+    () => { operatorActivityKept = recordOperatorAction(prompt, { envelope: ctx.envelope, config: ctx.config() }, { openTurn: false }); }, ctx);
   await stage('prompt-context', promptContext, ctx);
   await stage('channel-reply-reminder', channelReplyReminder, ctx);
 
@@ -144,6 +145,8 @@ async function main(raw: string): Promise<void> {
 }
 
 function emit(): void {
+  if (operatorActivityKept && blockReason === null) openTurnMarker();
+
   // A block must be the only thing on stdout: Claude Code parses stdout as a
   // decision object, and any leading context text makes that parse fail, which
   // would drop the block and deliver the prompt anyway. The accumulated context

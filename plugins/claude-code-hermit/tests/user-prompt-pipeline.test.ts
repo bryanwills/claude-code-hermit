@@ -88,6 +88,22 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
+  test('an allowlisted channel message blocked by pending shutdown does not open the turn marker', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, PENDING_SHUTDOWN);
+
+      const r = await run(wd, 'any updates?', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(false);
+    } finally {
+      stub.stop();
+    }
+  });
+
   test('/status during a pending shutdown with a FAILED send → shutdown relay only, status never answers', async () => {
     const wd = setupChannelWorkdir();
     writeRuntime(wd, PENDING_SHUTDOWN);
@@ -369,6 +385,22 @@ describe('user-prompt-pipeline: fail-open contract', () => {
   // write was delegated to a channel-responder skill step the model skipped), so the
   // midnight post-close /clear fired mid-exchange. The pipeline now hands the raw config
   // to record-operator-action, which applies the same allowed_users gate.
+  test('allowlisted channel /status records activity without opening the turn marker', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+
+      const r = await run(wd, '/status', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(false);
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
+    } finally {
+      stub.stop();
+    }
+  });
+
   test('allowlisted channel sender advances the clock and opens the turn marker', async () => {
     const wd = setupChannelWorkdir();
 
