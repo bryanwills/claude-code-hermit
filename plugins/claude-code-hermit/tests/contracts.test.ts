@@ -3671,3 +3671,55 @@ describe('worktree state-dir template contract', () => {
     expect(block.indexOf(CONFIG_LINE)).toBeLessThan(close);
   });
 });
+
+// ============================================================
+// validate-config: settings_permissions
+// ============================================================
+
+describe('settings_permissions validation', () => {
+  test('absent, or a well-formed map, is clean', () => {
+    expect(runValidate({}).errors).toEqual([]);
+    const out = runValidate({ settings_permissions: { allow: ['routines'], deny: ['escalation'] } });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings).toEqual([]);
+  });
+
+  test('the map must be an object of rule lists', () => {
+    expect(runValidate({ settings_permissions: ['routines'] }).errors
+      .some((e: string) => e.includes('expected object with allow/ask/deny arrays'))).toBe(true);
+    expect(runValidate({ settings_permissions: { allow: 'routines' } }).errors
+      .some((e: string) => e.includes('expected array of dotted config paths'))).toBe(true);
+    expect(runValidate({ settings_permissions: { maintainer: ['routines'] } }).errors
+      .some((e: string) => e.includes('not a rule list'))).toBe(true);
+  });
+
+  test('a rule that names a terminal-only key is an error, because it never applies', () => {
+    for (const p of ['channels.discord.allowed_users', 'channels.*.settings_policy',
+                     'operator_profile', 'settings_permissions']) {
+      const out = runValidate({ settings_permissions: { allow: [p] } });
+      expect(out.errors.some((e: string) => e.includes(p) && e.includes('never applies'))).toBe(true);
+    }
+    // Listing one under `deny` is redundant rather than wrong — the gate already
+    // holds it there, so nothing is being claimed that isn't true.
+    expect(runValidate({ settings_permissions: { deny: ['operator_profile'] } }).errors).toEqual([]);
+  });
+
+  test('lowering an execution-adjacent path warns, and names the client chat when there is one', () => {
+    const out = runValidate({ settings_permissions: { allow: ['routines.*.precheck', 'permission_mode'] } });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings.filter((w: string) => w.includes('execution-adjacent')).length).toBe(2);
+    expect(out.warnings.some((w: string) => w.includes('non-technical'))).toBe(false);
+
+    const client = runValidate({
+      operator_profile: 'non-technical',
+      settings_permissions: { allow: ['routines.*.precheck'] },
+    });
+    expect(client.warnings.some((w: string) => w.includes('non-technical'))).toBe(true);
+  });
+
+  test('raising a path never warns', () => {
+    const out = runValidate({ settings_permissions: { deny: ['boot_skill'], ask: ['model', 'env'] } });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings).toEqual([]);
+  });
+});

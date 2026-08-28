@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `settings_permissions` (top-level, terminal-only) re-tiers which settings a chat may change, in Claude Code's own `allow`/`ask`/`deny` rule shape: `"allow": ["routines", "routines.*.precheck"]` lets a chat register routines with prechecks, `"deny": ["boot_skill"]` pushes one to terminal-only. Entries are dotted config paths, `*` matches one segment, strictest list wins, and an unlisted path keeps its built-in tier. No rule can re-tier the channel enrollment root, `operator_profile`, or `settings_permissions` itself; `validate-config` errors on one that tries and warns when a rule lowers an execution-adjacent setting. Absent by default, so nothing changes until you write it.
+
 ### Changed
 - Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator`, or `feature-dev`, and no longer seeds their `scheduled_checks` entries — Claude Code's native `Plan`/`Explore` agents, auto-memory, and `/doctor` CLAUDE.md trims cover the same ground, and every loaded skill description is paid on every API call of an always-on hermit. The `scheduled_checks` mechanism itself is unchanged; register any plugin's skill with `/hermit-settings scheduled-checks`.
 - `proposal-act` authors `## Skill Improvement` and `## Skill Draft` bodies in-main from the source brief instead of delegating to `skill-creator`; the falsification gate's read-only pass always uses the native `Plan` agent instead of `feature-dev:code-explorer`.
