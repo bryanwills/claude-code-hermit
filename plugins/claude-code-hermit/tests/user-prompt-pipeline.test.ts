@@ -365,6 +365,36 @@ describe('user-prompt-pipeline: fail-open contract', () => {
     expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(true);
   });
 
+  // Issue #835: a channel-only conversation left last-operator-action.json frozen (the
+  // write was delegated to a channel-responder skill step the model skipped), so the
+  // midnight post-close /clear fired mid-exchange. The pipeline now hands the raw config
+  // to record-operator-action, which applies the same allowed_users gate.
+  test('allowlisted channel sender advances the clock and opens the turn marker', async () => {
+    const wd = setupChannelWorkdir();
+
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: envelope('any updates?', 'u1') }),
+      cwd: wd.dir,
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(true);
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(true);
+  });
+
+  test('non-allowlisted channel sender leaves the clock and turn marker untouched', async () => {
+    const wd = setupChannelWorkdir();
+
+    const r = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: envelope('any updates?', 'u2') }),
+      cwd: wd.dir,
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'last-operator-action.json'))).toBe(false);
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'operator-turn-open.json'))).toBe(false);
+  });
+
   test('empty stdin exits 0 and emits nothing', async () => {
     const wd = setupWorkdir();
     const r = await runScript('user-prompt-pipeline.ts', { stdin: '', cwd: wd.dir });
