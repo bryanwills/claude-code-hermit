@@ -13,6 +13,7 @@
 - The first-session baseline audit offer (`.baseline-pending`) is removed along with the plugins it audited.
 
 ### Fixed
+- The `reflection-judge` suppress-ratio flag now measures the last 20 judge verdicts and clears itself once the judge recovers, instead of staying lit from one bad stretch since install; `--reset-counters` remains available and also clears the window.
 - A channel `/status`, or any allowlisted channel message during a pending shutdown, no longer leaves the operator turn marker open and defers routines and the queued auto-close for up to 60 minutes.
 - `sessions/.status.json` no longer carries a resolved (`~` / `[resolved]`) blocker in its `blockers` field, so `bin/hermit-status` stops printing `BLOCKED:` for a blocker the session already cleared. A comment-only blocker bullet no longer leaves a bare `-` there either.
 - Channel messages from a sender that clears `allowed_users` now advance the operator-activity clock from the `UserPromptSubmit` hook, so a chat-only conversation no longer reads as silence to the post-close `/clear`, the 12h auto-close, and the context-hygiene backoff. Other senders are still ignored.
