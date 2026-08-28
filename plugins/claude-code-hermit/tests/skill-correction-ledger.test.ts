@@ -26,6 +26,10 @@ const noBriefRouting = reflect.slice(
   reflect.indexOf('**No brief found (human/plugin or brief fully gone, moderate signal):**'),
   reflect.indexOf('## `skill-preference:*` routing'),
 );
+const pluginBranch = noBriefRouting.slice(
+  noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
+  noBriefRouting.indexOf('**Neither applies:**'),
+);
 
 // ── 1. session-close: capture contract prose pins ───────────────────────────
 
@@ -167,16 +171,20 @@ describe('reflect: skill-correction:* graduation routing', () => {
   });
 
   test('reflect: no brief plugin skill path recommends an operator-space override', () => {
-    const pluginBranch = noBriefRouting.slice(
-      noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
-      noBriefRouting.indexOf('**Neither applies:**'),
-    );
     expect(pluginBranch).toContain('plain Tier 2 improvement candidate recommending an operator-space override skill in `.claude/skills/` or an upstream request');
     expect(pluginBranch).not.toContain('## Skill Improvement');
     // plugin skills appear in the list ONLY as `<plugin>:<name>` (probed), so a bare entry is
     // an operator-space or bundled skill; accepting one here routes a non-plugin name to the
     // override recommendation instead of `Neither applies`
     expect(pluginBranch).toContain('requiring a **namespaced** entry `<plugin>:<name>`');
+  });
+
+  test('reflect: an unreadable available-skills list is unknown, not a plugin-skill match', () => {
+    // no `skill_listing` attachment is re-injected after a compaction, so an absent list is
+    // recalled-not-verified: firing the plugin branch on it asserts a name is plugin-shipped
+    // on no evidence, and the fallback must still bar an edit under the plugin cache
+    expect(pluginBranch).toContain('the name class is unknown and this branch does not fire');
+    expect(pluginBranch).toContain('never an edit candidate for a file under the plugin cache');
   });
 
   test('reflect: editable path is tested before the plugin-skill path', () => {

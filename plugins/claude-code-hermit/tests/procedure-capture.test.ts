@@ -213,6 +213,8 @@ describe('proposal-act: ## Skill Draft install branch', () => {
 
   test('proposal-act: verification reads installed file frontmatter (not live available-skills)', () => {
     expect(proposalAct).toContain("installed file's frontmatter");
+    expect(proposalAct).not.toContain('next session reload');
+    expect(proposalAct).toContain('until the next user turn');
   });
 
   test('proposal-act: NEXT-TASK bullet for ## Skill Draft present', () => {

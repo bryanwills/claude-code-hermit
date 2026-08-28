@@ -69,6 +69,13 @@ describe('reflect routing (step 3b + branches)', () => {
     expect(branches.includes('**No editable `.claude/skills/<name>/SKILL.md`, and `<name>` is an installed plugin skill (read-only):**')).toBe(true);
   });
 
+  test('skill-preference states its own unknown-list fallback instead of borrowing one', () => {
+    // skill-correction's unknown fallback is its `Neither applies:` branch, which this
+    // routing does not have; a bare cross-reference dead-ends, or lands the settlement in
+    // `No skill covers the output` and drafts a skill for a name a plugin already owns
+    expect(branches.includes('does not fall to **No skill covers the output** either')).toBe(true);
+  });
+
   test('Tier 2/3 recurrence baseline names the ledger-graduation exception', () => {
     expect(branches.includes('satisfy recurrence via the `Artifact: state/observations.jsonl` rule')).toBe(true);
   });
