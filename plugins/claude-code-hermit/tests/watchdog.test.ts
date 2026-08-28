@@ -40,7 +40,7 @@ const readJson = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8'));
 
 /** Standard hermit project fixture: in_progress always-on tmux session. */
 function setupHermit(): Hermit {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-watchdog-'));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-watchdog-')));
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'state'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'bin'), { recursive: true });
 
@@ -1932,7 +1932,7 @@ test.if(isLinux)('systemd unit keeps every inherited PATH entry and adds bun\'s 
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 1);
   writeFakeSystemctl(h);
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-'));
+  const fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-')));
   try {
     const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
     expect(r.exitCode).toBe(0);
@@ -1975,7 +1975,7 @@ test.if(isLinux)('a PATH entry with % survives per-target escaping', withHermit(
 
   // systemd: % introduces a specifier, so a literal one is %% (systemd.unit(5)).
   writeFakeSystemctl(h);
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-'));
+  const fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-')));
   try {
     await watchdog(h, 'install', { env: { PATH: `${oddEntry}:${h.fakeBin}`, HOME: fakeHome } });
     const unitDir = path.join(fakeHome, '.config', 'systemd', 'user');
@@ -3337,7 +3337,7 @@ interface Cascade {
 /** Temp hermit whose World the cascade gates can be handed directly. Defaults to a
  *  live always-on tmux session that passes every lifecycle guard. */
 function setupCascade(): Cascade {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cascade-'));
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cascade-')));
   const hermitRoot = path.join(dir, '.claude-code-hermit');
   const stateDir = path.join(hermitRoot, 'state');
   fs.mkdirSync(stateDir, { recursive: true });

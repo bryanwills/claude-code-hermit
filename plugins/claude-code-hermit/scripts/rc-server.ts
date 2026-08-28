@@ -113,10 +113,15 @@ function start(): number {
 
 /**
  * cwds of every live process, for deciding whether a bridge worktree is still
- * in use. Returns null when /proc can't be read (non-Linux): with no liveness
- * signal, gc refuses to delete rather than guessing.
+ * in use. Returns null when no liveness signal can be obtained: gc then refuses
+ * to delete rather than guessing.
  */
 function liveCwds(): Set<string> | null {
+  return process.platform === 'darwin' ? darwinLiveCwds() : procLiveCwds();
+}
+
+/** Linux and friends: read each process's cwd symlink out of procfs. */
+function procLiveCwds(): Set<string> | null {
   let pids: string[];
   try {
     pids = fs.readdirSync('/proc').filter(n => /^\d+$/.test(n));
@@ -128,6 +133,40 @@ function liveCwds(): Set<string> | null {
     try { cwds.add(fs.readlinkSync(`/proc/${pid}/cwd`)); } catch {}
   }
   return cwds;
+}
+
+/**
+ * macOS has no procfs, so lsof is the supported way to read process cwds.
+ * `-d cwd` restricts to the cwd descriptor and `-F pn` asks for machine-readable
+ * output: one `p<pid>` line per process followed by its `n<path>`.
+ *
+ * lsof exits non-zero when it could not examine *some* process, which is the
+ * normal case for an unprivileged user, so the exit code is not a failure
+ * signal here and only empty output is. Those unreadable processes belong to
+ * other users and so cannot be holding one of this hermit's worktrees. A
+ * missing lsof does not throw: spawnSync reports it through `error` and leaves
+ * stdout undefined, so it lands on the same empty-output path. Either way null
+ * is returned, which keeps the
+ * refuse-to-delete posture rather than reporting "nothing is live" and
+ * sweeping every worktree.
+ */
+function darwinLiveCwds(): Set<string> | null {
+  let out: string;
+  try {
+    // Bounded: lsof walks every process on the box, so unlike the targeted git and
+    // tmux calls elsewhere in this file it is worth a ceiling. A kill on timeout
+    // leaves no output, which the empty-output check below turns into a safe null.
+    const r = spawnSync('lsof', ['-d', 'cwd', '-F', 'pn'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    out = r.stdout ?? '';
+  } catch {
+    return null;
+  }
+  if (!out.trim()) return null;
+  const cwds = new Set<string>();
+  for (const line of out.split('\n')) {
+    if (line.startsWith('n')) cwds.add(line.slice(1));
+  }
+  return cwds.size ? cwds : null;
 }
 
 function inUse(cwds: Set<string>, dir: string): boolean {

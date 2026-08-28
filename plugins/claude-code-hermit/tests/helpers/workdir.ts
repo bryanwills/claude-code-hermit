@@ -14,7 +14,10 @@ export interface Workdir {
 }
 
 export function setupWorkdir(): Workdir {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-hooks-'));
+  // realpath: on macOS os.tmpdir() is an unresolved symlink (/var -> /private/var)
+  // while process.cwd() inside the dir reports the resolved path, so a fixture
+  // built from the raw value never matches what the code under test sees.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-hooks-')));
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'sessions'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'state'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
@@ -58,7 +61,7 @@ export function freshDirFactory(prefix: string) {
   const tmpdirs: string[] = [];
   return {
     freshDir(): string {
-      const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+      const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
       tmpdirs.push(d);
       return d;
     },
