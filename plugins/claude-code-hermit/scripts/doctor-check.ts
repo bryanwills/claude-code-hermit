@@ -1846,8 +1846,14 @@ function checkMemorySize(p: DoctorPaths = PATHS) {
 
     // Same key scheme as lib/cc-compat.ts transcriptDirFor: Claude Code replaces
     // every non-alphanumeric character, not just '/'. A '/'-only scheme mis-keys
-    // any dotted path — including every worktree under `.claude/worktrees/` —
-    // and the leg below would then read as a permanent, silent "ok".
+    // any path containing a dot or other punctuation (a dotted repo name, a
+    // project under a hidden directory), and the leg below would then read as a
+    // permanent, silent "ok".
+    // Known gap: a doctor run whose project root is a *linked git worktree* finds
+    // nothing here — Claude Code writes transcripts under the worktree's own key
+    // but keeps auto-memory under the main checkout's key, so MEMORY.md never
+    // exists at the worktree key and this leg stays silently "ok". Only affects
+    // hermits driven from a worktree; a normally-installed hermit is unaffected.
     const pathKey = projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
     const memoryPath = path.join(defaultConfigDir(), 'projects', pathKey, 'memory', 'MEMORY.md');
     // Auto-memory loads only MEMORY.md's first 200 lines or 25 KB, whichever
@@ -1860,7 +1866,7 @@ function checkMemorySize(p: DoctorPaths = PATHS) {
         const bytes = Buffer.byteLength(memory, 'utf8');
         const bounds: string[] = [];
         if (lines >= MEMORY_WARN_LINES) bounds.push(`${lines} lines (>=${MEMORY_WARN_LINES} line threshold)`);
-        if (bytes >= MEMORY_WARN_BYTES) bounds.push(`${(bytes / 1024).toFixed(1)} KB (>=20 KB byte threshold)`);
+        if (bytes >= MEMORY_WARN_BYTES) bounds.push(`${(bytes / 1024).toFixed(1)} KB (>=${MEMORY_WARN_BYTES / 1024} KB byte threshold)`);
         if (bounds.length > 0) {
           parts.push(`MEMORY.md: ${bounds.join('; ')}; approaching the 200-line / 25 KB hard cap (whichever comes first is silently truncated)`);
         }
