@@ -3,7 +3,8 @@
   "private": true,
   "description": "Dev-only toolchain for the hermit plugin monorepo. Shipped plugins have zero runtime dependencies — bun runs their .ts sources directly; these devDependencies exist solely for `bunx tsc --noEmit` typechecking and test-only fuzzing.",
   "scripts": {
-    "test": "bash scripts/test-all.sh"
+    "test": "bash scripts/test-all.sh",
+    "graph": "bash scripts/graphify-refresh.sh"
   },
   "devDependencies": {
     "@types/bun": "~1.4.0",

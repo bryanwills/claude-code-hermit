@@ -43,6 +43,18 @@ Always launch Claude Code from this repo's root, not from inside a plugin dir. A
 - **Sibling-scan pattern**: `${CLAUDE_PLUGIN_ROOT}/../*/.claude-plugin/plugin.json` resolves to `plugins/*/...` and finds all fleet plugins as guaranteed siblings.
 - **Old standalone repos are redirect-only zombies**: `gtapps/claude-code-dev-hermit` and `gtapps/claude-code-homeassistant-hermit` exist but their `marketplace.json` redirects to this monorepo via `git-subdir`. **Do not push code there.** All work happens here.
 
+## graphify
+
+Two graph levels. Pick by scope **before** answering a codebase question.
+
+- **Inside one plugin** (most questions): `graphify query "<q>" --graph plugins/<name>/graphify-out/graph.json`
+- **Spanning plugins**, or about `scripts/`, `tests/cross-plugin/`, `marketplace.json`: `graphify query "<q>"` (root graph)
+
+- **The root graph is 58% `claude-code-hermit`** (4.5k of 7.7k nodes), so a single-plugin question asked against it spends its budget on that plugin's test harness and never reaches the answer. Measured on the same question at the same budget: root returned 4/12 relevant nodes and never surfaced `ha-api.ts`; the plugin graph returned 12/12. Always pass `--graph` for single-plugin questions.
+- `graphify path "<A>" "<B>"` for relationships between two nodes, `graphify explain "<concept>"` for one node and its neighbours.
+- **Refresh every level with `bun run graph`** (AST-only, no API cost). Run it after a pull, or when the graph is older than the last commit: a stale graph answers confidently about deleted code.
+- **Worktrees start with no graph on purpose.** A copied graph would be frozen at branch-creation time, containing none of the branch's own work. `hook-guard` silently no-ops when `graphify-out/` is absent and the session falls back to grep, which is always correct. If graph orientation is worth it for a long-lived worktree, run `graphify update .` inside it once: that builds a graph that includes the branch work. `bun run graph` refuses to run in a worktree.
+
 ## Environment quirks
 
 - **Secrets:** env vars → `.env` (gitignored); secret files (`.pem` etc.) → `.claude.local/` (gitignored). Never `.claude/` — it's checked in.
