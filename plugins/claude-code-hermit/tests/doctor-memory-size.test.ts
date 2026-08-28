@@ -13,7 +13,7 @@ type Fixture = {
   local?: string;
   memory?: string;
   memoryAsDir?: boolean;
-  /** Nest the project root under a dotted path, as every git worktree is. */
+  /** Nest the project root under a dotted path, e.g. a checkout inside a hidden dir. */
   dottedRoot?: boolean;
 };
 
@@ -23,7 +23,7 @@ function lines(count: number, content = 'x'): string {
 
 function scenario({ claude, local, memory, memoryAsDir, dottedRoot }: Fixture) {
   const projectRoot = dottedRoot
-    ? path.join(freshDir(), '.claude', 'worktrees', 'feat-x')
+    ? path.join(freshDir(), '.local', 'src', 'my.project')
     : freshDir();
   const hermitDir = path.join(projectRoot, '.claude-code-hermit');
   fs.mkdirSync(hermitDir, { recursive: true });
@@ -103,8 +103,9 @@ describe('doctor memory-size check', () => {
     expect(scenario({ claude: lines(200) + '\n' }).status).toBe('warn');
   });
 
-  // Every worktree lives under `.claude/worktrees/`, so a '/'-only path key would
-  // resolve to a directory that never exists and report a permanent false ok.
+  // A '/'-only path key mangles any root holding a dot (a hidden parent dir, a
+  // dotted repo name) and would resolve to a directory that never exists,
+  // reporting a permanent false ok.
   test('a dotted project path still resolves MEMORY.md', () => {
     const result = scenario({ dottedRoot: true, memory: lines(170) });
 
