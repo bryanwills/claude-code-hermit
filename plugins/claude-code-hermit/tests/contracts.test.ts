@@ -3449,8 +3449,14 @@ describe('proactive-notify unification contract', () => {
     // Prose wraps, so phrase pins run against a single-line copy; the payload literal
     // is on one line by construction and is matched verbatim.
     const flat = doctor.replace(/\s+/g, ' ');
-    expect(doctor).toContain('`{"client": "<summary of the rows without a tier>", "maintainer": "<complete summary, every row>"}`');
+    expect(doctor).toContain('`{"client": "<plain headline for the rows without a tier, plus the one next step>", "maintainer": "<complete summary, every row>"}`');
     expect(flat).toContain('Omit `client` when every new row is tiered');
+    // The client leg is new to the routine's `--maintainer` invocation, which used to
+    // send a maintainer-only notice. Doctor rows carry check ids, paths and spend
+    // figures, so an unconstrained client leg would put all of that in the client chat
+    // on a non-technical install with a maintainer chat configured (docs/security.md
+    // § Tiered disclosure bars exactly that).
+    expect(flat).toContain('no check ids, file paths, USD or token figures');
     // No `fallback` key: its default is the one that diverts a maintainer leg to
     // Findings on a non-technical install. "primary" bypassed that guard, which is
     // why the destination had to be resolved by hand in prose.

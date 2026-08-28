@@ -79,11 +79,13 @@ route: audience is decided by the row's own tier and the operator's config, not 
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
    ```
    One payload, whatever the invocation:
-   `{"client": "<summary of the rows without a tier>", "maintainer": "<complete summary, every row>"}`.
-   The maintainer leg is the complete richer version of the same notice, never a tiered-rows-only
-   fragment, because it stands alone wherever both audiences resolve to one chat. Omit `client`
-   when every new row is tiered. Send no `fallback` key: its default is what routes a maintainer
-   leg to Findings on a `non-technical` install.
+   `{"client": "<plain headline for the rows without a tier, plus the one next step>", "maintainer": "<complete summary, every row>"}`.
+   The client leg is the only part of this notice that can land in a client chat, so write it to the
+   channel voice rule — no check ids, file paths, USD or token figures; what is wrong in plain words
+   and what the operator should do about it. The maintainer leg is the complete richer version of
+   the same notice, never a tiered-rows-only fragment, because it stands alone wherever both
+   audiences resolve to one chat. Omit `client` when every new row is tiered. Send no `fallback`
+   key: its default is what routes a maintainer leg to Findings on a `non-technical` install.
 
    When doctor was invoked from a channel, do not quote a tiered row back into your reply; say a
    maintainer diagnostic was recorded and leave it at that.

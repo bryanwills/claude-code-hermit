@@ -2339,7 +2339,7 @@ function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir)
     if (prior.kind === 'ioerror') return NO_ESCALATION(false); // healthy file we couldn't read — touch nothing
     const priorStateKnown = prior.kind !== 'corrupt';
 
-    const pending: { id: string; status: string; detail: string }[] = [];
+    const pending: DoctorEscalation['new'] = [];
     const resolved: string[] = [];
     const applied = mutateOwnedAlerts(ledgerPath, (alerts) => {
       for (const [key, c] of failing) {
