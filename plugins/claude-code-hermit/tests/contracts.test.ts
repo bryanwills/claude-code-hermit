@@ -2200,11 +2200,15 @@ describe('proposal-act dispatch contract', () => {
     // regenerate the identical body, so a blanket REJECT is a permanent dead end).
     expect(skill).toContain('REJECT with code `stale-paths` only when that file is missing **and** `<name>` is not in the harness\'s available-skills list');
     expect(skill).toContain('is a plugin-shipped-skill improvement, not a stale path: let it through');
+    // the list namespaces plugin skills as `<plugin>:<name>`; a literal membership test on the
+    // bare canonical name never matches, so every plugin-skill improvement would REJECT
+    expect(skill).toContain('with any `<plugin>:` prefix stripped');
   });
 
   test('Skill Improvement authoring reads before writing and resolves an already fixed skill', () => {
     expect(skill).toContain('**It exists:** read it before writing, compare each corrected behavior in the body against its current content, and author only behaviors not already present');
-    expect(skill).toContain('If every listed behavior is already present, skip e.5/e.6, run `/proposal-act resolve PROP-NNN`, and tell the operator or channel that the skill was already fixed, writing nothing');
+    expect(skill).toContain('If every listed behavior is already present, skip e.5 (nothing was written, so there is no diff to clean) but still run e.6');
+    expect(skill).toContain('tell the operator or channel that the skill was already fixed, writing nothing');
   });
 
   test('Skill Improvement never writes into the plugin cache or resurrects a deleted skill', () => {
