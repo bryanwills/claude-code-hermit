@@ -243,7 +243,7 @@ Hermit does not probe for or configure Claude Code's native bash sandbox (`sandb
 
 ## Login Token Handling
 
-Docker hermits on subscription auth hold a long-lived `setup-token`. Renewal relays through the operator's chat channel, so it's worth being precise about what crosses that channel and what doesn't.
+Docker hermits on subscription auth can hold a long-lived `setup-token` (offered right after login in `/docker-setup`; a hermit that declines stays on its `/login` credentials and none of the below applies). Renewal relays through the operator's chat channel, so it's worth being precise about what crosses that channel and what doesn't.
 
 **Crosses the channel:** the one-time OAuth sign-in URL, and the short-lived login code the operator pastes back. Both are single-use and worthless once the flow completes. On an install with a `maintainer_channel_id` configured, the URL is routed to the maintainer chat (via `channel-send.ts --tier maintainer`, marked sensitive so it is not written to the searchable channel log) rather than the primary client chat; the operator still pastes the code back through the primary DM chat, which remains the only inbound surface.
 
