@@ -6,8 +6,8 @@
 - `reflect`'s `skill-correction:*` route with no procedure brief now splits by name class: an installed plugin skill gets an operator-space override recommendation, an editable `.claude/skills/<name>/SKILL.md` becomes a `## Skill Improvement` candidate carrying no `source_artifact:`, and a name matching neither stays a plain proposal.
 
 ### Fixed
-- Accepting a `## Skill Improvement` proposal whose target skill no longer exists now REJECTs with `stale-paths` inside the falsification gate, before any session transition, instead of authoring a fresh `SKILL.md` and resurrecting the deleted skill.
-- `## Skill Improvement` authoring reads the target skill first and writes only the behaviors not already present; when every listed behavior is already there the proposal resolves with no write. The queued session task no longer requires a `source_artifact` brief.
+- Accepting a `## Skill Improvement` proposal whose target skill is gone from both `.claude/skills/` and the available-skills list now REJECTs with `stale-paths` inside the falsification gate, before any session transition, instead of authoring a fresh `SKILL.md` and resurrecting the deleted skill. A proposal naming a still-installed plugin skill is not stale and still implements.
+- `## Skill Improvement` authoring reads an existing target first and writes only the behaviors not already present; when every listed behavior is already there the proposal resolves with no write. With no editable target it authors an operator-space override under `.claude/skills/` behind an explicit confirmation, never a write into the plugin cache. The queued session task no longer requires a `source_artifact` brief.
 
 ## [1.2.50] - 2026-08-28
 

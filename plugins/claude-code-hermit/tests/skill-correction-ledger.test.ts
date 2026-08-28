@@ -168,17 +168,24 @@ describe('reflect: skill-correction:* graduation routing', () => {
 
   test('reflect: no brief plugin skill path recommends an operator-space override', () => {
     const pluginBranch = noBriefRouting.slice(
-      0,
-      noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'),
+      noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
+      noBriefRouting.indexOf('**Neither applies:**'),
     );
     expect(pluginBranch).toContain('plain Tier 2 improvement candidate recommending an operator-space override skill in `.claude/skills/` or an upstream request');
     expect(pluginBranch).not.toContain('## Skill Improvement');
   });
 
+  test('reflect: editable path is tested before the plugin-skill path', () => {
+    // an operator override shadowing a plugin skill matches both classes; if the plugin
+    // branch ran first it would re-recommend creating an override that already exists
+    expect(noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'))
+      .toBeLessThan(noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'));
+  });
+
   test('reflect: no brief editable skill path produces a moderate Skill Improvement without an anchor', () => {
     const editableBranch = noBriefRouting.slice(
       noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'),
-      noBriefRouting.indexOf('**Neither applies:**'),
+      noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
     );
     expect(editableBranch).toContain('Build a Tier 2 candidate with a `## Skill Improvement` section listing the component name and those corrected behaviors');
     expect(editableBranch).toContain('state `moderate signal` as the confidence note');
