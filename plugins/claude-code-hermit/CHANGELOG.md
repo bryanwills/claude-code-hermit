@@ -26,6 +26,7 @@
 - The denial diagnostic follows the normal maintainer-tier routing instead of always falling back to `SHELL.md` Findings: maintainer chat when configured, the primary chat on a `technical` profile without one, Findings on a `non-technical` profile. An unreachable or absent channel now suppresses only the send, so the Findings trail survives a dead bot token.
 - A legacy run-object judge window folds into the 20-verdict ring on any reflect run, not only one that carries verdicts, so a quiet install stops carrying the old structure in `reflection-state.json`.
 - Verdicts from one judge run are interleaved in that window instead of grouped by type, so a run straddling the 20-verdict boundary no longer sheds its accepts first and inflates the `reflection-judge` suppress ratio.
+- The Docker entrypoint's split-brain boot guard read `runtime.json` from a doubled `.claude-code-hermit/.claude-code-hermit/` path, so it never fired and a container would boot beside a live host instance owning the same state dir. It now refuses that boot as intended, and writes the `.boot-conflict` marker where `hermit-docker up` reads it. `HERMIT_FORCE_BOOT=1` still overrides.
 
 ## [1.2.50] - 2026-08-28
 

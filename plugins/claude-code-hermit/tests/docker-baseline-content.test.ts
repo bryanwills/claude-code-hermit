@@ -7,13 +7,14 @@
 //
 // Usage: bun test tests/docker-baseline-content.test.ts   (from the plugin root)
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { PLUGIN_ROOT } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { getSessionName } from '../scripts/lib/tmux';
 
 const dockerfile = fs.readFileSync(
@@ -279,5 +280,101 @@ describe('Entrypoint: marketplace registration uses list --json, not dir existen
     expect(entrypoint).toContain('already enabled');
     // No enable site silently swallows failures via `|| true` anymore.
     expect(entrypoint).not.toMatch(/plugin enable[^\n]*\|\| true/);
+  });
+});
+
+// -------------------------------------------------------
+// Entrypoint §4b: the container-side split-brain boot guard.
+// hermit-start's own shouldRefuseBoot self-skips inside a container, so this
+// block is the only guard against booting a container over a live host hermit.
+// It shipped reading runtime.json from a doubled AGENT_DIR path, so jq always
+// came back empty and the whole block was unreachable (GH #863). A content
+// assertion on the path would not catch a later logic break, so this extracts
+// the real block and runs it.
+// -------------------------------------------------------
+describe('Entrypoint: §4b boot conflict guard', () => {
+  const block = entrypoint.slice(entrypoint.indexOf('# --- 4b.'), entrypoint.indexOf('# --- 5.'));
+
+  // `sleep` is overridden so the guard's `while true; do sleep 300; done` inert
+  // hold terminates: exit 42 means "the guard fired and went inert".
+  const { freshDir, cleanup } = freshDirFactory('hermit-4b-');
+  afterAll(cleanup);
+
+  function runGuard(
+    runtime: object,
+    opts: { liveness?: 'fresh' | 'stale'; forceBoot?: string } = {},
+  ) {
+    const agentDir = path.join(freshDir(), '.claude-code-hermit');
+    const stateDir = path.join(agentDir, 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify(runtime));
+    if (opts.liveness) {
+      const beat = path.join(stateDir, '.heartbeat');
+      fs.writeFileSync(beat, '');
+      // The guard's window is `find -mmin -10`; backdate 20min for the "stale
+      // signal reads as unknown, so boot" branch.
+      if (opts.liveness === 'stale') {
+        const old = new Date(Date.now() - 20 * 60_000);
+        fs.utimesSync(beat, old, old);
+      }
+    }
+
+    // `set -euo pipefail` mirrors the real entrypoint header: without -e, a
+    // future edit that drops an `|| true` would abort the whole entrypoint in
+    // production (container never boots) while still passing here.
+    const script = `set -euo pipefail\nsleep() { exit 42; }\nAGENT_DIR=${JSON.stringify(agentDir)}\n${block}`;
+    const out = spawnSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: { ...process.env, HERMIT_FORCE_BOOT: opts.forceBoot ?? '0' },
+    });
+    return {
+      status: out.status,
+      stdout: out.stdout,
+      marker: fs.existsSync(path.join(stateDir, '.boot-conflict')),
+    };
+  }
+
+  // The guard reads runtime.json through jq. Without it every `jq` call fails,
+  // `_mode` comes back empty and the guard silently self-skips — which is the
+  // exact shape of the bug under test, so assert the dependency explicitly
+  // rather than let its absence read as a logic regression.
+  test('entrypoint §4b: jq is available to run the guard', () => {
+    expect(spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
+  });
+
+  test('entrypoint §4b: goes inert over a live non-docker owner', () => {
+    const r = runGuard({ runtime_mode: 'tmux', session_state: 'active' }, { liveness: 'fresh' });
+    expect(r.status).toBe(42);
+    expect(r.stdout).toContain('BOOT CONFLICT');
+    expect(r.marker).toBe(true);
+  });
+
+  test('entrypoint §4b: boots over a cleanly-stopped owner', () => {
+    const r = runGuard({ runtime_mode: 'tmux', session_state: 'idle' }, { liveness: 'fresh' });
+    expect(r.status).toBe(0);
+    expect(r.marker).toBe(false);
+  });
+
+  test('entrypoint §4b: boots when the recorded owner is docker', () => {
+    const r = runGuard({ runtime_mode: 'docker' });
+    expect(r.status).toBe(0);
+    expect(r.marker).toBe(false);
+  });
+
+  // Stale-is-unknown is the guard's only protection against refusing every boot
+  // after an unclean host exit (runtime.json frozen at active, owner long gone).
+  test('entrypoint §4b: boots when the liveness signal is stale', () => {
+    const r = runGuard({ runtime_mode: 'tmux', session_state: 'active' }, { liveness: 'stale' });
+    expect(r.status).toBe(0);
+    expect(r.marker).toBe(false);
+  });
+
+  test('entrypoint §4b: HERMIT_FORCE_BOOT=1 overrides a live owner', () => {
+    const r = runGuard(
+      { runtime_mode: 'tmux', session_state: 'active' },
+      { liveness: 'fresh', forceBoot: '1' },
+    );
+    expect(r.status).toBe(0);
+    expect(r.marker).toBe(false);
   });
 });
