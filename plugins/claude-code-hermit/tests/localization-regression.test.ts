@@ -1,10 +1,9 @@
 // Regression guard: the `en` catalog bodies must stay byte-for-byte the strings
 // the deterministic senders emitted before scripts/lib/messages.ts existed, so a
 // stock install (language null, technical, no maintainer channel) speaks exactly
-// as it did pre-refactor. The two deliberate exceptions are EXCLUDED here:
-//   - DENY.client   — the auto-mode denial copy was rewritten to the channel voice
-//   - MINT.ackPrompt — the mint ack was unified to one destination-agnostic wording
-// Both are covered by their own tests. Every other `en` literal is pinned below;
+// as it did pre-refactor. MINT.ackPrompt is excluded because the mint ack was
+// unified to one destination-agnostic wording and is covered by its own tests.
+// Every other `en` literal is pinned below;
 // a change to any of them must fail loudly rather than silently drift the wire.
 
 import { describe, test, expect } from 'bun:test';
@@ -48,7 +47,7 @@ describe('en catalog byte-identity (pre-refactor literals)', () => {
     expect(BUDGET.en.headsUpPrefix()).toBe('Heads up — ');
   });
 
-  test('DENY maintainer frame (client copy deliberately excluded)', () => {
+  test('DENY maintainer frame', () => {
     expect(DENY.en.maintainerBase('Bash')).toBe('Auto-mode denied: Bash');
     expect(DENY.en.maintainerTail()).toBe('. Session continues. If intended: /hermit-settings or handle at the pane.');
   });
