@@ -43,13 +43,31 @@ const { escalate: escalateIn, markNotified: markNotifiedIn } =
 const escalate = (checks: any[], nowIso: string) => escalateIn(checks, nowIso, hermit);
 const markNotified = (ids: string[]) => markNotifiedIn(ids, hermit);
 
-const check = (id: string, status: string, detail = `${id} detail`, alertDetail?: string) => ({
+const check = (id: string, status: string, detail = `${id} detail`, alertDetail?: string, tier?: string) => ({
   id,
   status,
   detail,
   ...(alertDetail ? { alert_detail: alertDetail } : {}),
+  ...(tier ? { tier } : {}),
 });
 const readLedger = () => JSON.parse(fs.readFileSync(ledger, 'utf-8')).alerts;
+
+describe('escalate — audience tier', () => {
+  test.serial('a declared tier rides into escalation.new; an undeclared one leaves no key', async () => {
+
+    const checks = [
+      check('classifier-denials', 'warn', '3 denials in 7d', undefined, 'maintainer'),
+      check('permissions', 'warn'),
+    ];
+
+    const out = escalate(checks, '2026-08-01T10:00:00Z');
+    const byId = Object.fromEntries(out.new.map((n: any) => [n.id, n]));
+    expect(byId['classifier-denials'].tier).toBe('maintainer');
+    // Absent, not undefined-valued: the skill tests for the key's presence to decide
+    // which leg a row belongs on, so an empty key would put every row on both.
+    expect('tier' in byId['permissions']).toBe(false);
+  });
+});
 
 describe('escalate — episode lifecycle', () => {
   test.serial('first warn is new; unchanged second run is silent and preserves first_seen', async () => {

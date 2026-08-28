@@ -3444,18 +3444,28 @@ describe('proactive-notify unification contract', () => {
     expect(step3).toContain('`maintainer` leg only (no `client` leg)');
   });
 
-  test('doctor keeps legacy delivery while --maintainer changes only the route', () => {
+  test('doctor sends one two-leg notice and lets channel-send route it', () => {
     const doctor = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
-    expect(doctor).toContain('Default (no arguments)');
-    expect(doctor).toContain('Maintainer (`--maintainer`)');
-    expect(doctor).toContain('The optional flag changes its destination, not whether doctor notifies');
-    expect(doctor).toContain('`{"client": "<complete summary>"}`');
-    expect(doctor).toContain('`{"maintainer": "<complete summary>", "fallback": "primary"}`');
+    // Prose wraps, so phrase pins run against a single-line copy; the payload literal
+    // is on one line by construction and is matched verbatim.
+    const flat = doctor.replace(/\s+/g, ' ');
+    expect(doctor).toContain('`{"client": "<summary of the rows without a tier>", "maintainer": "<complete summary, every row>"}`');
+    expect(flat).toContain('Omit `client` when every new row is tiered');
+    // No `fallback` key: its default is the one that diverts a maintainer leg to
+    // Findings on a non-technical install. "primary" bypassed that guard, which is
+    // why the destination had to be resolved by hand in prose.
+    expect(doctor).not.toContain('"fallback": "primary"');
+    expect(doctor).not.toContain('Include this finding only when that destination');
+    // The flag survives for routine strings already on disk, but decides nothing.
+    expect(flat).toContain('It no longer changes the route');
     // "exactly once" was an overclaim: dedup was persisted before the send, so a
     // failed send was counted as delivered (issue #690). One attempt per episode,
     // retried until confirmed, is the guarantee doctor can actually keep.
     expect(doctor).toContain('Deliver it once through the canonical notice path');
     expect(doctor).not.toContain('Without `--maintainer`, do not call `channel-send.ts`');
+    // Every announced id gets confirmed, or escalation.new stays non-empty and the
+    // weekly routine gate wakes on the same standing finding forever.
+    expect(flat).toContain('tiered rows included');
   });
 
   test('hermit-evolve uses explicit unattended as the maintainer delivery signal', () => {

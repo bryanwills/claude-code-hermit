@@ -62,18 +62,24 @@ describe('reflect routing (step 3b + branches)', () => {
     expect(branches.includes('telemetry of settlements already applied')).toBe(true);
   });
 
-  test('skill-preference plugin branch is gated on there being no editable override', () => {
+  test('skill-preference branches on whether the skill exists, never on its class', () => {
     // an override does not shadow the plugin skill it overrides: both appear in the
-    // available-skills list (probed), so an ungated plugin branch swallows a settlement
-    // for an already-overridden skill and re-recommends the override that exists
-    expect(branches.includes('**No editable `.claude/skills/<name>/SKILL.md`, and `<name>` is an installed plugin skill (read-only):**')).toBe(true);
+    // available-skills list (probed), so a class test here can never separate them.
+    // Existence is the question reflect can answer; proposal-act resolves the class at
+    // accept, against the filesystem and list as they are then.
+    expect(branches.includes('- **A skill named `<name>` exists**')).toBe(true);
+    expect(branches.includes('`proposal-act` resolves the class once at accept')).toBe(true);
+    expect(branches.includes('installed plugin skill')).toBe(false);
   });
 
-  test('skill-preference states its own unknown-list fallback instead of borrowing one', () => {
-    // skill-correction's unknown fallback is its `Neither applies:` branch, which this
-    // routing does not have; a bare cross-reference dead-ends, or lands the settlement in
-    // `No skill covers the output` and drafts a skill for a name a plugin already owns
-    expect(branches.includes('does not fall to **No skill covers the output** either')).toBe(true);
+  test('skill-preference keeps an unreadable list out of both established branches', () => {
+    // no `skill_listing` is re-injected after a compaction, so an absent list is unknown,
+    // not empty. Emitting `## Skill Improvement` there would let a `<name>` that is an
+    // output slug reach accept as an authoring instruction and create a skill at that
+    // name, bypassing the Preference ladder's extend-before-create rule.
+    expect(branches.includes('- **Neither is established**')).toBe(true);
+    expect(branches.includes('asserting neither that a skill owns the output nor that none does')).toBe(true);
+    expect(branches.includes('Never a `## Skill Improvement` here')).toBe(true);
   });
 
   test('Tier 2/3 recurrence baseline names the ledger-graduation exception', () => {
