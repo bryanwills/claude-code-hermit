@@ -419,7 +419,7 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
 
 **Post-login decision — mint or keep `/login`:** ask immediately after the login above succeeds. The attended login is still required first — the first-launch wizard demands an interactive login and will not accept the env token (confirmed live), and initial setup is attended anyway.
 
-Ask with `AskUserQuestion` (header: `"Login token"`) — **Mint a long-lived token** (Recommended; a one-year token stored only on the container's config volume, never printed or written to `.env`, renews over the chat channel with no server access) / **Keep /login credentials** (server access needed again when they expire; `hermit-docker setup-token` converts at any time).
+Ask with `AskUserQuestion` (header: `"Login token"`) — **Mint a long-lived token** (Recommended; a one-year token stored only on the container's config volume, never printed or written to `.env`, renews over the chat channel with no server access) / **Keep /login credentials** (no expiry warning and no channel renewal; when they lapse the hermit goes quiet and you fix it from the box, `hermit-docker setup-token` converts at any time).
 
 **Mint a long-lived token:**
 1. Tell them: "One more step and this hermit never needs server access again. Run:"
@@ -430,7 +430,7 @@ Ask with `AskUserQuestion` (header: `"Login token"`) — **Mint a long-lived tok
 2. Ask with `AskUserQuestion` (header: `"Token"`) — `"Done"` / `"Failed"`. On `"Failed"`, the hermit still works on the `/login` credentials from the previous step; tell the operator that plainly and that they can retry `hermit-docker setup-token` any time. Do not block setup on it.
 3. On success, note for the summary: renewal is due in a year, the hermit will ask over the channel two weeks ahead, and it takes one browser tap with no server access.
 
-**Keep /login credentials:** no `setup-token` command, no restart. Note for the summary: the hermit runs on the `/login` credentials from above and will need server access again when they expire; convert to a long-lived token any time with `.claude-code-hermit/bin/hermit-docker setup-token`. Continue to first-run acceptance.
+**Keep /login credentials:** no `setup-token` command, no restart. Note for the summary, plainly, because this is the trade they just made: the hermit runs on the `/login` credentials from above, doctor's `credential-expiry` check has nothing to probe in this mode and the watchdog's channel re-auth relay only arms for token holders, so when the credentials lapse the container blocks at boot and exits after ten minutes with no notice on the channel. Watch for the hermit going quiet, then re-run `.claude-code-hermit/bin/hermit-docker login` from the box, or convert to a long-lived token any time with `.claude-code-hermit/bin/hermit-docker setup-token`. Continue to first-run acceptance.
 
 **First-run acceptance (workspace trust + bypass mode):** Before asking the operator to attach, verify the tmux session exists inside the container (the entrypoint may still be installing plugins):
 ```

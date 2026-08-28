@@ -264,9 +264,9 @@ All state is in `sessions/SHELL.md` on disk. A disconnect loses conversation con
 
 ## 6. Login Renewal
 
-A Docker hermit on subscription auth can hold a **long-lived login token** minted with `claude setup-token` — offered right after login in `/docker-setup`, recommended. It lasts a year, and because the hermit mints it, the expiry date is known from day one — the CLI itself exposes no expiry surface for these tokens, so the hermit tracks it in `state/setup-token.json`. A hermit still on plain `/login` credentials re-authenticates with `hermit-docker login` when they expire, and can convert to a long-lived token at any time with `hermit-docker setup-token`.
+A Docker hermit on subscription auth can hold a **long-lived login token** minted with `claude setup-token` — offered right after login in `/docker-setup`, recommended. It lasts a year, and because the hermit mints it, the expiry date is known from day one — the CLI itself exposes no expiry surface for these tokens, so the hermit tracks it in `state/setup-token.json`.
 
-The rest of this section covers renewal for a hermit holding the long-lived token. A hermit still on plain `/login` credentials re-authenticates from the host with `hermit-docker login` when the session expires instead, or converts once with `hermit-docker setup-token` to switch to the flow below.
+The rest of this section covers renewal for a hermit holding that token. A hermit still on plain `/login` credentials gets none of it: nothing warns ahead of expiry and the channel relay below never fires. When the credentials lapse the container blocks at boot, prints the `hermit-docker login` instruction to its own log, and exits after ten minutes, so the first sign is the hermit going quiet. Re-authenticate from the host with `hermit-docker login`, or convert once with `hermit-docker setup-token` to switch to the flow below.
 
 For a token-holding hermit, renewal takes one browser tap and needs no server access.
 
