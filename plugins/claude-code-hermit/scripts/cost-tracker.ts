@@ -502,9 +502,11 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
 
   // Resolved (`~` / `[resolved]`) entries are dropped, matching the other blocker
   // surfaces: bin/hermit-status prints this field verbatim as "BLOCKED: …".
+  // The dash filter drops the bare "-" a comment-only bullet leaves behind once
+  // stripPlaceholders runs (startup-context's dropBulletResidue, same shape).
   const blockersText = stripPlaceholders(blockersSection ?? '')
     .split('\n')
-    .filter(l => !isResolvedBlockerLine(l))
+    .filter(l => !isResolvedBlockerLine(l) && !/^\s*-+\s*$/.test(l))
     .join('\n')
     .trim();
   const hasBlockers = blockersText.length > 0 && !/^none$/i.test(blockersText);

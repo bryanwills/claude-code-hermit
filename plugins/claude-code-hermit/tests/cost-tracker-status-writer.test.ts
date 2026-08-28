@@ -173,4 +173,11 @@ describe('cost-tracker: blockers drops resolved entries', () => {
     const status = await statusFor(['[resolved] cleared blocker']);
     expect(status.blockers).toBeNull();
   });
+
+  // A comment-only bullet leaves a bare "-" once stripPlaceholders removes the
+  // comment; unfiltered it reaches the operator as "BLOCKED: -".
+  test('a comment-only bullet does not leave a bare dash', async () => {
+    const status = await statusFor(['- <!-- resolved: operator supplied the API key -->']);
+    expect(status.blockers).toBeNull();
+  });
 });
