@@ -44,12 +44,13 @@ export const TURN_OPEN_TTL_MS = 60 * 60 * 1000;
 const drainMarkerPath = (hermitDir: string) =>
   path.join(hermitDir, 'state', 'pending-close-drain.json');
 
-// A live operator exchange is open: the marker is written by record-operator-action.ts
-// on kept operator prompts and cleared by stop-pipeline.ts at Stop. This is NOT the
-// 10-min lull — that one ages from prompt submission, so an operator watching a long
-// agent turn goes quiet while still present. Absent, malformed, stale, or future-dated
-// (clock skew) all read as no-open-turn. Fail-open: a broken marker must never starve
-// the drain or the routine poll.
+// A live operator exchange is open: the marker is written by user-prompt-pipeline.ts
+// at hook exit for kept prompts the pipeline did not block (a blocked prompt runs
+// no model turn, so no Stop would ever clear it), and cleared by stop-pipeline.ts
+// at Stop. This is NOT the 10-min lull — that one ages from prompt submission,
+// so an operator watching a long agent turn goes quiet while still present. Absent,
+// malformed, stale, or future-dated (clock skew) all read as no-open-turn. Fail-open:
+// a broken marker must never starve the drain or the routine poll.
 export function operatorTurnOpen(hermitDir: string, nowMs: number): boolean {
   const marker = readJSON(path.join(hermitDir, 'state', 'operator-turn-open.json'));
   const at = marker && typeof marker.at === 'string' ? new Date(marker.at).getTime() : NaN;

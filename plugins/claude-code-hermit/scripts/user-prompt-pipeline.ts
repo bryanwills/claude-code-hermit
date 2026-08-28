@@ -145,8 +145,6 @@ async function main(raw: string): Promise<void> {
 }
 
 function emit(): void {
-  if (operatorActivityKept && blockReason === null) openTurnMarker();
-
   // A block must be the only thing on stdout: Claude Code parses stdout as a
   // decision object, and any leading context text makes that parse fail, which
   // would drop the block and deliver the prompt anyway. The accumulated context
@@ -156,6 +154,11 @@ function emit(): void {
     return;
   }
   for (const chunk of out) process.stdout.write(chunk.endsWith('\n') ? chunk : `${chunk}\n`);
+
+  // Last, and only here: the disposition is now settled as "the model will take
+  // this turn". Written after stdout so a throw on this write can never swallow
+  // the decision or the injected context — emit()'s caller catches and exits 0.
+  if (operatorActivityKept) openTurnMarker();
 }
 
 try {
