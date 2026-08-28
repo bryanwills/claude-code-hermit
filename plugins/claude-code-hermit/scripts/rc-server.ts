@@ -142,11 +142,10 @@ function procLiveCwds(): Set<string> | null {
  *
  * lsof exits non-zero when it could not examine *some* process, which is the
  * normal case for an unprivileged user, so the exit code is not a failure
- * signal here and only empty output is. Those unreadable processes belong to
- * other users and so cannot be holding one of this hermit's worktrees. A
- * missing lsof does not throw: spawnSync reports it through `error` and leaves
- * stdout undefined, so it lands on the same empty-output path. Either way null
- * is returned, which keeps the
+ * signal here. Those unreadable processes belong to other users and so cannot
+ * be holding one of this hermit's worktrees. A missing lsof does not throw:
+ * spawnSync reports it through `error` and leaves stdout null, so it lands on
+ * the same failure path. Either way null is returned, which keeps the
  * refuse-to-delete posture rather than reporting "nothing is live" and
  * sweeping every worktree.
  */
@@ -154,9 +153,15 @@ function darwinLiveCwds(): Set<string> | null {
   let out: string;
   try {
     // Bounded: lsof walks every process on the box, so unlike the targeted git and
-    // tmux calls elsewhere in this file it is worth a ceiling. A kill on timeout
-    // leaves no output, which the empty-output check below turns into a safe null.
-    const r = spawnSync('lsof', ['-d', 'cwd', '-F', 'pn'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    // tmux calls elsewhere in this file it is worth a ceiling. -n/-P suppress the
+    // hostname and port-name lookups that are the usual reason lsof stalls; they
+    // do not affect the cwd paths this reads.
+    const r = spawnSync('lsof', ['-n', '-P', '-d', 'cwd', '-F', 'pn'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    // `error`/`signal` mean the listing is incomplete, not empty: spawnSync
+    // returns whatever lsof had already buffered before the timeout kill. A
+    // truncated set is worse than none: every process lsof had not reached yet
+    // would read as dead and gc would sweep a live worktree.
+    if (r.error || r.signal) return null;
     out = r.stdout ?? '';
   } catch {
     return null;
@@ -214,7 +219,7 @@ function gc(): number {
 
   const cwds = liveCwds();
   if (cwds === null) {
-    console.error('[rc-server] cannot determine session liveness on this platform (no /proc) — skipping gc.');
+    console.error('[rc-server] cannot determine session liveness (no readable /proc, and no usable lsof on darwin) — skipping gc.');
     return 0;
   }
 

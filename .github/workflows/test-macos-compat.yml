@@ -34,6 +34,10 @@ on:
 jobs:
   macos:
     runs-on: macos-latest
+    # Serial across six suites, and 20+ core test files spawn real tmux: a wedged pane
+    # would otherwise sit on the 6h job default and the weekly run reports
+    # nothing at all. 60m is well above the observed Linux wall time.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
