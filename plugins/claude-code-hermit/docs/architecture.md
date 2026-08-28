@@ -178,6 +178,8 @@ No `package.json`, no `node_modules`, no build step.
 
 One writer per state file. No shared mutation bus. (Exception: `state/micro-proposals.json` has several writers — reflect and the channel-bridged asking skills queue entries, channel-responder/brief resolve them — but the hermit runs as a single sequential session, so these never overlap; the "one writer" rule is about avoiding concurrent mutation, which single-session execution already guarantees here.)
 
+**The single-session guarantee does not extend to hooks.** Claude Code does not serialise hook invocations: one assistant turn issuing parallel tool calls spawns several hook processes that run concurrently (probed 2026-08-28 — four denials, four pids, every `START` before the first `END`). A hook that owns a state file therefore cannot rely on the rule above, and must either append rather than read-modify-write (`lib/denial-log.ts`) or take the advisory lock (`lib/lockfile.ts`, as `lib/progress-log.ts` and `permission-denied-notify.ts` do).
+
 | File                           | Owner (sole writer)                                 | Readers                                                       |
 | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------- |
 | `state/runtime.json`           | session-archive.ts + cost-tracker                    | heartbeat, session-start, /hermit-routines (rdw=false suppression)   |

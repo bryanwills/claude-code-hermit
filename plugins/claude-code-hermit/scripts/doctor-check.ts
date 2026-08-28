@@ -22,6 +22,7 @@ import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
+import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
 import { isCloseableSessionState } from './lib/auto-close';
 import { promptTokensOf, compactibleTokens } from './lib/context-signal';
@@ -162,11 +163,22 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
     if (!fs.existsSync(stateDir)) {
       return { id: 'state', status: 'warn', detail: 'state/ directory does not exist' };
     }
-    const jsonFiles = globDir(stateDir, /\.json$/);
+    const stateFiles = globDir(stateDir, /\.jsonl?$/);
     const broken: string[] = [];
-    for (const f of jsonFiles) {
-      try { JSON.parse(fs.readFileSync(f, 'utf8')); }
-      catch (e) { broken.push(path.basename(f)); }
+    for (const f of stateFiles) {
+      try {
+        const raw = fs.readFileSync(f, 'utf8');
+        // A JSONL ledger has no whole-file JSON shape, and a torn trailing line is
+        // expected rather than corruption (report-export.ts, prune-observations.ts
+        // and config-audit.ts all keep unparseable lines verbatim). Only a broken
+        // line that is not the last one indicates real damage.
+        if (f.endsWith('.jsonl')) {
+          const lines = raw.split('\n').filter(l => l.trim());
+          for (const line of lines.slice(0, -1)) JSON.parse(line);
+        } else {
+          JSON.parse(raw);
+        }
+      } catch (e) { broken.push(path.basename(f)); }
     }
     if (broken.length > 0) {
       return { id: 'state', status: 'fail', detail: `unparseable: ${broken.join(', ')}` };
@@ -212,7 +224,7 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
       // file existence was already checked above; any error here is unexpected
       return { id: 'state', status: 'fail', detail: 'template-manifest.json: unreadable' };
     }
-    return { id: 'state', status: 'ok', detail: `${jsonFiles.length} state file(s) parse cleanly` };
+    return { id: 'state', status: 'ok', detail: `${stateFiles.length} state file(s) parse cleanly` };
   } catch (e: any) {
     return { id: 'state', status: 'fail', detail: `check failed: ${e.message}` };
   }
@@ -665,7 +677,7 @@ function checkPermissions(p: DoctorPaths = PATHS) {
     const looseFiles: string[] = [];
     const targets: string[] = [configPath];
     if (fs.existsSync(stateDir)) {
-      for (const f of globDir(stateDir, /\.json$/)) targets.push(f);
+      for (const f of globDir(stateDir, /\.jsonl?$/)) targets.push(f);
     }
     for (const target of targets) {
       if (!fs.existsSync(target)) continue;
@@ -2138,22 +2150,23 @@ const CLASSIFIER_DENIALS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const CLASSIFIER_DENIALS_DETAIL_MAX = 200;
 const CLASSIFIER_DENIALS_TOOL_LIMIT = 3;
 const CLASSIFIER_DENIALS_PROG_LIMIT = 3;
-const CLASSIFIER_DENIALS_BURST_FAIL = 3;
-
-function parseDenyHistory(raw: unknown): { since: string; total: number; burst_max: number; programs: Record<string, number> } | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const h = raw as Json;
-  if (typeof h.since !== 'string') return null;
-  if (typeof h.total !== 'number' || !Number.isFinite(h.total)) return null;
-  if (typeof h.burst_max !== 'number' || !Number.isFinite(h.burst_max)) return null;
-  if (!h.programs || typeof h.programs !== 'object' || Array.isArray(h.programs)) return null;
-  const programs: Record<string, number> = {};
-  for (const [name, n] of Object.entries(h.programs as Record<string, unknown>)) {
-    const count = Number(n);
-    if (Number.isFinite(count) && count > 0) programs[name] = count;
-  }
-  return { since: h.since, total: h.total, burst_max: h.burst_max, programs };
-}
+// The hook only fires on denials, so the log can never see the successful calls
+// between them and Claude Code's documented "3 in a row" fallback is not derivable.
+// Time-clustering is the honest substitute, and it is cross-tool because that
+// fallback is tool-agnostic — the old per-tool count was an artifact of the dedup
+// window being the only counter available, not a modelling choice. 10 minutes is
+// calibrated against the incident that motivated the notifier: four denials in
+// nine minutes is one cluster of four.
+const CLASSIFIER_DENIALS_CLUSTER_MS = 10 * 60 * 1000;
+const CLASSIFIER_DENIALS_CLUSTER_FAIL = 3;
+// Reporting floor. Auto mode suspends every wildcarded interpreter allow rule
+// (docs/security.md § Auto-mode Classifier), so the hermit's own script calls
+// re-enter the classifier constantly and an occasional stochastic denial is the
+// baseline, not an incident. Warning on a single one would pin a busy install to
+// a permanent `warn` and put "all checks passed" out of reach, costing more
+// signal than the row buys. Below the floor the count still renders, as `ok`.
+const CLASSIFIER_DENIALS_WARN_MIN_TOTAL = 3;
+const CLASSIFIER_DENIALS_WARN_MIN_CLUSTER = 2;
 
 function formatDenyTool(tool: string, total: number, programs: Record<string, number>): string {
   const entries = Object.entries(programs).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
@@ -2164,50 +2177,66 @@ function formatDenyTool(tool: string, total: number, programs: Record<string, nu
   return extra > 0 ? `${tool}: ${prog}, +${extra} more` : `${tool}: ${prog}`;
 }
 
+/** Most denials falling inside any single CLUSTER_MS span, across all tools. */
+function largestDenialCluster(sortedMs: number[]): number {
+  let best = 0;
+  let lo = 0;
+  for (let hi = 0; hi < sortedMs.length; hi++) {
+    while (sortedMs[hi] - sortedMs[lo] > CLASSIFIER_DENIALS_CLUSTER_MS) lo++;
+    best = Math.max(best, hi - lo + 1);
+  }
+  return best;
+}
+
 function checkClassifierDenials(p: DoctorPaths = PATHS) {
   const id = 'classifier-denials';
   try {
-    const read = readAlertState(path.join(p.stateDir, 'permission-denied-alerts.json'));
-    if (read.kind === 'missing') {
-      return { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
-    }
-    if (read.kind === 'corrupt' || read.kind === 'ioerror') {
-      const why = read.kind === 'corrupt'
-        ? 'unparseable'
-        : `unreadable${read.code ? ` (${read.code})` : ''}`;
-      return { id, status: 'warn', detail: `check failed: permission-denied-alerts.json ${why}` };
-    }
-
     const now = Date.now();
-    const counted: { tool: string; total: number; burst_max: number; programs: Record<string, number> }[] = [];
-    for (const [tool, raw] of Object.entries(read.value as Record<string, unknown>)) {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
-      const history = parseDenyHistory((raw as Json).history);
-      if (!history) continue;
-      const since = Date.parse(history.since);
-      if (Number.isNaN(since) || now - since > CLASSIFIER_DENIALS_WINDOW_MS) continue;
-      counted.push({ tool, total: history.total, burst_max: history.burst_max, programs: history.programs });
+    const read = readDenials(p.hermitDir, now - CLASSIFIER_DENIALS_WINDOW_MS);
+    if ('error' in read) {
+      return { id, status: 'warn', detail: `check failed: permission-denied-events.jsonl unreadable (${read.error})` };
     }
-
-    if (counted.length === 0) {
+    if (read.rows.length === 0) {
       return { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
     }
 
+    const byTool = new Map<string, { total: number; programs: Record<string, number> }>();
+    for (const row of read.rows) {
+      const entry = byTool.get(row.tool) ?? { total: 0, programs: {} };
+      entry.total += 1;
+      if (row.prog) entry.programs[row.prog] = (entry.programs[row.prog] ?? 0) + 1;
+      byTool.set(row.tool, entry);
+    }
+
+    const counted = [...byTool.entries()].map(([tool, e]) => ({ tool, ...e }));
     counted.sort((a, b) => b.total - a.total || a.tool.localeCompare(b.tool));
-    const grand = counted.reduce((s, c) => s + c.total, 0);
-    const burstMax = Math.max(...counted.map(c => c.burst_max));
+    const grand = read.rows.length;
+    const cluster = largestDenialCluster(read.rows.map(r => Date.parse(r.ts)).sort((a, b) => a - b));
+
     const shown = counted.slice(0, CLASSIFIER_DENIALS_TOOL_LIMIT);
     const extraTools = counted.length - shown.length;
     const parts = shown.map(c => formatDenyTool(c.tool, c.total, c.programs));
     if (extraTools > 0) parts.push(`+${extraTools} more`);
 
-    let detail = `${grand} denials in 7d — ${parts.join('; ')}; max burst ${burstMax}`;
-    const status = burstMax >= CLASSIFIER_DENIALS_BURST_FAIL ? 'fail' : 'warn';
-    if (status === 'fail') {
-      detail += `; a burst of ${CLASSIFIER_DENIALS_BURST_FAIL}+ drops auto mode to prompting (session may have stalled)`;
-    }
-    if (detail.length > CLASSIFIER_DENIALS_DETAIL_MAX) detail = detail.slice(0, CLASSIFIER_DENIALS_DETAIL_MAX);
-    return { id, status, detail };
+    const status = cluster >= CLASSIFIER_DENIALS_CLUSTER_FAIL
+      ? 'fail'
+      : (grand >= CLASSIFIER_DENIALS_WARN_MIN_TOTAL || cluster >= CLASSIFIER_DENIALS_WARN_MIN_CLUSTER)
+        ? 'warn'
+        : 'ok';
+    // Budget the breakdown, not the whole line: a long MCP tool key or a busy
+    // install must not push the cluster count or the fail guidance — the actionable
+    // half — past the cap and truncate it away.
+    const head = `${grand} denials in 7d — `;
+    const tail = `; largest cluster ${cluster} in 10 min`
+      // A cluster is not the documented consecutive-denial count (see CLUSTER_MS),
+      // so this correlates rather than asserting that the session actually stalled.
+      + (status === 'fail'
+        ? `; a cluster this size is around where auto mode falls back to prompting`
+        : '');
+    const budget = CLASSIFIER_DENIALS_DETAIL_MAX - head.length - tail.length;
+    let body = parts.join('; ');
+    if (body.length > budget) body = body.slice(0, Math.max(0, budget - 1)) + '…';
+    return { id, status, detail: `${head}${body}${tail}` };
   } catch (e: any) {
     return { id, status: 'warn', detail: `check failed: ${e.message}` };
   }

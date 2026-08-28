@@ -2,22 +2,25 @@
 
 ## [Unreleased]
 
+### Upgrade Instructions
+1. Tighten permissions on existing JSONL ledgers so the widened doctor check does not report them as world-readable: `chmod 600 .claude-code-hermit/state/*.jsonl` (no-op when none exist).
+
 ### Added
-- `hermit-doctor` gains a `classifier-denials` check, a 7-day per-tool digest of auto-mode denials with the program name for shell commands, that warns on any and fails on a burst of 3 or more, the point at which auto mode falls back to prompting.
+- `hermit-doctor` gains a `classifier-denials` check reading a rolling 7 days of auto-mode denials, with the program name for shell commands. It stays `ok` below a reporting floor (under 3 denials, no cluster past 1) since ambient denials are expected under auto mode, `warn`s at or above it, and `fail`s when 3 or more land inside any 10-minute span. Clustering is cross-tool. The finding is maintainer-tier and is held to `SHELL.md` Findings rather than sent to a client chat.
 
 ### Changed
 - `reflect`'s `skill-correction:*` route with no procedure brief now splits by name class: an installed plugin skill gets an operator-space override recommendation, an editable `.claude/skills/<name>/SKILL.md` becomes a `## Skill Improvement` candidate carrying no `source_artifact:`, and a name matching neither stays a plain proposal.
-- The `PermissionDenied` ledger keeps a 7-day per-tool history (totals, largest burst, shell program names); the 30-minute window and its 24-hour `(+N more)` cap are unchanged, and tool input still never leaves the ledger.
+- The `PermissionDenied` hook appends one line per denial to `state/permission-denied-events.jsonl` (timestamp, tool, shell program name) instead of aggregating a counter. The 30-minute dedup window and its 24-hour `(+N more)` cap are unchanged, and tool input still never leaves the ledger.
+- `state/*.jsonl` ledgers are created 0600 rather than at the process umask, and doctor's `permissions` and `state` checks now cover `.jsonl` as well as `.json` (a JSONL file is validated per line, with a torn trailing line tolerated).
 
 ### Fixed
+- Concurrent `PermissionDenied` hook processes no longer lose each other's writes. Claude Code does not serialise hook invocations, so parallel tool calls in one turn spawn overlapping hooks; the dedup window now takes the same bounded advisory lock `SHELL.md` appends use, and the denial record is append-only. Previously a burst could drop a suppressed count and under-report `(+N more)`.
 - Accepting a `## Skill Improvement` proposal whose target skill is gone from both `.claude/skills/` and the available-skills list now REJECTs with `stale-paths` inside the falsification gate, before any session transition, instead of authoring a fresh `SKILL.md` and resurrecting the deleted skill. A proposal naming a still-installed plugin skill is not stale and still implements.
 - A `skill-preference` settlement for a skill the operator has already overridden in `.claude/skills/` no longer routes to the plugin-skill branch and re-recommends creating the override that already exists. That branch is now gated on there being no editable file, matching the `skill-correction` routing.
 - `## Skill Improvement` authoring reads an existing target first and writes only the behaviors not already present; when every listed behavior is already there the proposal resolves with no write. With no editable target it authors an operator-space override under `.claude/skills/` behind an explicit confirmation, never a write into the plugin cache. The queued session task no longer requires a `source_artifact` brief, and now carries the same read-before-write and confirmation guards, so a target deleted or fixed between queueing and pickup is not resurrected or overwritten.
 - The `PermissionDenied` hook no longer messages client chat; its maintainer diagnostic carries the tool name and reason instead of tool input, and CLAUDE-APPEND handles denials as ordinary blockers.
 - Auto-mode denial diagnostics dedup per tool rather than per tool+input, so a burst of different commands blocked on the same tool sends one message instead of one each; the next window reports how many it absorbed (`(+3 more in the previous 30 min)`).
 - The denial diagnostic follows the normal maintainer-tier routing instead of always falling back to `SHELL.md` Findings: maintainer chat when configured, the primary chat on a `technical` profile without one, Findings on a `non-technical` profile. An unreachable or absent channel now suppresses only the send, so the Findings trail survives a dead bot token.
-
-### Fixed
 - A legacy run-object judge window folds into the 20-verdict ring on any reflect run, not only one that carries verdicts, so a quiet install stops carrying the old structure in `reflection-state.json`.
 - Verdicts from one judge run are interleaved in that window instead of grouped by type, so a run straddling the 20-verdict boundary no longer sheds its accepts first and inflates the `reflection-judge` suppress ratio.
 

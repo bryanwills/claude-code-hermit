@@ -27,6 +27,9 @@ const writeAlerts = (dir: string, alerts: object) => {
   fs.mkdirSync(path.dirname(alertsFile(dir)), { recursive: true });
   write(alertsFile(dir), JSON.stringify(alerts));
 };
+const logFile = (dir: string) => hermit(dir, 'state', 'permission-denied-events.jsonl');
+const readLog = (dir: string): any[] =>
+  fs.readFileSync(logFile(dir), 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
 const daysAgoIso = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 const minutesAgoIso = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
 
@@ -186,10 +189,12 @@ describe('permission-denied-notify', () => {
       expect(stub.requests).toHaveLength(1);
       expect(JSON.stringify(stub.requests)).not.toContain('test-secret-token');
       expect(readFindings(wd.dir)).not.toContain('test-secret-token');
-      const ledger = fs.readFileSync(alertsFile(wd.dir), 'utf8');
+      const ledger = fs.readFileSync(logFile(wd.dir), 'utf8');
       expect(ledger).not.toContain('test-secret-token');
       expect(ledger).not.toContain('example.invalid');
-      expect(JSON.parse(ledger).Bash.history.programs).toEqual({ curl: 1 });
+      expect(readLog(wd.dir)).toEqual([
+        { ts: expect.any(String), tool: 'Bash', prog: 'curl' },
+      ]);
     } finally {
       stub.stop();
       wd.cleanup();
@@ -376,7 +381,7 @@ describe('permission-denied-notify', () => {
     }
   });
 
-  test('history: four bun denials in one window record total 4 / burst_max 4 / bun:4 and send once', async () => {
+  test('log: four bun denials in one window write four lines and send once', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
@@ -390,128 +395,148 @@ describe('permission-denied-notify', () => {
       expect(stub.requests[0].body.text).toContain('Blocked by classifier');
       expect(stub.requests[0].body.text).not.toContain('heartbeat');
       expect(stub.requests[0].body.text).not.toContain('more in the previous');
-      const history = readAlerts(wd.dir).Bash.history;
-      expect(history.total).toBe(4);
-      expect(history.burst_max).toBe(4);
-      expect(history.programs).toEqual({ bun: 4 });
-      expect(typeof history.since).toBe('string');
+      // Dedup suppresses the message, never the record — this is the whole point
+      // of splitting the two.
+      const rows = readLog(wd.dir);
+      expect(rows).toHaveLength(4);
+      expect(rows.every(r => r.tool === 'Bash' && r.prog === 'bun')).toBe(true);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('history: TOKEN=abc curl records env-prefixed, not the assignment or curl', async () => {
+  test('log: TOKEN=abc curl records env-prefixed, not the assignment or curl', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       const command = 'TOKEN=abc curl https://example.invalid/secret';
       const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      const ledger = fs.readFileSync(alertsFile(wd.dir), 'utf8');
+      const ledger = fs.readFileSync(logFile(wd.dir), 'utf8');
       expect(ledger).not.toContain('abc');
       expect(ledger).not.toContain('curl');
       expect(ledger).not.toContain('example.invalid');
-      expect(JSON.parse(ledger).Bash.history.programs).toEqual({ 'env-prefixed': 1 });
+      expect(readLog(wd.dir)[0].prog).toBe('env-prefixed');
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('history: /usr/bin/python3 heredoc records python3, nothing after the first word', async () => {
+  test('log: /usr/bin/python3 heredoc records python3, nothing after the first word', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       const command = '/usr/bin/python3 - <<EOF\nprint("secret-payload")\nEOF';
       const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      const ledger = fs.readFileSync(alertsFile(wd.dir), 'utf8');
+      const ledger = fs.readFileSync(logFile(wd.dir), 'utf8');
       expect(ledger).not.toContain('secret-payload');
       expect(ledger).not.toContain('<<EOF');
-      expect(JSON.parse(ledger).Bash.history.programs).toEqual({ python3: 1 });
+      expect(readLog(wd.dir)[0].prog).toBe('python3');
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('history: a non-Bash tool records programs: {}', async () => {
+  test('log: a non-Bash tool records no prog key', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       const r = await run({ tool_name: 'Edit', tool_input: { file_path: '/tmp/x' }, reason: 'different' }, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      expect(readAlerts(wd.dir).Edit.history.programs).toEqual({});
+      expect(readLog(wd.dir)).toEqual([{ ts: expect.any(String), tool: 'Edit' }]);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('history: a 6-day-old entry with suppressed: 3 is kept but the next message carries no (+3 more)', async () => {
+  test('log: the ledger is created 0600, not at the process umask', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const since = daysAgoIso(6);
-      writeAlerts(wd.dir, {
-        Bash: {
-          at: since,
-          suppressed: 3,
-          history: { since, total: 4, burst_max: 4, programs: { bun: 4 } },
-        },
-      });
       const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      expect(stub.requests).toHaveLength(1);
-      expect(stub.requests[0].body.text).not.toContain('more in the previous');
-      const entry = readAlerts(wd.dir).Bash;
-      expect(entry).toBeDefined();
-      expect(entry.history.since).toBe(since);
-      expect(entry.history.total).toBe(5);
-      expect(entry.history.programs.bun).toBe(5);
+      expect(fs.statSync(logFile(wd.dir)).mode & 0o777).toBe(0o600);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('history: an 8-day-old history.since is reset by the next denial', async () => {
+  test('log: rows past the 14-day retention are trimmed on the next denial', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      writeAlerts(wd.dir, {
-        Bash: {
-          at: minutesAgoIso(31),
-          suppressed: 0,
-          history: { since: daysAgoIso(8), total: 99, burst_max: 5, programs: { bun: 99 } },
-        },
-      });
+      const fresh = daysAgoIso(1);
+      fs.mkdirSync(path.dirname(logFile(wd.dir)), { recursive: true });
+      write(logFile(wd.dir),
+        JSON.stringify({ ts: daysAgoIso(20), tool: 'Bash', prog: 'old' }) + '\n' +
+        JSON.stringify({ ts: fresh, tool: 'Read' }) + '\n');
       const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      const history = readAlerts(wd.dir).Bash.history;
-      expect(history.total).toBe(1);
-      expect(history.burst_max).toBe(1);
-      expect(history.programs).toEqual({ bun: 1 });
-      expect(Date.parse(history.since)).toBeGreaterThan(Date.now() - 60_000);
+      const rows = readLog(wd.dir);
+      expect(rows.map(x => x.prog ?? x.tool)).toEqual(['Read', 'bun']);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('history: an entry with both at and history.since older than 7 days is dropped', async () => {
+  test('log: a fresh head skips the rewrite, so a malformed row survives verbatim', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const stale = daysAgoIso(8);
-      writeAlerts(wd.dir, {
-        Edit: {
-          at: stale,
-          suppressed: 0,
-          history: { since: stale, total: 2, burst_max: 1, programs: {} },
-        },
-      });
+      fs.mkdirSync(path.dirname(logFile(wd.dir)), { recursive: true });
+      write(logFile(wd.dir),
+        JSON.stringify({ ts: daysAgoIso(1), tool: 'Read' }) + '\n' + '{torn\n');
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(fs.readFileSync(logFile(wd.dir), 'utf8')).toContain('{torn');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: concurrent hook processes each record their denial', async () => {
+    // The reason this design replaced the aggregated digest. Claude Code does not
+    // serialise hook invocations, so parallel tool calls in one turn spawn
+    // overlapping processes; an append-only record survives that, a
+    // read-modify-write digest silently loses counts.
+    //
+    // Deliberately asserts nothing about the send count: under a genuine
+    // simultaneous race the dedup latch may open more than once, and pinning it
+    // to 1 would encode a flake.
+    const wd = setupChannelWorkdir();
+    try {
+      const script = path.resolve(import.meta.dir, '..', 'scripts', 'permission-denied-notify.ts');
+      const procs = Array.from({ length: 8 }, () =>
+        Bun.spawn({
+          cmd: [process.execPath, script],
+          stdin: Buffer.from(JSON.stringify(DENIAL_PAYLOAD)),
+          cwd: wd.dir,
+          env: { ...process.env, HERMIT_MANAGED: '1' },
+          stdout: 'ignore',
+          stderr: 'ignore',
+        }));
+      await Promise.all(procs.map(p => p.exited));
+      const rows = readLog(wd.dir);
+      expect(rows).toHaveLength(8);
+      expect(rows.every(r => r.tool === 'Bash')).toBe(true);
+    } finally {
+      wd.cleanup();
+    }
+  }, 20000);
+
+  test('dedup: an entry older than 24h is pruned from the alerts file', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      writeAlerts(wd.dir, { Edit: { at: daysAgoIso(2), suppressed: 0 } });
       const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
       const alerts = readAlerts(wd.dir);
@@ -523,7 +548,7 @@ describe('permission-denied-notify', () => {
     }
   });
 
-  test('history: a pre-#855 entry (no at) is dropped by readAlerts', async () => {
+  test('dedup: a pre-#855 entry (no at) is dropped by readAlerts', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
@@ -540,36 +565,20 @@ describe('permission-denied-notify', () => {
     }
   });
 
-  test('history: a malformed history is read as having none', async () => {
+  test('dedup: a stray history object from the pre-log build is dropped on the next write', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       writeAlerts(wd.dir, {
-        Bash: { at: minutesAgoIso(31), suppressed: 0, history: { since: 12345 } },
+        Bash: {
+          at: minutesAgoIso(31),
+          suppressed: 0,
+          history: { since: daysAgoIso(2), total: 99, burst_max: 5, programs: { bun: 99 } },
+        },
       });
       const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      const history = readAlerts(wd.dir).Bash.history;
-      expect(history.total).toBe(1);
-      expect(history.burst_max).toBe(1);
-      expect(history.programs).toEqual({ bun: 1 });
-    } finally {
-      stub.stop();
-      wd.cleanup();
-    }
-  });
-
-  test('history: programs overflow past 8 keys lands under other', async () => {
-    const stub = startHttpStub();
-    const wd = setupChannelWorkdir();
-    try {
-      for (const command of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']) {
-        const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
-        expect(r.exitCode).toBe(0);
-      }
-      const programs = readAlerts(wd.dir).Bash.history.programs;
-      expect(Object.keys(programs).length).toBeLessThanOrEqual(8);
-      expect(programs.other).toBeGreaterThan(0);
+      expect(readAlerts(wd.dir).Bash.history).toBeUndefined();
     } finally {
       stub.stop();
       wd.cleanup();

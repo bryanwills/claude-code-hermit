@@ -44,6 +44,7 @@ import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 import { lastRoutineFire } from './lib/routines/history';
+import { ensureLedgerFile } from './lib/append-jsonl';
 
 type Json = any;
 
@@ -137,7 +138,9 @@ function writeJson(p: string, data: Json): void {
 function appendEvent(action: string, reason: string, world: World = REAL_WORLD): void {
   const line = JSON.stringify({ ts: worldStamp(world), action, reason }) + '\n';
   try {
-    fs.appendFileSync(path.join(world.paths.stateDir, 'watchdog-events.jsonl'), line);
+    const eventsPath = path.join(world.paths.stateDir, 'watchdog-events.jsonl');
+    ensureLedgerFile(eventsPath);
+    fs.appendFileSync(eventsPath, line);
   } catch (e) {
     process.stderr.write(`[watchdog] append_event: ${e}\n`);
   }

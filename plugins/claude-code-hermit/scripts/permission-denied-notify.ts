@@ -29,6 +29,8 @@ import { channelLikelyDown } from './lib/channel-health';
 import { resolve as resolveOutboundChannel, resolveMaintainerTarget } from './resolve-outbound-channel';
 import { sendOperatorNotice, appendMaintainerFindings } from './lib/channel-send';
 import { readAlertState, writeAlertState } from './lib/alert-state';
+import { acquireLock, releaseLock } from './lib/lockfile';
+import { appendDenial } from './lib/denial-log';
 import { safe } from './lib/sanitize';
 import { localISOStamp } from './lib/time';
 import { DENY, resolveLocale } from './lib/messages';
@@ -37,8 +39,15 @@ type Json = any;
 
 const DEDUP_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — carry-over cap
-const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7-day per-tool history
-const MAX_PROGRAM_KEYS = 8;
+// Bounded for the same reason TOOL_NAME_MAX_LEN below bounds tool_name: the
+// program name is model-supplied and is rendered into doctor's detail line. Real
+// program names are far shorter.
+const PROGRAM_MAX_LEN = 32;
+// A peer hook process's read-modify-write of the alerts file takes a few ms. Long
+// enough to wait out, short enough that a denied tool call never stalls on it —
+// the same posture (and constants) as lib/progress-log.ts's SHELL.md lock.
+const LOCK_WAIT_MS = 2000;
+const LOCK_STALE_MS = 10_000;
 const MESSAGE_MAX_LEN = 300;
 // The reason is bounded on its own so a long one (permission-rule denials are
 // far wordier than the classifier's fixed string) cannot push the trailing
@@ -52,23 +61,11 @@ const REASON_MAX_LEN = 150;
 const TOOL_NAME_MAX_LEN = 60;
 const TOOL_NAME_HASH_LEN = 6;
 
-// 7-day rolling digest the doctor reads. `programs` is Bash-only (first word of
-// the command, or `env-prefixed`); other tools keep it empty. At most 8 keys;
-// further distinct names fold into `other`.
-interface DenyHistory {
-  since: string;
-  total: number;
-  burst_max: number;
-  programs: Record<string, number>;
-}
-
 // One open window per tool: when it opened, and how many further denials of the
-// same tool it has absorbed since. `history` is the 7-day digest; absent or
-// malformed on disk is treated as none.
+// same tool it has absorbed since. The 7-day record lives in lib/denial-log.ts.
 interface DenyWindow {
   at: string;
   suppressed: number;
-  history?: DenyHistory;
 }
 
 function alertsPath(dir: string): string {
@@ -89,35 +86,10 @@ function readAlerts(dir: string): Record<string, DenyWindow> {
   // the pre-upgrade entries, keyed by a tool+input hash no new key can match.
   for (const [k, v] of Object.entries(read.value as Record<string, unknown>)) {
     if (v && typeof v === 'object' && typeof (v as Json).at === 'string') {
-      const history = parseHistory((v as Json).history);
-      out[k] = {
-        at: (v as Json).at,
-        suppressed: Number((v as Json).suppressed) || 0,
-        ...(history ? { history } : {}),
-      };
+      out[k] = { at: (v as Json).at, suppressed: Number((v as Json).suppressed) || 0 };
     }
   }
   return out;
-}
-
-function parseHistory(raw: unknown): DenyHistory | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const h = raw as Json;
-  if (typeof h.since !== 'string') return undefined;
-  if (typeof h.total !== 'number' || !Number.isFinite(h.total)) return undefined;
-  if (typeof h.burst_max !== 'number' || !Number.isFinite(h.burst_max)) return undefined;
-  if (!h.programs || typeof h.programs !== 'object' || Array.isArray(h.programs)) return undefined;
-  const programs: Record<string, number> = {};
-  for (const [name, n] of Object.entries(h.programs as Record<string, unknown>)) {
-    const count = Number(n);
-    if (Number.isFinite(count) && count > 0) programs[name] = count;
-  }
-  return {
-    since: h.since,
-    total: Math.max(0, Math.floor(h.total)),
-    burst_max: Math.max(0, Math.floor(h.burst_max)),
-    programs,
-  };
 }
 
 // First word of a Bash command, never anything after it. Env assignments
@@ -129,53 +101,72 @@ function bashProgram(payload: Json): string | null {
   const first = command.trim().split(/\s+/, 1)[0];
   if (!first) return null;
   if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return 'env-prefixed';
-  const token = safe(path.basename(first));
+  const token = safe(path.basename(first)).slice(0, PROGRAM_MAX_LEN);
   return token || null;
-}
-
-function addProgram(programs: Record<string, number>, name: string): void {
-  if (Object.prototype.hasOwnProperty.call(programs, name)) {
-    programs[name] += 1;
-    return;
-  }
-  // 7 named keys + `other` keeps the map at 8.
-  const namedCount = Object.keys(programs).filter(k => k !== 'other').length;
-  if (namedCount < MAX_PROGRAM_KEYS - 1) {
-    programs[name] = 1;
-    return;
-  }
-  programs.other = (programs.other ?? 0) + 1;
-}
-
-function historyStale(history: DenyHistory | undefined, now: number): boolean {
-  if (!history) return true;
-  const since = Date.parse(history.since);
-  return Number.isNaN(since) || now - since > HISTORY_RETENTION_MS;
-}
-
-function rollHistory(
-  prev: DenyHistory | undefined,
-  windowBurst: number,
-  program: string | null,
-  now: number,
-): DenyHistory {
-  const base: DenyHistory = historyStale(prev, now)
-    ? { since: localISOStamp(), total: 0, burst_max: 0, programs: {} }
-    : {
-        since: prev!.since,
-        total: prev!.total,
-        burst_max: prev!.burst_max,
-        programs: { ...prev!.programs },
-      };
-  base.total += 1;
-  base.burst_max = Math.max(base.burst_max, windowBurst);
-  if (program) addProgram(base.programs, program);
-  return base;
 }
 
 function writeAlerts(dir: string, alerts: Record<string, DenyWindow>): void {
   fs.mkdirSync(path.dirname(alertsPath(dir)), { recursive: true });
   writeAlertState(alertsPath(dir), alerts);
+}
+
+/**
+ * Advisory lock around the alerts file's read-modify-write. Claude Code does not
+ * serialise hook invocations, so two denials in one assistant turn can otherwise
+ * each overwrite the whole map with its own stale copy, dropping a peer tool's
+ * open window. Best-effort by design, the same posture as lib/progress-log.ts's
+ * SHELL.md lock: waiting out a contended lock is not worth stalling a denied tool
+ * call inside a 12s hook timeout, so we proceed unlocked instead.
+ */
+function withAlertsLock<T>(dir: string, fn: () => T): T {
+  const lockPath = `${alertsPath(dir)}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let held = false;
+  while (!held && Date.now() < deadline) {
+    try {
+      held = acquireLock(lockPath, LOCK_STALE_MS);
+    } catch {
+      break; // the lock path is unwritable — the write below may still succeed
+    }
+    if (!held) Bun.sleepSync(20);
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) releaseLock(lockPath);
+  }
+}
+
+/**
+ * Open or extend this tool's 30-minute window. Returns whether this denial opens a
+ * window (and so sends), plus how many the previous window absorbed — the only
+ * place that count can be truthful, since a burst's size isn't known when the
+ * window opens.
+ */
+function claimWindow(dir: string, key: string, now: number): { send: boolean; suppressed: number } {
+  return withAlertsLock(dir, () => {
+    const alerts = readAlerts(dir);
+
+    // Prune before reading this tool's window, so a stale one can neither hold the
+    // window open nor contribute a day-old suppressed count.
+    for (const [k, w] of Object.entries(alerts)) {
+      const t = Date.parse(w.at);
+      if (Number.isNaN(t) || now - t > PRUNE_AGE_MS) delete alerts[k];
+    }
+
+    // Pruning above guarantees a surviving entry's `at` parses.
+    const entry = alerts[key];
+    if (entry && now - Date.parse(entry.at) < DEDUP_WINDOW_MS) {
+      alerts[key] = { at: entry.at, suppressed: entry.suppressed + 1 };
+      writeAlerts(dir, alerts);
+      return { send: false, suppressed: 0 };
+    }
+
+    const suppressed = entry?.suppressed ?? 0;
+    alerts[key] = { at: localISOStamp(), suppressed: 0 };
+    writeAlerts(dir, alerts);
+    return { send: true, suppressed };
+  });
 }
 
 // Bounded, distinct identity for one tool: itself when short enough, otherwise
@@ -219,47 +210,17 @@ async function main(raw: string): Promise<void> {
   const reason = typeof payload.reason === 'string' ? safe(payload.reason).slice(0, REASON_MAX_LEN) : '';
 
   const now = Date.now();
-  const alerts = readAlerts(dir);
-  const program = bashProgram(payload);
+  // The record is append-only and needs no lock; only the dedup window is a
+  // read-modify-write.
+  appendDenial(dir, key, bashProgram(payload));
 
-  // Drop an entry only when both the window stamp and the history origin are
-  // older than 7 days. The 24h constant still caps `(+N more)` carry-over.
-  for (const [k, w] of Object.entries(alerts)) {
-    const atMs = Date.parse(w.at);
-    const atStale = Number.isNaN(atMs) || now - atMs > HISTORY_RETENTION_MS;
-    if (atStale && historyStale(w.history, now)) delete alerts[k];
-  }
-
-  const entry = alerts[key];
-  const entryAt = entry ? Date.parse(entry.at) : NaN;
-  if (entry && !Number.isNaN(entryAt) && now - entryAt < DEDUP_WINDOW_MS) {
-    // Count it and stay quiet. The count rides out on the next window's message,
-    // the only place it can be truthful — a burst's size isn't known when the
-    // window opens. burst_max is the largest suppressed+1 seen in one window.
-    const suppressed = entry.suppressed + 1;
-    alerts[key] = {
-      at: entry.at,
-      suppressed,
-      history: rollHistory(entry.history, suppressed + 1, program, now),
-    };
-    writeAlerts(dir, alerts);
-    return;
-  }
-
-  const suppressed = entry && !Number.isNaN(entryAt) && now - entryAt <= PRUNE_AGE_MS
-    ? entry.suppressed
-    : 0;
-  alerts[key] = {
-    at: localISOStamp(),
-    suppressed: 0,
-    history: rollHistory(entry?.history, 1, program, now),
-  };
-  writeAlerts(dir, alerts);
+  const claim = claimWindow(dir, key, now);
+  if (!claim.send) return; // inside an open window — counted, and stays quiet
 
   const locale = resolveLocale(config.language);
   let maintainerText = DENY[locale].maintainerBase(key);
   if (reason) maintainerText += ` — ${reason}`;
-  if (suppressed > 0) maintainerText += DENY[locale].maintainerSuppressed(suppressed);
+  if (claim.suppressed > 0) maintainerText += DENY[locale].maintainerSuppressed(claim.suppressed);
   maintainerText += DENY[locale].maintainerTail();
   maintainerText = maintainerText.slice(0, MESSAGE_MAX_LEN);
 

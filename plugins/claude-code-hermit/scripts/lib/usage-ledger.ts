@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { ensureLedgerFile } from './append-jsonl';
 
 type Json = any;
 
@@ -16,6 +17,9 @@ type Json = any;
 function appendUsageEvent(hermitDir: string, event: Json): void {
   const ledgerPath = path.join(hermitDir, 'state', 'usage-metrics.jsonl');
   if (!fs.existsSync(ledgerPath)) {
+    // Create at 0600 inside the existence branch this hot path already pays for,
+    // so the new file is not left at the process umask for doctor to flag.
+    ensureLedgerFile(ledgerPath);
     fs.appendFileSync(ledgerPath, JSON.stringify({ ts: new Date().toISOString(), kind: 'meta', event: 'ledger-start' }) + '\n');
   }
   fs.appendFileSync(ledgerPath, JSON.stringify(event) + '\n');
