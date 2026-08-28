@@ -148,7 +148,8 @@ Skipped sources are included with `items_yielded: 0, items_scored_p1: 0` and the
 ## 5. source-items JSON (fetch scratch)
 
 Written by the `source-fetcher` agent to `tmp/feed-source-items-<slot>.json` (project root,
-NOT `/tmp/`). Consumed by `feed-brief` Phase 3. Raw scratch — 3-day retention (§10).
+NOT `/tmp/`). Read by `feed-brief` Phase 1 (item collection + source reconciliation); the items
+it carries are scored in Phase 3. Raw scratch — 3-day retention (§10).
 
 ```json
 {
@@ -189,10 +190,14 @@ NOT `/tmp/`). Consumed by `feed-brief` Phase 3. Raw scratch — 3-day retention 
 - Caps/rules: <=20 items per source; `summary` is source-derived or `""`; URLs absolute and
   deduped within a source; continue-on-failure.
 
-**Maps to daily-archive `sources_skipped`/`sources_quiet` (§2) as:** `status: "failed"`, or a
-`feed-sources.md` source absent from `sources[]` entirely, → `sources_skipped`. `status: "ok"`
-with empty `items[]` → `sources_quiet`. `feed-brief` Phase 1 reconciles against this file, not
-the agent's reply — see `skills/feed-brief/SKILL.md`.
+**Maps to daily-archive `sources_skipped`/`sources_quiet` (§2), for `web`/`rss` sources only:**
+`status: "failed"` (or any status other than `"ok"`), or such a source absent from `sources[]`
+entirely, → `sources_skipped`; `status: "ok"` with empty `items[]` → `sources_quiet`.
+`chrome`/`reddit`/`reddit-home`/`x` sources never appear here and are classified by
+`feed-brief` Phase 2 instead. A source that yielded items but lost all of them to Phase 3
+scoring is also `sources_quiet` per §2.
+`feed-brief` Phase 1 reconciles against this file, not the agent's reply — see
+`skills/feed-brief/SKILL.md`.
 
 Full contract lives in `agents/source-fetcher.md`.
 
