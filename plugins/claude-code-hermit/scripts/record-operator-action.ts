@@ -35,11 +35,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
 import { isAllowedSender } from './lib/channel-auth';
-import { parseChannelEnvelope } from './lib/channel-envelope';
+import { parseChannelEnvelope, type ChannelEnvelope } from './lib/channel-envelope';
 import { readConfigRaw } from './lib/config-read';
 import { appendUsageEvent } from './lib/usage-ledger';
 
 type Json = any;
+
+// What the channel allowlist gate needs, supplied by a caller that already has
+// it. The pipeline hands over the envelope it parsed and the raw config it
+// memoizes, so neither is computed twice per prompt; omitted (direct-script
+// path) they are derived here, and only for a `<channel` prompt — the one
+// shape whose verdict depends on them.
+export interface ChannelGateInputs {
+  envelope: ChannelEnvelope | null;
+  config: Json;
+}
 
 const AGENT_DIR = hermitDir();
 const STATE_PATH = path.join(AGENT_DIR, 'state', 'last-operator-action.json');
@@ -83,7 +93,7 @@ const INJECTED_EXACT = new Set([
   '/claude-code-hermit:session-close --shutdown',
 ]);
 
-function isRoutinePrompt(prompt: string, config: Json = null): boolean {
+function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
   if (prompt.startsWith('[hermit-routine:')) return true;
   const t = prompt.trim();
   // A channel turn is operator activity exactly when its sender clears the same
@@ -92,8 +102,12 @@ function isRoutinePrompt(prompt: string, config: Json = null): boolean {
   // An unparseable `<channel` prefix keeps the old blanket skip — it carries no
   // identity to check, so it cannot be attributed to the operator.
   if (t.startsWith('<channel')) {
-    const envelope = parseChannelEnvelope(t);
+    const envelope = channel ? channel.envelope : parseChannelEnvelope(t);
     if (!envelope) return true;
+    // Presence of `channel`, not truthiness of its config: an unreadable config
+    // is a legitimate null the caller already resolved (fail-open → accept-all),
+    // and re-reading it here would just repeat that read.
+    const config = channel ? channel.config : readConfigRaw(AGENT_DIR);
     return !isAllowedSender(config, envelope.source, envelope.userId);
   }
   if (INJECTED_EXACT.has(t)) return true;
@@ -173,10 +187,9 @@ function appendSkillUsage(name: string): void {
 }
 
 // The UserPromptSubmit half, callable in-process by user-prompt-pipeline.ts.
-// `config` feeds the channel allowlist gate only; the pipeline passes its own
-// lazily-read raw config so this module never re-reads it on a hot path.
-export function run(prompt: string, config: Json = null): void {
-  if (!isRoutinePrompt(prompt, config)) {
+// `channel` feeds the channel allowlist gate only — see ChannelGateInputs.
+export function run(prompt: string, channel?: ChannelGateInputs): void {
+  if (!isRoutinePrompt(prompt, channel)) {
     // Skill-usage capture is operator-activity only — hermit's own injected
     // slash commands (INJECTED_EXACT) are routine prompts, so gating on the
     // same filter keeps automated heartbeat/session-close/routines fires out
@@ -200,15 +213,9 @@ function main(raw: string): void {
     return;
   }
 
-  // Direct-script path (SessionStart, tests). The pipeline hands run() its own
-  // config; here the read is ours to make — and only worth making for a channel
-  // prompt, the one shape whose verdict depends on it.
-  let config: Json = null;
-  if (prompt.trim().startsWith('<channel')) {
-    try { config = readConfigRaw(AGENT_DIR); } catch { /* fail-open — accept-all */ }
-  }
-
-  run(prompt, config);
+  // Direct-script path: no caller-supplied envelope or config, so isRoutinePrompt
+  // derives both itself — for a `<channel` prompt only.
+  run(prompt);
 }
 
 // Entry shell only when executed directly — importing this module (the pipeline

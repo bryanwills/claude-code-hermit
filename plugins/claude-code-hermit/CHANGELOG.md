@@ -2,13 +2,13 @@
 
 ## [Unreleased]
 
-### Fixed
-- Messages from an allowlisted channel sender now advance the operator-activity clock from the `UserPromptSubmit` hook itself instead of relying on a skill step, so a chat-only conversation no longer reads as silence to the post-close `/clear`, the 12h auto-close, and the context-hygiene backoff. Senders outside `allowed_users` are still ignored.
-
 ### Changed
 - Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator`, or `feature-dev`, and no longer seeds their `scheduled_checks` entries — Claude Code's native `Plan`/`Explore` agents, auto-memory, and `/doctor` CLAUDE.md trims cover the same ground, and every loaded skill description is paid on every API call of an always-on hermit. The `scheduled_checks` mechanism itself is unchanged; register any plugin's skill with `/hermit-settings scheduled-checks`.
 - `proposal-act` authors `## Skill Improvement` and `## Skill Draft` bodies in-main from the source brief instead of delegating to `skill-creator`; the falsification gate's read-only pass always uses the native `Plan` agent instead of `feature-dev:code-explorer`.
 - The first-session baseline audit offer (`.baseline-pending`) is removed along with the plugins it audited.
+
+### Fixed
+- Channel messages from a sender that clears `allowed_users` now advance the operator-activity clock from the `UserPromptSubmit` hook, so a chat-only conversation no longer reads as silence to the post-close `/clear`, the 12h auto-close, and the context-hygiene backoff. Other senders are still ignored.
 
 ### Upgrade Instructions
 - **Decide whether to keep the plugins hatch used to recommend.** Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator` or `feature-dev`; Claude Code covers them natively (see `${CLAUDE_PLUGIN_ROOT}/docs/recommended-plugins.md`). Nothing is removed for you. First, unconditionally delete `.claude-code-hermit/.baseline-pending` if it exists. Then inventory: `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get scheduled_checks` for entries whose `plugin` is `claude-code-setup` or `claude-md-management`; `… get docker.recommended_plugins` for entries naming any of the four; `claude plugin list` for any of the four installed. If all three are empty, skip silently. Otherwise this is the operator's decision with no default: **defer per SKILL.md Step 10** with `options: ["Keep", "Remove"]` and no `on_resolve`; the choice is applied in attended Step 10 only.
