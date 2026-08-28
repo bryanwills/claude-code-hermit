@@ -8,12 +8,6 @@
     ],
     "deny": []
   },
-  "enabledPlugins": {
-    "feature-dev@claude-plugins-official": true,
-    "context7@claude-plugins-official": true,
-    "claude-code-hermit@claude-code-hermit": true,
-    "skill-creator@claude-plugins-official": true
-  },
   "hooks": {
     "PreToolUse": [
       {
@@ -35,5 +29,10 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "context7@claude-plugins-official": true,
+    "claude-code-hermit@claude-code-hermit": true,
+    "skill-creator@claude-plugins-official": true
   }
 }
