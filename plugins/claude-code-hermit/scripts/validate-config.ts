@@ -5,6 +5,14 @@ import * as ENUM from './lib/settings/enums';
 import { validateExpectArtifact } from './lib/routines/run-record';
 import { validatePrecheckValue, validatePrecheckTimeout } from './lib/routines/gate';
 import { ENV_VAR_RE } from './lib/channel-config';
+// Shared with channel-settings-gate.ts so the hook that enforces a tier and the
+// validator that reports an unenforceable rule cannot drift on what belongs to
+// which set. From the leaf module rather than the gate itself: this hook runs on
+// every Edit and Write and exits on one string test, and has no business loading
+// the gate's transcript, envelope and nonce machinery to ask a regex question.
+import {
+  isImmutablePath, ruleReachesExecutionAdjacent, parseSettingsRules, rulePatternProbe,
+} from './lib/settings/permissions';
 
 type Json = any;
 
@@ -38,6 +46,12 @@ const VALID_OPERATOR_PROFILE = ENUM.OPERATOR_PROFILE;
 const VALID_SETTINGS_POLICY: readonly string[] = ENUM.SETTINGS_POLICY;
 const VALID_BUDGET_ACTION = ENUM.BUDGET_ACTION;
 const VALID_VOICE_STYLE: readonly string[] = ENUM.VOICE_STYLE;
+
+// Claude Code's own permission-rule vocabulary, which `settings_permissions`
+// borrows wholesale. Ordered by strictness so a rule can be compared against the
+// tier the gate would apply on its own.
+const SETTINGS_RULE_KEYS = ['allow', 'ask', 'deny'] as const;
+const RULE_STRICTNESS: Record<(typeof SETTINGS_RULE_KEYS)[number], number> = { allow: 0, ask: 1, deny: 2 };
 const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
 const TIME_RE = /^\d{2}:\d{2}$/;
 // Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with lib/routines/due.ts.
@@ -107,6 +121,72 @@ function validateCronSchedule(schedule: string): string | null {
   return null;
 }
 
+/**
+ * `settings_permissions` — the operator's re-tiering of the channel settings gate,
+ * in Claude Code's `allow`/`ask`/`deny` rule shape.
+ *
+ * Three things are worth saying out loud, and only the first is an error:
+ * a rule that names a path the gate holds terminal-only on every tier never
+ * applies, so listing one under `allow`/`ask` is a belief about this hermit's
+ * security that is not true. Lowering an execution-adjacent path is legitimate —
+ * it is the reason the key exists — but it is the operator standing down a
+ * default deliberately, so it is said back to them once, and again louder when
+ * the home chat belongs to a client rather than to them.
+ */
+function validateSettingsPermissions(config: Json, errors: string[], warnings: string[]): void {
+  const raw = config.settings_permissions;
+  if (raw === undefined || raw === null) return;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push(`settings_permissions: expected object with allow/ask/deny arrays, got ${Array.isArray(raw) ? 'array' : typeof raw}`);
+    return;
+  }
+
+  for (const key of Object.keys(raw)) {
+    if (!(SETTINGS_RULE_KEYS as readonly string[]).includes(key)) {
+      errors.push(`settings_permissions.${key}: not a rule list — expected one of [${SETTINGS_RULE_KEYS.join(', ')}]`);
+      continue;
+    }
+    if (!Array.isArray(raw[key])) {
+      errors.push(`settings_permissions.${key}: expected array of dotted config paths, got ${typeof raw[key]}`);
+      continue;
+    }
+    // parseSettingsRules drops anything that isn't a non-empty string, so an
+    // entry of the wrong shape applies to nothing and would otherwise vanish
+    // without a word — the same silent-belief problem as an immutable path.
+    raw[key].forEach((entry: Json, i: number) => {
+      if (typeof entry !== 'string' || entry.length === 0) {
+        errors.push(
+          `settings_permissions.${key}[${i}]: expected a dotted config path, got ${entry === '' ? 'an empty string' : typeof entry} — it is ignored`,
+        );
+      }
+    });
+  }
+
+  const rules = parseSettingsRules(raw);
+  if (!rules) return;
+
+  const clientHome = config.operator_profile === 'non-technical';
+  for (const key of SETTINGS_RULE_KEYS) {
+    for (const pattern of rules[key]) {
+      const probe = rulePatternProbe(pattern);
+      if (isImmutablePath(probe)) {
+        if (key !== 'deny') {
+          errors.push(
+            `settings_permissions.${key}: "${pattern}" names a terminal-only key (channel enrollment, operator_profile or settings_permissions) — no rule can lower those, so this entry never applies; remove it`,
+          );
+        }
+        continue;
+      }
+      if (ruleReachesExecutionAdjacent(pattern) && RULE_STRICTNESS[key] < RULE_STRICTNESS.ask) {
+        warnings.push(
+          `settings_permissions.${key}: "${pattern}" lowers an execution-adjacent setting (it reaches what a session runs) below its default confirmation tier` +
+          (clientHome ? ' — and operator_profile is "non-technical", so the chat this hands it to is the client\'s, not yours' : ''),
+        );
+      }
+    }
+  }
+}
+
 function validate(config: Json): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -134,6 +214,8 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       errors.push(`operator_profile: "${config.operator_profile}" not in [${VALID_OPERATOR_PROFILE.join(', ')}]`);
     }
   }
+
+  validateSettingsPermissions(config, errors, warnings);
 
   if (config.remote !== undefined && typeof config.remote !== 'boolean') {
     errors.push(`remote: expected boolean, got ${typeof config.remote}`);

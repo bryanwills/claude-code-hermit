@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `settings_permissions` (top-level, terminal-only) re-tiers which settings a chat may change, in Claude Code's own `allow`/`ask`/`deny` rule shape: `"allow": ["routines", "routines.*.precheck"]` lets a chat register routines with prechecks, `"deny": ["boot_skill"]` pushes one to terminal-only. Entries are dotted config paths, `*` matches one segment, strictest list wins, and an unlisted path keeps its built-in tier. A rule covers only the path it names and nothing beneath it, so re-tiering a container means naming its leaves too — `["env", "env.*"]`, not `["env"]` alone. No rule can re-tier the channel enrollment root, `operator_profile`, or `settings_permissions` itself; `validate-config` errors on one that tries, errors on an entry that isn't a dotted path instead of ignoring it, and warns when a rule lowers an execution-adjacent setting — including a wildcard as broad as `*`, which reaches those settings without naming any of them. Absent by default, so nothing changes until you write it.
 - New `memory-size` doctor check warns when a project `CLAUDE.md` or `CLAUDE.local.md` reaches 200 lines, or auto-memory `MEMORY.md` reaches 160 lines or 20 KB.
 
 ### Changed

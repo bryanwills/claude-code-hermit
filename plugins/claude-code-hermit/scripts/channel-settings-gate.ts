@@ -24,8 +24,14 @@
 //                  asked for only when the channel's settings_policy is `ask`;
 //                  on `allow` the tier applies on the first message
 //   terminal-only  the enrollment root (settings_policy included),
-//                  operator_profile, and any ancestor write that would replace
-//                  them — never reachable from a channel, on any tier
+//                  operator_profile, settings_permissions, and any ancestor
+//                  write that would replace them — never reachable from a
+//                  channel, on any tier
+//
+// Which path sits on which tier is the default, not the law: `settings_permissions`
+// in config.json re-tiers any other path with Claude Code's own allow/ask/deny
+// rule shape (see SettingsRules below). It cannot reach the terminal-only set
+// above, itself included — channelVerdict answers those before reading a rule.
 //
 // The maintainer tier exists because the hermit that most needs these decisions
 // is the unattended one, and its operator is reachable on a channel, not at a
@@ -82,6 +88,17 @@ import { byArg } from './lib/settings/registry';
 import { runHook } from './lib/hook-input';
 import { readPending, writePending, clearPending, newToken, bodyEchoesToken, bindingFor } from './lib/settings-confirm';
 import { isSecretPath } from './lib/config-audit';
+// The path-classification half of this gate: which paths no operator rule may
+// re-tier, which reach what a session executes, and the operator's own
+// `settings_permissions` rules. Shared with validate-config.ts, which reports a
+// rule that can never take effect and must classify a path exactly as this hook
+// does — so the regexes have one home rather than a copy in each.
+import {
+  type Verdict, type SettingsRules, STRICTNESS,
+  isImmutablePath, isExecutionAdjacentPath, parseSettingsRules, ruleVerdict,
+} from './lib/settings/permissions';
+
+export type { Verdict, SettingsRules };
 
 // Same window channel-hook.ts uses: enough to hold a turn, cheap to read.
 const TAIL_BYTES = 512 * 1024;
@@ -90,9 +107,11 @@ type Json = any;
 
 const DENY_TERMINAL_ONLY =
   'Terminal-only hermit setting. Channel enrollment (allowed_users, default_chat_id, ' +
-  'dm_channel_id, maintainer_channel_id, settings_policy) decides who is allowed to talk to this ' +
-  'hermit and how much a chat there may change, so it changes only on the operator\'s own ' +
-  'terminal-typed request — the maintainer chat cannot grant itself more reach. Writing a parent ' +
+  'dm_channel_id, maintainer_channel_id, settings_policy), operator_profile, and ' +
+  'settings_permissions decide who is allowed to talk to this ' +
+  'hermit and how much a chat there may change, so they change only on the operator\'s own ' +
+  'terminal-typed request — the maintainer chat cannot grant itself more reach, and no ' +
+  'settings_permissions rule can lift this tier. Writing a parent ' +
   'object counts, and so does editing config.json directly. ' +
   'Do not retry. Reply in the operator\'s language that this one has to be done from a terminal ' +
   'session with `/claude-code-hermit:hermit-settings <argument>`, and carry on with anything else ' +
@@ -215,91 +234,10 @@ const ALLOWED_PATTERNS: RegExp[] = [
   /^scheduled_checks\.\d+\.interval_days$/,
 ];
 
-/**
- * The enrollment root: who may talk to this hermit, which chat holds the
- * maintainer tier, and how much authority a chat on that channel carries.
- * Terminal-only on every turn, maintainer chat included — these keys are what
- * the maintainer tier is *anchored on*, so letting that chat write them would
- * make a single compromise self-extending and unrevokable. Everything else in
- * the security tier is recoverable by an operator who can still reach a
- * terminal; this is the part that would not be.
- *
- * `settings_policy` (lib/channel-auth.ts settingsPolicy) sits here for exactly
- * that reason: a chat that could raise its own channel from `ask` to `allow`
- * would drop its own second factor, and one that could lift `deny` would undo
- * the operator's opt-out.
- *
- * Matches the leaf AND anything beneath it. `settings-edit`'s setPath treats a
- * dotted path as a plain traversal and arrays are objects, so
- * `channels.discord.allowed_users.0` writes one allowlist entry — an
- * exact-leaf-only match would let that land on `maintainer` and hand the
- * maintainer chat the self-extending compromise this tier exists to block.
- * Indexed paths are a real spelling here, not a hypothetical: ALLOWED_PATTERNS
- * above depends on them for `routines.<n>.enabled`.
- */
-const ENROLLMENT_ROOT = /^channels\.[^.]+\.(allowed_users|default_chat_id|dm_channel_id|maintainer_channel_id|settings_policy)(\..+)?$/;
-
-/**
- * `channels` and `channels.<platform>` — writing either replaces the enrollment
- * root wholesale, so the ancestor rule has to hold at every tier, not just for
- * a channel turn. (Ancestors of merely maintainer-tier keys are maintainer-tier
- * themselves: nothing protected hides beneath them.)
- */
-const ENROLLMENT_ANCESTOR = /^channels(\.[^.]+)?$/;
-
-/**
- * The key that decides who holds settings authority at all, rather than what
- * one may change: `operator_profile` gates the home-chat fallback
- * (lib/channel-auth.ts isSettingsController), so a chat able to write it could
- * flip a client install to `technical` and grant itself the tier. Same
- * unrevocability argument as the enrollment root, so the same answer. The
- * per-channel half of this rule is `settings_policy`, which lives in
- * ENROLLMENT_ROOT above because it is spelled under `channels.<name>`.
- */
-const AUTHORITY_KEYS = /^operator_profile(\..+)?$/;
-
-/**
- * Execution-adjacent: `permission_mode` can be flipped to bypassPermissions,
- * `env` is a free-form dict that reaches the session's environment, and every
- * `monitors[]` entry carries a `command` string the `watch` skill registers as
- * a Monitor subprocess at session start (validate-config.ts requires it) — a
- * config-declared shell command is at least as execution-adjacent as either of
- * the other two, so it cannot sit a tier below them. All stay behind the
- * confirmation nonce even from the maintainer chat — see lib/settings-confirm.ts
- * for what that second factor is worth. Each matches as both the whole
- * container and any leaf, because replacing the container is the broader write.
- *
- * `boot_skill` joins them on persistence rather than on reach. It is not shell
- * (hermit-start shlex-quotes it into an argv element), but it becomes the boot
- * *prompt* of every session the hermit starts — arbitrary standing instructions,
- * re-applied on every restart, unattended, at whatever permission_mode is set.
- * That outlives a single `env` write, so it cannot sit a tier below one. Domain
- * hermits set it from the terminal at hatch, so the everyday path is untouched;
- * only a chat-originated change pays the second factor. `shutdown_skill` is the
- * same reach in the other direction — session-close invokes it as a skill
- * command on every full close, the `--auto` one included — so it is pinned
- * alongside its counterpart rather than left on the maintainer tier.
- *
- * `voice` joins them on the same persistence argument as `boot_skill`: its `prose`
- * is free text rendered verbatim into `.claude/output-styles/hermit-voice.md`, which
- * Claude Code builds into the SYSTEM PROMPT of every future session. That is the
- * longest-lived instruction surface a chat can reach, and content the hermit merely
- * *read* (a fetched page, an issue body) must not be able to write it. The container
- * is listed rather than the leaf so `set voice '<object>'` cannot smuggle prose past
- * a leaf-only rule; `voice.style` is caught by ALLOWED_EXACT first, which is the
- * whole point — the three sealed style values carry no text.
- */
-const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill|voice)(\..+)?$/;
-
-/**
- * A routine's `precheck` is an executable the routine monitor runs unattended at
- * fire time — the same trust class as a `monitors[]` command, and so the same tier.
- * Only the precheck leaves are pinned here: `routines` is the container an operator
- * edits from chat every day (add a routine, flip `enabled`), and putting the whole
- * array behind a nonce would tax that daily work to protect one field. The
- * container write is judged by value instead — see precheckSetChanged().
- */
-const NONCE_ROUTINE_PRECHECK = /^routines\.\d+\.precheck(_timeout_s)?(\..+)?$/;
+// The tiers this table does NOT decide live in lib/settings/permissions.ts: the
+// enrollment root and authority keys (terminal-only on every turn, and beyond the
+// reach of any operator rule) and the execution-adjacent set behind the
+// confirmation code. channelVerdict() below is where the two halves meet.
 
 /**
  * The container spellings judged by value: the whole array, and one indexed entry.
@@ -345,9 +283,6 @@ export function precheckSetChanged(value: string, current: Json[]): boolean {
   return false;
 }
 
-/** Increasing strictness — a chained command takes the strongest verdict. */
-export type Verdict = 'allowed' | 'maintainer' | 'nonce' | 'terminal-only';
-const STRICTNESS: Record<Verdict, number> = { allowed: 0, maintainer: 1, nonce: 2, 'terminal-only': 3 };
 
 /**
  * `apply-known`'s registry arg name resolved to its dotted config path; every
@@ -381,20 +316,30 @@ function resolveTarget(verb: string, target: string): string {
  *
  * The verdict is a tier, not an answer: `allowed` still requires the trusted
  * chat for a write (main() applies that), and every tier above it is void when
- * `settings_from_chat` is false.
+ * the channel's `settings_policy` is `deny`.
+ *
+ * `rules` is the operator's `settings_permissions` map, consulted after the
+ * unreachable keys and before every built-in rule — so an operator can re-tier
+ * anything the defaults decide, in either direction, and nothing at all of what
+ * makes a chat compromise revocable. The immutable checks moved above the
+ * `allowed` ones to make that ordering explicit; the two sets are disjoint
+ * (nothing in ALLOWED_EXACT/ALLOWED_PATTERNS is an enrollment or authority key),
+ * so the built-in verdicts are unchanged by the move.
  */
-export function channelVerdict(verb: string, target: string): Verdict {
+export function channelVerdict(verb: string, target: string, rules?: SettingsRules | null): Verdict {
   if (READ_VERBS.has(verb)) return 'allowed';
   if (!WRITE_VERBS.has(verb)) return 'terminal-only';
   if (!target) return 'terminal-only';
 
   const dotted = resolveTarget(verb, target);
+  if (isImmutablePath(dotted)) return 'terminal-only';
+
+  const ruled = ruleVerdict(rules ?? null, dotted);
+  if (ruled) return ruled;
+
   if (ALLOWED_EXACT.has(dotted)) return 'allowed';
   if (ALLOWED_PATTERNS.some(rx => rx.test(dotted))) return 'allowed';
-  if (ENROLLMENT_ROOT.test(dotted) || ENROLLMENT_ANCESTOR.test(dotted)) return 'terminal-only';
-  if (AUTHORITY_KEYS.test(dotted)) return 'terminal-only';
-  if (NONCE_REQUIRED.test(dotted)) return 'nonce';
-  if (NONCE_ROUTINE_PRECHECK.test(dotted)) return 'nonce';
+  if (isExecutionAdjacentPath(dotted)) return 'nonce';
   return 'maintainer';
 }
 
@@ -441,15 +386,36 @@ function targetsConfigFile(p: string): boolean {
  * An unreadable config yields an empty baseline, which makes every declared gate
  * in the incoming write look new — the strict direction.
  */
-function currentRoutines(): Json[] {
+/**
+ * The config as it stands on disk, read at most once per hook process. Both
+ * readers below want the same file, and a routines write that arms a gate asks
+ * for both — without the memo that is two directory walk-ups and two parses for
+ * one answer. Safe because the file cannot change inside one invocation.
+ */
+let configCache: Json | null | undefined;
+function currentConfig(): Json | null {
+  if (configCache !== undefined) return configCache;
   try {
     const dir = hermitDir();
-    if (!dir) return [];
-    const config: any = readConfigRaw(dir);
-    return Array.isArray(config?.routines) ? config.routines : [];
+    configCache = dir ? readConfigRaw(dir) : null;
   } catch {
-    return [];
+    configCache = null;
   }
+  return configCache;
+}
+
+function currentRoutines(): Json[] {
+  const routines = currentConfig()?.routines;
+  return Array.isArray(routines) ? routines : [];
+}
+
+/**
+ * The operator's `settings_permissions` map as it stands on disk. Unreadable
+ * config yields no rules, which leaves every built-in tier in force — the strict
+ * direction, and the same one an install that never wrote the key gets.
+ */
+function currentRules(): SettingsRules | null {
+  return parseSettingsRules(currentConfig()?.settings_permissions);
 }
 
 /**
@@ -541,6 +507,10 @@ function protectedMutation(
   )];
   if (matches.length === 0) return null;
 
+  // Read only once a settings write is actually in hand — a command that never
+  // touches settings must not pay for a config read.
+  const rules = currentRules();
+
   // Every distinct target tied at the worst tier survives into `target`, not
   // just the first. At the nonce tier this string is what the confirmation
   // token binds to, and one command can carry two nonce-tier writes
@@ -570,13 +540,22 @@ function protectedMutation(
     // `unset` and `toggle` take a path and nothing else, so the token after
     // theirs belongs to the shell (a `&&`, a redirect), not to the setting.
     const value = TAKES_VALUE.has(verb) ? strip(m[4]) : '';
-    let v = channelVerdict(verb, t);
+    let v = channelVerdict(verb, t, rules);
     // Routines container write (whole array or one indexed entry): escalate only
     // when it arms or changes a gate. Keeps the everyday add/edit/enable path on
     // its existing tier while closing the bypass a container write would otherwise be.
+    //
+    // The escalation target is whatever tier a precheck leaf itself carries, not a
+    // fixed `nonce`: the add/edit flow writes the whole array back, so an operator
+    // who re-tiered `routines.*.precheck` would otherwise see their rule apply to
+    // the leaf spelling nobody uses and never to the write that actually arms a
+    // gate. Resolved through the same channelVerdict, so the two spellings cannot
+    // disagree, and applied only when it is stricter — a container write is never
+    // made weaker than the container's own verdict.
     if (v !== 'terminal-only' && ROUTINES_CONTAINER.test(resolveTarget(verb, t)) && value
         && precheckSetChanged(value, currentRoutines())) {
-      v = 'nonce';
+      const precheckTier = channelVerdict('set', 'routines.0.precheck', rules);
+      if (STRICTNESS[precheckTier] > STRICTNESS[v]) v = precheckTier;
     }
     const dotted = resolveTarget(verb, t);
     // Two labels, deliberately: `raw` carries the exact value and is only ever
@@ -688,7 +667,9 @@ function main(payload: any): void {
     deny(mutation.target === 'config.json' ? DENY_DIRECT_CONFIG_EDIT : DENY_TERMINAL_ONLY);
   }
 
-  const config = readConfigRaw(dir);
+  // Same memo the verdict was built from: one parse per hook process, and the
+  // authority check can't disagree with the rules that produced the tier.
+  const config = currentConfig();
 
   // Safe tier: any setting, but only from a chat that holds authority — the
   // operator's own chat (the same anchor pause/resume/status bind to) or the

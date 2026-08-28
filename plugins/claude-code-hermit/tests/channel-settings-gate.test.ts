@@ -8,6 +8,7 @@ import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 import { triggerPrompt, assistantEntry } from './helpers/transcript';
 import { channelVerdict, precheckSetChanged } from '../scripts/channel-settings-gate';
+import { parseSettingsRules, type SettingsRules } from '../scripts/lib/settings/permissions';
 import { SETTINGS } from '../scripts/lib/settings/registry';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-channel-settings-gate-');
@@ -1429,5 +1430,130 @@ describe('channel-settings-gate — confirmation nonce', () => {
       `'${JSON.stringify(next, null, 1).replace(/\n\s*/g, ' ')}'`;
     const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command } }), dir);
     expect(r.exitCode).toBe(0);
+  });
+});
+
+describe('settings_permissions — operator re-tiering', () => {
+  const rules = (r: Partial<SettingsRules>): SettingsRules => ({ allow: [], ask: [], deny: [], ...r });
+
+  /** A message from the hermit's own home chat — the trusted-controller anchor. */
+  const homePrompt = (body: string) =>
+    `<channel source="plugin:discord:discord" chat_id="${HOME_CHAT}" user="operator" ` +
+    `user_id="u-operator">${body}</channel>`;
+
+  /** The array write the settings skill emits when a routine with a gate is added. */
+  const setRoutinesWithPrecheck = () =>
+    'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set routines ' +
+    `'${JSON.stringify([{ id: 'mail', skill: 'x:mail', schedule: '0 9 * * *', precheck: 'tools/gate.sh', enabled: true }])}'`;
+
+  test('allow lowers a path to the everyday tier', () => {
+    const r = rules({ allow: ['routines', 'routines.*.precheck'] });
+    expect(channelVerdict('set', 'routines.0.precheck', r)).toBe('allowed');
+    expect(channelVerdict('set', 'routines', r)).toBe('allowed');
+    // Untouched paths keep the built-in tier.
+    expect(channelVerdict('set', 'permission_mode', r)).toBe('nonce');
+    expect(channelVerdict('set', 'escalation', r)).toBe('maintainer');
+  });
+
+  test('ask and deny raise a path above its default', () => {
+    expect(channelVerdict('set', 'model', rules({ ask: ['model'] }))).toBe('nonce');
+    expect(channelVerdict('set', 'model', rules({ deny: ['model'] }))).toBe('terminal-only');
+    expect(channelVerdict('set', 'escalation', rules({ deny: ['escalation'] }))).toBe('terminal-only');
+    // `allow` is the only downgrade word, by design: a nonce-tier default the
+    // operator is willing to hand their own chat goes all the way down.
+    expect(channelVerdict('set', 'boot_skill', rules({ allow: ['boot_skill'] }))).toBe('allowed');
+  });
+
+  test('the strictest rule naming a path wins, whichever list it is in', () => {
+    expect(channelVerdict('set', 'model', rules({ allow: ['model'], deny: ['model'] }))).toBe('terminal-only');
+    expect(channelVerdict('set', 'model', rules({ allow: ['model'], ask: ['model'] }))).toBe('nonce');
+  });
+
+  test('`*` matches exactly one segment, and nothing else is a metacharacter', () => {
+    const r = rules({ allow: ['routines.*.precheck'] });
+    expect(channelVerdict('set', 'routines.12.precheck', r)).toBe('allowed');
+    // One segment, not none and not many.
+    expect(channelVerdict('set', 'routines.precheck', r)).toBe('maintainer');
+    expect(channelVerdict('set', 'routines.0.a.precheck', r)).toBe('maintainer');
+    // A literal dot in a pattern must not match an arbitrary character.
+    expect(channelVerdict('set', 'voiceXstyle', rules({ allow: ['voice.style'] }))).toBe('maintainer');
+  });
+
+  test('no rule can re-tier the enrollment root, the authority keys, or itself', () => {
+    const r = rules({
+      allow: [
+        'channels.discord.allowed_users',
+        'channels.*.settings_policy',
+        'channels.discord.maintainer_channel_id',
+        'channels',
+        'channels.discord',
+        'operator_profile',
+        'settings_permissions',
+        'settings_permissions.allow',
+      ],
+    });
+    for (const p of r.allow) expect(channelVerdict('set', p, r)).toBe('terminal-only');
+    // And with no rules at all, the new key is terminal-only on its own.
+    expect(channelVerdict('set', 'settings_permissions', null)).toBe('terminal-only');
+    expect(channelVerdict('set', 'settings_permissions.deny', null)).toBe('terminal-only');
+  });
+
+  test('reads stay open on every tier, whatever the rules say', () => {
+    const r = rules({ deny: ['model', 'routines'] });
+    expect(channelVerdict('show', 'model', r)).toBe('allowed');
+    expect(channelVerdict('get', 'routines', r)).toBe('allowed');
+  });
+
+  test('a rule list only counts when it is legible', () => {
+    expect(parseSettingsRules(undefined)).toBeNull();
+    expect(parseSettingsRules('allow')).toBeNull();
+    expect(parseSettingsRules(['model'])).toBeNull();
+    expect(parseSettingsRules({})).toBeNull();
+    expect(parseSettingsRules({ allow: [], ask: [], deny: [] })).toBeNull();
+    // Junk entries drop out; the legible ones still apply.
+    expect(parseSettingsRules({ allow: ['model', 42, null, ''], deny: 'nope' }))
+      .toEqual({ allow: ['model'], ask: [], deny: [] });
+  });
+
+  test('the routines container write follows the tier its precheck carries', async () => {
+    // The add/edit flow writes the whole array back, so an operator who allowed
+    // `routines.*.precheck` must see that apply to the array write that actually
+    // arms a gate — not only to the leaf spelling nobody uses.
+    const config = configHomeOnly({ settings_permissions: { allow: ['routines', 'routines.*.precheck'] } });
+    config.routines = [];
+    const { dir, transcript } = fixture(homePrompt('add a mail routine with a precheck'), config);
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: setRoutinesWithPrecheck() } }), dir);
+    expect(r.exitCode).toBe(0);
+  });
+
+  test('the same write without the rules still pays the confirmation code', async () => {
+    const config = configHomeOnly();
+    config.routines = [];
+    const { dir, transcript } = fixture(homePrompt('add a mail routine with a precheck'), config);
+    const r = await runGate(
+      payload({ dir, transcript, tool: 'Bash', input: { command: setRoutinesWithPrecheck() } }), dir);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Second factor required');
+  });
+
+  test('a chat cannot write the rule map itself, even holding settings authority', async () => {
+    const { dir, transcript } = fixture(
+      maintainerPrompt('let the client register routines with prechecks'), configWithMaintainer());
+    const command =
+      'bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json set settings_permissions ' +
+      `'${JSON.stringify({ allow: ['routines.*.precheck'] })}'`;
+    const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command } }), dir);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Terminal-only hermit setting');
+  });
+
+  test('a deny rule holds against the maintainer chat', async () => {
+    const config = configWithMaintainer();
+    config.settings_permissions = { deny: ['escalation'] };
+    const { dir, transcript } = fixture(maintainerPrompt('switch escalation to always'), config);
+    const r = await runGate(payload({ dir, transcript, tool: 'Bash', input: { command: SET_ESCALATION } }), dir);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('Terminal-only hermit setting');
   });
 });
