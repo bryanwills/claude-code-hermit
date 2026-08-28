@@ -190,7 +190,7 @@ export interface OperatorNoticeResult {
 
 const FINDINGS_MAX = 300;
 
-function appendMaintainerFindings(hermitDir: string, text: string): string | null {
+export function appendMaintainerFindings(hermitDir: string, text: string): string | null {
   return appendShellLine(
     path.join(hermitDir, 'sessions'),
     'Findings',

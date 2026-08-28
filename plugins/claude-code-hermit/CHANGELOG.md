@@ -4,6 +4,8 @@
 
 ### Changed
 - The `PermissionDenied` hook no longer messages client chat; its maintainer diagnostic carries the tool name and reason instead of tool input, and CLAUDE-APPEND handles denials as ordinary blockers.
+- Auto-mode denial diagnostics dedup per tool rather than per tool+input, so a burst of different commands blocked on the same tool sends one message instead of one each; the next window reports how many it absorbed (`(+3 more in the previous 30 min)`).
+- The denial diagnostic follows the normal maintainer-tier routing instead of always falling back to `SHELL.md` Findings: maintainer chat when configured, the primary chat on a `technical` profile without one, Findings on a `non-technical` profile. An unreachable or absent channel now suppresses only the send, so the Findings trail survives a dead bot token.
 
 ## [1.2.50] - 2026-08-28
 

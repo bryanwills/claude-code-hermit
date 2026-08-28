@@ -169,20 +169,25 @@ export const BUDGET: Localized<BudgetMessages> = {
 
 // ---------- auto-mode denial (permission-denied-notify.ts) ----------
 // `maintainer*` provides the technical frame for the operator who owns the
-// maintainer channel / SHELL.md Findings.
+// maintainer channel / SHELL.md Findings. `maintainerSuppressed` reports the
+// burst size the previous dedup window absorbed — one blocked call reads very
+// differently from twelve, and the count is the only carrier of that.
 
 export interface DenyMessages {
   maintainerBase(toolName: string): string;
+  maintainerSuppressed(count: number): string;
   maintainerTail(): string;
 }
 
 export const DENY: Localized<DenyMessages> = {
   en: {
     maintainerBase: (toolName) => `Auto-mode denied: ${toolName}`,
+    maintainerSuppressed: (count) => ` (+${count} more in the previous 30 min)`,
     maintainerTail: () => '. Session continues. If intended: /hermit-settings or handle at the pane.',
   },
   'pt-PT': {
     maintainerBase: (toolName) => `Negado em modo automático: ${toolName}`,
+    maintainerSuppressed: (count) => ` (+${count} nos 30 min anteriores)`,
     maintainerTail: () => '. A sessão continua. Se for intencional: /hermit-settings ou trate no terminal.',
   },
 };
