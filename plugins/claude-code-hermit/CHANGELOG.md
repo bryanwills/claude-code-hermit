@@ -13,6 +13,10 @@
 - Auto-mode denial diagnostics dedup per tool rather than per tool+input, so a burst of different commands blocked on the same tool sends one message instead of one each; the next window reports how many it absorbed (`(+3 more in the previous 30 min)`).
 - The denial diagnostic follows the normal maintainer-tier routing instead of always falling back to `SHELL.md` Findings: maintainer chat when configured, the primary chat on a `technical` profile without one, Findings on a `non-technical` profile. An unreachable or absent channel now suppresses only the send, so the Findings trail survives a dead bot token.
 
+### Fixed
+- A legacy run-object judge window folds into the 20-verdict ring on any reflect run, not only one that carries verdicts, so a quiet install stops carrying the old structure in `reflection-state.json`.
+- Verdicts from one judge run are interleaved in that window instead of grouped by type, so a run straddling the 20-verdict boundary no longer sheds its accepts first and inflates the `reflection-judge` suppress ratio.
+
 ## [1.2.50] - 2026-08-28
 
 ### Added
