@@ -58,7 +58,7 @@ questions: [
 ]
 ```
 
-**Quick-mode contract — security non-negotiables.** Quick mode never bulk-accepts third-party plugins, never weakens the safelist, never skips the public-repo pre-flight, and never bypasses the write-time assertion. Those gates exist because that's the line where defaults stop being safe. Quick only auto-defaults the choices that have one obviously-correct answer (auth, networking, build-now) and the SAFE plugin batch (claude-plugins-official + gtapps/* — already vetted by the safelist).
+**Quick-mode contract — security non-negotiables.** Quick mode never bulk-accepts third-party plugins, never weakens the safelist, never skips the public-repo pre-flight, and never bypasses the write-time assertion. Those gates exist because that's the line where defaults stop being safe. Quick only auto-defaults the choices that have one obviously-correct answer (auth, networking, build-now) and the SAFE plugin batch (claude-plugins-official + gtapps/* — already vetted by the safelist). Minting the long-lived setup token is never one of those auto-defaulted choices — in both Quick and Advanced it's a post-login question at Step 8.
 
 Branch on the choice for the rest of the skill:
 - **Advanced** → run today's flow unchanged from Step 2.
@@ -66,7 +66,7 @@ Branch on the choice for the rest of the skill:
 
 ### 2. Ask operator and analyze project
 
-**Quick:** silently apply `auth = setup-token`, `docker.network_mode = "bridge"`. Skip the `AskUserQuestion` below. Continue at the project-dependencies scan below.
+**Quick:** silently apply `auth = oauth-token`, `docker.network_mode = "bridge"`. Skip the `AskUserQuestion` below. Continue at the project-dependencies scan below.
 
 **Advanced:** ask auth method and networking in a single `AskUserQuestion` call:
 
@@ -76,8 +76,7 @@ questions: [
     header: "Auth",
     question: "Authentication method for the container?",
     options: [
-      { label: "Subscription token", description: "Mint a 1-year login token — renews over chat, no server access needed (recommended)" },
-      { label: "Subscription login", description: "Run claude /login inside the container — needs server access again when it expires" },
+      { label: "Subscription", description: "Log in inside the container — the long-lived setup token is offered right after login (recommended)" },
       { label: "API Key", description: "Set ANTHROPIC_API_KEY in .env — bills per token instead of using a subscription" }
     ],
   },
@@ -92,7 +91,7 @@ questions: [
 ]
 ```
 
-Record networking choice as `docker.network_mode` (`"bridge"` or `"host"`).
+Record auth choice as `auth = oauth-token` for Subscription, `auth = api-key` for API Key. Record networking choice as `docker.network_mode` (`"bridge"` or `"host"`).
 
 **Project dependencies scan:** Scan for signals that suggest extra system packages:
    - `package.json` native addons (sqlite3, sharp, canvas, bcrypt, etc.)
@@ -120,7 +119,7 @@ Do NOT set `AGENT_HOOK_PROFILE` in `config.json` `env` — leave it unset. The s
 The render script derives every `{{PLACEHOLDER}}` internally and fails loud (writes nothing) if any survives. Assemble this input object as choices resolve, to be piped on stdin at Step 7b.6:
 
 - `packages` — the finalized `docker.packages` array (Step 7b.packages). Empty array → no project-package layer.
-- `auth` — `"setup-token"`, `"oauth-token"`, or `"api-key"` (Step 2). Both subscription modes add no auth env line — their credential lives on the named volume (`.hermit-setup-token` for token mode, `.credentials.json` for `/login` mode). The setup-token deliberately never goes in `.env`: compose applies `env_file` only at container creation, so an `.env`-stored token would force a host-side recreate on every renewal.
+- `auth` — `"oauth-token"` for subscription, or `"api-key"` (Step 2). The mint-or-keep decision at Step 8 does not affect rendering — both subscription outcomes render as `oauth-token` and add no auth env line, since their credential lives on the named volume (`.hermit-setup-token` if minted, `.credentials.json` otherwise). The setup-token deliberately never goes in `.env`: compose applies `env_file` only at container creation, so an `.env`-stored token would force a host-side recreate on every renewal.
 - `channels` — `{ envLines: [...], volumeLines: [...] }`, one entry per enabled channel (Step 7). Pass the line **bodies** (the script owns the `      - ` indent):
   - env body: `<VAR>_STATE_DIR=${PWD}/.claude.local/channels/<plugin>` (VAR = `DISCORD` / `TELEGRAM`)
   - volume body: `${PWD}/.claude.local/channels/<plugin>:/home/claude/.claude/channels/<plugin>` (keeps channel writes inside the project tree — no permission prompts under `bypassPermissions`)
@@ -147,7 +146,7 @@ Only the top-level project memory is seeded — not agent-scoped memories at `<p
    ANTHROPIC_API_KEY=your-api-key-here
    ```
    If already present, leave it — note for step 8.
-   **If setup-token or oauth:** No auth var needed in `.env`. Check whether `ANTHROPIC_API_KEY` is set (non-empty) in `.env`. If so, warn and ask with `AskUserQuestion` (header: "API key"): **Yes — comment out** (prefix with # to disable it) / **No — keep** (container will run in API key mode).
+   **If subscription (oauth):** No auth var needed in `.env`. Check whether `ANTHROPIC_API_KEY` is set (non-empty) in `.env`. If so, warn and ask with `AskUserQuestion` (header: "API key"): **Yes — comment out** (prefix with # to disable it) / **No — keep** (container will run in API key mode).
    Also remove any `CLAUDE_CODE_OAUTH_TOKEN` line you find in `.env` — this is not a preference. A token stored there is baked in at container creation, so renewing it would require recreating the container from the host, which is exactly the manual access token mode exists to remove. The hermit stores it on the config volume and exports it at process start instead.
 3. Ensure `.env` is listed in both `.gitignore` and `.dockerignore` (create the files if needed, append if missing).
 4. **Deny patterns:** Merge the `default` deny set into the target settings file.
@@ -307,7 +306,7 @@ Now that `docker.packages` (Step 7b.packages), channel state dirs (Step 7), and 
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-docker-templates.ts <PROJECT_ROOT> <<'HERMIT_RENDER_JSON'
 {
   "packages": [...],
-  "auth": "setup-token" | "oauth-token" | "api-key",
+  "auth": "oauth-token" | "api-key",
   "channels": { "envLines": [...], "volumeLines": [...] },
   "agentHookProfile": "strict",
   "networkMode": "bridge" | "host",
@@ -369,7 +368,7 @@ Manual deployment guide
 2. (Subscription auth only) From a second terminal, complete login:
    .claude-code-hermit/bin/hermit-docker login
 
-   Then, in token mode, mint the long-lived token:
+   Then, optionally (recommended), mint the long-lived token so future renewals need only a browser tap and no server access — skip it and you'll re-run `hermit-docker login` from a terminal when the `/login` credentials expire:
    .claude-code-hermit/bin/hermit-docker setup-token
 
 3. Accept first-run prompts (press Ctrl+B D to detach when done):
@@ -405,7 +404,7 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
    - **Port conflict** → `ss -tlnp | grep <port>` finds what's using the published port
    **Do not continue to Login / Workspace trust / Channel pairing while the container is down — stop here and ask the operator to fix and re-run the skill.**
 
-**Login (subscription auth only — both `setup-token` and `oauth-token`):** If operator chose either subscription mode, proceed only once the container is confirmed running. Guide them through login:
+**Login (subscription auth only):** If operator chose subscription auth, proceed only once the container is confirmed running. Guide them through login:
 1. Tell them: "The container is waiting for you to log in. Run this from another terminal:"
    ```
    .claude-code-hermit/bin/hermit-docker login
@@ -418,8 +417,11 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
    - **Credentials not written** → `docker compose exec -T hermit ls /home/claude/.claude/.credentials.json` (should exist after login); missing = named volume not mounted — check `docker-compose.hermit.yml` volume entry
    Then **stop** — operator re-runs `/claude-code-hermit:docker-setup` after resolving the issue.
 
-**Mint the long-lived token (`setup-token` mode only):** run immediately after the login above succeeds. The attended login is still required first — the first-launch wizard demands an interactive login and will not accept the env token (confirmed live), and initial setup is attended anyway.
+**Post-login decision — mint or keep `/login`:** ask immediately after the login above succeeds. The attended login is still required first — the first-launch wizard demands an interactive login and will not accept the env token (confirmed live), and initial setup is attended anyway.
 
+Ask with `AskUserQuestion` (header: `"Login token"`) — **Mint a long-lived token** (Recommended; a one-year token stored only on the container's config volume, never printed or written to `.env`, renews over the chat channel with no server access) / **Keep /login credentials** (no expiry warning and no channel renewal; when they lapse the hermit goes quiet and you fix it from the box, `hermit-docker setup-token` converts at any time).
+
+**Mint a long-lived token:**
 1. Tell them: "One more step and this hermit never needs server access again. Run:"
    ```
    .claude-code-hermit/bin/hermit-docker setup-token
@@ -427,6 +429,8 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
    It prints a sign-in link, takes the code back, writes the token to the container's config volume, and restarts the hermit. The token is never printed and never stored in `.env`.
 2. Ask with `AskUserQuestion` (header: `"Token"`) — `"Done"` / `"Failed"`. On `"Failed"`, the hermit still works on the `/login` credentials from the previous step; tell the operator that plainly and that they can retry `hermit-docker setup-token` any time. Do not block setup on it.
 3. On success, note for the summary: renewal is due in a year, the hermit will ask over the channel two weeks ahead, and it takes one browser tap with no server access.
+
+**Keep /login credentials:** no `setup-token` command, no restart. Note for the summary, plainly, because this is the trade they just made: the hermit runs on the `/login` credentials from above, doctor's `credential-expiry` check has nothing to probe in this mode and the watchdog's channel re-auth relay only arms for token holders, so when the credentials lapse the container blocks at boot and exits after ten minutes with no notice on the channel. Watch for the hermit going quiet, then re-run `.claude-code-hermit/bin/hermit-docker login` from the box, or convert to a long-lived token any time with `.claude-code-hermit/bin/hermit-docker setup-token`. Continue to first-run acceptance.
 
 **First-run acceptance (workspace trust + bypass mode):** Before asking the operator to attach, verify the tmux session exists inside the container (the entrypoint may still be installing plugins):
 ```
@@ -561,7 +565,7 @@ You're all set! Your hermit is live and running autonomously.
   .claude-code-hermit/bin/hermit-docker attach    — connect to tmux session
   .claude-code-hermit/bin/hermit-docker bash      — shell into container
   .claude-code-hermit/bin/hermit-docker login     — subscription login (first boot)
-  .claude-code-hermit/bin/hermit-docker setup-token — mint/renew the long-lived login token
+  .claude-code-hermit/bin/hermit-docker setup-token — (optional) mint/renew the long-lived login token
   .claude-code-hermit/bin/hermit-docker logs -f   — follow logs
   .claude-code-hermit/bin/hermit-docker restart   — restart container
   .claude-code-hermit/bin/hermit-docker update    — rebuild image + update plugins (durable pin move) + auto-evolve

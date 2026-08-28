@@ -39,6 +39,21 @@ in the project root (never `/tmp/`). Items are nested under `sources[]`, each it
 `{title, summary, url, published_at, source, section, author}`. No scoring —
 extraction only. After the agent returns, read that file for the collected items.
 
+**Reconcile against the file, not the reply** (mapping owned by `docs/schema.md` §5). The
+agent's reply is a claim; the file is the only truth. This classifies `web`/`rss` sources only —
+`chrome`/`reddit`/`reddit-home`/`x` sources are absent from `sources[]` by design and are
+classified in Phase 2:
+- File missing or unparseable → every `web`/`rss` source in `feed-sources.md` goes to
+  `sources_skipped`. Continue to Phase 2 — do not re-dispatch the agent — and note the wholesale
+  fetch failure in the brief's Source notes.
+- A `web`/`rss` source with no entry in `sources[]` → `sources_skipped`, regardless of what the
+  reply claimed.
+- Entry with `status: "failed"`, or any status other than `"ok"` → `sources_skipped`.
+- Entry with `status: "ok"` and empty `items[]` → `sources_quiet`. An entry that did yield items
+  stays provisional: Phase 6 splits `sources_used` vs `sources_quiet` on what survived Phase 3
+  scoring, so a source whose items were all filtered out still lands in `sources_quiet`.
+- Reply disagrees with the file → the file wins; note the discrepancy in the brief's Source notes.
+
 ### Phase 2 — Chrome, reddit, and X sources
 
 For each source whose type is `chrome`, `reddit`, `reddit-home`, or `x`:

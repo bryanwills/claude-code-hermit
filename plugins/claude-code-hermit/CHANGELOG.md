@@ -7,12 +7,14 @@
 - New `memory-size` doctor check warns when a project `CLAUDE.md` or `CLAUDE.local.md` reaches 200 lines, or auto-memory `MEMORY.md` reaches 160 lines or 20 KB.
 
 ### Changed
+- `/docker-setup` now asks after a successful container login whether to mint the long-lived setup token or stay on `/login` credentials, in both Quick and Advanced; the Advanced auth prompt is Subscription / API Key, and the manual guide lists `hermit-docker setup-token` as optional.
 - Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator`, or `feature-dev`, and no longer seeds their `scheduled_checks` entries — Claude Code's native `Plan`/`Explore` agents, auto-memory, and `/doctor` CLAUDE.md trims cover the same ground, and every loaded skill description is paid on every API call of an always-on hermit. The `scheduled_checks` mechanism itself is unchanged; register any plugin's skill with `/hermit-settings scheduled-checks`.
 - `proposal-act` authors `## Skill Improvement` and `## Skill Draft` bodies in-main from the source brief instead of delegating to `skill-creator`; the falsification gate's read-only pass always uses the native `Plan` agent instead of `feature-dev:code-explorer`.
 - The first-session baseline audit offer (`.baseline-pending`) is removed along with the plugins it audited.
 
 ### Fixed
 - The `reflection-judge` suppress-ratio flag now measures the last 20 judge verdicts and clears itself once the judge recovers, instead of staying lit from one bad stretch since install; `--reset-counters` remains available and also clears the window.
+- A channel `/status`, or any allowlisted channel message during a pending shutdown, no longer leaves the operator turn marker open and defers routines and the queued auto-close for up to 60 minutes.
 - `sessions/.status.json` no longer carries a resolved (`~` / `[resolved]`) blocker in its `blockers` field, so `bin/hermit-status` stops printing `BLOCKED:` for a blocker the session already cleared. A comment-only blocker bullet no longer leaves a bare `-` there either.
 - Channel messages from a sender that clears `allowed_users` now advance the operator-activity clock from the `UserPromptSubmit` hook, so a chat-only conversation no longer reads as silence to the post-close `/clear`, the 12h auto-close, and the context-hygiene backoff. Other senders are still ignored.
 - The watchdog now re-arms a heartbeat or routine Monitor whose liveness has gone stale while the session rests at `idle`, instead of exiting above those tiers — previously heartbeat and routines could stay silent for a full day after a restart caught the hermit resting. The wedge nudge and the pane-frozen restart are still suppressed at `idle`.

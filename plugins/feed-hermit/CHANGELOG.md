@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `feed-brief` Phase 1 classifies each `web`/`rss` source from `tmp/feed-source-items-<slot>.json`, not the `source-fetcher` reply, so a fabricated success summary no longer hides a failed fetch.
+- `source-fetcher` reads its output file back before reporting, reports per-source status instead of an aggregate count, and never writes to a suffixed variant path.
+
 ## [0.1.3] - 2026-08-14
 
 ### Fixed
