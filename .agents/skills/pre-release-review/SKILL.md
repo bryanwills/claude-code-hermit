@@ -1,6 +1,6 @@
 ---
 name: pre-release-review
-description: "Run the pre-release gate for this multi-plugin monorepo: establish each plugin's release boundary from its last reachable tag to HEAD, audit every changed plugin's [Unreleased] changelog against the actual code diff, identify contract-surface and breaking changes, and optionally run a dedicated Codex correctness review over the exact union release window after explicit approval. Use when the user asks for a pre-release review, release audit, readiness check, release-window review, sanity check before tagging, or whether accumulated unreleased work is ready to ship. Run before release or fleet-release; never bump versions, create tags, commit, or push."
+description: "Run the pre-release gate for this multi-plugin monorepo: establish each plugin's release boundary from its last reachable tag to HEAD, audit every changed plugin's [Unreleased] changelog against the actual code diff, identify contract-surface and breaking changes, and, per the objective the user picks up front, either run a dedicated Codex correctness review over the exact union release window or an adversarial design review of what shipped (overengineering, alternative designs, downstream-hermit impact) sourced from the PRs, issues, and proposals behind the window. Use when the user asks for a pre-release review, release audit, readiness check, release-window review, sanity check before tagging, whether accumulated unreleased work is ready to ship, whether any of it is overengineered, or whether you would design it differently. Run before release or fleet-release; never bump versions, create tags, commit, or push."
 ---
 
 # Pre-Release Review
@@ -9,16 +9,27 @@ Run this gate immediately before `$release` or `$fleet-release`. Answer:
 
 1. What is actually shipping in each plugin?
 2. Does each plugin's `[Unreleased]` changelog accurately describe that diff?
-3. If the user authorizes the expensive pass, does a dedicated Codex review find correctness problems in the union release window?
+3. Per the mode picked in Step 0: does a dedicated Codex review find correctness problems in the union release window (Step 4), or is what shipped the right design for a downstream hermit (Step 3D)?
 
-Keep Steps 1–3 read-only. Do not edit changelogs, bump versions, commit, tag, or push. Step 4 may edit only after the user explicitly authorizes the disclosed review-and-fix pass.
+Keep Steps 1–3 and 3D read-only. Do not edit changelogs, bump versions, commit, tag, or push. Step 4 may edit only when the user chose the disclosed review-and-fix mode in Step 0.
 
 ## Invocation
 
 - `$pre-release-review` — audit every plugin with commits since its own last tag.
-- `$pre-release-review` for `<plugin-slug>` — audit only that plugin.
+- `$pre-release-review` for one or more `<plugin-slug>`s — audit only those plugins.
+- Any trailing free text is the objective: it settles the Step 0 mode when it clearly names one ("design review", "run the deep pass too") and otherwise becomes the lens the verdict answers.
 
 When installed, `$release-status` is an optional lightweight precursor. `$docs-drift` is the documentation follow-up after this changelog-vs-code audit.
+
+## Step 0 — Pick the mode
+
+Ask once, in one message, before any git work, unless the invocation already settles it. Offer three options and accept a free-text objective alongside any of them:
+
+1. **Readiness audit** (default) — Steps 1–3. Cheap, read-only.
+2. **Audit + deep correctness review** — Steps 1–4. Choosing this authorizes the Step 4 native code review (read-only) and the disclosed confirmed-fix pass; state the cost and that confirmed fixes edit the working tree, and do not ask again later.
+3. **Design review** — Steps 1–3, then Step 3D: an adversarial critique of what shipped (overengineering, alternative designs, downstream-hermit impact), sourced from the PRs, issues, and proposals behind the window. Read-only.
+
+A free-text objective does two things: the Verdict answers it ("ready to tag for <objective>", never an unqualified ready), and Step 3 flags anything in the window that does not serve it as scope creep, even when it is correctly documented.
 
 ## Step 1 — Establish per-plugin release boundaries
 
@@ -107,17 +118,40 @@ For each plugin, state whether these contract surfaces changed:
 
 Say `no contract changes` explicitly when none changed.
 
-## Step 4 — Dedicated Codex correctness review
+## Step 3D — Adversarial design review (design mode only)
 
-Do not start this step automatically. After reporting Steps 1–3, ask whether to run the deep pass and wait for an explicit yes.
+Runs after Step 3 on the same windows. The audit checks that the changelog tells the truth; this step asks whether what shipped is the right design for a downstream hermit.
 
-Disclose the exact scope, cost, and mutation behavior:
+**Gather the rationale first.** Changelog bullets are deliberately terse (rationale lives in the PR and issue by repository convention), so review the design from its sources. Per merged change in the window:
 
-> Steps 1–3 are complete. The deep pass will run a dedicated `codex review` over `<review_base>...HEAD`. It can take several minutes and consume additional tokens. Native Codex review is read-only; after it returns, I will verify each finding and apply only confirmed fixes to the working tree, then run relevant checks. Run it now? (yes / stop here)
+```bash
+git log --merges --format='%h %s' "$base"..HEAD -- plugins/<slug>/       # "Merge pull request #NNN"
+gh pr view <NNN> --json title,body,headRefName,closingIssuesReferences
+gh issue view <issue> --json title,body                                    # also the <N> in feat/<N>-<slug>
+rg -l -e '#<issue>' -e '<branch-slug>' .claude-code-hermit/proposals/PROP-*.md
+```
 
-If the user declines, stop after Step 3.
+The proposal match is loose (frontmatter has no issue field); "no proposal" is a valid answer, never guess one. Commits that landed without a PR are reviewed from their commit messages. PROP ids may appear in this report (terminal-only) but never travel into a follow-up PR, commit, or CHANGELOG.
 
-On explicit approval, use a custom review prompt because `codex review --base` accepts a branch, while the release boundary may be a tag or commit:
+**Review against the repository conventions** in the root `CLAUDE.md` (mechanism not policy, token discipline, one-way dependency, `hermit-evolve` survival, `/plugin update` semantics, downstream operators as the audience) and name the convention each finding rests on. Load `/delta-diagrams` before drawing. Keep the PR and issue bodies out of the report; only the findings below go in.
+
+Per change, with `file:line` evidence:
+
+- **What / why** — one line each, the why from the issue or proposal.
+- **Overengineering** — is there a simpler mechanism that meets the same contract? Name it, or say "no".
+- **Alternative design** — the one you would have chosen, drawn as a `/delta-diagrams` decision tree: the shipped branch marked `◀ SHIPPED`, the alternative beside it with its functional consequence. Behavior, never files.
+- **Downstream impact** — what an operator sees on `/plugin update` without having read the PR, what `hermit-evolve` must migrate, what it adds to always-on token cost.
+- **Recommendation** — `keep` | `simplify before tag` | `defer to follow-up`, one-line reason.
+
+Per plugin, one end-to-end `/delta-diagrams` before/after flow: the hermit's behavior at the base tag → at HEAD.
+
+**Close with the decision loop.** End the report by offering `/grill-me`: the findings are opinions until the user defends or overturns each one, and grilling in the same session has the full report as its material. Never start it yourself; it is user-typed by design.
+
+## Step 4 — Dedicated Codex correctness review (mode 2 only)
+
+Run this only when Step 0 selected **audit + deep correctness review**; that choice is the authorization, do not re-ask. In any other mode, stop after Step 3 (or 3D) and note that the deep pass is available by re-running with option 2.
+
+Use a custom review prompt because `codex review --base` accepts a branch, while the release boundary may be a tag or commit:
 
 ```bash
 codex review "Review only the committed diff in <review_base>...HEAD. Find concrete correctness, regression, security, efficiency, reuse, and repository-convention problems. Cite a file and line for every finding, explain the impact, and ignore changes outside this range. Do not modify files."
@@ -158,14 +192,28 @@ Skipped: <zero-commit or unstructured plugins>
 - understated breaking change: <impact and file:line>
 - contract surfaces changed: <list or "none">
 
-## Deep review
+## Design review (design mode only)
+### <slug>
+<delta-diagrams before/after flow: behavior at <base tag> → at HEAD>
+
+#### PR #NNN — <title>   (issue #N · PROP-NNN | no proposal)
+what / why: ...
+overengineering: <simpler mechanism, or "no">
+<delta-diagrams decision tree: shipped branch ◀ SHIPPED vs alternative + consequence>
+downstream: <on /plugin update · hermit-evolve migration · always-on cost>
+recommendation: keep | simplify before tag | defer to follow-up — <reason>
+(repeat per change)
+
+Next: `/grill-me` to turn each recommendation into a decision.
+
+## Deep review (mode 2 only)
 Scope: <review_base>...HEAD
-Status: not run | declined | clean | findings fixed | findings remain
+Status: not run | clean | findings fixed | findings remain
 - <prioritized finding or fix summary>
 
 ## Verdict
-Ready to tag: <slugs>
+Ready to tag[ for <objective>]: <slugs>
 Fix first: <slugs and one-line reason>
 ```
 
-A plugin with an omitted breaking change or a missing changelog entry for a contract change is not ready to tag.
+Omit the sections the chosen mode did not run. A plugin with an omitted breaking change or a missing changelog entry for a contract change is not ready to tag.
