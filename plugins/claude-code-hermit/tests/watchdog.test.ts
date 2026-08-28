@@ -1593,6 +1593,48 @@ test('idle arc + heartbeat-restart missed > 26h → re-arm-fallback', withHermit
   expect(tmuxCalls(h)).toContain('/claude-code-hermit:hermit-routines load');
 }));
 
+// 11g. The re-arm tiers must not reuse a pre-restart aliveness verdict.
+//
+// Step 4's pane-frozen escalation falls through to steps 5 and 6 (doRestart returns, it
+// does not exit). Both guard on `sessionAlive`, which step 3c caches — so the verdict has
+// to be refreshed after the restart killed the pane, or the tick injects slash commands
+// into a session that no longer exists and stamps the 6h per-monitor damper on a send
+// that never landed.
+test('pane-frozen restart → no monitor re-arm into the killed session', withHermit(async (h) => {
+  writeConfig(h);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  // Stale heartbeat-monitor liveness: step 6 would fire if it trusted the cached verdict.
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(9) });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(8) });
+
+  const paneContent = 'frozen pane';
+  const frozenHash = crypto.createHash('sha256').update(`${paneContent}\n`).digest('hex');
+  writeState(h, 'watchdog-state.json', {
+    consecutive_stale: 2, last_pane_hash: frozenHash, last_nudge_at: '2026-01-01T00:00:00Z',
+  });
+
+  // tmux stub that actually dies on kill-session, unlike the always-alive writeFakeTmux.
+  const log = path.join(h.dir, 'tmux-calls.log');
+  const deadMarker = path.join(h.dir, 'tmux-dead');
+  const stub = path.join(h.fakeBin, 'tmux');
+  fs.writeFileSync(stub, `#!/usr/bin/env bash
+case "$1" in
+  has-session) [[ -f "${deadMarker}" ]] && exit 1 ; exit 0 ;;
+  capture-pane) echo "${paneContent}" ;;
+  send-keys) echo "send-keys $@" >> "${log}" ;;
+  kill-session) echo "kill-session $@" >> "${log}" ; touch "${deadMarker}" ;;
+esac
+`);
+  fs.chmodSync(stub, 0o755);
+  writeFakePgrep(h, 1);
+
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(tmuxCalls(h)).toContain('kill-session');
+  expect(tmuxCalls(h)).not.toContain('/claude-code-hermit:heartbeat start');
+  expect(events(h)).not.toContain('monitor-rearm');
+}));
+
 // -------------------------------------------------------
 // 12. checkWatchdog in doctor-check.ts: disabled → ok
 // -------------------------------------------------------

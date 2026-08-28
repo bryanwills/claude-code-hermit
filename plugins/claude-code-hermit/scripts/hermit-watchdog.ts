@@ -1591,6 +1591,12 @@ async function main(): Promise<void> {
             watchdogState.last_pane_hash = currentPaneHash;
             writeWatchdogState(watchdogState);
             await doRestart(sessionName, 'pane-frozen', runtime, timezone);
+            // doRestart kills the tmux session and spawns a detached replacement, so the
+            // verdict cached at step 3c is stale from here on. Steps 5 and 6 below send
+            // keys into this pane and guard on it: reusing the pre-restart `true` would
+            // inject slash commands into a killed (or still-booting) session and burn the
+            // per-monitor re-arm damper for 6h on a send that never landed.
+            sessionAlive = tmuxSessionAlive(sessionName);
           } else {
             doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs);
           }
