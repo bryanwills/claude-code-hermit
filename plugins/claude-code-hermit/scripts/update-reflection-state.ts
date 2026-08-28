@@ -21,11 +21,11 @@
 // "re-surfaces on the next reflect cycle" promise for exactly the best-evidenced
 // patterns. Bare (no value) still stamps now, for callers with nothing to preserve.
 //
-// --reset-counters zeroes the judge verdict tallies and restarts their window
+// --reset-counters zeroes the judge verdict tallies and drops their window
 // (counters.judge_accept/judge_downgrade/judge_suppress = 0, judge_suppress_by_code
-// emptied, counters.judge_since = now). The ratio these feed is cumulative from install
-// day, so one bad stretch pins the Component Health flag on forever; this is the only
-// way to clear it. It deliberately does NOT touch counters.since: that is the hatch
+// emptied, counters.judge_since = now). The ratio now reads counters.judge_window;
+// this reset stays for the 1.2.49 upgrade step and as a manual escape hatch. It
+// deliberately does NOT touch counters.since: that is the hatch
 // stamp the reflect phase ladder (newborn/juvenile/adult) and doctor's run-rate line
 // are measured from, and moving it would make an established install newborn again.
 //
@@ -115,6 +115,7 @@ if (arg3 === '--reset-counters') {
   state.counters.judge_suppress = 0;
   state.counters.judge_suppress_by_code = {};
   state.counters.judge_since = new Date().toISOString();
+  delete state.counters.judge_window;
   try {
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
   } catch (err: any) {
@@ -166,6 +167,9 @@ try {
 
 const now = new Date().toISOString();
 
+// Retain whole runs covering at least the latest 20 judge verdicts.
+const WINDOW_VERDICTS = 20;
+
 const c: Json = (state.counters && typeof state.counters === 'object') ? { ...state.counters } : {};
 const intOf = (v: any) => Math.max(0, typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : 0);
 
@@ -199,6 +203,52 @@ if (payload.judge_suppress_by_code && typeof payload.judge_suppress_by_code === 
 c.proposals_created += proposalsCreated;
 c.micro_proposals_queued += microQueued;
 c.last_output_at = (proposalsCreated + microQueued > 0) ? now : (c.last_output_at ?? null);
+
+const judgeRun = {
+  at: now,
+  accept: intOf(payload.judge_accept),
+  downgrade: intOf(payload.judge_downgrade),
+  suppress: intOf(payload.judge_suppress),
+};
+const judgeVerdicts = judgeRun.accept + judgeRun.downgrade + judgeRun.suppress;
+if (judgeVerdicts > 0) {
+  const storedRuns = Array.isArray(c.judge_window?.runs) && c.judge_window.runs.every((run: Json) =>
+    run && typeof run === 'object' && !Array.isArray(run) &&
+    typeof run.at === 'string' && !Number.isNaN(Date.parse(run.at)) &&
+    ['accept', 'downgrade', 'suppress'].every((key) =>
+      typeof run[key] === 'number' && Number.isFinite(run[key]) && run[key] >= 0
+    )
+  ) ? c.judge_window.runs : [];
+  const runs = storedRuns.map((run: Json) => ({
+    at: run.at,
+    accept: intOf(run.accept),
+    downgrade: intOf(run.downgrade),
+    suppress: intOf(run.suppress),
+  }));
+  runs.push(judgeRun);
+
+  let verdicts = runs.reduce((sum: number, run: Json) =>
+    sum + run.accept + run.downgrade + run.suppress, 0);
+  while (runs.length > 1) {
+    const first = runs[0];
+    const firstVerdicts = first.accept + first.downgrade + first.suppress;
+    if (verdicts - firstVerdicts < WINDOW_VERDICTS) break;
+    runs.shift();
+    verdicts -= firstVerdicts;
+  }
+
+  const totals = runs.reduce((sum: Json, run: Json) => ({
+    accept: sum.accept + run.accept,
+    downgrade: sum.downgrade + run.downgrade,
+    suppress: sum.suppress + run.suppress,
+  }), { accept: 0, downgrade: 0, suppress: 0 });
+  c.judge_window = {
+    runs,
+    ...totals,
+    verdicts,
+    since: runs[0].at,
+  };
+}
 
 if (!('since' in c)) c.since = null;
 
