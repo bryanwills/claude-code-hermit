@@ -22,6 +22,10 @@ const sessionClose = read('skills', 'session-close', 'SKILL.md');
 const reflect        = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
 const proposalAct    = read('skills', 'proposal-act', 'SKILL.md');
 const channelResponder = read('skills', 'channel-responder', 'SKILL.md');
+const noBriefRouting = reflect.slice(
+  reflect.indexOf('**No brief found (human/plugin or brief fully gone, moderate signal):**'),
+  reflect.indexOf('## `skill-preference:*` routing'),
+);
 
 // ── 1. session-close: capture contract prose pins ───────────────────────────
 
@@ -162,8 +166,42 @@ describe('reflect: skill-correction:* graduation routing', () => {
     expect(reflect).toContain("each session listed in the graduated ledger rows' `session_id` fields");
   });
 
-  test('reflect: no brief found path produces moderate plain proposal (no ## Skill Improvement)', () => {
-    expect(reflect).toContain('plain Tier 2 improvement proposal (no `## Skill Improvement`). The candidate carries `Artifact: state/observations.jsonl`');
+  test('reflect: no brief plugin skill path recommends an operator-space override', () => {
+    const pluginBranch = noBriefRouting.slice(
+      noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
+      noBriefRouting.indexOf('**Neither applies:**'),
+    );
+    expect(pluginBranch).toContain('plain Tier 2 improvement candidate recommending an operator-space override skill in `.claude/skills/` or an upstream request');
+    expect(pluginBranch).not.toContain('## Skill Improvement');
+    // plugin skills appear in the list ONLY as `<plugin>:<name>` (probed), so a bare entry is
+    // an operator-space or bundled skill; accepting one here routes a non-plugin name to the
+    // override recommendation instead of `Neither applies`
+    expect(pluginBranch).toContain('requiring a **namespaced** entry `<plugin>:<name>`');
+  });
+
+  test('reflect: editable path is tested before the plugin-skill path', () => {
+    // an override does not shadow the plugin skill it overrides: both appear in the
+    // available-skills list (probed), so name class alone matches both branches; ordering
+    // plus the plugin branch's `No editable file` precondition is what stops the plugin
+    // branch re-recommending an override that already exists
+    expect(noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'))
+      .toBeLessThan(noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'));
+  });
+
+  test('reflect: no brief editable skill path produces a moderate Skill Improvement without an anchor', () => {
+    const editableBranch = noBriefRouting.slice(
+      noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'),
+      noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
+    );
+    expect(editableBranch).toContain('Build a Tier 2 candidate with a `## Skill Improvement` section listing the component name and those corrected behaviors');
+    expect(editableBranch).toContain('state `moderate signal` as the confidence note');
+    expect(editableBranch).not.toContain('source_artifact:');
+  });
+
+  test('reflect: no brief gone skill path produces a plain proposal', () => {
+    const goneBranch = noBriefRouting.slice(noBriefRouting.indexOf('**Neither applies:**'));
+    expect(goneBranch).toContain('build a plain Tier 2 improvement proposal');
+    expect(goneBranch).not.toContain('## Skill Improvement');
   });
 
   test('reflect: both paths carry Artifact: state/observations.jsonl for judge §1.4', () => {

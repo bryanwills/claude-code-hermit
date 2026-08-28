@@ -2193,6 +2193,46 @@ describe('proposal-act dispatch contract', () => {
     expect(skill).toContain('Dispatch (falsification gate returned PROCEED, no in-main skill handler)');
   });
 
+  test('Skill Improvement gate rejects a deleted target, but not a still-installed plugin skill', () => {
+    expect(skill).toContain('For `## Skill Improvement`, first resolve the component name to `.claude/skills/<name>/SKILL.md`');
+    // stale-paths is conditional: a missing file for a name still in the available-skills
+    // list is a plugin-skill improvement, not a dead proposal (re-running reflect would
+    // regenerate the identical body, so a blanket REJECT is a permanent dead end).
+    expect(skill).toContain('REJECT with code `stale-paths` only when that file is missing **and** `<name>` is not in the harness\'s available-skills list');
+    expect(skill).toContain('is a plugin-shipped-skill improvement, not a stale path: let it through');
+    // the list namespaces plugin skills as `<plugin>:<name>` and nothing else (probed), so the
+    // match must be ON the namespaced form: a literal test of the bare canonical name never
+    // hits a plugin skill, and a bare entry is an operator-space or bundled skill, which must
+    // not clear the REJECT on behalf of a plugin one
+    expect(skill).toContain('only a **namespaced** entry `<plugin>:<name>` counts as a match');
+    expect(skill).toContain('a bare `<name>` entry is an operator-space or bundled skill, never a plugin one');
+  });
+
+  test('queued Skill Improvement task carries the same guards as the in-main path', () => {
+    // NEXT-TASK.md is consumed by a later /session-start as ordinary work, so step (e) never
+    // runs again — the guards have to travel in the bullet or the queued path can resurrect a
+    // target deleted after queueing, or rewrite one already fixed
+    const queued = skill.slice(skill.indexOf('- **"Create a session task"**'), skill.indexOf('- **"I\'ll handle it manually"**'));
+    expect(queued).toContain('If it exists, read it before writing and author only the behaviors from the ## Skill Improvement body that are not already present');
+    expect(queued).toContain('never write into the plugin cache, and create a file at that name only after the operator explicitly confirms');
+  });
+
+  test('Skill Improvement authoring reads before writing and resolves an already fixed skill', () => {
+    expect(skill).toContain('**It exists:** read it before writing, compare each corrected behavior in the body against its current content, and author only behaviors not already present');
+    expect(skill).toContain('If every listed behavior is already present, skip e.5 (nothing was written, so there is no diff to clean) but still run e.6');
+    expect(skill).toContain('tell the operator or channel that the skill was already fixed, writing nothing');
+  });
+
+  test('Skill Improvement never writes into the plugin cache or resurrects a deleted skill', () => {
+    expect(skill).toContain('never write into the plugin cache and never resurrect a deleted skill');
+    expect(skill).toContain('author the improvement as an operator-space override at that path and require the operator\'s explicit confirmation');
+  });
+
+  test('queued Skill Improvement task does not require a source artifact brief', () => {
+    expect(skill).toContain('Use the source_artifact brief only when present, and validate the result.');
+    expect(skill).not.toContain('from the source_artifact brief and validate it');
+  });
+
   test('dispatch prompt instructs escalate-don\'t-guess (cannot prompt the operator)', () => {
     // missing → subagent guesses on ambiguous/destructive choices instead of escalating
     expect(skill).toContain('You cannot prompt the operator');
