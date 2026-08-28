@@ -184,6 +184,7 @@ describe('reflect: skill-correction:* graduation routing', () => {
     // available-skills list (probed), so name class alone matches both branches; ordering
     // plus the plugin branch's `No editable file` precondition is what stops the plugin
     // branch re-recommending an override that already exists
+    expect(noBriefRouting).toContain('the name class is unknown');
     expect(noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'))
       .toBeLessThan(noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'));
   });

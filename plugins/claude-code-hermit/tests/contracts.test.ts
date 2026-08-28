@@ -2200,6 +2200,8 @@ describe('proposal-act dispatch contract', () => {
     // regenerate the identical body, so a blanket REJECT is a permanent dead end).
     expect(skill).toContain('REJECT with code `stale-paths` only when that file is missing **and** `<name>` is not in the harness\'s available-skills list');
     expect(skill).toContain('is a plugin-shipped-skill improvement, not a stale path: let it through');
+    expect(skill).toContain('is `unknown`, not absent');
+    expect(skill).toContain('fires only on a list the model can actually read');
     // the list namespaces plugin skills as `<plugin>:<name>` and nothing else (probed), so the
     // match must be ON the namespaced form: a literal test of the bare canonical name never
     // hits a plugin skill, and a bare entry is an operator-space or bundled skill, which must
