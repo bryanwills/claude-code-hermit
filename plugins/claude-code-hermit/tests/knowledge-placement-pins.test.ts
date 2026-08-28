@@ -62,6 +62,13 @@ describe('reflect routing (step 3b + branches)', () => {
     expect(branches.includes('telemetry of settlements already applied')).toBe(true);
   });
 
+  test('skill-preference plugin branch is gated on there being no editable override', () => {
+    // an override does not shadow the plugin skill it overrides: both appear in the
+    // available-skills list (probed), so an ungated plugin branch swallows a settlement
+    // for an already-overridden skill and re-recommends the override that exists
+    expect(branches.includes('**No editable `.claude/skills/<name>/SKILL.md`, and `<name>` is an installed plugin skill (read-only):**')).toBe(true);
+  });
+
   test('Tier 2/3 recurrence baseline names the ledger-graduation exception', () => {
     expect(branches.includes('satisfy recurrence via the `Artifact: state/observations.jsonl` rule')).toBe(true);
   });

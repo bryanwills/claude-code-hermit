@@ -7,6 +7,7 @@
 
 ### Fixed
 - Accepting a `## Skill Improvement` proposal whose target skill is gone from both `.claude/skills/` and the available-skills list now REJECTs with `stale-paths` inside the falsification gate, before any session transition, instead of authoring a fresh `SKILL.md` and resurrecting the deleted skill. A proposal naming a still-installed plugin skill is not stale and still implements.
+- A `skill-preference` settlement for a skill the operator has already overridden in `.claude/skills/` no longer routes to the plugin-skill branch and re-recommends creating the override that already exists. That branch is now gated on there being no editable file, matching the `skill-correction` routing.
 - `## Skill Improvement` authoring reads an existing target first and writes only the behaviors not already present; when every listed behavior is already there the proposal resolves with no write. With no editable target it authors an operator-space override under `.claude/skills/` behind an explicit confirmation, never a write into the plugin cache. The queued session task no longer requires a `source_artifact` brief.
 
 ## [1.2.50] - 2026-08-28
