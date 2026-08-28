@@ -213,27 +213,45 @@ const judgeRun = {
 };
 const judgeVerdicts = judgeRun.accept + judgeRun.downgrade + judgeRun.suppress;
 // Only the last WINDOW_VERDICTS characters can survive the slice below, so each letter
-// run is capped there: an absurd count (garbled payload, corrupted on-disk run) would
+// count is capped there: an absurd count (garbled payload, corrupted on-disk run) would
 // otherwise throw RangeError out of String.repeat and abort the whole state write.
 // Capping is lossless — a run longer than the window already drops everything before it.
+// Verdicts inside one judge run are simultaneous (one batch, one judge call), so there is
+// no true order among them. The letters are interleaved largest-remaining-first rather
+// than clustered a...d...s...: a run straddling the window boundary then sheds its verdicts
+// proportionally, instead of always losing its accepts first and inflating the suppress
+// ratio Component Health reads off this window.
 const RING_RE = new RegExp(`^[ads]{1,${WINDOW_VERDICTS}}$`);
-const letters = (run: Json) =>
-  'a'.repeat(Math.min(intOf(run.accept), WINDOW_VERDICTS)) +
-  'd'.repeat(Math.min(intOf(run.downgrade), WINDOW_VERDICTS)) +
-  's'.repeat(Math.min(intOf(run.suppress), WINDOW_VERDICTS));
-if (judgeVerdicts > 0) {
-  const storedRuns = Array.isArray(c.judge_window?.runs) && c.judge_window.runs.every((run: Json) =>
-    run && typeof run === 'object' && !Array.isArray(run) &&
-    typeof run.at === 'string' && !Number.isNaN(Date.parse(run.at)) &&
-    ['accept', 'downgrade', 'suppress'].every((key) =>
-      typeof run[key] === 'number' && Number.isFinite(run[key]) && run[key] >= 0
-    )
-  ) ? c.judge_window.runs : [];
-  const priorRing = typeof c.judge_window?.ring === 'string' && RING_RE.test(c.judge_window.ring)
-    ? c.judge_window.ring
-    : storedRuns.map(letters).join('');
-  const ring = (priorRing + letters(judgeRun))
-    .slice(-WINDOW_VERDICTS);
+const letters = (run: Json) => {
+  const left: Record<string, number> = {
+    a: Math.min(intOf(run.accept), WINDOW_VERDICTS),
+    d: Math.min(intOf(run.downgrade), WINDOW_VERDICTS),
+    s: Math.min(intOf(run.suppress), WINDOW_VERDICTS),
+  };
+  let out = '';
+  for (let remaining = left.a + left.d + left.s; remaining > 0; remaining -= 1) {
+    const ch = ['a', 'd', 's'].filter((k) => left[k] > 0)
+      .reduce((best, k) => (left[k] > left[best] ? k : best));
+    left[ch] -= 1;
+    out += ch;
+  }
+  return out;
+};
+
+const storedRuns = Array.isArray(c.judge_window?.runs) && c.judge_window.runs.every((run: Json) =>
+  run && typeof run === 'object' && !Array.isArray(run) &&
+  typeof run.at === 'string' && !Number.isNaN(Date.parse(run.at)) &&
+  ['accept', 'downgrade', 'suppress'].every((key) =>
+    typeof run[key] === 'number' && Number.isFinite(run[key]) && run[key] >= 0
+  )
+) ? c.judge_window.runs : [];
+const isRing = typeof c.judge_window?.ring === 'string' && RING_RE.test(c.judge_window.ring);
+const priorRing = isRing ? c.judge_window.ring : storedRuns.map(letters).join('');
+// A zero-verdict run still folds a legacy runs-shaped window into the ring: a quiet install
+// can go a long time without another verdict, and the point of the ring is to stop carrying
+// that structure in a file six skills Read whole.
+if (judgeVerdicts > 0 || (!isRing && priorRing.length > 0)) {
+  const ring = (priorRing + letters(judgeRun)).slice(-WINDOW_VERDICTS);
   c.judge_window = {
     ring,
     accept: ring.split('a').length - 1,

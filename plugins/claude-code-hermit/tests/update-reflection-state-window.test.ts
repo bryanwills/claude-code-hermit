@@ -39,7 +39,7 @@ describe('update-reflection-state judge window', () => {
     const state = await runPayload(stateFile, { judge_accept: 2, judge_downgrade: 1, judge_suppress: 3 });
     const window = state.counters.judge_window;
 
-    expect(window.ring).toBe('aadsss');
+    expect(window.ring).toBe('sasads');
     expect(window).toMatchObject({ accept: 2, downgrade: 1, suppress: 3, verdicts: 6 });
     expect(window).not.toHaveProperty('runs');
     expect(window).not.toHaveProperty('since');
@@ -111,7 +111,7 @@ describe('update-reflection-state judge window', () => {
     writeState(stateFile, { counters: { judge_window: 'malformed' } });
     const state = await runPayload(stateFile, { judge_accept: 1, judge_suppress: 2 });
 
-    expect(state.counters.judge_window.ring).toBe('ass');
+    expect(state.counters.judge_window.ring).toBe('sas');
     expect(state.counters.judge_window).toMatchObject({
       accept: 1,
       downgrade: 0,
@@ -170,7 +170,7 @@ describe('update-reflection-state judge window', () => {
 
     const state = await runPayload(stateFile, { judge_accept: 5, judge_downgrade: 2, judge_suppress: 3 });
     const window = state.counters.judge_window;
-    const expected = ('aaaadd' + 'aadsss' + 'aaaaaddsss').slice(-20);
+    const expected = ('aaadad' + 'sasads' + 'aaasadsads').slice(-20);
     expect(window.ring).toBe(expected);
     expect(window.accept).toBe(expected.split('a').length - 1);
     expect(window.downgrade).toBe(expected.split('d').length - 1);
@@ -183,11 +183,35 @@ describe('update-reflection-state judge window', () => {
     expect(state.counters.judge_suppress).toBe(6);
   }));
 
+  test('a zero-verdict run folds a legacy runs window into the ring', withTmp(async (stateFile) => {
+    writeState(stateFile, {
+      counters: {
+        judge_window: {
+          runs: [
+            { at: '2026-08-01T00:00:00.000Z', accept: 4, downgrade: 2, suppress: 0 },
+            { at: '2026-08-02T00:00:00.000Z', accept: 2, downgrade: 1, suppress: 3 },
+          ],
+          accept: 6,
+          downgrade: 3,
+          suppress: 3,
+          verdicts: 12,
+          since: '2026-08-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    const window = (await runPayload(stateFile, {})).counters.judge_window;
+    expect(window.ring).toBe('aaadad' + 'sasads');
+    expect(window).toMatchObject({ accept: 6, downgrade: 3, suppress: 3, verdicts: 12 });
+    expect(window).not.toHaveProperty('runs');
+    expect(window).not.toHaveProperty('since');
+  }));
+
   test('an absurd verdict count caps the ring instead of aborting the state write', withTmp(async (stateFile) => {
     const state = await runPayload(stateFile, { judge_accept: 1e11, judge_suppress: 4 });
     const window = state.counters.judge_window;
 
-    expect(window.ring).toBe('a'.repeat(16) + 'ssss');
+    expect(window.ring).toBe('a'.repeat(12) + 'asasasas');
     expect(window).toMatchObject({ accept: 16, downgrade: 0, suppress: 4, verdicts: 20 });
     expect(typeof state.counters.last_run_at).toBe('string');
   }));
