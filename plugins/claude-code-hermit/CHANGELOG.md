@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- The watchdog now re-arms a heartbeat or routine Monitor whose liveness has gone stale while the session rests at `idle`, instead of exiting above those tiers. A restart that caught a hermit resting left the daily `heartbeat-restart` anchor as the only recovery, and that anchor dies with the process in the same event, so heartbeat and routines could stay silent for a full day. The wedge nudge and the pane-frozen restart are still suppressed at `idle`.
+
 ### Changed
 - Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator`, or `feature-dev`, and no longer seeds their `scheduled_checks` entries — Claude Code's native `Plan`/`Explore` agents, auto-memory, and `/doctor` CLAUDE.md trims cover the same ground, and every loaded skill description is paid on every API call of an always-on hermit. The `scheduled_checks` mechanism itself is unchanged; register any plugin's skill with `/hermit-settings scheduled-checks`.
 - `proposal-act` authors `## Skill Improvement` and `## Skill Draft` bodies in-main from the source brief instead of delegating to `skill-creator`; the falsification gate's read-only pass always uses the native `Plan` agent instead of `feature-dev:code-explorer`.

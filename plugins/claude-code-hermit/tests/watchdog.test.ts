@@ -1040,8 +1040,11 @@ test('idle arc + DEAD tmux + stale enqueue tail → no wedge event', withHermit(
   } finally { stub.stop(); }
 }));
 
-// The other half of the contract: reaching the alert tiers must NOT hand an idle arc back
-// to the keystroke tiers. "Never resurrect a deliberately-stopped hermit" still holds.
+// The other half of the contract: reaching the alert tiers must NOT hand an idle arc back to
+// the wedge nudge or the pane-frozen restart. "Never resurrect a deliberately-stopped hermit"
+// still holds. The re-arm tiers (steps 5 and 6) DO run at idle — see section 11f — but stay
+// silent here: this fixture writes no monitor liveness, no monitor runtime and no
+// routine-metrics.jsonl, so neither tier has a stale signal to act on.
 test('idle arc + stale heartbeat + monitor down → no nudge, no restart, no keystrokes', withHermit(async (h) => {
   writeConfig(h);
   configureChannel(h);
@@ -1533,6 +1536,61 @@ test('routine monitor in croncreate-fallback mode → no re-arm', withHermit(asy
   const r = await watchdog(h, 'run');
   expect(r.exitCode).toBe(0);
   expect(events(h)).not.toContain('monitor-rearm');
+}));
+
+// 11f. The same re-arms on an IDLE session arc.
+//
+// A hermit rests at 'idle' between arcs, so that is where a Monitor that died has to be
+// recovered from. Before this, the supervision-only cut exited above steps 5 and 6, and the
+// only recovery left was the daily heartbeat-restart anchor — a CronCreate that dies with the
+// process it was registered in, i.e. in the same event that kills the monitors. A restart
+// catching the hermit at 'idle' therefore silenced heartbeat and routines until an operator
+// noticed. Idle still suppresses step 4 (the nudge and the pane-frozen restart); that half of
+// the contract is pinned in section 5b.
+// -------------------------------------------------------
+
+test('idle arc + stale heartbeat liveness → monitor-rearm, heartbeat start injected', withHermit(async (h) => {
+  writeConfig(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(9) });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(8) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('monitor-rearm');
+  const calls = tmuxCalls(h);
+  expect(calls).toContain('/claude-code-hermit:heartbeat start');
+  expect(calls).not.toContain('hermit-routines load');
+}));
+
+test('idle arc + stale routine-monitor liveness → monitor-rearm, hermit-routines load injected', withHermit(async (h) => {
+  writeRoutineMonitorConfig(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeState(h, 'routine-monitor.runtime.json', { started_at: isoAgo(25 / 60), interval: 60, mode: 'monitor' });
+  writeState(h, 'routine-monitor-liveness.json', { last_peek_at: isoAgo(20 / 60) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('monitor-rearm');
+  const calls = tmuxCalls(h);
+  expect(calls).toContain('/claude-code-hermit:hermit-routines load');
+  expect(calls).not.toContain('heartbeat start');
+}));
+
+test('idle arc + heartbeat-restart missed > 26h → re-arm-fallback', withHermit(async (h) => {
+  writeConfig(h);
+  patchRuntime(h, { session_state: 'idle' });
+  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
+    ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
+  }) + '\n');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 0);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('re-arm-fallback');
+  expect(tmuxCalls(h)).toContain('/claude-code-hermit:hermit-routines load');
 }));
 
 // -------------------------------------------------------
