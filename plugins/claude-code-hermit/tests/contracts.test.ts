@@ -2193,6 +2193,20 @@ describe('proposal-act dispatch contract', () => {
     expect(skill).toContain('Dispatch (falsification gate returned PROCEED, no in-main skill handler)');
   });
 
+  test('Skill Improvement gate rejects a missing target before session transition', () => {
+    expect(skill).toContain('For `## Skill Improvement`, first resolve the component name to `.claude/skills/<name>/SKILL.md` and check that file exists');
+    expect(skill).toContain('if it is missing, REJECT with code `stale-paths`');
+  });
+
+  test('Skill Improvement authoring reads before writing and resolves an already fixed skill', () => {
+    expect(skill).toContain('read `.claude/skills/<name>/SKILL.md` (already confirmed to exist), compare each corrected behavior in the body against its current content, and author only behaviors not already present');
+    expect(skill).toContain('If every listed behavior is already present, skip e.5/e.6, run `/proposal-act resolve PROP-NNN`, and tell the operator or channel that the skill was already fixed, writing nothing');
+  });
+
+  test('queued Skill Improvement task does not require a source artifact brief', () => {
+    expect(skill).not.toContain('from the source_artifact brief and validate it');
+  });
+
   test('dispatch prompt instructs escalate-don\'t-guess (cannot prompt the operator)', () => {
     // missing → subagent guesses on ambiguous/destructive choices instead of escalating
     expect(skill).toContain('You cannot prompt the operator');
