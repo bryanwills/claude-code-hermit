@@ -11,6 +11,7 @@
 - The first-session baseline audit offer (`.baseline-pending`) is removed along with the plugins it audited.
 
 ### Fixed
+- `sessions/.status.json` no longer carries a resolved (`~` / `[resolved]`) blocker in its `blockers` field, so `bin/hermit-status` stops printing `BLOCKED:` for a blocker the session already cleared. A comment-only blocker bullet no longer leaves a bare `-` there either.
 - Channel messages from a sender that clears `allowed_users` now advance the operator-activity clock from the `UserPromptSubmit` hook, so a chat-only conversation no longer reads as silence to the post-close `/clear`, the 12h auto-close, and the context-hygiene backoff. Other senders are still ignored.
 
 ### Upgrade Instructions
