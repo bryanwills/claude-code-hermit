@@ -2,8 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- `hermit-doctor` gains a `classifier-denials` check, a 7-day per-tool digest of auto-mode denials with the program name for shell commands, that warns on any and fails on a burst of 3 or more, the point at which auto mode falls back to prompting.
+
 ### Changed
 - `reflect`'s `skill-correction:*` route with no procedure brief now splits by name class: an installed plugin skill gets an operator-space override recommendation, an editable `.claude/skills/<name>/SKILL.md` becomes a `## Skill Improvement` candidate carrying no `source_artifact:`, and a name matching neither stays a plain proposal.
+- The `PermissionDenied` ledger keeps a 7-day per-tool history (totals, largest burst, shell program names); the 30-minute window and its 24-hour `(+N more)` cap are unchanged, and tool input still never leaves the ledger.
 
 ### Fixed
 - Accepting a `## Skill Improvement` proposal whose target skill is gone from both `.claude/skills/` and the available-skills list now REJECTs with `stale-paths` inside the falsification gate, before any session transition, instead of authoring a fresh `SKILL.md` and resurrecting the deleted skill. A proposal naming a still-installed plugin skill is not stale and still implements.

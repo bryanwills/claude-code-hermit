@@ -21,6 +21,14 @@ const write = (p: string, content: string) => fs.writeFileSync(p, content);
 // seeds a `## Findings` section).
 const readFindings = (dir: string) => fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf8');
 const findingsLines = (dir: string) => readFindings(dir).match(/^- \[maintainer alert suppressed\].*$/gm) ?? [];
+const alertsFile = (dir: string) => hermit(dir, 'state', 'permission-denied-alerts.json');
+const readAlerts = (dir: string) => JSON.parse(fs.readFileSync(alertsFile(dir), 'utf8'));
+const writeAlerts = (dir: string, alerts: object) => {
+  fs.mkdirSync(path.dirname(alertsFile(dir)), { recursive: true });
+  write(alertsFile(dir), JSON.stringify(alerts));
+};
+const daysAgoIso = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+const minutesAgoIso = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
 
 function setupChannelWorkdir(telegramExtra: object = {}, configExtra: object = {}): Workdir {
   const wd = setupWorkdir();
@@ -44,11 +52,10 @@ const setupClientWorkdir = (telegramExtra: object = {}) =>
 
 // Age the dedup state so the next denial of the same tool opens a fresh window.
 function expireDedupWindow(dir: string): void {
-  const p = hermit(dir, 'state', 'permission-denied-alerts.json');
-  const alerts = JSON.parse(fs.readFileSync(p, 'utf8'));
-  const past = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+  const alerts = readAlerts(dir);
+  const past = minutesAgoIso(31);
   for (const k of Object.keys(alerts)) alerts[k].at = past;
-  write(p, JSON.stringify(alerts));
+  writeAlerts(dir, alerts);
 }
 
 // Mirrors Claude Code's PermissionDenied stdin payload. The fixed classifier
@@ -179,6 +186,10 @@ describe('permission-denied-notify', () => {
       expect(stub.requests).toHaveLength(1);
       expect(JSON.stringify(stub.requests)).not.toContain('test-secret-token');
       expect(readFindings(wd.dir)).not.toContain('test-secret-token');
+      const ledger = fs.readFileSync(alertsFile(wd.dir), 'utf8');
+      expect(ledger).not.toContain('test-secret-token');
+      expect(ledger).not.toContain('example.invalid');
+      expect(JSON.parse(ledger).Bash.history.programs).toEqual({ curl: 1 });
     } finally {
       stub.stop();
       wd.cleanup();
@@ -359,6 +370,206 @@ describe('permission-denied-notify', () => {
       await run({ ...DENIAL_PAYLOAD, tool_name: `${prefix}write` }, wd.dir, stub.url);
       expect(stub.requests).toHaveLength(2);
       expect(stub.requests[0].body.text).not.toBe(stub.requests[1].body.text);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: four bun denials in one window record total 4 / burst_max 4 / bun:4 and send once', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const command = 'bun /x/scripts/heartbeat.ts precheck';
+      for (let i = 0; i < 4; i++) {
+        const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+        expect(r.exitCode).toBe(0);
+      }
+      expect(stub.requests).toHaveLength(1);
+      expect(stub.requests[0].body.text).toContain('Auto-mode denied: Bash');
+      expect(stub.requests[0].body.text).toContain('Blocked by classifier');
+      expect(stub.requests[0].body.text).not.toContain('heartbeat');
+      expect(stub.requests[0].body.text).not.toContain('more in the previous');
+      const history = readAlerts(wd.dir).Bash.history;
+      expect(history.total).toBe(4);
+      expect(history.burst_max).toBe(4);
+      expect(history.programs).toEqual({ bun: 4 });
+      expect(typeof history.since).toBe('string');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: TOKEN=abc curl records env-prefixed, not the assignment or curl', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const command = 'TOKEN=abc curl https://example.invalid/secret';
+      const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const ledger = fs.readFileSync(alertsFile(wd.dir), 'utf8');
+      expect(ledger).not.toContain('abc');
+      expect(ledger).not.toContain('curl');
+      expect(ledger).not.toContain('example.invalid');
+      expect(JSON.parse(ledger).Bash.history.programs).toEqual({ 'env-prefixed': 1 });
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: /usr/bin/python3 heredoc records python3, nothing after the first word', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const command = '/usr/bin/python3 - <<EOF\nprint("secret-payload")\nEOF';
+      const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const ledger = fs.readFileSync(alertsFile(wd.dir), 'utf8');
+      expect(ledger).not.toContain('secret-payload');
+      expect(ledger).not.toContain('<<EOF');
+      expect(JSON.parse(ledger).Bash.history.programs).toEqual({ python3: 1 });
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: a non-Bash tool records programs: {}', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const r = await run({ tool_name: 'Edit', tool_input: { file_path: '/tmp/x' }, reason: 'different' }, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(readAlerts(wd.dir).Edit.history.programs).toEqual({});
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: a 6-day-old entry with suppressed: 3 is kept but the next message carries no (+3 more)', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const since = daysAgoIso(6);
+      writeAlerts(wd.dir, {
+        Bash: {
+          at: since,
+          suppressed: 3,
+          history: { since, total: 4, burst_max: 4, programs: { bun: 4 } },
+        },
+      });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(stub.requests).toHaveLength(1);
+      expect(stub.requests[0].body.text).not.toContain('more in the previous');
+      const entry = readAlerts(wd.dir).Bash;
+      expect(entry).toBeDefined();
+      expect(entry.history.since).toBe(since);
+      expect(entry.history.total).toBe(5);
+      expect(entry.history.programs.bun).toBe(5);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: an 8-day-old history.since is reset by the next denial', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      writeAlerts(wd.dir, {
+        Bash: {
+          at: minutesAgoIso(31),
+          suppressed: 0,
+          history: { since: daysAgoIso(8), total: 99, burst_max: 5, programs: { bun: 99 } },
+        },
+      });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const history = readAlerts(wd.dir).Bash.history;
+      expect(history.total).toBe(1);
+      expect(history.burst_max).toBe(1);
+      expect(history.programs).toEqual({ bun: 1 });
+      expect(Date.parse(history.since)).toBeGreaterThan(Date.now() - 60_000);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: an entry with both at and history.since older than 7 days is dropped', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const stale = daysAgoIso(8);
+      writeAlerts(wd.dir, {
+        Edit: {
+          at: stale,
+          suppressed: 0,
+          history: { since: stale, total: 2, burst_max: 1, programs: {} },
+        },
+      });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const alerts = readAlerts(wd.dir);
+      expect(alerts.Edit).toBeUndefined();
+      expect(alerts.Bash).toBeDefined();
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: a pre-#855 entry (no at) is dropped by readAlerts', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const hash = '0fb7d655de0335c2572cebcfcab45df66bc32206fe4f957ada64952d57ee04ea';
+      writeAlerts(wd.dir, { [hash]: '2026-08-26T20:21:19+0100' });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const alerts = readAlerts(wd.dir);
+      expect(alerts[hash]).toBeUndefined();
+      expect(alerts.Bash).toBeDefined();
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: a malformed history is read as having none', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      writeAlerts(wd.dir, {
+        Bash: { at: minutesAgoIso(31), suppressed: 0, history: { since: 12345 } },
+      });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const history = readAlerts(wd.dir).Bash.history;
+      expect(history.total).toBe(1);
+      expect(history.burst_max).toBe(1);
+      expect(history.programs).toEqual({ bun: 1 });
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('history: programs overflow past 8 keys lands under other', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      for (const command of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']) {
+        const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+        expect(r.exitCode).toBe(0);
+      }
+      const programs = readAlerts(wd.dir).Bash.history.programs;
+      expect(Object.keys(programs).length).toBeLessThanOrEqual(8);
+      expect(programs.other).toBeGreaterThan(0);
     } finally {
       stub.stop();
       wd.cleanup();

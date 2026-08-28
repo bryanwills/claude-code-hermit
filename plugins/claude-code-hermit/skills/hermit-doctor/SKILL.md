@@ -1,11 +1,11 @@
 ---
 name: hermit-doctor
-description: Returns a twenty-eight-check health report on the hermit installation (runtime, config, hooks, state-file integrity, cost, proposals, deps, version currency, permissions, docker, archival, auto-close queue, reflect loop, scheduler, watchdog, context age, opus-wake spend, routine cost, heartbeat, routine monitor, routine precheck, raw storage size, plugin credential expiry, model pricing, memory size, context scan, voice carrier, channel liveness). Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
+description: Returns a twenty-nine-check health report on the hermit installation (runtime, config, hooks, state-file integrity, cost, proposals, deps, version currency, permissions, docker, archival, auto-close queue, reflect loop, scheduler, watchdog, context age, opus-wake spend, routine cost, heartbeat, routine monitor, routine precheck, raw storage size, plugin credential expiry, model pricing, memory size, context scan, voice carrier, classifier denials, channel liveness). Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
 ---
 
 # Hermit Doctor
 
-Runs twenty-eight read-only health checks against the current hermit install (`channel-liveness`
+Runs twenty-nine read-only health checks against the current hermit install (`channel-liveness`
 is the only one that performs outbound API calls — see Notes) and surfaces the summary. Safe
 to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
@@ -35,19 +35,19 @@ The optional flag changes its destination, not whether doctor notifies:
    JSON to stdout. It exits 0 unconditionally — on any internal failure the failing
    check reports `status: "fail"` in its own entry rather than crashing the report.
 
-2. Parse the JSON. For each of the twenty-eight checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
+2. Parse the JSON. For each of the twenty-nine checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
    `proposals`, `dependencies`, `version-currency`, `permissions`, `docker-security`, `archive`, `auto-close`, `reflect`, `scheduler`, `watchdog`,
-   `context-age`, `opus-wake`, `routine-cost`, `heartbeat`, `routine-monitor`, `routine-precheck`, `raw-size`, `credential-expiry`, `model-pricing-known`, `memory-size`, `context-scan`, `voice-carrier`, `channel-liveness`), emit one line using this format:
+   `context-age`, `opus-wake`, `routine-cost`, `heartbeat`, `routine-monitor`, `routine-precheck`, `raw-size`, `credential-expiry`, `model-pricing-known`, `memory-size`, `context-scan`, `voice-carrier`, `classifier-denials`, `channel-liveness`), emit one line using this format:
    - `✓ <id> — <detail>` when `status: ok`
    - `⚠ <id> — <detail>` when `status: warn`
    - `✗ <id> — <detail>` when `status: fail`
 
 3. Append a summary section to `.claude-code-hermit/sessions/SHELL.md` under a new
-   `## Doctor Report (<ts>)` heading. Use the same twenty-eight lines from step 2. Place it
+   `## Doctor Report (<ts>)` heading. Use the same twenty-nine lines from step 2. Place it
    above the `## Monitoring` section so it sits with session-level context, not
    with monitoring chatter.
 
-4. Return the twenty-eight lines to the caller. Cap total output at 31 lines.
+4. Return the twenty-nine lines to the caller. Cap total output at 31 lines.
 
 5. **Escalation.** The script already computed this — do not recompute it, and do not write alert
    state yourself. Read the `escalation` object from the step-1 JSON:
@@ -63,6 +63,11 @@ The optional flag changes its destination, not whether doctor notifies:
 
    **When `escalation.new` is non-empty.** Compose one complete, concise summary covering every
    listed check, its detail, and a named next action, in the operator's configured language.
+   When the finding is `classifier-denials`, name what was blocked by kind: hermit-script blocks
+   (`bun`) are a call-shape/upstream matter the hermit reports; interpreter heredocs (`python3`,
+   `node`) are something the hermit stops doing itself; an operator's own host needs an environment
+   entry added from the terminal (`/auto-mode-setup` or user settings). Never offer to add
+   classifier context on a chat reply.
    Deliver it once through the canonical notice path:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
@@ -84,10 +89,10 @@ The optional flag changes its destination, not whether doctor notifies:
 
 ## Silence policy
 
-- If every check is `ok`, return only: `All twenty-eight checks passed.` Do not notify via
+- If every check is `ok`, return only: `All twenty-nine checks passed.` Do not notify via
   channel (Tier 0). Still append to SHELL.md so the run is traceable. Clearing the stale
   `doctor:*` entries is the script's job, not yours — it happens on every run.
-- If any check is `warn` or `fail`, return the full twenty-eight-line summary. Notification is
+- If any check is `warn` or `fail`, return the full twenty-nine-line summary. Notification is
   governed by `escalation.new` (step 5), not a blanket per-run ping: only findings not yet
   confirmed delivered notify the selected route.
 
@@ -122,6 +127,7 @@ The optional flag changes its destination, not whether doctor notifies:
 | `memory-size` | Reads the project's `CLAUDE.md` and `CLAUDE.local.md`, plus its auto-memory `MEMORY.md` under `CLAUDE_CONFIG_DIR/projects/<project-path-key>/memory/`. | `warn` naming any project CLAUDE file at >=200 lines, or when `MEMORY.md` reaches >=160 lines or >=20 KB (ahead of the 200-line / 25 KB hard cap, whichever comes first and is silently truncated); `ok` otherwise, including absent files. |
 | `context-scan` | Reads `state/context-scan.json`, written by `startup-context.ts` on every `SessionStart` — which injected entries (compiled bodies/stubs, catalog summaries, OPERATOR.md/SHELL.md excerpts, last report) tripped the injection-marker scan and were blocked. The scan never mutates files; this check only surfaces its verdict. | `ok` if no record yet or the last scan found nothing; `warn` naming the blocked sources (content stays on disk — inspect or remove the flagged files) if any hit. |
 | `voice-carrier` | Compares `config.json`'s `voice` block against what is actually persisted: the winning `outputStyle` across local, project and user scope (`CLAUDE_CONFIG_DIR`), plus `.claude/output-styles/hermit-voice.md` for a custom voice. Boot re-renders both from config, so a mismatch means the hermit has not restarted since the change, or something outside it holds the key. | `ok` when they agree, or when no voice is configured — whatever style is persisted is then the operator's own and is only reported; `warn` naming both values when they disagree, or when a custom voice's style file is missing. A leftover voice file alongside a built-in voice is inert, not a warning. |
+| `classifier-denials` | Reads `state/permission-denied-alerts.json`'s 7-day per-tool history (totals, largest burst, first word of a shell command). | `ok` with no history in 7d; `warn` on any denial, naming tools by count and shell programs; `fail` when any `burst_max` is 3 or more (auto mode drops back to prompting). |
 | `channel-liveness` | For each enabled channel in `config.channels`, resolves its bot token from `<state_dir>/.env` and makes one token-authed liveness call (Telegram `getMe`, Discord `/users/@me`) with a 5s timeout. The only check that leaves the machine. | `ok` if reachable or no channels configured; `warn` if unreachable (timeout/network error) or no token configured; `fail` if the platform rejects the token (401/403 — bot token invalid or revoked). |
 
 No automatic fixes. Doctor reports; the operator acts.

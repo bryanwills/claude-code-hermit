@@ -36,7 +36,9 @@ import { DENY, resolveLocale } from './lib/messages';
 type Json = any;
 
 const DEDUP_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
-const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — carry-over cap
+const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7-day per-tool history
+const MAX_PROGRAM_KEYS = 8;
 const MESSAGE_MAX_LEN = 300;
 // The reason is bounded on its own so a long one (permission-rule denials are
 // far wordier than the classifier's fixed string) cannot push the trailing
@@ -50,11 +52,23 @@ const REASON_MAX_LEN = 150;
 const TOOL_NAME_MAX_LEN = 60;
 const TOOL_NAME_HASH_LEN = 6;
 
+// 7-day rolling digest the doctor reads. `programs` is Bash-only (first word of
+// the command, or `env-prefixed`); other tools keep it empty. At most 8 keys;
+// further distinct names fold into `other`.
+interface DenyHistory {
+  since: string;
+  total: number;
+  burst_max: number;
+  programs: Record<string, number>;
+}
+
 // One open window per tool: when it opened, and how many further denials of the
-// same tool it has absorbed since.
+// same tool it has absorbed since. `history` is the 7-day digest; absent or
+// malformed on disk is treated as none.
 interface DenyWindow {
   at: string;
   suppressed: number;
+  history?: DenyHistory;
 }
 
 function alertsPath(dir: string): string {
@@ -75,10 +89,88 @@ function readAlerts(dir: string): Record<string, DenyWindow> {
   // the pre-upgrade entries, keyed by a tool+input hash no new key can match.
   for (const [k, v] of Object.entries(read.value as Record<string, unknown>)) {
     if (v && typeof v === 'object' && typeof (v as Json).at === 'string') {
-      out[k] = { at: (v as Json).at, suppressed: Number((v as Json).suppressed) || 0 };
+      const history = parseHistory((v as Json).history);
+      out[k] = {
+        at: (v as Json).at,
+        suppressed: Number((v as Json).suppressed) || 0,
+        ...(history ? { history } : {}),
+      };
     }
   }
   return out;
+}
+
+function parseHistory(raw: unknown): DenyHistory | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const h = raw as Json;
+  if (typeof h.since !== 'string') return undefined;
+  if (typeof h.total !== 'number' || !Number.isFinite(h.total)) return undefined;
+  if (typeof h.burst_max !== 'number' || !Number.isFinite(h.burst_max)) return undefined;
+  if (!h.programs || typeof h.programs !== 'object' || Array.isArray(h.programs)) return undefined;
+  const programs: Record<string, number> = {};
+  for (const [name, n] of Object.entries(h.programs as Record<string, unknown>)) {
+    const count = Number(n);
+    if (Number.isFinite(count) && count > 0) programs[name] = count;
+  }
+  return {
+    since: h.since,
+    total: Math.max(0, Math.floor(h.total)),
+    burst_max: Math.max(0, Math.floor(h.burst_max)),
+    programs,
+  };
+}
+
+// First word of a Bash command, never anything after it. Env assignments
+// (`TOKEN=abc curl …`) become the sentinel rather than looking at word two.
+function bashProgram(payload: Json): string | null {
+  if (payload.tool_name !== 'Bash') return null;
+  const command = payload.tool_input?.command;
+  if (typeof command !== 'string') return null;
+  const first = command.trim().split(/\s+/, 1)[0];
+  if (!first) return null;
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return 'env-prefixed';
+  const token = safe(path.basename(first));
+  return token || null;
+}
+
+function addProgram(programs: Record<string, number>, name: string): void {
+  if (Object.prototype.hasOwnProperty.call(programs, name)) {
+    programs[name] += 1;
+    return;
+  }
+  // 7 named keys + `other` keeps the map at 8.
+  const namedCount = Object.keys(programs).filter(k => k !== 'other').length;
+  if (namedCount < MAX_PROGRAM_KEYS - 1) {
+    programs[name] = 1;
+    return;
+  }
+  programs.other = (programs.other ?? 0) + 1;
+}
+
+function historyStale(history: DenyHistory | undefined, now: number): boolean {
+  if (!history) return true;
+  const since = Date.parse(history.since);
+  return Number.isNaN(since) || now - since > HISTORY_RETENTION_MS;
+}
+
+function rollHistory(
+  prev: DenyHistory | undefined,
+  windowBurst: number,
+  program: string | null,
+  now: number,
+): DenyHistory {
+  const base: DenyHistory = historyStale(prev, now)
+    ? { since: localISOStamp(), total: 0, burst_max: 0, programs: {} }
+    : {
+        since: prev!.since,
+        total: prev!.total,
+        burst_max: prev!.burst_max,
+        programs: { ...prev!.programs },
+      };
+  base.total += 1;
+  base.burst_max = Math.max(base.burst_max, windowBurst);
+  if (program) addProgram(base.programs, program);
+  return base;
 }
 
 function writeAlerts(dir: string, alerts: Record<string, DenyWindow>): void {
@@ -128,27 +220,40 @@ async function main(raw: string): Promise<void> {
 
   const now = Date.now();
   const alerts = readAlerts(dir);
+  const program = bashProgram(payload);
 
-  // Prune before reading this tool's window, so a stale one can neither hold the
-  // window open nor contribute a day-old suppressed count.
+  // Drop an entry only when both the window stamp and the history origin are
+  // older than 7 days. The 24h constant still caps `(+N more)` carry-over.
   for (const [k, w] of Object.entries(alerts)) {
-    const t = Date.parse(w.at);
-    if (Number.isNaN(t) || now - t > PRUNE_AGE_MS) delete alerts[k];
+    const atMs = Date.parse(w.at);
+    const atStale = Number.isNaN(atMs) || now - atMs > HISTORY_RETENTION_MS;
+    if (atStale && historyStale(w.history, now)) delete alerts[k];
   }
 
-  // Pruning above guarantees a surviving entry's `at` parses.
   const entry = alerts[key];
-  if (entry && now - Date.parse(entry.at) < DEDUP_WINDOW_MS) {
+  const entryAt = entry ? Date.parse(entry.at) : NaN;
+  if (entry && !Number.isNaN(entryAt) && now - entryAt < DEDUP_WINDOW_MS) {
     // Count it and stay quiet. The count rides out on the next window's message,
     // the only place it can be truthful — a burst's size isn't known when the
-    // window opens.
-    alerts[key] = { at: entry.at, suppressed: entry.suppressed + 1 };
+    // window opens. burst_max is the largest suppressed+1 seen in one window.
+    const suppressed = entry.suppressed + 1;
+    alerts[key] = {
+      at: entry.at,
+      suppressed,
+      history: rollHistory(entry.history, suppressed + 1, program, now),
+    };
     writeAlerts(dir, alerts);
     return;
   }
 
-  const suppressed = entry?.suppressed ?? 0;
-  alerts[key] = { at: localISOStamp(), suppressed: 0 };
+  const suppressed = entry && !Number.isNaN(entryAt) && now - entryAt <= PRUNE_AGE_MS
+    ? entry.suppressed
+    : 0;
+  alerts[key] = {
+    at: localISOStamp(),
+    suppressed: 0,
+    history: rollHistory(entry?.history, 1, program, now),
+  };
   writeAlerts(dir, alerts);
 
   const locale = resolveLocale(config.language);

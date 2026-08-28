@@ -2134,6 +2134,85 @@ function checkVoiceCarrier(p: DoctorPaths = PATHS) {
   }
 }
 
+const CLASSIFIER_DENIALS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const CLASSIFIER_DENIALS_DETAIL_MAX = 200;
+const CLASSIFIER_DENIALS_TOOL_LIMIT = 3;
+const CLASSIFIER_DENIALS_PROG_LIMIT = 3;
+const CLASSIFIER_DENIALS_BURST_FAIL = 3;
+
+function parseDenyHistory(raw: unknown): { since: string; total: number; burst_max: number; programs: Record<string, number> } | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const h = raw as Json;
+  if (typeof h.since !== 'string') return null;
+  if (typeof h.total !== 'number' || !Number.isFinite(h.total)) return null;
+  if (typeof h.burst_max !== 'number' || !Number.isFinite(h.burst_max)) return null;
+  if (!h.programs || typeof h.programs !== 'object' || Array.isArray(h.programs)) return null;
+  const programs: Record<string, number> = {};
+  for (const [name, n] of Object.entries(h.programs as Record<string, unknown>)) {
+    const count = Number(n);
+    if (Number.isFinite(count) && count > 0) programs[name] = count;
+  }
+  return { since: h.since, total: h.total, burst_max: h.burst_max, programs };
+}
+
+function formatDenyTool(tool: string, total: number, programs: Record<string, number>): string {
+  const entries = Object.entries(programs).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (entries.length === 0) return `${tool} ×${total}`;
+  const shown = entries.slice(0, CLASSIFIER_DENIALS_PROG_LIMIT);
+  const extra = entries.length - shown.length;
+  const prog = shown.map(([n, k]) => `${n} ×${k}`).join(', ');
+  return extra > 0 ? `${tool}: ${prog}, +${extra} more` : `${tool}: ${prog}`;
+}
+
+function checkClassifierDenials(p: DoctorPaths = PATHS) {
+  const id = 'classifier-denials';
+  try {
+    const read = readAlertState(path.join(p.stateDir, 'permission-denied-alerts.json'));
+    if (read.kind === 'missing') {
+      return { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
+    }
+    if (read.kind === 'corrupt' || read.kind === 'ioerror') {
+      const why = read.kind === 'corrupt'
+        ? 'unparseable'
+        : `unreadable${read.code ? ` (${read.code})` : ''}`;
+      return { id, status: 'warn', detail: `check failed: permission-denied-alerts.json ${why}` };
+    }
+
+    const now = Date.now();
+    const counted: { tool: string; total: number; burst_max: number; programs: Record<string, number> }[] = [];
+    for (const [tool, raw] of Object.entries(read.value as Record<string, unknown>)) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const history = parseDenyHistory((raw as Json).history);
+      if (!history) continue;
+      const since = Date.parse(history.since);
+      if (Number.isNaN(since) || now - since > CLASSIFIER_DENIALS_WINDOW_MS) continue;
+      counted.push({ tool, total: history.total, burst_max: history.burst_max, programs: history.programs });
+    }
+
+    if (counted.length === 0) {
+      return { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
+    }
+
+    counted.sort((a, b) => b.total - a.total || a.tool.localeCompare(b.tool));
+    const grand = counted.reduce((s, c) => s + c.total, 0);
+    const burstMax = Math.max(...counted.map(c => c.burst_max));
+    const shown = counted.slice(0, CLASSIFIER_DENIALS_TOOL_LIMIT);
+    const extraTools = counted.length - shown.length;
+    const parts = shown.map(c => formatDenyTool(c.tool, c.total, c.programs));
+    if (extraTools > 0) parts.push(`+${extraTools} more`);
+
+    let detail = `${grand} denials in 7d — ${parts.join('; ')}; max burst ${burstMax}`;
+    const status = burstMax >= CLASSIFIER_DENIALS_BURST_FAIL ? 'fail' : 'warn';
+    if (status === 'fail') {
+      detail += `; a burst of ${CLASSIFIER_DENIALS_BURST_FAIL}+ drops auto mode to prompting (session may have stalled)`;
+    }
+    if (detail.length > CLASSIFIER_DENIALS_DETAIL_MAX) detail = detail.slice(0, CLASSIFIER_DENIALS_DETAIL_MAX);
+    return { id, status, detail };
+  } catch (e: any) {
+    return { id, status: 'warn', detail: `check failed: ${e.message}` };
+  }
+}
+
 // ----------------- Orchestration -----------------
 
 async function runAllChecks(p: DoctorPaths = PATHS) {
@@ -2165,6 +2244,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkMemorySize(p),
     checkContextScan(p),
     checkVoiceCarrier(p),
+    checkClassifierDenials(p),
     await checkChannelLiveness(p),
   ];
 }
@@ -2290,7 +2370,7 @@ export {
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
   checkRoutinePrecheck, checkRawSize,
-  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkChannelLiveness,
+  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkClassifierDenials, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
   resolvePaths,
