@@ -182,4 +182,13 @@ describe('update-reflection-state judge window', () => {
     expect(state.counters.judge_downgrade).toBe(5);
     expect(state.counters.judge_suppress).toBe(6);
   }));
+
+  test('an absurd verdict count caps the ring instead of aborting the state write', withTmp(async (stateFile) => {
+    const state = await runPayload(stateFile, { judge_accept: 1e11, judge_suppress: 4 });
+    const window = state.counters.judge_window;
+
+    expect(window.ring).toBe('a'.repeat(16) + 'ssss');
+    expect(window).toMatchObject({ accept: 16, downgrade: 0, suppress: 4, verdicts: 20 });
+    expect(typeof state.counters.last_run_at).toBe('string');
+  }));
 });

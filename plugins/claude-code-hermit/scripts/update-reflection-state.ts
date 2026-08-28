@@ -212,6 +212,15 @@ const judgeRun = {
   suppress: intOf(payload.judge_suppress),
 };
 const judgeVerdicts = judgeRun.accept + judgeRun.downgrade + judgeRun.suppress;
+// Only the last WINDOW_VERDICTS characters can survive the slice below, so each letter
+// run is capped there: an absurd count (garbled payload, corrupted on-disk run) would
+// otherwise throw RangeError out of String.repeat and abort the whole state write.
+// Capping is lossless — a run longer than the window already drops everything before it.
+const RING_RE = new RegExp(`^[ads]{1,${WINDOW_VERDICTS}}$`);
+const letters = (run: Json) =>
+  'a'.repeat(Math.min(intOf(run.accept), WINDOW_VERDICTS)) +
+  'd'.repeat(Math.min(intOf(run.downgrade), WINDOW_VERDICTS)) +
+  's'.repeat(Math.min(intOf(run.suppress), WINDOW_VERDICTS));
 if (judgeVerdicts > 0) {
   const storedRuns = Array.isArray(c.judge_window?.runs) && c.judge_window.runs.every((run: Json) =>
     run && typeof run === 'object' && !Array.isArray(run) &&
@@ -220,12 +229,10 @@ if (judgeVerdicts > 0) {
       typeof run[key] === 'number' && Number.isFinite(run[key]) && run[key] >= 0
     )
   ) ? c.judge_window.runs : [];
-  const priorRing = typeof c.judge_window?.ring === 'string' && /^[ads]{1,20}$/.test(c.judge_window.ring)
+  const priorRing = typeof c.judge_window?.ring === 'string' && RING_RE.test(c.judge_window.ring)
     ? c.judge_window.ring
-    : storedRuns.map((run: Json) =>
-        'a'.repeat(intOf(run.accept)) + 'd'.repeat(intOf(run.downgrade)) + 's'.repeat(intOf(run.suppress))
-      ).join('');
-  const ring = (priorRing + 'a'.repeat(judgeRun.accept) + 'd'.repeat(judgeRun.downgrade) + 's'.repeat(judgeRun.suppress))
+    : storedRuns.map(letters).join('');
+  const ring = (priorRing + letters(judgeRun))
     .slice(-WINDOW_VERDICTS);
   c.judge_window = {
     ring,
