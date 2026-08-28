@@ -8,6 +8,40 @@ function makeDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-lock-'));
 }
 
+// A live pid we genuinely cannot signal (EPERM): alive, owned by another user.
+// pid 1 is the obvious candidate but only qualifies when the runner is
+// unprivileged AND pid 1 is not its own — neither holds inside a container or a
+// PID namespace, where pid 1 shares our uid and is often the test process
+// itself. Returns null where the environment cannot produce such a pid (running
+// as root, or every visible process is ours).
+function foreignUserPid(): number | null {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (uid === null) return null;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync('/proc');
+  } catch {
+    return null; // no procfs — cannot identify another user's process
+  }
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    const pid = parseInt(entry, 10);
+    if (pid === process.pid) continue;
+    try {
+      if (fs.statSync(`/proc/${entry}`).uid === uid) continue;
+      process.kill(pid, 0); // signalable after all (we are root) — not a witness
+    } catch (e: any) {
+      if (e && e.code === 'EPERM') return pid;
+    }
+  }
+  return null;
+}
+
+const FOREIGN_PID = foreignUserPid();
+// Content that cannot be mistaken for this process. Liveness is irrelevant
+// wherever this is used; only the string comparison against our own pid is.
+const NOT_OUR_PID = String(process.pid + 1);
+
 describe('lockfile', () => {
   test('acquire on clean state succeeds and records our pid', () => {
     const dir = makeDir();
@@ -39,14 +73,14 @@ describe('lockfile', () => {
     }
   });
 
-  test('foreign-user pid (EPERM) is treated as not-holding, not wedged for the stale window', () => {
+  test.skipIf(FOREIGN_PID === null)('foreign-user pid (EPERM) is treated as not-holding, not wedged for the stale window', () => {
     const dir = makeDir();
     try {
       const lock = path.join(dir, '.lifecycle.lock');
-      // pid 1 (init, root-owned) is alive but unsignalable by a non-root test
-      // runner → EPERM. The single-user invariant means it cannot be a hermit
-      // holder, so a FRESH lock naming it is still taken over immediately.
-      fs.writeFileSync(lock, '1'); // mtime = now (fresh)
+      // A live process owned by another user is unsignalable here → EPERM. The
+      // single-user invariant means it cannot be a hermit holder, so a FRESH
+      // lock naming it is still taken over immediately.
+      fs.writeFileSync(lock, String(FOREIGN_PID)); // mtime = now (fresh)
       expect(acquireLock(lock)).toBe(true);
       expect(fs.readFileSync(lock, 'utf-8')).toBe(String(process.pid));
     } finally {
@@ -207,7 +241,7 @@ describe('lockfile', () => {
     const dir = makeDir();
     try {
       const lock = path.join(dir, '.lifecycle.lock');
-      fs.writeFileSync(lock, '1');
+      fs.writeFileSync(lock, NOT_OUR_PID);
       releaseLock(lock);
       expect(fs.existsSync(lock)).toBe(true); // not ours — untouched
       fs.unlinkSync(lock);

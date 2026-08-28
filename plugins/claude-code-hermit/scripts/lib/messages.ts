@@ -6,10 +6,9 @@
 // tables, `en` as the guaranteed fallback, one added object per new language.
 //
 // The `en` bodies are byte-for-byte the strings the senders used before this
-// module existed (verified by tests/localization-regression.test.ts) — the two
-// deliberate exceptions are the auto-mode denial copy (rewritten to the channel
-// voice rule) and the mint ack prompt (unified to one destination-agnostic
-// wording); both are called out in the CHANGELOG.
+// module existed (verified by tests/localization-regression.test.ts), except for
+// the mint ack prompt (unified to one destination-agnostic wording), which is
+// called out in the CHANGELOG.
 
 export type Locale = 'en' | 'pt-PT';
 export type Localized<T> = Record<Locale, T>;
@@ -169,26 +168,20 @@ export const BUDGET: Localized<BudgetMessages> = {
 };
 
 // ---------- auto-mode denial (permission-denied-notify.ts) ----------
-// `client` is the deliberately-rewritten plain copy (no slash commands, paths,
-// tool input, or "auto-mode" jargon). `maintainer*` reproduces today's technical
-// assembly for the operator who owns the maintainer channel / SHELL.md Findings.
+// `maintainer*` provides the technical frame for the operator who owns the
+// maintainer channel / SHELL.md Findings.
 
 export interface DenyMessages {
-  client(): string;
   maintainerBase(toolName: string): string;
   maintainerTail(): string;
 }
 
 export const DENY: Localized<DenyMessages> = {
   en: {
-    client: () =>
-      "One action could not run because it needed approval. Work that doesn't depend on it can continue. You don't need to fix this.",
     maintainerBase: (toolName) => `Auto-mode denied: ${toolName}`,
     maintainerTail: () => '. Session continues. If intended: /hermit-settings or handle at the pane.',
   },
   'pt-PT': {
-    client: () =>
-      'Uma ação não pôde ser executada porque precisava de aprovação. O trabalho que não depende dela continua. Não precisa de fazer nada.',
     maintainerBase: (toolName) => `Negado em modo automático: ${toolName}`,
     maintainerTail: () => '. A sessão continua. Se for intencional: /hermit-settings ou trate no terminal.',
   },

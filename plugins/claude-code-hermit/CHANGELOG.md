@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The `PermissionDenied` hook no longer messages client chat; its maintainer diagnostic carries the tool name and reason instead of tool input, and CLAUDE-APPEND handles denials as ordinary blockers.
+
 ## [1.2.50] - 2026-08-28
 
 ### Added

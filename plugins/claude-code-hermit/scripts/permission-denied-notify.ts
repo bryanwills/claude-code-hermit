@@ -2,11 +2,11 @@
 process.stdout.on('error', () => {});
 
 // PermissionDenied hook (matcher "*") — fires after Claude Code's own auto-mode
-// classifier (or the permissions system) has already denied a tool call. This
-// hook cannot block and cannot retry the call — it only makes an otherwise
-// silent denial visible to the operator on the managed unattended session,
-// per CLAUDE-APPEND.md's "Auto-mode denial alert" rule (deterministic
-// counterpart to that model-level instruction).
+// classifier (or the permissions system) has already denied a tool call. The
+// payload carries tool_name, tool_input, tool_use_id, and reason (usually the
+// fixed text "Blocked by classifier"). This hook cannot block or retry the call;
+// it records a maintainer-tier diagnostic, with a best-effort Findings trail
+// when no maintainer channel is configured.
 //
 // Gating mirrors ask-gate.ts: only the managed unattended session
 // (HERMIT_MANAGED, stamped into the tmux env-file by hermit-start) with
@@ -35,7 +35,6 @@ type Json = any;
 
 const DEDUP_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
-const DETAIL_MAX_LEN = 150;
 const MESSAGE_MAX_LEN = 300;
 
 function alertsPath(dir: string): string {
@@ -62,12 +61,6 @@ function dedupKey(toolName: string, toolInput: Json): string {
   return createHash('sha256').update(`${toolName}:${JSON.stringify(toolInput ?? {})}`).digest('hex');
 }
 
-function extractDetail(toolInput: Json): string {
-  if (!toolInput || typeof toolInput !== 'object') return '';
-  const value = toolInput.command ?? toolInput.file_path ?? Object.values(toolInput)[0] ?? '';
-  return safe(value).slice(0, DETAIL_MAX_LEN);
-}
-
 async function main(raw: string): Promise<void> {
   let payload: Json;
   try {
@@ -91,13 +84,9 @@ async function main(raw: string): Promise<void> {
 
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : 'unknown_tool';
   const toolInput = payload.tool_input;
-  // Best-effort: Claude Code's PermissionDenied payload carries tool_name/
-  // tool_input but not the classifier's reason text (that surfaces in the
-  // transcript and the Recently-denied view, not on stdin). Read it optionally
-  // so a future CC version that adds it is picked up automatically, but the
-  // alert's primary signal is the tool + its input (extractDetail below), never
-  // this field — the message stays useful when it's absent, which is the norm.
-  const reason = typeof payload.reason === 'string' ? safe(payload.reason).slice(0, DETAIL_MAX_LEN) : '';
+  // PermissionDenied normally supplies the fixed reason "Blocked by classifier";
+  // keep it optional so older or synthetic payloads remain fail-open.
+  const reason = typeof payload.reason === 'string' ? safe(payload.reason) : '';
 
   const key = dedupKey(toolName, toolInput);
   const now = Date.now();
@@ -115,17 +104,12 @@ async function main(raw: string): Promise<void> {
   writeAlerts(dir, alerts);
 
   const locale = resolveLocale(config.language);
-  const detail = extractDetail(toolInput);
-  // Maintainer tier keeps today's technical assembly (tool + input + reason);
-  // the client tier gets the plain, channel-voice copy with no tool detail.
   let maintainerText = DENY[locale].maintainerBase(toolName);
-  if (detail) maintainerText += ` — ${detail}`;
   if (reason) maintainerText += ` — ${reason}`;
   maintainerText += DENY[locale].maintainerTail();
   maintainerText = maintainerText.slice(0, MESSAGE_MAX_LEN);
 
   await sendOperatorNotice(dir, {
-    client: DENY[locale].client(),
     maintainer: { text: maintainerText, fallback: 'findings', sensitive: true },
   });
 }

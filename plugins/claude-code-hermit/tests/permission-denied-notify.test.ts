@@ -1,8 +1,8 @@
-// Contract tests for scripts/permission-denied-notify.ts — the PermissionDenied
-// hook that surfaces an auto-mode classifier denial to the channel on the
-// managed unattended session. Exercised as a subprocess (stdin in, exit code +
-// stub requests out), the same boundary Claude Code sees. This hook cannot
-// block and never emits hookSpecificOutput.retry — every case exits 0.
+// Contract tests for scripts/permission-denied-notify.ts, the PermissionDenied
+// hook that records maintainer-tier diagnostics on a managed unattended session.
+// Exercised as a subprocess (stdin in, exit code + stub requests out), the same
+// boundary Claude Code sees. This hook cannot block and never emits
+// hookSpecificOutput.retry; every case exits 0.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
@@ -14,12 +14,12 @@ import { startHttpStub } from './helpers/http-stub';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
-// The technical assembly (tool + input + reason) now lands maintainer-tier;
+// The technical assembly (tool + reason) lands maintainer-tier;
 // on a stock single-channel install with no maintainer_channel_id it is
 // suppressed to SHELL.md Findings (setupWorkdir seeds a `## Findings` section).
 const readFindings = (dir: string) => fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf8');
 
-function setupChannelWorkdir(): Workdir {
+function setupChannelWorkdir(telegramExtra: object = {}): Workdir {
   const wd = setupWorkdir();
   const stateDir = path.join(wd.dir, '.claude.local', 'channels', 'telegram');
   fs.mkdirSync(stateDir, { recursive: true });
@@ -28,21 +28,20 @@ function setupChannelWorkdir(): Workdir {
     always_on: true,
     channels: {
       primary: 'telegram',
-      telegram: { enabled: true, dm_channel_id: '12345', allowed_users: ['u1'], state_dir: '.claude.local/channels/telegram' },
+      telegram: { enabled: true, dm_channel_id: '12345', allowed_users: ['u1'], state_dir: '.claude.local/channels/telegram', ...telegramExtra },
     },
   }));
   return wd;
 }
 
-// Mirrors Claude Code's real PermissionDenied stdin payload: tool_name +
-// tool_input + permission_mode, and NO reason field — the classifier's reason
-// text stays in the transcript / Recently-denied view, it is not delivered on
-// the hook's stdin. The alert must be useful from this shape alone.
+// Mirrors Claude Code's PermissionDenied stdin payload. The fixed classifier
+// reason is normally present, while synthetic and older payloads may omit it.
 const DENIAL_PAYLOAD = {
   hook_event_name: 'PermissionDenied',
   permission_mode: 'auto',
   tool_name: 'Bash',
   tool_input: { command: 'bun scripts/apply-settings.ts .claude/settings.local.json artifact-allow' },
+  reason: 'Blocked by classifier',
 };
 
 const run = (payload: object, dir: string, stubUrl: string, env: Record<string, string> = {}) =>
@@ -53,77 +52,81 @@ const run = (payload: object, dir: string, stubUrl: string, env: Record<string, 
   });
 
 describe('permission-denied-notify', () => {
-  test('managed + always_on + eligible channel — sends exactly one notification', async () => {
+  test('no maintainer configured records one diagnostic in Findings and sends no request', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      // Exactly one channel request, and it carries the plain client copy — no
-      // tool name, path, or "auto-mode" jargon (Channel voice rule).
-      expect(stub.requests.length).toBe(1);
-      expect(stub.requests[0].body.text).toContain('One action could not run because it needed approval');
-      // The technical signal (tool + input, the only detail the real payload
-      // carries) now lands in SHELL.md Findings, not the channel.
+      expect(stub.requests.length).toBe(0);
       const findings = readFindings(wd.dir);
       expect(findings).toContain('Auto-mode denied: Bash');
-      expect(findings).toContain('apply-settings.ts');
+      expect(findings).toContain('Blocked by classifier');
+      expect(findings).not.toContain('apply-settings.ts');
+      expect(findings.match(/^- \[maintainer alert suppressed\]/gm)).toHaveLength(1);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('includes the classifier reason when a payload happens to carry one (forward-compat)', async () => {
+  test('configured maintainer receives one diagnostic and the client receives none', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir({ maintainer_channel_id: '99999' });
+    try {
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(stub.requests).toHaveLength(1);
+      expect(stub.requests[0].body.chat_id).toBe('99999');
+      expect(stub.requests[0].body.text).toContain('Auto-mode denied: Bash');
+      expect(stub.requests[0].body.text).toContain('Blocked by classifier');
+      expect(stub.requests[0].body.text).not.toContain('apply-settings.ts');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('includes the classifier reason when the payload carries one', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       const r = await run({ ...DENIAL_PAYLOAD, reason: '[Self-Modification] blocked' }, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      // The classifier reason is technical detail — it rides the maintainer tier
-      // into Findings, never the client channel.
       expect(readFindings(wd.dir)).toContain('Self-Modification');
-      expect(stub.requests[0].body.text).not.toContain('Self-Modification');
+      expect(stub.requests.length).toBe(0);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('client channel copy carries no slash command, tool name, or tool input', async () => {
+  test('payload without reason still records exactly one Findings line', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      const r = await run({ ...DENIAL_PAYLOAD, reason: undefined }, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      const text = stub.requests[0].body.text as string;
-      expect(text).not.toContain('/');            // no slash commands or paths
-      expect(text).not.toContain('Bash');         // no tool name
-      expect(text).not.toContain('apply-settings'); // no tool input
-      expect(text.toLowerCase()).not.toContain('auto-mode');
+      expect(stub.requests.length).toBe(0);
+      const findings = readFindings(wd.dir);
+      expect(findings).toContain('Auto-mode denied: Bash');
+      expect(findings.match(/^- \[maintainer alert suppressed\]/gm)).toHaveLength(1);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('pt-PT install → client channel copy is the Portuguese plain copy', async () => {
+  test('credential-shaped tool input reaches neither HTTP bodies nor Findings', async () => {
     const stub = startHttpStub();
-    const wd = setupChannelWorkdir();
+    const wd = setupChannelWorkdir({ maintainer_channel_id: '99999' });
     try {
-      write(hermit(wd.dir, 'config.json'), JSON.stringify({
-        always_on: true,
-        language: 'português',
-        channels: {
-          primary: 'telegram',
-          telegram: { enabled: true, dm_channel_id: '12345', allowed_users: ['u1'], state_dir: '.claude.local/channels/telegram' },
-        },
-      }));
-      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      const command = 'curl -H "Authorization: Bearer test-secret-token" https://example.invalid';
+      const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
       expect(r.exitCode).toBe(0);
-      expect(stub.requests[0].body.text).toContain('Uma ação não pôde ser executada porque precisava de aprovação');
-      // Portuguese technical frame in Findings.
-      expect(readFindings(wd.dir)).toContain('Negado em modo automático: Bash');
+      expect(stub.requests).toHaveLength(1);
+      expect(JSON.stringify(stub.requests)).not.toContain('test-secret-token');
+      expect(readFindings(wd.dir)).not.toContain('test-secret-token');
     } finally {
       stub.stop();
       wd.cleanup();
@@ -214,7 +217,7 @@ describe('permission-denied-notify', () => {
     }
   });
 
-  test('dedup: identical payload twice within the window sends only once', async () => {
+  test('dedup: identical payload twice within the window records one Findings line', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
@@ -222,21 +225,23 @@ describe('permission-denied-notify', () => {
       expect(r1.exitCode).toBe(0);
       const r2 = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       expect(r2.exitCode).toBe(0);
-      expect(stub.requests.length).toBe(1);
+      expect(stub.requests.length).toBe(0);
+      expect(readFindings(wd.dir).match(/^- \[maintainer alert suppressed\]/gm)).toHaveLength(1);
     } finally {
       stub.stop();
       wd.cleanup();
     }
   });
 
-  test('dedup: a different payload still sends', async () => {
+  test('dedup: a different tool records a second Findings line', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
       await run(DENIAL_PAYLOAD, wd.dir, stub.url);
       const other = { tool_name: 'Edit', tool_input: { file_path: '/tmp/x' }, reason: 'different' };
       await run(other, wd.dir, stub.url);
-      expect(stub.requests.length).toBe(2);
+      expect(stub.requests.length).toBe(0);
+      expect(readFindings(wd.dir).match(/^- \[maintainer alert suppressed\]/gm)).toHaveLength(2);
     } finally {
       stub.stop();
       wd.cleanup();
