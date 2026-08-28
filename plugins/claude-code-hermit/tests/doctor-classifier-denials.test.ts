@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { checkClassifierDenials, resolvePaths } from '../scripts/doctor-check';
+import { checkClassifierDenials, checkStateFiles, resolvePaths } from '../scripts/doctor-check';
 import { freshDirFactory } from './helpers/workdir';
 
 const PLUGIN_ROOT = path.resolve(import.meta.dir, '..');
@@ -162,5 +162,52 @@ describe('doctor classifier-denials check', () => {
     ]);
     expect(result.status).toBe('ok');
     expect(result.detail).toBe('no classifier denials recorded in 7d');
+  });
+});
+
+describe('doctor state check — JSONL validation', () => {
+  /** Seed one state/<name> with `body` and run the state-integrity check. */
+  function stateScenario(name: string, body: string) {
+    const projectRoot = freshDir();
+    const hermitDir = path.join(projectRoot, '.claude-code-hermit');
+    fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
+    fs.writeFileSync(path.join(hermitDir, 'state', name), body);
+    return checkStateFiles(resolvePaths(hermitDir, PLUGIN_ROOT));
+  }
+
+  test('a newline-terminated malformed line is caught, not skipped as a torn tail', () => {
+    // The whole file is one complete row. Dropping the last line unconditionally
+    // meant a single-row corrupt ledger validated nothing and reported clean.
+    const result = stateScenario('observations.jsonl', '{torn\n');
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('observations.jsonl');
+  });
+
+  test('a terminated malformed final row is caught even with valid history above it', () => {
+    // The production shape: a real ledger plus one corrupt but newline-terminated
+    // last row. Dropping the last line unconditionally validated only the history
+    // and missed the damage.
+    const result = stateScenario(
+      'observations.jsonl',
+      JSON.stringify({ ts: '2026-08-28T10:00:00Z' }) + '\n{torn\n',
+    );
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('observations.jsonl');
+  });
+
+  test('an unterminated final line is still tolerated as a partial write', () => {
+    const result = stateScenario(
+      'observations.jsonl',
+      JSON.stringify({ ts: '2026-08-28T10:00:00Z' }) + '\n{"ts":"2026-08-2',
+    );
+    expect(result.status).not.toBe('fail');
+  });
+
+  test('a malformed row that is not last is caught regardless of termination', () => {
+    const result = stateScenario(
+      'observations.jsonl',
+      '{torn\n' + JSON.stringify({ ts: '2026-08-28T11:00:00Z' }) + '\n',
+    );
+    expect(result.status).toBe('fail');
   });
 });

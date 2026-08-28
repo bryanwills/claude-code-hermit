@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Upgrade Instructions
-1. Tighten permissions on existing JSONL ledgers so the widened doctor check does not report them as world-readable: `chmod 600 .claude-code-hermit/state/*.jsonl` (no-op when none exist).
+1. Tighten permissions on existing JSONL ledgers so the widened doctor check does not report them as world-readable: `find .claude-code-hermit/state -name '*.jsonl' -exec chmod 600 {} +`. Use `find`, not `chmod .../*.jsonl`: an unmatched glob is passed through literally and exits non-zero, which would fail this step on an install that has no ledgers yet.
 
 ### Added
 - `hermit-doctor` gains a `classifier-denials` check reading a rolling 7 days of auto-mode denials, with the program name for shell commands. It stays `ok` below a reporting floor (under 3 denials, no cluster past 1) since ambient denials are expected under auto mode, `warn`s at or above it, and `fail`s when 3 or more land inside any 10-minute span. Clustering is cross-tool. The finding is maintainer-tier and is held to `SHELL.md` Findings rather than sent to a client chat.

@@ -69,15 +69,30 @@ The optional flag changes its destination, not whether doctor notifies:
    environment entry added from the terminal (`/auto-mode-setup` or user settings). Never offer to
    add classifier context on a chat reply.
 
-   **`classifier-denials` is maintainer-tier, whichever route this run selected.** Tool names,
-   program names and the terminal command are the same content the `PermissionDenied` hook keeps
-   off a client chat, and doctor sends one leg, so the route cannot carry both audiences. On a
-   `client` payload (the default, no `--maintainer`), include this finding only when the primary
-   chat *is* the maintainer's — that is, `operator_profile` is not `non-technical` and no
-   `maintainer_channel_id` is configured. Otherwise omit it from the payload, leave its id out of
-   `--mark-notified`, and record it under `## Findings` in SHELL.md instead, so it reaches the
-   maintainer at the next boot rather than the client's chat now. The scheduled routine runs
-   `--maintainer` and is unaffected.
+   **`classifier-denials` is maintainer-tier, and the test is the destination this run actually
+   resolves to — not which flag was passed.** Tool names, program names and the terminal command
+   are the same content the `PermissionDenied` hook keeps off a client chat, and doctor sends one
+   leg, so the route cannot carry both audiences. Note `--maintainer` is not by itself a
+   safeguard: with no `maintainer_channel_id` configured it falls back to the primary chat for
+   every profile (§ Notification route), which on a `non-technical` install is the client's.
+
+   So resolve the destination first, then decide. Include this finding only when that destination
+   is the maintainer's own chat:
+
+   - **This run passed `--maintainer` and a `maintainer_channel_id` is configured** — the
+     destination is the maintainer chat. Include.
+   - **Otherwise the destination is the primary chat**, which is the maintainer's own only on an
+     install with no `maintainer_channel_id` *and* an `operator_profile` that is not
+     `non-technical`. A configured maintainer chat means the primary one is the client's, whatever
+     the profile.
+
+   Anything else: omit the finding from the payload, leave its id out of `--mark-notified`, and
+   record it under `## Findings` in SHELL.md instead, so it reaches the maintainer at the next boot
+   rather than the client's chat now.
+
+   The same test governs your reply: when doctor was invoked from a channel on a client-facing
+   profile, do not quote the `classifier-denials` line back into the chat — say a maintainer
+   diagnostic was recorded and leave it at that.
    Deliver it once through the canonical notice path:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice

@@ -170,11 +170,16 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
         const raw = fs.readFileSync(f, 'utf8');
         // A JSONL ledger has no whole-file JSON shape, and a torn trailing line is
         // expected rather than corruption (report-export.ts, prune-observations.ts
-        // and config-audit.ts all keep unparseable lines verbatim). Only a broken
-        // line that is not the last one indicates real damage.
+        // and config-audit.ts all keep unparseable lines verbatim). Only an
+        // *unterminated* final line is a partial write, though: when the file ends
+        // in a newline every line is complete and must be validated, or a
+        // single-line corrupt ledger reports as parsing cleanly.
         if (f.endsWith('.jsonl')) {
-          const lines = raw.split('\n').filter(l => l.trim());
-          for (const line of lines.slice(0, -1)) JSON.parse(line);
+          const lines = raw.split('\n');
+          const complete = raw.endsWith('\n') ? lines : lines.slice(0, -1);
+          for (const line of complete) {
+            if (line.trim()) JSON.parse(line);
+          }
         } else {
           JSON.parse(raw);
         }
