@@ -108,12 +108,21 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
     // Composed maintainer-only, they misroute (maintainer chat configured) or
     // vanish to Findings (non-technical, none configured) — live-fleet incident.
     'must carry a plain-language `client` leg',
+    'not itself an operator alert',
+    'permitted alternatives first',
+    'never retry',
+    '## Blockers',
   ];
   for (const a of anchors) {
     test(`contains anchor: ${a}`, () => {
       expect(append.includes(a)).toBe(true);
     });
   }
+
+  test('removed denial-alert instructions stay absent', () => {
+    expect(append.includes(['hook already', 'channels it'].join(' '))).toBe(false);
+    expect(append.includes(['one-shot denial', 'alert'].join(' '))).toBe(false);
+  });
 });
 
 describe('relocation targets received the moved content', () => {

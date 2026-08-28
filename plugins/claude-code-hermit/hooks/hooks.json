@@ -73,7 +73,7 @@
             "timeout": 12
           }
         ],
-        "description": "Notify the channel (deterministic send, deduped) when the auto-mode classifier denies a tool call on the managed unattended session — denials stop being silent"
+        "description": "Record a deduped maintainer-tier denial diagnostic on the managed unattended session: tool name and reason to the maintainer chat, else Findings; no client message"
       }
     ],
     "PostToolUse": [
