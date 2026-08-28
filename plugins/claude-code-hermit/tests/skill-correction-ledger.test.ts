@@ -26,10 +26,6 @@ const noBriefRouting = reflect.slice(
   reflect.indexOf('**No brief found (human/plugin or brief fully gone, moderate signal):**'),
   reflect.indexOf('## `skill-preference:*` routing'),
 );
-const pluginBranch = noBriefRouting.slice(
-  noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
-  noBriefRouting.indexOf('**Neither applies:**'),
-);
 
 // ── 1. session-close: capture contract prose pins ───────────────────────────
 
@@ -170,46 +166,20 @@ describe('reflect: skill-correction:* graduation routing', () => {
     expect(reflect).toContain("each session listed in the graduated ledger rows' `session_id` fields");
   });
 
-  test('reflect: no brief plugin skill path recommends an operator-space override', () => {
-    expect(pluginBranch).toContain('plain Tier 2 improvement candidate recommending an operator-space override skill in `.claude/skills/` or an upstream request');
-    expect(pluginBranch).not.toContain('## Skill Improvement');
-    // plugin skills appear in the list ONLY as `<plugin>:<name>` (probed), so a bare entry is
-    // an operator-space or bundled skill; accepting one here routes a non-plugin name to the
-    // override recommendation instead of `Neither applies`
-    expect(pluginBranch).toContain('requiring a **namespaced** entry `<plugin>:<name>`');
+  test('reflect: no brief path always produces a moderate Skill Improvement without an anchor', () => {
+    expect(noBriefRouting).toContain('Build a Tier 2 candidate with a `## Skill Improvement` section listing the component name and those corrected behaviors');
+    expect(noBriefRouting).toContain('state `moderate signal` as the confidence note');
+    expect(noBriefRouting).not.toContain('source_artifact:');
   });
 
-  test('reflect: an unreadable available-skills list is unknown, not a plugin-skill match', () => {
-    // no `skill_listing` attachment is re-injected after a compaction, so an absent list is
-    // recalled-not-verified: firing the plugin branch on it asserts a name is plugin-shipped
-    // on no evidence, and the fallback must still bar an edit under the plugin cache
-    expect(pluginBranch).toContain('the name class is unknown and this branch does not fire');
-    expect(pluginBranch).toContain('never an edit candidate for a file under the plugin cache');
-  });
-
-  test('reflect: editable path is tested before the plugin-skill path', () => {
-    // an override does not shadow the plugin skill it overrides: both appear in the
-    // available-skills list (probed), so name class alone matches both branches; ordering
-    // plus the plugin branch's `No editable file` precondition is what stops the plugin
-    // branch re-recommending an override that already exists
-    expect(noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'))
-      .toBeLessThan(noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'));
-  });
-
-  test('reflect: no brief editable skill path produces a moderate Skill Improvement without an anchor', () => {
-    const editableBranch = noBriefRouting.slice(
-      noBriefRouting.indexOf('**`.claude/skills/<name>/SKILL.md` exists (editable):**'),
-      noBriefRouting.indexOf('**No editable file, and `<name>` is an installed plugin skill (read-only)**'),
-    );
-    expect(editableBranch).toContain('Build a Tier 2 candidate with a `## Skill Improvement` section listing the component name and those corrected behaviors');
-    expect(editableBranch).toContain('state `moderate signal` as the confidence note');
-    expect(editableBranch).not.toContain('source_artifact:');
-  });
-
-  test('reflect: no brief gone skill path produces a plain proposal', () => {
-    const goneBranch = noBriefRouting.slice(noBriefRouting.indexOf('**Neither applies:**'));
-    expect(goneBranch).toContain('build a plain Tier 2 improvement proposal');
-    expect(goneBranch).not.toContain('## Skill Improvement');
+  test('reflect: the no-brief branch does not classify the name, it defers to accept', () => {
+    // An override does not shadow the plugin skill it overrides: both appear in the
+    // available-skills list (probed), so a name-class test here could never separate them,
+    // and a list absent after a compaction made the answer recalled-not-verified. The class
+    // is resolved once at accept, against the filesystem and list as they are then.
+    expect(noBriefRouting).toContain("resolved once at accept by `proposal-act`'s falsification gate and step (e)");
+    expect(noBriefRouting).not.toContain('installed plugin skill');
+    expect(noBriefRouting).not.toContain('Neither applies');
   });
 
   test('reflect: both paths carry Artifact: state/observations.jsonl for judge §1.4', () => {

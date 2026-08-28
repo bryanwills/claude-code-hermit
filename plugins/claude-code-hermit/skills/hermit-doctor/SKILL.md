@@ -16,14 +16,14 @@ and appending a summary block to SHELL.md.
 A finding gets one notification per unresolved episode: the check script records it, you send it
 once, and it stays silent until it resolves. A send that never reached the operator is re-offered
 on the next run rather than counted as delivered.
-The optional flag changes its destination, not whether doctor notifies:
+Every run sends the same two-leg notice and `channel-send.ts` resolves each leg against this
+install's own config: the maintainer leg reaches the configured `maintainer_channel_id`, else the
+primary chat on a `technical` profile (the client leg is dropped there, since both landed in one
+chat), else `SHELL.md` Findings on a `non-technical` one. A configured maintainer destination that
+is unreachable fails closed to Findings and never spills into the primary chat.
 
-- **Default (no arguments):** send the notification to the primary operator chat. This preserves
-  the legacy `hermit-doctor` behavior.
-- **Maintainer (`--maintainer`):** prefer the configured `maintainer_channel_id`. When no maintainer
-  destination is configured, fall back to the primary operator chat for every operator profile.
-  When a configured maintainer destination is unreachable, fail closed to SHELL.md Findings and
-  never spill the notification into the primary chat.
+`--maintainer` is accepted so existing routine strings keep working. It no longer changes the
+route: audience is decided by the row's own tier and the operator's config, not by the flag.
 
 ## Steps
 
@@ -52,8 +52,9 @@ The optional flag changes its destination, not whether doctor notifies:
 5. **Escalation.** The script already computed this — do not recompute it, and do not write alert
    state yourself. Read the `escalation` object from the step-1 JSON:
 
-   - `escalation.new` — findings owed to the operator, each `{id, status, detail}`. Empty means
-     everything currently failing has already been announced; say nothing.
+   - `escalation.new` — findings owed to the operator, each `{id, status, detail}` plus an
+     optional `tier`. Empty means everything currently failing has already been announced; say
+     nothing.
    - `escalation.resolved` — check ids whose finding cleared. Recorded, never announced: there is
      no "recovered" ping.
    - `escalation.persisted: false` — the ledger could not be written. `prior_state_known: false` —
@@ -69,46 +70,34 @@ The optional flag changes its destination, not whether doctor notifies:
    environment entry added from the terminal (`/auto-mode-setup` or user settings). Never offer to
    add classifier context on a chat reply.
 
-   **`classifier-denials` is maintainer-tier, and the test is the destination this run actually
-   resolves to — not which flag was passed.** Tool names, program names and the terminal command
-   are the same content the `PermissionDenied` hook keeps off a client chat, and doctor sends one
-   leg, so the route cannot carry both audiences. Note `--maintainer` is not by itself a
-   safeguard: with no `maintainer_channel_id` configured it falls back to the primary chat for
-   every profile (§ Notification route), which on a `non-technical` install is the client's.
+   **Rows carrying `tier: "maintainer"` go on the maintainer leg only.** Their content is what the
+   `PermissionDenied` hook already keeps off a client chat, so the payload splits by audience and
+   `channel-send.ts` decides where each leg lands (§ Notification route).
 
-   So resolve the destination first, then decide. Include this finding only when that destination
-   is the maintainer's own chat:
-
-   - **This run passed `--maintainer` and a `maintainer_channel_id` is configured** — the
-     destination is the maintainer chat. Include.
-   - **Otherwise the destination is the primary chat**, which is the maintainer's own only on an
-     install with no `maintainer_channel_id` *and* an `operator_profile` that is not
-     `non-technical`. A configured maintainer chat means the primary one is the client's, whatever
-     the profile.
-
-   Anything else: omit the finding from the payload, leave its id out of `--mark-notified`, and
-   record it under `## Findings` in SHELL.md instead, so it reaches the maintainer at the next boot
-   rather than the client's chat now.
-
-   The same test governs your reply: when doctor was invoked from a channel on a client-facing
-   profile, do not quote the `classifier-denials` line back into the chat — say a maintainer
-   diagnostic was recorded and leave it at that.
    Deliver it once through the canonical notice path:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
    ```
-   Choose one payload from the invocation:
-   - Without `--maintainer`, send `{"client": "<complete summary>"}`. Do not include a `maintainer` leg.
-   - With `--maintainer`, send
-     `{"maintainer": "<complete summary>", "fallback": "primary"}`. Do not include a `client` leg.
+   One payload, whatever the invocation:
+   `{"client": "<plain headline for the rows without a tier, plus the one next step>", "maintainer": "<complete summary, every row>"}`.
+   The client leg is the only part of this notice that can land in a client chat, so write it to the
+   channel voice rule — no check ids, file paths, USD or token figures; what is wrong in plain words
+   and what the operator should do about it. The maintainer leg is the complete richer version of
+   the same notice, never a tiered-rows-only fragment, because it stands alone wherever both
+   audiences resolve to one chat. Omit `client` when every new row is tiered. Send no `fallback`
+   key: its default is what routes a maintainer leg to Findings on a `non-technical` install.
+
+   When doctor was invoked from a channel, do not quote a tiered row back into your reply; say a
+   maintainer diagnostic was recorded and leave it at that.
 
    **Then confirm delivery**, so those findings stop being re-offered — only when the send actually
    landed (exit 0):
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/doctor-check.ts .claude-code-hermit --mark-notified <id> [<id>…]
    ```
-   Pass the `escalation.new[].id` values you just announced. If the send failed or degraded, skip
-   this step — leaving them unconfirmed is what makes the next run retry instead of dropping them.
+   Pass every `escalation.new[].id` you just announced, tiered rows included. If the send failed
+   or degraded, skip this step: an id left unconfirmed keeps `escalation.new` non-empty, so the
+   next run retries it instead of dropping it, and the doctor routine keeps waking on it.
    For exit-code handling and the Findings fallback, follow
    `/claude-code-hermit:channel-responder` § Outbound notification protocol.
 

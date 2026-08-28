@@ -61,7 +61,7 @@ Generates the weekly review for the current ISO week.
    - If no prior week file exists: omit the "vs prior week" comparison and show this week's spend only.
    - If the current-week file is missing (script failed): skip step 6 entirely and fall back to a plain note ("Weekly review didn't generate this week — nothing to send.").
 
-6. **Channel voice rule** (generalizes `claude-code-hermit:hermit-doctor`'s channel rule, `skills/hermit-doctor/SKILL.md:75-77`): the message below is for the person who owns this hermit, not a developer. Never emit `PROP-NNN`/`S-NNN`, `operator_turns`, raw token counts, cron strings, or file paths. Speak in plain outcomes and counts.
+6. **Channel voice rule** (generalizes `claude-code-hermit:hermit-doctor`'s channel rule, `skills/hermit-doctor/SKILL.md` step 5, the paragraph barring a tiered row from a channel reply): the message below is for the person who owns this hermit, not a developer. Never emit `PROP-NNN`/`S-NNN`, `operator_turns`, raw token counts, cron strings, or file paths. Speak in plain outcomes and counts.
 
    Channel-send the combined weekly summary:
    - Refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md`; if it returns a URL, note it for the message below.

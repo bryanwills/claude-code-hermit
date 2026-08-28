@@ -2195,11 +2195,16 @@ function largestDenialCluster(sortedMs: number[]): number {
 
 function checkClassifierDenials(p: DoctorPaths = PATHS) {
   const id = 'classifier-denials';
+  // Tool names, shell program names and the terminal remedy are the same content the
+  // `PermissionDenied` hook keeps off a client chat, so every return carries the tier
+  // and doctor's notice puts the row on its maintainer leg only. Data, not prose: an
+  // install that overrides this skill still gets a routable report.
+  const tier = 'maintainer' as const;
   try {
     const now = Date.now();
     const read = readDenials(p.hermitDir, now - CLASSIFIER_DENIALS_WINDOW_MS);
     if ('error' in read) {
-      return { id, status: 'warn', detail: `check failed: permission-denied-events.jsonl unreadable (${read.error})` };
+      return { id, tier, status: 'warn', detail: `check failed: permission-denied-events.jsonl unreadable (${read.error})` };
     }
     // Before the empty-window return, not after: a log whose every line is torn
     // would otherwise report a clean all-ok over a damaged file, which is the
@@ -2207,8 +2212,8 @@ function checkClassifierDenials(p: DoctorPaths = PATHS) {
     const damaged = read.malformed > 0 ? `; ${read.malformed} unreadable row(s)` : '';
     if (read.rows.length === 0) {
       return read.malformed > 0
-        ? { id, status: 'warn', detail: `no readable classifier denials in 7d${damaged}` }
-        : { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
+        ? { id, tier, status: 'warn', detail: `no readable classifier denials in 7d${damaged}` }
+        : { id, tier, status: 'ok', detail: 'no classifier denials recorded in 7d' };
     }
 
     const byTool = new Map<string, { total: number; programs: Record<string, number> }>();
@@ -2248,9 +2253,9 @@ function checkClassifierDenials(p: DoctorPaths = PATHS) {
     const budget = CLASSIFIER_DENIALS_DETAIL_MAX - head.length - tail.length;
     let body = parts.join('; ');
     if (body.length > budget) body = body.slice(0, Math.max(0, budget - 1)) + '…';
-    return { id, status, detail: `${head}${body}${tail}` };
+    return { id, tier, status, detail: `${head}${body}${tail}` };
   } catch (e: any) {
-    return { id, status: 'warn', detail: `check failed: ${e.message}` };
+    return { id, tier, status: 'warn', detail: `check failed: ${e.message}` };
   }
 }
 
@@ -2305,7 +2310,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
 export interface DoctorEscalation {
   persisted: boolean;
   prior_state_known: boolean;
-  new: { id: string; status: string; detail: string }[];
+  new: { id: string; status: string; detail: string; tier?: 'maintainer' }[];
   resolved: string[];
 }
 
@@ -2334,7 +2339,7 @@ function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir)
     if (prior.kind === 'ioerror') return NO_ESCALATION(false); // healthy file we couldn't read — touch nothing
     const priorStateKnown = prior.kind !== 'corrupt';
 
-    const pending: { id: string; status: string; detail: string }[] = [];
+    const pending: DoctorEscalation['new'] = [];
     const resolved: string[] = [];
     const applied = mutateOwnedAlerts(ledgerPath, (alerts) => {
       for (const [key, c] of failing) {
@@ -2346,7 +2351,11 @@ function escalate(checks: Json[], nowIso: string, dir: string = PATHS.hermitDir)
           : { first_seen: nowIso, last_seen: nowIso, status: c.status, message,
               suppressed: false, notified: false, count: 1 };
         // Anything not yet confirmed delivered is still owed to the operator.
-        if (alerts[key].notified !== true) pending.push({ id: c.id, status: c.status, detail: c.detail });
+        // `tier` rides along when the check declares one, so the skill can split its
+        // notice by audience without re-deriving the tier from the check id.
+        if (alerts[key].notified !== true) {
+          pending.push({ id: c.id, status: c.status, detail: c.detail, ...(c.tier ? { tier: c.tier } : {}) });
+        }
       }
       for (const key of Object.keys(alerts)) {
         if (key.startsWith(DOCTOR_PREFIX) && !failing.has(key)) {

@@ -43,6 +43,7 @@ describe('doctor classifier-denials check', () => {
   test('absent file is ok', () => {
     const result = scenario('missing');
     expect(result.status).toBe('ok');
+    expect(result.tier).toBe('maintainer');
     expect(result.detail).toBe('no classifier denials recorded in 7d');
   });
 
@@ -50,6 +51,7 @@ describe('doctor classifier-denials check', () => {
     if (process.getuid?.() === 0) return; // root ignores the mode bits
     const result = scenario('unreadable');
     expect(result.status).toBe('warn');
+    expect(result.tier).toBe('maintainer');
     expect(result.detail).toContain('check failed');
   });
 
@@ -84,6 +86,7 @@ describe('doctor classifier-denials check', () => {
   test('below the reporting floor stays ok but still renders the count', () => {
     const result = scenario(spread(2, 60));
     expect(result.status).toBe('ok');
+    expect(result.tier).toBe('maintainer');
     expect(result.detail).toBe('2 denials in 7d — Bash: bun ×2; largest cluster 1 in 10 min');
   });
 
@@ -102,6 +105,9 @@ describe('doctor classifier-denials check', () => {
   test('three inside ten minutes fails, correlating without asserting a stall', () => {
     const result = scenario(spread(3, 2));
     expect(result.status).toBe('fail');
+    // Tagged on every status, not only the loud ones: the skill splits its notice on
+    // this key, so an ok row that later warns must never change audience.
+    expect(result.tier).toBe('maintainer');
     expect(result.detail).toContain('largest cluster 3 in 10 min');
     expect(result.detail).toContain('around where auto mode falls back to prompting');
     // A cluster is not the documented consecutive-denial count, so the row must
