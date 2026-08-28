@@ -173,6 +173,10 @@ describe('reflect: skill-correction:* graduation routing', () => {
     );
     expect(pluginBranch).toContain('plain Tier 2 improvement candidate recommending an operator-space override skill in `.claude/skills/` or an upstream request');
     expect(pluginBranch).not.toContain('## Skill Improvement');
+    // plugin skills appear in the list ONLY as `<plugin>:<name>` (probed), so a bare entry is
+    // an operator-space or bundled skill; accepting one here routes a non-plugin name to the
+    // override recommendation instead of `Neither applies`
+    expect(pluginBranch).toContain('requiring a **namespaced** entry `<plugin>:<name>`');
   });
 
   test('reflect: editable path is tested before the plugin-skill path', () => {

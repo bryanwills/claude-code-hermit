@@ -2200,9 +2200,21 @@ describe('proposal-act dispatch contract', () => {
     // regenerate the identical body, so a blanket REJECT is a permanent dead end).
     expect(skill).toContain('REJECT with code `stale-paths` only when that file is missing **and** `<name>` is not in the harness\'s available-skills list');
     expect(skill).toContain('is a plugin-shipped-skill improvement, not a stale path: let it through');
-    // the list namespaces plugin skills as `<plugin>:<name>`; a literal membership test on the
-    // bare canonical name never matches, so every plugin-skill improvement would REJECT
-    expect(skill).toContain('with any `<plugin>:` prefix stripped');
+    // the list namespaces plugin skills as `<plugin>:<name>` and nothing else (probed), so the
+    // match must be ON the namespaced form: a literal test of the bare canonical name never
+    // hits a plugin skill, and a bare entry is an operator-space or bundled skill, which must
+    // not clear the REJECT on behalf of a plugin one
+    expect(skill).toContain('only a **namespaced** entry `<plugin>:<name>` counts as a match');
+    expect(skill).toContain('a bare `<name>` entry is an operator-space or bundled skill, never a plugin one');
+  });
+
+  test('queued Skill Improvement task carries the same guards as the in-main path', () => {
+    // NEXT-TASK.md is consumed by a later /session-start as ordinary work, so step (e) never
+    // runs again — the guards have to travel in the bullet or the queued path can resurrect a
+    // target deleted after queueing, or rewrite one already fixed
+    const queued = skill.slice(skill.indexOf('- **"Create a session task"**'), skill.indexOf('- **"I\'ll handle it manually"**'));
+    expect(queued).toContain('If it exists, read it before writing and author only the behaviors from the ## Skill Improvement body that are not already present');
+    expect(queued).toContain('never write into the plugin cache, and create a file at that name only after the operator explicitly confirms');
   });
 
   test('Skill Improvement authoring reads before writing and resolves an already fixed skill', () => {
@@ -2217,7 +2229,7 @@ describe('proposal-act dispatch contract', () => {
   });
 
   test('queued Skill Improvement task does not require a source artifact brief', () => {
-    expect(skill).toContain('Author the revised SKILL.md from the ## Skill Improvement body, using the source_artifact brief only when present, and validate it.');
+    expect(skill).toContain('Use the source_artifact brief only when present, and validate the result.');
     expect(skill).not.toContain('from the source_artifact brief and validate it');
   });
 
