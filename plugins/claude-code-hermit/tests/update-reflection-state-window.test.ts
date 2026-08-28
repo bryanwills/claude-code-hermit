@@ -35,30 +35,23 @@ async function runPayload(stateFile: string, payload: Record<string, unknown>) {
 }
 
 describe('update-reflection-state judge window', () => {
-  test('first verdict-bearing run creates the window with derived sums and since', withTmp(async (stateFile) => {
+  test('first verdict-bearing run creates a letter ring with derived counts', withTmp(async (stateFile) => {
     const state = await runPayload(stateFile, { judge_accept: 2, judge_downgrade: 1, judge_suppress: 3 });
     const window = state.counters.judge_window;
 
-    expect(window.runs).toHaveLength(1);
-    expect(window.runs[0]).toEqual({
-      at: window.runs[0].at,
-      accept: 2,
-      downgrade: 1,
-      suppress: 3,
-    });
-    expect(Number.isNaN(Date.parse(window.runs[0].at))).toBe(false);
+    expect(window.ring).toBe('aadsss');
     expect(window).toMatchObject({ accept: 2, downgrade: 1, suppress: 3, verdicts: 6 });
-    expect(window.since).toBe(window.runs[0].at);
+    expect(window).not.toHaveProperty('runs');
+    expect(window).not.toHaveProperty('since');
   }));
 
   test('a zero-verdict run preserves an existing window and does not create one when absent', withTmp(async (stateFile) => {
     const existingWindow = {
-      runs: [{ at: '2026-08-01T00:00:00.000Z', accept: 3, downgrade: 1, suppress: 2 }],
+      ring: 'aaadss',
       accept: 3,
       downgrade: 1,
       suppress: 2,
       verdicts: 6,
-      since: '2026-08-01T00:00:00.000Z',
     };
     writeState(stateFile, { counters: { judge_window: existingWindow } });
 
@@ -70,21 +63,22 @@ describe('update-reflection-state judge window', () => {
     expect(absent.counters).not.toHaveProperty('judge_window');
   }));
 
-  test('trimming keeps whole runs and never takes the remainder below 20 verdicts', withTmp(async (stateFile) => {
+  test('trimming keeps exactly the last 20 verdicts', withTmp(async (stateFile) => {
     for (let run = 0; run < 3; run += 1) {
       await runPayload(stateFile, { judge_accept: 8 });
     }
     const initialWindow = readState(stateFile).counters.judge_window;
-    expect(initialWindow.runs).toHaveLength(3);
-    expect(initialWindow.verdicts).toBe(24);
+    expect(initialWindow.ring.length).toBe(20);
+    expect(initialWindow.verdicts).toBe(20);
 
     await runPayload(stateFile, { judge_accept: 8 });
     const window = readState(stateFile).counters.judge_window;
-    expect(window.runs).toHaveLength(3);
-    expect(window.verdicts).toBe(24);
+    expect(window.ring.length).toBe(20);
+    expect(window.verdicts).toBe(20);
+    expect(window.ring).toBe('a'.repeat(20));
   }));
 
-  test('reported sums equal the surviving runs after the window advances', withTmp(async (stateFile) => {
+  test('reported counts equal per-letter tallies of the ring', withTmp(async (stateFile) => {
     const payloads = [
       { judge_accept: 8 },
       { judge_downgrade: 5, judge_suppress: 3 },
@@ -94,13 +88,11 @@ describe('update-reflection-state judge window', () => {
     for (const payload of payloads) await runPayload(stateFile, payload);
 
     const window = readState(stateFile).counters.judge_window;
-    const sums = window.runs.reduce((total: any, run: any) => ({
-      accept: total.accept + run.accept,
-      downgrade: total.downgrade + run.downgrade,
-      suppress: total.suppress + run.suppress,
-    }), { accept: 0, downgrade: 0, suppress: 0 });
-    expect(window).toMatchObject(sums);
-    expect(window.verdicts).toBe(sums.accept + sums.downgrade + sums.suppress);
+    expect(window.ring).toMatch(/^[ads]{1,20}$/);
+    expect(window.accept).toBe(window.ring.split('a').length - 1);
+    expect(window.downgrade).toBe(window.ring.split('d').length - 1);
+    expect(window.suppress).toBe(window.ring.split('s').length - 1);
+    expect(window.verdicts).toBe(window.ring.length);
   }));
 
   test('cumulative judge tallies keep growing past the window totals', withTmp(async (stateFile) => {
@@ -119,13 +111,14 @@ describe('update-reflection-state judge window', () => {
     writeState(stateFile, { counters: { judge_window: 'malformed' } });
     const state = await runPayload(stateFile, { judge_accept: 1, judge_suppress: 2 });
 
-    expect(state.counters.judge_window.runs).toHaveLength(1);
+    expect(state.counters.judge_window.ring).toBe('ass');
     expect(state.counters.judge_window).toMatchObject({
       accept: 1,
       downgrade: 0,
       suppress: 2,
       verdicts: 3,
     });
+    expect(state.counters.judge_window).not.toHaveProperty('runs');
   }));
 
   test('--reset-counters clears the judge window and stamps judge_since', withTmp(async (stateFile) => {
@@ -153,5 +146,40 @@ describe('update-reflection-state judge window', () => {
     const counters = readState(stateFile).counters;
     expect(counters).not.toHaveProperty('judge_window');
     expect(typeof counters.judge_since).toBe('string');
+  }));
+
+  test('an on-disk runs window folds into the ring without resetting', withTmp(async (stateFile) => {
+    writeState(stateFile, {
+      counters: {
+        judge_accept: 6,
+        judge_downgrade: 3,
+        judge_suppress: 3,
+        judge_window: {
+          runs: [
+            { at: '2026-08-01T00:00:00.000Z', accept: 4, downgrade: 2, suppress: 0 },
+            { at: '2026-08-02T00:00:00.000Z', accept: 2, downgrade: 1, suppress: 3 },
+          ],
+          accept: 6,
+          downgrade: 3,
+          suppress: 3,
+          verdicts: 12,
+          since: '2026-08-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    const state = await runPayload(stateFile, { judge_accept: 5, judge_downgrade: 2, judge_suppress: 3 });
+    const window = state.counters.judge_window;
+    const expected = ('aaaadd' + 'aadsss' + 'aaaaaddsss').slice(-20);
+    expect(window.ring).toBe(expected);
+    expect(window.accept).toBe(expected.split('a').length - 1);
+    expect(window.downgrade).toBe(expected.split('d').length - 1);
+    expect(window.suppress).toBe(expected.split('s').length - 1);
+    expect(window.verdicts).toBe(expected.length);
+    expect(window).not.toHaveProperty('runs');
+    expect(window).not.toHaveProperty('since');
+    expect(state.counters.judge_accept).toBe(11);
+    expect(state.counters.judge_downgrade).toBe(5);
+    expect(state.counters.judge_suppress).toBe(6);
   }));
 });

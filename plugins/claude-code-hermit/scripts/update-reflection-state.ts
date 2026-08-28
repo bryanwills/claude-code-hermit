@@ -168,7 +168,7 @@ try {
 
 const now = new Date().toISOString();
 
-// Retain whole runs covering at least the latest 20 judge verdicts.
+// Ring of the last 20 judge verdicts as a/d/s letters. An old runs array is folded in once.
 const WINDOW_VERDICTS = 20;
 
 const c: Json = (state.counters && typeof state.counters === 'object') ? { ...state.counters } : {};
@@ -220,34 +220,19 @@ if (judgeVerdicts > 0) {
       typeof run[key] === 'number' && Number.isFinite(run[key]) && run[key] >= 0
     )
   ) ? c.judge_window.runs : [];
-  const runs = storedRuns.map((run: Json) => ({
-    at: run.at,
-    accept: intOf(run.accept),
-    downgrade: intOf(run.downgrade),
-    suppress: intOf(run.suppress),
-  }));
-  runs.push(judgeRun);
-
-  let verdicts = runs.reduce((sum: number, run: Json) =>
-    sum + run.accept + run.downgrade + run.suppress, 0);
-  while (runs.length > 1) {
-    const first = runs[0];
-    const firstVerdicts = first.accept + first.downgrade + first.suppress;
-    if (verdicts - firstVerdicts < WINDOW_VERDICTS) break;
-    runs.shift();
-    verdicts -= firstVerdicts;
-  }
-
-  const totals = runs.reduce((sum: Json, run: Json) => ({
-    accept: sum.accept + run.accept,
-    downgrade: sum.downgrade + run.downgrade,
-    suppress: sum.suppress + run.suppress,
-  }), { accept: 0, downgrade: 0, suppress: 0 });
+  const priorRing = typeof c.judge_window?.ring === 'string' && /^[ads]{1,20}$/.test(c.judge_window.ring)
+    ? c.judge_window.ring
+    : storedRuns.map((run: Json) =>
+        'a'.repeat(intOf(run.accept)) + 'd'.repeat(intOf(run.downgrade)) + 's'.repeat(intOf(run.suppress))
+      ).join('');
+  const ring = (priorRing + 'a'.repeat(judgeRun.accept) + 'd'.repeat(judgeRun.downgrade) + 's'.repeat(judgeRun.suppress))
+    .slice(-WINDOW_VERDICTS);
   c.judge_window = {
-    runs,
-    ...totals,
-    verdicts,
-    since: runs[0].at,
+    ring,
+    accept: ring.split('a').length - 1,
+    downgrade: ring.split('d').length - 1,
+    suppress: ring.split('s').length - 1,
+    verdicts: ring.length,
   };
 }
 
