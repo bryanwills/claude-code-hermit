@@ -246,6 +246,14 @@ describe('last-operator-action.json signal', () => {
   const recordHook = (dir: string, stdin: string, args: string[] = []) =>
     runScript('record-operator-action.ts', { stdin, cwd: dir, args });
 
+  // A well-formed inbound envelope — quoted attributes, so parseChannelEnvelope
+  // actually resolves a sender to check against the allowlist.
+  const channelPrompt = (userId: string) =>
+    `<channel source="discord" chat_id="c1" user_id="${userId}">hi</channel>`;
+  const writeAllowlist = (dir: string, allowed: string[]) =>
+    fs.writeFileSync(hermit(dir, 'config.json'),
+      JSON.stringify({ timezone: 'UTC', channels: { discord: { enabled: true, allowed_users: allowed } } }));
+
   // a. precheck: last-operator-action.json 13h ago + fresh SHELL.md mtime → AUTO_CLOSE
   test('precheck: stale last-operator-action (13h) + fresh SHELL.md → AUTO_CLOSE', withTmp(async (dir) => {
     seedPrecheck(dir); // fresh SHELL.md mtime
@@ -359,8 +367,29 @@ describe('last-operator-action.json signal', () => {
     expect(fs.existsSync(lastOp(dir))).toBe(true);
   }));
 
-  // i. hook smoke: channel inbound prompt → file NOT written (channel-responder handles post-auth)
-  test('hook smoke: <channel inbound → file NOT written by hook', withTmp(async (dir) => {
+  // i. hook smoke: channel inbound. Issue #835 — a channel-only conversation used to
+  // leave the clock frozen (the write was delegated to a skill step the model skipped),
+  // so the midnight post-close /clear fired mid-exchange. The hook now applies the same
+  // allowlist gate channel-responder does: allowlisted sender = operator activity,
+  // anyone else still ignored so stranger/bot traffic can't suppress AUTO_CLOSE.
+  test('hook smoke: <channel inbound, no allowlist configured → file IS written', withTmp(async (dir) => {
+    await recordHook(dir, JSON.stringify({ prompt: channelPrompt('u1') }));
+    expect(fs.existsSync(lastOp(dir))).toBe(true);
+  }));
+
+  test('hook smoke: <channel inbound from allowlisted sender → file IS written', withTmp(async (dir) => {
+    writeAllowlist(dir, ['u1']);
+    await recordHook(dir, JSON.stringify({ prompt: channelPrompt('u1') }));
+    expect(fs.existsSync(lastOp(dir))).toBe(true);
+  }));
+
+  test('hook smoke: <channel inbound from non-allowlisted sender → file NOT written', withTmp(async (dir) => {
+    writeAllowlist(dir, ['u1']);
+    await recordHook(dir, JSON.stringify({ prompt: channelPrompt('stranger') }));
+    expect(fs.existsSync(lastOp(dir))).toBe(false);
+  }));
+
+  test('hook smoke: <channel prefix with no parseable envelope → file NOT written', withTmp(async (dir) => {
     await recordHook(dir, '{"prompt":"<channel source=discord chat_id=x>hi</channel>"}');
     expect(fs.existsSync(lastOp(dir))).toBe(false);
   }));
@@ -447,8 +476,20 @@ describe('last-operator-action.json signal', () => {
     expect(fs.existsSync(turnPath(dir))).toBe(false);
   }));
 
-  test('marker: <channel inbound → NOT written', withTmp(async (dir) => {
-    await recordHook(dir, '{"prompt":"<channel source=discord chat_id=x>hi</channel>"}');
+  test('marker: <channel inbound, no allowlist configured → written', withTmp(async (dir) => {
+    await recordHook(dir, JSON.stringify({ prompt: channelPrompt('u1') }));
+    expect(fs.existsSync(turnPath(dir))).toBe(true);
+  }));
+
+  test('marker: <channel inbound from allowlisted sender → written', withTmp(async (dir) => {
+    writeAllowlist(dir, ['u1']);
+    await recordHook(dir, JSON.stringify({ prompt: channelPrompt('u1') }));
+    expect(fs.existsSync(turnPath(dir))).toBe(true);
+  }));
+
+  test('marker: <channel inbound from non-allowlisted sender → NOT written', withTmp(async (dir) => {
+    writeAllowlist(dir, ['u1']);
+    await recordHook(dir, JSON.stringify({ prompt: channelPrompt('stranger') }));
     expect(fs.existsSync(turnPath(dir))).toBe(false);
   }));
 

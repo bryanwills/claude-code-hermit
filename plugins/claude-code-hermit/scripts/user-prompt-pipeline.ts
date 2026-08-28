@@ -112,7 +112,7 @@ async function main(raw: string): Promise<void> {
   // 1-3. Audit and context. These run on every prompt, including during a
   // shutdown — the operator's message is still recorded and the reply reminder
   // still names the chat to answer on.
-  await stage('record-operator-action', () => { recordOperatorAction(prompt); }, ctx);
+  await stage('record-operator-action', () => { recordOperatorAction(prompt, ctx.config()); }, ctx);
   await stage('prompt-context', promptContext, ctx);
   await stage('channel-reply-reminder', channelReplyReminder, ctx);
 
