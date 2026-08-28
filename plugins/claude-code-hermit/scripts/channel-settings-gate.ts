@@ -667,7 +667,9 @@ function main(payload: any): void {
     deny(mutation.target === 'config.json' ? DENY_DIRECT_CONFIG_EDIT : DENY_TERMINAL_ONLY);
   }
 
-  const config = readConfigRaw(dir);
+  // Same memo the verdict was built from: one parse per hook process, and the
+  // authority check can't disagree with the rules that produced the tier.
+  const config = currentConfig();
 
   // Safe tier: any setting, but only from a chat that holds authority — the
   // operator's own chat (the same anchor pause/resume/status bind to) or the

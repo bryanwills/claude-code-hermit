@@ -11,7 +11,7 @@ import { ENV_VAR_RE } from './lib/channel-config';
 // every Edit and Write and exits on one string test, and has no business loading
 // the gate's transcript, envelope and nonce machinery to ask a regex question.
 import {
-  isImmutablePath, isExecutionAdjacentPath, parseSettingsRules, rulePatternProbe,
+  isImmutablePath, ruleReachesExecutionAdjacent, parseSettingsRules, rulePatternProbe,
 } from './lib/settings/permissions';
 
 type Json = any;
@@ -148,7 +148,18 @@ function validateSettingsPermissions(config: Json, errors: string[], warnings: s
     }
     if (!Array.isArray(raw[key])) {
       errors.push(`settings_permissions.${key}: expected array of dotted config paths, got ${typeof raw[key]}`);
+      continue;
     }
+    // parseSettingsRules drops anything that isn't a non-empty string, so an
+    // entry of the wrong shape applies to nothing and would otherwise vanish
+    // without a word — the same silent-belief problem as an immutable path.
+    raw[key].forEach((entry: Json, i: number) => {
+      if (typeof entry !== 'string' || entry.length === 0) {
+        errors.push(
+          `settings_permissions.${key}[${i}]: expected a dotted config path, got ${entry === '' ? 'an empty string' : typeof entry} — it is ignored`,
+        );
+      }
+    });
   }
 
   const rules = parseSettingsRules(raw);
@@ -166,7 +177,7 @@ function validateSettingsPermissions(config: Json, errors: string[], warnings: s
         }
         continue;
       }
-      if (isExecutionAdjacentPath(probe) && RULE_STRICTNESS[key] < RULE_STRICTNESS.ask) {
+      if (ruleReachesExecutionAdjacent(pattern) && RULE_STRICTNESS[key] < RULE_STRICTNESS.ask) {
         warnings.push(
           `settings_permissions.${key}: "${pattern}" lowers an execution-adjacent setting (it reaches what a session runs) below its default confirmation tier` +
           (clientHome ? ' — and operator_profile is "non-technical", so the chat this hands it to is the client\'s, not yours' : ''),

@@ -3722,4 +3722,22 @@ describe('settings_permissions validation', () => {
     expect(out.errors).toEqual([]);
     expect(out.warnings).toEqual([]);
   });
+
+  test('a wildcard that reaches an execution-adjacent path warns like a literal one', () => {
+    // `*` and `*.*` name no family literally, yet they lower `permission_mode`,
+    // `env.KEY` and the rest — the broadest rules an operator can write must not
+    // be the quietest ones.
+    for (const p of ['*', '*.*', 'env.*', 'routines.0.*']) {
+      const out = runValidate({ settings_permissions: { allow: [p] } });
+      expect(out.warnings.some((w: string) => w.includes('execution-adjacent') && w.includes(`"${p}"`))).toBe(true);
+    }
+    // A wildcard that reaches nothing execution-adjacent still stays quiet.
+    expect(runValidate({ settings_permissions: { allow: ['heartbeat.*'] } }).warnings).toEqual([]);
+  });
+
+  test('an entry that is not a dotted path is reported, not silently dropped', () => {
+    const out = runValidate({ settings_permissions: { allow: ['model', 42, ''] } });
+    expect(out.errors.some((e: string) => e.includes('settings_permissions.allow[1]'))).toBe(true);
+    expect(out.errors.some((e: string) => e.includes('settings_permissions.allow[2]') && e.includes('empty string'))).toBe(true);
+  });
 });

@@ -223,6 +223,8 @@ Top-level. The tier table above is this hermit's default, not its law: `settings
 
 Entries are dotted `config.json` paths. `*` matches exactly one segment, so `routines.*.precheck` covers every routine's gate. A path named in more than one list takes the strictest, `deny` > `ask` > `allow`; a path named nowhere keeps its built-in tier (the security tier for anything unlisted). Omit the key entirely and nothing changes.
 
+A rule matches the path it names and nothing beneath it, where the built-in tiers cover a whole subtree. Re-tiering a container therefore means naming its leaves too — `"deny": ["env", "env.*"]`, not `"deny": ["env"]` alone, which raises the tier of a whole-object `env` write and leaves `env.API_KEY` on its built-in one.
+
 The example above is the case this exists for: a client chat that should be able to register its own routines, prechecks included, on a hermit whose maintainer is elsewhere. Because the routine add/edit flow rewrites the whole `routines` array, `routines` and `routines.*.precheck` are both listed — the array write is judged at whatever tier the precheck leaf carries.
 
 **Three paths no rule can reach:** the channel enrollment root (`allowed_users`, `default_chat_id`, `dm_channel_id`, `maintainer_channel_id`, `settings_policy`), `operator_profile`, and `settings_permissions` itself. They stay terminal-only whatever the map says, because a chat able to re-tier them could grant itself authority permanently instead of something an operator with a terminal can revoke. `validate-config.ts` errors on an `allow`/`ask` rule naming one (it would never apply) and warns when a rule lowers an execution-adjacent setting below its default, louder when `operator_profile` is `"non-technical"` and the home chat is the client's.

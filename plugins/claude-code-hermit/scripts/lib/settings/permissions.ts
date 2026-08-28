@@ -140,6 +140,11 @@ export function isExecutionAdjacentPath(dotted: string): boolean {
  * single-token wildcard Claude Code's own rules use (`Bash(npm run test *)`), so
  * `routines.*.precheck` covers every routine's gate without naming indices.
  *
+ * A rule matches the path it names and nothing beneath it, where the built-in
+ * regexes above match a whole subtree. Raising a container therefore means naming
+ * its leaves too — `deny: ['env', 'env.*']`, not `deny: ['env']` alone, which would
+ * leave `env.API_KEY` on its built-in tier rather than the operator's.
+ *
  * The map cannot reach the enrollment root, the authority keys, or itself: the
  * gate's channelVerdict() answers isImmutablePath() before it consults any rule.
  * That ordering is the invariant — an operator relaxing their own gate is a
@@ -202,4 +207,27 @@ export function ruleVerdict(rules: SettingsRules | null, dotted: string): Verdic
  */
 export function rulePatternProbe(pattern: string): string {
   return pattern.replace(/(^|\.)\*(?=\.|$)/g, '$10');
+}
+
+/**
+ * One concrete path per execution-adjacent family, matched against the pattern
+ * itself rather than against its probe.
+ *
+ * The probe alone is not enough here: `*` and `*.*` are legal patterns that name
+ * no family literally — their probes are `0` and `0.0`, which match nothing — yet
+ * at runtime they lower `permission_mode`, `env.KEY` and the rest to whatever list
+ * they were written in. A probe-only check would let the two broadest rules an
+ * operator can write pass the validator in silence, which is exactly where the
+ * warning is worth the most.
+ */
+const EXECUTION_ADJACENT_SAMPLES = [
+  'permission_mode', 'env', 'env.KEY', 'monitors', 'monitors.0', 'monitors.0.command',
+  'boot_skill', 'shutdown_skill', 'voice', 'voice.prose',
+  'routines.0.precheck', 'routines.0.precheck_timeout_s',
+];
+
+/** Does this rule pattern reach anything execution-adjacent, literally or by wildcard? */
+export function ruleReachesExecutionAdjacent(pattern: string): boolean {
+  return isExecutionAdjacentPath(rulePatternProbe(pattern))
+    || EXECUTION_ADJACENT_SAMPLES.some(sample => ruleMatches(pattern, sample));
 }
