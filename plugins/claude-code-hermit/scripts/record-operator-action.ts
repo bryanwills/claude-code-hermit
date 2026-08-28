@@ -18,8 +18,13 @@ process.stdout.on('error', () => {});
 //
 // Filtered prompts (not operator activity):
 //   [hermit-routine:…   — cron-delivered routine prompts (hermit-routines/SKILL.md:43-54)
-//   <channel…           — unauthorized DMs arrive here before channel-responder's allowlist
-//                          check; recording them would let bot traffic suppress AUTO_CLOSE
+//   <channel…           — only when the sender fails the channel's `allowed_users` gate;
+//                          recording those would let stranger/bot traffic suppress
+//                          AUTO_CLOSE. An allowlisted sender IS operator activity and is
+//                          recorded here (issue #835 — a channel-only conversation left
+//                          the clock frozen, so the midnight post-close /clear fired
+//                          mid-exchange). This hook is the mechanical write site;
+//                          channel-responder/SKILL.md 1d's --force is a fallback.
 //   HEARTBEAT_EVALUATE/HEARTBEAT_ERROR/ROUTINE_DUE/ROUTINE_MONITOR_ERROR — Monitor-delivered
 //                          scheduler wake notifications (heartbeat-monitor.sh, routines.ts due,
 //                          routine-monitor.sh) — see isRoutinePrompt below
@@ -29,7 +34,22 @@ process.stdout.on('error', () => {});
 import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
+import { isAllowedSender } from './lib/channel-auth';
+import { parseChannelEnvelope, type ChannelEnvelope } from './lib/channel-envelope';
+import { readConfigRaw } from './lib/config-read';
 import { appendUsageEvent } from './lib/usage-ledger';
+
+type Json = any;
+
+// What the channel allowlist gate needs, supplied by a caller that already has
+// it. The pipeline hands over the envelope it parsed and the raw config it
+// memoizes, so neither is computed twice per prompt; omitted (direct-script
+// path) they are derived here, and only for a `<channel` prompt — the one
+// shape whose verdict depends on them.
+export interface ChannelGateInputs {
+  envelope: ChannelEnvelope | null;
+  config: Json;
+}
 
 const AGENT_DIR = hermitDir();
 const STATE_PATH = path.join(AGENT_DIR, 'state', 'last-operator-action.json');
@@ -73,10 +93,23 @@ const INJECTED_EXACT = new Set([
   '/claude-code-hermit:session-close --shutdown',
 ]);
 
-function isRoutinePrompt(prompt: string): boolean {
+function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
   if (prompt.startsWith('[hermit-routine:')) return true;
   const t = prompt.trim();
-  if (t.startsWith('<channel')) return true;
+  // A channel turn is operator activity exactly when its sender clears the same
+  // `allowed_users` gate channel-responder applies (lib/channel-auth.ts owns the
+  // semantics: absent list → accept all, [] → lockdown, unverifiable id → closed).
+  // An unparseable `<channel` prefix keeps the old blanket skip — it carries no
+  // identity to check, so it cannot be attributed to the operator.
+  if (t.startsWith('<channel')) {
+    const envelope = channel ? channel.envelope : parseChannelEnvelope(t);
+    if (!envelope) return true;
+    // Presence of `channel`, not truthiness of its config: an unreadable config
+    // is a legitimate null the caller already resolved (fail-open → accept-all),
+    // and re-reading it here would just repeat that read.
+    const config = channel ? channel.config : readConfigRaw(AGENT_DIR);
+    return !isAllowedSender(config, envelope.source, envelope.userId);
+  }
   if (INJECTED_EXACT.has(t)) return true;
   // Harness task notifications — Monitor events AND subagent/background-task
   // completions. Live-probed 2026-08-19 (CC 2.1.235): the harness wraps the
@@ -154,8 +187,9 @@ function appendSkillUsage(name: string): void {
 }
 
 // The UserPromptSubmit half, callable in-process by user-prompt-pipeline.ts.
-export function run(prompt: string): void {
-  if (!isRoutinePrompt(prompt)) {
+// `channel` feeds the channel allowlist gate only — see ChannelGateInputs.
+export function run(prompt: string, channel?: ChannelGateInputs): void {
+  if (!isRoutinePrompt(prompt, channel)) {
     // Skill-usage capture is operator-activity only — hermit's own injected
     // slash commands (INJECTED_EXACT) are routine prompts, so gating on the
     // same filter keeps automated heartbeat/session-close/routines fires out
@@ -179,6 +213,8 @@ function main(raw: string): void {
     return;
   }
 
+  // Direct-script path: no caller-supplied envelope or config, so isRoutinePrompt
+  // derives both itself — for a `<channel` prompt only.
   run(prompt);
 }
 

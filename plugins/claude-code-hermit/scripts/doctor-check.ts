@@ -1813,6 +1813,77 @@ function checkModelPricingKnown(p: DoctorPaths = PATHS) {
   }
 }
 
+function checkMemorySize(p: DoctorPaths = PATHS) {
+  const CLAUDE_WARN_LINES = 200;
+  const MEMORY_WARN_LINES = 160;
+  const MEMORY_WARN_BYTES = 20 * 1024;
+  const projectRoot = path.dirname(p.hermitDir);
+
+  // A file saved with a trailing newline (the editor norm) has one more
+  // split() element than `wc -l` counts, which would trip every threshold a
+  // line early. Drop the trailing blank so the count matches what the operator
+  // sees on disk.
+  const countLines = (text: string): number => {
+    const segments = text.split(/\r?\n/);
+    return segments[segments.length - 1] === '' ? segments.length - 1 : segments.length;
+  };
+
+  try {
+    const parts: string[] = [];
+
+    for (const name of ['CLAUDE.md', 'CLAUDE.local.md']) {
+      const filePath = path.join(projectRoot, name);
+      if (!fs.existsSync(filePath)) continue;
+      try {
+        const lines = countLines(fs.readFileSync(filePath, 'utf8'));
+        if (lines >= CLAUDE_WARN_LINES) {
+          parts.push(`${name}: ${lines} lines (>=${CLAUDE_WARN_LINES}); use native /doctor to trim it`);
+        }
+      } catch (e: any) {
+        parts.push(`${name}: unreadable (${e.message})`);
+      }
+    }
+
+    // Same key scheme as lib/cc-compat.ts transcriptDirFor: Claude Code replaces
+    // every non-alphanumeric character, not just '/'. A '/'-only scheme mis-keys
+    // any path containing a dot or other punctuation (a dotted repo name, a
+    // project under a hidden directory), and the leg below would then read as a
+    // permanent, silent "ok".
+    // Known gap: a doctor run whose project root is a *linked git worktree* finds
+    // nothing here — Claude Code writes transcripts under the worktree's own key
+    // but keeps auto-memory under the main checkout's key, so MEMORY.md never
+    // exists at the worktree key and this leg stays silently "ok". Only affects
+    // hermits driven from a worktree; a normally-installed hermit is unaffected.
+    const pathKey = projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
+    const memoryPath = path.join(defaultConfigDir(), 'projects', pathKey, 'memory', 'MEMORY.md');
+    // Auto-memory loads only MEMORY.md's first 200 lines or 25 KB, whichever
+    // comes first, and drops the rest with no notice. The thresholds sit at 80%
+    // of that cap so there is room to consolidate before entries start vanishing.
+    if (fs.existsSync(memoryPath)) {
+      try {
+        const memory = fs.readFileSync(memoryPath, 'utf8');
+        const lines = countLines(memory);
+        const bytes = Buffer.byteLength(memory, 'utf8');
+        const bounds: string[] = [];
+        if (lines >= MEMORY_WARN_LINES) bounds.push(`${lines} lines (>=${MEMORY_WARN_LINES} line threshold)`);
+        if (bytes >= MEMORY_WARN_BYTES) bounds.push(`${(bytes / 1024).toFixed(1)} KB (>=${MEMORY_WARN_BYTES / 1024} KB byte threshold)`);
+        if (bounds.length > 0) {
+          parts.push(`MEMORY.md: ${bounds.join('; ')}; approaching the 200-line / 25 KB hard cap (whichever comes first is silently truncated)`);
+        }
+      } catch (e: any) {
+        parts.push(`MEMORY.md: unreadable (${e.message})`);
+      }
+    }
+
+    if (parts.length > 0) {
+      return { id: 'memory-size', status: 'warn', detail: parts.join('; ') };
+    }
+    return { id: 'memory-size', status: 'ok', detail: 'project CLAUDE files and auto-memory below warning thresholds' };
+  } catch (e: any) {
+    return { id: 'memory-size', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
 // ----------------- Context scan -----------------
 // Reads the record startup-context.ts writes on every SessionStart: which
 // injected entries (compiled/ bodies, catalog summaries, OPERATOR/SHELL
@@ -2091,6 +2162,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkRawSize(p),
     checkCredentialExpiry(p),
     checkModelPricingKnown(p),
+    checkMemorySize(p),
     checkContextScan(p),
     checkVoiceCarrier(p),
     await checkChannelLiveness(p),
@@ -2218,7 +2290,7 @@ export {
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
   checkRoutinePrecheck, checkRawSize,
-  checkCredentialExpiry, checkModelPricingKnown, checkContextScan, checkVoiceCarrier, checkChannelLiveness,
+  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
   resolvePaths,

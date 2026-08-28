@@ -96,7 +96,7 @@ The monitor's poll interval is fixed at registration from `heartbeat.every`. The
 ### stop
 
 1. Read `state/heartbeat-monitor.runtime.json`. If a `task_id` is present, TaskStop it.
-2. Clear `state/heartbeat-monitor.runtime.json` (write `{}`).
+2. Clear `state/heartbeat-monitor.runtime.json` (write `{}`). Delete `state/heartbeat-liveness.json` if it exists — the cleared runtime file has no `started_at`, so a leftover `last_peek_at` would be trusted as current and read fresh until it ages past the threshold, after which the watchdog re-arms the heartbeat the operator just stopped.
 3. Sweep legacy CronCreate: `CronList` → `CronDelete` any entry whose `prompt` matches `/claude-code-hermit:heartbeat run`. Belt-and-suspenders.
 4. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: stopped`.
 

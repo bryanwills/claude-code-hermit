@@ -767,10 +767,10 @@ export function rearmDamperOpen(lastStamp: unknown, world: World = REAL_WORLD): 
  * neither stamps the operator-activity clock). `alreadyRearmed` short-circuits when
  * step 5 already fired doRearm this tick — that re-armed both, nothing left to do.
  */
-function maybeMonitorRearm(config: Json, sessionName: string, operatorGraceSecs: number, alreadyRearmed: boolean): void {
+function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number, alreadyRearmed: boolean): void {
   if (alreadyRearmed) return;
   if (isPaused(HERMIT_ROOT).paused) return;               // no injection while paused (mirrors doNudge)
-  if (!tmuxSessionAlive(sessionName)) return;             // dead session belongs to the doRestart path
+  if (!sessionAlive) return;                              // dead session belongs to the doRestart path
   const opAge = getOperatorLastActionAgeSecs();
   if (opAge !== null && opAge < operatorGraceSecs) return; // operator mid-conversation — back off
 
@@ -1493,8 +1493,11 @@ async function main(): Promise<void> {
   // condition this tier always documented has to actually be tested. 3b needs no equivalent —
   // capturePane returns null on a dead session and the `paneContent !== null` check catches it.
   // Reuses step 3's verdict when it ran; falls back to a fresh check when it didn't —
-  // 'idle' (the path this fix enables) and any other unlisted session_state.
-  if (sessionAlive ?? tmuxSessionAlive(sessionName)) {
+  // 'idle' (the path this fix enables) and any other unlisted session_state. The fallback
+  // is cached back, not discarded: on an idle arc step 3 never ran, so this is the tick's
+  // only has-session call and steps 5 and 6 below reuse it rather than spawning tmux again.
+  sessionAlive = sessionAlive ?? tmuxSessionAlive(sessionName);
+  if (sessionAlive) {
     // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
     // `session_id` is the logical S-NNN arc id and resolves to a path that never exists.
     const transcriptId = typeof runtime.opened_transcript === 'string' ? runtime.opened_transcript : null;
@@ -1526,28 +1529,31 @@ async function main(): Promise<void> {
   // auto-answering a decision that is always the operator's to make.
   if (pendingQuestion) process.exit(0);
 
-  // Supervision-only boundary. Everything below this line sends keystrokes into the pane
-  // (steps 4 and 5) or restarts the session (the pane-frozen path inside step 4, and the
-  // monitor re-arm in step 6) on the watchdog's own initiative. An idle session arc gets
-  // the observe/notify tiers above and never these, which is what keeps "never resurrect a
-  // deliberately-stopped hermit" true now that step 2 no longer exits on it — and a
-  // deliberately-stopped hermit is not merely 'idle' anyway: hermit-stop always stamps
-  // shutdown_completed_at, which step 2 still hard-exits on.
+  // Supervision-only scope. An idle session arc suppresses step 4 — the wedge nudge and the
+  // pane-frozen restart, the two tiers that act on a pane whose intent the watchdog cannot
+  // read. It does NOT suppress the re-arm injections in steps 5 and 6: a hermit rests at
+  // 'idle' between arcs, so that is exactly where a dead heartbeat/routine Monitor has to be
+  // recovered from, and until this it was not — the only recovery was the daily
+  // heartbeat-restart anchor, a CronCreate that dies with the process it was registered in,
+  // i.e. in the same event that kills the monitors. Those steps carry their own guards
+  // (pause, dead tmux, operator-recency, a per-monitor damper) and inject only slash commands
+  // whose skills are stop-then-start idempotent, so a re-arm cannot stack duplicate Monitors.
   //
-  // Step 3's dead-session restart needs no equivalent guard: its state whitelist
+  // "Never resurrect a deliberately-stopped hermit" still holds: hermit-stop stamps
+  // shutdown_completed_at, which step 2 hard-exits on — a stopped hermit is never merely
+  // 'idle'. Step 3's dead-session restart needs no guard either: its state whitelist
   // (in_progress / waiting / suspect_process) already excludes 'idle'.
   //
-  // Step 3a is the one tier above this line that can eventually reach a restart: the
-  // re-auth relay's `finish` verb calls requestRestart() once the operator has completed
-  // the browser sign-in. That is deliberate — an expired setup-token strands a RESTING
-  // hermit just as hard as a working one, and the restart only happens after the operator
-  // acts on the relay's message, so it is operator-initiated, not watchdog-initiated.
-  if (supervisionOnly) process.exit(0);
+  // Step 3a can also reach a restart from an idle arc: the re-auth relay's `finish` verb
+  // calls requestRestart() once the operator has completed the browser sign-in. That is
+  // deliberate — an expired setup-token strands a RESTING hermit just as hard as a working
+  // one, and the restart only follows the operator acting on the relay's message.
 
-  // 4. Wedge detection (only when heartbeat is enabled + within active hours)
+  // 4. Wedge detection (only when heartbeat is enabled + within active hours, and never on an
+  //    idle arc — see the supervision-only scope note above)
   const heartbeatCfg = config?.heartbeat ?? {};
   const heartbeatIsObj = heartbeatCfg && typeof heartbeatCfg === 'object' && !Array.isArray(heartbeatCfg);
-  if (heartbeatIsObj && ('enabled' in heartbeatCfg ? heartbeatCfg.enabled : true)) {
+  if (!supervisionOnly && heartbeatIsObj && ('enabled' in heartbeatCfg ? heartbeatCfg.enabled : true)) {
     const activeHours = heartbeatCfg.active_hours;
     const activeHoursIsObj = activeHours && typeof activeHours === 'object' && !Array.isArray(activeHours);
     if (!activeHoursIsObj || inActiveHours(activeHours, config.timezone ?? 'UTC')) {
@@ -1585,6 +1591,12 @@ async function main(): Promise<void> {
             watchdogState.last_pane_hash = currentPaneHash;
             writeWatchdogState(watchdogState);
             await doRestart(sessionName, 'pane-frozen', runtime, timezone);
+            // doRestart kills the tmux session and spawns a detached replacement, so the
+            // verdict cached at step 3c is stale from here on. Steps 5 and 6 below send
+            // keys into this pane and guard on it: reusing the pre-restart `true` would
+            // inject slash commands into a killed (or still-booting) session and burn the
+            // per-monitor re-arm damper for 6h on a send that never landed.
+            sessionAlive = tmuxSessionAlive(sessionName);
           } else {
             doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs);
           }
@@ -1616,7 +1628,7 @@ async function main(): Promise<void> {
     // Only re-arm when operator is silent (not in the middle of a conversation)
     if (opAge === null || opAge >= operatorGraceSecs) {
       const watchdogState = readWatchdogState();
-      if (rearmDamperOpen(watchdogState.last_rearm_fallback) && tmuxSessionAlive(sessionName)) {
+      if (rearmDamperOpen(watchdogState.last_rearm_fallback) && sessionAlive) {
         doRearm(sessionName, config);
         watchdogState.last_rearm_fallback = utcStamp();
         writeWatchdogState(watchdogState);
@@ -1628,7 +1640,7 @@ async function main(): Promise<void> {
   // 6. Liveness-keyed monitor re-arm: recover a heartbeat/routine Monitor that died
   // mid-session, detected via its stale liveness file rather than step 5's fired-age
   // heuristic (which needs a model-issued 'fired' metric that can be missing).
-  maybeMonitorRearm(config, sessionName, operatorGraceSecs, rearmedThisTick);
+  maybeMonitorRearm(config, sessionName, sessionAlive, operatorGraceSecs, rearmedThisTick);
 }
 
 // --- Install / uninstall ---

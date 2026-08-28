@@ -90,7 +90,9 @@ After authorization passes, run:
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts --force
 ```
 
-This writes `state/last-operator-action.json` with the current timestamp, resetting the AUTO_CLOSE quiet window (used by both the 12h-inactivity trigger and the daily-midnight lull drain). It also opens `state/operator-turn-open.json`, which defers monitor-mode routines for the rest of this exchange (cleared at Stop). The `UserPromptSubmit` hook deliberately skips `<channel` prompts (it can't see the allowlist); this step is the authorized write site for both. Run it as early as authorization allows — a routine due before it lands can interject mid-exchange.
+This writes `state/last-operator-action.json` with the current timestamp, resetting the AUTO_CLOSE quiet window (used by both the 12h-inactivity trigger and the daily-midnight lull drain). It also opens `state/operator-turn-open.json`, which defers monitor-mode routines for the rest of this exchange (cleared at Stop).
+
+The `UserPromptSubmit` hook already writes both for any `<channel` prompt whose sender clears this channel's `allowed_users` gate — that mechanical write, not this step, is what keeps the clock honest on a channel-only conversation. Run this anyway: it is idempotent, and it covers the turns the hook could not attribute (an envelope it could not parse, or a sender you admitted by some other route). Run it as early as authorization allows.
 
 ## 1e. Chat-ID persistence — hook-owned, nothing to do here
 

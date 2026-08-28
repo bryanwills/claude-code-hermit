@@ -12,7 +12,7 @@ import { kStr, formatTokens } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, readTailLines, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
 import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
-import { extractSection, stripPlaceholders } from './lib/md-write';
+import { extractSection, isResolvedBlockerLine, stripPlaceholders } from './lib/md-write';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
 import { readSettledConfig } from './lib/config-read';
 import { setPause, isPaused } from './lib/pause';
@@ -500,7 +500,15 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
 
   const task = stripPlaceholders(taskSection ?? '');
 
-  const blockersText = stripPlaceholders(blockersSection ?? '');
+  // Resolved (`~` / `[resolved]`) entries are dropped, matching the other blocker
+  // surfaces: bin/hermit-status prints this field verbatim as "BLOCKED: …".
+  // The dash filter drops the bare "-" a comment-only bullet leaves behind once
+  // stripPlaceholders runs (startup-context's dropBulletResidue, same shape).
+  const blockersText = stripPlaceholders(blockersSection ?? '')
+    .split('\n')
+    .filter(l => !isResolvedBlockerLine(l) && !/^\s*-+\s*$/.test(l))
+    .join('\n')
+    .trim();
   const hasBlockers = blockersText.length > 0 && !/^none$/i.test(blockersText);
 
   const statusData = {

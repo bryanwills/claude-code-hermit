@@ -144,12 +144,12 @@ Steps 1–3 are **scheduler-owned context-hygiene** — the watchdog script runs
 2. If context-clear conditions met (prompt tokens over `watchdog.context_clear_tokens`, always-on, quiescent, operator silent) → send `/clear`, exit.
 3. If routine-hygiene compact conditions met (see `context_hygiene.compact` below) → send `/compact`, exit.
 4. If `enabled: false` → exit (restart/nudge machinery disabled).
-5. Read `runtime.json`. If explicit shutdown markers are set, the runtime is interactive, or no tmux session is named → exit. `session_state == idle` is supervision-only, not an immediate exit: the alert tiers below still run.
+5. Read `runtime.json`. If explicit shutdown markers are set, the runtime is interactive, or no tmux session is named → exit. `session_state == idle` is supervision-only, not an immediate exit: the alert tiers and the monitor re-arms below still run.
 6. If an active session's tmux session is gone → restart, unless fresh shared-liveness says the process survived without tmux; in that orphan shape, alert and exit instead of starting a duplicate.
 7. If a re-auth relay was spawned or remains active → exit while it owns recovery.
 8. If the captured pane shows a stalled dialog → send one deduplicated operator alert for the episode.
 9. If the transcript ends with an `enqueue` that has not drained for 30 minutes while tmux is alive → send one deduplicated `session-wedged` alert for the episode.
-10. If a dialog is pending, or the session is supervision-only (`idle`) → exit before any tier that sends keystrokes or restarts the session.
+10. If a dialog is pending → exit before any tier that sends keystrokes or restarts the session. A supervision-only (`idle`) session skips step 11's wedge nudge and pane-frozen restart, but still reaches the monitor re-arms in steps 12 and 13 — a hermit rests at `idle`, so that is where a dead Monitor has to be recovered from.
 11. If the heartbeat is stale and the operator is quiet and the pane is frozen for `escalate_after` cycles → restart. Before that threshold: nudge (`/claude-code-hermit:heartbeat run`).
 12. If the in-session 4am `heartbeat-restart` routine missed its fire (last fired > 26h ago) → send-keys re-arm fallback.
 13. If heartbeat or routine Monitor liveness is stale → re-arm the missing monitor.
