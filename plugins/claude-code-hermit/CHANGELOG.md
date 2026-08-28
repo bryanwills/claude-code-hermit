@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-- The watchdog now re-arms a heartbeat or routine Monitor whose liveness has gone stale while the session rests at `idle`, instead of exiting above those tiers — previously heartbeat and routines could stay silent for a full day after a restart caught the hermit resting. The wedge nudge and the pane-frozen restart are still suppressed at `idle`.
-- `/claude-code-hermit:heartbeat stop` now deletes `state/heartbeat-liveness.json` alongside clearing the runtime file, so a stopped heartbeat is no longer re-armed by the watchdog once the leftover liveness timestamp ages out.
 ### Added
 - New `memory-size` doctor check warns when a project `CLAUDE.md` or `CLAUDE.local.md` reaches 200 lines, or auto-memory `MEMORY.md` reaches 160 lines or 20 KB.
 
@@ -16,6 +13,8 @@
 ### Fixed
 - `sessions/.status.json` no longer carries a resolved (`~` / `[resolved]`) blocker in its `blockers` field, so `bin/hermit-status` stops printing `BLOCKED:` for a blocker the session already cleared. A comment-only blocker bullet no longer leaves a bare `-` there either.
 - Channel messages from a sender that clears `allowed_users` now advance the operator-activity clock from the `UserPromptSubmit` hook, so a chat-only conversation no longer reads as silence to the post-close `/clear`, the 12h auto-close, and the context-hygiene backoff. Other senders are still ignored.
+- The watchdog now re-arms a heartbeat or routine Monitor whose liveness has gone stale while the session rests at `idle`, instead of exiting above those tiers — previously heartbeat and routines could stay silent for a full day after a restart caught the hermit resting. The wedge nudge and the pane-frozen restart are still suppressed at `idle`.
+- `/claude-code-hermit:heartbeat stop` now deletes `state/heartbeat-liveness.json` alongside clearing the runtime file, so a stopped heartbeat is no longer re-armed by the watchdog once the leftover liveness timestamp ages out.
 
 ### Upgrade Instructions
 - **Decide whether to keep the plugins hatch used to recommend.** Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator` or `feature-dev`; Claude Code covers them natively (see `${CLAUDE_PLUGIN_ROOT}/docs/recommended-plugins.md`). Nothing is removed for you. First, unconditionally delete `.claude-code-hermit/.baseline-pending` if it exists. Then inventory: `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get scheduled_checks` for entries whose `plugin` is `claude-code-setup` or `claude-md-management`; `… get docker.recommended_plugins` for entries naming any of the four; `claude plugin list` for any of the four installed. If all three are empty, skip silently. Otherwise this is the operator's decision with no default: **defer per SKILL.md Step 10** with `options: ["Keep", "Remove"]` and no `on_resolve`; the choice is applied in attended Step 10 only.
