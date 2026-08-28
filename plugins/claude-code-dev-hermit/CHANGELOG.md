@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.11] - 2026-08-28
 
 ### Changed
 - Hatch now offers only `context7` as a companion plugin (single yes/no); `feature-dev` is retired — Claude Code's native `Plan`/`Explore` agents cover the same research-and-planning ground. The standard-mode `§Implementation Flow` no longer suggests `/feature-dev:feature-dev` for unfamiliar code paths.
