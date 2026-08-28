@@ -7,6 +7,7 @@
 - New `memory-size` doctor check warns when a project `CLAUDE.md` or `CLAUDE.local.md` reaches 200 lines, or auto-memory `MEMORY.md` reaches 160 lines or 20 KB.
 
 ### Changed
+- `/docker-setup` now asks after a successful container login whether to mint the long-lived setup token or stay on `/login` credentials, in both Quick and Advanced; the Advanced auth prompt is Subscription / API Key, and the manual guide lists `hermit-docker setup-token` as optional.
 - Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator`, or `feature-dev`, and no longer seeds their `scheduled_checks` entries — Claude Code's native `Plan`/`Explore` agents, auto-memory, and `/doctor` CLAUDE.md trims cover the same ground, and every loaded skill description is paid on every API call of an always-on hermit. The `scheduled_checks` mechanism itself is unchanged; register any plugin's skill with `/hermit-settings scheduled-checks`.
 - `proposal-act` authors `## Skill Improvement` and `## Skill Draft` bodies in-main from the source brief instead of delegating to `skill-creator`; the falsification gate's read-only pass always uses the native `Plan` agent instead of `feature-dev:code-explorer`.
 - The first-session baseline audit offer (`.baseline-pending`) is removed along with the plugins it audited.

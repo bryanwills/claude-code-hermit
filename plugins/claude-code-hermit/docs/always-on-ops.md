@@ -264,9 +264,11 @@ All state is in `sessions/SHELL.md` on disk. A disconnect loses conversation con
 
 ## 6. Login Renewal
 
-A Docker hermit on subscription auth uses a **long-lived login token** minted with `claude setup-token`. It lasts a year, and because the hermit mints it, the expiry date is known from day one — the CLI itself exposes no expiry surface for these tokens, so the hermit tracks it in `state/setup-token.json`.
+A Docker hermit on subscription auth can hold a **long-lived login token** minted with `claude setup-token` — offered right after login in `/docker-setup`, recommended. It lasts a year, and because the hermit mints it, the expiry date is known from day one — the CLI itself exposes no expiry surface for these tokens, so the hermit tracks it in `state/setup-token.json`. A hermit still on plain `/login` credentials re-authenticates with `hermit-docker login` when they expire, and can convert to a long-lived token at any time with `hermit-docker setup-token`.
 
-Renewal takes one browser tap and needs no server access.
+The rest of this section covers renewal for a hermit holding the long-lived token. A hermit still on plain `/login` credentials re-authenticates from the host with `hermit-docker login` when the session expires instead, or converts once with `hermit-docker setup-token` to switch to the flow below.
+
+For a token-holding hermit, renewal takes one browser tap and needs no server access.
 
 **Two weeks before expiry**, the hermit asks you over your channel. Reply and it sends a one-time sign-in link; open it, send back the code it gives you, and the hermit installs the new token and restarts itself. Doctor's `credential-expiry` check reports the same thing if you'd rather see it there.
 
