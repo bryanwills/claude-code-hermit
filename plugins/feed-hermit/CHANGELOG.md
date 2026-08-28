@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `feed-brief` Phase 1 now classifies each `web`/`rss` source from the `source-fetcher` agent's written output file, not its one-line reply, so a fabricated or partial success summary no longer misclassifies a failed fetch as `sources_used`/`sources_quiet`. `source-fetcher` reports per-source status derived from what it wrote and never writes to a suffixed variant path.
+
 ## [0.1.3] - 2026-08-14
 
 ### Fixed

@@ -184,7 +184,7 @@ You WRITE your result to the file path supplied in your dispatch prompt. That pa
 tmp/feed-source-items-<slot>.json
 ```
 
-where `<slot>` is the slot name from your dispatch (e.g. `morning`, `evening`). Write to that exact relative path in the project root — never `/tmp/`. Use the `Write` tool. Do not also print the JSON back as your reply; your reply is a one-line confirmation of how many sources succeeded/failed.
+where `<slot>` is the slot name from your dispatch (e.g. `morning`, `evening`). Write to that exact relative path in the project root — never `/tmp/`, never a suffixed variant (`-complete`, `-partial`, or any other name). Use the `Write` tool. Do not also print the JSON back as your reply; your reply is a one-line per-source status derived from the file you just wrote, never an aggregate count you did not read back. If the `Write` itself fails, say so plainly in your reply — do not report success.
 
 Write exactly this JSON shape (valid JSON only, no prose, no code fences inside the file):
 

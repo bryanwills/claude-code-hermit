@@ -118,3 +118,8 @@ test("feed-brief defers the injection rule to its single owner", () => {
   const body = readFileSync(join(ROOT, "skills", "feed-brief", "SKILL.md"), "utf8");
   expect(body).toMatch(/§ Source Fetching[\s\S]{0,60}owns this rule/);
 });
+
+test("feed-brief Phase 1 reconciles the fetch file, not the agent's reply", () => {
+  const body = readFileSync(join(ROOT, "skills", "feed-brief", "SKILL.md"), "utf8");
+  expect(body).toMatch(/Reconcile against the file, not the reply/);
+});

@@ -189,6 +189,11 @@ NOT `/tmp/`). Consumed by `feed-brief` Phase 3. Raw scratch — 3-day retention 
 - Caps/rules: <=20 items per source; `summary` is source-derived or `""`; URLs absolute and
   deduped within a source; continue-on-failure.
 
+**Maps to daily-archive `sources_skipped`/`sources_quiet` (§2) as:** `status: "failed"`, or a
+`feed-sources.md` source absent from `sources[]` entirely, → `sources_skipped`. `status: "ok"`
+with empty `items[]` → `sources_quiet`. `feed-brief` Phase 1 reconciles against this file, not
+the agent's reply — see `skills/feed-brief/SKILL.md`.
+
 Full contract lives in `agents/source-fetcher.md`.
 
 ---
