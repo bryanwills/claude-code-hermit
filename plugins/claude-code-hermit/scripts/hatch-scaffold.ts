@@ -149,7 +149,10 @@ for (const jsonl of [
   'channel-replies.jsonl',
 ]) {
   const dest = path.join(hermit, 'state', jsonl);
-  seedIfAbsent(dest, () => fs.writeFileSync(dest, ''));
+  // 0600, not the umask default a bare writeFileSync would leave: these ledgers
+  // carry channel and user IDs, and doctor's `permissions` check reports any
+  // world-readable state file.
+  seedIfAbsent(dest, () => fs.writeFileSync(dest, '', { mode: 0o600 }));
 }
 // state/pending-close.json: deliberately never created.
 

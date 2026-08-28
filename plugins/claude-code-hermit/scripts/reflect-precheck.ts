@@ -28,6 +28,7 @@ import { extractSection, stripPlaceholders } from './lib/md-write';
 import { pinStateDirOrExit, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { costIndexPath, readCostIndex } from './lib/cost-log';
+import { ensureLedgerFile } from './lib/append-jsonl';
 
 type Json = any;
 
@@ -418,6 +419,7 @@ try {
   }
 
   if (newRows.length > 0) {
+    ensureLedgerFile(ledgerPath);
     fs.appendFileSync(ledgerPath, newRows.join('\n') + '\n', 'utf-8');
     wroteNewRows = true;
   }

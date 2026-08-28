@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { appendJsonlLine } from './append-jsonl';
+import { appendJsonlLine, pruneJsonlIfHeadStale } from './append-jsonl';
 import { readRuntimeJson } from './runtime';
 import { utcISOStamp } from './time';
 
@@ -94,44 +94,6 @@ export function diffLeaves(before: Json, after: Json, prefix = ''): Array<{ path
   return changes;
 }
 
-/** Drop rows older than the retention window; only called when the head row is stale. */
-function pruneStale(file: string, now: Date): void {
-  const cutoff = now.getTime() - RETENTION_DAYS * 86_400_000;
-  const kept = fs
-    .readFileSync(file, 'utf-8')
-    .split('\n')
-    .filter((line) => {
-      if (!line.trim()) return false;
-      try {
-        return new Date(JSON.parse(line).ts).getTime() >= cutoff;
-      } catch {
-        return true; // unparseable lines are kept verbatim, per house rule
-      }
-    });
-  const tmp = `${file}.tmp`;
-  fs.writeFileSync(tmp, kept.length ? kept.join('\n') + '\n' : '', { encoding: 'utf-8', mode: 0o600 });
-  fs.renameSync(tmp, file);
-}
-
-/** Prune only when the ledger's oldest row has aged out — avoids rewriting on every append. */
-function pruneIfHeadStale(file: string, now: Date): void {
-  if (!fs.existsSync(file)) return;
-  const fd = fs.openSync(file, 'r');
-  try {
-    const buf = Buffer.alloc(512);
-    const read = fs.readSync(fd, buf, 0, 512, 0);
-    const head = buf.subarray(0, read).toString('utf-8').split('\n')[0];
-    if (!head.trim()) return;
-    const ts = new Date(JSON.parse(head).ts).getTime();
-    if (Number.isNaN(ts) || ts >= now.getTime() - RETENTION_DAYS * 86_400_000) return;
-  } catch {
-    return;
-  } finally {
-    fs.closeSync(fd);
-  }
-  pruneStale(file, now);
-}
-
 /**
  * Append one row per changed leaf. `before === undefined` means the file did not
  * exist (hatch), which records a single "config created" row rather than one row
@@ -170,10 +132,7 @@ export function auditConfigChange(
 
     const file = ledgerPath(stateDir);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    pruneIfHeadStale(file, new Date());
-    // Create with 0600 before appending — rows can carry channel and user IDs,
-    // and appendFileSync would otherwise leave the file at the process umask.
-    if (!fs.existsSync(file)) fs.closeSync(fs.openSync(file, 'a', 0o600));
+    pruneJsonlIfHeadStale(file, RETENTION_DAYS * 86_400_000, new Date());
     for (const row of rows) appendJsonlLine(file, JSON.stringify(row));
   } catch {
     // Fail open: the config write already landed, and a missing audit row must

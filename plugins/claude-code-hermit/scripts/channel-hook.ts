@@ -6,6 +6,7 @@ import { readConfigRaw } from './lib/config-read';
 import { auditConfigChange } from './lib/config-audit';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { logMessage, isLoggingEnabled } from './lib/channel-log';
+import { ensureLedgerFile } from './lib/append-jsonl';
 
 type Json = any;
 
@@ -149,6 +150,7 @@ function updateLastReplyAt(channelKey: string, ts: string): void {
 function appendReplyEvent(channelKey: string, ts: string): void {
   try {
     const entry = JSON.stringify({ ts, channel: channelKey, event: 'reply' });
+    ensureLedgerFile(REPLIES_PATH);
     fs.appendFileSync(REPLIES_PATH, entry + '\n', 'utf8');
   } catch {}
 }

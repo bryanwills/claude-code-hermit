@@ -29,6 +29,8 @@ import { channelLikelyDown } from './lib/channel-health';
 import { resolve as resolveOutboundChannel, resolveMaintainerTarget } from './resolve-outbound-channel';
 import { sendOperatorNotice, appendMaintainerFindings } from './lib/channel-send';
 import { readAlertState, writeAlertState } from './lib/alert-state';
+import { acquireLock, releaseLock } from './lib/lockfile';
+import { appendDenial } from './lib/denial-log';
 import { safe } from './lib/sanitize';
 import { localISOStamp } from './lib/time';
 import { DENY, resolveLocale } from './lib/messages';
@@ -36,7 +38,16 @@ import { DENY, resolveLocale } from './lib/messages';
 type Json = any;
 
 const DEDUP_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
-const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — carry-over cap
+// Bounded for the same reason TOOL_NAME_MAX_LEN below bounds tool_name: the
+// program name is model-supplied and is rendered into doctor's detail line. Real
+// program names are far shorter.
+const PROGRAM_MAX_LEN = 32;
+// A peer hook process's read-modify-write of the alerts file takes a few ms. Long
+// enough to wait out, short enough that a denied tool call never stalls on it —
+// the same posture (and constants) as lib/progress-log.ts's SHELL.md lock.
+const LOCK_WAIT_MS = 2000;
+const LOCK_STALE_MS = 10_000;
 const MESSAGE_MAX_LEN = 300;
 // The reason is bounded on its own so a long one (permission-rule denials are
 // far wordier than the classifier's fixed string) cannot push the trailing
@@ -51,7 +62,7 @@ const TOOL_NAME_MAX_LEN = 60;
 const TOOL_NAME_HASH_LEN = 6;
 
 // One open window per tool: when it opened, and how many further denials of the
-// same tool it has absorbed since.
+// same tool it has absorbed since. The 7-day record lives in lib/denial-log.ts.
 interface DenyWindow {
   at: string;
   suppressed: number;
@@ -81,9 +92,92 @@ function readAlerts(dir: string): Record<string, DenyWindow> {
   return out;
 }
 
+// First word of a Bash command, never anything after it. Env assignments
+// (`TOKEN=abc curl …`) become the sentinel rather than looking at word two.
+function bashProgram(payload: Json): string | null {
+  if (payload.tool_name !== 'Bash') return null;
+  const command = payload.tool_input?.command;
+  if (typeof command !== 'string') return null;
+  const first = command.trim().split(/\s+/, 1)[0];
+  if (!first) return null;
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(first)) return 'env-prefixed';
+  const token = safe(path.basename(first)).slice(0, PROGRAM_MAX_LEN);
+  return token || null;
+}
+
 function writeAlerts(dir: string, alerts: Record<string, DenyWindow>): void {
   fs.mkdirSync(path.dirname(alertsPath(dir)), { recursive: true });
   writeAlertState(alertsPath(dir), alerts);
+}
+
+/**
+ * Advisory lock over both of this hook's writes — the alerts file's
+ * read-modify-write and the event-log append. Claude Code does not serialise hook
+ * invocations, so two denials in one assistant turn can otherwise each overwrite
+ * the whole alerts map with its own stale copy, dropping a peer tool's open
+ * window. Best-effort by design, the same posture as lib/progress-log.ts's
+ * SHELL.md lock: waiting out a contended lock is not worth stalling a denied tool
+ * call inside a 12s hook timeout, so we proceed unlocked instead.
+ *
+ * The lock file is named for the alerts file though it now guards both; renaming
+ * it would leave an upgrading install with one process on each name, briefly
+ * unprotected, for no functional gain.
+ */
+function withAlertsLock<T>(dir: string, fn: () => T): T {
+  const lockPath = `${alertsPath(dir)}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let held = false;
+  while (!held && Date.now() < deadline) {
+    try {
+      held = acquireLock(lockPath, LOCK_STALE_MS);
+    } catch {
+      break; // the lock path is unwritable — the write below may still succeed
+    }
+    if (!held) Bun.sleepSync(20);
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) releaseLock(lockPath);
+  }
+}
+
+/**
+ * Record the denial and open or extend this tool's 30-minute window, in one
+ * critical section. Returns whether this denial opens a window (and so sends),
+ * plus how many the previous window absorbed — the only place that count can be
+ * truthful, since a burst's size isn't known when the window opens.
+ *
+ * The append rides inside the lock rather than outside it so the record does not
+ * depend on the filesystem serializing concurrent `O_APPEND` writes. Linux does;
+ * a FUSE-backed mount (a bind-mounted project tree under Docker Desktop for macOS)
+ * is not guaranteed to, and an interleaved line is a denial silently lost.
+ */
+function recordDenial(dir: string, key: string, prog: string | null, now: number): { send: boolean; suppressed: number } {
+  return withAlertsLock(dir, () => {
+    appendDenial(dir, key, prog); // swallows its own errors — never breaks the claim below
+    const alerts = readAlerts(dir);
+
+    // Prune before reading this tool's window, so a stale one can neither hold the
+    // window open nor contribute a day-old suppressed count.
+    for (const [k, w] of Object.entries(alerts)) {
+      const t = Date.parse(w.at);
+      if (Number.isNaN(t) || now - t > PRUNE_AGE_MS) delete alerts[k];
+    }
+
+    // Pruning above guarantees a surviving entry's `at` parses.
+    const entry = alerts[key];
+    if (entry && now - Date.parse(entry.at) < DEDUP_WINDOW_MS) {
+      alerts[key] = { at: entry.at, suppressed: entry.suppressed + 1 };
+      writeAlerts(dir, alerts);
+      return { send: false, suppressed: 0 };
+    }
+
+    const suppressed = entry?.suppressed ?? 0;
+    alerts[key] = { at: localISOStamp(), suppressed: 0 };
+    writeAlerts(dir, alerts);
+    return { send: true, suppressed };
+  });
 }
 
 // Bounded, distinct identity for one tool: itself when short enough, otherwise
@@ -127,34 +221,13 @@ async function main(raw: string): Promise<void> {
   const reason = typeof payload.reason === 'string' ? safe(payload.reason).slice(0, REASON_MAX_LEN) : '';
 
   const now = Date.now();
-  const alerts = readAlerts(dir);
-
-  // Prune before reading this tool's window, so a stale one can neither hold the
-  // window open nor contribute a day-old suppressed count.
-  for (const [k, w] of Object.entries(alerts)) {
-    const t = Date.parse(w.at);
-    if (Number.isNaN(t) || now - t > PRUNE_AGE_MS) delete alerts[k];
-  }
-
-  // Pruning above guarantees a surviving entry's `at` parses.
-  const entry = alerts[key];
-  if (entry && now - Date.parse(entry.at) < DEDUP_WINDOW_MS) {
-    // Count it and stay quiet. The count rides out on the next window's message,
-    // the only place it can be truthful — a burst's size isn't known when the
-    // window opens.
-    alerts[key] = { at: entry.at, suppressed: entry.suppressed + 1 };
-    writeAlerts(dir, alerts);
-    return;
-  }
-
-  const suppressed = entry?.suppressed ?? 0;
-  alerts[key] = { at: localISOStamp(), suppressed: 0 };
-  writeAlerts(dir, alerts);
+  const claim = recordDenial(dir, key, bashProgram(payload), now);
+  if (!claim.send) return; // inside an open window — counted, and stays quiet
 
   const locale = resolveLocale(config.language);
   let maintainerText = DENY[locale].maintainerBase(key);
   if (reason) maintainerText += ` — ${reason}`;
-  if (suppressed > 0) maintainerText += DENY[locale].maintainerSuppressed(suppressed);
+  if (claim.suppressed > 0) maintainerText += DENY[locale].maintainerSuppressed(claim.suppressed);
   maintainerText += DENY[locale].maintainerTail();
   maintainerText = maintainerText.slice(0, MESSAGE_MAX_LEN);
 

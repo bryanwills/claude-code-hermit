@@ -22,6 +22,7 @@ import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
 import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
+import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
 import { isCloseableSessionState } from './lib/auto-close';
 import { promptTokensOf, compactibleTokens } from './lib/context-signal';
@@ -162,11 +163,27 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
     if (!fs.existsSync(stateDir)) {
       return { id: 'state', status: 'warn', detail: 'state/ directory does not exist' };
     }
-    const jsonFiles = globDir(stateDir, /\.json$/);
+    const stateFiles = globDir(stateDir, /\.jsonl?$/);
     const broken: string[] = [];
-    for (const f of jsonFiles) {
-      try { JSON.parse(fs.readFileSync(f, 'utf8')); }
-      catch (e) { broken.push(path.basename(f)); }
+    for (const f of stateFiles) {
+      try {
+        const raw = fs.readFileSync(f, 'utf8');
+        // A JSONL ledger has no whole-file JSON shape, and a torn trailing line is
+        // expected rather than corruption (report-export.ts, prune-observations.ts
+        // and config-audit.ts all keep unparseable lines verbatim). Only an
+        // *unterminated* final line is a partial write, though: when the file ends
+        // in a newline every line is complete and must be validated, or a
+        // single-line corrupt ledger reports as parsing cleanly.
+        if (f.endsWith('.jsonl')) {
+          const lines = raw.split('\n');
+          const complete = raw.endsWith('\n') ? lines : lines.slice(0, -1);
+          for (const line of complete) {
+            if (line.trim()) JSON.parse(line);
+          }
+        } else {
+          JSON.parse(raw);
+        }
+      } catch (e) { broken.push(path.basename(f)); }
     }
     if (broken.length > 0) {
       return { id: 'state', status: 'fail', detail: `unparseable: ${broken.join(', ')}` };
@@ -212,7 +229,7 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
       // file existence was already checked above; any error here is unexpected
       return { id: 'state', status: 'fail', detail: 'template-manifest.json: unreadable' };
     }
-    return { id: 'state', status: 'ok', detail: `${jsonFiles.length} state file(s) parse cleanly` };
+    return { id: 'state', status: 'ok', detail: `${stateFiles.length} state file(s) parse cleanly` };
   } catch (e: any) {
     return { id: 'state', status: 'fail', detail: `check failed: ${e.message}` };
   }
@@ -665,7 +682,7 @@ function checkPermissions(p: DoctorPaths = PATHS) {
     const looseFiles: string[] = [];
     const targets: string[] = [configPath];
     if (fs.existsSync(stateDir)) {
-      for (const f of globDir(stateDir, /\.json$/)) targets.push(f);
+      for (const f of globDir(stateDir, /\.jsonl?$/)) targets.push(f);
     }
     for (const target of targets) {
       if (!fs.existsSync(target)) continue;
@@ -2134,6 +2151,109 @@ function checkVoiceCarrier(p: DoctorPaths = PATHS) {
   }
 }
 
+const CLASSIFIER_DENIALS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const CLASSIFIER_DENIALS_DETAIL_MAX = 200;
+const CLASSIFIER_DENIALS_TOOL_LIMIT = 3;
+const CLASSIFIER_DENIALS_PROG_LIMIT = 3;
+// The hook only fires on denials, so the log can never see the successful calls
+// between them and Claude Code's documented "3 in a row" fallback is not derivable.
+// Time-clustering is the honest substitute, and it is cross-tool because that
+// fallback is tool-agnostic — the old per-tool count was an artifact of the dedup
+// window being the only counter available, not a modelling choice. 10 minutes is
+// calibrated against the incident that motivated the notifier: four denials in
+// nine minutes is one cluster of four.
+const CLASSIFIER_DENIALS_CLUSTER_MS = 10 * 60 * 1000;
+const CLASSIFIER_DENIALS_CLUSTER_FAIL = 3;
+// Reporting floor. Auto mode suspends every wildcarded interpreter allow rule
+// (docs/security.md § Auto-mode Classifier), so the hermit's own script calls
+// re-enter the classifier constantly and an occasional stochastic denial is the
+// baseline, not an incident. Warning on a single one would pin a busy install to
+// a permanent `warn` and put "all checks passed" out of reach, costing more
+// signal than the row buys. Below the floor the count still renders, as `ok`.
+const CLASSIFIER_DENIALS_WARN_MIN_TOTAL = 3;
+const CLASSIFIER_DENIALS_WARN_MIN_CLUSTER = 2;
+
+function formatDenyTool(tool: string, total: number, programs: Record<string, number>): string {
+  const entries = Object.entries(programs).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (entries.length === 0) return `${tool} ×${total}`;
+  const shown = entries.slice(0, CLASSIFIER_DENIALS_PROG_LIMIT);
+  const extra = entries.length - shown.length;
+  const prog = shown.map(([n, k]) => `${n} ×${k}`).join(', ');
+  return extra > 0 ? `${tool}: ${prog}, +${extra} more` : `${tool}: ${prog}`;
+}
+
+/** Most denials falling inside any single CLUSTER_MS span, across all tools. */
+function largestDenialCluster(sortedMs: number[]): number {
+  let best = 0;
+  let lo = 0;
+  for (let hi = 0; hi < sortedMs.length; hi++) {
+    while (sortedMs[hi] - sortedMs[lo] > CLASSIFIER_DENIALS_CLUSTER_MS) lo++;
+    best = Math.max(best, hi - lo + 1);
+  }
+  return best;
+}
+
+function checkClassifierDenials(p: DoctorPaths = PATHS) {
+  const id = 'classifier-denials';
+  try {
+    const now = Date.now();
+    const read = readDenials(p.hermitDir, now - CLASSIFIER_DENIALS_WINDOW_MS);
+    if ('error' in read) {
+      return { id, status: 'warn', detail: `check failed: permission-denied-events.jsonl unreadable (${read.error})` };
+    }
+    // Before the empty-window return, not after: a log whose every line is torn
+    // would otherwise report a clean all-ok over a damaged file, which is the
+    // exact failure this count exists to prevent.
+    const damaged = read.malformed > 0 ? `; ${read.malformed} unreadable row(s)` : '';
+    if (read.rows.length === 0) {
+      return read.malformed > 0
+        ? { id, status: 'warn', detail: `no readable classifier denials in 7d${damaged}` }
+        : { id, status: 'ok', detail: 'no classifier denials recorded in 7d' };
+    }
+
+    const byTool = new Map<string, { total: number; programs: Record<string, number> }>();
+    for (const row of read.rows) {
+      const entry = byTool.get(row.tool) ?? { total: 0, programs: {} };
+      entry.total += 1;
+      if (row.prog) entry.programs[row.prog] = (entry.programs[row.prog] ?? 0) + 1;
+      byTool.set(row.tool, entry);
+    }
+
+    const counted = [...byTool.entries()].map(([tool, e]) => ({ tool, ...e }));
+    counted.sort((a, b) => b.total - a.total || a.tool.localeCompare(b.tool));
+    const grand = read.rows.length;
+    const cluster = largestDenialCluster(read.rows.map(r => Date.parse(r.ts)).sort((a, b) => a - b));
+
+    const shown = counted.slice(0, CLASSIFIER_DENIALS_TOOL_LIMIT);
+    const extraTools = counted.length - shown.length;
+    const parts = shown.map(c => formatDenyTool(c.tool, c.total, c.programs));
+    if (extraTools > 0) parts.push(`+${extraTools} more`);
+
+    const status = cluster >= CLASSIFIER_DENIALS_CLUSTER_FAIL
+      ? 'fail'
+      : (grand >= CLASSIFIER_DENIALS_WARN_MIN_TOTAL || cluster >= CLASSIFIER_DENIALS_WARN_MIN_CLUSTER)
+        ? 'warn'
+        : 'ok';
+    // Budget the breakdown, not the whole line: a long MCP tool key or a busy
+    // install must not push the cluster count or the fail guidance — the actionable
+    // half — past the cap and truncate it away.
+    const head = `${grand} denials in 7d — `;
+    const tail = `; largest cluster ${cluster} in 10 min`
+      + damaged
+      // A cluster is not the documented consecutive-denial count (see CLUSTER_MS),
+      // so this correlates rather than asserting that the session actually stalled.
+      + (status === 'fail'
+        ? `; a cluster this size is around where auto mode falls back to prompting`
+        : '');
+    const budget = CLASSIFIER_DENIALS_DETAIL_MAX - head.length - tail.length;
+    let body = parts.join('; ');
+    if (body.length > budget) body = body.slice(0, Math.max(0, budget - 1)) + '…';
+    return { id, status, detail: `${head}${body}${tail}` };
+  } catch (e: any) {
+    return { id, status: 'warn', detail: `check failed: ${e.message}` };
+  }
+}
+
 // ----------------- Orchestration -----------------
 
 async function runAllChecks(p: DoctorPaths = PATHS) {
@@ -2165,6 +2285,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkMemorySize(p),
     checkContextScan(p),
     checkVoiceCarrier(p),
+    checkClassifierDenials(p),
     await checkChannelLiveness(p),
   ];
 }
@@ -2290,7 +2411,7 @@ export {
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
   checkRoutinePrecheck, checkRawSize,
-  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkChannelLiveness,
+  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkClassifierDenials, checkChannelLiveness,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
   resolvePaths,

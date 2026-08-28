@@ -21,6 +21,17 @@ const write = (p: string, content: string) => fs.writeFileSync(p, content);
 // seeds a `## Findings` section).
 const readFindings = (dir: string) => fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf8');
 const findingsLines = (dir: string) => readFindings(dir).match(/^- \[maintainer alert suppressed\].*$/gm) ?? [];
+const alertsFile = (dir: string) => hermit(dir, 'state', 'permission-denied-alerts.json');
+const readAlerts = (dir: string) => JSON.parse(fs.readFileSync(alertsFile(dir), 'utf8'));
+const writeAlerts = (dir: string, alerts: object) => {
+  fs.mkdirSync(path.dirname(alertsFile(dir)), { recursive: true });
+  write(alertsFile(dir), JSON.stringify(alerts));
+};
+const logFile = (dir: string) => hermit(dir, 'state', 'permission-denied-events.jsonl');
+const readLog = (dir: string): any[] =>
+  fs.readFileSync(logFile(dir), 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+const daysAgoIso = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+const minutesAgoIso = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
 
 function setupChannelWorkdir(telegramExtra: object = {}, configExtra: object = {}): Workdir {
   const wd = setupWorkdir();
@@ -44,11 +55,10 @@ const setupClientWorkdir = (telegramExtra: object = {}) =>
 
 // Age the dedup state so the next denial of the same tool opens a fresh window.
 function expireDedupWindow(dir: string): void {
-  const p = hermit(dir, 'state', 'permission-denied-alerts.json');
-  const alerts = JSON.parse(fs.readFileSync(p, 'utf8'));
-  const past = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+  const alerts = readAlerts(dir);
+  const past = minutesAgoIso(31);
   for (const k of Object.keys(alerts)) alerts[k].at = past;
-  write(p, JSON.stringify(alerts));
+  writeAlerts(dir, alerts);
 }
 
 // Mirrors Claude Code's PermissionDenied stdin payload. The fixed classifier
@@ -179,6 +189,12 @@ describe('permission-denied-notify', () => {
       expect(stub.requests).toHaveLength(1);
       expect(JSON.stringify(stub.requests)).not.toContain('test-secret-token');
       expect(readFindings(wd.dir)).not.toContain('test-secret-token');
+      const ledger = fs.readFileSync(logFile(wd.dir), 'utf8');
+      expect(ledger).not.toContain('test-secret-token');
+      expect(ledger).not.toContain('example.invalid');
+      expect(readLog(wd.dir)).toEqual([
+        { ts: expect.any(String), tool: 'Bash', prog: 'curl' },
+      ]);
     } finally {
       stub.stop();
       wd.cleanup();
@@ -359,6 +375,210 @@ describe('permission-denied-notify', () => {
       await run({ ...DENIAL_PAYLOAD, tool_name: `${prefix}write` }, wd.dir, stub.url);
       expect(stub.requests).toHaveLength(2);
       expect(stub.requests[0].body.text).not.toBe(stub.requests[1].body.text);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: four bun denials in one window write four lines and send once', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const command = 'bun /x/scripts/heartbeat.ts precheck';
+      for (let i = 0; i < 4; i++) {
+        const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+        expect(r.exitCode).toBe(0);
+      }
+      expect(stub.requests).toHaveLength(1);
+      expect(stub.requests[0].body.text).toContain('Auto-mode denied: Bash');
+      expect(stub.requests[0].body.text).toContain('Blocked by classifier');
+      expect(stub.requests[0].body.text).not.toContain('heartbeat');
+      expect(stub.requests[0].body.text).not.toContain('more in the previous');
+      // Dedup suppresses the message, never the record — this is the whole point
+      // of splitting the two.
+      const rows = readLog(wd.dir);
+      expect(rows).toHaveLength(4);
+      expect(rows.every(r => r.tool === 'Bash' && r.prog === 'bun')).toBe(true);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: TOKEN=abc curl records env-prefixed, not the assignment or curl', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const command = 'TOKEN=abc curl https://example.invalid/secret';
+      const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const ledger = fs.readFileSync(logFile(wd.dir), 'utf8');
+      expect(ledger).not.toContain('abc');
+      expect(ledger).not.toContain('curl');
+      expect(ledger).not.toContain('example.invalid');
+      expect(readLog(wd.dir)[0].prog).toBe('env-prefixed');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: /usr/bin/python3 heredoc records python3, nothing after the first word', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const command = '/usr/bin/python3 - <<EOF\nprint("secret-payload")\nEOF';
+      const r = await run({ ...DENIAL_PAYLOAD, tool_input: { command } }, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const ledger = fs.readFileSync(logFile(wd.dir), 'utf8');
+      expect(ledger).not.toContain('secret-payload');
+      expect(ledger).not.toContain('<<EOF');
+      expect(readLog(wd.dir)[0].prog).toBe('python3');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: a non-Bash tool records no prog key', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const r = await run({ tool_name: 'Edit', tool_input: { file_path: '/tmp/x' }, reason: 'different' }, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(readLog(wd.dir)).toEqual([{ ts: expect.any(String), tool: 'Edit' }]);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: the ledger is created 0600, not at the process umask', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(fs.statSync(logFile(wd.dir)).mode & 0o777).toBe(0o600);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: rows past the 14-day retention are trimmed on the next denial', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const fresh = daysAgoIso(1);
+      fs.mkdirSync(path.dirname(logFile(wd.dir)), { recursive: true });
+      write(logFile(wd.dir),
+        JSON.stringify({ ts: daysAgoIso(20), tool: 'Bash', prog: 'old' }) + '\n' +
+        JSON.stringify({ ts: fresh, tool: 'Read' }) + '\n');
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const rows = readLog(wd.dir);
+      expect(rows.map(x => x.prog ?? x.tool)).toEqual(['Read', 'bun']);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: a fresh head skips the rewrite, so a malformed row survives verbatim', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      fs.mkdirSync(path.dirname(logFile(wd.dir)), { recursive: true });
+      write(logFile(wd.dir),
+        JSON.stringify({ ts: daysAgoIso(1), tool: 'Read' }) + '\n' + '{torn\n');
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(fs.readFileSync(logFile(wd.dir), 'utf8')).toContain('{torn');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('log: concurrent hook processes each record their denial', async () => {
+    // The reason this design replaced the aggregated digest. Claude Code does not
+    // serialise hook invocations, so parallel tool calls in one turn spawn
+    // overlapping processes; an append-only record survives that, a
+    // read-modify-write digest silently loses counts.
+    //
+    // Deliberately asserts nothing about the send count: under a genuine
+    // simultaneous race the dedup latch may open more than once, and pinning it
+    // to 1 would encode a flake.
+    const wd = setupChannelWorkdir();
+    try {
+      const script = path.resolve(import.meta.dir, '..', 'scripts', 'permission-denied-notify.ts');
+      const procs = Array.from({ length: 8 }, () =>
+        Bun.spawn({
+          cmd: [process.execPath, script],
+          stdin: Buffer.from(JSON.stringify(DENIAL_PAYLOAD)),
+          cwd: wd.dir,
+          env: { ...process.env, HERMIT_MANAGED: '1' },
+          stdout: 'ignore',
+          stderr: 'ignore',
+        }));
+      await Promise.all(procs.map(p => p.exited));
+      const rows = readLog(wd.dir);
+      expect(rows).toHaveLength(8);
+      expect(rows.every(r => r.tool === 'Bash')).toBe(true);
+    } finally {
+      wd.cleanup();
+    }
+  }, 20000);
+
+  test('dedup: an entry older than 24h is pruned from the alerts file', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      writeAlerts(wd.dir, { Edit: { at: daysAgoIso(2), suppressed: 0 } });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const alerts = readAlerts(wd.dir);
+      expect(alerts.Edit).toBeUndefined();
+      expect(alerts.Bash).toBeDefined();
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('dedup: a pre-#855 entry (no at) is dropped by readAlerts', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      const hash = '0fb7d655de0335c2572cebcfcab45df66bc32206fe4f957ada64952d57ee04ea';
+      writeAlerts(wd.dir, { [hash]: '2026-08-26T20:21:19+0100' });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      const alerts = readAlerts(wd.dir);
+      expect(alerts[hash]).toBeUndefined();
+      expect(alerts.Bash).toBeDefined();
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('dedup: a stray history object from the pre-log build is dropped on the next write', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    try {
+      writeAlerts(wd.dir, {
+        Bash: {
+          at: minutesAgoIso(31),
+          suppressed: 0,
+          history: { since: daysAgoIso(2), total: 99, burst_max: 5, programs: { bun: 99 } },
+        },
+      });
+      const r = await run(DENIAL_PAYLOAD, wd.dir, stub.url);
+      expect(r.exitCode).toBe(0);
+      expect(readAlerts(wd.dir).Bash.history).toBeUndefined();
     } finally {
       stub.stop();
       wd.cleanup();
