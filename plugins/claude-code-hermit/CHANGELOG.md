@@ -10,7 +10,7 @@
 
 ### Changed
 - `reflect`'s `skill-correction:*` route with no procedure brief now splits by name class: an installed plugin skill gets an operator-space override recommendation, an editable `.claude/skills/<name>/SKILL.md` becomes a `## Skill Improvement` candidate carrying no `source_artifact:`, and a name matching neither stays a plain proposal.
-- The `PermissionDenied` hook appends one line per denial to `state/permission-denied-events.jsonl` (timestamp, tool, shell program name) instead of aggregating a counter. The 30-minute dedup window and its 24-hour `(+N more)` cap are unchanged, and tool input still never leaves the ledger. Lines that cannot be read back as a denial are counted and named in the doctor row rather than silently skipped.
+- The `PermissionDenied` hook appends one line per denial to `state/permission-denied-events.jsonl` (timestamp, tool, shell program name) instead of aggregating a counter. The 30-minute dedup window and its 24-hour `(+N more)` cap are unchanged, and tool input still never leaves the ledger. Lines that cannot be read back as a denial are counted in the doctor row rather than silently skipped.
 - `state/*.jsonl` ledgers are created 0600 rather than at the process umask, and doctor's `permissions` and `state` checks now cover `.jsonl` as well as `.json` (a JSONL file is validated per line, with a torn trailing line tolerated).
 
 ### Fixed
