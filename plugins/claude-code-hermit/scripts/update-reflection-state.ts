@@ -23,8 +23,9 @@
 //
 // --reset-counters zeroes the judge verdict tallies and drops their window
 // (counters.judge_accept/judge_downgrade/judge_suppress = 0, judge_suppress_by_code
-// emptied, counters.judge_since = now). The ratio now reads counters.judge_window;
-// this reset stays for the 1.2.49 upgrade step and as a manual escape hatch. It
+// emptied, counters.judge_since = now). The ratio now reads counters.judge_window,
+// so judge_since is only a reset audit marker: nothing measures a window from it.
+// This reset stays for the 1.2.49 upgrade step and as a manual escape hatch. It
 // deliberately does NOT touch counters.since: that is the hatch
 // stamp the reflect phase ladder (newborn/juvenile/adult) and doctor's run-rate line
 // are measured from, and moving it would make an established install newborn again.
