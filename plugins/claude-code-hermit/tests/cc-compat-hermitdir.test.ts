@@ -20,7 +20,7 @@ import path from 'node:path';
 // -------------------------------------------------------------------------
 
 function makeTmpHermit(): string {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-test-'));
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-test-')));
   fs.mkdirSync(path.join(tmp, '.claude-code-hermit', 'state'), { recursive: true });
   fs.writeFileSync(path.join(tmp, '.claude-code-hermit', 'config.json'), '{}');
   return tmp;
@@ -86,7 +86,7 @@ describe('hermitDir()', () => {
   it.serial('(a) absolute AGENT_DIR wins over CLAUDE_PROJECT_DIR and drifted cwd', () => {
     const agentDir = path.join(tmp, '.claude-code-hermit');
     // Set a conflicting CLAUDE_PROJECT_DIR pointing somewhere else
-    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-other-'));
+    const other = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-other-')));
     try {
       fs.mkdirSync(path.join(other, '.claude-code-hermit'), { recursive: true });
       fs.writeFileSync(path.join(other, '.claude-code-hermit', 'config.json'), '{}');
@@ -125,7 +125,7 @@ describe('hermitDir()', () => {
     delete process.env.AGENT_DIR;
     delete process.env.CLAUDE_PROJECT_DIR;
     // Use a tmpdir with no hermit (walk-up finds nothing)
-    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-bare-'));
+    const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-bare-')));
     try {
       process.chdir(bare);
       const result = hermitDir();
@@ -139,7 +139,7 @@ describe('hermitDir()', () => {
   it.serial('(b2) CLAUDE_PROJECT_DIR set but .claude-code-hermit subdir absent — falls to walk-up', () => {
     // existsSync guard: if CLAUDE_PROJECT_DIR doesn't actually have a .cch dir, skip it
     delete process.env.AGENT_DIR;
-    const noHermit = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-noh-'));
+    const noHermit = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-noh-')));
     try {
       process.env.CLAUDE_PROJECT_DIR = noHermit; // no .claude-code-hermit inside
       process.chdir(path.join(tmp, '.claude-code-hermit', 'state'));

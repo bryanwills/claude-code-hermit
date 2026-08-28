@@ -3,7 +3,7 @@
 // under --concurrent.
 import { afterEach, describe, expect, test as bunTest } from 'bun:test';
 const test = bunTest.serial;
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,7 +14,7 @@ const tmpDirs: string[] = [];
 const savedEnv = process.env.HOMEASSISTANT_URL;
 
 function tmpPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'ha-config-test-'));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ha-config-test-')));
   tmpDirs.push(dir);
   return dir;
 }
@@ -104,7 +104,7 @@ describe('projectRoot()', () => {
 
   function makeTmpHermit() {
     const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs');
-    const dir = mkdtempSync(join(tmpdir(), 'ha-root-test-'));
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ha-root-test-')));
     driftDirs.push(dir);
     mkdirSync(join(dir, '.claude-code-hermit', 'state'), { recursive: true });
     writeFileSync(join(dir, '.claude-code-hermit', 'config.json'), '{}');

@@ -16,16 +16,19 @@ on:
     branches: [main]
     paths:
       # The platform-specific surfaces: shell that meets BSD userland, scripts
-      # that branch on process.platform, and the per-plugin bash runners.
+      # that branch on process.platform, and every plugin's tests/. The last one
+      # is load-bearing: the first run of this job failed on test fixtures, not on
+      # product code (unresolved os.tmpdir() compared against resolved
+      # process.cwd()), so a test-only push has to be able to retrigger it.
       - 'plugins/claude-code-hermit/scripts/**'
       - 'plugins/*/state-templates/bin/**'
-      - 'plugins/*/tests/run-all.sh'
+      - 'plugins/*/tests/**'
       - '.github/workflows/test-macos-compat.yml'
   pull_request:
     paths:
       - 'plugins/claude-code-hermit/scripts/**'
       - 'plugins/*/state-templates/bin/**'
-      - 'plugins/*/tests/run-all.sh'
+      - 'plugins/*/tests/**'
       - '.github/workflows/test-macos-compat.yml'
 
 jobs:
@@ -33,9 +36,20 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # HA's gate-corpus.test.ts materializes the retired Python gates from
+          # git history, so it needs the full history (matches test-ha.yml).
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.0'
+      # Python is a TEST FIXTURE for the HA suite only; nothing shipped runs it.
+      # gate-corpus replays the retired Python hooks and yaml-parity compares
+      # against PyYAML. Same versions test-ha.yml pins.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml python-dotenv
       - run: bun install --frozen-lockfile
       # 20+ core test files spawn real tmux sessions; it is not preinstalled on
       # macOS runners. Printing the version also proves the suite below is

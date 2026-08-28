@@ -50,7 +50,7 @@ function mkProject(root: string, withConfig = true): string {
 }
 
 function tmp(prefix: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
 }
 
 describe('hermit-run resolver', () => {
