@@ -553,7 +553,7 @@ fi
 # tmux healthcheck) rather than exit, so `restart: unless-stopped` can't loop us.
 # HERMIT_FORCE_BOOT=1 overrides, for split-state recovery.
 if [ "${HERMIT_FORCE_BOOT:-0}" != "1" ]; then
-  _rt="${AGENT_DIR}/.claude-code-hermit/state/runtime.json"
+  _rt="${AGENT_DIR}/state/runtime.json"
   _mode="$(jq -r '.runtime_mode // empty' "$_rt" 2>/dev/null || true)"
   if [ -n "$_mode" ] && [ "$_mode" != "docker" ]; then
     # A cleanly-stopped owner is definitively dead; its frozen runtime_mode and
@@ -563,18 +563,18 @@ if [ "${HERMIT_FORCE_BOOT:-0}" != "1" ]; then
     _fresh=0
     if [ "$_state" != "idle" ] && [ -z "$_done" ]; then
       for _f in state/routine-monitor-liveness.json state/heartbeat-liveness.json state/.heartbeat sessions/.status.json; do
-        if [ -n "$(find "${AGENT_DIR}/.claude-code-hermit/$_f" -mmin -10 2>/dev/null || true)" ]; then _fresh=1; break; fi
+        if [ -n "$(find "${AGENT_DIR}/$_f" -mmin -10 2>/dev/null || true)" ]; then _fresh=1; break; fi
       done
     fi
     if [ "$_fresh" = "1" ]; then
       echo "[docker-entrypoint] BOOT CONFLICT: a live '$_mode' instance owns this project's state dir."
       echo "[docker-entrypoint] Staying inert (no claude started). Stop the other instance, then: hermit-docker restart"
-      printf 'live %s owner detected at boot\n' "$_mode" > "${AGENT_DIR}/.claude-code-hermit/state/.boot-conflict"
+      printf 'live %s owner detected at boot\n' "$_mode" > "${AGENT_DIR}/state/.boot-conflict"
       while true; do sleep 300; done
     fi
   fi
 fi
-rm -f "${AGENT_DIR}/.claude-code-hermit/state/.boot-conflict" 2>/dev/null || true
+rm -f "${AGENT_DIR}/state/.boot-conflict" 2>/dev/null || true
 
 # --- 5. Launch hermit-start ---
 "${AGENT_DIR}/bin/hermit-start" "$@"

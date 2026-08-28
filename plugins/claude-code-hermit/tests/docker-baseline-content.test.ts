@@ -7,13 +7,14 @@
 //
 // Usage: bun test tests/docker-baseline-content.test.ts   (from the plugin root)
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { PLUGIN_ROOT } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { getSessionName } from '../scripts/lib/tmux';
 
 const dockerfile = fs.readFileSync(
@@ -279,5 +280,61 @@ describe('Entrypoint: marketplace registration uses list --json, not dir existen
     expect(entrypoint).toContain('already enabled');
     // No enable site silently swallows failures via `|| true` anymore.
     expect(entrypoint).not.toMatch(/plugin enable[^\n]*\|\| true/);
+  });
+});
+
+// -------------------------------------------------------
+// Entrypoint §4b: the container-side split-brain boot guard.
+// hermit-start's own shouldRefuseBoot self-skips inside a container, so this
+// block is the only guard against booting a container over a live host hermit.
+// It shipped reading runtime.json from a doubled AGENT_DIR path, so jq always
+// came back empty and the whole block was unreachable (GH #863). A content
+// assertion on the path would not catch a later logic break, so this extracts
+// the real block and runs it.
+// -------------------------------------------------------
+describe('Entrypoint: §4b boot conflict guard', () => {
+  const block = entrypoint.slice(entrypoint.indexOf('# --- 4b.'), entrypoint.indexOf('# --- 5.'));
+
+  // `sleep` is overridden so the guard's `while true; do sleep 300; done` inert
+  // hold terminates: exit 42 means "the guard fired and went inert".
+  const { freshDir, cleanup } = freshDirFactory('hermit-4b-');
+  afterAll(cleanup);
+
+  function runGuard(runtime: object, opts: { freshLiveness?: boolean } = {}) {
+    const agentDir = path.join(freshDir(), '.claude-code-hermit');
+    const stateDir = path.join(agentDir, 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify(runtime));
+    if (opts.freshLiveness) fs.writeFileSync(path.join(stateDir, '.heartbeat'), '');
+
+    const script = `set -uo pipefail\nsleep() { exit 42; }\nAGENT_DIR=${JSON.stringify(agentDir)}\n${block}`;
+    const out = spawnSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: { ...process.env, HERMIT_FORCE_BOOT: '0' },
+    });
+    return {
+      status: out.status,
+      stdout: out.stdout,
+      marker: fs.existsSync(path.join(stateDir, '.boot-conflict')),
+    };
+  }
+
+  test('entrypoint §4b: goes inert over a live non-docker owner', () => {
+    const r = runGuard({ runtime_mode: 'tmux', session_state: 'active' }, { freshLiveness: true });
+    expect(r.status).toBe(42);
+    expect(r.stdout).toContain('BOOT CONFLICT');
+    expect(r.marker).toBe(true);
+  });
+
+  test('entrypoint §4b: boots over a cleanly-stopped owner', () => {
+    const r = runGuard({ runtime_mode: 'tmux', session_state: 'idle' }, { freshLiveness: true });
+    expect(r.status).toBe(0);
+    expect(r.marker).toBe(false);
+  });
+
+  test('entrypoint §4b: boots when the recorded owner is docker', () => {
+    const r = runGuard({ runtime_mode: 'docker' });
+    expect(r.status).toBe(0);
+    expect(r.marker).toBe(false);
   });
 });
