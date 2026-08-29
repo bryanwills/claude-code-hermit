@@ -4,14 +4,21 @@
 
 ### Added
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
+- The watchdog notices a lapsed Claude login on the session's own screen. On `/login` credentials it sends one channel notice (repeated daily until fixed) and suppresses the nudge and restart tiers, instead of restarting a session that can't authenticate; on a setup-token it spawns the existing re-auth relay, which now also covers a token that stops working before its recorded expiry.
 
 ### Fixed
+- The Docker entrypoint no longer blocks boot when `.credentials.json` carries a past `expiresAt`. That field belongs to the access token Claude Code refreshes silently, so the gate stalled healthy hermits while catching a real lapse only by accident.
 - `docker-setup` aborts at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, instead of building the image first.
 - `docker-setup`'s post-start and first-run-acceptance polls read the entrypoint's `.boot-conflict` marker, so an inert container no longer passes as `running` or takes the operator through login and channel pairing.
 - The Docker entrypoint's credential waits no longer exit after ten minutes. Under `restart: unless-stopped` that exit respawned the container into the same wait and broke `hermit-docker login`, which execs into a running container.
 - `docker-setup`'s first-run acceptance poll waits for an outcome (the tmux session, or `.boot-conflict`) with a 10-minute cap instead of a fixed 30s, so a slow first-run plugin install is not misread as a crash.
 - The `memory-size` warning distinguishes Claude Code's `/doctor` from `/hermit-doctor` and says it can be sent from chat or typed in a terminal.
 - Stopping a boot-conflicted (inert) container took ~2 minutes: the entrypoint's inert hold never trapped SIGTERM, and `hermit-docker down` polled the other, live instance's `runtime.json` for 60s. The hold now traps SIGTERM/SIGINT and exits immediately, and `down` short-circuits past the poll when `state/.boot-conflict` is present.
+
+### Upgrade Instructions
+
+1. **Docker hermits only — refresh the on-disk entrypoint BEFORE rebuilding.** `hermit-docker update` rebuilds with the operator's on-disk `docker-entrypoint.hermit.sh`, not the plugin template, so bumping the plugin and running `update` alone rebuilds with the old boot gate still in place. Re-run `/claude-code-hermit:docker-setup` (or patch the on-disk copy from `state-templates/docker/docker-entrypoint.hermit.sh.template`) first, then run `hermit-docker update`. This carries the removal of the expired-login boot block.
+2. Non-Docker (tmux/local) hermits: nothing to do — that removal lives only in the Docker entrypoint template. Lapsed-login detection ships in the watchdog and applies to both deployments with no config change.
 
 ## [1.2.51] - 2026-08-29
 

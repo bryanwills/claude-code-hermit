@@ -70,5 +70,20 @@ describe('en catalog byte-identity (pre-refactor literals)', () => {
     expect(WATCHDOG.en.stallQuestion('08:30')).toBe(
       "Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer (08:30).",
     );
+    expect(WATCHDOG.en.lapsedLogin('08:30', 'FIX')).toBe(
+      "Your Claude login has expired, so your hermit can't do any work until you sign in again (08:30). FIX",
+    );
+  });
+
+  // The lapsed-login fix lines are the one place a channel message has to name a
+  // command: the sign-in happens on the machine the hermit runs on, so there is no
+  // chat-side alternative to point at. Pinned in both locales because a translation
+  // that drops or garbles the command leaves the operator with no way back in.
+  test('WATCHDOG lapsed-login fix lines carry a runnable command in both locales', () => {
+    expect(WATCHDOG.en.lapsedLoginFixDocker()).toContain('hermit-docker login');
+    expect(WATCHDOG.en.lapsedLoginFixHost()).toContain('/login');
+    expect(WATCHDOG['pt-PT'].lapsedLoginFixDocker()).toContain('hermit-docker login');
+    expect(WATCHDOG['pt-PT'].lapsedLoginFixHost()).toContain('/login');
+    expect(WATCHDOG['pt-PT'].lapsedLogin('08:30', 'FIX')).toContain('(08:30). FIX');
   });
 });

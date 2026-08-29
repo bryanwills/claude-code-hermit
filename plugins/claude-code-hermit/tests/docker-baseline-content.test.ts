@@ -138,7 +138,7 @@ describe('Entrypoint: setup-token auth gates', () => {
   test('entrypoint: defines the token file path and gates on the FILE', () => {
     expect(entrypoint).toContain('SETUP_TOKEN_FILE="${CLAUDE_CONFIG_DIR}/.hermit-setup-token"');
     const gate = entrypoint.slice(entrypoint.indexOf('# --- 0. Wait for auth credentials'));
-    const zeroGate = gate.slice(0, gate.indexOf('# --- 0b.'));
+    const zeroGate = gate.slice(0, gate.indexOf('# --- 0c.'));
     expect(zeroGate).toContain('[ ! -f "$SETUP_TOKEN_FILE" ]');
   });
 
@@ -146,28 +146,29 @@ describe('Entrypoint: setup-token auth gates', () => {
     expect(entrypoint).toContain('while [ ! -f "$CRED_FILE" ] && [ ! -f "$SETUP_TOKEN_FILE" ]; do');
   });
 
-  // Neither credential wait may exit: `restart: unless-stopped` respawns the
+  // The credential wait may not exit: `restart: unless-stopped` respawns the
   // container straight back into the same wait, and `hermit-docker login` execs
   // into a *running* container, so exiting destroys the recovery path the wait's
-  // own banner points at. Both waits stay up and remind instead.
-  test('entrypoint: neither credential wait exits on a timeout', () => {
+  // own banner points at. It stays up and reminds instead.
+  test('entrypoint: the credential wait does not exit on a timeout', () => {
     const zeroGate = entrypoint.slice(
       entrypoint.indexOf('# --- 0. Wait for auth credentials'),
       entrypoint.indexOf('# --- 0c.'),
     );
     expect(zeroGate).not.toContain('exit 1');
     expect(zeroGate).toContain('Still waiting for credentials');
-    expect(zeroGate).toContain('Still waiting for fresh credentials');
   });
 
-  // A converted hermit usually still carries the .credentials.json from its
-  // original /login, whose expiresAt lapses and is never refreshed again. Before
-  // this skip, that stale field false-blocked a perfectly healthy hermit at boot.
-  test('entrypoint: §0b expiry gate is skipped entirely in token mode', () => {
-    const expiryGate = entrypoint.slice(entrypoint.indexOf('# --- 0b.'));
-    const condition = expiryGate.slice(0, expiryGate.indexOf('EXPIRED=$('));
-    expect(condition).toContain('[ ! -f "$SETUP_TOKEN_FILE" ]');
-    expect(condition).toContain('[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]');
+  // §0b used to block boot whenever .credentials.json carried a past `expiresAt`.
+  // That field is the ACCESS token's, which Claude Code refreshes silently roughly
+  // every 8h, so the gate false-blocked healthy hermits (doctor-check declines to
+  // warn on it for the same reason) while catching a genuinely lapsed login only by
+  // accident. A lapsed login now boots 401-alive and the watchdog reports it from the
+  // pane, which is also the only way the tmux path ever hears about it.
+  test('entrypoint: no expiry gate blocks boot on a stale access token', () => {
+    expect(entrypoint).not.toContain('EXPIRED=$(');
+    expect(entrypoint).not.toContain('# --- 0b.');
+    expect(entrypoint).not.toContain('Still waiting for fresh credentials');
   });
 
   // §0c parks a stale /login credential when a setup-token is present: interactive

@@ -112,7 +112,7 @@ Both fire once per day. Configure with `/claude-code-hermit:hermit-settings rout
 
 ## Going Always-On
 
-Docker is the recommended way to run your hermit autonomously. It provides container isolation, crash recovery, and a reproducible environment. The default `auto` mode works inside or outside Docker; use `bypassPermissions` as an explicit opt-in if you need zero prompts for fully unattended operation.
+Docker is the guided way to run your hermit autonomously: container isolation, a reproducible environment, and a container that restarts itself. tmux runs the same hermit on the host with no image build — see [Always-On Setup](always-on.md) for how to pick. The default `auto` mode works either way; use `bypassPermissions` as an explicit opt-in if you need zero prompts for fully unattended operation.
 
 ```bash
 /claude-code-hermit:docker-setup    # generates hermit Docker files, walks you through deployment

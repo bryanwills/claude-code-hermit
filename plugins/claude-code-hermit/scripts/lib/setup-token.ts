@@ -183,3 +183,26 @@ export function msUntilExpiry(hermitDir: string, now: number = Date.now()): numb
   if (!rec) return null;
   return Date.parse(rec.expires_at) - now;
 }
+
+/**
+ * True when a stored /login credential still carries a token — i.e. somebody could
+ * work with it. Deliberately NOT an expiry check: the access token refreshes silently
+ * roughly every 8h, so a past `expiresAt` says nothing (doctor-check makes the same
+ * point where it declines to warn on that field).
+ *
+ * The empty case is the load-bearing one. Observed live on CC 2.1.251: when a refresh
+ * fails, Claude Code rewrites the file in place as
+ * `{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,…}}` — the file
+ * survives as an inert stub. So "the file exists" and "the file changed" both keep
+ * reading healthy through a lapse, and only the token's presence distinguishes a
+ * hermit that can work from one that can't. `/logout` leaves the same stub.
+ */
+export function storedLoginUsable(configDir: string): boolean {
+  try {
+    const creds = JSON.parse(fs.readFileSync(credentialsFilePath(configDir), 'utf8'));
+    const token = creds?.claudeAiOauth?.accessToken;
+    return typeof token === 'string' && token.length > 0;
+  } catch {
+    return false; // absent, unreadable, or malformed — nothing usable either way
+  }
+}

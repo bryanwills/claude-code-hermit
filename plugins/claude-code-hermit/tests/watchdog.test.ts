@@ -14,7 +14,7 @@ import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
 import {
-  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, classifyQueueTail, composeCompactSteeringMessage,
+  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, hasLapsedLogin, classifyQueueTail, composeCompactSteeringMessage,
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
   maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
@@ -742,6 +742,173 @@ test('ordinary busy pane content → no false-positive match', withHermit(async 
   expect(r.exitCode).toBe(0);
   const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
   expect(events).not.toContain('stall-question-detected');
+}));
+
+// -------------------------------------------------------
+// 5c. Lapsed-login detection
+//
+// Both fixtures are verbatim captures (CC 2.1.251, `tmux capture-pane -p`, the same
+// call the watchdog makes): an isolated config dir holding an expired, unrefreshable
+// .credentials.json, and one holding a bogus CLAUDE_CODE_OAUTH_TOKEN. Neither session
+// died — the REPL stayed up answering every prompt with the error below, which is why
+// a pane scan is the instrument and dead-session detection never fires here.
+// -------------------------------------------------------
+
+const LAPSED_LOGIN_PANE = [
+  ' ▐▛███▛█   Claude Code v2.1.251',
+  '❯ reply with the single word ok',
+  '● Login expired · Please run /login',
+  '✻ Churned for 0s · done 21:09',
+].join('\n');
+
+const DEAD_TOKEN_PANE = [
+  ' ▐▛███▛█   Claude Code v2.1.251',
+  '❯ reply with the single word ok',
+  '● Please run /login · API Error: 401 OAuth access token is invalid.',
+  '✻ Baked for 2s · done 21:09',
+].join('\n');
+
+/** A /login hermit: no token file, no token env var, and a usable stored credential. */
+function writeStoredLogin(h: Hermit, accessToken = 'sk-ant-oat01-storedstoredstored'): string {
+  const configDir = path.join(h.dir, 'claude-config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken, refreshToken: 'r', expiresAt: 0 } }),
+    { mode: 0o600 },
+  );
+  return configDir;
+}
+
+describe('hasLapsedLogin pane scan', () => {
+  test('the captured expired-/login pane matches', () => {
+    expect(hasLapsedLogin(LAPSED_LOGIN_PANE)).toBe(true);
+  });
+
+  test('the captured dead-setup-token pane matches', () => {
+    expect(hasLapsedLogin(DEAD_TOKEN_PANE)).toBe(true);
+  });
+
+  test('ordinary pane content does not match', () => {
+    expect(hasLapsedLogin('tmux pane content\n❯ Try "fix typecheck errors"')).toBe(false);
+  });
+
+  // Same tail discipline as hasPendingQuestion: an error quoted far up in scrollback
+  // is history, not the session's current state.
+  test('the error scrolled out of the tail does not match', () => {
+    const scrolled = ['● Login expired · Please run /login', ...Array(20).fill('busy work')].join('\n');
+    expect(hasLapsedLogin(scrolled)).toBe(false);
+  });
+});
+
+test('lapsed /login → notice, record stamped, no nudge or restart', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  // Stale enough that a nudge would normally fire — proving the tier suppresses it.
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h);
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', {
+      env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '', HERMIT_TELEGRAM_API_URL: stub.url },
+    });
+    expect(r.exitCode).toBe(0);
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('lapsed-login-detected');
+    expect(events).not.toContain('nudge');
+    expect(events).not.toContain('restart');
+    expect(stub.requests.length).toBe(1);
+    expect(stub.requests[0].body.text).toContain('login has expired');
+    expect(readJson(state(h, 'watchdog-state.json')).lapsed_login_notified_at).toBeTruthy();
+  } finally {
+    stub.stop();
+  }
+}));
+
+test('lapsed /login, second tick within the day → deduped, no second push', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h);
+  fs.writeFileSync(
+    state(h, 'watchdog-state.json'),
+    JSON.stringify({ lapsed_login_notified_at: isoAgo(2) }) + '\n',
+  );
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', {
+      env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '', HERMIT_TELEGRAM_API_URL: stub.url },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests.length).toBe(0);
+  } finally {
+    stub.stop();
+  }
+}));
+
+// The pane clearing proves nothing: a failed refresh rewrites .credentials.json into an
+// empty stub (observed live), so the file exists and its mtime moved while the hermit
+// is exactly as dead. Only a usable token coming back re-arms.
+test('pane clears but the stored login is still an empty stub → record kept', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, 'tmux pane content');
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h, ''); // the stub CC leaves behind
+  fs.writeFileSync(
+    state(h, 'watchdog-state.json'),
+    JSON.stringify({ lapsed_login_notified_at: isoAgo(2) }) + '\n',
+  );
+  const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' } });
+  expect(r.exitCode).toBe(0);
+  expect(readJson(state(h, 'watchdog-state.json')).lapsed_login_notified_at).toBeTruthy();
+}));
+
+test('usable stored login returns → record cleared', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, 'tmux pane content');
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h);
+  fs.writeFileSync(
+    state(h, 'watchdog-state.json'),
+    JSON.stringify({ lapsed_login_notified_at: isoAgo(2) }) + '\n',
+  );
+  const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' } });
+  expect(r.exitCode).toBe(0);
+  expect(readJson(state(h, 'watchdog-state.json')).lapsed_login_notified_at).toBeUndefined();
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('lapsed-login-recovered');
+}));
+
+// An API-key hermit sees the same 401 for a cause no sign-in fixes.
+test('API-key hermit on a 401 pane → no lapsed-login notice', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h, '');
+  const r = await watchdog(h, 'run', {
+    env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '', ANTHROPIC_API_KEY: 'sk-ant-api-key' },
+  });
+  expect(r.exitCode).toBe(0);
+  const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+  expect(events).not.toContain('lapsed-login-detected');
+}));
+
+// A token can die before the record says it should (revoked, rotated, restored from a
+// stale backup). The record reads healthy; the pane is the only witness.
+test('token dead before its recorded expiry → relay spawned, no nudge', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeSetupToken(h, 200); // record says ~200 days left
+  const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir } });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('reauth-relay');
+  expect(events).toContain('auth failure on pane');
+  expect(events).not.toContain('nudge');
 }));
 
 // Regression: a pending pane whose in-session heartbeat has ALSO gone stale must

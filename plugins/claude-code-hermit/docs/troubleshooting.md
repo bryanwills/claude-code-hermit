@@ -169,7 +169,9 @@ Common causes:
 
 ## Hermit Went Dark / Authentication Errors
 
-If the hermit stops responding and the logs show `401` or `Invalid authentication credentials`, its login has lapsed.
+If the hermit stops responding and the logs show `401` or `Invalid authentication credentials`, its login has lapsed. Either way you should hear about it: the watchdog reads the error off the session's own screen and messages you on your channel.
+
+**On a hermit still using plain `/login` credentials**, that message is all the automation there is — renewing them needs a browser on the machine the hermit runs on. Sign in there (`hermit-docker login` under Docker; otherwise run `claude` in the project folder and type `/login`), then restart it. The session stays up in the meantime, so nothing is lost, and the watchdog will not restart or nudge a session it knows can't authenticate. It repeats the notice once a day until a working login is back.
 
 **On a hermit using a long-lived login token, you shouldn't need to do anything from a terminal.** Within a few minutes the watchdog messages you on your channel saying it's down and asking you to reply `reauth`. Do that when you're at a browser; it sends a one-time sign-in link, takes the code back, and restarts itself. Nothing is minted until you reply, so a link never expires unused.
 

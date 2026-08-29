@@ -38,6 +38,8 @@ To pause/resume the running session without stopping it (also triggerable from a
 
 **Config options:** If `remote: true`, adds `--remote-control` and names the session after `agent_name`. If `model` is set, passes it to Claude Code.
 
+**Restarting dead sessions.** A tmux hermit dies with its host and nothing brings it back on its own. `.claude-code-hermit/bin/hermit-watchdog install` registers the watchdog on a 5-minute schedule (systemd user timer on Linux/WSL2, LaunchAgent on macOS, a cron line printed as fallback), which restarts dead sessions, nudges wedged ones, and keeps long-running context compacted. On Linux add `loginctl enable-linger` if the hermit has to come back after a reboot before anyone logs in. Docker hermits need none of this — the entrypoint runs the same watchdog on its own cycle, and the container restart policy handles a dead session.
+
 ### Manual tmux (alternative)
 
 ```bash
@@ -266,13 +268,13 @@ All state is in `sessions/SHELL.md` on disk. A disconnect loses conversation con
 
 A Docker hermit on subscription auth can hold a **long-lived login token** minted with `claude setup-token` — offered right after login in `/docker-setup`, recommended. It lasts a year, and because the hermit mints it, the expiry date is known from day one — the CLI itself exposes no expiry surface for these tokens, so the hermit tracks it in `state/setup-token.json`.
 
-The rest of this section covers renewal for a hermit holding that token. A hermit still on plain `/login` credentials gets none of it: nothing warns ahead of expiry and the channel relay below never fires. When the credentials lapse the container blocks at boot, prints the `hermit-docker login` instruction to its own log, and exits after ten minutes, so the first sign is the hermit going quiet. Re-authenticate from the host with `hermit-docker login`, or convert once with `hermit-docker setup-token` to switch to the flow below.
+The rest of this section covers renewal for a hermit holding that token. A hermit still on plain `/login` credentials gets a narrower version: nothing warns ahead of expiry, and there is no link-and-code relay, because renewing a `/login` credential needs a browser on the machine itself. What it does get is a heads-up. When the credentials lapse the session stays up answering every request with `Login expired · Please run /login`, the watchdog reads that off the pane within a tick, and messages you once (repeating daily while it stays lapsed) instead of restarting a session that cannot authenticate. Sign in on the box — `hermit-docker login` under Docker, or `claude` in the project folder followed by `/login` — then restart it. Converting once with `hermit-docker setup-token` switches you to the flow below.
 
 For a token-holding hermit, renewal takes one browser tap and needs no server access.
 
 **Two weeks before expiry**, the hermit asks you over your channel. Reply and it sends a one-time sign-in link; open it, send back the code it gives you, and the hermit installs the new token and restarts itself. Doctor's `credential-expiry` check reports the same thing if you'd rather see it there.
 
-**If a token lapses unnoticed**, the hermit recovers itself. It can't think without a working login, so this path runs deterministically in the watchdog: it messages you that it's down and waits. Reply `reauth` when you're at a browser, and the same link-and-code exchange follows. Nothing happens until you reply — a one-time link minted at 3am while you're asleep would just expire unused.
+**If a token lapses unnoticed**, the hermit recovers itself. It can't think without a working login, so this path runs deterministically in the watchdog: it messages you that it's down and waits. Reply `reauth` when you're at a browser, and the same link-and-code exchange follows. Nothing happens until you reply — a one-time link minted at 3am while you're asleep would just expire unused. The same recovery fires when a token stops working *before* its recorded expiry (revoked, rotated, restored from an old backup): the record still reads healthy, so the watchdog goes by what the session is actually saying on screen.
 
 You can also renew from a terminal at any time:
 
