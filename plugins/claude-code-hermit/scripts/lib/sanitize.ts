@@ -7,7 +7,7 @@ function safe(s: any): string {
 }
 
 // Known XML-like tag names used as Claude/CC context markers. Matching these
-// in hook rejection text (routed to Claude via continueOnBlock) would let an
+// in hook rejection text (surfaced to Claude as PostToolUse stderr) would let an
 // adversarial config value impersonate system context. We bracket-wrap instead
 // of stripping so the tag name stays readable for debugging.
 const INJECTION_TAGS = [
@@ -26,7 +26,7 @@ function defuseTags(s: string): string {
 }
 
 // Like safe(), but also defuses prompt-injection tag patterns so hook rejection
-// text can be safely routed to Claude's context via continueOnBlock.
+// text can be safely surfaced to Claude via PostToolUse stderr.
 function safeForLLM(s: any): string {
   return defuseTags(safe(s));
 }

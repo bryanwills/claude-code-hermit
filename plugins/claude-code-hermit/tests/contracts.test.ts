@@ -3401,19 +3401,15 @@ describe('voice carrier contract', () => {
 
   // The voice file is operator-curated and gitignored — which is exactly the
   // combination that falls through every lifecycle pass unless each one names
-  // it: git won't carry it, so the worktree and migrate paths must.
-  test('the voice file is gitignored, worktree-included and marked must-migrate', () => {
+  // it: git won't carry it, so the worktree path and the moving-hosts docs must.
+  test('the voice file is gitignored, worktree-included and its migration handling documented', () => {
     expect(read(path.join(TEMPLATES, 'GITIGNORE-APPEND.txt')))
       .toContain('.claude/output-styles/hermit-voice.md');
     expect(read(path.join(TEMPLATES, 'WORKTREEINCLUDE-APPEND.txt')))
       .toContain('.claude/output-styles/hermit-voice.md');
 
-    const migrate = read(path.join(SKILLS, 'migrate', 'SKILL.md'));
-    const row = migrate
-      .split('\n')
-      .find((l) => l.includes('output-styles/hermit-voice.md') && l.includes('|'));
-    expect(row).toBeDefined();
-    expect(row).toContain('MUST_MIGRATE');
+    const configRef = read(path.join(PLUGIN_ROOT, 'docs', 'config-reference.md'));
+    expect(configRef).toContain('.claude/output-styles/hermit-voice.md');
   });
 });
 

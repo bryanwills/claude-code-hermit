@@ -20,9 +20,7 @@ import { MONOREPO_ROOT, walkFiles } from './helpers/run';
 
 const SKIP_DIRS = new Set(['node_modules', 'vendor']);
 
-// migrate inspects the *operator's own* project for bootstrap docs — that
-// project may legitimately have a .env.example. Not a hermit-shipped file.
-const ALLOW = new Set(['claude-code-hermit/skills/migrate/SKILL.md']);
+const ALLOW = new Set<string>();
 
 function hitLines(text: string): number[] {
   const out: number[] = [];

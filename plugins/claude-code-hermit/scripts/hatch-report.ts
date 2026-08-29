@@ -168,7 +168,7 @@ export function renderFinal(o: Observed, deployment: string): string {
   }
   out.push('');
   out.push('  Anytime: /hermit-settings to change settings, /hermit-evolve after plugin');
-  out.push('  updates, /smoke-test to troubleshoot. Refine OPERATOR.md by telling me what changed.');
+  out.push('  updates, /hermit-doctor to troubleshoot. Refine OPERATOR.md by telling me what changed.');
 
   return out.join('\n');
 }
