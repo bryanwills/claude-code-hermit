@@ -682,7 +682,12 @@ function checkPermissions(p: DoctorPaths = PATHS) {
     const looseFiles: string[] = [];
     const targets: string[] = [configPath];
     if (fs.existsSync(stateDir)) {
-      for (const f of globDir(stateDir, /\.jsonl?$/)) targets.push(f);
+      // `.json` only. The append-only `.jsonl` ledgers are created 0600 by
+      // lib/append-jsonl.ts and hatch-scaffold.ts, but they carry no secrets
+      // (timestamps, counts, tool and program names), so inspecting pre-existing
+      // ones would warn on every install upgraded from before that default and
+      // buy a chmod migration for a finding with no operational consequence.
+      for (const f of globDir(stateDir, /\.json$/)) targets.push(f);
     }
     for (const target of targets) {
       if (!fs.existsSync(target)) continue;

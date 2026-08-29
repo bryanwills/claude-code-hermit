@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Upgrade Instructions
-1. Tighten permissions on existing JSONL ledgers so the widened doctor check does not report them as world-readable: `find .claude-code-hermit/state -name '*.jsonl' -exec chmod 600 {} +`. Use `find`, not `chmod .../*.jsonl`: an unmatched glob is passed through literally and exits non-zero, which would fail this step on an install that has no ledgers yet.
-
 ### Added
 - `hermit-doctor` gains a `classifier-denials` check reading a rolling 7 days of auto-mode denials, with the program name for shell commands. It stays `ok` below a reporting floor (under 3 denials, no cluster past 1) since ambient denials are expected under auto mode, `warn`s at or above it, and `fail`s when 3 or more land inside any 10-minute span. Clustering is cross-tool. The row is tagged `tier: maintainer` in the doctor JSON and travels only on the maintainer leg of doctor's notice, so a client chat never sees it.
 
@@ -12,7 +9,7 @@
 - `hermit-doctor` sends one two-leg notice on every run and `--maintainer` no longer changes the route, which `channel-send` resolves from the install's own config: a technical install with no maintainer chat gets the full summary in its primary chat, a non-technical one gets the plain summary there and the technical detail in `SHELL.md` Findings.
 - `reflect`'s `skill-correction:*` route with no procedure brief now always emits a `## Skill Improvement` candidate carrying no `source_artifact:`, and `skill-preference:*` does the same whenever `.claude/skills/<name>/SKILL.md` exists or `<plugin>:<name>` is in the available-skills list (an unreadable list still yields a plain candidate). Whether the target is an editable override, a plugin skill, or gone is decided once by `proposal-act` at accept.
 - The `PermissionDenied` hook records each denial as one line in `state/permission-denied-events.jsonl` (timestamp, tool, shell program name) for doctor's `classifier-denials` check; tool input never leaves the ledger. `state/permission-denied-alerts.json` is now keyed by tool with an open-window record, and entries in the previous tool+input hash shape are dropped on first read. Lines that cannot be read back as a denial are counted in the doctor row rather than silently skipped.
-- `state/*.jsonl` ledgers are created 0600 rather than at the process umask, and doctor's `permissions` and `state` checks now cover `.jsonl` as well as `.json` (a JSONL file is validated per line, with a torn trailing line tolerated).
+- `state/*.jsonl` ledgers are created 0600 rather than at the process umask, and doctor's `state` check now covers `.jsonl` as well as `.json` (validated per line, with a torn trailing line tolerated). The `permissions` check still looks only at `config.json`, `state/*.json` and `proposals/`: the ledgers carry no secrets, so inspecting them would warn on every install upgraded from before the 0600 default.
 
 ### Fixed
 - `rc-server gc` collects orphaned bridge worktrees on macOS. `liveCwds()` read `/proc`, which does not exist there, so it returned null and the GC refused to collect anything; it now reads process cwds through `lsof -n -P` on darwin, bounded at 5s. A missing `lsof`, or a timeout that leaves a partial listing, returns null rather than a short set, so the GC skips instead of treating the processes `lsof` had not reached as dead and deleting a live worktree.

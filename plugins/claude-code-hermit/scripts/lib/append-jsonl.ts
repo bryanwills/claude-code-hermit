@@ -26,9 +26,9 @@ function appendJsonlLine(filePath: string, eventJson: string): string | null {
 /**
  * Create the ledger at 0600 if it does not exist yet. Rows across these files carry
  * channel and user IDs, tool names and command programs, and `fs.appendFileSync`
- * would otherwise leave a new file at the process umask (0644 under the usual 022)
- * — which doctor's `permissions` check reports as world-readable. Defined here so
- * every JSONL writer inherits it instead of each remembering the openSync dance.
+ * would otherwise leave a new file at the process umask (0644 under the usual 022).
+ * Defined here so every JSONL writer inherits it instead of each remembering the
+ * openSync dance.
  */
 function ensureLedgerFile(filePath: string): void {
   try {
