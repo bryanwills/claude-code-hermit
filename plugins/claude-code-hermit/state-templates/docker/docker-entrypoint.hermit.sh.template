@@ -578,7 +578,11 @@ if [ "${HERMIT_FORCE_BOOT:-0}" != "1" ]; then
       echo "[docker-entrypoint] BOOT CONFLICT: a live '$_mode' instance owns this project's state dir."
       echo "[docker-entrypoint] Staying inert (no claude started). Stop the other instance, then: hermit-docker restart"
       printf 'live %s owner detected at boot\n' "$_mode" > "${AGENT_DIR}/state/.boot-conflict"
-      while true; do sleep 300; done
+      # Bash defers a trapped signal until a foreground command returns, and PID 1
+      # has no default signal action. docker stop/compose down do not re-trigger
+      # restart: unless-stopped, so make the sleep interruptible through wait.
+      trap 'echo "[docker-entrypoint] Stop requested while inert — exiting."; exit 0' SIGTERM SIGINT
+      while true; do sleep 300 & wait $! || true; done
     fi
   fi
 fi

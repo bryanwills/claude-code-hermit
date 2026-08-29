@@ -40,6 +40,7 @@ import { run as promptContext } from './lib/prompt-stages/prompt-context';
 import { run as channelReplyReminder } from './lib/prompt-stages/channel-reply-reminder';
 import { run as pauseKeyword } from './lib/prompt-stages/pause-keyword';
 import { run as harnessCommand } from './lib/prompt-stages/harness-command';
+import { run as skillRelay } from './lib/prompt-stages/skill-relay';
 import { run as harnessVerify } from './lib/prompt-stages/harness-verify';
 import { run as shutdownGate } from './lib/prompt-stages/shutdown-gate';
 import { run as channelStatusResponder } from './lib/prompt-stages/channel-status-responder';
@@ -128,15 +129,16 @@ async function main(raw: string): Promise<void> {
     return;
   }
 
-  // 4-5. State writers. Both land before any network send, so an outer-timeout
-  // kill can lose a send but never a state write.
+  // 4-6. State writers and delivered relay context. They land before any network
+  // send, so an outer-timeout kill can lose a send but never a state write.
   await stage('pause-keyword', pauseKeyword, ctx);
   await stage('harness-command', harnessCommand, ctx);
+  await stage('skill-relay', skillRelay, ctx);
 
-  // 6. Deterministic status.
+  // 7. Deterministic status.
   await stage('channel-status-responder', channelStatusResponder, ctx);
 
-  // 7. Switch verification LAST, and specifically after the status responder:
+  // 8. Switch verification LAST, and specifically after the status responder:
   // its success path clears the verify marker, and a blocked prompt discards all
   // accumulated context (see emit()). Running it earlier let a blocked `status`
   // turn destroy the marker with the report unread — stage() skips it entirely

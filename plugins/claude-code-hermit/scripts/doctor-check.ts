@@ -1859,7 +1859,7 @@ function checkMemorySize(p: DoctorPaths = PATHS) {
       try {
         const lines = countLines(fs.readFileSync(filePath, 'utf8'));
         if (lines >= CLAUDE_WARN_LINES) {
-          parts.push(`${name}: ${lines} lines (>=${CLAUDE_WARN_LINES}); use native /doctor to trim it`);
+          parts.push(`${name}: ${lines} lines (>=${CLAUDE_WARN_LINES}); trim it with Claude Code's own /doctor (not /hermit-doctor): send it from chat or type it in a terminal session`);
         }
       } catch (e: any) {
         parts.push(`${name}: unreadable (${e.message})`);

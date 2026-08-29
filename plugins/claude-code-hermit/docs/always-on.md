@@ -29,7 +29,7 @@ Either way, the first launch needs one attended step to clear the trust gate, th
 
 | Requirement              | For          | Notes                                          |
 | ------------------------ | ------------ | ---------------------------------------------- |
-| **Docker**               | Container    | `docker compose` v2 (Docker Desktop or modern Docker Engine) |
+| **Docker**               | Container    | `docker compose` v2 (Docker Desktop or modern Docker Engine) — see [Install Docker Compose](https://docs.docker.com/compose/install/) |
 | **Node.js 22+**          | Hooks        | Inside the container — handled by the Dockerfile |
 | **Bun**                  | Plugins      | Inside the container — always included          |
 | **Claude Code v2.1.241+** | Channels, sandbox | Minimum supported version |

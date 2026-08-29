@@ -228,6 +228,11 @@ case "$CMD" in
     FORCE=false
     [ "${1:-}" = "--force" ] && FORCE=true
 
+    if [ "$FORCE" = false ] && [ -f "$PROJECT_DIR/.claude-code-hermit/state/.boot-conflict" ]; then
+      echo "[hermit] Container is inert (boot conflict) — no session to close."
+      FORCE=true
+    fi
+
     if [ "$FORCE" = false ]; then
       echo "[hermit] Requesting graceful session close..."
       # Split text and Enter into two send-keys calls with a pause — Claude Code's

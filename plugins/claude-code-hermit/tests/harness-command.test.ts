@@ -16,6 +16,12 @@ import {
   SWITCH_VERIFY_TTL_SECS,
   normalizePermissionMode,
   permissionModeRefusal,
+  skillCommandRefusal,
+  isSkillCommand,
+  writeSkillRelay,
+  readSkillRelay,
+  clearSkillRelay,
+  SKILL_RELAY_TTL_SECS,
 } from '../scripts/lib/harness-command';
 
 function tmpRoot(): string {
@@ -103,6 +109,40 @@ describe('parseHarnessCommand grammar', () => {
     expect(parseHarnessCommand('/login')).toBeNull();
     expect(parseHarnessCommand('/claude-code-hermit:brief')).toBeNull();
   });
+
+  test('accepts doctor and checkup as the canonical bare doctor command', () => {
+    expect(parseHarnessCommand('/doctor')).toEqual({ command: '/doctor', arg: null });
+    expect(parseHarnessCommand('/checkup')).toEqual({ command: '/doctor', arg: null });
+    expect(parseHarnessCommand('/doctor now')).toBeNull();
+  });
+
+  test('accepts code-review aliases and safe arguments', () => {
+    expect(parseHarnessCommand('/code-review')).toEqual({ command: '/code-review', arg: null });
+    expect(parseHarnessCommand('/review low')).toEqual({ command: '/code-review', arg: 'low' });
+    expect(parseHarnessCommand('/code-review high --fix #123')).toEqual({
+      command: '/code-review',
+      arg: 'high --fix #123',
+    });
+  });
+
+  test('rejects unsafe code-review arguments', () => {
+    expect(parseHarnessCommand('/code-review --no-post')).toBeNull();
+    expect(parseHarnessCommand('/code-review low; rm x')).toBeNull();
+    expect(parseHarnessCommand('/code-review low\n/clear')).toBeNull();
+  });
+});
+
+describe('skill command policy', () => {
+  test('refuses ultra code reviews and identifies only relayed skill commands', () => {
+    expect(skillCommandRefusal({ command: '/code-review', arg: 'ultra' })).toContain('dialog');
+    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --post' })).toContain('--post');
+    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --fix' })).toBeNull();
+    expect(skillCommandRefusal({ command: '/doctor', arg: null })).toBeNull();
+    expect(isSkillCommand('/doctor')).toBe(true);
+    expect(isSkillCommand('/code-review')).toBe(true);
+    expect(isSkillCommand('/clear')).toBe(false);
+    expect(isSkillCommand('/review')).toBe(false);
+  });
 });
 
 describe('permission-mode targets', () => {
@@ -144,6 +184,20 @@ describe('pending-command marker', () => {
     expect(writePendingCommand(root, entry)).toBe(true);
     expect(readPendingCommand(root)).toEqual(entry);
     expect(renderCommand(entry)).toBe('/model opus');
+    fs.rmSync(root, { recursive: true });
+  });
+
+  test('round-trips a reply target while keeping it optional', () => {
+    const root = tmpRoot();
+    const entry = {
+      command: '/code-review',
+      arg: 'low',
+      by: 'op',
+      reply_to: { source: 'telegram', chat_id: 'chat-123' },
+      requested_at: new Date().toISOString(),
+    };
+    expect(writePendingCommand(root, entry)).toBe(true);
+    expect(readPendingCommand(root)).toEqual(entry);
     fs.rmSync(root, { recursive: true });
   });
 
@@ -252,6 +306,41 @@ describe('switch-verify marker', () => {
     writeSwitchVerify(root, { command: '/model', arg: 'fable', by: 'op', delivered_at: now });
     writeSwitchVerify(root, { command: '/model', arg: 'opus', by: 'op', delivered_at: now });
     expect(readSwitchVerify(root)?.arg).toBe('opus');
+    fs.rmSync(root, { recursive: true });
+  });
+});
+
+describe('skill-relay marker', () => {
+  const relayPath = (root: string) => path.join(root, 'state', 'pending-skill-relay.json');
+
+  test('round-trips a delivered skill command', () => {
+    const root = tmpRoot();
+    const entry = {
+      command: '/code-review',
+      arg: 'low',
+      by: 'op',
+      reply_to: { source: 'discord', chat_id: 'chat-456' },
+      delivered_at: new Date().toISOString(),
+    };
+    expect(writeSkillRelay(root, entry)).toBe(true);
+    expect(readSkillRelay(root)).toEqual(entry);
+    clearSkillRelay(root);
+    expect(readSkillRelay(root)).toBeNull();
+    fs.rmSync(root, { recursive: true });
+  });
+
+  test('an expired relay reads as null and is deleted', () => {
+    const root = tmpRoot();
+    const stale = new Date(Date.now() - (SKILL_RELAY_TTL_SECS + 60) * 1000).toISOString();
+    writeSkillRelay(root, {
+      command: '/doctor',
+      arg: null,
+      by: 'op',
+      reply_to: { source: 'telegram', chat_id: 'chat-123' },
+      delivered_at: stale,
+    });
+    expect(readSkillRelay(root)).toBeNull();
+    expect(fs.existsSync(relayPath(root))).toBe(false);
     fs.rmSync(root, { recursive: true });
   });
 });
