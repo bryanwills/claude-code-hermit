@@ -237,6 +237,9 @@ export interface WatchdogMessages {
   stallQuestion(hhmm: string): string;
   sessionWedged(hhmm: string): string;
   orphan(hhmm: string): string;
+  lapsedLogin(hhmm: string, howToFix: string): string;
+  lapsedLoginFixDocker(): string;
+  lapsedLoginFixHost(): string;
 }
 
 export const WATCHDOG: Localized<WatchdogMessages> = {
@@ -253,6 +256,12 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
       `Your hermit has stopped picking up its scheduled work — something on screen is holding it. Open the terminal or Claude app and clear whatever is waiting there (${hhmm}).`,
     orphan: (hhmm) =>
       `Your hermit's session ended but a process may still be running (${hhmm}). If it keeps replying, stop it from the terminal: run \`pgrep -af "claude --channels"\` and kill that PID.`,
+    lapsedLogin: (hhmm, howToFix) =>
+      `Your Claude login has expired, so your hermit can't do any work until you sign in again (${hhmm}). ${howToFix}`,
+    lapsedLoginFixDocker: () =>
+      'This one needs the machine it runs on: `.claude-code-hermit/bin/hermit-docker login`, then `hermit-docker restart`.',
+    lapsedLoginFixHost: () =>
+      'This one needs the machine it runs on: run `claude` in its project folder, type `/login`, then restart it with `.claude-code-hermit/bin/hermit-stop` and `hermit-start`.',
   },
   'pt-PT': {
     restart: (hhmm, cause) => `Reiniciei o seu hermit às ${hhmm} — ${cause}.`,
@@ -267,6 +276,12 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
       `O seu hermit deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo. Abra o terminal ou a app Claude e resolva o que está à espera (${hhmm}).`,
     orphan: (hhmm) =>
       `A sessão do seu hermit terminou mas pode haver um processo ainda a correr (${hhmm}). Se continuar a responder, pare-o no terminal: corra \`pgrep -af "claude --channels"\` e faça kill desse PID.`,
+    lapsedLogin: (hhmm, howToFix) =>
+      `A sua sessão Claude expirou, por isso o seu hermit não consegue trabalhar até voltar a autenticar-se (${hhmm}). ${howToFix}`,
+    lapsedLoginFixDocker: () =>
+      'Isto tem de ser feito na máquina onde ele corre: `.claude-code-hermit/bin/hermit-docker login` e depois `hermit-docker restart`.',
+    lapsedLoginFixHost: () =>
+      'Isto tem de ser feito na máquina onde ele corre: corra `claude` na pasta do projeto, escreva `/login` e reinicie-o com `.claude-code-hermit/bin/hermit-stop` e `hermit-start`.',
   },
 };
 

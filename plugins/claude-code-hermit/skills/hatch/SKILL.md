@@ -553,7 +553,7 @@ Claude Code ships its own native bash sandbox (`sandbox.*` settings, `bwrap`/`sa
 
 2. **Branch on deployment:**
 
-   **If `deployment == docker`**: print a one-line informational note (never a recommendation — recommending an in-container sandbox would push operators toward the Ubuntu 24.04+ AppArmor path where `bwrap` can't start in-container): "In Docker the container is the isolation boundary (Anthropic-recommended for unattended runs). Claude Code's bash sandbox is off by default; `bubblewrap`/`socat` are installed, so `/sandbox` is available if you want in-container defense-in-depth." No settings write.
+   **If `deployment == docker`**: print a one-line informational note (never a recommendation — recommending an in-container sandbox would push operators toward the Ubuntu 24.04+ AppArmor path where `bwrap` can't start in-container): "In Docker the container is your isolation boundary — one of the approaches Anthropic lists for unattended runs (https://code.claude.com/docs/en/sandbox-environments). Claude Code's bash sandbox is off by default; `bubblewrap`/`socat` are installed, so `/sandbox` is available if you want in-container defense-in-depth." No settings write.
 
    For non-Docker deployments (`tmux` or `interactive`), check the target settings file for an already-declared `sandbox.enabled` key (either value):
    - **Not declared**: print a one-time recommendation — "Bash sandboxing isn't set up. Claude Code can isolate Bash calls at the OS level — recommended. Run `/sandbox` to enable it (its Dependencies tab checks bubblewrap/socat for you); docs: https://code.claude.com/docs/en/sandboxing."
@@ -669,8 +669,8 @@ questions: [
     header: "Deployment",
     question: "How will you run hermit?",
     options: [
-      { label: "Docker always-on", description: "Recommended. Isolated, auto-restart, channel pairing handled by /docker-setup" },
-      { label: "tmux always-on", description: "Persistent on host. Boots via .claude-code-hermit/bin/hermit-start" },
+      { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
+      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; add bin/hermit-watchdog install for restarts" },
       { label: "Interactive", description: "Just trying it. /session in your terminal" }
     ]
   },

@@ -4,7 +4,7 @@
 
 ## Does this work on Windows?
 
-Only via WSL2. Clone your project inside WSL2 (`/home/you/project`), not on the Windows filesystem. Docker Desktop with WSL2 backend works for always-on mode.
+Only via WSL2. Clone your project inside WSL2 (`/home/you/project`), not on the Windows filesystem. Docker Desktop with WSL2 backend works for always-on mode, with the caveat that it stops when Windows sleeps or you log out — a hermit expected to be up overnight wants a machine that stays up.
 
 ---
 
@@ -62,7 +62,7 @@ Yes. Set `ANTHROPIC_API_KEY` in `.env` and choose "apikey" during `/docker-setup
 
 ## Can I use this without Docker?
 
-Yes. Docker is recommended for always-on mode but not required. Use `hermit-start`/`hermit-stop` for bare tmux. For interactive-only use, just run `/claude-code-hermit:session` — no tmux or Docker needed.
+Yes. Docker is the guided always-on path, not a requirement. Use `hermit-start`/`hermit-stop` for bare tmux, and `bin/hermit-watchdog install` there if you want dead sessions restarted for you. For interactive-only use, just run `/claude-code-hermit:session` — no tmux or Docker needed.
 
 ---
 

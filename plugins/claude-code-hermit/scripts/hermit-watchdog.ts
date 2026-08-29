@@ -29,7 +29,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
-import { anchoredPaneTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
+import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
@@ -37,7 +37,8 @@ import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
-import { defaultConfigDir, msUntilExpiry, tokenModeActive } from './lib/setup-token';
+import { defaultConfigDir, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
+import { isContainer } from './lib/container';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
 import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
@@ -215,6 +216,22 @@ export function composeOrphanMessage(timezone: string, locale: Locale = OPERATOR
   return WATCHDOG[locale].orphan(nowHHMM(timezone));
 }
 
+/**
+ * Operator-language message for a login nobody can renew from chat. Unlike every other
+ * message here it has to name a command, because there is no chat-side fix: the sign-in
+ * happens on the machine the hermit runs on. `orphan` above sets the precedent.
+ */
+export function composeLapsedLoginMessage(
+  timezone: string,
+  inDocker: boolean = isContainer(),
+  locale: Locale = OPERATOR_LOCALE,
+): string {
+  const fix = inDocker
+    ? WATCHDOG[locale].lapsedLoginFixDocker()
+    : WATCHDOG[locale].lapsedLoginFixHost();
+  return WATCHDOG[locale].lapsedLogin(nowHHMM(timezone), fix);
+}
+
 export type CompactFlavor = 'boundary' | 'mid-arc';
 
 /**
@@ -330,6 +347,36 @@ export function hasPendingQuestion(paneContent: string): boolean {
     const tail = anchoredPaneTail(paneContent, PENDING_TAIL_LINES, footer);
     return tail !== null && PENDING_OPTION_RE.test(tail);
   });
+}
+
+// An auth failure renders as an ordinary assistant response, not a modal, so it has
+// no terminal anchor and anchoredPaneTail() cannot find it — a plain tail scan is the
+// whole mechanism. Captured live (CC 2.1.251, tmux capture-pane, the instrument this
+// file already uses): an expired /login credential answers "Login expired · Please run
+// /login", and a dead setup-token answers "Please run /login · API Error: 401 OAuth
+// access token is invalid." The rest are the spellings Claude Code's error reference
+// documents for the same class. `Please run /login` covers both probed cases; the
+// others are cheap insurance against a wording change in one of them.
+//
+// The generic 401 line is safe here only because callers exclude API-key and
+// cloud-provider hermits before asking: in the two remaining auth modes (/login and
+// setup-token) a 401 IS an auth lapse, while an API-key hermit emits the same text
+// for a cause no login can fix.
+const LAPSED_LOGIN_PATTERNS = [
+  'Please run /login',
+  'Login expired',
+  'Claude.ai login expired',
+  'OAuth access token is invalid',
+  'OAuth token refresh failed',
+  'OAuth token revoked',
+  'OAuth token has expired',
+  '401 Invalid authentication credentials',
+];
+
+/** True when the pane TAIL shows Claude Code refusing to work until someone signs in. */
+export function hasLapsedLogin(paneContent: string): boolean {
+  const tail = nonBlankTail(paneContent, PENDING_TAIL_LINES);
+  return LAPSED_LOGIN_PATTERNS.some((p) => tail.includes(p));
 }
 
 // A wedged session is shape-independent: whatever holds stdin (a dialog the pane
@@ -599,12 +646,37 @@ function reauthRelayActive(): boolean {
   return false;
 }
 
-/** 'active' → relay in flight; 'spawned' → just started one; 'idle' → nothing to do. */
-function evaluateReauth(): 'active' | 'spawned' | 'idle' {
+/**
+ * Auth modes where a 401 on the pane is NOT a login problem: an API key, a bearer
+ * token, or a cloud provider. Telling those operators to sign in would be wrong advice
+ * for a cause no login can fix, so the lapsed-login paths sit this out entirely.
+ */
+function envAuthOwnsCredential(): boolean {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY ||
+      process.env.ANTHROPIC_AUTH_TOKEN ||
+      process.env.CLAUDE_CODE_USE_BEDROCK ||
+      process.env.CLAUDE_CODE_USE_VERTEX ||
+      process.env.CLAUDE_CODE_USE_FOUNDRY,
+  );
+}
+
+/**
+ * 'active' → relay in flight; 'spawned' → just started one; 'idle' → nothing to do.
+ *
+ * `authLapsed` is the pane's verdict, and it is a second, independent trigger next to
+ * the recorded expiry. The record only knows when the token was *minted plus a year*;
+ * a token revoked early (account change, rotation, a bad restore) leaves the record
+ * reading healthy while every request 401s, and the wedge tiers below would answer
+ * that with restart churn. The pane says what the record can't.
+ */
+function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'idle' {
   if (reauthRelayActive()) return 'active';
   if (!tokenModeActive(defaultConfigDir())) return 'idle';
   const msLeft = msUntilExpiry(HERMIT_ROOT);
-  if (msLeft === null || msLeft > 0) return 'idle';
+  const expiredByRecord = msLeft !== null && msLeft <= 0;
+  if (!expiredByRecord && !authLapsed) return 'idle';
+  const trigger = expiredByRecord ? 'setup-token expired' : 'auth failure on pane';
 
   try {
     const child = spawn(process.execPath, [REAUTH_MINT_SCRIPT, 'relay'], {
@@ -613,8 +685,8 @@ function evaluateReauth(): 'active' | 'spawned' | 'idle' {
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] reauth relay spawn failed: ${e}\n`));
     child.unref();
-    appendEvent('reauth-relay', 'setup-token expired — relay spawned');
-    process.stderr.write('[watchdog] setup-token expired — spawned re-auth relay\n');
+    appendEvent('reauth-relay', `${trigger} — relay spawned`);
+    process.stderr.write(`[watchdog] ${trigger} — spawned re-auth relay\n`);
     return 'spawned';
   } catch (e) {
     process.stderr.write(`[watchdog] reauth relay spawn failed: ${e}\n`);
@@ -1453,20 +1525,60 @@ async function main(): Promise<void> {
     }
   }
 
+  // The pane is read once here and shared by 3a, 3a-bis and 3b. It has to come before
+  // 3a because the pane carries the only signal that a *token* died early — before the
+  // recorded expiry — which 3a now accepts as a trigger.
+  const paneContent = capturePane(sessionName);
+  const authLapsed =
+    paneContent !== null && hasLapsedLogin(paneContent) && !envAuthOwnsCredential();
+
   // 3a. Re-auth relay — runs after dead-session restart on purpose (see the
   // block comment above evaluateReauth). While a relay is in flight the session
   // can't do useful work, so the nudge/wedge tiers below are suppressed: they'd
   // be noise, and an escalated restart mid-flow would churn the session the
   // relay is about to bounce itself.
-  const reauth = evaluateReauth();
+  const reauth = evaluateReauth(authLapsed);
   if (reauth === 'spawned' || reauth === 'active') process.exit(0);
+
+  // 3a-bis. The same lapse on a hermit with no setup-token to mint. There is no
+  // deterministic recovery here — renewing a /login credential needs a browser on the
+  // machine itself — so the whole tier is one notice, and then silence: restarting or
+  // nudging a session that cannot authenticate only produces churn and misleading
+  // "I restarted your hermit" pushes, which is what this hermit did before.
+  //
+  // Re-arming is keyed on a usable credential returning, never on the pane clearing.
+  // Two reasons, both observed: the error scrolls off as soon as anything else renders,
+  // and a failed refresh rewrites .credentials.json into an empty stub — so mtime moves
+  // and the file still exists while the hermit stays just as dead. `notified_at` also
+  // ages out after a day, so a lapse nobody has fixed says so again tomorrow rather
+  // than going quiet forever.
+  if (authLapsed && !tokenModeActive(defaultConfigDir())) {
+    const ws = readWatchdogState();
+    const notifiedAt = typeof ws.lapsed_login_notified_at === 'string' ? ws.lapsed_login_notified_at : null;
+    const age = notifiedAt ? ageSecs(notifiedAt) : null;
+    const stale = age === null || age > 24 * 3600;
+    if (stale) {
+      pushOperatorMessage(composeLapsedLoginMessage(timezone));
+      appendEvent('lapsed-login-detected', notifiedAt ? 'still lapsed after 24h' : 'auth failure on pane, no token to mint');
+      ws.lapsed_login_notified_at = worldStamp(REAL_WORLD);
+      writeWatchdogState(ws);
+    }
+    process.exit(0);
+  }
+  if (!authLapsed) {
+    const ws = readWatchdogState();
+    if (ws.lapsed_login_notified_at && storedLoginUsable(defaultConfigDir())) {
+      delete ws.lapsed_login_notified_at;
+      writeWatchdogState(ws);
+      appendEvent('lapsed-login-recovered', 'usable stored login present again');
+    }
+  }
 
   // 3b. Stall-question detection (PROP-024) — catches the un-redirectable remainder
   // the AskUserQuestion PreToolUse gate (ask-gate.ts) can't reach: native permission
   // dialogs and harness-rendered prompts below the tool layer. Notify only, once per
   // episode (re-arms when the pane clears) — never auto-answer or send Escape, that's
   // always the operator's call.
-  const paneContent = capturePane(sessionName);
   const pendingQuestion = paneContent !== null && hasPendingQuestion(paneContent);
   {
     const watchdogState = readWatchdogState();

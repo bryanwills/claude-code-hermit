@@ -1,25 +1,29 @@
 # Always-On Setup
 
-Docker is the recommended way to run your hermit autonomously. For lifecycle internals and bare-tmux setup, see [Always-On Operations](always-on-ops.md). For security hardening, see [Security](security.md).
+Docker is the guided way to run your hermit autonomously, and the rest of this page is that workflow. It is not the only one: tmux runs the same hermit with the same heartbeat, monitors, and channels, and which one fits depends on the machine more than on the hermit. See [Always-On Operations](always-on-ops.md) for the tmux setup and the lifecycle internals both share, and [Security](security.md) for hardening.
 
 ---
 
 ## Docker vs tmux
 
-Both run your hermit unattended between tasks with heartbeat, monitors, and channels live. Docker is the default recommendation because it gives you four things at once: config isolation, crash recovery, a reproducible environment, and kernel-enforced hardening. tmux is the lighter path when you don't need container isolation and want to skip the image build. The tmux setup lives in [Always-On Operations](always-on-ops.md); the rest of this page is the Docker workflow.
+Both run your hermit unattended between tasks with heartbeat, monitors, and channels live. Docker adds config isolation, a reproducible environment, and kernel-enforced hardening, and it is what `/docker-setup` walks you through. tmux skips the image build and reaches host services natively. The tmux setup lives in [Always-On Operations](always-on-ops.md); the rest of this page is the Docker workflow.
 
-| Dimension        | Docker (recommended)                                          | tmux                                                        |
+| Dimension        | Docker                                                        | tmux                                                        |
 | ---------------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
 | Isolation        | Container sees only what you mount                            | Full host access as your user                              |
-| Crash recovery   | `restart: unless-stopped` auto-restarts on crash and reboot   | Session dies with the host; you restart it manually        |
+| Crash recovery   | Container restarts itself (`restart: unless-stopped`) as long as Docker is running | `bin/hermit-watchdog install` (systemd timer / LaunchAgent) restarts dead sessions |
 | Environment      | Pinned, reproducible image (Node, Bun, project packages)      | Whatever is installed on the host                          |
 | Host services    | Reach localhost DBs/dev servers via mounts or `network_mode`  | Native, no networking setup                                |
 | Hardening        | Opt-in `/docker-security` overlay (LAN containment, sysctls)  | Deny patterns and hooks only                               |
 | Setup cost       | Image build on first `up` (slower first run)                  | `bin/hermit-start`, no build                               |
 
+Isolation is a spectrum rather than a Docker-or-nothing choice, and Claude Code's own [sandbox environments](https://code.claude.com/docs/en/sandbox-environments) page compares the options — the bash sandbox, the sandbox runtime, containers, VMs. A boundary is required for `bypassPermissions` and is defense in depth under the default `auto` mode.
+
 **Choose Docker when** the hermit runs on a shared or long-lived host, you want it to survive reboots unattended, or you want the container to only see the project you mount.
 
 **Choose tmux when** you're on a trusted single-user box, Docker isn't available, or you need the hermit to reach host services with no networking setup.
+
+**Either way, "always-on" is bounded by the machine.** Sleep pauses everything, on both paths. Logout depends on the host: a Linux system Docker daemon keeps running, while Docker Desktop, systemd *user* timers, and macOS LaunchAgents stop with your session — on Linux, `loginctl enable-linger` is what keeps a user timer alive across a reboot before anyone logs in. A hermit that has to be up at 4am belongs on a machine that is up at 4am.
 
 Either way, the first launch needs one attended step to clear the trust gate, then subsequent boots are headless. On Docker the default `auto` mode (classifier-reviewed autonomy) requires the same one-time Screen 2 acknowledgement as `bypassPermissions`; both persist in the named volume after you click through once. If your workload cannot tolerate any action-level confirmation at all, opt into `bypassPermissions` via `/hermit-settings permissions`.
 

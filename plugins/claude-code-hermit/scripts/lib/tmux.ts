@@ -142,9 +142,20 @@ const MODE_SCAN_LINES = 4;
  * visible content, so the status bar falls outside the scan window and no mode is
  * returned (same property anchoredPaneTail relies on).
  */
+/**
+ * The pane's last `maxLines` non-blank rows, rejoined. The unanchored counterpart to
+ * anchoredPaneTail, for callers scanning for text that has no dialog footer to anchor on.
+ */
+export function nonBlankTail(paneContent: string, maxLines: number): string {
+  return paneContent
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .slice(-maxLines)
+    .join('\n');
+}
+
 export function paneModeLine(paneContent: string): string | null {
-  const lines = paneContent.split('\n').filter((line) => line.trim() !== '');
-  const tail = lines.slice(-MODE_SCAN_LINES).join('\n').toLowerCase();
+  const tail = nonBlankTail(paneContent, MODE_SCAN_LINES).toLowerCase();
 
   const matched = Object.entries(MODE_PHRASES)
     .filter(([, phrase]) => tail.includes(phrase))

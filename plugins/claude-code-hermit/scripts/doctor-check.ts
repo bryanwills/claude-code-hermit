@@ -20,7 +20,7 @@ import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
 import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
-import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, CREDENTIALS_FILENAME } from './lib/setup-token';
+import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, storedLoginUsable, CREDENTIALS_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
 import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
@@ -1731,13 +1731,8 @@ function probeDeclaredCredentials(p: DoctorPaths): { okCount: number; badNotes: 
 function shadowingCredentialNote(): string | null {
   const configDir = defaultConfigDir();
   if (!tokenModeActive(configDir)) return null;
-  try {
-    const creds = JSON.parse(fs.readFileSync(credentialsFilePath(configDir), 'utf8'));
-    const token = creds?.claudeAiOauth?.accessToken;
-    if (typeof token !== 'string' || token.length === 0) return null;
-  } catch {
-    return null; // absent or unreadable — nothing to shadow
-  }
+  // absent, unreadable, or an inert stub (parked file, /logout) — nothing to shadow
+  if (!storedLoginUsable(configDir)) return null;
   return `stored ${CREDENTIALS_FILENAME} will shadow the login token in interactive sessions — park it (mv ${credentialsFilePath(configDir)} ${parkedCredentialsFilePath(configDir)}) and restart`;
 }
 
