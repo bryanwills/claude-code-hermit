@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
+
+### Fixed
+- The `memory-size` warning distinguishes Claude Code's `/doctor` from `/hermit-doctor` and says it can be sent from chat or typed in a terminal.
+
 ## [1.2.51] - 2026-08-29
 
 ### Added

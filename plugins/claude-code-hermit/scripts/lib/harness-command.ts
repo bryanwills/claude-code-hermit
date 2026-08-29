@@ -22,7 +22,7 @@ type PermissionMode = (typeof PERMISSION_MODE)[number];
 const ARG_RE = /^[A-Za-z0-9._[\]-]{1,64}$/;
 
 /** Commands taking no argument. */
-const BARE_COMMANDS = new Set(['/compact', '/clear']);
+const BARE_COMMANDS = new Set(['/compact', '/clear', '/doctor', '/checkup']);
 // The exactly-two-token rule enforced below is load-bearing for /advisor specifically:
 // a bare `/advisor` opens Claude Code's interactive advisor picker (a real blocking
 // dialog, "Enter to confirm · Esc to cancel" — probe-verified, CC 2.1.240) that no one
@@ -30,6 +30,12 @@ const BARE_COMMANDS = new Set(['/compact', '/clear']);
 // that picker from ever being deliverable; do not add a bare `/advisor` acceptance path.
 /** Commands requiring exactly one argument. */
 const ARG_COMMANDS = new Set(['/model', '/effort', '/permission-mode', '/advisor']);
+
+const SKILL_ARG_RE = /^(--fix|--comment|#?[A-Za-z0-9._/@\[\]-]{1,64})$/;
+const SKILL_ARG_COMMANDS = new Map([
+  ['/code-review', '/code-review'],
+  ['/review', '/code-review'],
+]);
 
 export type ParsedCommand = { command: string; arg: string | null };
 
@@ -52,14 +58,33 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
   const command = parts[0].toLowerCase();
 
   if (BARE_COMMANDS.has(command)) {
-    return parts.length === 1 ? { command, arg: null } : null;
+    if (parts.length !== 1) return null;
+    return { command: command === '/checkup' ? '/doctor' : command, arg: null };
   }
   if (ARG_COMMANDS.has(command)) {
     if (parts.length !== 2) return null;
     const arg = parts[1];
     return ARG_RE.test(arg) ? { command, arg } : null;
   }
+  const skillCommand = SKILL_ARG_COMMANDS.get(command);
+  if (skillCommand) {
+    const args = parts.slice(1);
+    if (!args.every((arg) => SKILL_ARG_RE.test(arg) && (!arg.startsWith('--') || arg === '--fix' || arg === '--comment'))) return null;
+    return { command: skillCommand, arg: args.length > 0 ? args.join(' ') : null };
+  }
   return null;
+}
+
+/** Why a parsed skill command cannot be delivered, or null when it can. */
+export function skillCommandRefusal(parsed: ParsedCommand): string | null {
+  if (parsed.command !== '/code-review' || !parsed.arg) return null;
+  if (!parsed.arg.split(' ').some((token) => token.toLowerCase() === 'ultra')) return null;
+  return 'ultra opens an interactive launch dialog that nobody in chat can answer and can start a cloud-billed run; choose low, medium, or high.';
+}
+
+/** Whether this canonical command is a chat-relayed skill command. */
+export function isSkillCommand(command: string): boolean {
+  return command === '/doctor' || command === '/code-review';
 }
 
 // --- Permission-mode targets ----------------------------------------------
@@ -119,6 +144,7 @@ export type PendingCommand = {
   command: string;
   arg: string | null;
   by: string;
+  reply_to?: { source: string; chat_id: string };
   requested_at: string;
 };
 
@@ -140,6 +166,7 @@ export const COMMAND_MARKER_TTL_SECS = 3600;
  * forever.
  */
 export const SWITCH_VERIFY_TTL_SECS = 86_400;
+export const SKILL_RELAY_TTL_SECS = 600;
 const HARNESS_CONFIRM_TAIL_LINES = 20;
 
 // /advisor has NO entry here on purpose. Upstream: "Enabling or disabling the advisor
@@ -227,6 +254,49 @@ export function clearPendingCommand(hermitRoot: string): void {
 /** Render a marker back to the literal text typed into the pane. */
 export function renderCommand(entry: { command: string; arg: string | null }): string {
   return entry.arg ? `${entry.command} ${entry.arg}` : entry.command;
+}
+
+// --- Relayed skill delivery -----------------------------------------------
+
+export type SkillRelay = {
+  command: string;
+  arg: string | null;
+  by: string;
+  reply_to: { source: string; chat_id: string };
+  delivered_at: string;
+};
+
+function skillRelayPath(hermitRoot: string): string {
+  return path.join(hermitRoot, 'state', 'pending-skill-relay.json');
+}
+
+/** Atomic tmp+rename write. Returns false on any failure. */
+export function writeSkillRelay(hermitRoot: string, entry: SkillRelay): boolean {
+  return writeMarker(skillRelayPath(hermitRoot), entry);
+}
+
+/** Read the delivered skill relay, or null when absent, malformed, or expired. */
+export function readSkillRelay(hermitRoot: string): SkillRelay | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(skillRelayPath(hermitRoot), 'utf-8')) as SkillRelay;
+    if (!parsed || typeof parsed.command !== 'string' || !parsed.reply_to) return null;
+
+    const ts = Date.parse(parsed.delivered_at);
+    if (Number.isNaN(ts)) return null;
+    if ((Date.now() - ts) / 1000 > SKILL_RELAY_TTL_SECS) {
+      clearSkillRelay(hermitRoot);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete the relay once its matching pane turn has claimed it. */
+export function clearSkillRelay(hermitRoot: string): void {
+  try { fs.unlinkSync(skillRelayPath(hermitRoot)); } catch {}
 }
 
 // --- Post-delivery verification -------------------------------------------

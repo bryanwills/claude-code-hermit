@@ -5,7 +5,7 @@
 import { readRuntimeJson } from './runtime';
 import { capturePane, paneModeLine, sendKeys, tmuxSessionAlive } from './tmux';
 import { applyContextReset } from './context-reset';
-import { CHANNEL_SETTABLE_MODES, clearPendingCommand, normalizePermissionMode, readPendingCommand, renderCommand, writeSwitchVerify } from './harness-command';
+import { CHANNEL_SETTABLE_MODES, clearPendingCommand, isSkillCommand, normalizePermissionMode, readPendingCommand, renderCommand, writeSkillRelay, writeSwitchVerify } from './harness-command';
 import type { PendingCommand } from './harness-command';
 import { currentHHMMOrUTC } from './time';
 import { readSettledConfig } from './config-read';
@@ -106,6 +106,16 @@ export function drainHarnessCommand(hermitRoot: string): void {
   if (!sendKeys(sessionName, text)) {
     console.error(`[stop-pipeline] harness-command: tmux refused "${text}" — marker kept for retry`);
     return;
+  }
+
+  if (isSkillCommand(pending.command) && pending.reply_to) {
+    writeSkillRelay(hermitRoot, {
+      command: pending.command,
+      arg: pending.arg,
+      by: pending.by,
+      reply_to: pending.reply_to,
+      delivered_at: new Date().toISOString(),
+    });
   }
   clearPendingCommand(hermitRoot);
 

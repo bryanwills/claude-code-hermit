@@ -68,6 +68,7 @@ describe('doctor memory-size check', () => {
     expect(result.status).toBe('warn');
     expect(result.detail).toContain('CLAUDE.md: 250 lines');
     expect(result.detail).toContain('/doctor');
+    expect(result.detail).toContain('hermit-doctor');
   });
 
   test('a 250-line CLAUDE.local.md warns on its own', () => {
@@ -76,6 +77,7 @@ describe('doctor memory-size check', () => {
     expect(result.status).toBe('warn');
     expect(result.detail).toContain('CLAUDE.local.md: 250 lines');
     expect(result.detail).toContain('/doctor');
+    expect(result.detail).toContain('hermit-doctor');
   });
 
   test('a 21 KB, 60-line MEMORY.md warns on the byte bound', () => {

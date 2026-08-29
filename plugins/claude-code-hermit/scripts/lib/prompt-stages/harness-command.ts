@@ -28,8 +28,8 @@
 
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
-import { isTrustedController, channelBotIdentity } from '../channel-auth';
-import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal } from '../harness-command';
+import { isTrustedController, isSettingsController, channelBotIdentity } from '../channel-auth';
+import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal, skillCommandRefusal, isSkillCommand } from '../harness-command';
 import { resolveSlashCommand } from '../channel-slash-address';
 import type { StageContext, StageResult } from './types';
 
@@ -51,7 +51,10 @@ export function run(ctx: StageContext): StageResult | void {
   const parsed = parseHarnessCommand(`${addressed.command}${addressed.rest}`);
   if (!parsed) return;
 
-  if (!isTrustedController(config, env.source, env.userId, env.chatId)) return; // unauthorized — silent no-op
+  const authorized = parsed.command === '/doctor'
+    ? isSettingsController(config, env.source, env.userId, env.chatId)
+    : isTrustedController(config, env.source, env.userId, env.chatId);
+  if (!authorized) return; // unauthorized — silent no-op
 
   // Interactive sessions store tmux_session: null (hermit-start.ts), so there is no pane
   // to deliver into. Refuse HERE rather than recording a marker the drain could never
@@ -73,17 +76,28 @@ export function run(ctx: StageContext): StageResult | void {
     }
   }
 
+  const skillRefusal = skillCommandRefusal(parsed);
+  if (skillRefusal) {
+    return {
+      context: `[harness-command] refused "${renderCommand(parsed)}": ${skillRefusal}\n`,
+    };
+  }
+
   const by = safeForLLM(senderLabel(env).slice(0, 64));
+  const isRelayedSkillCommand = isSkillCommand(parsed.command);
   const ok = writePendingCommand(dir, {
     command: parsed.command,
     arg: parsed.arg,
     by,
+    ...(isRelayedSkillCommand ? { reply_to: { source: env.source, chat_id: env.chatId } } : {}),
     requested_at: new Date().toISOString(),
   });
   if (!ok) return;
 
   const rendered = renderCommand(parsed);
   return {
-    context: `[harness-command] "${rendered}" requested by ${by} — will be applied to this session when the current turn ends.\n`,
+    context: isRelayedSkillCommand
+      ? `[harness-command] "${rendered}" requested by ${by} — will run when the current turn ends; its result comes back to this chat.\n`
+      : `[harness-command] "${rendered}" requested by ${by} — will be applied to this session when the current turn ends.\n`,
   };
 }

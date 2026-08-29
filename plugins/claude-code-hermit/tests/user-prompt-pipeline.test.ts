@@ -196,6 +196,83 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
+  test('a trusted code review is recorded with its reply target', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/code-review low', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('will run when the current turn ends; its result comes back to this chat');
+      const pending = JSON.parse(fs.readFileSync(hermit(wd.dir, 'state', 'pending-harness-command.json'), 'utf-8'));
+      expect(pending).toMatchObject({
+        command: '/code-review',
+        arg: 'low',
+        reply_to: { source: 'telegram', chat_id: '12345' },
+      });
+    } finally {
+      stub.stop();
+    }
+  });
+
+  test('an ultra code review is refused and records nothing', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/code-review ultra', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('refused "/code-review ultra"');
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    } finally {
+      stub.stop();
+    }
+  });
+
+  test('doctor is silent for a trusted sender without settings authority', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      const configPath = hermit(wd.dir, 'config.json');
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      config.operator_profile = 'non-technical';
+      fs.writeFileSync(configPath, JSON.stringify(config));
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/doctor', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).not.toContain('[harness-command]');
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    } finally {
+      stub.stop();
+    }
+  });
+
+  test('doctor is recorded for the default technical settings authority', async () => {
+    const stub = startHttpStub();
+    try {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
+
+      const r = await run(wd, '/doctor', stub.url);
+
+      expect(r.exitCode).toBe(0);
+      const pending = JSON.parse(fs.readFileSync(hermit(wd.dir, 'state', 'pending-harness-command.json'), 'utf-8'));
+      expect(pending).toMatchObject({
+        command: '/doctor',
+        arg: null,
+        reply_to: { source: 'telegram', chat_id: '12345' },
+      });
+    } finally {
+      stub.stop();
+    }
+  });
+
   // Addressing is resolved before the harness grammar, so a Telegram group's
   // `/cmd@thebot` reaches the parser — and one aimed at another bot does not.
   test('a harness command addressed to this bot reaches the pending marker', async () => {
