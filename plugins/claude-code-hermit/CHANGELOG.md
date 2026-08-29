@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `docker-setup` refuses at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, so the wizard stops before the image build instead of after it. Its post-start poll also reads the entrypoint's `.boot-conflict` marker: an inert container reports `running`, so setup previously walked the operator through login and channel pairing against a container with no tmux session.
+
 ## [1.2.51] - 2026-08-29
 
 ### Added
