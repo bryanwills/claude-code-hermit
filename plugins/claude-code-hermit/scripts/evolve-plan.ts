@@ -255,13 +255,22 @@ function classifyDockerEntrypoint(
     && manifestFiles['docker/docker-entrypoint.hermit.sh'] != null;
   if (e !== null && !hasBaseline) e.bootstrap = true;
 
-  // Expose the baseline content when manifest-seed kept a copy. Without it the
-  // runner sees ours and theirs but no base, so it cannot tell an operator line
-  // from an old-upstream one and Step 5c stays on the replace + .bak path.
-  if (e !== null) {
+  // Expose the baseline content when manifest-seed kept a copy AND its bytes
+  // still hash to the recorded baseline. Without it the runner sees ours and
+  // theirs but no base, so it cannot tell an operator line from an old-upstream
+  // one and Step 5c stays on the replace + .bak path. An *unverified* copy is
+  // worse than none: Step 5c diffs against it and never re-checks the hash, so a
+  // stale one (manifest re-seeded, the copy left at the previous version) reads
+  // every intervening upstream line as an operator hunk and migrates upstream
+  // code into the sidecar. A mismatch — or no manifest entry at all, the
+  // `bootstrap` case — falls back to replace + .bak.
+  if (e !== null && hasBaseline) {
     const basePath = path.join(
       hermitDir, 'state', 'pristine', 'docker', 'docker-entrypoint.hermit.sh');
-    if (fs.existsSync(basePath)) e.base_path = basePath;
+    try {
+      const recorded = manifestFiles!['docker/docker-entrypoint.hermit.sh'].sha256;
+      if (sha256(fs.readFileSync(basePath)) === recorded) e.base_path = basePath;
+    } catch { /* absent or unreadable -> no base, same as never recorded */ }
   }
   return e;
 }
