@@ -40,6 +40,25 @@ export function defaultConfigDir(): string {
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 }
 
+/**
+ * True when this process's environment carries a credential Claude Code uses
+ * INSTEAD of a stored login: an API key, a bearer token, or a cloud provider.
+ * A 401 under any of these is not a login lapse.
+ *
+ * Only meaningful in a process that shares the session's environment — the
+ * session itself, or Docker, where the whole container shares one. A host
+ * watchdog does not, and reads the launch stamp in runtime.json instead.
+ */
+export function envAuthPresent(): boolean {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY ||
+      process.env.ANTHROPIC_AUTH_TOKEN ||
+      process.env.CLAUDE_CODE_USE_BEDROCK ||
+      process.env.CLAUDE_CODE_USE_VERTEX ||
+      process.env.CLAUDE_CODE_USE_FOUNDRY,
+  );
+}
+
 export function tokenFilePath(configDir: string): string {
   return path.join(configDir, TOKEN_FILENAME);
 }

@@ -911,6 +911,86 @@ test('token dead before its recorded expiry → relay spawned, no nudge', withHe
   expect(events).not.toContain('nudge');
 }));
 
+// --- The session's launch stamp vs. the watchdog's own environment -------
+// On a host install the watchdog runs from a systemd unit / launchd job / cron
+// entry whose only injected variable is PATH, so `process.env` here describes the
+// watchdog and never the session. These fixtures reproduce that: CLAUDE_CONFIG_DIR
+// and ANTHROPIC_API_KEY are blanked in the subprocess env, and HOME is redirected
+// so the ~/.claude fallback cannot accidentally resolve to a real install.
+const UNIT_ENV = (h: Hermit) => ({
+  HOME: h.dir,
+  CLAUDE_CONFIG_DIR: '',
+  ANTHROPIC_API_KEY: '',
+  CLAUDE_CODE_OAUTH_TOKEN: '',
+});
+
+test('token hermit, config dir known only to the session → relay spawned, no notice', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  // Record still reads healthy — only the pane witnesses the dead token, and only
+  // the stamp says where the token lives. Without it the watchdog reads ~/.claude,
+  // fails tokenModeActive(), and tells the operator to go run /login by hand.
+  const configDir = writeSetupToken(h, 200);
+  patchRuntime(h, { config_dir: configDir });
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('reauth-relay');
+  expect(events).not.toContain('lapsed-login-detected');
+}));
+
+// Precedence, not merely gap-filling: the session's dir wins over a value the
+// watchdog process happens to carry.
+test('stamped config dir overrides the watchdog process env', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  // A token dir the watchdog's own env points at, distinct from the /login dir
+  // the session actually reads. Built inline because writeSetupToken() and
+  // writeStoredLogin() share one fixture dir by design.
+  const tokenDir = path.join(h.dir, 'watchdog-config');
+  fs.mkdirSync(tokenDir, { recursive: true });
+  fs.writeFileSync(path.join(tokenDir, '.hermit-setup-token'), 'sk-ant-oat01-testtesttesttesttest\n', { mode: 0o600 });
+  const sessionDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: sessionDir });
+  const r = await watchdog(h, 'run', {
+    env: { ...UNIT_ENV(h), CLAUDE_CONFIG_DIR: tokenDir },
+  });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('lapsed-login-detected'); // /login tier, per the session
+  expect(events).not.toContain('reauth-relay');
+}));
+
+// An API-key hermit's 401 is not a login lapse. The key lives in the operator's
+// shell, so the watchdog never sees it — only the boolean the session stamped.
+test('env_auth stamp → 401 pane is not read as a lapsed login, tiers keep running', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600); // stale: the nudge tier must survive
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).not.toContain('lapsed-login-detected');
+  expect(events).toContain('nudge'); // no process.exit(0) swallowing the outage
+}));
+
+// Same fixture without the stamp: the wrong story the issue describes. Pins the
+// fallback so a pre-upgrade session is provably unchanged, not silently migrated.
+test('no stamp → falls back to the watchdog process env', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h, '');
+  const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), CLAUDE_CONFIG_DIR: configDir } });
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('lapsed-login-detected');
+}));
+
 // Regression: a pending pane whose in-session heartbeat has ALSO gone stale must
 // NOT be nudged or restarted. Wedge detection (step 4) and the re-arm fallback
 // (step 5) both send keystrokes into the pane; on a focused prompt that would

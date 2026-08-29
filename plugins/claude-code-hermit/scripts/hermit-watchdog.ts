@@ -37,7 +37,7 @@ import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
-import { defaultConfigDir, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
+import { defaultConfigDir, envAuthPresent, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
 import { isContainer } from './lib/container';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
 import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
@@ -588,6 +588,10 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
     const child = spawn(startBin, [], {
       detached: true,
       stdio: 'ignore',
+      // No explicit env: hermit-start reads the setup token from defaultConfigDir()
+      // and forwards CLAUDE_CONFIG_DIR into the new session's tmux env-file, and
+      // main() already assigned the session's own value onto process.env — which
+      // spawn passes on by default.
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] restart failed: ${e}\n`));
     child.unref();
@@ -651,14 +655,12 @@ function reauthRelayActive(): boolean {
  * token, or a cloud provider. Telling those operators to sign in would be wrong advice
  * for a cause no login can fix, so the lapsed-login paths sit this out entirely.
  */
-function envAuthOwnsCredential(): boolean {
-  return Boolean(
-    process.env.ANTHROPIC_API_KEY ||
-      process.env.ANTHROPIC_AUTH_TOKEN ||
-      process.env.CLAUDE_CODE_USE_BEDROCK ||
-      process.env.CLAUDE_CODE_USE_VERTEX ||
-      process.env.CLAUDE_CODE_USE_FOUNDRY,
-  );
+function envAuthOwnsCredential(sessionEnvAuth: boolean): boolean {
+  // The session's stamp answers first, because on a host install this process's
+  // own env is empty here. Its env is still the fallback: Docker shares one
+  // environment between the loop and the session, and a session booted before
+  // the stamp existed has nothing else to offer.
+  return sessionEnvAuth || envAuthPresent();
 }
 
 /**
@@ -682,6 +684,9 @@ function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'id
     const child = spawn(process.execPath, [REAUTH_MINT_SCRIPT, 'relay'], {
       detached: true,
       stdio: 'ignore',
+      // No explicit env: the relay installs the freshly-minted token into
+      // defaultConfigDir(), which must be the SESSION's config dir — already on
+      // process.env from main()'s launch-stamp adoption, which spawn passes on.
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] reauth relay spawn failed: ${e}\n`));
     child.unref();
@@ -1467,6 +1472,18 @@ async function main(): Promise<void> {
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
 
+  // Adopt the session's own launch environment before any auth decision.
+  // startup-context.ts stamps `config_dir` from inside the session, so it also
+  // carries a value set in user or managed settings — a source this process
+  // cannot observe at all. Assigning it here reaches every defaultConfigDir()
+  // call below — and the children spawned from them, the re-auth relay and
+  // hermit-start — without special-casing each one. Absent field → today's
+  // behavior, so a session booted before this shipped is unaffected.
+  if (typeof runtime.config_dir === 'string' && runtime.config_dir) {
+    process.env.CLAUDE_CONFIG_DIR = runtime.config_dir;
+  }
+  const sessionEnvAuth = runtime.env_auth === true;
+
   // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
   //
   // `session_state: 'idle'` used to exit here outright. It cannot: 'in_progress' is written
@@ -1530,7 +1547,7 @@ async function main(): Promise<void> {
   // recorded expiry — which 3a now accepts as a trigger.
   const paneContent = capturePane(sessionName);
   const authLapsed =
-    paneContent !== null && hasLapsedLogin(paneContent) && !envAuthOwnsCredential();
+    paneContent !== null && hasLapsedLogin(paneContent) && !envAuthOwnsCredential(sessionEnvAuth);
 
   // 3a. Re-auth relay — runs after dead-session restart on purpose (see the
   // block comment above evaluateReauth). While a relay is in flight the session
