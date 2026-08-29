@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.51] - 2026-08-29
 
 ### Added
 - `hermit-doctor` gains a `classifier-denials` check reading a rolling 7 days of auto-mode denials, with the program name for shell commands. It stays `ok` below a reporting floor (under 3 denials, no cluster past 1) since ambient denials are expected under auto mode, `warn`s at or above it, and `fail`s when 3 or more land inside any 10-minute span. Clustering is cross-tool. The row is tagged `tier: maintainer` in the doctor JSON and travels only on the maintainer leg of doctor's notice, so a client chat never sees it.
@@ -25,6 +25,13 @@
 - A legacy run-object judge window folds into the 20-verdict ring on any reflect run, not only one that carries verdicts, so a quiet install stops carrying the old structure in `reflection-state.json`.
 - Verdicts from one judge run are interleaved in that window instead of grouped by type, so a run straddling the 20-verdict boundary no longer sheds its accepts first and inflates the `reflection-judge` suppress ratio.
 - The Docker entrypoint's split-brain boot guard read `runtime.json` from a doubled `.claude-code-hermit/.claude-code-hermit/` path, so it never fired and a container would boot beside a live host instance owning the same state dir. It now refuses that boot as intended, and writes the `.boot-conflict` marker where `hermit-docker up` reads it. `HERMIT_FORCE_BOOT=1` still overrides.
+
+### Upgrade Instructions
+
+1. **Docker hermits only — refresh the on-disk entrypoint BEFORE rebuilding.** `hermit-docker update` rebuilds with the operator's on-disk `docker-entrypoint.hermit.sh`, not the plugin template, so bumping the plugin and running `update` alone rebuilds with the still-dead boot guard. Re-run `/claude-code-hermit:docker-setup` (or patch the on-disk copy from `state-templates/docker/docker-entrypoint.hermit.sh.template`) first, then run `hermit-docker update`. This carries the split-brain boot-guard path fix.
+2. Non-Docker (tmux/local) hermits: nothing to do — the fix lives only in the Docker entrypoint template.
+
+Everything else in this release is self-migrating on next run: the denial ledger's alert-state file re-keys itself on first read, and the reflection judge's legacy window folds into the ring automatically. No `config.json` changes required.
 
 ## [1.2.50] - 2026-08-28
 
