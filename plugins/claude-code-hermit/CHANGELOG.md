@@ -5,6 +5,12 @@
 ### Added
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
 - The watchdog notices a lapsed Claude login on the session's own screen. On `/login` credentials it sends one channel notice (repeated daily until fixed) and suppresses the nudge and restart tiers, instead of restarting a session that can't authenticate; on a setup-token it spawns the existing re-auth relay, which now also covers a token that stops working before its recorded expiry.
+- Operator customizations to the Docker entrypoint have a supported home: `<project-root>/docker-entrypoint.hermit-local.sh`, sourced at `HERMIT_ENTRY_PHASE=pre-boot` (before plugins install) and `pre-launch` (before `hermit-start`). It is never touched by `hermit-evolve`, and it lives on the project bind mount, so edits apply on `hermit-docker restart` without a rebuild.
+- The Docker entrypoint auto-approves the MCP servers a project's own `.mcp.json` declares, alongside the channel plugin ids, and sets the container's workspace-trust flag when it does (a versioned `.mcp.json` is only honoured in a trusted workspace, which `/docker-setup` already walks the operator through). Without this a first boot sat on an interactive approval prompt.
+- `manifest-seed.ts` keeps each baseline's bytes at `state/pristine/<key>` next to its hash, written after the manifest so a crash can only leave a missing copy, never a stale one.
+
+### Changed
+- A Docker entrypoint `conflict` with a recorded baseline no longer just parks the operator's copy: `hermit-evolve` diffs the baseline against it, moves the shell-level hunks into `docker-entrypoint.hermit-local.sh` under the phase that matches their intent, and parks the full delta as `state/docker-entrypoint.delta.<ts>.patch`. Hunks inside a heredoc, a loop body, or the plugin-install logic are never moved and stay in the patch. The sidecar is syntax-checked, and a failure leaves every hunk unmoved. A `customized-kept` entrypoint with a baseline takes the same path instead of drifting further from upstream each release. Without a baseline, behaviour is unchanged.
 
 ### Fixed
 - The Docker entrypoint no longer blocks boot when `.credentials.json` carries a past `expiresAt`. That field belongs to the access token Claude Code refreshes silently, so the gate stalled healthy hermits while catching a real lapse only by accident.
@@ -18,7 +24,8 @@
 ### Upgrade Instructions
 
 1. **Docker hermits only — refresh the on-disk entrypoint BEFORE rebuilding.** `hermit-docker update` rebuilds with the operator's on-disk `docker-entrypoint.hermit.sh`, not the plugin template, so bumping the plugin and running `update` alone rebuilds with the old boot gate still in place. Re-run `/claude-code-hermit:docker-setup` (or patch the on-disk copy from `state-templates/docker/docker-entrypoint.hermit.sh.template`) first, then run `hermit-docker update`. This carries the removal of the expired-login boot block.
-2. Non-Docker (tmux/local) hermits: nothing to do — that removal lives only in the Docker entrypoint template. Lapsed-login detection ships in the watchdog and applies to both deployments with no config change.
+2. **Docker hermits with a hand-edited entrypoint.** If you edited `docker-entrypoint.hermit.sh` directly, move those changes to `<project-root>/docker-entrypoint.hermit-local.sh` — see the sidecar note in `/claude-code-hermit:docker-setup`. This upgrade migrates them for you when a baseline was recorded; if none was, your copy is parked as `state/docker-entrypoint.hermit.sh.<ts>.bak` and the move is manual this once. After that, upgrades leave the sidecar alone.
+3. Non-Docker (tmux/local) hermits: nothing to do — that removal lives only in the Docker entrypoint template. Lapsed-login detection ships in the watchdog and applies to both deployments with no config change.
 
 ## [1.2.51] - 2026-08-29
 

@@ -48,6 +48,61 @@ describe('manifest-seed: hashing + shape', () => {
   }));
 });
 
+describe('manifest-seed: pristine baseline copies', () => {
+  test('copies the seeded bytes to state/pristine/<key>, nested key included',
+    withDir(async (dir) => {
+      const f = path.join(dir, 'entrypoint.sh');
+      fs.writeFileSync(f, '#!/usr/bin/env bash\necho boot\n');
+
+      const r = await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
+        stdin: JSON.stringify({
+          pluginVersion: '1.2.52',
+          entries: [{ key: 'docker/docker-entrypoint.hermit.sh', file: f }],
+        }),
+      });
+      expect(r.exitCode).toBe(0);
+
+      const copy = path.join(
+        stateArg(dir), 'state', 'pristine', 'docker', 'docker-entrypoint.hermit.sh');
+      expect(fs.readFileSync(copy)).toEqual(fs.readFileSync(f));
+    }));
+
+  test('keyPrefix entries get one pristine copy each', withDir(async (dir) => {
+    const src = path.join(dir, 'src-bin');
+    fs.mkdirSync(src);
+    fs.writeFileSync(path.join(src, 'hermit-run'), 'run\n');
+    fs.writeFileSync(path.join(src, 'hermit-start'), 'start\n');
+
+    await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
+      stdin: JSON.stringify({
+        pluginVersion: '1.2.52',
+        entries: [{ keyPrefix: 'bin', dir: src }],
+      }),
+    });
+
+    const root = path.join(stateArg(dir), 'state', 'pristine', 'bin');
+    expect(fs.readFileSync(path.join(root, 'hermit-run'), 'utf8')).toBe('run\n');
+    expect(fs.readFileSync(path.join(root, 'hermit-start'), 'utf8')).toBe('start\n');
+  }));
+
+  test('re-seeding a key refreshes its pristine copy', withDir(async (dir) => {
+    const f = path.join(dir, 'a.txt');
+    const copy = path.join(stateArg(dir), 'state', 'pristine', 'templates', 'a');
+
+    fs.writeFileSync(f, 'v1\n');
+    await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
+      stdin: JSON.stringify({ pluginVersion: '1.0.0', entries: [{ key: 'templates/a', file: f }] }),
+    });
+    expect(fs.readFileSync(copy, 'utf8')).toBe('v1\n');
+
+    fs.writeFileSync(f, 'v2\n');
+    await runPinnedScript('manifest-seed.ts', stateArg(dir), [stateArg(dir)], {
+      stdin: JSON.stringify({ pluginVersion: '1.0.1', entries: [{ key: 'templates/a', file: f }] }),
+    });
+    expect(fs.readFileSync(copy, 'utf8')).toBe('v2\n');
+  }));
+});
+
 describe('manifest-seed: foreign-key preservation', () => {
   test('preserves untouched keys, overwrites re-seeded ones', withDir(async (dir) => {
     fs.writeFileSync(

@@ -47,6 +47,12 @@ never block:
 - **Legacy `## Plan` strip (step 4b):** warn only, never strip.
 - **Boot-critical conflicts (steps 5b bin/, 5c docker entrypoint):** follow `reference.md` as written —
   replace with upstream and save the operator's copy as `.bak` / timestamped backup. These never prompt.
+- **Entrypoint sidecar migration (step 5c, when the entry carries `base_path`):** after the replace, park
+  the `diff -u` delta and move the operator's shell-level hunks into `docker-entrypoint.hermit-local.sh` per
+  `reference.md`. Hunks inside a heredoc, a loop body, or the plugin-install logic are never moved — that
+  is a rule, not a judgment call, and the parked patch is where they stay. `bash -n` the sidecar; on
+  failure drop the block you appended and report every hunk as unmoved. Never overwrite an existing
+  sidecar.
 - **`### Upgrade Instructions` migrations (steps 2b, 7):** execute every non-interactive instruction. If a
   step poses a genuine either/or with **no safe non-destructive default**, do **not** guess — record it
   as a deferred-migration block (below) and **skip that step only**. This is the sole escalation path.
@@ -79,7 +85,7 @@ Upgrade: vOLD -> vNEW | core current vNEW | blocked: <reason>
 Settings added: <keys | none>
 Templates: <refreshed/restored/kept-N/conflicts-parked-N | none>
 Bin wrappers: <restored/replaced(.bak) | none>
-Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | n/a>
+Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | migrated(<N> moved, <M> in <patch path>) | n/a>
 Docker rebuild: <needed + order | base-patched | no>
 CLAUDE-APPEND: <updated | unchanged>
 Context reload: <required (comma-separated plugin names) | no>

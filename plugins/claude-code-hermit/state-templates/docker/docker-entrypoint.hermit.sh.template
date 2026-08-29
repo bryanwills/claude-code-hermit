@@ -6,6 +6,19 @@ PROJECT_DIR="$(pwd)"
 AGENT_DIR="${PROJECT_DIR}/.claude-code-hermit"
 CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/claude/.claude}"
 
+# --- Operator sidecar ---------------------------------------------------------
+# This file is hermit-managed: hermit-evolve replaces it whenever upstream moves,
+# so edits made here do not survive an upgrade. Put customizations in
+# <project-root>/docker-entrypoint.hermit-local.sh instead. It is SOURCED (not exec'd) at
+# two points below, with HERMIT_ENTRY_PHASE naming which one:
+#   pre-boot    channel dirs exist, env resolved, before plugins are installed —
+#               extra packages, env, mounts, anything the session needs at start
+#   pre-launch  immediately before hermit-start — side services, last-second
+#               overrides
+# It inherits `set -euo pipefail`, so a failing command aborts the boot exactly
+# as an edit here would: guard anything optional with `|| true`. It lives on the
+# project bind mount, so edits apply on `hermit-docker restart` — no rebuild.
+
 echo "[docker-entrypoint] Starting hermit container..."
 echo "[docker-entrypoint] Project: ${PROJECT_DIR}"
 
@@ -189,7 +202,21 @@ if (configExists) {
       .map(([name]) => name);
   }
 }
-if (channels.length > 0) {
+// Servers a project's own .mcp.json declares need the same auto-approval as the
+// channel plugin ids: the container starts from a clean config, so without this
+// the first boot sits on an interactive "approve this MCP server?" prompt with
+// nobody there to answer it.
+const mcpJsonPath = path.join(project, ".mcp.json");
+let mcpJsonServers = [];
+if (fs.existsSync(mcpJsonPath)) {
+  try {
+    mcpJsonServers = Object.keys(JSON.parse(fs.readFileSync(mcpJsonPath, "utf8")).mcpServers ?? {});
+  } catch (e) {
+    console.error(`[docker-entrypoint] Warning: failed to parse .mcp.json: ${e}`);
+  }
+}
+
+if (channels.length > 0 || mcpJsonServers.length > 0) {
   const pluginIds = {
     discord: "plugin:discord:discord",
     telegram: "plugin:telegram:telegram",
@@ -199,9 +226,11 @@ if (channels.length > 0) {
   const enabled = proj.enabledMcpjsonServers ?? [];
   const disabledJson = proj.disabledMcpjsonServers ?? [];
   const disabledMcp = proj.disabledMcpServers ?? [];
-  for (const ch of channels) {
-    const pid = pluginIds[ch];
-    if (!pid) continue;
+  const approveIds = [
+    ...channels.map((ch) => pluginIds[ch]).filter(Boolean),
+    ...mcpJsonServers,
+  ];
+  for (const pid of approveIds) {
     if (!enabled.includes(pid)) {
       enabled.push(pid);
       changed = true;
@@ -215,6 +244,13 @@ if (channels.length > 0) {
   proj.enabledMcpjsonServers = enabled;
   proj.disabledMcpjsonServers = disabledJson;
   proj.disabledMcpServers = disabledMcp;
+  // A versioned .mcp.json is only honoured in a trusted workspace, and the
+  // wizard already walks the operator through accepting trust for this dir.
+  if (mcpJsonServers.length > 0 && !proj.hasTrustDialogAccepted) {
+    proj.hasTrustDialogAccepted = true;
+    changed = true;
+    console.error(`[docker-entrypoint] hasTrustDialogAccepted set (required for .mcp.json auto-approval)`);
+  }
 }
 
 if (changed) fs.writeFileSync(claudeJson, JSON.stringify(d));
@@ -248,6 +284,10 @@ for var_name in DISCORD_STATE_DIR TELEGRAM_STATE_DIR; do
     mkdir -p "$local_dir"
   fi
 done
+
+# --- 2b. Operator sidecar: pre-boot ---
+export HERMIT_ENTRY_PHASE=pre-boot
+if [ -f "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh" ]; then . "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh"; fi
 
 # --- 3. Install plugins (named volume starts empty on first run) ---
 # Registration is checked via `marketplace list --json` (reads known_marketplaces.json),
@@ -523,6 +563,10 @@ if [ "${HERMIT_FORCE_BOOT:-0}" != "1" ]; then
   fi
 fi
 rm -f "${AGENT_DIR}/state/.boot-conflict" 2>/dev/null || true
+
+# --- 4c. Operator sidecar: pre-launch ---
+export HERMIT_ENTRY_PHASE=pre-launch
+if [ -f "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh" ]; then . "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh"; fi
 
 # --- 5. Launch hermit-start ---
 "${AGENT_DIR}/bin/hermit-start" "$@"

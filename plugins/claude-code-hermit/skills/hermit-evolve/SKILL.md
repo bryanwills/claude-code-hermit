@@ -44,7 +44,7 @@ Upgrade: vOLD -> vNEW | core current vNEW | blocked: <reason>
 Settings added: <keys | none>
 Templates: <refreshed/restored/kept-N/conflicts-parked-N | none>
 Bin wrappers: <restored/replaced(.bak) | none>
-Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | n/a>
+Docker entrypoint: <refreshed | conflict-replaced(<backup path>) | migrated(<N> moved, <M> in <patch path>) | n/a>
 Docker rebuild: <needed + order | base-patched | no>
 CLAUDE-APPEND: <updated | unchanged>
 Context reload: <required (comma-separated plugin names) | no>
@@ -89,6 +89,7 @@ conversation. Stop.
 
 **Docker rebuild notice.** From the report's `Docker entrypoint` / `Docker rebuild` fields, append a `Docker:` section when a rebuild is needed:
 - Entrypoint refreshed → "Docker entrypoint refreshed. Rebuild to apply: `.claude-code-hermit/bin/hermit-docker update`."
+- `Docker entrypoint: migrated(...)` → "Your entrypoint customizations moved to `docker-entrypoint.hermit-local.sh`, where upgrades no longer touch them (`<N>` moved). Rebuild to apply the new entrypoint: `.claude-code-hermit/bin/hermit-docker update`." Add, only when `<M>` is non-zero: "`<M>` change(s) could not be moved automatically — they are in `<patch path>` for you to re-apply."
 - `Docker rebuild: base-patched` → "Docker base image updated. Rebuild to apply: `.claude-code-hermit/bin/hermit-docker update`. Do **not** re-run `/docker-setup` — your Dockerfile customizations are preserved." When this value is present, **suppress** the "Compose/Dockerfile changed upstream" bullet below for `Dockerfile.hermit` (the migration already handled it).
 - Compose/Dockerfile changed upstream → "Docker template(s) changed upstream. Refresh FIRST, then rebuild: (1) re-run `/claude-code-hermit:docker-setup`, (2) THEN `hermit-docker update`. Rebuilding first bakes stale on-disk files into the image."
 - Baseline not recorded → "Docker template baseline not recorded. Run `/claude-code-hermit:docker-setup` once to arm the drift signal."
