@@ -295,8 +295,8 @@ describe('Entrypoint: marketplace registration uses list --json, not dir existen
 describe('Entrypoint: §4b boot conflict guard', () => {
   const block = entrypoint.slice(entrypoint.indexOf('# --- 4b.'), entrypoint.indexOf('# --- 5.'));
 
-  // `sleep` is overridden so the guard's `while true; do sleep 300; done` inert
-  // hold terminates: exit 42 means "the guard fired and went inert".
+  // `sleep` is overridden so the inert hold receives the same signal sent by
+  // docker stop and exercises its trap without waiting for the real interval.
   const { freshDir, cleanup } = freshDirFactory('hermit-4b-');
   afterAll(cleanup);
 
@@ -319,16 +319,17 @@ describe('Entrypoint: §4b boot conflict guard', () => {
       }
     }
 
-    // `set -euo pipefail` mirrors the real entrypoint header: without -e, a
-    // future edit that drops an `|| true` would abort the whole entrypoint in
-    // production (container never boots) while still passing here.
-    const script = `set -euo pipefail\nsleep() { exit 42; }\nAGENT_DIR=${JSON.stringify(agentDir)}\n${block}`;
+    // `set -euo pipefail` mirrors the real entrypoint header so the extracted
+    // guard runs under the same shell options as it does in production.
+    const script = `set -euo pipefail\nsleep() { kill -TERM $$; }\nAGENT_DIR=${JSON.stringify(agentDir)}\n${block}`;
     const out = spawnSync('bash', ['-c', script], {
       encoding: 'utf8',
       env: { ...process.env, HERMIT_FORCE_BOOT: opts.forceBoot ?? '0' },
+      timeout: 10_000,
     });
     return {
       status: out.status,
+      signal: out.signal,
       stdout: out.stdout,
       marker: fs.existsSync(path.join(stateDir, '.boot-conflict')),
     };
@@ -342,9 +343,15 @@ describe('Entrypoint: §4b boot conflict guard', () => {
     expect(spawnSync('sh', ['-c', 'command -v jq'], { encoding: 'utf8' }).status).toBe(0);
   });
 
+  test('entrypoint §4b: inert hold traps signals around an interruptible sleep', () => {
+    expect(block).toContain('sleep 300 & wait $!');
+    expect(block.indexOf('trap ')).toBeLessThan(block.indexOf('sleep 300 & wait $!'));
+  });
+
   test('entrypoint §4b: goes inert over a live non-docker owner', () => {
     const r = runGuard({ runtime_mode: 'tmux', session_state: 'active' }, { liveness: 'fresh' });
-    expect(r.status).toBe(42);
+    expect(r.status).toBe(0);
+    expect(r.signal).toBeNull();
     expect(r.stdout).toContain('BOOT CONFLICT');
     expect(r.marker).toBe(true);
   });
