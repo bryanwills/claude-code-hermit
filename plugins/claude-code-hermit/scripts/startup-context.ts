@@ -22,7 +22,8 @@ import { extractSection, firstContentLine, isResolvedBlockerLine, stripPlacehold
 import { isResetBreadcrumb } from './lib/progress-log';
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
-import { readRuntimeJson } from './lib/runtime';
+import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
+import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
 import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
 type Json = any;
@@ -270,8 +271,52 @@ function emitGuestBanner(agentDir: string): void {
   console.log('or watches — the resident session owns all of that. Otherwise work normally.');
 }
 
+// --- Launch stamp: the session's own auth environment -------------------
+// The watchdog diagnoses this session from a systemd unit / launchd job / cron
+// entry whose only injected variable is PATH, so its own `process.env` describes
+// the watchdog, not the hermit. Reading CLAUDE_CONFIG_DIR there resolves to
+// ~/.claude and a token-mode hermit with a custom config dir looks like a
+// /login hermit; reading ANTHROPIC_API_KEY there is always empty and an
+// API-key hermit's 401 looks like an expired login.
+//
+// A SessionStart hook is the exact witness: it runs inside the session, so it
+// sees the environment Claude Code actually resolved — including the value from
+// user or managed settings' `env` block, which never passes through hermit-start
+// at all (probed on CC 2.1.251: user-settings CLAUDE_CONFIG_DIR re-points
+// .credentials.json, and the hook inherits the resolved value).
+//
+// Only the managed session stamps: HERMIT_MANAGED=1 is set solely by
+// hermit-start's tmux env-file, so a hand-launched session in the same folder
+// never overwrites the resident's record. No secret is written — a path and a
+// boolean.
+//
+// hermit-start rewrites runtime.json moments after spawning tmux, seconds before
+// Claude Code boots and fires this hook; both sides read-modify-write, so the
+// later write preserves the earlier one's fields.
+function stampSessionEnv(stateDir: string): void {
+  if (process.env.HERMIT_MANAGED !== '1') return;
+  try {
+    const runtime = readRuntimeJson(stateDir);
+    if (runtime === null) return; // no lifecycle record yet — hermit-start owns creating it
+    const configDir = defaultConfigDir();
+    const envAuth = envAuthPresent();
+    // Both describe the launch, so every later SessionStart (resume, clear, compact)
+    // recomputes the same pair. Skip the write when nothing moved: writeRuntimeJson
+    // stamps updated_at, and refreshing that on the strength of a compaction alone
+    // would hide a wedged session from doctor's stale-session check. stampContextReset
+    // in lib/context-reset.ts avoids the same hazard by writing around the helper.
+    if (runtime.config_dir === configDir && runtime.env_auth === envAuth) return;
+    runtime.config_dir = configDir;
+    runtime.env_auth = envAuth;
+    writeRuntimeJson(runtime, stateDir);
+  } catch {
+    // fail-open — the watchdog falls back to its own env when the fields are absent
+  }
+}
+
 function main(source: string | null, sessionId: string | null) {
   const stateDir = path.resolve(AGENT_DIR, 'state');
+  stampSessionEnv(stateDir);
   pruneGuestMarkers(stateDir);
   if (residentSessionActive(AGENT_DIR)) {
     // The banner only reaches the model; the marker is what the state-writing

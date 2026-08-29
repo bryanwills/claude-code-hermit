@@ -156,7 +156,7 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 ├── proposals/
 │   └── PROP-001.md            <- improvement ideas
 ├── state/                     <- runtime observations (agent-owned)
-│   ├── runtime.json           <- session state (in_progress/waiting/idle)
+│   ├── runtime.json           <- session state (in_progress/waiting/idle) + launch env stamp
 │   ├── alert-state.json       <- heartbeat alert dedup + self-eval evidence
 │   ├── reflection-state.json  <- last reflection timestamp + scheduled check state
 │   ├── routine-metrics.jsonl <- append-only routine fire log

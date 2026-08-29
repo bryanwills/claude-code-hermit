@@ -131,9 +131,9 @@ The render script derives every `{{PLACEHOLDER}}` internally and fails loud (wri
 
 ### 5. Auto-memory seed
 
-The Step 1 preflight already resolved `memory.pathKey` (`pwd | sed 's|/|-|g'` — keeps leading dash, matches Claude Code's format, e.g. `-home-user-myproject`) and `memory.seedExists` (whether `~/.claude/projects/<pathKey>/memory/MEMORY.md` exists). Reuse those:
+The Step 1 preflight already resolved `memory.pathKey` (Claude Code's own scheme: every non-alphanumeric character becomes `-`, dots included, leading dash kept — e.g. `-home-user-myproject`) and `memory.seedExists` (whether `MEMORY.md` exists under `<config-dir>/projects/<pathKey>/memory/`, where `<config-dir>` is `CLAUDE_CONFIG_DIR` when set and `~/.claude` otherwise). Reuse those:
 
-- **If `memory.seedExists` is true:** Copy `~/.claude/projects/<memory.pathKey>/memory/MEMORY.md` to `.claude-code-hermit/MEMORY-SEED.md`. Tell the operator: "Found existing Claude Code memory for this project — seeding it into the container so your hermit starts with full context." Then ensure `.claude-code-hermit/MEMORY-SEED.md` is in `.gitignore` (append if missing).
+- **If `memory.seedExists` is true:** Copy `MEMORY.md` from that same `<config-dir>/projects/<memory.pathKey>/memory/` to `.claude-code-hermit/MEMORY-SEED.md`. Tell the operator: "Found existing Claude Code memory for this project — seeding it into the container so your hermit starts with full context." Then ensure `.claude-code-hermit/MEMORY-SEED.md` is in `.gitignore` (append if missing).
 - **If false:** Do nothing. No message, no prompt.
 
 Only the top-level project memory is seeded — not agent-scoped memories at `<path-key>/<agent-name>/`.

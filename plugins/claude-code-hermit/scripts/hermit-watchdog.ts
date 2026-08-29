@@ -37,7 +37,7 @@ import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
-import { defaultConfigDir, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
+import { defaultConfigDir, envAuthPresent, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
 import { isContainer } from './lib/container';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
 import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
@@ -230,6 +230,16 @@ export function composeLapsedLoginMessage(
     ? WATCHDOG[locale].lapsedLoginFixDocker()
     : WATCHDOG[locale].lapsedLoginFixHost();
   return WATCHDOG[locale].lapsedLogin(nowHHMM(timezone), fix);
+}
+
+/** The auth-failure notice for a hermit whose credential comes from its environment.
+ *  Deliberately says nothing about signing in: an API key, bearer token, or cloud
+ *  provider is not a login the hermit can re-mint, and the relay has nothing to offer. */
+export function composeEnvAuthFailureMessage(
+  timezone: string,
+  locale: Locale = OPERATOR_LOCALE,
+): string {
+  return WATCHDOG[locale].envAuthFailure(nowHHMM(timezone));
 }
 
 export type CompactFlavor = 'boundary' | 'mid-arc';
@@ -588,6 +598,10 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
     const child = spawn(startBin, [], {
       detached: true,
       stdio: 'ignore',
+      // No explicit env: hermit-start reads the setup token from defaultConfigDir()
+      // and forwards CLAUDE_CONFIG_DIR into the new session's tmux env-file, and
+      // adoptSessionConfigDir() already assigned the session's own value onto
+      // process.env on both paths that reach here — which spawn passes on by default.
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] restart failed: ${e}\n`));
     child.unref();
@@ -647,18 +661,36 @@ function reauthRelayActive(): boolean {
 }
 
 /**
+ * Adopt the session's own config dir from runtime.json, before any auth decision,
+ * transcript read, or child spawn that resolves defaultConfigDir() — the re-auth
+ * relay and hermit-start among them.
+ *
+ * startup-context.ts stamps `config_dir` from inside the session, so it also carries
+ * a value set in user or managed settings — a source this process cannot observe at
+ * all. Assigning it here reaches every defaultConfigDir() call without special-casing
+ * each one. Absent field → today's behavior, so a session booted before this shipped
+ * is unaffected.
+ */
+function adoptSessionConfigDir(runtime: Json): void {
+  if (typeof runtime.config_dir === 'string' && runtime.config_dir) {
+    process.env.CLAUDE_CONFIG_DIR = runtime.config_dir;
+  }
+}
+
+/**
  * Auth modes where a 401 on the pane is NOT a login problem: an API key, a bearer
  * token, or a cloud provider. Telling those operators to sign in would be wrong advice
  * for a cause no login can fix, so the lapsed-login paths sit this out entirely.
  */
-function envAuthOwnsCredential(): boolean {
-  return Boolean(
-    process.env.ANTHROPIC_API_KEY ||
-      process.env.ANTHROPIC_AUTH_TOKEN ||
-      process.env.CLAUDE_CODE_USE_BEDROCK ||
-      process.env.CLAUDE_CODE_USE_VERTEX ||
-      process.env.CLAUDE_CODE_USE_FOUNDRY,
-  );
+function envAuthOwnsCredential(sessionEnvAuth: boolean | null): boolean {
+  // The session's stamp answers, because on a host install this process's own env
+  // describes the unit, not the hermit — including when it says `false`. A unit or
+  // crontab that happens to carry a key while the session runs on /login would
+  // otherwise suppress the lapsed-login tiers and re-create the silent outage this
+  // reads the stamp to avoid. Only an ABSENT stamp falls back to this process's env:
+  // Docker shares one environment between the loop and the session, and a session
+  // booted before the stamp existed has nothing else to offer.
+  return sessionEnvAuth ?? envAuthPresent();
 }
 
 /**
@@ -682,6 +714,9 @@ function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'id
     const child = spawn(process.execPath, [REAUTH_MINT_SCRIPT, 'relay'], {
       detached: true,
       stdio: 'ignore',
+      // No explicit env: the relay installs the freshly-minted token into
+      // defaultConfigDir(), which must be the SESSION's config dir — already on
+      // process.env from adoptSessionConfigDir(), which spawn passes on.
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] reauth relay spawn failed: ${e}\n`));
     child.unref();
@@ -1467,6 +1502,10 @@ async function main(): Promise<void> {
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
 
+  // The session's launch environment, adopted before any auth decision below.
+  adoptSessionConfigDir(runtime);
+  const sessionEnvAuth = typeof runtime.env_auth === 'boolean' ? runtime.env_auth : null;
+
   // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
   //
   // `session_state: 'idle'` used to exit here outright. It cannot: 'in_progress' is written
@@ -1530,7 +1569,7 @@ async function main(): Promise<void> {
   // recorded expiry — which 3a now accepts as a trigger.
   const paneContent = capturePane(sessionName);
   const authLapsed =
-    paneContent !== null && hasLapsedLogin(paneContent) && !envAuthOwnsCredential();
+    paneContent !== null && hasLapsedLogin(paneContent) && !envAuthOwnsCredential(sessionEnvAuth);
 
   // 3a. Re-auth relay — runs after dead-session restart on purpose (see the
   // block comment above evaluateReauth). While a relay is in flight the session
@@ -1565,13 +1604,56 @@ async function main(): Promise<void> {
     }
     process.exit(0);
   }
+
+  // 3a-ter. The session's own environment owns the credential (API key, bearer token,
+  // Bedrock/Vertex/Foundry), so its 401 is not a lapsed login and 3a/3a-bis correctly sat
+  // out. It still has to stop the tick. Falling through would reach the pane-frozen
+  // restart, and doRestart spawns hermit-start with this process's environment — on a host
+  // unit carrying only PATH, that forwards no ANTHROPIC_API_KEY and nothing re-derives one
+  // (unlike the setup token, which hydrateSetupTokenEnv reads back off disk). The restarted
+  // session would come up with no credential at all, show the same failing pane, and be
+  // restarted again on the next escalation: a loop that strips the key and never recovers.
+  // Suppressing here is the fix, because the credential lives somewhere the hermit cannot
+  // reach — runtime.json stamps a path and a boolean, never a secret.
+  const envAuthFailing =
+    paneContent !== null && hasLapsedLogin(paneContent) && envAuthOwnsCredential(sessionEnvAuth);
+  if (envAuthFailing) {
+    const ws = readWatchdogState();
+    const notifiedAt =
+      typeof ws.env_auth_failure_notified_at === 'string' ? ws.env_auth_failure_notified_at : null;
+    const age = notifiedAt ? ageSecs(notifiedAt) : null;
+    if (age === null || age > 24 * 3600) {
+      pushOperatorMessage(composeEnvAuthFailureMessage(timezone));
+      appendEvent('env-auth-failure-detected', notifiedAt ? 'credential still rejected after 24h' : 'auth failure on pane, credential owned by the session env');
+      ws.env_auth_failure_notified_at = worldStamp(REAL_WORLD);
+      writeWatchdogState(ws);
+    }
+    // Unconditional: the exit IS the suppression, whether or not a notice was due.
+    process.exit(0);
+  }
+
+  // Both recoveries share one state read. This point is reached on every ordinary healthy
+  // tick, and `!hasLapsedLogin(paneContent)` already forces `authLapsed` false — the one
+  // case where it would not is envAuthFailing, which exited above — so reading the file
+  // once per check billed the common path twice for nothing.
+  //
+  // A cleared pane is the only recovery signal available for the env-auth stamp: there is
+  // no storedLoginUsable() equivalent for a key held in the operator's shell, which the
+  // watchdog cannot see even when it is working.
   if (!authLapsed) {
     const ws = readWatchdogState();
+    let recovered = false;
+    if (paneContent !== null && !hasLapsedLogin(paneContent) && ws.env_auth_failure_notified_at) {
+      delete ws.env_auth_failure_notified_at;
+      appendEvent('env-auth-failure-recovered', 'pane no longer shows an auth failure');
+      recovered = true;
+    }
     if (ws.lapsed_login_notified_at && storedLoginUsable(defaultConfigDir())) {
       delete ws.lapsed_login_notified_at;
-      writeWatchdogState(ws);
       appendEvent('lapsed-login-recovered', 'usable stored login present again');
+      recovered = true;
     }
+    if (recovered) writeWatchdogState(ws);
   }
 
   // 3b. Stall-question detection (PROP-024) — catches the un-redirectable remainder
@@ -1968,6 +2050,11 @@ async function cmdRestart(reason: string): Promise<void> {
   const config: Json = readSettledConfig(HERMIT_ROOT);
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
+  // Same adoption main() does: hermit-start is spawned below and reads the setup
+  // token from defaultConfigDir(). Invoked from a plain shell (the operator, or a
+  // mint whose own env is bare), this process would otherwise resolve ~/.claude and
+  // restart a token hermit with no token exported into its session.
+  adoptSessionConfigDir(runtime);
   const sessionName = runtime.tmux_session || deriveSessionName(config);
   if (!sessionName) process.exit(0);
   await doRestart(sessionName, reason, runtime, config.timezone ?? 'UTC');

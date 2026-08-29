@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
+import { transcriptDirFor } from '../scripts/lib/cc-compat';
 import {
   inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, hasLapsedLogin, classifyQueueTail, composeCompactSteeringMessage,
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
@@ -568,16 +569,24 @@ describe('classifyQueueTail', () => {
 
 /** Seed a transcript for CC transcript id `transcriptId` under a sandboxed HOME, and point
  *  runtime.json's `opened_transcript` at it. That field — not `session_id`, which holds the
- *  logical S-NNN arc id — is what names the `<uuid>.jsonl` file CC writes. */
-function seedTranscript(h: Hermit, transcriptId: string, lines: string[]): Record<string, string> {
+ *  logical S-NNN arc id — is what names the `<uuid>.jsonl` file CC writes.
+ *
+ *  `configDir` seeds the file under a config dir other than the sandboxed HOME's ~/.claude;
+ *  the caller is then responsible for stamping runtime.json's `config_dir`, since the
+ *  returned env deliberately leaves CLAUDE_CONFIG_DIR blank (the host-install shape).
+ *  Blanking matters beyond realism: runScript merges process.env, so a maintainer running
+ *  the suite with their own config dir set would send the reader off the fixture entirely. */
+function seedTranscript(
+  h: Hermit, transcriptId: string, lines: string[], configDir?: string,
+): Record<string, string> {
   const home = path.join(h.dir, 'fake-home');
-  const dir = path.join(home, '.claude', 'projects', h.dir.replace(/[^a-zA-Z0-9]/g, '-'));
+  const dir = transcriptDirFor(h.dir, configDir ?? path.join(home, '.claude'));
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${transcriptId}.jsonl`), lines.join('\n') + '\n');
   const runtimePath = state(h, 'runtime.json');
   fs.writeFileSync(runtimePath, JSON.stringify(
     { ...readJson(runtimePath), session_id: 'S-001', opened_transcript: transcriptId }, null, 2) + '\n');
-  return { HOME: home };
+  return { HOME: home, CLAUDE_CONFIG_DIR: '' };
 }
 
 describe('session-wedged detection (queued notifications not draining)', () => {
@@ -623,6 +632,33 @@ describe('session-wedged detection (queued notifications not draining)', () => {
     expect(calls).not.toContain('kill-session');
   });
 });
+
+// Composition test for the two halves of the session-environment fix: the SessionStart
+// stamp records where the session's transcripts actually live, and transcriptDirFor()
+// resolves through that config dir instead of hardcoding ~/.claude. Either half alone
+// leaves the watchdog reading an empty directory, where a wedged session is
+// indistinguishable from a healthy one and no operator ever hears about it.
+test('wedge detection reads the transcript under the stamped config dir', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'ordinary pane output\nno dialog here');
+  writeFakePgrep(h, 1);
+  const stub = startHttpStub();
+  try {
+    const configDir = path.join(h.dir, 'session-config');
+    const env = seedTranscript(h, 'sess-wedged-cfg', [
+      queueRec('enqueue', isoAgoSeconds(50)),
+      queueRec('enqueue', isoAgoSeconds(2)),
+    ], configDir);
+    patchRuntime(h, { config_dir: configDir });
+
+    const r = await watchdog(h, 'run', { env: { ...env, HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('session-wedged');
+  } finally {
+    stub.stop();
+  }
+}));
 
 test('draining transcript → no wedge event, sticky flag clears', withHermit(async (h) => {
   writeConfig(h);
@@ -909,6 +945,191 @@ test('token dead before its recorded expiry → relay spawned, no nudge', withHe
   expect(events).toContain('reauth-relay');
   expect(events).toContain('auth failure on pane');
   expect(events).not.toContain('nudge');
+}));
+
+// --- The session's launch stamp vs. the watchdog's own environment -------
+// On a host install the watchdog runs from a systemd unit / launchd job / cron
+// entry whose only injected variable is PATH, so `process.env` here describes the
+// watchdog and never the session. These fixtures reproduce that: CLAUDE_CONFIG_DIR
+// and every var envAuthPresent() reads are blanked in the subprocess env, and HOME
+// is redirected so the ~/.claude fallback cannot accidentally resolve to a real
+// install. The whole auth list, not just ANTHROPIC_API_KEY — the runner inherits
+// process.env, so a developer shell carrying ANTHROPIC_AUTH_TOKEN or a
+// cloud-provider flag would suppress the lapsed-login tiers these assert on.
+const UNIT_ENV = (h: Hermit) => ({
+  HOME: h.dir,
+  CLAUDE_CONFIG_DIR: '',
+  ANTHROPIC_API_KEY: '',
+  ANTHROPIC_AUTH_TOKEN: '',
+  CLAUDE_CODE_USE_BEDROCK: '',
+  CLAUDE_CODE_USE_VERTEX: '',
+  CLAUDE_CODE_USE_FOUNDRY: '',
+  CLAUDE_CODE_OAUTH_TOKEN: '',
+});
+
+test('token hermit, config dir known only to the session → relay spawned, no notice', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  // Record still reads healthy — only the pane witnesses the dead token, and only
+  // the stamp says where the token lives. Without it the watchdog reads ~/.claude,
+  // fails tokenModeActive(), and tells the operator to go run /login by hand.
+  const configDir = writeSetupToken(h, 200);
+  patchRuntime(h, { config_dir: configDir });
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('reauth-relay');
+  expect(events).not.toContain('lapsed-login-detected');
+}));
+
+// Precedence, not merely gap-filling: the session's dir wins over a value the
+// watchdog process happens to carry.
+test('stamped config dir overrides the watchdog process env', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  // A token dir the watchdog's own env points at, distinct from the /login dir
+  // the session actually reads. Built inline because writeSetupToken() and
+  // writeStoredLogin() share one fixture dir by design.
+  const tokenDir = path.join(h.dir, 'watchdog-config');
+  fs.mkdirSync(tokenDir, { recursive: true });
+  fs.writeFileSync(path.join(tokenDir, '.hermit-setup-token'), 'sk-ant-oat01-testtesttesttesttest\n', { mode: 0o600 });
+  const sessionDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: sessionDir });
+  const r = await watchdog(h, 'run', {
+    env: { ...UNIT_ENV(h), CLAUDE_CONFIG_DIR: tokenDir },
+  });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('lapsed-login-detected'); // /login tier, per the session
+  expect(events).not.toContain('reauth-relay');
+}));
+
+// An API-key hermit's 401 is not a login lapse. The key lives in the operator's
+// shell, so the watchdog never sees it — only the boolean the session stamped. It gets
+// its own tier rather than falling through: see the restart-loop test below.
+test('env_auth stamp → 401 pane is not read as a lapsed login', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).not.toContain('lapsed-login-detected');
+  expect(events).toContain('env-auth-failure-detected');
+}));
+
+// The regression this tier exists for — the restart-loop rationale lives on the
+// envAuthFailing block in hermit-watchdog.ts.
+test('env_auth 401 → one notice, and no nudge or restart to strip the key', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1); // monitor dead
+  touchAgo(state(h, '.heartbeat'), 6 * 3600); // stale heartbeat: the nudge tier is otherwise due
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('env-auth-failure-detected');
+    expect(events).not.toContain('nudge');
+    expect(events).not.toContain('restart');
+    expect(stub.requests.length).toBe(1);
+    expect(stub.requests[0].body.text).toContain('API credential');
+    expect(stub.requests[0].body.text).not.toContain('sign in again'); // not the /login copy
+    expect(readJson(state(h, 'watchdog-state.json')).env_auth_failure_notified_at).toBeTruthy();
+  } finally { stub.stop(); }
+}));
+
+test('env_auth 401 already notified within 24h → still suppressed, but silent', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  fs.writeFileSync(state(h, 'watchdog-state.json'),
+    JSON.stringify({ env_auth_failure_notified_at: isoAgo(2) }, null, 2) + '\n');
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests.length).toBe(0);
+    // A silent tick writes no events at all — the file may legitimately not exist.
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('nudge'); // the exit is the suppression, not the notice
+    expect(events).not.toContain('restart');
+    const calls = fs.existsSync(path.join(h.dir, 'tmux-calls.log'))
+      ? fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')
+      : '';
+    expect(calls).not.toContain('send-keys');
+    expect(calls).not.toContain('kill-session');
+  } finally { stub.stop(); }
+}));
+
+test('env_auth credential works again → stamp cleared', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, 'ordinary pane output\nno auth error here');
+  writeFakePgrep(h, 0);
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  fs.writeFileSync(state(h, 'watchdog-state.json'),
+    JSON.stringify({ env_auth_failure_notified_at: isoAgo(2) }, null, 2) + '\n');
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  expect(readJson(state(h, 'watchdog-state.json')).env_auth_failure_notified_at).toBeUndefined();
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('env-auth-failure-recovered');
+}));
+
+// The two tiers must stay mutually exclusive: a /login hermit is unaffected by the above.
+test('no env_auth stamp → the /login tier still owns the 401, not the env-auth tier', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h);
+  patchRuntime(h, { config_dir: configDir, env_auth: false });
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('lapsed-login-detected');
+  expect(events).not.toContain('env-auth-failure-detected');
+}));
+
+// Same fixture without the stamp: the wrong story the issue describes. Pins the
+// fallback so a pre-upgrade session is provably unchanged, not silently migrated.
+test('no stamp → falls back to the watchdog process env', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h, '');
+  const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), CLAUDE_CONFIG_DIR: configDir } });
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('lapsed-login-detected');
+}));
+
+// The stamp is authoritative in BOTH directions. A unit or crontab that happens to
+// carry a key while the session runs on /login must not suppress the notice — that
+// is the silent outage the stamp exists to end, arriving from the other side.
+test('stamped env_auth=false beats a key in the watchdog process env', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: false });
+  const r = await watchdog(h, 'run', {
+    env: { ...UNIT_ENV(h), ANTHROPIC_API_KEY: 'sk-ant-api03-watchdog-unit-only' },
+  });
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('lapsed-login-detected');
 }));
 
 // Regression: a pending pane whose in-session heartbeat has ALSO gone stale must

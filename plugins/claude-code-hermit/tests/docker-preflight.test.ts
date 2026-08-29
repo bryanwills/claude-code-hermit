@@ -3,12 +3,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
+import { transcriptPathKey } from '../scripts/lib/cc-compat';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-dpf-');
 afterAll(cleanup);
 
-async function run(projectRoot: string) {
-  const r = await runScript('docker-preflight.ts', { args: [projectRoot] });
+async function run(projectRoot: string, env: Record<string, string> = {}) {
+  // CLAUDE_CONFIG_DIR is blanked by default: runScript merges process.env, so a
+  // maintainer whose own config dir is set would otherwise have the seed probe
+  // look somewhere the fixture never wrote.
+  const r = await runScript('docker-preflight.ts', {
+    args: [projectRoot],
+    env: { CLAUDE_CONFIG_DIR: '', ...env },
+  });
   expect(r.exitCode).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -23,9 +30,9 @@ describe('docker-preflight.ts', () => {
     expect(out.configExists).toBe(false);
     expect(out.existing).toEqual({ dockerfile: false, entrypoint: false, compose: false });
     expect(typeof out.gitconfigExists).toBe('boolean');
-    // path key is derived from the project root passed in (mirrors `pwd | sed 's|/|-|g'`,
-    // leading dash retained) — keyed off the supplied logical path, not a resolved one.
-    expect(out.memory.pathKey).toBe(dir.replace(/\//g, '-'));
+    // path key is derived from the project root passed in — keyed off the supplied
+    // logical path, not a resolved one — using CC's scheme via cc-compat.
+    expect(out.memory.pathKey).toBe(transcriptPathKey(dir));
     expect(typeof out.memory.seedExists).toBe('boolean');
   });
 
@@ -94,5 +101,28 @@ describe('docker-preflight.ts', () => {
     seedOwner(dir, { runtime_mode: 'tmux', session_state: 'active' }, 660);
 
     expect((await run(dir)).liveOwner).toBe(null);
+  });
+
+  // The older `pwd | sed 's|/|-|g'` scheme replaced slashes only, so any dotted
+  // path key diverged from the one CC actually writes and the seed probe missed a
+  // memory file that was sitting right there.
+  test('a dotted project root keys the way CC does, dots included', async () => {
+    const dir = path.join(freshDir(), 'my.project');
+    fs.mkdirSync(dir, { recursive: true });
+
+    const out = await run(dir);
+    expect(out.memory.pathKey).toBe(transcriptPathKey(dir));
+    expect(out.memory.pathKey).not.toContain('.');
+  });
+
+  test('the seed probe follows CLAUDE_CONFIG_DIR, not ~/.claude', async () => {
+    const dir = freshDir();
+    const configDir = freshDir();
+    const seedDir = path.join(configDir, 'projects', transcriptPathKey(dir), 'memory');
+    fs.mkdirSync(seedDir, { recursive: true });
+    fs.writeFileSync(path.join(seedDir, 'MEMORY.md'), '# seed\n');
+
+    expect((await run(dir, { CLAUDE_CONFIG_DIR: configDir })).memory.seedExists).toBe(true);
+    expect((await run(dir)).memory.seedExists).toBe(false); // blanked: falls back to ~/.claude
   });
 });

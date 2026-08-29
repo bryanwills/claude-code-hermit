@@ -18,6 +18,10 @@
 - Removed the dead `HERMIT_DEV_MODE` PostToolUse hook — it had no setter anywhere in the plugin, docs, or CI, so it never ran.
 
 ### Fixed
+- Transcript reads honor `CLAUDE_CONFIG_DIR`. `transcriptDirFor()` hardcoded `~/.claude/projects`, so a hermit with a custom config dir had cost tracking report an empty window and wedge detection see a healthy session where a stuck one was.
+- `docker-setup`'s auto-memory probe finds a seed under a custom `CLAUDE_CONFIG_DIR`, and derives its path key the way Claude Code does — every non-alphanumeric character, dots included. The old slashes-only key missed the memory file for any dotted project path.
+- The watchdog reads the session's own auth environment instead of its own, so a host-installed token hermit with a custom `CLAUDE_CONFIG_DIR` gets the automatic re-auth relay rather than being told to run `/login` by hand.
+- A hermit that authenticates from its environment (an API key, a bearer token, Bedrock/Vertex/Foundry) now gets its own notice when that credential is rejected, and is left running rather than restarted — a restart could not carry the credential into the new session.
 - The Docker entrypoint no longer blocks boot when `.credentials.json` carries a past `expiresAt`. That field belongs to the access token Claude Code refreshes silently, so the gate stalled healthy hermits while catching a real lapse only by accident.
 - `docker-setup` aborts at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, instead of building the image first.
 - `docker-setup`'s post-start and first-run-acceptance polls read the entrypoint's `.boot-conflict` marker, so an inert container no longer passes as `running` or takes the operator through login and channel pairing.
