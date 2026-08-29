@@ -144,7 +144,7 @@ your-project/
 │   ├── compiled/review-weekly-YYYY-Www.md  # Weekly review reports (weekly-review.ts; type: review)
 │   ├── templates/
 │   ├── state/                        # Runtime observations (agent-owned, not operator-configured)
-│   │   ├── runtime.json              # Session state: in_progress/waiting/idle (authoritative since v0.3.2), plus the launch env stamp (config_dir, env_auth)
+│   │   ├── runtime.json              # Session state: in_progress/waiting/idle (authoritative since v0.3.2), plus the launch env stamp (config_dir, env_auth) and peer_name — the --name actually registered this boot, null when the CC version couldn't take the flag
 │   │   ├── alert-state.json          # Alert dedup state + self-eval evidence (heartbeat-owned)
 │   │   ├── reflection-state.json     # Last reflection timestamp (reflect-owned)
 │   │   ├── channel-activity.json     # Last channel interaction timestamp (channel-hook-owned)

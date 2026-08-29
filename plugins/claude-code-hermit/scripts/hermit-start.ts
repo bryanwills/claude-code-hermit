@@ -435,7 +435,16 @@ function checkPrerequisites(): Json {
     process.exit(1);
   }
 
-  return { tmux: hasTmux, bun: hasBun };
+  // Best-effort claude CLI version, for the --name gate in buildClaudeCommand.
+  // Never blocks boot — a failed or unparseable probe just leaves --name off.
+  let claudeVersion: string | null = null;
+  try {
+    const r = spawnSync('claude', ['--version'], { timeout: 5000, encoding: 'utf8' });
+    const match = (r.stdout ?? '').match(/^(\d+\.\d+\.\d+)/);
+    if (match) claudeVersion = match[1];
+  } catch {}
+
+  return { tmux: hasTmux, bun: hasBun, claude_version: claudeVersion };
 }
 
 /** Check for stale runtime state from a previous run and warn. */
@@ -616,6 +625,26 @@ function inputLine(promptText: string): string {
   return line;
 }
 
+/** The session's stable peer name: safe for an `@` mention, no quoting needed. */
+function peerName(config: Json): string {
+  return String(config.agent_name || getSessionName(config))
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * The name actually registered as this session's --name, or null when the
+ * detected CC version can't take the flag (< 2.1.224, or undetected). Feeds
+ * both buildClaudeCommand's --name push and the runtime.json peer_name stamp,
+ * so the two never disagree about what got registered.
+ */
+function effectivePeerName(config: Json, tools: Json): string | null {
+  const name = peerName(config);
+  if (!name) return null;
+  if (!tools.claude_version || cmpSemver(tools.claude_version, '2.1.224') < 0) return null;
+  return name;
+}
+
 /** Build the claude launch command from config. */
 function buildClaudeCommand(config: Json, tools: Json): string[] {
   const cmd = ['claude'];
@@ -712,10 +741,25 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
     }
   }
 
+  const name = peerName(config);
+
   // Add remote control for web/mobile access (with session name)
   if (pyTruthy('remote' in config ? config.remote : false)) {
-    const remoteName = config.agent_name || getSessionName(config);
-    cmd.push('--remote-control', remoteName);
+    cmd.push('--remote-control', name);
+  }
+
+  // --name is 2.1.224+; older CC treats it as an unknown option and refuses to
+  // boot, so gate on the probed version and stay silent (no --name) otherwise.
+  const effectiveName = effectivePeerName(config, tools);
+  if (effectiveName) {
+    cmd.push('--name', effectiveName);
+  } else if (name && tools.claude_version) {
+    // effectiveName is null here with a non-empty name and a detected version
+    // only because effectivePeerName found it below the 2.1.224 floor — no
+    // need to re-run cmpSemver and risk the two checks drifting apart.
+    console.log(
+      `[hermit] WARNING: --name skipped — claude ${tools.claude_version} is below the 2.1.224 floor for cross-session naming.`,
+    );
   }
 
   if (pyTruthy(config.chrome)) {
@@ -1303,6 +1347,7 @@ async function main(): Promise<void> {
         created_at: localISOStamp(),
         runtime_mode: 'interactive',
         tmux_session: null,
+        peer_name: effectivePeerName(config, tools),
         transition: null,
         transition_target: null,
         transition_started_at: null,
@@ -1316,6 +1361,7 @@ async function main(): Promise<void> {
       existing.version = 1;
       existing.runtime_mode = 'interactive';
       existing.tmux_session = null;
+      existing.peer_name = effectivePeerName(config, tools);
       clearShutdownStampsOnBoot(existing);
       writeRuntimeJson(existing);
     }
@@ -1416,6 +1462,7 @@ async function main(): Promise<void> {
       created_at: localISOStamp(),
       runtime_mode: runtimeMode,
       tmux_session: sessionName,
+      peer_name: effectivePeerName(config, tools),
       transition: null,
       transition_target: null,
       transition_started_at: null,
@@ -1429,6 +1476,7 @@ async function main(): Promise<void> {
     existing.version = 1;
     existing.runtime_mode = runtimeMode;
     existing.tmux_session = sessionName;
+    existing.peer_name = effectivePeerName(config, tools);
     clearShutdownStampsOnBoot(existing);
     writeRuntimeJson(existing);
   }
@@ -1513,6 +1561,8 @@ export {
   getEnabledChannels,
   resolveStateDir,
   buildClaudeCommand,
+  peerName,
+  effectivePeerName,
   renderClassifierOverlay,
   writeSettingsEnv,
   applyVoiceRender,
