@@ -118,6 +118,8 @@ The wizard sets up your agent's identity, scans your folder, generates `OPERATOR
 
 ### 3. Go Always-on
 
+> **Prerequisites:** [Docker Compose](https://docs.docker.com/compose/install/) v2, or [tmux](https://github.com/tmux/tmux/wiki/Installing) for the no-Docker path.
+
 ```
 /claude-code-hermit:docker-setup
 ```
