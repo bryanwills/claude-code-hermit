@@ -44,6 +44,8 @@ Run after `/claude-code-hermit:hatch`:
 /claude-code-hermit:docker-setup
 ```
 
+**Already running this hermit in tmux on this box?** Stop it first with `.claude-code-hermit/bin/hermit-stop`. Both instances share the same `.claude-code-hermit/` state dir, so the container's entrypoint refuses to boot beside a live host instance and goes inert instead. The wizard checks for this before it builds anything and will tell you to stop the host hermit.
+
 The wizard scans your project for dependencies, asks about auth, and generates four hermit-namespaced files (so they don't clash with your own Docker setup):
 
 | File                          | Purpose                                               |

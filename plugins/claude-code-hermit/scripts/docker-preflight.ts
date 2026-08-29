@@ -21,7 +21,8 @@
  *     "isWSL": false,
  *     "existing": { "dockerfile": false, "entrypoint": false, "compose": false },
  *     "gitconfigExists": true,
- *     "memory": { "pathKey": "-home-user-project", "seedExists": false }
+ *     "memory": { "pathKey": "-home-user-project", "seedExists": false },
+ *     "liveOwner": { "mode": "tmux", "ageSecs": 42 } | null
  *   }
  */
 
@@ -29,6 +30,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readRuntimeJson } from './lib/runtime';
+import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 
 function dockerVersion(): string | null {
   try {
@@ -36,6 +39,34 @@ function dockerVersion(): string | null {
     if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
   } catch {}
   return null;
+}
+
+/**
+ * A live non-docker instance owning this project's state, or null.
+ *
+ * Mirrors the entrypoint's split-brain guard (docker-entrypoint template) and
+ * hermit-start's shouldRefuseBoot: same runtime_mode / cleanly-stopped test,
+ * same liveness files, same 600s window: all three agree on what "another
+ * instance is alive" means. Deliberately NOT a call into shouldRefuseBoot: its
+ * first branch also refuses when a Docker hermit is running, which is the
+ * supported case for re-running /docker-setup over an existing container.
+ *
+ * Fresh proves alive; stale proves nothing (see lib/liveness), so a stale or
+ * absent signal reads as null, and the wizard proceeds as it does today.
+ */
+function liveOwner(projectRoot: string, hermitDir: string) {
+  try {
+    const hermitRoot = path.join(projectRoot, hermitDir);
+    const rt = readRuntimeJson(path.join(hermitRoot, 'state')) as Record<string, unknown> | null;
+    const mode = rt && typeof rt.runtime_mode === 'string' ? rt.runtime_mode : '';
+    if (!mode || mode === 'docker') return null;
+    if (rt?.session_state === 'idle' || rt?.shutdown_completed_at) return null;
+    const ageSecs = sharedLivenessAgeSecs(hermitRoot);
+    if (ageSecs === null || ageSecs >= LIVENESS_FRESH_SECS) return null;
+    return { mode, ageSecs: Math.round(ageSecs) };
+  } catch {
+    return null;
+  }
 }
 
 function probe(projectRoot: string, hermitDir: string) {
@@ -59,6 +90,7 @@ function probe(projectRoot: string, hermitDir: string) {
       pathKey,
       seedExists: fs.existsSync(path.join(home, '.claude', 'projects', pathKey, 'memory', 'MEMORY.md')),
     },
+    liveOwner: liveOwner(projectRoot, hermitDir),
   };
 }
 

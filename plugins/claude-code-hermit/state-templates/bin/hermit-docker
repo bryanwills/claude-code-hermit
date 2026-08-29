@@ -195,13 +195,16 @@ case "$CMD" in
   up)
     echo "[hermit] Starting Docker container..."
     # Clear any stale conflict marker from a prior inert boot before starting, so
-    # the poll below only trips on a marker THIS boot's entrypoint writes (the
-    # entrypoint clears it several seconds in, after the singleton check).
+    # the poll below only trips on a marker THIS boot's entrypoint writes.
     rm -f "$PROJECT_DIR/.claude-code-hermit/state/.boot-conflict" 2>/dev/null || true
     cd "$PROJECT_DIR" && "${DC[@]}" up -d "$@"
     # Surface an entrypoint singleton-conflict: the container comes up but stays
     # inert (a live non-docker owner holds the state dir). `up -d` returns success
     # and the healthcheck only flips minutes later, so poll the marker briefly.
+    # This only catches a boot that reaches the guard fast, i.e. a warm re-run over
+    # an already-provisioned container. On a first run the guard sits behind the
+    # credential wait and the plugin install, so an absent marker is not proof the
+    # container is healthy.
     for _i in 1 2 3 4 5 6 7 8 9 10; do
       if [ -f "$PROJECT_DIR/.claude-code-hermit/state/.boot-conflict" ]; then
         echo "[hermit] BOOT CONFLICT: $(cat "$PROJECT_DIR/.claude-code-hermit/state/.boot-conflict")"

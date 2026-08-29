@@ -73,17 +73,20 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
   echo "  Do NOT attach to tmux and run claude while waiting"
   echo "  — use hermit-docker login only."
   echo ""
-  echo "  Waiting for credentials (timeout: 10 minutes)..."
+  echo "  Waiting for credentials. The container stays up until they arrive."
   echo "=============================================="
   echo ""
   WAIT_SECS=0
   while [ ! -f "$CRED_FILE" ] && [ ! -f "$SETUP_TOKEN_FILE" ]; do
     sleep 5
     WAIT_SECS=$((WAIT_SECS + 5))
-    if [ "$WAIT_SECS" -ge 600 ]; then
-      echo "[docker-entrypoint] Timed out waiting for credentials after 10 minutes."
-      echo "[docker-entrypoint] Run 'hermit-docker login' from another terminal, then restart."
-      exit 1
+    # Never exit here. `restart: unless-stopped` would respawn us straight back
+    # into this wait, and `hermit-docker login` execs into a *running* container,
+    # so exiting destroys the recovery path the banner above just pointed at.
+    # Stay up and keep polling; remind the operator every 10 minutes.
+    if [ "$WAIT_SECS" -ge 600 ] && [ $((WAIT_SECS % 600)) -eq 0 ]; then
+      echo "[docker-entrypoint] Still waiting for credentials (${WAIT_SECS}s elapsed)."
+      echo "[docker-entrypoint] Run 'hermit-docker login' from another terminal."
     fi
   done
   echo "[docker-entrypoint] Credentials detected! Continuing startup..."
@@ -126,23 +129,28 @@ try {
     echo ""
     echo "    .claude-code-hermit/bin/hermit-docker login"
     echo ""
-    echo "  Waiting for fresh credentials (timeout: 10 minutes)..."
+    echo "  Waiting for fresh credentials. The container stays up until they arrive."
     echo "=============================================="
     echo ""
-    ORIG_MTIME=$(bun -e 'try { console.log(Math.floor(require("fs").statSync(process.argv[1]).mtimeMs / 1000)); } catch { console.log("0"); }' "$CRED_FILE" 2>/dev/null || echo "0")
+    # `stat`, not `bun -e`: the wait below no longer exits, so its mtime check runs
+    # every 5s indefinitely and must not spawn a JS runtime per tick. Both sides of
+    # the comparison use the same mechanism on purpose — a bun ORIG against a stat
+    # NEW would read "0" vs a real mtime if bun were missing, faking an update.
+    ORIG_MTIME=$(stat -c %Y "$CRED_FILE" 2>/dev/null || echo "0")
     WAIT_SECS=0
     while true; do
       sleep 5
       WAIT_SECS=$((WAIT_SECS + 5))
-      NEW_MTIME=$(bun -e 'try { console.log(Math.floor(require("fs").statSync(process.argv[1]).mtimeMs / 1000)); } catch { console.log("0"); }' "$CRED_FILE" 2>/dev/null || echo "0")
+      NEW_MTIME=$(stat -c %Y "$CRED_FILE" 2>/dev/null || echo "0")
       if [ "$NEW_MTIME" != "$ORIG_MTIME" ]; then
         echo "[docker-entrypoint] Credentials updated! Continuing startup..."
         break
       fi
-      if [ "$WAIT_SECS" -ge 600 ]; then
-        echo "[docker-entrypoint] Timed out waiting for fresh credentials."
-        echo "[docker-entrypoint] Run 'claude /login' inside the container, then restart it."
-        exit 1
+      # Same reason as §0: exiting under `restart: unless-stopped` loops the wait
+      # and breaks `hermit-docker login`, which execs into a running container.
+      if [ "$WAIT_SECS" -ge 600 ] && [ $((WAIT_SECS % 600)) -eq 0 ]; then
+        echo "[docker-entrypoint] Still waiting for fresh credentials (${WAIT_SECS}s elapsed)."
+        echo "[docker-entrypoint] Run 'hermit-docker login' from another terminal."
       fi
     done
   fi
