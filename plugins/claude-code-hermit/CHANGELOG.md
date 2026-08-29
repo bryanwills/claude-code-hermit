@@ -2,15 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
+
 ### Fixed
 - `docker-setup` aborts at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, instead of building the image first.
 - `docker-setup`'s post-start and first-run-acceptance polls read the entrypoint's `.boot-conflict` marker, so an inert container no longer passes as `running` or takes the operator through login and channel pairing.
 - The Docker entrypoint's credential waits no longer exit after ten minutes. Under `restart: unless-stopped` that exit respawned the container into the same wait and broke `hermit-docker login`, which execs into a running container.
 - `docker-setup`'s first-run acceptance poll waits for an outcome (the tmux session, or `.boot-conflict`) with a 10-minute cap instead of a fixed 30s, so a slow first-run plugin install is not misread as a crash.
-### Added
-- Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
-
-### Fixed
 - The `memory-size` warning distinguishes Claude Code's `/doctor` from `/hermit-doctor` and says it can be sent from chat or typed in a terminal.
 - Stopping a boot-conflicted (inert) container took ~2 minutes: the entrypoint's inert hold never trapped SIGTERM, and `hermit-docker down` polled the other, live instance's `runtime.json` for 60s. The hold now traps SIGTERM/SIGINT and exits immediately, and `down` short-circuits past the poll when `state/.boot-conflict` is present.
 
