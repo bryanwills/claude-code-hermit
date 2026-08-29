@@ -3,7 +3,10 @@
 ## [Unreleased]
 
 ### Fixed
-- `docker-setup` refuses at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, so the wizard stops before the image build instead of after it. Its post-start poll also reads the entrypoint's `.boot-conflict` marker: an inert container reports `running`, so setup previously walked the operator through login and channel pairing against a container with no tmux session.
+- `docker-setup` aborts at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, instead of building the image first.
+- `docker-setup`'s post-start and first-run-acceptance polls read the entrypoint's `.boot-conflict` marker, so an inert container no longer passes as `running` or takes the operator through login and channel pairing.
+- The Docker entrypoint's credential waits no longer exit after ten minutes. Under `restart: unless-stopped` that exit respawned the container into the same wait and broke `hermit-docker login`, which execs into a running container.
+- `docker-setup`'s first-run acceptance poll waits for an outcome (the tmux session, or `.boot-conflict`) with a 10-minute cap instead of a fixed 30s, so a slow first-run plugin install is not misread as a crash.
 
 ## [1.2.51] - 2026-08-29
 

@@ -72,6 +72,16 @@ describe('docker-preflight.ts', () => {
     expect(out.liveOwner.ageSecs).toBeLessThan(600);
   });
 
+  // The reason liveOwner is not a call into shouldRefuseBoot: a running Docker
+  // hermit is the supported case for re-running /docker-setup over an existing
+  // container, so it must never gate the wizard.
+  test('a live docker owner never gates the wizard', async () => {
+    const dir = freshDir();
+    seedOwner(dir, { runtime_mode: 'docker', session_state: 'active' });
+
+    expect((await run(dir)).liveOwner).toBe(null);
+  });
+
   test('cleanly-stopped owner is definitively dead, not live', async () => {
     const dir = freshDir();
     seedOwner(dir, { runtime_mode: 'tmux', session_state: 'idle' });

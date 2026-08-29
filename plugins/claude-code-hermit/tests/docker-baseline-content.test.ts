@@ -146,6 +146,20 @@ describe('Entrypoint: setup-token auth gates', () => {
     expect(entrypoint).toContain('while [ ! -f "$CRED_FILE" ] && [ ! -f "$SETUP_TOKEN_FILE" ]; do');
   });
 
+  // Neither credential wait may exit: `restart: unless-stopped` respawns the
+  // container straight back into the same wait, and `hermit-docker login` execs
+  // into a *running* container, so exiting destroys the recovery path the wait's
+  // own banner points at. Both waits stay up and remind instead.
+  test('entrypoint: neither credential wait exits on a timeout', () => {
+    const zeroGate = entrypoint.slice(
+      entrypoint.indexOf('# --- 0. Wait for auth credentials'),
+      entrypoint.indexOf('# --- 0c.'),
+    );
+    expect(zeroGate).not.toContain('exit 1');
+    expect(zeroGate).toContain('Still waiting for credentials');
+    expect(zeroGate).toContain('Still waiting for fresh credentials');
+  });
+
   // A converted hermit usually still carries the .credentials.json from its
   // original /login, whose expiresAt lapses and is never refreshed again. Before
   // this skip, that stale field false-blocked a perfectly healthy hermit at boot.
