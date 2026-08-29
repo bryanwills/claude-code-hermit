@@ -31,10 +31,24 @@ function seedRuntime(dir: string): void {
 
 const readRuntime = (dir: string) => JSON.parse(fs.readFileSync(runtimePath(dir), 'utf-8'));
 
+// runScript inherits process.env, so every variable the stamp reads is blanked
+// first: a `bun test` run from inside a managed hermit pane carries HERMIT_MANAGED=1
+// (which would make the unmanaged fixture stamp) and a developer's own shell may
+// carry any of the auth vars (which would make env_auth true against expectation).
+const BLANK_ENV = {
+  HERMIT_MANAGED: '',
+  CLAUDE_CONFIG_DIR: '',
+  ANTHROPIC_API_KEY: '',
+  ANTHROPIC_AUTH_TOKEN: '',
+  CLAUDE_CODE_USE_BEDROCK: '',
+  CLAUDE_CODE_USE_VERTEX: '',
+  CLAUDE_CODE_USE_FOUNDRY: '',
+};
+
 async function run(dir: string, env: Record<string, string>) {
   return runScript('startup-context.ts', {
     stdin: JSON.stringify({ source: 'startup' }),
-    env: { AGENT_DIR: path.join(dir, '.claude-code-hermit'), ...env },
+    env: { AGENT_DIR: path.join(dir, '.claude-code-hermit'), ...BLANK_ENV, ...env },
   });
 }
 

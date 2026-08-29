@@ -590,8 +590,8 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
       stdio: 'ignore',
       // No explicit env: hermit-start reads the setup token from defaultConfigDir()
       // and forwards CLAUDE_CONFIG_DIR into the new session's tmux env-file, and
-      // main() already assigned the session's own value onto process.env — which
-      // spawn passes on by default.
+      // adoptSessionConfigDir() already assigned the session's own value onto
+      // process.env on both paths that reach here — which spawn passes on by default.
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] restart failed: ${e}\n`));
     child.unref();
@@ -651,16 +651,36 @@ function reauthRelayActive(): boolean {
 }
 
 /**
+ * Adopt the session's own config dir from runtime.json, before any auth decision,
+ * transcript read, or child spawn that resolves defaultConfigDir() — the re-auth
+ * relay and hermit-start among them.
+ *
+ * startup-context.ts stamps `config_dir` from inside the session, so it also carries
+ * a value set in user or managed settings — a source this process cannot observe at
+ * all. Assigning it here reaches every defaultConfigDir() call without special-casing
+ * each one. Absent field → today's behavior, so a session booted before this shipped
+ * is unaffected.
+ */
+function adoptSessionConfigDir(runtime: Json): void {
+  if (typeof runtime.config_dir === 'string' && runtime.config_dir) {
+    process.env.CLAUDE_CONFIG_DIR = runtime.config_dir;
+  }
+}
+
+/**
  * Auth modes where a 401 on the pane is NOT a login problem: an API key, a bearer
  * token, or a cloud provider. Telling those operators to sign in would be wrong advice
  * for a cause no login can fix, so the lapsed-login paths sit this out entirely.
  */
-function envAuthOwnsCredential(sessionEnvAuth: boolean): boolean {
-  // The session's stamp answers first, because on a host install this process's
-  // own env is empty here. Its env is still the fallback: Docker shares one
-  // environment between the loop and the session, and a session booted before
-  // the stamp existed has nothing else to offer.
-  return sessionEnvAuth || envAuthPresent();
+function envAuthOwnsCredential(sessionEnvAuth: boolean | null): boolean {
+  // The session's stamp answers, because on a host install this process's own env
+  // describes the unit, not the hermit — including when it says `false`. A unit or
+  // crontab that happens to carry a key while the session runs on /login would
+  // otherwise suppress the lapsed-login tiers and re-create the silent outage this
+  // reads the stamp to avoid. Only an ABSENT stamp falls back to this process's env:
+  // Docker shares one environment between the loop and the session, and a session
+  // booted before the stamp existed has nothing else to offer.
+  return sessionEnvAuth ?? envAuthPresent();
 }
 
 /**
@@ -686,7 +706,7 @@ function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'id
       stdio: 'ignore',
       // No explicit env: the relay installs the freshly-minted token into
       // defaultConfigDir(), which must be the SESSION's config dir — already on
-      // process.env from main()'s launch-stamp adoption, which spawn passes on.
+      // process.env from adoptSessionConfigDir(), which spawn passes on.
     });
     child.on('error', (e) => process.stderr.write(`[watchdog] reauth relay spawn failed: ${e}\n`));
     child.unref();
@@ -1472,17 +1492,9 @@ async function main(): Promise<void> {
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
 
-  // Adopt the session's own launch environment before any auth decision.
-  // startup-context.ts stamps `config_dir` from inside the session, so it also
-  // carries a value set in user or managed settings — a source this process
-  // cannot observe at all. Assigning it here reaches every defaultConfigDir()
-  // call below — and the children spawned from them, the re-auth relay and
-  // hermit-start — without special-casing each one. Absent field → today's
-  // behavior, so a session booted before this shipped is unaffected.
-  if (typeof runtime.config_dir === 'string' && runtime.config_dir) {
-    process.env.CLAUDE_CONFIG_DIR = runtime.config_dir;
-  }
-  const sessionEnvAuth = runtime.env_auth === true;
+  // The session's launch environment, adopted before any auth decision below.
+  adoptSessionConfigDir(runtime);
+  const sessionEnvAuth = typeof runtime.env_auth === 'boolean' ? runtime.env_auth : null;
 
   // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
   //
@@ -1985,6 +1997,11 @@ async function cmdRestart(reason: string): Promise<void> {
   const config: Json = readSettledConfig(HERMIT_ROOT);
   const runtime = readRuntimeJson();
   if (runtime === null) process.exit(0);
+  // Same adoption main() does: hermit-start is spawned below and reads the setup
+  // token from defaultConfigDir(). Invoked from a plain shell (the operator, or a
+  // mint whose own env is bare), this process would otherwise resolve ~/.claude and
+  // restart a token hermit with no token exported into its session.
+  adoptSessionConfigDir(runtime);
   const sessionName = runtime.tmux_session || deriveSessionName(config);
   if (!sessionName) process.exit(0);
   await doRestart(sessionName, reason, runtime, config.timezone ?? 'UTC');

@@ -32,6 +32,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readRuntimeJson } from './lib/runtime';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { transcriptDirFor, transcriptPathKey } from './lib/cc-compat';
 
 function dockerVersion(): string | null {
   try {
@@ -73,9 +74,11 @@ function probe(projectRoot: string, hermitDir: string) {
   const home = os.homedir();
   // Auto-memory seed path key — derived from the project root the skill passes in
   // (the shell's logical `$(pwd)`, the same path Claude Code keys
-  // ~/.claude/projects/<key> off), so it matches even when the root is reached
-  // through a symlink. Mirrors the original `pwd | sed 's|/|-|g'` (leading dash kept).
-  const pathKey = projectRoot.replace(/\//g, '-');
+  // <config-dir>/projects/<key> off), so it matches even when the root is reached
+  // through a symlink. Goes through cc-compat so it stays CC's scheme: every
+  // non-alphanumeric character maps to '-', dots included. The older
+  // `pwd | sed 's|/|-|g'` form replaced slashes only and mis-keyed any dotted path.
+  const pathKey = transcriptPathKey(projectRoot);
   return {
     dockerVersion: dockerVersion(),
     configExists: fs.existsSync(path.join(projectRoot, hermitDir, 'config.json')),
@@ -88,7 +91,7 @@ function probe(projectRoot: string, hermitDir: string) {
     gitconfigExists: fs.existsSync(path.join(home, '.gitconfig')),
     memory: {
       pathKey,
-      seedExists: fs.existsSync(path.join(home, '.claude', 'projects', pathKey, 'memory', 'MEMORY.md')),
+      seedExists: fs.existsSync(path.join(transcriptDirFor(projectRoot), 'memory', 'MEMORY.md')),
     },
     liveOwner: liveOwner(projectRoot, hermitDir),
   };

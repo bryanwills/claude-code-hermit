@@ -11,7 +11,7 @@ import { globDir, readFrontmatter } from './lib/frontmatter';
 import { validate } from './validate-config';
 import { kStr } from './lib/format';
 import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } from './lib/cost-log';
-import { costLogPath } from './lib/cc-compat';
+import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
 import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolvePersistedStyle, outputStyleFor } from './lib/voice';
@@ -1861,18 +1861,15 @@ function checkMemorySize(p: DoctorPaths = PATHS) {
       }
     }
 
-    // Same key scheme as lib/cc-compat.ts transcriptDirFor: Claude Code replaces
-    // every non-alphanumeric character, not just '/'. A '/'-only scheme mis-keys
-    // any path containing a dot or other punctuation (a dotted repo name, a
-    // project under a hidden directory), and the leg below would then read as a
-    // permanent, silent "ok".
+    // Goes through lib/cc-compat.ts so the key scheme and config-dir resolution stay
+    // sourced from one place. Getting either wrong makes this leg read as a
+    // permanent, silent "ok" rather than failing loudly.
     // Known gap: a doctor run whose project root is a *linked git worktree* finds
     // nothing here — Claude Code writes transcripts under the worktree's own key
     // but keeps auto-memory under the main checkout's key, so MEMORY.md never
     // exists at the worktree key and this leg stays silently "ok". Only affects
     // hermits driven from a worktree; a normally-installed hermit is unaffected.
-    const pathKey = projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
-    const memoryPath = path.join(defaultConfigDir(), 'projects', pathKey, 'memory', 'MEMORY.md');
+    const memoryPath = path.join(transcriptDirFor(projectRoot), 'memory', 'MEMORY.md');
     // Auto-memory loads only MEMORY.md's first 200 lines or 25 KB, whichever
     // comes first, and drops the rest with no notice. The thresholds sit at 80%
     // of that cap so there is room to consolidate before entries start vanishing.

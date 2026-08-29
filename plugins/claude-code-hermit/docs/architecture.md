@@ -106,7 +106,7 @@ Skills are namespaced `/claude-code-hermit:*`; the full set is listed in the plu
 | Heartbeat touch     | PostToolUse  | strict    | Marks activity for heartbeat gap detection             |
 | Contract tests      | PostToolUse  | strict    | Runs plugin contract tests after changes               |
 | Config validator    | PostToolUse  | strict    | Validates config.json after mutations                  |
-| Context loader      | SessionStart | all       | Loads OPERATOR.md, SHELL.md, latest report, cost data  |
+| Context loader      | SessionStart | all       | Loads OPERATOR.md, SHELL.md, latest report, cost data; on a managed session (`HERMIT_MANAGED=1`) also stamps the launch env into `runtime.json` |
 | Cost tracker        | Stop         | all       | Logs tokens/cost                                       |
 | Session diff        | Stop         | standard+ | Auto-populates `## Changed` from `git diff`            |
 | Session evaluator   | Stop         | standard+ | Validates SHELL.md quality, detects zombie/stale/bloat |
@@ -144,7 +144,7 @@ your-project/
 │   ├── compiled/review-weekly-YYYY-Www.md  # Weekly review reports (weekly-review.ts; type: review)
 │   ├── templates/
 │   ├── state/                        # Runtime observations (agent-owned, not operator-configured)
-│   │   ├── runtime.json              # Session state: in_progress/waiting/idle (authoritative since v0.3.2)
+│   │   ├── runtime.json              # Session state: in_progress/waiting/idle (authoritative since v0.3.2), plus the launch env stamp (config_dir, env_auth)
 │   │   ├── alert-state.json          # Alert dedup state + self-eval evidence (heartbeat-owned)
 │   │   ├── reflection-state.json     # Last reflection timestamp (reflect-owned)
 │   │   ├── channel-activity.json     # Last channel interaction timestamp (channel-hook-owned)
@@ -180,9 +180,11 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 
 **The single-session guarantee does not extend to hooks.** Claude Code does not serialise hook invocations: one assistant turn issuing parallel tool calls spawns several hook processes that run concurrently (probed 2026-08-28 — four denials, four pids, every `START` before the first `END`). A hook that owns a state file therefore cannot rely on the rule above, and must either append rather than read-modify-write (`lib/denial-log.ts`) or take the advisory lock (`lib/lockfile.ts`, as `lib/progress-log.ts` and `permission-denied-notify.ts` do).
 
+`startup-context.ts`'s launch-env stamp is the one read-modify-write on `runtime.json` from a hook, and it is exempt by timing rather than by locking: `SessionStart` fires once per session, seconds after `hermit-start` has finished its own write (which lands within milliseconds of `tmux new-session`, before Claude Code has booted). It is also idempotent — every later `SessionStart` in the same session recomputes the same pair and skips the write when nothing moved, which keeps `updated_at` from drifting forward on a mere compaction and hiding a wedged session from doctor's stale-session check.
+
 | File                           | Owner (sole writer)                                 | Readers                                                       |
 | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------- |
-| `state/runtime.json`           | session-archive.ts + cost-tracker                    | heartbeat, session-start, /hermit-routines (rdw=false suppression)   |
+| `state/runtime.json`           | session-archive.ts + cost-tracker + startup-context.ts (launch-env stamp only) | heartbeat, session-start, /hermit-routines (rdw=false suppression), hermit-watchdog (`config_dir`, `env_auth`) |
 | `state/alert-state.json`       | heartbeat only                                      | heartbeat; evaluate-session (read-only nudge computation)     |
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (scheduled-checks display) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |
@@ -371,7 +373,9 @@ config.json "env"  →  hermit-start.ts  →  .claude/settings.local.json "env" 
 3. Claude Code reads `settings.local.json` and exports `env` values to hooks and Bash tool calls
 4. For vars that MCP servers need (`*_STATE_DIR`), `hermit-start.ts` also forwards them as OS env vars (tmux temp file or Docker compose `environment:`) — MCP servers are separate processes that inherit shell env but do NOT read `settings.local.json`
 
-**Bucket A (shell env only):** `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY` — must be in shell env before `claude` starts. Forwarded via temp file in tmux, or Docker `environment:`. OAuth credentials live in `.credentials.json` (written by `claude /login`), not in env vars.
+**Bucket A (shell env — the only carrier the hermit has):** `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY` — must be in shell env before `claude` starts *when the hermit is the one supplying them*. Forwarded via temp file in tmux, or Docker `environment:`. `settings.local.json` is project scope, and Claude Code stopped honoring `CLAUDE_CONFIG_DIR` there in 2.1.251, so Bucket B is not an option for it. OAuth credentials live in `.credentials.json` (written by `claude /login`), not in env vars.
+
+**Bucket A′ (operator-set, invisible to the launcher):** Claude Code also honors `CLAUDE_CONFIG_DIR` from the operator's **user or managed** `settings.json` `env` block. Probed live on 2.1.251: a value there re-points `.credentials.json`, sessions, plugins and hooks, and hooks inherit the resolved value — but it never passes through `hermit-start`'s environment, so no process outside the session can discover it. Only a process *inside* the session witnesses it. This is why `startup-context.ts` stamps `config_dir` into `state/runtime.json` on `SessionStart`, and why the watchdog adopts that stamp (`adoptSessionConfigDir`) before making any auth or transcript-path decision.
 
 **Bucket B (settings.local.json only):** `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `MAX_THINKING_TOKENS` — consumed by hooks and Claude Code itself.
 

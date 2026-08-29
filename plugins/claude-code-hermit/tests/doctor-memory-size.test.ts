@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { checkMemorySize, resolvePaths } from '../scripts/doctor-check';
+import { transcriptDirFor } from '../scripts/lib/cc-compat';
 import { freshDirFactory } from './helpers/workdir';
 
 const PLUGIN_ROOT = path.resolve(import.meta.dir, '..');
@@ -32,9 +33,7 @@ function scenario({ claude, local, memory, memoryAsDir, dottedRoot }: Fixture) {
   if (local !== undefined) fs.writeFileSync(path.join(projectRoot, 'CLAUDE.local.md'), local);
 
   const configDir = freshDir();
-  // Claude Code's own key scheme: every non-alphanumeric character becomes '-'.
-  const pathKey = projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
-  const memoryPath = path.join(configDir, 'projects', pathKey, 'memory', 'MEMORY.md');
+  const memoryPath = path.join(transcriptDirFor(projectRoot, configDir), 'memory', 'MEMORY.md');
   if (memory !== undefined || memoryAsDir) {
     fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
     if (memoryAsDir) fs.mkdirSync(memoryPath);

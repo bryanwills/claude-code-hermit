@@ -20,8 +20,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { defaultConfigDir } from './setup-token';
 
 type Json = any;
 type TriState = { state: string; count: number; entries: Json[] };
@@ -590,18 +590,30 @@ function classifyToolResults(entry: Json): { rejections: string[]; failureIds: s
 }
 
 /**
- * The transcript directory for a project root, mirroring CC's own path-key
- * derivation: the absolute project root with every non-alphanumeric character
- * replaced by '-' (so `/home/u/.claude/x` → `-home-u--claude-x`). CC replaces
- * dots too — a `/`-only scheme silently mis-keys any dotted path.
+ * CC's own path-key derivation: the absolute project root with every
+ * non-alphanumeric character replaced by '-' (so `/home/u/.claude/x` →
+ * `-home-u--claude-x`). CC replaces dots too — a `/`-only scheme silently
+ * mis-keys any dotted path.
  * @param {string} projectRoot absolute project root
- * @param {string} [home] override for ~ (tests); defaults to os.homedir()
- * @returns {string} absolute path to ~/.claude/projects/<key>
+ * @returns {string} the path key naming this project's CC-owned directories
  */
-function transcriptDirFor(projectRoot: string, home?: string): string {
-  const h = home ?? os.homedir();
-  const key = projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
-  return path.join(h, '.claude', 'projects', key);
+function transcriptPathKey(projectRoot: string): string {
+  return projectRoot.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+/**
+ * The transcript directory for a project root, under the config dir CC actually
+ * resolved. Honors CLAUDE_CONFIG_DIR: a hermit pointed at a custom config dir
+ * keeps its transcripts there, and a caller that hardcoded ~/.claude would read
+ * a directory that does not exist. An out-of-session caller must adopt the
+ * session's stamped `config_dir` onto its own env first — the watchdog does this
+ * in adoptSessionConfigDir(), which also covers the children it spawns.
+ * @param {string} projectRoot absolute project root
+ * @param {string} [configDir] override for the config dir (tests); defaults to defaultConfigDir()
+ * @returns {string} absolute path to <configDir>/projects/<key>
+ */
+function transcriptDirFor(projectRoot: string, configDir?: string): string {
+  return path.join(configDir ?? defaultConfigDir(), 'projects', transcriptPathKey(projectRoot));
 }
 
 // ---------------------------------------------------------------------------
@@ -691,6 +703,7 @@ export {
   isCompactBoundary,
   toolUseNames,
   classifyToolResults,
+  transcriptPathKey,
   transcriptDirFor,
   // Cost-log
   costLogPath,

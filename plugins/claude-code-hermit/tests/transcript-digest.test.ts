@@ -233,25 +233,61 @@ describe('transcript-digest (subprocess)', () => {
   // transcript dir from the hermit root (resolveHermitRoot) rather than a
   // cwd-relative path.resolve. AGENT_DIR anchors the hermit root and HOME
   // anchors os.homedir(), so transcriptDirFor lands on the seeded dir.
+  // CLAUDE_CONFIG_DIR is blanked deliberately: runScript merges process.env, so a
+  // maintainer running the suite with their own config dir set would otherwise send
+  // the script somewhere the fixture never seeded.
   test('derives the transcript dir from the hermit root when --dir is omitted', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-home-'));
     tmpRoots.push(home);
     const projRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-proj-'));
     tmpRoots.push(projRoot);
     const hermitRoot = path.join(projRoot, '.claude-code-hermit');
-    const derivedDir = transcriptDirFor(projRoot, home);
+    const derivedDir = transcriptDirFor(projRoot, path.join(home, '.claude'));
     fs.mkdirSync(derivedDir, { recursive: true });
     fs.writeFileSync(path.join(derivedDir, 's.jsonl'),
       [triggerEntry('HEARTBEAT_EVALUATE'), assistantToolUse('u1', 'Agent')].join('\n') + '\n');
 
     const res = await runScript('transcript-digest.ts', {
       args: ['.claude-code-hermit'],
-      env: { HOME: home, AGENT_DIR: hermitRoot },
+      env: { HOME: home, CLAUDE_CONFIG_DIR: '', AGENT_DIR: hermitRoot },
     });
     const json = JSON.parse(res.stdout.trim());
     expect(res.exitCode).toBe(0);
     expect(json.window.files).toBe(1);
     expect(json.counters.subagent_dispatches).toBe(1);
+  });
+
+  // The regression the ~/.claude hardcode caused: a hermit with a custom config dir
+  // had its transcripts read from a directory that does not exist, so cost tracking
+  // silently reported an empty window. HOME points at a decoy holding a DIFFERENT
+  // transcript — if the resolver falls back to it the counters give it away.
+  test('reads transcripts from CLAUDE_CONFIG_DIR, not ~/.claude', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-home-'));
+    tmpRoots.push(home);
+    const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-cfg-'));
+    tmpRoots.push(configDir);
+    const projRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-td-proj-'));
+    tmpRoots.push(projRoot);
+    const hermitRoot = path.join(projRoot, '.claude-code-hermit');
+
+    const decoyDir = transcriptDirFor(projRoot, path.join(home, '.claude'));
+    fs.mkdirSync(decoyDir, { recursive: true });
+    fs.writeFileSync(path.join(decoyDir, 'decoy.jsonl'),
+      [triggerEntry('HEARTBEAT_EVALUATE')].join('\n') + '\n');
+
+    const realDir = transcriptDirFor(projRoot, configDir);
+    fs.mkdirSync(realDir, { recursive: true });
+    fs.writeFileSync(path.join(realDir, 's.jsonl'),
+      [triggerEntry('HEARTBEAT_EVALUATE'), assistantToolUse('u1', 'Agent')].join('\n') + '\n');
+
+    const res = await runScript('transcript-digest.ts', {
+      args: ['.claude-code-hermit'],
+      env: { HOME: home, CLAUDE_CONFIG_DIR: configDir, AGENT_DIR: hermitRoot },
+    });
+    const json = JSON.parse(res.stdout.trim());
+    expect(res.exitCode).toBe(0);
+    expect(json.window.files).toBe(1);
+    expect(json.counters.subagent_dispatches).toBe(1); // the decoy has none
   });
 });
 
@@ -459,8 +495,16 @@ describe('helpers', () => {
 
 describe('transcriptDirFor', () => {
   test('non-alphanumeric characters (including dots) map to dashes', () => {
-    expect(transcriptDirFor('/home/user/proj', '/HOME')).toBe('/HOME/.claude/projects/-home-user-proj');
-    expect(transcriptDirFor('/home/user/.claude/jobs/x', '/HOME')).toBe('/HOME/.claude/projects/-home-user--claude-jobs-x');
+    expect(transcriptDirFor('/home/user/proj', '/HOME/.claude')).toBe('/HOME/.claude/projects/-home-user-proj');
+    expect(transcriptDirFor('/home/user/.claude/jobs/x', '/HOME/.claude'))
+      .toBe('/HOME/.claude/projects/-home-user--claude-jobs-x');
+  });
+
+  // The override is the CONFIG dir, not HOME: a hermit whose CLAUDE_CONFIG_DIR points
+  // somewhere other than ~/.claude keeps its transcripts there, and the old
+  // os.homedir()/.claude hardcode read a directory that does not exist.
+  test('the override is the config dir, with no .claude segment appended', () => {
+    expect(transcriptDirFor('/home/user/proj', '/srv/cfg')).toBe('/srv/cfg/projects/-home-user-proj');
   });
 });
 
