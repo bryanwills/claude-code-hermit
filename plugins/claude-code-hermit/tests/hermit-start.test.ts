@@ -42,10 +42,7 @@ import {
   dockerHermitRunning,
   duplicateSessionRefusal,
   checkForUpgrade,
-  checkPrerequisites,
-  buildClaudeCommand,
   peerName,
-  effectivePeerName,
 } from '../scripts/hermit-start';
 import { readRuntimeState } from '../scripts/lib/runtime';
 import { automodeAllowEntry, SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
@@ -191,15 +188,13 @@ const claudeMarketplaces = (entries: any[]) =>
 const HERMIT_START_TS = path.join(PLUGIN_ROOT, 'scripts', 'hermit-start.ts');
 
 /**
- * Run buildClaudeCommand(config, {bun: ..., ...toolsOverride}) in a child bun
- * process rooted at the tempdir, with `claude` stubbed on PATH. console.log is
- * captured inside the child (the redirect_stdout port) and returned alongside
- * the command.
+ * Run buildClaudeCommand(config, {bun: ...}) in a child bun process rooted at
+ * the tempdir, with `claude` stubbed on PATH. console.log is captured inside
+ * the child (the redirect_stdout port) and returned alongside the command.
  */
 async function runBuildClaudeCommand(
   config: any,
   claudeStubBody: string,
-  toolsOverride: any = {},
 ): Promise<{ cmd: string[]; out: string }> {
   const bin = path.join(tmpdir, 'stub-bin');
   fs.mkdirSync(bin, { recursive: true });
@@ -210,7 +205,7 @@ async function runBuildClaudeCommand(
     const lines = [];
     console.log = (...a) => lines.push(a.map(String).join(' '));
     const m = await import(${JSON.stringify(HERMIT_START_TS)});
-    const cmd = m.buildClaudeCommand(${JSON.stringify(config)}, { bun: '/usr/local/bin/bun', ...${JSON.stringify(toolsOverride)} });
+    const cmd = m.buildClaudeCommand(${JSON.stringify(config)}, { bun: '/usr/local/bin/bun' });
     process.stdout.write(JSON.stringify({ cmd, out: lines.length ? lines.join('\\n') + '\\n' : '' }));
   `;
   const proc = Bun.spawn({
@@ -744,57 +739,10 @@ describe('buildClaudeCommand channel resolution', () => {
 });
 
 // ============================================================
-// checkPrerequisites — claude version probe (TestClaudeVersionProbe)
+// peer name — --name / --remote-control (TestPeerName)
 // ============================================================
 
-describe('checkPrerequisites — claude version probe', () => {
-  // checkPrerequisites resolves `claude` via Bun.which, which — unlike
-  // spawnSync — has no `env` override and ignores an in-process PATH
-  // mutation outright (verified live), so this needs the same PATH-stubbed
-  // child-process harness as buildClaudeCommand's marketplace fetch.
-  async function runCheckPrerequisites(claudeStubBody: string): Promise<any> {
-    const bin = path.join(tmpdir, 'stub-bin-prereq');
-    fs.mkdirSync(bin, { recursive: true });
-    fs.writeFileSync(path.join(bin, 'claude'), claudeStubBody);
-    fs.chmodSync(path.join(bin, 'claude'), 0o755);
-
-    const harness = `
-      const m = await import(${JSON.stringify(HERMIT_START_TS)});
-      const tools = m.checkPrerequisites();
-      process.stdout.write(JSON.stringify(tools));
-    `;
-    const proc = Bun.spawn({
-      cmd: [process.execPath, '-e', harness],
-      cwd: tmpdir,
-      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (exitCode !== 0) throw new Error(`harness exited ${exitCode}: ${stderr}`);
-    return JSON.parse(stdout);
-  }
-
-  test('parses the leading semver from `claude --version`', async () => {
-    const tools = await runCheckPrerequisites('#!/bin/sh\necho "2.1.251 (Claude Code)"\n');
-    expect(tools.claude_version).toBe('2.1.251');
-  }, 15000);
-
-  test('a failed probe leaves claude_version null without blocking boot', async () => {
-    const tools = await runCheckPrerequisites('#!/bin/sh\nexit 1\n');
-    expect(tools.claude_version).toBeNull();
-  }, 15000);
-});
-
-// ============================================================
-// peer name — --name / --remote-control gate (TestPeerName)
-// ============================================================
-
-describe('peer name — --name / --remote-control gate', () => {
+describe('peer name — --name / --remote-control', () => {
   test('peerName sanitizes agent_name to [A-Za-z0-9_-]', () => {
     expect(peerName({ agent_name: 'Ana Paula' })).toBe('Ana-Paula');
   });
@@ -803,57 +751,15 @@ describe('peer name — --name / --remote-control gate', () => {
     expect(peerName({})).toBe(`hermit-${path.basename(tmpdir)}`);
   });
 
-  test('effectivePeerName is the sanitized name at or above 2.1.224', () => {
-    expect(effectivePeerName({ agent_name: 'Ana Paula' }, { claude_version: '2.1.251' })).toBe('Ana-Paula');
-    expect(effectivePeerName({ agent_name: 'Ana Paula' }, { claude_version: '2.1.224' })).toBe('Ana-Paula');
-  });
-
-  test('effectivePeerName is null below the 2.1.224 floor', () => {
-    expect(effectivePeerName({ agent_name: 'Ana Paula' }, { claude_version: '2.1.200' })).toBeNull();
-  });
-
-  test('effectivePeerName is null when the version is undetected', () => {
-    expect(effectivePeerName({ agent_name: 'Ana Paula' }, { claude_version: null })).toBeNull();
-  });
-
-  test('--name present and sanitized on a recent claude', async () => {
-    const config = { agent_name: 'Ana Paula' };
-    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS, { claude_version: '2.1.251' });
-    const i = cmd.indexOf('--name');
-    expect(i).toBeGreaterThan(-1);
-    expect(cmd[i + 1]).toBe('Ana-Paula');
-  }, 15000);
-
-  test('--name absent and a WARNING printed on an old claude', async () => {
-    const config = { agent_name: 'Ana Paula' };
-    const { cmd, out } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS, { claude_version: '2.1.200' });
-    expect(cmd).not.toContain('--name');
-    expect(out).toContain('WARNING');
-    expect(out).toContain('2.1.200');
-  }, 15000);
-
-  test('--name absent when the version is undetected, no warning', async () => {
-    const config = { agent_name: 'Ana Paula' };
-    const { cmd, out } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS, { claude_version: null });
-    expect(cmd).not.toContain('--name');
-    expect(out).not.toContain('WARNING');
-  }, 15000);
-
-  test('--remote-control carries the same sanitized name as --name', async () => {
+  test('--name and --remote-control both carry the same sanitized name', async () => {
     const config = { agent_name: 'Ana Paula', remote: true };
-    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS, { claude_version: '2.1.251' });
-    const i = cmd.indexOf('--remote-control');
-    expect(i).toBeGreaterThan(-1);
-    expect(cmd[i + 1]).toBe('Ana-Paula');
-  }, 15000);
-
-  test('--remote-control stays sanitized even when --name is gated off', async () => {
-    const config = { agent_name: 'Ana Paula', remote: true };
-    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS, { claude_version: '2.1.200' });
-    const i = cmd.indexOf('--remote-control');
-    expect(i).toBeGreaterThan(-1);
-    expect(cmd[i + 1]).toBe('Ana-Paula');
-    expect(cmd).not.toContain('--name');
+    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS);
+    const nameIdx = cmd.indexOf('--name');
+    const rcIdx = cmd.indexOf('--remote-control');
+    expect(nameIdx).toBeGreaterThan(-1);
+    expect(rcIdx).toBeGreaterThan(-1);
+    expect(cmd[nameIdx + 1]).toBe('Ana-Paula');
+    expect(cmd[rcIdx + 1]).toBe('Ana-Paula');
   }, 15000);
 });
 
