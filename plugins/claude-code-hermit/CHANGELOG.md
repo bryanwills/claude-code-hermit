@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
+
 ### Fixed
+- The `memory-size` warning distinguishes Claude Code's `/doctor` from `/hermit-doctor` and says it can be sent from chat or typed in a terminal.
 - Stopping a boot-conflicted (inert) container took ~2 minutes: the entrypoint's inert hold never trapped SIGTERM, and `hermit-docker down` polled the other, live instance's `runtime.json` for 60s. The hold now traps SIGTERM/SIGINT and exits immediately, and `down` short-circuits past the poll when `state/.boot-conflict` is present.
 
 ## [1.2.51] - 2026-08-29
