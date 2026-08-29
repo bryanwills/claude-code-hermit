@@ -42,6 +42,7 @@ import {
   dockerHermitRunning,
   duplicateSessionRefusal,
   checkForUpgrade,
+  peerName,
 } from '../scripts/hermit-start';
 import { readRuntimeState } from '../scripts/lib/runtime';
 import { automodeAllowEntry, SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from '../scripts/lib/settings/automode-entries';
@@ -734,6 +735,31 @@ describe('buildClaudeCommand channel resolution', () => {
     expect(cmd).not.toContain('--channels');
     expect(out).toContain('--evil');
     expect(out).toContain('-');
+  }, 15000);
+});
+
+// ============================================================
+// peer name — --name / --remote-control (TestPeerName)
+// ============================================================
+
+describe('peer name — --name / --remote-control', () => {
+  test('peerName sanitizes agent_name to [A-Za-z0-9_-]', () => {
+    expect(peerName({ agent_name: 'Ana Paula' })).toBe('Ana-Paula');
+  });
+
+  test('peerName falls back to hermit-<project> when agent_name is unset', () => {
+    expect(peerName({})).toBe(`hermit-${path.basename(tmpdir)}`);
+  });
+
+  test('--name and --remote-control both carry the same sanitized name', async () => {
+    const config = { agent_name: 'Ana Paula', remote: true };
+    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS);
+    const nameIdx = cmd.indexOf('--name');
+    const rcIdx = cmd.indexOf('--remote-control');
+    expect(nameIdx).toBeGreaterThan(-1);
+    expect(rcIdx).toBeGreaterThan(-1);
+    expect(cmd[nameIdx + 1]).toBe('Ana-Paula');
+    expect(cmd[rcIdx + 1]).toBe('Ana-Paula');
   }, 15000);
 });
 

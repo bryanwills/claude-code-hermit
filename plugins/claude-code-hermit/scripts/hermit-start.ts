@@ -616,6 +616,18 @@ function inputLine(promptText: string): string {
   return line;
 }
 
+/**
+ * The peer name requested via --name: safe for an `@` mention, no quoting
+ * needed. This is what we ASK Claude Code to register, computed before the
+ * session exists — a collision with a live session of the same name gets
+ * silently renamed by Claude Code, which this can't observe or correct.
+ */
+function peerName(config: Json): string {
+  return String(config.agent_name || getSessionName(config))
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 /** Build the claude launch command from config. */
 function buildClaudeCommand(config: Json, tools: Json): string[] {
   const cmd = ['claude'];
@@ -712,10 +724,15 @@ function buildClaudeCommand(config: Json, tools: Json): string[] {
     }
   }
 
+  const name = peerName(config);
+
   // Add remote control for web/mobile access (with session name)
   if (pyTruthy('remote' in config ? config.remote : false)) {
-    const remoteName = config.agent_name || getSessionName(config);
-    cmd.push('--remote-control', remoteName);
+    cmd.push('--remote-control', name);
+  }
+
+  if (name) {
+    cmd.push('--name', name);
   }
 
   if (pyTruthy(config.chrome)) {
@@ -1303,6 +1320,7 @@ async function main(): Promise<void> {
         created_at: localISOStamp(),
         runtime_mode: 'interactive',
         tmux_session: null,
+        peer_name: peerName(config),
         transition: null,
         transition_target: null,
         transition_started_at: null,
@@ -1316,6 +1334,7 @@ async function main(): Promise<void> {
       existing.version = 1;
       existing.runtime_mode = 'interactive';
       existing.tmux_session = null;
+      existing.peer_name = peerName(config);
       clearShutdownStampsOnBoot(existing);
       writeRuntimeJson(existing);
     }
@@ -1416,6 +1435,7 @@ async function main(): Promise<void> {
       created_at: localISOStamp(),
       runtime_mode: runtimeMode,
       tmux_session: sessionName,
+      peer_name: peerName(config),
       transition: null,
       transition_target: null,
       transition_started_at: null,
@@ -1429,6 +1449,7 @@ async function main(): Promise<void> {
     existing.version = 1;
     existing.runtime_mode = runtimeMode;
     existing.tmux_session = sessionName;
+    existing.peer_name = peerName(config);
     clearShutdownStampsOnBoot(existing);
     writeRuntimeJson(existing);
   }
@@ -1513,6 +1534,7 @@ export {
   getEnabledChannels,
   resolveStateDir,
   buildClaudeCommand,
+  peerName,
   renderClassifierOverlay,
   writeSettingsEnv,
   applyVoiceRender,
