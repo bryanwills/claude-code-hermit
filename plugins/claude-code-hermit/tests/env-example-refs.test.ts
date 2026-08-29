@@ -20,8 +20,6 @@ import { MONOREPO_ROOT, walkFiles } from './helpers/run';
 
 const SKIP_DIRS = new Set(['node_modules', 'vendor']);
 
-const ALLOW = new Set<string>();
-
 function hitLines(text: string): number[] {
   const out: number[] = [];
   text.split('\n').forEach((line, i) => {
@@ -63,7 +61,6 @@ function surfaces(): string[] {
 
 describe('no plugin prose references a .env.example', () => {
   for (const file of surfaces()) {
-    if (ALLOW.has(path.relative(PLUGINS_DIR, file))) continue;
     const rel = path.relative(MONOREPO_ROOT, file);
     test(rel, () => {
       const hits = hitLines(fs.readFileSync(file, 'utf8'));

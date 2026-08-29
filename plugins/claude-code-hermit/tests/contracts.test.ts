@@ -3408,8 +3408,17 @@ describe('voice carrier contract', () => {
     expect(read(path.join(TEMPLATES, 'WORKTREEINCLUDE-APPEND.txt')))
       .toContain('.claude/output-styles/hermit-voice.md');
 
-    const configRef = read(path.join(PLUGIN_ROOT, 'docs', 'config-reference.md'));
-    expect(configRef).toContain('.claude/output-styles/hermit-voice.md');
+    // The moving-hosts answer is the one place that has to say what happens to
+    // the file on a new machine. Assert on that line rather than on the path
+    // appearing anywhere in the docs — config-reference.md also names the path
+    // in its unrelated voice-style table, so a bare toContain() would stay
+    // green even if the migration guidance were deleted outright.
+    const faq = read(path.join(PLUGIN_ROOT, 'docs', 'faq.md'));
+    const line = faq
+      .split('\n')
+      .find((l) => l.includes('.claude/output-styles/hermit-voice.md'));
+    expect(line).toBeDefined();
+    expect(line).toContain('config.json');
   });
 });
 
