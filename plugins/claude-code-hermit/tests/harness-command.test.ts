@@ -126,7 +126,7 @@ describe('parseHarnessCommand grammar', () => {
   });
 
   test('rejects unsafe code-review arguments', () => {
-    expect(parseHarnessCommand('/code-review --post')).toBeNull();
+    expect(parseHarnessCommand('/code-review --no-post')).toBeNull();
     expect(parseHarnessCommand('/code-review low; rm x')).toBeNull();
     expect(parseHarnessCommand('/code-review low\n/clear')).toBeNull();
   });
@@ -135,6 +135,7 @@ describe('parseHarnessCommand grammar', () => {
 describe('skill command policy', () => {
   test('refuses ultra code reviews and identifies only relayed skill commands', () => {
     expect(skillCommandRefusal({ command: '/code-review', arg: 'ultra' })).toContain('dialog');
+    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --post' })).toContain('--post');
     expect(skillCommandRefusal({ command: '/code-review', arg: 'low --fix' })).toBeNull();
     expect(skillCommandRefusal({ command: '/doctor', arg: null })).toBeNull();
     expect(isSkillCommand('/doctor')).toBe(true);

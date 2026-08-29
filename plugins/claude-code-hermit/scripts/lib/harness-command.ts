@@ -31,7 +31,8 @@ const BARE_COMMANDS = new Set(['/compact', '/clear', '/doctor', '/checkup']);
 /** Commands requiring exactly one argument. */
 const ARG_COMMANDS = new Set(['/model', '/effort', '/permission-mode', '/advisor']);
 
-const SKILL_ARG_RE = /^(--fix|--comment|#?[A-Za-z0-9._/@\[\]-]{1,64})$/;
+const SKILL_ARG_RE = /^(--fix|--comment|--post|#?[A-Za-z0-9._/@\[\]-]{1,64})$/;
+const SKILL_FLAGS = new Set(['--fix', '--comment', '--post']);
 const SKILL_ARG_COMMANDS = new Map([
   ['/code-review', '/code-review'],
   ['/review', '/code-review'],
@@ -69,7 +70,9 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
   const skillCommand = SKILL_ARG_COMMANDS.get(command);
   if (skillCommand) {
     const args = parts.slice(1);
-    if (!args.every((arg) => SKILL_ARG_RE.test(arg) && (!arg.startsWith('--') || arg === '--fix' || arg === '--comment'))) return null;
+    // `--post` parses on purpose so skillCommandRefusal can relay a reason; every other
+    // flag stays unparsed (the message falls through as an ordinary channel slash command).
+    if (!args.every((arg) => SKILL_ARG_RE.test(arg) && (!arg.startsWith('--') || SKILL_FLAGS.has(arg)))) return null;
     return { command: skillCommand, arg: args.length > 0 ? args.join(' ') : null };
   }
   return null;
@@ -78,7 +81,11 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
 /** Why a parsed skill command cannot be delivered, or null when it can. */
 export function skillCommandRefusal(parsed: ParsedCommand): string | null {
   if (parsed.command !== '/code-review' || !parsed.arg) return null;
-  if (!parsed.arg.split(' ').some((token) => token.toLowerCase() === 'ultra')) return null;
+  const tokens = parsed.arg.split(' ').map((token) => token.toLowerCase());
+  if (tokens.includes('--post')) {
+    return '--post writes a comment to the pull request under the operator\'s GitHub account, which is not a chat-authorizable action; run the review without it.';
+  }
+  if (!tokens.includes('ultra')) return null;
   return 'ultra opens an interactive launch dialog that nobody in chat can answer and can start a cloud-billed run; choose low, medium, or high.';
 }
 
