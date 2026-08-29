@@ -232,6 +232,16 @@ export function composeLapsedLoginMessage(
   return WATCHDOG[locale].lapsedLogin(nowHHMM(timezone), fix);
 }
 
+/** The auth-failure notice for a hermit whose credential comes from its environment.
+ *  Deliberately says nothing about signing in: an API key, bearer token, or cloud
+ *  provider is not a login the hermit can re-mint, and the relay has nothing to offer. */
+export function composeEnvAuthFailureMessage(
+  timezone: string,
+  locale: Locale = OPERATOR_LOCALE,
+): string {
+  return WATCHDOG[locale].envAuthFailure(nowHHMM(timezone));
+}
+
 export type CompactFlavor = 'boundary' | 'mid-arc';
 
 /**
@@ -1594,13 +1604,56 @@ async function main(): Promise<void> {
     }
     process.exit(0);
   }
+
+  // 3a-ter. The session's own environment owns the credential (API key, bearer token,
+  // Bedrock/Vertex/Foundry), so its 401 is not a lapsed login and 3a/3a-bis correctly sat
+  // out. It still has to stop the tick. Falling through would reach the pane-frozen
+  // restart, and doRestart spawns hermit-start with this process's environment — on a host
+  // unit carrying only PATH, that forwards no ANTHROPIC_API_KEY and nothing re-derives one
+  // (unlike the setup token, which hydrateSetupTokenEnv reads back off disk). The restarted
+  // session would come up with no credential at all, show the same failing pane, and be
+  // restarted again on the next escalation: a loop that strips the key and never recovers.
+  // Suppressing here is the fix, because the credential lives somewhere the hermit cannot
+  // reach — runtime.json stamps a path and a boolean, never a secret.
+  const envAuthFailing =
+    paneContent !== null && hasLapsedLogin(paneContent) && envAuthOwnsCredential(sessionEnvAuth);
+  if (envAuthFailing) {
+    const ws = readWatchdogState();
+    const notifiedAt =
+      typeof ws.env_auth_failure_notified_at === 'string' ? ws.env_auth_failure_notified_at : null;
+    const age = notifiedAt ? ageSecs(notifiedAt) : null;
+    if (age === null || age > 24 * 3600) {
+      pushOperatorMessage(composeEnvAuthFailureMessage(timezone));
+      appendEvent('env-auth-failure-detected', notifiedAt ? 'credential still rejected after 24h' : 'auth failure on pane, credential owned by the session env');
+      ws.env_auth_failure_notified_at = worldStamp(REAL_WORLD);
+      writeWatchdogState(ws);
+    }
+    // Unconditional: the exit IS the suppression, whether or not a notice was due.
+    process.exit(0);
+  }
+
+  // Both recoveries share one state read. This point is reached on every ordinary healthy
+  // tick, and `!hasLapsedLogin(paneContent)` already forces `authLapsed` false — the one
+  // case where it would not is envAuthFailing, which exited above — so reading the file
+  // once per check billed the common path twice for nothing.
+  //
+  // A cleared pane is the only recovery signal available for the env-auth stamp: there is
+  // no storedLoginUsable() equivalent for a key held in the operator's shell, which the
+  // watchdog cannot see even when it is working.
   if (!authLapsed) {
     const ws = readWatchdogState();
+    let recovered = false;
+    if (paneContent !== null && !hasLapsedLogin(paneContent) && ws.env_auth_failure_notified_at) {
+      delete ws.env_auth_failure_notified_at;
+      appendEvent('env-auth-failure-recovered', 'pane no longer shows an auth failure');
+      recovered = true;
+    }
     if (ws.lapsed_login_notified_at && storedLoginUsable(defaultConfigDir())) {
       delete ws.lapsed_login_notified_at;
-      writeWatchdogState(ws);
       appendEvent('lapsed-login-recovered', 'usable stored login present again');
+      recovered = true;
     }
+    if (recovered) writeWatchdogState(ws);
   }
 
   // 3b. Stall-question detection (PROP-024) — catches the un-redirectable remainder

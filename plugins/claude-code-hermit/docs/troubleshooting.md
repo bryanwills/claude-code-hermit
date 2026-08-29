@@ -171,7 +171,9 @@ Common causes:
 
 If the hermit stops responding and the logs show `401` or `Invalid authentication credentials`, its login has lapsed. You should hear about it: the watchdog reads the error off the session's own screen and messages you on your channel.
 
-**One exception, by design.** If the hermit authenticates from its environment rather than from a stored login — an `ANTHROPIC_API_KEY`, an `ANTHROPIC_AUTH_TOKEN`, or Bedrock/Vertex/Foundry — a 401 is not a lapsed login and you get no login notice for it. Check the key itself (revoked, rotated, out of credit, wrong region) rather than waiting for a message that is not coming. The watchdog's other supervision still runs normally.
+**If the hermit authenticates from its environment** rather than from a stored login — an `ANTHROPIC_API_KEY`, an `ANTHROPIC_AUTH_TOKEN`, or Bedrock/Vertex/Foundry — a 401 is not a lapsed login, so you get a different message: one that names the credential instead of telling you to sign in. Check the key itself: revoked, rotated, out of credit, or wrong region.
+
+In that case the hermit also stops supervising the session rather than restarting it, and that is deliberate. The credential lives in the environment that started it, which the watchdog cannot see and cannot pass on; a restart would bring the session back with no credential at all and then restart it again on the next escalation. It waits for you instead, repeating the notice once a day until the key works.
 
 **On a hermit still using plain `/login` credentials**, that message is all the automation there is — renewing them needs a browser on the machine the hermit runs on. Sign in there (`hermit-docker login` under Docker; otherwise run `claude` in the project folder and type `/login`), then restart it. The session stays up in the meantime, so nothing is lost, and the watchdog will not restart or nudge a session it knows can't authenticate. It repeats the notice once a day until a working login is back.
 

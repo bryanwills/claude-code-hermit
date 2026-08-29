@@ -1007,19 +1007,101 @@ test('stamped config dir overrides the watchdog process env', withHermit(async (
 }));
 
 // An API-key hermit's 401 is not a login lapse. The key lives in the operator's
-// shell, so the watchdog never sees it — only the boolean the session stamped.
-test('env_auth stamp → 401 pane is not read as a lapsed login, tiers keep running', withHermit(async (h) => {
+// shell, so the watchdog never sees it — only the boolean the session stamped. It gets
+// its own tier rather than falling through: see the restart-loop test below.
+test('env_auth stamp → 401 pane is not read as a lapsed login', withHermit(async (h) => {
   writeConfig(h);
   writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
   writeFakePgrep(h, 1);
-  touchAgo(state(h, '.heartbeat'), 6 * 3600); // stale: the nudge tier must survive
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
   const configDir = writeStoredLogin(h, '');
   patchRuntime(h, { config_dir: configDir, env_auth: true });
   const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
   expect(r.exitCode).toBe(0);
   const events = fs.readFileSync(eventsFile(h), 'utf-8');
   expect(events).not.toContain('lapsed-login-detected');
-  expect(events).toContain('nudge'); // no process.exit(0) swallowing the outage
+  expect(events).toContain('env-auth-failure-detected');
+}));
+
+// The regression this tier exists for — the restart-loop rationale lives on the
+// envAuthFailing block in hermit-watchdog.ts.
+test('env_auth 401 → one notice, and no nudge or restart to strip the key', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1); // monitor dead
+  touchAgo(state(h, '.heartbeat'), 6 * 3600); // stale heartbeat: the nudge tier is otherwise due
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('env-auth-failure-detected');
+    expect(events).not.toContain('nudge');
+    expect(events).not.toContain('restart');
+    expect(stub.requests.length).toBe(1);
+    expect(stub.requests[0].body.text).toContain('API credential');
+    expect(stub.requests[0].body.text).not.toContain('sign in again'); // not the /login copy
+    expect(readJson(state(h, 'watchdog-state.json')).env_auth_failure_notified_at).toBeTruthy();
+  } finally { stub.stop(); }
+}));
+
+test('env_auth 401 already notified within 24h → still suppressed, but silent', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, DEAD_TOKEN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  fs.writeFileSync(state(h, 'watchdog-state.json'),
+    JSON.stringify({ env_auth_failure_notified_at: isoAgo(2) }, null, 2) + '\n');
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests.length).toBe(0);
+    // A silent tick writes no events at all — the file may legitimately not exist.
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('nudge'); // the exit is the suppression, not the notice
+    expect(events).not.toContain('restart');
+    const calls = fs.existsSync(path.join(h.dir, 'tmux-calls.log'))
+      ? fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8')
+      : '';
+    expect(calls).not.toContain('send-keys');
+    expect(calls).not.toContain('kill-session');
+  } finally { stub.stop(); }
+}));
+
+test('env_auth credential works again → stamp cleared', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, 'ordinary pane output\nno auth error here');
+  writeFakePgrep(h, 0);
+  const configDir = writeStoredLogin(h, '');
+  patchRuntime(h, { config_dir: configDir, env_auth: true });
+  fs.writeFileSync(state(h, 'watchdog-state.json'),
+    JSON.stringify({ env_auth_failure_notified_at: isoAgo(2) }, null, 2) + '\n');
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  expect(readJson(state(h, 'watchdog-state.json')).env_auth_failure_notified_at).toBeUndefined();
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('env-auth-failure-recovered');
+}));
+
+// The two tiers must stay mutually exclusive: a /login hermit is unaffected by the above.
+test('no env_auth stamp → the /login tier still owns the 401, not the env-auth tier', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h);
+  patchRuntime(h, { config_dir: configDir, env_auth: false });
+  const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('lapsed-login-detected');
+  expect(events).not.toContain('env-auth-failure-detected');
 }));
 
 // Same fixture without the stamp: the wrong story the issue describes. Pins the
