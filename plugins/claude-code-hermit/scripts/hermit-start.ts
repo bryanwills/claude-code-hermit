@@ -944,6 +944,32 @@ function writeSettingsEnv(
   if (mirroredLanguage) settings.language = mirroredLanguage;
   else delete settings.language;
 
+  // Cross-session inbox, for the watchdog's socket wake.
+  //
+  // Claude Code decides per message when no crossSessionInbound value applies,
+  // and the rule is about permission classes: a session that PROMPTS for
+  // permissions (auto, acceptEdits, dontAsk — the hermit default) is delivered
+  // anything that doesn't claim to bypass, while a session that BYPASSES holds
+  // every message that doesn't claim to bypass too, behind an approval dialog
+  // that expires after dialogExpiry. The watchdog's post claims no class at all,
+  // so on a bypassPermissions hermit the wake would sit in a dialog nobody is
+  // watching and be dropped five minutes later — and the socket write returns
+  // success either way, so nothing downstream can see it happen. `accept` is what
+  // makes an unattended bypass hermit reachable.
+  //
+  // Only for that mode: everywhere else the default already delivers, and writing
+  // the key would widen inbound handling for no gain.
+  if (config.permission_mode === 'bypassPermissions') settings.crossSessionInbound = 'accept';
+  else delete settings.crossSessionInbound;
+
+  // Messages to a session on ANOTHER machine travel through Anthropic's servers;
+  // same-machine peers never do. `remote` is this hermit's own switch for leaving
+  // the box, so it decides here too — off means every cross-machine send needs the
+  // operator's approval first, even under bypassPermissions. A `true` from any
+  // settings scope applies, so this can tighten but never loosen.
+  if (!pyTruthy('remote' in config ? config.remote : false)) settings.isolatePeerMachines = true;
+  else delete settings.isolatePeerMachines;
+
   // Malformed file — warned above, left byte-for-byte intact. The profile is
   // still resolved and exported, so a bad settings file cannot silently drop the
   // session to a weaker set of deny patterns.

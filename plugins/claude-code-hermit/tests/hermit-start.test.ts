@@ -1052,6 +1052,43 @@ describe('writeSettingsEnv', () => {
     expect(readSettings().env ?? {}).not.toContainKey('AGENT_HOOK_PROFILE');
   });
 
+  // The watchdog wakes the resident by posting on its inbox socket. A
+  // bypassPermissions session holds an unauthenticated post behind an approval
+  // dialog and drops it when the dialog expires — invisibly, since the write
+  // still succeeds — so that mode needs the key to be reachable at all.
+  test('bypassPermissions → crossSessionInbound accept', () => {
+    writeConfig({ permission_mode: 'bypassPermissions' });
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings().crossSessionInbound).toBe('accept');
+  });
+
+  test('prompting modes deliver by default → key not written', () => {
+    writeConfig({ permission_mode: 'auto' });
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings()).not.toContainKey('crossSessionInbound');
+  });
+
+  test('permission_mode change back → the stale accept is removed', () => {
+    writeSettings({ crossSessionInbound: 'accept' });
+    writeConfig({ permission_mode: 'auto' });
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings()).not.toContainKey('crossSessionInbound');
+  });
+
+  // Cross-MACHINE peer messages leave the box through Anthropic's servers;
+  // config.remote is the hermit's own switch for that, so it gates them too.
+  test('remote off → isolatePeerMachines true', () => {
+    writeConfig({ remote: false });
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings().isolatePeerMachines).toBe(true);
+  });
+
+  test('remote on → isolatePeerMachines not written', () => {
+    writeConfig({ remote: true });
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings()).not.toContainKey('isolatePeerMachines');
+  });
+
   test('pre-existing keys in settings.local.json survive write', () => {
     writeSettings({ env: { CUSTOM_VAR: 'keep-me' }, other_key: 'also-keep' });
     writeConfig({});

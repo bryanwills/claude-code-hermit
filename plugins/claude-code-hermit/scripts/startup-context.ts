@@ -300,17 +300,39 @@ function stampSessionEnv(stateDir: string): void {
     if (runtime === null) return; // no lifecycle record yet — hermit-start owns creating it
     const configDir = defaultConfigDir();
     const envAuth = envAuthPresent();
-    // Both describe the launch, so every later SessionStart (resume, clear, compact)
-    // recomputes the same pair. Skip the write when nothing moved: writeRuntimeJson
-    // stamps updated_at, and refreshing that on the strength of a compaction alone
-    // would hide a wedged session from doctor's stale-session check. stampContextReset
-    // in lib/context-reset.ts avoids the same hazard by writing around the helper.
-    if (runtime.config_dir === configDir && runtime.env_auth === envAuth) return;
+    // The session's own inbox socket, exported by Claude Code before any hook
+    // runs. Stamping it here is what lets the watchdog wake this session
+    // over the socket instead of typing into its pane. The registry at
+    // <config dir>/sessions/<pid>.json carries the same path, but finding the
+    // right entry there means disambiguating the resident from any guest session
+    // in the same folder; the resident writing its own path is exact by
+    // construction. `session_pid` is that registry entry's filename — the hook is
+    // spawned directly by Claude Code (argv form in hooks.json, no shell between),
+    // so ppid is the claude process.
+    const inboxSocket = process.env.CLAUDE_CODE_MESSAGING_SOCKET || null;
+    const sessionPid = process.ppid;
+    // All four describe the launch, so every later SessionStart (resume, clear,
+    // compact) recomputes the same values. Skip the write when nothing moved:
+    // writeRuntimeJson stamps updated_at, and refreshing that on the strength of a
+    // compaction alone would hide a wedged session from doctor's stale-session
+    // check. stampContextReset in lib/context-reset.ts avoids the same hazard by
+    // writing around the helper.
+    if (
+      runtime.config_dir === configDir &&
+      runtime.env_auth === envAuth &&
+      runtime.inbox_socket === inboxSocket &&
+      runtime.session_pid === sessionPid
+    ) {
+      return;
+    }
     runtime.config_dir = configDir;
     runtime.env_auth = envAuth;
+    runtime.inbox_socket = inboxSocket;
+    runtime.session_pid = sessionPid;
     writeRuntimeJson(runtime, stateDir);
   } catch {
-    // fail-open — the watchdog falls back to its own env when the fields are absent
+    // fail-open — the watchdog falls back to its own env, and to typing, when the
+    // fields are absent
   }
 }
 

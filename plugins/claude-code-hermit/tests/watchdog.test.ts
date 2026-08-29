@@ -9,6 +9,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -1258,6 +1259,121 @@ test('wedge_floor "0s": every 30m + 90m-stale heartbeat → nudge (floor disable
 
   expect(r.exitCode).toBe(0);
   expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge');
+}));
+
+// -------------------------------------------------------
+// 5a. Wedge nudge transport: inbox socket first, typing as the fallback
+//
+// The socket cannot report whether the model actually read the message
+// (`crossSessionInbound: refuse` drops it silently, a bypassPermissions receiver
+// holds it behind an expiring dialog, a model may decline), so the fallback is
+// keyed on the effect: a second due nudge with the heartbeat still stale means
+// the post did not work, and that one types. Fixtures below assert the wire, the
+// alternation, and that the typed path is untouched when there is no socket.
+// -------------------------------------------------------
+
+/** A Unix socket server standing in for the resident's inbox, recording frames.
+ *  Created and closed inside each test — bunfig sets concurrentTestGlob, so a
+ *  shared fixture reaped by afterEach is torn down under sibling tests. */
+async function fakeInbox(h: Hermit): Promise<{ path: string; lines: string[]; close: () => void }> {
+  const socketPath = path.join(h.dir, 'inbox.sock');
+  const lines: string[] = [];
+  const server = net.createServer((conn) => {
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk.toString();
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        lines.push(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  return { path: socketPath, lines, close: () => server.close() };
+}
+
+test('inbox socket present → wedge nudge posts the bare token, types nothing', withHermit(async (h) => {
+  const inbox = await fakeInbox(h);
+  try {
+    writeConfig(h, '30m');
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    patchRuntime(h, { inbox_socket: inbox.path });
+    touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+    const r = await watchdog(h, 'run');
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge-socket');
+    expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('socket');
+    // The pane is never touched for this wake.
+    expect(tmuxCalls(h)).not.toContain('heartbeat run');
+
+    const deadline = Date.now() + 2000;
+    while (inbox.lines.length < 1 && Date.now() < deadline) await Bun.sleep(10);
+    // Exactly the token heartbeat-monitor.sh emits — no framing, no wording.
+    expect(JSON.parse(inbox.lines[0])).toEqual({
+      type: 'user',
+      message: { role: 'user', content: 'HEARTBEAT_EVALUATE' },
+    });
+  } finally {
+    inbox.close();
+  }
+}));
+
+test('previous nudge went over the socket and the heartbeat is still stale → this one types', withHermit(async (h) => {
+  const inbox = await fakeInbox(h);
+  try {
+    writeConfig(h, '30m');
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    patchRuntime(h, { inbox_socket: inbox.path });
+    touchAgo(state(h, '.heartbeat'), 5 * 3600);
+    // A socket nudge from the previous episode window, old enough to be due again.
+    fs.writeFileSync(
+      state(h, 'watchdog-state.json'),
+      JSON.stringify({ last_nudge_transport: 'socket', last_nudge_at: isoAgoSeconds(24) }) + '\n',
+    );
+
+    const r = await watchdog(h, 'run');
+
+    expect(r.exitCode).toBe(0);
+    expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat run');
+    expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('typed');
+    expect(inbox.lines).toHaveLength(0); // no second post
+  } finally {
+    inbox.close();
+  }
+}));
+
+test('no inbox socket in runtime.json → wedge nudge types, exactly as before', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat run');
+  expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('typed');
+}));
+
+// A stamped path whose session died takes the socket file with it. Reading the
+// stale value as usable would post into nothing and skip the typed recovery.
+test('stamped socket path no longer exists → falls through to typing', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  patchRuntime(h, { inbox_socket: path.join(h.dir, 'gone.sock') });
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat run');
+  expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('typed');
 }));
 
 // -------------------------------------------------------
