@@ -28,7 +28,13 @@ import { newConfigKeys, isPlainObject } from './lib/evolve-config';
 type Json = any;
 
 type FileClass = 'missing' | 'unmodified' | 'customized-kept' | 'conflict';
-interface ClassifiedFile { name: string; class: FileClass; boot_critical?: boolean; bootstrap?: boolean; }
+interface ClassifiedFile {
+  name: string; class: FileClass; boot_critical?: boolean; bootstrap?: boolean;
+  // Absolute path to the recorded baseline CONTENT (state/pristine/<key>), when
+  // manifest-seed kept one. Present only on the docker entrypoint: Step 5c diffs
+  // it against the operator's copy to migrate their hunks into the sidecar.
+  base_path?: string;
+}
 
 interface SiblingPlanEntry {
   name: string;
@@ -220,6 +226,7 @@ function classifyFiles(
 function classifyDockerEntrypoint(
   stDir: string,
   projectRoot: string,
+  hermitDir: string,
   manifestFiles: Record<string, { sha256: string }> | null,
 ): ClassifiedFile | null {
   let srcBuf: Buffer;
@@ -247,6 +254,24 @@ function classifyDockerEntrypoint(
   const hasBaseline = e !== null && manifestFiles != null
     && manifestFiles['docker/docker-entrypoint.hermit.sh'] != null;
   if (e !== null && !hasBaseline) e.bootstrap = true;
+
+  // Expose the baseline content when manifest-seed kept a copy AND its bytes
+  // still hash to the recorded baseline. Without it the runner sees ours and
+  // theirs but no base, so it cannot tell an operator line from an old-upstream
+  // one and Step 5c stays on the replace + .bak path. An *unverified* copy is
+  // worse than none: Step 5c diffs against it and never re-checks the hash, so a
+  // stale one (manifest re-seeded, the copy left at the previous version) reads
+  // every intervening upstream line as an operator hunk and migrates upstream
+  // code into the sidecar. A mismatch — or no manifest entry at all, the
+  // `bootstrap` case — falls back to replace + .bak.
+  if (e !== null && hasBaseline) {
+    const basePath = path.join(
+      hermitDir, 'state', 'pristine', 'docker', 'docker-entrypoint.hermit.sh');
+    try {
+      const recorded = manifestFiles!['docker/docker-entrypoint.hermit.sh'].sha256;
+      if (sha256(fs.readFileSync(basePath)) === recorded) e.base_path = basePath;
+    } catch { /* absent or unreadable -> no base, same as never recorded */ }
+  }
   return e;
 }
 
@@ -760,7 +785,7 @@ function buildPlan({ hermitDir, pluginRoot, hatchTarget, pluginListJsonPath }: {
   // so only upstream-template drift is detectable). Both fail open to safe defaults.
   const projectRoot = path.resolve(hermitDir, '..');
   try {
-    plan.docker_entrypoint = classifyDockerEntrypoint(stDir, projectRoot, manifestFiles);
+    plan.docker_entrypoint = classifyDockerEntrypoint(stDir, projectRoot, hermitDir, manifestFiles);
   } catch (e: any) {
     plan.docker_entrypoint = null;
     errors.push({ code: 'docker_entrypoint_classify_failed', message: e.message });

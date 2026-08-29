@@ -12,6 +12,9 @@
 // Manifest shape (consumed by evolve-plan.ts):
 //   { "version": 1, "files": { "<key>": { "sha256": "<64hex>", "plugin_version": "<v>" } } }
 //
+// Each seeded key also gets its bytes copied to <state-dir>/state/pristine/<key>,
+// the base hermit-evolve diffs an operator-customized file against.
+//
 // Caller owns which path each `file` points at (upstream template vs on-disk
 // rendered output) — the script only hashes what it is given. For `keyPrefix`
 // entries it enumerates the SOURCE dir handed in, never the project destination
@@ -84,6 +87,7 @@ function apply(raw: string): void {
   }
 
   const seeded: Record<string, { sha256: string; plugin_version: string }> = {};
+  const pristine: { key: string; buf: Buffer }[] = [];
   for (const { key, file } of toHash) {
     let buf: Buffer;
     try {
@@ -92,6 +96,7 @@ function apply(raw: string): void {
       die(`cannot read file to hash for key '${key}': ${err.message}`);
     }
     seeded[key] = { sha256: sha256(buf), plugin_version: pluginVersion };
+    pristine.push({ key, buf });
   }
 
   // A present-but-invalid existing manifest is fatal, matching how evolve-plan.ts
@@ -128,6 +133,40 @@ function apply(raw: string): void {
   const tmp = manifestPath + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(out, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, manifestPath);
+
+  // Keep the baseline CONTENT next to its hash. The hash tells hermit-evolve
+  // *that* a file diverged; only the bytes tell it *how*, which is what the
+  // Step 5c sidecar migration diffs against. Written after the manifest rename
+  // so a crash mid-write can only leave a missing pristine copy (evolve falls
+  // back to today's replace + .bak), never one that disagrees with the hash —
+  // tmp + rename per file, since a truncated baseline would silently feed a
+  // wrong diff to the migration, which never re-checks the hash.
+  const pristineRoot = path.join(stateDir, 'state', 'pristine');
+  // A key becomes a real filesystem path here, not just a JSON object key, so a
+  // `..` segment would drop these bytes anywhere the process can write. Checked
+  // for every key before the first write, so a bad payload lands nothing.
+  for (const { key } of pristine) {
+    const dest = path.join(pristineRoot, key);
+    if (!dest.startsWith(pristineRoot + path.sep)) {
+      die(`key '${key}' escapes state/pristine — refusing to write a baseline copy`);
+    }
+  }
+  for (const { key, buf } of pristine) {
+    const dest = path.join(pristineRoot, key);
+    const destTmp = dest + '.tmp';
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(destTmp, buf);
+      fs.renameSync(destTmp, dest);
+    } catch (err: any) {
+      // The manifest already carries the NEW hash, so a surviving OLD copy is a
+      // stale base the migration would diff against without noticing. Drop it —
+      // missing is the safe state (evolve falls back to replace + .bak).
+      try { fs.rmSync(dest, { force: true }); } catch { /* best effort */ }
+      try { fs.rmSync(destTmp, { force: true }); } catch { /* best effort */ }
+      die(`cannot write pristine baseline for key '${key}': ${err.message}`);
+    }
+  }
 
   console.log(`seeded ${Object.keys(seeded).length} entries, preserved ${preserved} foreign keys`);
 }

@@ -308,7 +308,10 @@ describe('Entrypoint: marketplace registration uses list --json, not dir existen
 // the real block and runs it.
 // -------------------------------------------------------
 describe('Entrypoint: §4b boot conflict guard', () => {
-  const block = entrypoint.slice(entrypoint.indexOf('# --- 4b.'), entrypoint.indexOf('# --- 5.'));
+  // Ends at 4c (the pre-launch sidecar hook), not 5: the hook reads PROJECT_DIR,
+  // which this harness does not set, so including it would fail every case here
+  // under `set -u` for a reason that has nothing to do with the guard.
+  const block = entrypoint.slice(entrypoint.indexOf('# --- 4b.'), entrypoint.indexOf('# --- 4c.'));
 
   // `sleep` is overridden so the inert hold receives the same signal sent by
   // docker stop and exercises its trap without waiting for the real interval.
@@ -398,5 +401,176 @@ describe('Entrypoint: §4b boot conflict guard', () => {
     );
     expect(r.status).toBe(0);
     expect(r.marker).toBe(false);
+  });
+});
+
+
+// -------------------------------------------------------
+// Entrypoint: operator sidecar hook points
+// -------------------------------------------------------
+describe('Entrypoint: operator sidecar', () => {
+  const lines = entrypoint.split('\n');
+  const sourceLines = lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => l.includes('. "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh"'));
+
+  test('sourced at exactly two points', () => {
+    expect(sourceLines.length).toBe(2);
+  });
+
+  test('each source is guarded by a file test', () => {
+    for (const { l } of sourceLines) {
+      expect(l).toContain('[ -f "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh" ]');
+    }
+  });
+
+  // $0 would resolve inside the image (Dockerfile COPYs the entrypoint to
+  // /home/claude/), never the bind-mounted project dir where the sidecar lives.
+  test('anchored on PROJECT_DIR, never $0', () => {
+    expect(entrypoint).not.toContain('dirname "$0"');
+  });
+
+  test('pre-boot runs after channel dirs, before the plugin install', () => {
+    const phase = lines.findIndex((l) => l.includes('export HERMIT_ENTRY_PHASE=pre-boot'));
+    const install = lines.findIndex((l) => l.startsWith('# --- 3. Install plugins'));
+    const channelDirs = lines.findIndex((l) => l.startsWith('# --- 2. Ensure channel state dirs'));
+    expect(phase).toBeGreaterThan(channelDirs);
+    expect(phase).toBeLessThan(install);
+    expect(sourceLines[0].i).toBe(phase + 1);
+  });
+
+  test('pre-launch runs immediately before hermit-start', () => {
+    const phase = lines.findIndex((l) => l.includes('export HERMIT_ENTRY_PHASE=pre-launch'));
+    const launch = lines.findIndex((l) => l.includes('"${AGENT_DIR}/bin/hermit-start" "$@"'));
+    expect(phase).toBeGreaterThan(-1);
+    expect(phase).toBeLessThan(launch);
+    expect(sourceLines[1].i).toBe(phase + 1);
+  });
+
+  const { freshDir, cleanup } = freshDirFactory('hermit-sidecar-');
+  afterAll(cleanup);
+
+  // Run the two extracted hook-point pairs under the entrypoint's own shell
+  // options: a sidecar that aborts the boot is the documented contract, so the
+  // absent-file case must still exit 0 under `set -euo pipefail`.
+  function runHooks(sidecar: string | null): { status: number | null; phases: string } {
+    const projectDir = freshDir();
+    const log = path.join(projectDir, 'phases.txt');
+    if (sidecar !== null) {
+      fs.writeFileSync(path.join(projectDir, 'docker-entrypoint.hermit-local.sh'), sidecar);
+    }
+    const hooks = sourceLines
+      .map(({ i }) => `${lines[i - 1]}\n${lines[i]}`)
+      .join('\n');
+    const script = `set -euo pipefail\nPROJECT_DIR=${JSON.stringify(projectDir)}\nSIDECAR_LOG=${JSON.stringify(log)}\n${hooks}`;
+    const out = spawnSync('bash', ['-c', script], { encoding: 'utf8', timeout: 10_000 });
+    return {
+      status: out.status,
+      phases: fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '',
+    };
+  }
+
+  test('a present sidecar runs once per phase, in order', () => {
+    const r = runHooks('echo "$HERMIT_ENTRY_PHASE" >> "$SIDECAR_LOG"\n');
+    expect(r.status).toBe(0);
+    expect(r.phases).toBe('pre-boot\npre-launch\n');
+  });
+
+  test('an absent sidecar is not an error', () => {
+    const r = runHooks(null);
+    expect(r.status).toBe(0);
+    expect(r.phases).toBe('');
+  });
+});
+
+// -------------------------------------------------------
+// Entrypoint: project .mcp.json auto-approval (phase 1)
+// -------------------------------------------------------
+describe('Entrypoint: .mcp.json auto-approval', () => {
+  const { freshDir, cleanup } = freshDirFactory('hermit-mcpjson-');
+  afterAll(cleanup);
+
+  // The phase-1 block runs as `bun - <claude.json> <version> <project>`; extract
+  // it from the heredoc and drive it directly rather than booting a container.
+  const initBlock = entrypoint.split("<<'JSEOF'")[1].split('\nJSEOF')[0];
+
+  function runInit(
+    mcpJson: Record<string, unknown> | string | null,
+    seedProject?: Record<string, unknown>,
+  ): any {
+    const projectDir = freshDir();
+    const claudeJson = path.join(projectDir, '.claude.json');
+    fs.writeFileSync(claudeJson, JSON.stringify(
+      seedProject ? { projects: { [projectDir]: seedProject } } : {}));
+    fs.mkdirSync(path.join(projectDir, '.claude-code-hermit'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, '.claude-code-hermit', 'config.json'), JSON.stringify({ channels: {} }));
+    if (mcpJson !== null) {
+      fs.writeFileSync(
+        path.join(projectDir, '.mcp.json'),
+        typeof mcpJson === 'string' ? mcpJson : JSON.stringify(mcpJson));
+    }
+    const script = path.join(projectDir, 'init.js');
+    fs.writeFileSync(script, initBlock);
+    const out = spawnSync('bun', [script, claudeJson, '9.9.9', projectDir], {
+      encoding: 'utf8', timeout: 15_000,
+    });
+    return {
+      status: out.status,
+      stderr: out.stderr,
+      project: JSON.parse(fs.readFileSync(claudeJson, 'utf8')).projects?.[projectDir],
+    };
+  }
+
+  test('declared servers are enabled and the workspace is trusted', () => {
+    const r = runInit({ mcpServers: { dropartifact: { command: 'x' }, other: { command: 'y' } } });
+    expect(r.status).toBe(0);
+    expect(r.project.enabledMcpjsonServers).toEqual(['dropartifact', 'other']);
+    expect(r.project.hasTrustDialogAccepted).toBe(true);
+  });
+
+  test('no .mcp.json leaves the project entry untouched', () => {
+    const r = runInit(null);
+    expect(r.status).toBe(0);
+    expect(r.project).toBeUndefined();
+  });
+
+  // The config volume outlives the container, so a restart must not undo a
+  // disable the operator made via /mcp.
+  test('a server the operator disabled stays disabled across a restart', () => {
+    const r = runInit(
+      { mcpServers: { noisy: { command: 'x' }, wanted: { command: 'y' } } },
+      { disabledMcpjsonServers: ['noisy'] });
+    expect(r.status).toBe(0);
+    expect(r.project.disabledMcpjsonServers).toEqual(['noisy']);
+    expect(r.project.enabledMcpjsonServers).toEqual(['wanted']);
+  });
+
+  test('a channel plugin id is re-approved even when disabled', () => {
+    const projectDir = freshDir();
+    const claudeJson = path.join(projectDir, '.claude.json');
+    fs.writeFileSync(claudeJson, JSON.stringify({
+      projects: { [projectDir]: { disabledMcpjsonServers: ['plugin:discord:discord'] } },
+    }));
+    fs.mkdirSync(path.join(projectDir, '.claude-code-hermit'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, '.claude-code-hermit', 'config.json'),
+      JSON.stringify({ channels: { discord: { enabled: true } } }));
+    const script = path.join(projectDir, 'init.js');
+    fs.writeFileSync(script, initBlock);
+    const out = spawnSync('bun', [script, claudeJson, '9.9.9', projectDir], {
+      encoding: 'utf8', timeout: 15_000,
+    });
+    expect(out.status).toBe(0);
+    const proj = JSON.parse(fs.readFileSync(claudeJson, 'utf8')).projects[projectDir];
+    expect(proj.disabledMcpjsonServers).toEqual([]);
+    expect(proj.enabledMcpjsonServers).toEqual(['plugin:discord:discord']);
+  });
+
+  // A hand-edited .mcp.json must not wedge the boot before the credential wait.
+  test('an unparsable .mcp.json warns instead of aborting', () => {
+    const r = runInit('{ not json');
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('failed to parse .mcp.json');
   });
 });

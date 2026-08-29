@@ -570,6 +570,29 @@ test('docker entrypoint conflict: operator edited AND upstream moved', withProj(
   expect(d.docker_entrypoint.bootstrap).toBeUndefined(); // baseline present -> not a bootstrap
 }));
 
+test('docker entrypoint: base_path exposed when a pristine copy exists', withProj(async (proj) => {
+  writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
+  deployDocker(proj, { entrypoint: 'ENTRYPOINT OPERATOR EDIT\n' });
+  dockerManifest(proj, { 'docker/docker-entrypoint.hermit.sh': sha256(Buffer.from('ENTRYPOINT BASELINE\n')) });
+  const pristine = path.join(proj, '.claude-code-hermit', 'state', 'pristine', 'docker');
+  fs.mkdirSync(pristine, { recursive: true });
+  fs.writeFileSync(path.join(pristine, 'docker-entrypoint.hermit.sh'), 'ENTRYPOINT BASELINE\n');
+
+  const d = await runPlan(proj, 'local');
+  expect(d.docker_entrypoint.class).toBe('conflict');
+  expect(d.docker_entrypoint.base_path)
+    .toBe(path.join(pristine, 'docker-entrypoint.hermit.sh'));
+}));
+
+test('docker entrypoint: base_path absent without a pristine copy', withProj(async (proj) => {
+  writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
+  deployDocker(proj, { entrypoint: 'ENTRYPOINT OPERATOR EDIT\n' });
+  dockerManifest(proj, { 'docker/docker-entrypoint.hermit.sh': sha256(Buffer.from('ENTRYPOINT BASELINE\n')) });
+  const d = await runPlan(proj, 'local');
+  expect(d.docker_entrypoint.class).toBe('conflict');
+  expect(d.docker_entrypoint.base_path).toBeUndefined();
+}));
+
 // -------------------------------------------------------
 // 12. Sibling hermit plans — registry-driven from _hermit_versions
 // -------------------------------------------------------
