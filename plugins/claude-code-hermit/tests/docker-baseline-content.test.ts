@@ -494,10 +494,14 @@ describe('Entrypoint: .mcp.json auto-approval', () => {
   // it from the heredoc and drive it directly rather than booting a container.
   const initBlock = entrypoint.split("<<'JSEOF'")[1].split('\nJSEOF')[0];
 
-  function runInit(mcpJson: Record<string, unknown> | string | null): any {
+  function runInit(
+    mcpJson: Record<string, unknown> | string | null,
+    seedProject?: Record<string, unknown>,
+  ): any {
     const projectDir = freshDir();
     const claudeJson = path.join(projectDir, '.claude.json');
-    fs.writeFileSync(claudeJson, JSON.stringify({}));
+    fs.writeFileSync(claudeJson, JSON.stringify(
+      seedProject ? { projects: { [projectDir]: seedProject } } : {}));
     fs.mkdirSync(path.join(projectDir, '.claude-code-hermit'), { recursive: true });
     fs.writeFileSync(
       path.join(projectDir, '.claude-code-hermit', 'config.json'), JSON.stringify({ channels: {} }));
@@ -529,6 +533,38 @@ describe('Entrypoint: .mcp.json auto-approval', () => {
     const r = runInit(null);
     expect(r.status).toBe(0);
     expect(r.project).toBeUndefined();
+  });
+
+  // The config volume outlives the container, so a restart must not undo a
+  // disable the operator made via /mcp.
+  test('a server the operator disabled stays disabled across a restart', () => {
+    const r = runInit(
+      { mcpServers: { noisy: { command: 'x' }, wanted: { command: 'y' } } },
+      { disabledMcpjsonServers: ['noisy'] });
+    expect(r.status).toBe(0);
+    expect(r.project.disabledMcpjsonServers).toEqual(['noisy']);
+    expect(r.project.enabledMcpjsonServers).toEqual(['wanted']);
+  });
+
+  test('a channel plugin id is re-approved even when disabled', () => {
+    const projectDir = freshDir();
+    const claudeJson = path.join(projectDir, '.claude.json');
+    fs.writeFileSync(claudeJson, JSON.stringify({
+      projects: { [projectDir]: { disabledMcpjsonServers: ['plugin:discord:discord'] } },
+    }));
+    fs.mkdirSync(path.join(projectDir, '.claude-code-hermit'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, '.claude-code-hermit', 'config.json'),
+      JSON.stringify({ channels: { discord: { enabled: true } } }));
+    const script = path.join(projectDir, 'init.js');
+    fs.writeFileSync(script, initBlock);
+    const out = spawnSync('bun', [script, claudeJson, '9.9.9', projectDir], {
+      encoding: 'utf8', timeout: 15_000,
+    });
+    expect(out.status).toBe(0);
+    const proj = JSON.parse(fs.readFileSync(claudeJson, 'utf8')).projects[projectDir];
+    expect(proj.disabledMcpjsonServers).toEqual([]);
+    expect(proj.enabledMcpjsonServers).toEqual(['plugin:discord:discord']);
   });
 
   // A hand-edited .mcp.json must not wedge the boot before the credential wait.

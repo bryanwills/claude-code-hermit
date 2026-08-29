@@ -227,10 +227,15 @@ if (channels.length > 0 || mcpJsonServers.length > 0) {
   const disabledJson = proj.disabledMcpjsonServers ?? [];
   const disabledMcp = proj.disabledMcpServers ?? [];
   const approveIds = [
-    ...channels.map((ch) => pluginIds[ch]).filter(Boolean),
-    ...mcpJsonServers,
+    ...channels.map((ch) => pluginIds[ch]).filter(Boolean).map((id) => ({ id, force: true })),
+    ...mcpJsonServers.map((id) => ({ id, force: false })),
   ];
-  for (const pid of approveIds) {
+  for (const { id: pid, force } of approveIds) {
+    // Only a channel plugin is force-approved: it is hermit infrastructure, and
+    // a disabled one takes the operator's own chat down. A project .mcp.json
+    // server is the operator's call, and the config volume outlives the
+    // container, so one they disabled via /mcp stays disabled across restarts.
+    if (!force && (disabledJson.includes(pid) || disabledMcp.includes(pid))) continue;
     if (!enabled.includes(pid)) {
       enabled.push(pid);
       changed = true;
