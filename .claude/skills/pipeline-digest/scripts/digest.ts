@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Release-pipeline digest with a change gate. Collects per-plugin release state,
-// main-branch CI health, and stale branches; prints a bounded digest only when
-// those facts differ from the last committed hash.
+// main-branch CI health, stale branches, and GitHub issue/PR activity; prints a
+// bounded digest only when those facts differ from the last committed hash.
 //
 //   bun digest.ts <hermit-dir>                 -> "CHANGED|<sha256>" + digest, or "NOCHANGE"
 //   bun digest.ts <hermit-dir> commit <hash>   -> persist the hash
@@ -128,6 +128,52 @@ function collectStaleBranches(): string[] {
   }, []).sort();
 }
 
+function ghApi(args: string[]): string | null {
+  const r = spawnSync('gh', args, { encoding: 'utf-8', timeout: 20_000 });
+  if (r.status !== 0 || !r.stdout) return null;
+  return r.stdout;
+}
+
+function searchCount(nameWithOwner: string, query: string): number | null {
+  // -X GET is required: gh api defaults to POST whenever -f is present, and
+  // search/issues only accepts GET (a POST 404s instead of 405).
+  const out = ghApi(['api', '-X', 'GET', 'search/issues', '-f', `q=repo:${nameWithOwner} ${query}`, '-q', '.total_count']);
+  if (out === null) return null;
+  const n = Number(out.trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+type Activity = {
+  open_issues: number;
+  open_prs: number;
+  new_issues: number;
+  closed_issues: number;
+  new_prs: number;
+  closed_prs: number;
+} | null; // null = gh unavailable, no GitHub remote, or any query failed
+
+function collectActivity(sinceIso: string): Activity {
+  const repoOut = ghApi(['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner']);
+  if (!repoOut) return null;
+  const nameWithOwner = repoOut.trim();
+
+  const openIssues = searchCount(nameWithOwner, 'is:issue is:open');
+  const openPrs = searchCount(nameWithOwner, 'is:pr is:open');
+  const newIssues = searchCount(nameWithOwner, `is:issue created:>=${sinceIso}`);
+  const closedIssues = searchCount(nameWithOwner, `is:issue is:closed closed:>=${sinceIso}`);
+  const newPrs = searchCount(nameWithOwner, `is:pr created:>=${sinceIso}`);
+  const closedPrs = searchCount(nameWithOwner, `is:pr is:closed closed:>=${sinceIso}`);
+
+  const counts = { openIssues, openPrs, newIssues, closedIssues, newPrs, closedPrs };
+  if (Object.values(counts).some((v) => v === null)) return null;
+
+  return {
+    open_issues: openIssues!, open_prs: openPrs!,
+    new_issues: newIssues!, closed_issues: closedIssues!,
+    new_prs: newPrs!, closed_prs: closedPrs!,
+  };
+}
+
 function statePath(hermitDir: string): string {
   return path.join(hermitDir, 'state', 'pipeline-digest.json');
 }
@@ -135,6 +181,12 @@ function statePath(hermitDir: string): string {
 function readCommittedHash(hermitDir: string): string | null {
   try {
     return JSON.parse(fs.readFileSync(statePath(hermitDir), 'utf-8'))?.hash ?? null;
+  } catch { return null; }
+}
+
+function readCommittedTs(hermitDir: string): string | null {
+  try {
+    return JSON.parse(fs.readFileSync(statePath(hermitDir), 'utf-8'))?.ts ?? null;
   } catch { return null; }
 }
 
@@ -150,7 +202,7 @@ function commitHash(hermitDir: string, hash: string): void {
   }
 }
 
-function render(plugins: Plugin[], failingCI: string[] | null, stale: string[]): string {
+function render(plugins: Plugin[], failingCI: string[] | null, stale: string[], activity: Activity): string {
   const lines: string[] = [];
 
   const pending = plugins.filter((p) => p.status === 'awaiting-tag' || p.status === 'prep-needed');
@@ -175,6 +227,14 @@ function render(plugins: Plugin[], failingCI: string[] | null, stale: string[]):
 
   if (stale.length) lines.push(`Stale branches (>${STALE_BRANCH_DAYS}d): ${stale.join(', ')}`);
 
+  if (activity) {
+    const moved = activity.new_issues || activity.closed_issues || activity.new_prs || activity.closed_prs;
+    const change = moved
+      ? `${activity.new_issues} new issue(s), ${activity.closed_issues} closed; ${activity.new_prs} new PR(s), ${activity.closed_prs} merged/closed`
+      : 'quiet';
+    lines.push(`GitHub activity: ${change} (open: ${activity.open_issues} issues, ${activity.open_prs} PRs)`);
+  }
+
   return lines.join('\n');
 }
 
@@ -197,13 +257,18 @@ if (process.argv[3] === 'commit') {
 const plugins = collectPlugins();
 const failingCI = collectFailingCI();
 const stale = collectStaleBranches();
+const since = readCommittedTs(hermitDir) ?? new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+const activity = collectActivity(since);
 
 // Stable facts only — no dates or ages, so an unchanged pipeline hashes equal
-// day after day.
+// day after day. new_issues/new_prs/closed_issues/closed_prs are windowed by
+// `since` (the last committed run), so they naturally return to 0 — and drop
+// back out of the hash — once reported once.
 const hash = crypto.createHash('sha256').update(JSON.stringify({
   plugins: plugins.map((p) => [p.slug, p.version, p.tag, p.ahead, p.unreleased]),
   failingCI,
   stale,
+  activity,
 })).digest('hex');
 
 if (hash === readCommittedHash(hermitDir)) {
@@ -212,4 +277,4 @@ if (hash === readCommittedHash(hermitDir)) {
 }
 
 console.log(`CHANGED|${hash}`);
-console.log(render(plugins, failingCI, stale));
+console.log(render(plugins, failingCI, stale, activity));

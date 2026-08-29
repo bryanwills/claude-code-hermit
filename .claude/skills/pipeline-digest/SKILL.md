@@ -1,6 +1,6 @@
 ---
 name: pipeline-digest
-description: Daily release-pipeline digest with a change gate — reports which plugins are pending release, whether main's CI is green, and which branches went stale, and notifies the operator only when that state actually moved since the last run. Use when the operator asks "what moved in the pipeline", "anything to ship", "pipeline digest", or when the `pipeline-digest` routine fires. For a full on-demand pipeline snapshot regardless of change, use /release-status instead.
+description: Daily release-pipeline digest with a change gate — reports which plugins are pending release, whether main's CI is green, which branches went stale, and GitHub issue/PR activity, and notifies the operator only when that state actually moved since the last run. Use when the operator asks "what moved in the pipeline", "anything to ship", "pipeline digest", "any repo activity", or when the `pipeline-digest` routine fires. For a full on-demand pipeline snapshot regardless of change, use /release-status instead.
 ---
 
 # Pipeline Digest
