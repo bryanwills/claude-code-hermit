@@ -47,7 +47,6 @@ describe('GITIGNORE-APPEND.txt', () => {
 // naming the canonical path and the field.
 const DIRECT_READERS = [
   'skills/docker-setup/SKILL.md',
-  'skills/migrate/SKILL.md',
 ];
 
 for (const rel of DIRECT_READERS) {

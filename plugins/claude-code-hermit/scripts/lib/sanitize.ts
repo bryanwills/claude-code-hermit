@@ -7,9 +7,10 @@ function safe(s: any): string {
 }
 
 // Known XML-like tag names used as Claude/CC context markers. Matching these
-// in hook rejection text (routed to Claude via continueOnBlock) would let an
-// adversarial config value impersonate system context. We bracket-wrap instead
-// of stripping so the tag name stays readable for debugging.
+// in text that reaches Claude's context (hook stderr, script diagnostics,
+// recall excerpts) would let an adversarial config value impersonate system
+// context. We bracket-wrap instead of stripping so the tag name stays
+// readable for debugging.
 const INJECTION_TAGS = [
   'system-reminder', 'system', 'assistant', 'user',
   'tool_use', 'tool_result', 'thinking', 'function_calls',
@@ -25,8 +26,9 @@ function defuseTags(s: string): string {
   return s.replace(INJECTION_RE, (match) => '[' + match.slice(1, -1) + ']');
 }
 
-// Like safe(), but also defuses prompt-injection tag patterns so hook rejection
-// text can be safely routed to Claude's context via continueOnBlock.
+// Like safe(), but also defuses prompt-injection tag patterns so text derived
+// from config/state can be safely surfaced to Claude (hook stderr, script
+// diagnostics, recall excerpts).
 function safeForLLM(s: any): string {
   return defuseTags(safe(s));
 }

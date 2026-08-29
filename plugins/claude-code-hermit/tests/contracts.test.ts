@@ -3401,19 +3401,24 @@ describe('voice carrier contract', () => {
 
   // The voice file is operator-curated and gitignored — which is exactly the
   // combination that falls through every lifecycle pass unless each one names
-  // it: git won't carry it, so the worktree and migrate paths must.
-  test('the voice file is gitignored, worktree-included and marked must-migrate', () => {
+  // it: git won't carry it, so the worktree path and the moving-hosts docs must.
+  test('the voice file is gitignored, worktree-included and its migration handling documented', () => {
     expect(read(path.join(TEMPLATES, 'GITIGNORE-APPEND.txt')))
       .toContain('.claude/output-styles/hermit-voice.md');
     expect(read(path.join(TEMPLATES, 'WORKTREEINCLUDE-APPEND.txt')))
       .toContain('.claude/output-styles/hermit-voice.md');
 
-    const migrate = read(path.join(SKILLS, 'migrate', 'SKILL.md'));
-    const row = migrate
+    // The moving-hosts answer is the one place that has to say what happens to
+    // the file on a new machine. Assert on that line rather than on the path
+    // appearing anywhere in the docs — config-reference.md also names the path
+    // in its unrelated voice-style table, so a bare toContain() would stay
+    // green even if the migration guidance were deleted outright.
+    const faq = read(path.join(PLUGIN_ROOT, 'docs', 'faq.md'));
+    const line = faq
       .split('\n')
-      .find((l) => l.includes('output-styles/hermit-voice.md') && l.includes('|'));
-    expect(row).toBeDefined();
-    expect(row).toContain('MUST_MIGRATE');
+      .find((l) => l.includes('.claude/output-styles/hermit-voice.md'));
+    expect(line).toBeDefined();
+    expect(line).toContain('config.json');
   });
 });
 

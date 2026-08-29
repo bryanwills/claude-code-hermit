@@ -74,9 +74,9 @@ Send `/stop` or `/pause` from your channel and the assistant is blocked from eve
 
 ## How do I move my hermit to another machine?
 
-Run `/claude-code-hermit:migrate` on the source machine before you leave. It audits Git hygiene, classifies which ignored files are portable, assesses hermit state (OPERATOR.md, config.json, HEARTBEAT.md), and produces a `migration-manifest.txt` with a verification checklist.
+`git clone` handles your tracked files. Copy `.claude-code-hermit/` — at minimum `OPERATOR.md`, `HEARTBEAT.md`, and `config.json`; `sessions/`, `proposals/`, `raw/`, `compiled/` are optional history, and `state/`, `bin/`, `templates/` regenerate on their own. Copy `.claude/settings.local.json` too if `.claude-code-hermit/state/hatch-options.json` shows `"target": "local"` — that file carries hermit's hook permissions and deny patterns. Never copy `.env` or `.claude.local/`; recreate those secrets and channel state dirs on the destination and re-pair channels. The gitignored `.claude/output-styles/hermit-voice.md` doesn't travel with the clone, but copying `config.json` is enough on its own — the next boot re-renders it.
 
-The short version: `git clone` handles your tracked files. The manifest handles the small set of portable ignored files. `hatch` handles destination setup (it preserves OPERATOR.md and config.json on re-init). `.claude/` is machine-local — reinstall plugins and re-grant permissions on the destination.
+On the destination: run `/claude-code-hermit:hatch` (it preserves OPERATOR.md, config.json, and HEARTBEAT.md on re-init), then `/claude-code-hermit:hermit-evolve` if the plugin version differs. Update the machine-specific `config.json` fields: `timezone`, `channels.*.default_chat_id`, `channels.*.dm_channel_id`, `tmux_session_name`, `permission_mode`.
 
 For always-on Docker setups, see [Moving to a new host](always-on.md#moving-to-a-new-host).
 

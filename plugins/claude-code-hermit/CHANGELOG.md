@@ -6,6 +6,11 @@
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
 - The watchdog notices a lapsed Claude login on the session's own screen. On `/login` credentials it sends one channel notice (repeated daily until fixed) and suppresses the nudge and restart tiers, instead of restarting a session that can't authenticate; on a setup-token it spawns the existing re-auth relay, which now also covers a token that stops working before its recorded expiry.
 
+### Changed
+- Dropped the `smoke-test` skill — its checks overlap `hermit-doctor`, which is already scheduled weekly for every operator. Hatch's post-setup summary now points at `/hermit-doctor` instead.
+- Dropped the `migrate` skill — no code path invoked it. The moving-hosts guidance it produced now lives directly in `docs/faq.md`.
+- Removed the dead `HERMIT_DEV_MODE` PostToolUse hook — it had no setter anywhere in the plugin, docs, or CI, so it never ran.
+
 ### Fixed
 - The Docker entrypoint no longer blocks boot when `.credentials.json` carries a past `expiresAt`. That field belongs to the access token Claude Code refreshes silently, so the gate stalled healthy hermits while catching a real lapse only by accident.
 - `docker-setup` aborts at its pre-flight when a live non-Docker hermit already owns the project's state dir, naming `bin/hermit-stop`, instead of building the image first.

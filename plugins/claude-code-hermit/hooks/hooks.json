@@ -94,21 +94,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c '[ -z \"${HERMIT_DEV_MODE:-}\" ] && exit 0; INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r \".tool_input.file_path // empty\"); if [ -n \"${CLAUDE_PLUGIN_ROOT:-}\" ] && echo \"$FILE\" | grep -qF \"$CLAUDE_PLUGIN_ROOT\" && echo \"$FILE\" | grep -qE \"scripts/|hooks/\"; then bun test \"${CLAUDE_PLUGIN_ROOT}/tests\" 2>&1 | tail -5; fi'",
-            "timeout": 30
-          }
-        ],
-        "description": "Run contract tests after script/hook edits (dev mode only: set HERMIT_DEV_MODE=1). Stays in shell form: uses stdin/jq/pipes; convert by porting to Node, not by switching to args:[]."
-      },
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
             "command": "bun",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/validate-config.ts"],
-            "timeout": 5,
-            "continueOnBlock": true
+            "timeout": 5
           }
         ],
         "description": "Validate config.json schema after edits"

@@ -253,4 +253,3 @@ Most common actions auto-trigger from natural language — just say what you mea
 | **Docker**     | `docker-setup`                                                     |
 | **Channels**   | `channel-responder`                                                |
 | **Summaries**  | `hermit-evolution`, `hermit-health`, `weekly-review`              |
-| **Testing**    | `smoke-test`                                                      |

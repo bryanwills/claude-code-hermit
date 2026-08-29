@@ -266,7 +266,7 @@ Adjust with `/hermit-settings env`.
 
 ## Moving to a new host
 
-Run `/claude-code-hermit:migrate` on the source machine first — it produces a full migration review and `migration-manifest.txt`. Follow the Migration Steps in its output, then handle these Docker-specific additions:
+See [How do I move my hermit to another machine?](faq.md#how-do-i-move-my-hermit-to-another-machine) for the base steps, then handle these Docker-specific additions:
 
 1. **Stop the container before leaving the source:** `.claude-code-hermit/bin/hermit-docker down`
 2. **Auth credentials are in the named volume** (`claude-config`) — they do not migrate with the project. Re-authenticate on the destination with `hermit-docker login` after the container is up
