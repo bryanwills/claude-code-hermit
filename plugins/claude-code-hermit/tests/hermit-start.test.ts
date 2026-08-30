@@ -751,6 +751,20 @@ describe('peer name — --name / --remote-control', () => {
     expect(peerName({})).toBe(`hermit-${path.basename(tmpdir)}`);
   });
 
+  test('peerName falls back when agent_name has no ASCII alphanumerics', () => {
+    expect(peerName({ agent_name: '🤖' })).toBe(`hermit-${path.basename(tmpdir)}`);
+  });
+
+  test('peerName never returns an empty name', () => {
+    expect(peerName({ agent_name: '···', tmux_session_name: '···' })).toBe('hermit');
+  });
+
+  test('--remote-control is never launched with an empty name', async () => {
+    const config = { agent_name: '🤖', tmux_session_name: '···', remote: true };
+    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS);
+    expect(cmd[cmd.indexOf('--remote-control') + 1]).toBe('hermit');
+  });
+
   test('--name and --remote-control both carry the same sanitized name', async () => {
     const config = { agent_name: 'Ana Paula', remote: true };
     const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS);

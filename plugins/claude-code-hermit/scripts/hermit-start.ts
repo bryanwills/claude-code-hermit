@@ -622,11 +622,21 @@ function inputLine(promptText: string): string {
  * needed. This is what we ASK Claude Code to register, computed before the
  * session exists — a collision with a live session of the same name gets
  * silently renamed by Claude Code, which this can't observe or correct.
+ *
+ * An `agent_name` with no ASCII alphanumerics at all ("ロボ", "🤖") sanitizes to
+ * the empty string, so the tmux-session fallback is keyed on the sanitized
+ * result, not on `agent_name` being unset — otherwise `--remote-control` would
+ * be launched with an empty name. `hermit` is the last resort for the same
+ * reason, since `tmux_session_name` is operator-editable and can sanitize away too.
  */
+function sanitizePeerName(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
 function peerName(config: Json): string {
-  return String(config.agent_name || getSessionName(config))
-    .replace(/[^A-Za-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  return sanitizePeerName(String(config.agent_name ?? ''))
+    || sanitizePeerName(getSessionName(config))
+    || 'hermit';
 }
 
 /** Build the claude launch command from config. */
