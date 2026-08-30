@@ -244,8 +244,11 @@ If the correction is a stated preference/recurrence with **no** clearly named sk
 
 Canonical protocol for proactively notifying the operator (referenced from `CLAUDE-APPEND.md` § Operator Notification). Main owns the outbound send and any `AskUserQuestion`; a delegated sub-step returns the message and main runs this protocol.
 
-- **Always** compose the audience version(s) and deliver them in one
-  call; do not resolve the channel yourself, the script owns routing:
+- **If no channel is enabled** (channels block absent, `channels === {}`, or every channel-config entry has `enabled === false` — exclude the `primary` string pointer when iterating):
+  - If `push_notifications === true` in `config.json`, fire `PushNotification(message="<condensed one line, per `CLAUDE-APPEND.md` § Operator Notification push format>", status="proactive")`. Push is best-effort; do not retry on failure and do not log a `channel-send-unavailable` issue for this branch — the operator's empty-channels config is intentional.
+  - Respond in conversation either way (the conversation response is the durable record).
+- **If at least one channel is enabled**, compose the audience version(s) and deliver them in one
+  call — do not resolve the channel yourself, the script owns routing:
   ```
   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
   ```
@@ -266,21 +269,18 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
 
   Compose each version in the operator's configured `language`.
 
-  The script prints `{ "delivered", "degraded", "no_channel", "channels_configured", "result" }`.
+  The script prints `{ "delivered", "degraded", "no_channel", "result" }`.
   - **Exit 0** — every leg landed. Done.
   - **Exit 2** — the payload was rejected (unknown key, empty audience, bad value; the reason is on
     stderr and nothing was sent). Fix the payload and re-run. This is your error, not the channel's:
     do not push and do not record a `channel-send-unavailable` issue.
   - **Exit 1** — a leg did not land (including `degraded: true`, where maintainer detail reached only
-    SHELL.md Findings because a configured maintainer chat was unreachable). When
+    SHELL.md Findings because a configured maintainer chat was unreachable). If
     `push_notifications === true`, fire `PushNotification(message="<condensed one line, per
-    § Operator Notification push format>", status="proactive")` and respond in conversation either way.
-    Whether that failure is also worth an issue is decided by `channels_configured`, not `no_channel`:
-    with `no_channel: true` **and** `channels_configured: false` the operator configured no channel at
-    all — that is intentional, so do not record a `channel-send-unavailable` issue. In every other case
-    a channel is configured and did not take the message (unpaired, empty `allowed_users`, unreadable
-    config, platform error): log the undelivered content to SHELL.md Findings and record a deduped
-    `channel-send-unavailable` issue.
+    § Operator Notification push format>", status="proactive")`, log the undelivered content to SHELL.md
+    Findings, and record a deduped `channel-send-unavailable` issue — you only reach this branch with a
+    channel enabled, so even `no_channel: true` means it is configured but unreachable (unpaired,
+    empty `allowed_users`, unreadable config), which is exactly the signal the operator needs.
 - Never send a proactive notice through a channel reply tool, and never advise `/<channel>:access`
   for a maintainer chat — the maintainer chat is reached by direct API POST, not `access.json` pairing (its one inbound authority is the settings tier, `docs/security.md` § Tiered settings authority, not reply routing).
 

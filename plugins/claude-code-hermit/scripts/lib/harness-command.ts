@@ -82,8 +82,9 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
 export function skillCommandRefusal(parsed: ParsedCommand): string | null {
   if (parsed.command !== '/code-review' || !parsed.arg) return null;
   const tokens = parsed.arg.split(' ').map((token) => token.toLowerCase());
-  if (tokens.includes('--post')) {
-    return '--post writes a comment to the pull request under the operator\'s GitHub account, which is not a chat-authorizable action; run the review without it.';
+  const outwardWriteFlag = tokens.find((token) => token === '--post' || token === '--comment');
+  if (outwardWriteFlag) {
+    return `${outwardWriteFlag} writes a comment to the pull request under the operator's GitHub account, which is not a chat-authorizable action; run the review without it.`;
   }
   if (!tokens.includes('ultra')) return null;
   return 'ultra opens an interactive launch dialog that nobody in chat can answer and can start a cloud-billed run; choose low, medium, or high.';

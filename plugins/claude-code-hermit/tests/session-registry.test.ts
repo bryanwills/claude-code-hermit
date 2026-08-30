@@ -2,11 +2,10 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readRegistry, findResident, findPeerTargets } from '../scripts/lib/session-registry';
+import { readRegistry, findResident } from '../scripts/lib/session-registry';
 import { procStartOf, localPidDomain } from './helpers/registry-fixture';
 
 const dirs: string[] = [];
-const children: Bun.Subprocess[] = [];
 
 function registryDir(): string {
   const configDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-registry-')));
@@ -34,17 +33,10 @@ function writeEntry(configDir: string, pid: number, patch: Record<string, unknow
   fs.writeFileSync(path.join(configDir, 'sessions', `${pid}.json`), JSON.stringify(entry));
 }
 
-function liveChild(): Bun.Subprocess {
-  const child = Bun.spawn([process.execPath, '-e', 'setTimeout(() => {}, 60_000)']);
-  children.push(child);
-  return child;
-}
-
 // afterAll, not afterEach: bunfig.toml runs these tests concurrently, so a
 // per-test teardown of a shared list would rm a fixture another in-flight test
-// is still reading. Each test builds its own dir; they all die together here.
+// is still reading. Each test builds its own dir; they are removed together here.
 afterAll(() => {
-  for (const child of children) child.kill();
   while (dirs.length) {
     try { fs.rmSync(dirs.pop()!, { recursive: true, force: true }); } catch {}
   }
@@ -127,91 +119,5 @@ describe('findResident', () => {
     const c = registryDir();
     writeEntry(c, process.pid);
     expect(findResident({ session_pid: 4_194_304 }, c)).toBeNull();
-  });
-});
-
-describe('findPeerTargets', () => {
-  test('selects only the freshest recent non-resident interactive session', () => {
-    const c = registryDir();
-    const interactiveOld = liveChild();
-    const interactiveFresh = liveChild();
-    const background = liveChild();
-    const stale = liveChild();
-    const now = Date.now();
-    writeEntry(c, process.pid, { statusUpdatedAt: now + 10_000 });
-    writeEntry(c, interactiveOld.pid, { statusUpdatedAt: now - 2_000 });
-    writeEntry(c, interactiveFresh.pid, { statusUpdatedAt: now - 1_000 });
-    writeEntry(c, background.pid, { kind: 'bg', statusUpdatedAt: now });
-    writeEntry(c, stale.pid, { statusUpdatedAt: now - 60_000 });
-
-    expect(findPeerTargets(
-      { session_pid: process.pid },
-      { maxIdleMs: 30_000 },
-      c,
-    ).map((entry) => entry.pid)).toEqual([interactiveFresh.pid]);
-  });
-
-  test('skips an interactive entry managed by another hermit', () => {
-    const c = registryDir();
-    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-peer-cwd-')));
-    dirs.push(cwd);
-    fs.mkdirSync(path.join(cwd, '.claude-code-hermit', 'state'), { recursive: true });
-    fs.writeFileSync(
-      path.join(cwd, '.claude-code-hermit', 'state', 'runtime.json'),
-      JSON.stringify({ session_pid: process.pid }),
-    );
-    writeEntry(c, process.pid, { cwd });
-
-    expect(findPeerTargets(
-      { session_pid: 4_194_304 },
-      { maxIdleMs: 30_000 },
-      c,
-    )).toEqual([]);
-  });
-
-  test('skips a hermit resident whose session cwd is a subdirectory of its project', () => {
-    const c = registryDir();
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-peer-cwd-')));
-    dirs.push(root);
-    fs.mkdirSync(path.join(root, '.claude-code-hermit', 'state'), { recursive: true });
-    fs.writeFileSync(
-      path.join(root, '.claude-code-hermit', 'state', 'runtime.json'),
-      JSON.stringify({ session_pid: process.pid }),
-    );
-    const cwd = path.join(root, 'packages', 'api');
-    fs.mkdirSync(cwd, { recursive: true });
-    writeEntry(c, process.pid, { cwd });
-
-    expect(findPeerTargets({ session_pid: 4_194_304 }, { maxIdleMs: 30_000 }, c)).toEqual([]);
-  });
-
-  test('no own session_pid means no target — the sender cannot rule itself out', () => {
-    const c = registryDir();
-    writeEntry(c, process.pid, { statusUpdatedAt: Date.now() });
-
-    expect(findPeerTargets({}, { maxIdleMs: 30_000 }, c)).toEqual([]);
-    expect(findPeerTargets(null, { maxIdleMs: 30_000 }, c)).toEqual([]);
-  });
-
-  test('an entry missing cwd or messagingSocketPath is skipped, not thrown on', () => {
-    const c = registryDir();
-    const other = liveChild();
-    const now = Date.now();
-    writeEntry(c, process.pid, { statusUpdatedAt: now, cwd: undefined });
-    writeEntry(c, other.pid, { statusUpdatedAt: now - 1_000 });
-
-    expect(findPeerTargets(
-      { session_pid: 4_194_304 },
-      { maxIdleMs: 30_000 },
-      c,
-    ).map((entry) => entry.pid)).toEqual([other.pid]);
-  });
-
-  test('an empty registry directory reads as unknown', () => {
-    expect(findPeerTargets(
-      { session_pid: process.pid },
-      { maxIdleMs: 30_000 },
-      registryDir(),
-    )).toEqual([]);
   });
 });

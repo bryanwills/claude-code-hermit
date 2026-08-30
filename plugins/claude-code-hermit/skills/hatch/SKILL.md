@@ -698,8 +698,6 @@ Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `cha
 
 `push_notifications` is left at the template default (`true`) — no follow-up question. Push is dormant whenever a channel is reachable (the runtime guard in CLAUDE-APPEND.md sends channel-first) and fires only as fallback when a channel is unreachable or absent.
 
-`peer_notices` is likewise left at the template default (`{"enabled": true, "max_idle_minutes": 30}`) — no follow-up question. It is a supplementary local leg that also drops an operator notice into the freshest live Claude Code session on the machine; it never replaces a channel and never counts as delivered.
-
 **Derived values from this turn (used in the confirm bundle and Step 5 overlay):**
 - `permission_mode`: `auto` (same default for both Docker and non-Docker deployments). Generally available to all users across subscription plans and API usage; supported models and provider configuration can vary. If Claude reports it unavailable for the current selection, choose a supported model or run `/hermit-settings permissions` to select another mode.
 - Deny pattern profile: Docker → hardened (default + always_on), else → minimal (default only). Applied at Step 9 silently.

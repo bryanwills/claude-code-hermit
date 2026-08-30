@@ -136,6 +136,7 @@ describe('skill command policy', () => {
   test('refuses ultra code reviews and identifies only relayed skill commands', () => {
     expect(skillCommandRefusal({ command: '/code-review', arg: 'ultra' })).toContain('dialog');
     expect(skillCommandRefusal({ command: '/code-review', arg: 'low --post' })).toContain('--post');
+    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --comment' })).toContain('--comment');
     expect(skillCommandRefusal({ command: '/code-review', arg: 'low --fix' })).toBeNull();
     expect(skillCommandRefusal({ command: '/doctor', arg: null })).toBeNull();
     expect(isSkillCommand('/doctor')).toBe(true);

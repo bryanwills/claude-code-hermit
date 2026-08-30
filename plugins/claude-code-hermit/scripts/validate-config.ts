@@ -739,20 +739,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     errors.push('push_notifications: must be a boolean');
   }
 
-  if (config.peer_notices?.enabled !== undefined && typeof config.peer_notices.enabled !== 'boolean') {
-    errors.push('peer_notices.enabled: must be a boolean');
-  }
-  if (
-    config.peer_notices?.max_idle_minutes !== undefined
-    && (
-      typeof config.peer_notices.max_idle_minutes !== 'number'
-      || !Number.isFinite(config.peer_notices.max_idle_minutes)
-      || config.peer_notices.max_idle_minutes <= 0
-    )
-  ) {
-    errors.push('peer_notices.max_idle_minutes: must be a positive number');
-  }
-
   if (config.ask_gate !== undefined && typeof config.ask_gate !== 'boolean') {
     errors.push('ask_gate: must be a boolean');
   }
