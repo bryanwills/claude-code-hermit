@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Automatic silent sweep of dead, clean `.claude/worktrees/bridge-*` worktrees while the routine monitor runs, plus a live-spawn summary from `rc-server status`.
 - `/hermit-doctor` check `peer-inbox`: the resident is registered with Claude Code, its inbox socket accepts a connection (connect-only, never a post), and its registered name still matches. Warns, never fails — every failure mode falls back to typing the nudge.
 - Turns triggered by another local Claude Code session are attributed to a `peer` source, so `cost-reflect` shows them as "other sessions on this machine". The watchdog's own socket wake stays `heartbeat`.
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
