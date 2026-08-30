@@ -495,6 +495,8 @@ describe('config contract: template and DEFAULT_CONFIG must mirror', () => {
     'doctor', 'doctor.routine_cost_floor_usd',
     // Read by hermit-watchdog through lib/config-read (own default of '4h') — not part of the loadConfig merge.
     'watchdog.wedge_floor',
+    // Read by lib/channel-send through lib/config-read (own defaults) — not part of the loadConfig merge.
+    'peer_notices', 'peer_notices.enabled', 'peer_notices.max_idle_minutes',
   ]);
 
   test('key path sync: flattened key paths must match (excluding known template-only keys)', () => {

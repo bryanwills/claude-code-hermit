@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { defaultConfigDir } from './setup-token';
 import { pidAlive } from './lockfile';
+import { readRuntimeJson } from './runtime';
 
 export type SessionStatus = 'idle' | 'busy' | 'shell' | 'waiting';
 
@@ -151,4 +152,28 @@ export function findResident(runtime: any, configDir?: string): SessionEntry | n
   const pid = runtime?.session_pid;
   if (typeof pid !== 'number') return null;
   return readRegistry(configDir).find((e) => e.pid === pid) ?? null;
+}
+
+/**
+ * The freshest recently-transitioned interactive session that is not managed
+ * by this or another hermit, if one can be validated.
+ */
+export function findPeerTargets(
+  runtime: any,
+  { maxIdleMs }: { maxIdleMs: number },
+  configDir?: string,
+): SessionEntry[] {
+  const cutoff = Date.now() - maxIdleMs;
+  const candidates = readRegistry(configDir)
+    .filter((entry) => entry.kind === 'interactive')
+    .filter((entry) => entry.pid !== runtime?.session_pid)
+    .filter((entry) => entry.statusUpdatedAt >= cutoff)
+    .sort((a, b) => b.statusUpdatedAt - a.statusUpdatedAt);
+  // Sorted first so this stops at the freshest survivor instead of reading
+  // every candidate's resident marker only to discard all but the top one.
+  const winner = candidates.find((entry) => {
+    const marker = readRuntimeJson(path.join(entry.cwd, '.claude-code-hermit', 'state'));
+    return marker?.session_pid !== entry.pid;
+  });
+  return winner ? [winner] : [];
 }

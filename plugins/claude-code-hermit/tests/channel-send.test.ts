@@ -6,6 +6,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { runScript, runPinnedScript, type RunOptions } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
@@ -13,6 +14,7 @@ import { startHttpStub } from './helpers/http-stub';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
 import { sendOperatorNotice } from '../scripts/lib/channel-send';
 import { channelHealthPath } from '../scripts/lib/channel-health';
+import { procStartOf, localPidDomain } from './helpers/registry-fixture';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
@@ -43,6 +45,54 @@ function setupChannelWorkdir(telegramExtra: object = {}, topExtra: object = {}):
     channels: { telegram: { enabled: true, dm_channel_id: '12345', state_dir: '.claude.local/channels/telegram', ...telegramExtra } },
   }));
   return wd;
+}
+
+type Inbox = { socketPath: string; lines: string[]; close: () => void };
+
+async function inboxServer(wd: Workdir): Promise<Inbox> {
+  const socketPath = path.join(wd.dir, 'peer-inbox.sock');
+  const lines: string[] = [];
+  const server = net.createServer((conn) => {
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk.toString();
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        lines.push(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  return { socketPath, lines, close: () => server.close() };
+}
+
+async function waitForLines(lines: string[], n: number, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (lines.length < n && Date.now() < deadline) await Bun.sleep(10);
+}
+
+function configurePeer(wd: Workdir, socketPath: string): void {
+  const configDir = path.join(wd.dir, 'claude-config');
+  const sessionsDir = path.join(configDir, 'sessions');
+  const cwd = path.join(wd.dir, 'operator-session');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.mkdirSync(cwd, { recursive: true });
+  write(hermit(wd.dir, 'state', 'runtime.json'), JSON.stringify({
+    session_pid: 4_194_304,
+    config_dir: configDir,
+  }));
+  write(path.join(sessionsDir, `${process.pid}.json`), JSON.stringify({
+    pid: process.pid,
+    procStart: procStartOf(process.pid),
+    pidDomain: localPidDomain(),
+    kind: 'interactive',
+    status: 'idle',
+    statusUpdatedAt: Date.now(),
+    cwd,
+    name: 'operator-session',
+    messagingSocketPath: socketPath,
+  }));
 }
 
 describe('channel-send CLI', () => {
@@ -307,6 +357,78 @@ describe('sendOperatorNotice tiering', () => {
     try { return await fn(); } finally { delete process.env.HERMIT_TELEGRAM_API_URL; }
   };
   const findings = (wd: Workdir) => fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf8');
+
+  test('client text is posted as one prefixed NDJSON peer message and logged', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    const inbox = await inboxServer(wd);
+    configurePeer(wd, inbox.socketPath);
+    try {
+      const res = await withApi(stub.url, () =>
+        sendOperatorNotice(hermit(wd.dir), { client: 'plain notice' }));
+      expect(res.peer).toEqual({ ok: true, route: 'peer', delivered: false });
+      await waitForLines(inbox.lines, 1);
+      expect(inbox.lines).toHaveLength(1);
+      expect(JSON.parse(inbox.lines[0]).message.content).toBe('[Hermit notice]\nplain notice');
+      expect(unconsolidated(hermit(wd.dir)).rows).toContainEqual(expect.objectContaining({
+        source: 'peer', chat_id: 'operator-session', direction: 'out', text: '[Hermit notice]\nplain notice',
+      }));
+    } finally {
+      inbox.close();
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('peer_notices.enabled false skips the peer leg', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir({}, { peer_notices: { enabled: false, max_idle_minutes: 30 } });
+    const inbox = await inboxServer(wd);
+    configurePeer(wd, inbox.socketPath);
+    try {
+      const res = await withApi(stub.url, () =>
+        sendOperatorNotice(hermit(wd.dir), { client: 'plain notice' }));
+      expect(res.peer).toBeUndefined();
+      await Bun.sleep(20);
+      expect(inbox.lines).toEqual([]);
+    } finally {
+      inbox.close();
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('maintainer-only text never reaches the peer socket', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    const inbox = await inboxServer(wd);
+    configurePeer(wd, inbox.socketPath);
+    try {
+      const res = await withApi(stub.url, () =>
+        sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'SECRET', fallback: 'client' } }));
+      expect(res.peer).toBeUndefined();
+      await Bun.sleep(20);
+      expect(inbox.lines).toEqual([]);
+    } finally {
+      inbox.close();
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('a dead peer socket is reported without counting as delivered', async () => {
+    const stub = startHttpStub();
+    const wd = setupChannelWorkdir();
+    configurePeer(wd, path.join(wd.dir, 'absent.sock'));
+    try {
+      const res = await withApi(stub.url, () =>
+        sendOperatorNotice(hermit(wd.dir), { client: 'plain notice' }));
+      expect(res.peer).toEqual({ ok: false, route: 'peer', delivered: false, error: 'dead' });
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
 
   test('fallback:primary + maintainer target hit: same token, route maintainer_channel', async () => {
     const stub = startHttpStub();
@@ -630,6 +752,28 @@ describe('channel-send CLI --notice', () => {
       expect(out.no_channel).toBe(true);
       expect(out.delivered).toBe(false);
     } finally {
+      wd.cleanup();
+    }
+  });
+
+  test('a successful peer post does not move channel-less delivery or exit status', async () => {
+    const stub = startHttpStub();
+    const wd = setupWorkdir();
+    write(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: {} }));
+    const inbox = await inboxServer(wd);
+    configurePeer(wd, inbox.socketPath);
+    try {
+      const r = await runNotice(wd, { client: 'hello' }, stub);
+      expect(r.exitCode).toBe(1);
+      const out = JSON.parse(r.stdout);
+      expect(out.no_channel).toBe(true);
+      expect(out.delivered).toBe(false);
+      expect(out.result.peer).toEqual({ ok: true, route: 'peer', delivered: false });
+      await waitForLines(inbox.lines, 1);
+      expect(JSON.parse(inbox.lines[0]).message.content).toBe('[Hermit notice]\nhello');
+    } finally {
+      inbox.close();
+      stub.stop();
       wd.cleanup();
     }
   });

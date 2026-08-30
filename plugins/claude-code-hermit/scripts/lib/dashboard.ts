@@ -281,7 +281,7 @@ function alertMessage(key: string, v: Json, s: ArtifactStrings): string {
   return escapeHtml(key);
 }
 
-function agentNameFromConfig(config: Json): string {
+export function agentNameFromConfig(config: Json): string {
   return typeof config?.agent_name === 'string' && config.agent_name.trim() ? config.agent_name : 'Hermit';
 }
 

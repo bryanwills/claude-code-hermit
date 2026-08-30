@@ -72,6 +72,7 @@ const TABLE: Record<string, Spec> = {
   always_on: bool(false),
   chrome: bool(false),
   push_notifications: bool(true),
+  peer_notices: shape({ enabled: bool(true), max_idle_minutes: num(30) }),
   ask_gate: bool(true),
   idle_behavior: str('discover'),
   routines: arr,

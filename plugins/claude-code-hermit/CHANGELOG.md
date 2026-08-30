@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Operator notices also land in the freshest live local Claude Code session, one target only; disable with `peer_notices.enabled`.
 - `/watch session <name> [note]` subscribes to another local session's next idle notice via `SendMessage` with `notify_when_idle` as a pure subscription with no message, lists it in `/watch status`, and relays the one-shot finished or expired notice to the operator's channel; like every watch, it dies with the session. On a hermit that holds peer messages for approval the notice reaches the operator's screen instead of the session, so the watch is declined up front rather than registered as live.
 - `docker.fleet_mesh` shares the session registry, inbox sockets, and a PID namespace between Docker hermits on one box so they can address each other with `ListAgents`/`SendMessage`. Opt-in because it needs two host-created volumes and a PID-namespace holder container that the plugin cannot provision: enable it in `config.json`, then run `/docker-setup` and `hermit-docker update`.
 - Automatic silent sweep of dead, clean `.claude/worktrees/bridge-*` worktrees while the routine monitor runs, plus a live-spawn summary from `rc-server status`.
@@ -49,6 +50,7 @@
 4. **Restart the hermit so it records its inbox socket.** The socket path is only visible from inside the session, so the resident stamps it into `state/runtime.json` at its next start. Until then the watchdog keeps typing its wedge nudge, exactly as before — nothing breaks, the socket path just isn't used yet. `bin/hermit-stop && bin/hermit-start` (or `hermit-docker restart`).
 5. **`permission_mode: "bypassPermissions"` hermits get no socket wake.** That mode holds an incoming peer message behind an approval dialog and drops it after five minutes, and `crossSessionInbound` can only be *tightened* from project-level settings, so the hermit cannot opt itself back in. Its wedge nudge falls back to typing one cycle later than before. Switch `permission_mode` to `auto` (the default, and a prompting mode) to get the socket wake, or set `crossSessionInbound: "accept"` yourself in your user-level `settings.json`.
 6. **Hermits with `remote: false`** get `isolatePeerMachines: true` at the same restart, so a message to a session on another machine asks for approval first. Set `remote: true` if you want cross-machine sends to go through unprompted.
+7. **Peer notices.** A `bypassPermissions` receiver holds the post for five minutes; `hermit-evolve` adds `peer_notices` automatically.
 
 ## [1.2.51] - 2026-08-29
 
