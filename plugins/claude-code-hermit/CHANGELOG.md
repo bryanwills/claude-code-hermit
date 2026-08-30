@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Changed
-- Weekly review no longer reports dormant skills to the operator — the offer to "archive them" was never actionable for a skill, only for a doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/doctor` already finds unused skills against their context cost.
+- Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
 
 ## [1.2.52] - 2026-08-30
 

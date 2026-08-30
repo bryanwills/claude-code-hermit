@@ -7,9 +7,11 @@ type Json = any;
  * PostToolUse hook — appends a usage event to state/usage-metrics.jsonl when a
  * skill is invoked via the Skill tool or a compiled/ artifact is read.
  *
- * Feeds weekly-review's "no tracked use" section, which auto-archives on this
- * evidence. Subagent reads ARE captured: PostToolUse fires for sidechain tool
- * calls, with the parent session_id in the payload (probed on CC 2.1.239).
+ * The compiled-read half feeds weekly-review's "no tracked use" section, which
+ * auto-archives on that evidence; skill rows are recorded but have no reader
+ * today (weekly-review stopped reporting dormant skills). Subagent reads ARE
+ * captured: PostToolUse fires for sidechain tool calls, with the parent
+ * session_id in the payload (probed on CC 2.1.239).
  *
  * Coverage gaps that remain, and why "no tracked use" is weaker than "unused":
  * startup-context injection; user-typed slash commands (which bypass the Skill

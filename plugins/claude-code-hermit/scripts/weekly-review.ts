@@ -328,7 +328,7 @@ const usageLedgerPath = path.join(hermitDir, 'state', 'usage-metrics.jsonl');
 
 let ledgerStartMs: number | null = null;
 let compiledEvidence = false;
-const lastUsedMs = new Map<string, number>(); // key: `${kind}:${name}`
+const lastCompiledReadMs = new Map<string, number>(); // key: compiled/ doc stem
 try {
   const usageLines = fs.readFileSync(usageLedgerPath, 'utf-8').split('\n');
   for (const line of usageLines) {
@@ -340,9 +340,8 @@ try {
       if (ledgerStartMs === null || tsMs < ledgerStartMs) ledgerStartMs = tsMs;
       if (e.kind === 'compiled' && typeof e.name === 'string') {
         compiledEvidence = true;
-        const key = `${e.kind}:${e.name}`;
-        const prev = lastUsedMs.get(key);
-        if (prev === undefined || tsMs > prev) lastUsedMs.set(key, tsMs);
+        const prev = lastCompiledReadMs.get(e.name);
+        if (prev === undefined || tsMs > prev) lastCompiledReadMs.set(e.name, tsMs);
       }
     } catch {}
   }
@@ -367,7 +366,7 @@ if (ledgerStartMs !== null && (now.getTime() - ledgerStartMs) >= usageStaleMs) {
       const date = new Date(dateStr);
       if (isNaN(date.getTime()) || (now.getTime() - date.getTime()) < usageStaleMs) continue;
       const stem = path.basename(docPath, '.md');
-      const lastRead = lastUsedMs.get(`compiled:${stem}`) ?? null;
+      const lastRead = lastCompiledReadMs.get(stem) ?? null;
       if (lastRead !== null && lastRead >= cutoffMs) continue; // read recently — not stale
       untouchedDocs.push({ stem, lastRead, date });
     }
