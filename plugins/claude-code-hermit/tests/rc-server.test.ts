@@ -54,6 +54,50 @@ describe('rc-server.ts', () => {
     }
   });
 
+  // The unattended sweep dates a worktree by the `.git` file `worktree add`
+  // writes once, so back-dating that file is how a test says "not brand new".
+  function ageWorktree(wt: string, minutes: number): void {
+    const t = new Date(Date.now() - minutes * 60_000);
+    fs.utimesSync(path.join(wt, '.git'), t, t);
+  }
+
+  it('sweep silently removes an orphaned locked bridge worktree and its branch', async () => {
+    const wd = setupGitWorkdir();
+    try {
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-sweep123');
+      git(wd.dir, 'worktree', 'add', '-q', '-b', 'cse-session-sweep', wt);
+      git(wd.dir, 'worktree', 'lock', wt);
+      ageWorktree(wt, 10);
+
+      const res = await rcServer(wd.dir, ['sweep']);
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.trim()).toBe('');
+      expect(fs.existsSync(wt)).toBe(false);
+      expect(git(wd.dir, 'branch', '--list', 'cse-session-sweep').trim()).toBe('');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // A spawn is clean and unheld for the moment between `git worktree add` and
+  // the session chdir-ing into it. gc runs on a timer now, so that window has to
+  // be safe. The un-aged twin of the `gc removes an orphaned...` case above,
+  // which pins that the operator-invoked verb still sweeps it either way.
+  it('sweep leaves a brand-new worktree alone', async () => {
+    const wd = setupGitWorkdir();
+    try {
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-fresh999');
+      git(wd.dir, 'worktree', 'add', '-q', '-b', 'cse-session-fresh', wt);
+
+      const res = await rcServer(wd.dir, ['sweep']);
+      expect(res.exitCode).toBe(0);
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(git(wd.dir, 'branch', '--list', 'cse-session-fresh').trim()).not.toBe('');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
   it('gc on a repo with no bridge worktrees is a silent no-op', async () => {
     const wd = setupGitWorkdir();
     try {
@@ -153,6 +197,25 @@ describe('rc-server.ts', () => {
       const res = await rcServer(wd.dir, ['status']);
       expect(res.exitCode).toBe(0);
       expect(res.stdout.trim()).toBe('down');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  it('status lists a live bridge worktree', async () => {
+    const wd = setupGitWorkdir();
+    try {
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-status456');
+      git(wd.dir, 'worktree', 'add', '-q', '-b', 'cse-session-status', wt);
+
+      const holder = Bun.spawn({ cmd: ['sleep', '30'], cwd: wt });
+      try {
+        const res = await rcServer(wd.dir, ['status']);
+        expect(res.exitCode).toBe(0);
+        expect(res.stdout).toContain('spawns: 1 live (bridge-status456)');
+      } finally {
+        holder.kill();
+      }
     } finally {
       wd.cleanup();
     }
