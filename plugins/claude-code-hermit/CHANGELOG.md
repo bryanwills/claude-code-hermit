@@ -28,6 +28,7 @@
 - Dropped the `smoke-test` skill — its checks overlap `hermit-doctor`, which is already scheduled weekly for every operator. Hatch's post-setup summary now points at `/hermit-doctor` instead.
 - Dropped the `migrate` skill — no code path invoked it. The moving-hosts guidance it produced now lives directly in `docs/faq.md`.
 - Removed the dead `HERMIT_DEV_MODE` PostToolUse hook — it had no setter anywhere in the plugin, docs, or CI, so it never ran.
+- Trimmed the CLAUDE-APPEND block from 10.2 KB to 8.5 KB (~16% smaller) without dropping a rule, trigger, or command.
 
 ### Fixed
 - Transcript reads honor `CLAUDE_CONFIG_DIR`. `transcriptDirFor()` hardcoded `~/.claude/projects`, so a hermit with a custom config dir had cost tracking report an empty window and wedge detection see a healthy session where a stuck one was.
@@ -53,6 +54,7 @@
 5. **`permission_mode: "bypassPermissions"` hermits get no socket wake.** That mode holds an incoming peer message behind an approval dialog and drops it after five minutes, and `crossSessionInbound` can only be *tightened* from project-level settings, so the hermit cannot opt itself back in. Its wedge nudge falls back to typing one cycle later than before. Switch `permission_mode` to `auto` (the default, and a prompting mode) to get the socket wake, or set `crossSessionInbound: "accept"` yourself in your user-level `settings.json`.
 6. **Hermits with `remote: false`** get `isolatePeerMachines: true` at the same restart, so a message to a session on another machine asks for approval first. Set `remote: true` if you want cross-machine sends to go through unprompted.
 7. **Remote-control session names with spaces or accents change on restart.** Operators whose `agent_name` contains spaces or accented characters will see the remote-control session name change after the next restart because `--remote-control` now receives the string sanitized to `[A-Za-z0-9_-]`. The tmux session name is unaffected — it comes from `tmux_session_name`, not `agent_name`.
+8. **Session-discipline block: no manual edit needed.** The trimmed CLAUDE-APPEND block rides the block refresh in Step 6/7, which replaces the marker-delimited block wholesale. If this operator hand-edited lines inside the block, those edits are overwritten; tell them once. Reload project context afterwards as the skill already instructs.
 
 ## [1.2.51] - 2026-08-29
 

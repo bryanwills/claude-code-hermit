@@ -99,6 +99,14 @@ describe('CLAUDE-APPEND size budget', () => {
     // notice arrives as a bare turn with no skill in context. Do NOT re-derive
     // this ceiling from a branch's own base — a number computed against a stale
     // base looks green on the branch and fails the moment main's block merges in.
+    // The 1.2.52 trim took the block from 10,172 B to ~8,500 B without removing
+    // a rule: rationale clauses, mechanism descriptions ("gates enforce this
+    // mechanically", "script-enforced"), and routing examples that skill
+    // descriptions already carry were cut; recall-first, delegation, and
+    // OPERATOR.md are one sentence each; bold stays only on the two
+    // classifier-facing bullets. The ceiling is left at 10,450 on purpose: the
+    // ~2 KB of headroom is margin for deliberate additions, each still owed a
+    // ledger line here, not a budget to refill.
     expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(10450);
   });
 });
