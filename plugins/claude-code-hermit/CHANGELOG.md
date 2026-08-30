@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Operator notices also land in the freshest live local Claude Code session, one target only; disable with `peer_notices.enabled`.
 - `/hermit-doctor` check `peer-inbox`: the resident is registered with Claude Code, its inbox socket accepts a connection (connect-only, never a post), and its registered name still matches. Warns, never fails — every failure mode falls back to typing the nudge.
 - Turns triggered by another local Claude Code session are attributed to a `peer` source, so `cost-reflect` shows them as "other sessions on this machine". The watchdog's own socket wake stays `heartbeat`.
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
@@ -45,6 +46,7 @@
 4. **Restart the hermit so it records its inbox socket.** The socket path is only visible from inside the session, so the resident stamps it into `state/runtime.json` at its next start. Until then the watchdog keeps typing its wedge nudge, exactly as before — nothing breaks, the socket path just isn't used yet. `bin/hermit-stop && bin/hermit-start` (or `hermit-docker restart`).
 5. **`permission_mode: "bypassPermissions"` hermits get no socket wake.** That mode holds an incoming peer message behind an approval dialog and drops it after five minutes, and `crossSessionInbound` can only be *tightened* from project-level settings, so the hermit cannot opt itself back in. Its wedge nudge falls back to typing one cycle later than before. Switch `permission_mode` to `auto` (the default, and a prompting mode) to get the socket wake, or set `crossSessionInbound: "accept"` yourself in your user-level `settings.json`.
 6. **Hermits with `remote: false`** get `isolatePeerMachines: true` at the same restart, so a message to a session on another machine asks for approval first. Set `remote: true` if you want cross-machine sends to go through unprompted.
+7. **Peer notices.** A `bypassPermissions` receiver holds the post for five minutes; `hermit-evolve` adds `peer_notices` automatically.
 
 ## [1.2.51] - 2026-08-29
 

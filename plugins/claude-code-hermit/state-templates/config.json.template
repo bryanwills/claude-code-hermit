@@ -20,6 +20,7 @@
   "always_on": false,
   "chrome": false,
   "push_notifications": true,
+  "peer_notices": { "enabled": true, "max_idle_minutes": 30 },
   "ask_gate": true,
   "idle_behavior": "discover",
   "routines": [

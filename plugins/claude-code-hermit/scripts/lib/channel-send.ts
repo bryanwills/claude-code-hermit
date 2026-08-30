@@ -20,6 +20,10 @@ import { settleConfig, readConfigRaw, readSettledConfig } from './config-read';
 import { readChannelToken } from './channel-token';
 import { recordChannelHealth } from './channel-health';
 import { appendShellLine } from './md-write';
+import { findPeerTargets } from './session-registry';
+import { postToSession } from './peer-post';
+import { agentNameFromConfig } from './dashboard';
+import { readRuntimeJson } from './runtime';
 
 type Json = any;
 
@@ -29,7 +33,7 @@ export interface SendResult {
   error?: string;
   // Set by sendOperatorNotice on the maintainer leg: where the tiered
   // resolution actually landed. Absent on a plain sendToChannel call.
-  route?: 'client' | 'maintainer_channel' | 'findings';
+  route?: 'client' | 'maintainer_channel' | 'findings' | 'peer';
   // True only when route === 'findings' — the notice was written to SHELL.md
   // Findings instead of crossing a channel.
   suppressed?: boolean;
@@ -40,6 +44,8 @@ export interface SendResult {
   // configured but unreachable): the append succeeded (ok:true) but nobody live
   // saw it. Callers gating a "notified" flag must read `delivered`, not `ok`,
   // so a degraded write still leaves the heartbeat re-announce fallback armed.
+  // Always false on the peer leg: a socket write confirms the bytes were
+  // flushed, never that the receiving session acted on them.
   delivered?: boolean;
 }
 
@@ -186,6 +192,7 @@ export interface OperatorNotice {
 export interface OperatorNoticeResult {
   client?: SendResult;
   maintainer?: SendResult;
+  peer?: SendResult;
 }
 
 const FINDINGS_MAX = 300;
@@ -257,6 +264,38 @@ export async function sendOperatorNotice(hermitDir: string, notice: OperatorNoti
       out.client = await sendToChannel(hermitDir, notice.client, {
         target: clientTarget ?? undefined, timeoutMs: notice.timeoutMs, config,
       });
+    }
+  }
+
+  if (notice.client && config.peer_notices.enabled) {
+    try {
+      const runtime: Json = readRuntimeJson(path.join(hermitDir, 'state'));
+      const maxIdleMinutes = config.peer_notices.max_idle_minutes;
+      const target = runtime
+        ? findPeerTargets(runtime, { maxIdleMs: maxIdleMinutes * 60_000 }, runtime.config_dir)[0]
+        : undefined;
+      if (!target) {
+        out.peer = { ok: false, route: 'peer', delivered: false, error: 'no_peer_target' };
+      } else {
+        const text = `[${agentNameFromConfig(config)} notice]\n${notice.client}`;
+        const verdict = await postToSession(target.messagingSocketPath, text);
+        out.peer = verdict === 'sent'
+          ? { ok: true, route: 'peer', delivered: false }
+          : { ok: false, route: 'peer', delivered: false, error: 'dead' };
+        if (verdict === 'sent' && isLoggingEnabled(config)) {
+          const logResult = logMessage(hermitDir, {
+            source: 'peer',
+            chat_id: target.name,
+            direction: 'out',
+            text,
+          });
+          if (!logResult.ok) {
+            process.stderr.write(`[channel-log] outbound capture failed: ${logResult.error}\n`);
+          }
+        }
+      }
+    } catch {
+      out.peer = { ok: false, route: 'peer', delivered: false, error: 'no_peer_target' };
     }
   }
 
