@@ -40,6 +40,7 @@
 - The Docker entrypoint's credential waits no longer exit after ten minutes. Under `restart: unless-stopped` that exit respawned the container into the same wait and broke `hermit-docker login`, which execs into a running container.
 - `docker-setup`'s first-run acceptance poll waits for an outcome (the tmux session, or `.boot-conflict`) with a 10-minute cap instead of a fixed 30s, so a slow first-run plugin install is not misread as a crash.
 - The `memory-size` warning distinguishes Claude Code's `/doctor` from `/hermit-doctor` and says it can be sent from chat or typed in a terminal.
+- A relayed harness command padded with extra whitespace (a doubled space, a tab, a mobile keyboard's non-breaking space) no longer fails the grammar and falls through to the model as ordinary text — which meant a refused flag could reach the session anyway. Multi-line bodies stay rejected.
 - An `agent_name` with no ASCII alphanumerics (`🤖`, `ロボ`) sanitized to the empty string and reached `--remote-control` as an empty session name. The fallback is now keyed on the sanitized result rather than on `agent_name` being unset: tmux session name first, then `hermit`.
 - Stopping a boot-conflicted (inert) container took ~2 minutes: the entrypoint's inert hold never trapped SIGTERM, and `hermit-docker down` polled the other, live instance's `runtime.json` for 60s. The hold now traps SIGTERM/SIGINT and exits immediately, and `down` short-circuits past the poll when `state/.boot-conflict` is present.
 

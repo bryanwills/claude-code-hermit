@@ -831,6 +831,14 @@ describe('hasLapsedLogin pane scan', () => {
     expect(hasLapsedLogin('tmux pane content\n❯ Try "fix typecheck errors"')).toBe(false);
   });
 
+  // A match suppresses the nudge and restart tiers, so a phrase short enough for a
+  // session to echo while merely TALKING about auth would disarm the watchdog. The
+  // captured pane carrying "Login expired" also carries "Please run /login", so
+  // dropping the bare phrase costs no detection.
+  test('a bare "Login expired" in ordinary output does not match', () => {
+    expect(hasLapsedLogin('❯ why did it say Login expired yesterday?')).toBe(false);
+  });
+
   // Same tail discipline as hasPendingQuestion: an error quoted far up in scrollback
   // is history, not the session's current state.
   test('the error scrolled out of the tail does not match', () => {

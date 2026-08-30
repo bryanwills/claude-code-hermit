@@ -366,12 +366,24 @@ export function hasPendingQuestion(paneContent: string): boolean {
 // whole mechanism. Captured live (CC 2.1.251, tmux capture-pane, the instrument this
 // file already uses): an expired /login credential answers "Login expired · Please run
 // /login", and a dead setup-token answers "Please run /login · API Error: 401 OAuth
-// access token is invalid." These are the only probe-verified spellings;
-// `Please run /login` covers both captured cases.
+// access token is invalid." Those two are the only probe-verified spellings, and
+// `Please run /login` alone covers both.
+//
+// The rest are unverified spellings kept as insurance against a wording change, which
+// is only affordable because each one is long and specific enough that ordinary pane
+// text does not contain it by accident. That distinction is load-bearing rather than
+// stylistic: a match SUPPRESSES the nudge and restart tiers, so a false positive
+// disarms the watchdog on its own core job. A bare "Login expired" is exactly the
+// phrase a session discussing its own auth handling echoes, so it is deliberately
+// absent — the captured pane carrying it also carries "Please run /login".
 const LAPSED_LOGIN_PATTERNS = [
   'Please run /login',
-  'Login expired',
   'OAuth access token is invalid',
+  '401 Invalid authentication credentials',
+  'OAuth token refresh failed',
+  'OAuth token revoked',
+  'OAuth token has expired',
+  'Claude.ai login expired',
 ];
 
 /** True when the pane TAIL shows Claude Code refusing to work until someone signs in. */
