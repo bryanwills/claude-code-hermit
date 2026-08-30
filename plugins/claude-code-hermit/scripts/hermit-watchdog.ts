@@ -1761,7 +1761,15 @@ async function main(): Promise<void> {
   // pane scanner above doesn't recognise — a future CC release's, or one that
   // scrolled — is still caught, and caught by the session's own account of
   // itself rather than by a regex over rendered text.
-  const registryWaiting = resident?.status === 'waiting';
+  //
+  // Bounded, unlike the pane leg. Both suppress the restart tiers below, but the
+  // pane leg fires on modals the operator is watching, while this one fires on the
+  // ones nothing else recognises — where step 11's pane-frozen restart used to be
+  // the only thing that ever cleared them on an unattended hermit. `statusUpdatedAt`
+  // dates the current state, so it is the dialog's own age: honour it for a day,
+  // then let that tier reclaim the session.
+  const registryWaiting =
+    resident?.status === 'waiting' && Date.now() - resident.statusUpdatedAt < 24 * 3600 * 1000;
   const pendingQuestion = (paneContent !== null && hasPendingQuestion(paneContent)) || registryWaiting;
   {
     const watchdogState = readWatchdogState();

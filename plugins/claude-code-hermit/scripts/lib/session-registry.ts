@@ -56,16 +56,21 @@ function procStartOf(pid: number): string | null {
   }
 }
 
-/** This machine's pid domain, in the registry's own spelling:
- *  `linux:<boot-id, dashes stripped>:<the /proc/self/ns/pid link target>`.
- *  Distinguishes a container's pid namespace from the host's when both share a
- *  config dir. Null on any platform that doesn't publish these. */
+/** This machine's pid domain, in the registry's own spelling, read off a live
+ *  entry: `linux:<contents of /etc/machine-id>:<the /proc/self/ns/pid link
+ *  target>`. Distinguishes a container's pid namespace from the host's when both
+ *  share a config dir. Null on any platform that doesn't publish these.
+ *
+ *  The spelling can only be confirmed against a real registry file — a test that
+ *  builds the fixture from this same function agrees with itself no matter what
+ *  it computes, so a mismatch here reads as "no live sessions" and silently
+ *  disables every consumer. */
 function localPidDomain(): string | null {
   if (os.platform() !== 'linux') return null;
   try {
-    const bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim().replace(/-/g, '');
+    const machineId = fs.readFileSync('/etc/machine-id', 'utf-8').trim();
     const ns = fs.readlinkSync('/proc/self/ns/pid');
-    return `linux:${bootId}:${ns}`;
+    return `linux:${machineId}:${ns}`;
   } catch {
     return null;
   }
@@ -120,6 +125,11 @@ export function readRegistry(configDir?: string): SessionEntry[] {
     if (!entry) continue;
     if (!pidAlive(entry.pid)) continue;
     const start = procStartOf(entry.pid);
+    // Asymmetric with pidDomain below on purpose. An entry carrying no `procStart`
+    // can't be told apart from a stale one at a reused pid, so it is dropped, not
+    // skipped: if a future release stops writing the field the registry reads empty
+    // and every consumer degrades, which is the safe direction. A missing pidDomain
+    // only risks a cross-container collision, so that one skips.
     if (start !== null && entry.procStart !== start) continue;
     if (domain !== null && typeof entry.pidDomain === 'string' && entry.pidDomain !== domain) continue;
     out.push(entry);

@@ -2128,8 +2128,11 @@ async function checkPeerInbox(p: DoctorPaths = PATHS) {
     }
 
     const notes: string[] = [];
+    // Must be a string, not merely truthy: net.connect() reads a number as a TCP
+    // port on localhost, so an unexpected shape in this undocumented file would
+    // turn a local-socket probe into a TCP dial.
     const sock = resident.messagingSocketPath;
-    const reachable = sock ? await socketAccepts(sock) : false;
+    const reachable = typeof sock === 'string' && sock ? await socketAccepts(sock) : false;
     if (!reachable) notes.push('inbox socket not accepting connections — wedge nudge will type');
 
     // A rename means peers address the hermit by a name it no longer answers to;

@@ -29,8 +29,8 @@ export function procStartOf(pid: number): string | null {
  *  deliberate: off Linux the lib skips the comparison, so any value passes. */
 export function localPidDomain(): string {
   try {
-    const bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf-8').trim().replace(/-/g, '');
-    return `linux:${bootId}:${fs.readlinkSync('/proc/self/ns/pid')}`;
+    const machineId = fs.readFileSync('/etc/machine-id', 'utf-8').trim();
+    return `linux:${machineId}:${fs.readlinkSync('/proc/self/ns/pid')}`;
   } catch {
     return 'linux:unknown:pid:[0]';
   }
