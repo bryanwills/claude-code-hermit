@@ -81,10 +81,14 @@ describe('CLAUDE-APPEND size budget', () => {
     // trimmed from the auto-mode denial bullet's restated fallback and the
     // proposal-id rationale sentence paid for most of it — +210 B net against
     // the ~500 B of margin, no raise.
-    // Raised to 9,800 for the cross-session idle-notice routing line, landing at
-    // 9,769 B. It must stay always-loaded because the notice arrives as a bare
-    // turn with no skill in context.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(9800);
+    // Raised to 10,450 by the guest-to-resident peer-routing branch, landing at
+    // ~9,966 B with ~500 B of working margin.
+    // The cross-session idle-notice routing line (+181 B) is funded from that
+    // margin — no raise. It must stay always-loaded because the notice arrives
+    // as a bare turn with no skill in context. Do NOT re-derive this ceiling
+    // from a branch's own base: a number computed against a stale base looks
+    // green on the branch and fails the moment main's block merges in.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(10450);
   });
 });
 

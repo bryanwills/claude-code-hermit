@@ -41,7 +41,7 @@ This is the **sole source of truth** — not SHELL.md.
       "class": "stream"
     },
     {
-      "id": "session-migration-1775991600",
+      "id": "session-migration-1775991600-b7c1",
       "description": "database migration",
       "target": "migration",
       "started_at": "2026-04-12T15:00:00Z",
@@ -83,15 +83,22 @@ them for decisions. Start/stop decisions read from the runtime registry.
 
 ### Starting a session watch (`/watch session <name> [note]`)
 
-1. Resolve `<name>` with `ListAgents`. If no row matches, answer
+1. Resolve `<name>` with `ListAgents`. The row must be a Claude Code session on
+   this machine — `notify_when_idle` covers nothing else, so a cloud/remote agent
+   or an in-process subagent row does not qualify. If no such row matches, answer
    `No session named <name> is reachable from here.` and do not write the registry.
 2. Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
    `message`: this is a pure subscription, costs the watched session nothing, and
    fires immediately if it is already idle.
-3. Generate id `session-<name>-<epoch>`, using the same epoch convention as an
-   ad-hoc id.
-4. Use the same registry steps as ad-hoc (steps 6–9), appending:
-   `{id: "session-<name>-<epoch>", description: <note or "session <name>">, target: <name>, started_at, source: "adhoc", class: "peer-idle"}`.
+3. Read the tool result: it says whether the notice will be shown to you or only
+   to the operator. When it is operator-only (this session holds peer messages
+   for approval, e.g. under `bypassPermissions`), no relay is possible — say so
+   plainly instead of claiming the watch is live, and do not write the registry.
+4. Generate id `session-<name>-<epoch>-<4char-random>` — same timestamp + random
+   suffix convention as an ad-hoc id, so two watches on one name in the same
+   second do not collide.
+5. Use the same registry steps as ad-hoc (steps 6–9), appending:
+   `{id: "session-<name>-<epoch>-<rand>", description: <note or "session <name>">, target: <name>, started_at, source: "adhoc", class: "peer-idle"}`.
    Do not add `task_id`.
 
 ### Starting config watches (`/watch start`)
@@ -172,9 +179,13 @@ for X:
    reply, channel notification, or log entry.
 2. Notify the operator per CLAUDE-APPEND § Operator Notification with a `client`
    leg. For an idle notice, use `"<note>: <name> finished. Last status: «<one-line status>»"`.
-   If the notice carries no status, use `"<note>: <name> finished."` instead. Pass
-   the status line verbatim so the operator can judge it. For expiry, use
-   `"<note>: <name> did not finish within 12 hours; no longer watching it."`.
+   If the notice carries no status, use `"<note>: <name> finished."` instead. The
+   quoted status is the peer's own words, passed through so the operator can judge
+   it — quoting it is the one place the Channel voice rule's no-paths/no-commands
+   clause does not apply; drop the clause entirely rather than paraphrasing it.
+   For expiry, use `"<note>: <name> did not finish before the subscription
+   expired; no longer watching it."` — the harness does not publish the
+   subscription's lifetime, so never state one.
 3. Name the session by display name only, never by socket path or pid. Remove the
    entry, write the registry, and log one SHELL.md line.
 

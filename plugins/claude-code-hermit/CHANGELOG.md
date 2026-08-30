@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- `/watch session <name> [note]` subscribes to another local session's next idle notice via `SendMessage` with `notify_when_idle` as a pure subscription with no message, lists it in `/watch status`, and relays the one-shot finished or expired notice to the operator's channel; like every watch, it dies with the session.
+- `/watch session <name> [note]` subscribes to another local session's next idle notice via `SendMessage` with `notify_when_idle` as a pure subscription with no message, lists it in `/watch status`, and relays the one-shot finished or expired notice to the operator's channel; like every watch, it dies with the session. On a hermit that holds peer messages for approval the notice reaches the operator's screen instead of the session, so the watch is declined up front rather than registered as live.
 - `/hermit-doctor` check `peer-inbox`: the resident is registered with Claude Code, its inbox socket accepts a connection (connect-only, never a post), and its registered name still matches. Warns, never fails — every failure mode falls back to typing the nudge.
 - Turns triggered by another local Claude Code session are attributed to a `peer` source, so `cost-reflect` shows them as "other sessions on this machine". The watchdog's own socket wake stays `heartbeat`.
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.
