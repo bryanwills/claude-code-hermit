@@ -298,4 +298,6 @@ A few basics:
 HERMIT_WELCOME
 ```
 
-No file paths or internal jargon in this text — it's the owner's first message. The only slash commands allowed are the five control commands `/pause`, `/stop`, `/resume`, `/snooze`, `/status`; every other slash command stays out. If the send fails, note it in the summary above but don't block setup: "Welcome message couldn't be sent (`<error>`) — the channel is paired; let the owner know directly this time."
+No file paths or internal jargon in this text — it's the owner's first message. The only slash commands allowed are the five control commands `/pause`, `/stop`, `/resume`, `/snooze`, `/status`; every other slash command stays out.
+
+Use this send as the post-hatch delivery confirmation and report it explicitly in the summary. On success: "Test message sent — check <channel> and tell me if it didn't arrive." If the send fails, don't block setup: "Channel paired, but the test message didn't arrive (`<error>`) — check the pairing before relying on this channel."

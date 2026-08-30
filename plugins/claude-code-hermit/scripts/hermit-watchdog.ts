@@ -366,23 +366,24 @@ export function hasPendingQuestion(paneContent: string): boolean {
 // whole mechanism. Captured live (CC 2.1.251, tmux capture-pane, the instrument this
 // file already uses): an expired /login credential answers "Login expired · Please run
 // /login", and a dead setup-token answers "Please run /login · API Error: 401 OAuth
-// access token is invalid." The rest are the spellings Claude Code's error reference
-// documents for the same class. `Please run /login` covers both probed cases; the
-// others are cheap insurance against a wording change in one of them.
+// access token is invalid." Those two are the only probe-verified spellings, and
+// `Please run /login` alone covers both.
 //
-// The generic 401 line is safe here only because callers exclude API-key and
-// cloud-provider hermits before asking: in the two remaining auth modes (/login and
-// setup-token) a 401 IS an auth lapse, while an API-key hermit emits the same text
-// for a cause no login can fix.
+// The rest are unverified spellings kept as insurance against a wording change, which
+// is only affordable because each one is long and specific enough that ordinary pane
+// text does not contain it by accident. That distinction is load-bearing rather than
+// stylistic: a match SUPPRESSES the nudge and restart tiers, so a false positive
+// disarms the watchdog on its own core job. A bare "Login expired" is exactly the
+// phrase a session discussing its own auth handling echoes, so it is deliberately
+// absent — the captured pane carrying it also carries "Please run /login".
 const LAPSED_LOGIN_PATTERNS = [
   'Please run /login',
-  'Login expired',
-  'Claude.ai login expired',
   'OAuth access token is invalid',
+  '401 Invalid authentication credentials',
   'OAuth token refresh failed',
   'OAuth token revoked',
   'OAuth token has expired',
-  '401 Invalid authentication credentials',
+  'Claude.ai login expired',
 ];
 
 /** True when the pane TAIL shows Claude Code refusing to work until someone signs in. */

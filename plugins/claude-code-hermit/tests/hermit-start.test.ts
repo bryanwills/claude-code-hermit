@@ -495,8 +495,6 @@ describe('config contract: template and DEFAULT_CONFIG must mirror', () => {
     'doctor', 'doctor.routine_cost_floor_usd',
     // Read by hermit-watchdog through lib/config-read (own default of '4h') — not part of the loadConfig merge.
     'watchdog.wedge_floor',
-    // Read by lib/channel-send through lib/config-read (own defaults) — not part of the loadConfig merge.
-    'peer_notices', 'peer_notices.enabled', 'peer_notices.max_idle_minutes',
   ]);
 
   test('key path sync: flattened key paths must match (excluding known template-only keys)', () => {
@@ -751,6 +749,20 @@ describe('peer name — --name / --remote-control', () => {
 
   test('peerName falls back to hermit-<project> when agent_name is unset', () => {
     expect(peerName({})).toBe(`hermit-${path.basename(tmpdir)}`);
+  });
+
+  test('peerName falls back when agent_name has no ASCII alphanumerics', () => {
+    expect(peerName({ agent_name: '🤖' })).toBe(`hermit-${path.basename(tmpdir)}`);
+  });
+
+  test('peerName never returns an empty name', () => {
+    expect(peerName({ agent_name: '···', tmux_session_name: '···' })).toBe('hermit');
+  });
+
+  test('--remote-control is never launched with an empty name', async () => {
+    const config = { agent_name: '🤖', tmux_session_name: '···', remote: true };
+    const { cmd } = await runBuildClaudeCommand(config, CLAUDE_FETCH_FAILS);
+    expect(cmd[cmd.indexOf('--remote-control') + 1]).toBe('hermit');
   });
 
   test('--name and --remote-control both carry the same sanitized name', async () => {

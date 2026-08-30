@@ -130,12 +130,32 @@ describe('parseHarnessCommand grammar', () => {
     expect(parseHarnessCommand('/code-review low; rm x')).toBeNull();
     expect(parseHarnessCommand('/code-review low\n/clear')).toBeNull();
   });
+
+  // Splitting on a literal ' ' made padding whitespace a parse failure, and a parse
+  // failure is a fallthrough to the model rather than a refusal — so a doubled space
+  // was enough to route an outward-write flag around skillCommandRefusal.
+  test('padding whitespace does not slip a flag past the grammar', () => {
+    expect(parseHarnessCommand('/code-review low  --comment')).toEqual({
+      command: '/code-review',
+      arg: 'low --comment',
+    });
+    expect(parseHarnessCommand('/code-review\tlow\t--post')).toEqual({
+      command: '/code-review',
+      arg: 'low --post',
+    });
+    expect(parseHarnessCommand('/model  sonnet')).toEqual({ command: '/model', arg: 'sonnet' });
+    // A mobile keyboard's non-breaking space is padding too, not a token.
+    expect(parseHarnessCommand('/code-review\u00a0low')).toEqual({ command: '/code-review', arg: 'low' });
+    // Still exactly-two-token for /advisor: a bare one must never reach the picker.
+    expect(parseHarnessCommand('/advisor   ')).toBeNull();
+  });
 });
 
 describe('skill command policy', () => {
   test('refuses ultra code reviews and identifies only relayed skill commands', () => {
     expect(skillCommandRefusal({ command: '/code-review', arg: 'ultra' })).toContain('dialog');
     expect(skillCommandRefusal({ command: '/code-review', arg: 'low --post' })).toContain('--post');
+    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --comment' })).toContain('--comment');
     expect(skillCommandRefusal({ command: '/code-review', arg: 'low --fix' })).toBeNull();
     expect(skillCommandRefusal({ command: '/doctor', arg: null })).toBeNull();
     expect(isSkillCommand('/doctor')).toBe(true);

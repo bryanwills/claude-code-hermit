@@ -55,7 +55,17 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
   const trimmed = body.trim();
   if (!trimmed.startsWith('/')) return null;
 
-  const parts = trimmed.split(' ');
+  // A multi-line body is never one command: rejected before the split so that
+  // splitting on whitespace below cannot fold an embedded `\n/clear` into an argument.
+  if (/[\r\n]/.test(trimmed)) return null;
+
+  // Split on any whitespace run, not a literal space: `/code-review low  --comment`,
+  // a tab-separated form, and a mobile keyboard's non-breaking space must all reach the
+  // same grammar as the single-spaced one. Splitting on ' ' left an empty (or
+  // whitespace-bearing) token that failed the arg shape, so the whole command parsed as
+  // null — and a null here is not a refusal, it is a fallthrough to the model, which is
+  // exactly what skillCommandRefusal exists to take out of the loop.
+  const parts = trimmed.split(/\s+/);
   const command = parts[0].toLowerCase();
 
   if (BARE_COMMANDS.has(command)) {
@@ -82,8 +92,9 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
 export function skillCommandRefusal(parsed: ParsedCommand): string | null {
   if (parsed.command !== '/code-review' || !parsed.arg) return null;
   const tokens = parsed.arg.split(' ').map((token) => token.toLowerCase());
-  if (tokens.includes('--post')) {
-    return '--post writes a comment to the pull request under the operator\'s GitHub account, which is not a chat-authorizable action; run the review without it.';
+  const outwardWriteFlag = tokens.find((token) => token === '--post' || token === '--comment');
+  if (outwardWriteFlag) {
+    return `${outwardWriteFlag} writes a comment to the pull request under the operator's GitHub account, which is not a chat-authorizable action; run the review without it.`;
   }
   if (!tokens.includes('ultra')) return null;
   return 'ultra opens an interactive launch dialog that nobody in chat can answer and can start a cloud-billed run; choose low, medium, or high.';

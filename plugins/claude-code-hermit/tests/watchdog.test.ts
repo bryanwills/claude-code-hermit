@@ -163,6 +163,31 @@ function withHermit(fn: (h: Hermit) => Promise<void> | void) {
   };
 }
 
+/**
+ * doRestart spawns hermit-start `detached` and `unref`s it, so the marker the stub
+ * writes lands only after a fork, an exec of bash, and a write — none of which the
+ * watchdog process waits for before exiting. A bare existsSync right after the await
+ * is racing that chain and wins only while the runner is idle; it loses on a loaded
+ * one (macOS CI, 2026-08-30). Poll instead. Only the positive assertion can use this:
+ * waiting for an absence is just a sleep, so the no-spawn paths keep asserting the
+ * `restart-aborted` event, which is written synchronously.
+ *
+ * 20s matches the deadline `harness-command-delivery`, `proc-survivor` and
+ * `hermit-stop` already converged on for this same shape, and callers pair it with a
+ * 45s per-test timeout because Bun's `--timeout` does not extend an in-test
+ * `Date.now()` deadline — without the override the poll is unreachable under the 5s
+ * default a local `bun test` uses.
+ */
+async function waitForStartMarker(h: Hermit, timeoutMs = 20_000): Promise<boolean> {
+  const marker = path.join(h.dir, 'hermit-start-called');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(marker)) return true;
+    await Bun.sleep(25);
+  }
+  return fs.existsSync(marker);
+}
+
 // -------------------------------------------------------
 // 1. Config gate: watchdog.enabled false → no-op
 // -------------------------------------------------------
@@ -286,8 +311,8 @@ describe('dead session with fresh liveness (orphan guard)', () => {
     const events = fs.readFileSync(eventsFile(h), 'utf-8');
     expect(events).toContain('dead-process');
     expect(events).not.toContain('restart-aborted');
-    expect(fs.existsSync(path.join(h.dir, 'hermit-start-called'))).toBe(true);
-  }));
+    expect(await waitForStartMarker(h)).toBe(true);
+  }), 45000);
 });
 
 // -------------------------------------------------------
@@ -403,8 +428,8 @@ describe('restart subcommand', () => {
     expect(r.exitCode).toBe(0);
     const events = fs.readFileSync(eventsFile(h), 'utf-8');
     expect(events).toContain('restart');
-    expect(fs.existsSync(path.join(h.dir, 'hermit-start-called'))).toBe(true);
-  }));
+    expect(await waitForStartMarker(h)).toBe(true);
+  }), 45000);
 });
 
 // -------------------------------------------------------
@@ -829,6 +854,14 @@ describe('hasLapsedLogin pane scan', () => {
 
   test('ordinary pane content does not match', () => {
     expect(hasLapsedLogin('tmux pane content\n❯ Try "fix typecheck errors"')).toBe(false);
+  });
+
+  // A match suppresses the nudge and restart tiers, so a phrase short enough for a
+  // session to echo while merely TALKING about auth would disarm the watchdog. The
+  // captured pane carrying "Login expired" also carries "Please run /login", so
+  // dropping the bare phrase costs no detection.
+  test('a bare "Login expired" in ordinary output does not match', () => {
+    expect(hasLapsedLogin('❯ why did it say Login expired yesterday?')).toBe(false);
   });
 
   // Same tail discipline as hasPendingQuestion: an error quoted far up in scrollback

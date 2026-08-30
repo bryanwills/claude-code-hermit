@@ -503,27 +503,6 @@ describe('push_notifications validation', () => {
   });
 });
 
-describe('peer_notices validation', () => {
-  test('valid values and an absent key are accepted', () => {
-    expect(runValidate({}).errors.some((e: string) => e.includes('peer_notices'))).toBe(false);
-    expect(runValidate({
-      peer_notices: { enabled: false, max_idle_minutes: 30 },
-    }).errors.some((e: string) => e.includes('peer_notices'))).toBe(false);
-  });
-
-  test('enabled must be a boolean', () => {
-    const out = runValidate({ peer_notices: { enabled: 'yes' } });
-    expect(out.errors).toContain('peer_notices.enabled: must be a boolean');
-  });
-
-  test('max_idle_minutes must be a positive number', () => {
-    for (const val of [0, -1, '30', Number.NaN]) {
-      const out = runValidate({ peer_notices: { max_idle_minutes: val } });
-      expect(out.errors).toContain('peer_notices.max_idle_minutes: must be a positive number');
-    }
-  });
-});
-
 describe('settings_from_chat retirement', () => {
   // A leftover key is inert, not dangerous: nothing reads it since it became
   // per-channel `settings_policy`. Erroring would stop a half-migrated hermit

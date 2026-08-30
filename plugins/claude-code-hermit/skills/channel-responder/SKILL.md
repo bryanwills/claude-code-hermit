@@ -115,7 +115,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - `/model`, `/effort`, and `/permission-mode` apply to *this* session only: the next `hermit-start` re-asserts `config.model` / `config.effort` / `config.permission_mode`. `/advisor` is the exception — see below. If Claude Code rejects the argument, that shows in the terminal, not in chat — so don't promise it took effect.
   - `/permission-mode` accepts `default`, `acceptEdits`, or `auto`. Anything else is refused by that hook with a reason to relay — `plan` because it would block you from replying at all, `bypassPermissions` because widening autonomy is a terminal decision, `dontAsk` because Claude Code cannot reach it mid-session. Unlike the others it is applied by driving Claude Code's mode cycle and reading the status bar back, so the next prompt tells you the mode the session actually landed in: report that, not the one that was asked for.
   - `/advisor <model>` pairs the main model with a second, typically stronger model that Claude Code consults at decision points (experimental, Anthropic API only); `/advisor off` clears it. Claude Code owns the valid set — the hook shape-checks the argument and passes it through, so don't recite a value list of your own. A rejected argument renders inline **in the terminal** and never reaches you: report the command as delivered, not confirmed, and never quote a rejection message you did not see. Unlike `/model`/`/effort` there is no cached-context pause to confirm. Unlike every other harness command here, the selection is **not** re-asserted at the next boot — Claude Code saves it to its own user-level settings (shared by every session using that config directory), so it persists across restarts and each advisor call adds spend; `/advisor off` is the only way back.
-  - `/doctor` and `/code-review` are relayed skill commands. Acknowledge briefly; the hook runs them after this turn ends, and that later turn delivers the result to the requesting chat. `/doctor` requires settings authority. The hook refuses `ultra` and `--post`, and its refusal reason is relayed instead of running the command.
+  - `/doctor` and `/code-review` are relayed skill commands. Acknowledge briefly; the hook runs them after this turn ends, and that later turn delivers the result to the requesting chat. `/doctor` requires settings authority. The hook refuses `ultra`, `--post`, and `--comment`, and its refusal reason is relayed instead of running the command. `--fix` is allowed — it only edits this hermit's own tree.
   - A near-miss (`/model` with no argument, a bare `clear`, or prose mentioning one) is **not** intercepted — classify it under the categories below instead. A bare `/advisor` is the exception: it is not intercepted *and* must never be invoked — natively it opens a blocking picker nobody is there to answer, which would wedge the session. Reply asking for `/advisor <model>` or `/advisor off` instead.
 
 - **Slash command** (message starts with `/`, e.g. `/claude-code-hermit:simplify`, `/plugin:command`)
@@ -244,8 +244,11 @@ If the correction is a stated preference/recurrence with **no** clearly named sk
 
 Canonical protocol for proactively notifying the operator (referenced from `CLAUDE-APPEND.md` § Operator Notification). Main owns the outbound send and any `AskUserQuestion`; a delegated sub-step returns the message and main runs this protocol.
 
-- **Always** compose the audience version(s) and deliver them in one
-  call; do not resolve the channel yourself, the script owns routing:
+- **If no channel is enabled** (channels block absent, `channels === {}`, or every channel-config entry has `enabled === false` — exclude the `primary` string pointer when iterating):
+  - If `push_notifications === true` in `config.json`, fire `PushNotification(message="<condensed one line, per `CLAUDE-APPEND.md` § Operator Notification push format>", status="proactive")`. Push is best-effort; do not retry on failure and do not log a `channel-send-unavailable` issue for this branch — the operator's empty-channels config is intentional.
+  - Respond in conversation either way (the conversation response is the durable record).
+- **If at least one channel is enabled**, compose the audience version(s) and deliver them in one
+  call — do not resolve the channel yourself, the script owns routing:
   ```
   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
   ```
@@ -266,21 +269,18 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
 
   Compose each version in the operator's configured `language`.
 
-  The script prints `{ "delivered", "degraded", "no_channel", "channels_configured", "result" }`.
+  The script prints `{ "delivered", "degraded", "no_channel", "result" }`.
   - **Exit 0** — every leg landed. Done.
   - **Exit 2** — the payload was rejected (unknown key, empty audience, bad value; the reason is on
     stderr and nothing was sent). Fix the payload and re-run. This is your error, not the channel's:
     do not push and do not record a `channel-send-unavailable` issue.
   - **Exit 1** — a leg did not land (including `degraded: true`, where maintainer detail reached only
-    SHELL.md Findings because a configured maintainer chat was unreachable). When
+    SHELL.md Findings because a configured maintainer chat was unreachable). If
     `push_notifications === true`, fire `PushNotification(message="<condensed one line, per
-    § Operator Notification push format>", status="proactive")` and respond in conversation either way.
-    Whether that failure is also worth an issue is decided by `channels_configured`, not `no_channel`:
-    with `no_channel: true` **and** `channels_configured: false` the operator configured no channel at
-    all — that is intentional, so do not record a `channel-send-unavailable` issue. In every other case
-    a channel is configured and did not take the message (unpaired, empty `allowed_users`, unreadable
-    config, platform error): log the undelivered content to SHELL.md Findings and record a deduped
-    `channel-send-unavailable` issue.
+    § Operator Notification push format>", status="proactive")`, log the undelivered content to SHELL.md
+    Findings, and record a deduped `channel-send-unavailable` issue — you only reach this branch with a
+    channel enabled, so even `no_channel: true` means it is configured but unreachable (unpaired,
+    empty `allowed_users`, unreadable config), which is exactly the signal the operator needs.
 - Never send a proactive notice through a channel reply tool, and never advise `/<channel>:access`
   for a maintainer chat — the maintainer chat is reached by direct API POST, not `access.json` pairing (its one inbound authority is the settings tier, `docs/security.md` § Tiered settings authority, not reply routing).
 

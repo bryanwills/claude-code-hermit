@@ -23,8 +23,8 @@ Config-defined watches auto-register on session start. Ad-hoc watches via `/watc
 
 Main owns outbound sends and `AskUserQuestion`. To notify the operator proactively:
 
-- **Always:** compose the audience version(s) and run `.claude-code-hermit/bin/hermit-run channel-send .claude-code-hermit --notice` with `{"client": "<plain>", "maintainer": "<technical/spend detail>"}` on stdin (either key alone is fine).
-- **If the result has `no_channel: true`:** when `push_notifications === true`, also fire `PushNotification(message="<≤200 chars, no markdown, actionable first>", status="proactive")`; respond in conversation either way. Log a `channel-send-unavailable` issue only when `channels_configured: true`.
+- **No channel enabled** (no channel entry with `enabled !== false`, excluding `primary`): if `push_notifications === true`, fire `PushNotification(message="<≤200 chars, no markdown, actionable first>", status="proactive")` and respond in conversation. Empty-channels config is intentional — don't log an issue.
+- **Channel enabled:** compose the audience version(s) and run `.claude-code-hermit/bin/hermit-run channel-send .claude-code-hermit --notice` with `{"client": "<plain>", "maintainer": "<technical/spend detail>"}` on stdin (either key alone is fine).
 
 Delivery failures, degraded legs, and exit-code handling: `/claude-code-hermit:channel-responder` § Outbound notification protocol.
 
