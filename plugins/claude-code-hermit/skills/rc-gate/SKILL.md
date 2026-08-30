@@ -20,7 +20,7 @@ All four are `.claude-code-hermit/bin/hermit-run rc-server <verb>`:
 | Verb | What it does | Output |
 |---|---|---|
 | `start` | opens the gate (tmux session `hermit-rc-gate`), waits for the server | `ready <url>` or a one-line refusal |
-| `status` | one pane read | `down`, `starting` (up but not serving yet), `ready`, or `connected N/32` |
+| `status` | one pane read | `down`, `starting` (up but not serving yet), `ready`, or `connected N/32`; a second `spawns: N live (<names>)` line when spawn worktrees exist |
 | `stop` | closes the gate, then sweeps | `closed` / `down`, plus any removals |
 | `gc` | sweeps worktrees left by archived spawns | one line per worktree removed, or kept because it holds uncommitted work |
 
@@ -42,6 +42,7 @@ account can spawn while the gate is open.
 When `start` refuses with the not-logged-in verdict, that is final. Say it once,
 don't retry, don't propose workarounds.
 
-Run `gc` when the operator mentions leftover or stuck worktrees; `stop` already
-sweeps. A `kept` line means that worktree holds uncommitted work — say it is
-there and let the operator decide, never delete it for them.
+Leftover worktrees are swept automatically while the routine monitor runs. Run
+`gc` for an on-demand sweep that reports `kept`; `stop` already sweeps. A `kept`
+line means that worktree holds uncommitted work: say it is there and let the
+operator decide, never delete it for them.

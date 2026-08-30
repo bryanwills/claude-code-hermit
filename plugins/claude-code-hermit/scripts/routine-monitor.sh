@@ -16,13 +16,27 @@
 set -u
 INTERVAL="${1:?usage: routine-monitor.sh <interval_seconds> <hermit_state_dir>}"
 RT_DIR="${2:?usage: routine-monitor.sh <interval_seconds> <hermit_state_dir>}"
+# Absolute: the sweep below runs it from inside a `cd` subshell, so a relative
+# $0 (bash scripts/routine-monitor.sh …) would resolve against the wrong dir.
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 # Array, not a string — see heartbeat-monitor.sh for why.
 if [[ -n "${ROUTINE_DUE_SCRIPT:-}" ]]; then
   DUE=("$ROUTINE_DUE_SCRIPT")
 else
-  DUE=("$(dirname "$0")/routines.ts" due)
+  DUE=("$SCRIPT_DIR/routines.ts" due)
 fi
 fail_count=0
+# Spawn-worktree sweep. The root is the git toplevel, not $RT_DIR/..: rc-server
+# creates and scans worktrees under the repo root, which is only the hermit's
+# project dir when the hermit was hatched there — gating on the wrong dir would
+# silently never sweep. Every SWEEP_EVERY-th poll, not every one: a dirty orphan
+# is kept by design, so an every-poll sweep would cost a bun spawn and a full
+# process scan (lsof over every process on darwin) once a minute for as long as
+# that worktree sits there.
+SWEEP_ROOT="$(cd "$RT_DIR/.." 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)"
+[[ -n "$SWEEP_ROOT" ]] || SWEEP_ROOT="$RT_DIR/.."
+SWEEP_EVERY=10
+sweep_tick=0
 # Emission grammar (this line's "$out" and the ROUTINE_MONITOR_ERROR line below) is
 # load-bearing: record-operator-action.ts isRoutinePrompt() drops these lines;
 # tests/auto-close.test.ts drift guard syncs them.
@@ -36,6 +50,10 @@ while true; do
       echo "ROUTINE_MONITOR_ERROR: routine-due failed (${fail_count} consecutive)"
     fi
   fi
+  if (( sweep_tick % SWEEP_EVERY == 0 )) && compgen -G "$SWEEP_ROOT/.claude/worktrees/bridge-*" >/dev/null; then
+    (cd "$SWEEP_ROOT" && bun "$SCRIPT_DIR/rc-server.ts" sweep) >/dev/null 2>&1 || true
+  fi
+  sweep_tick=$((sweep_tick + 1))
   [[ -n "${ROUTINE_MONITOR_ONCE:-}" ]] && break
   sleep "$INTERVAL"
 done

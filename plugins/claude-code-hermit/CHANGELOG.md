@@ -4,6 +4,8 @@
 
 ### Added
 - `docker.fleet_mesh` shares the session registry, inbox sockets, and a PID namespace between Docker hermits on one box so they can address each other with `ListAgents`/`SendMessage`. Opt-in because it needs two host-created volumes and a PID-namespace holder container that the plugin cannot provision: enable it in `config.json`, then run `/docker-setup` and `hermit-docker update`.
+- Automatic silent sweep of dead, clean `.claude/worktrees/bridge-*` worktrees while the routine monitor runs, plus a live-spawn summary from `rc-server status`.
+- Guest sessions in hatched folders can report finished work and ask the resident history questions over cross-session messaging, while `GUEST_REPORT:` turns do not count as operator activity.
 - `/hermit-doctor` check `peer-inbox`: the resident is registered with Claude Code, its inbox socket accepts a connection (connect-only, never a post), and its registered name still matches. Warns, never fails — every failure mode falls back to typing the nudge.
 - Turns triggered by another local Claude Code session are attributed to a `peer` source, so `cost-reflect` shows them as "other sessions on this machine". The watchdog's own socket wake stays `heartbeat`.
 - Trusted chats can relay `/doctor` and `/code-review` into the managed session and receive the result in the requesting chat; `/doctor` requires settings authority, and `ultra`/`--post` are refused.

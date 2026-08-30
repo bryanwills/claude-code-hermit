@@ -25,6 +25,8 @@ process.stdout.on('error', () => {});
 //                          the clock frozen, so the midnight post-close /clear fired
 //                          mid-exchange). This hook is the mechanical write site;
 //                          channel-responder/SKILL.md 1d's --force is a fallback.
+//   GUEST_REPORT:…      — a guest session in this folder reporting finished work over the
+//                          inbox socket. Another local session is not the operator.
 //   HEARTBEAT_EVALUATE/HEARTBEAT_ERROR/ROUTINE_DUE/ROUTINE_MONITOR_ERROR — Monitor-delivered
 //                          scheduler wake notifications (heartbeat-monitor.sh, routines.ts due,
 //                          routine-monitor.sh) — see isRoutinePrompt below
@@ -111,6 +113,9 @@ function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
     return !isAllowedSender(config, envelope.source, envelope.userId);
   }
   if (INJECTED_EXACT.has(t)) return true;
+  // Peer delivery passes only the message body to this hook, not the
+  // `Message from @...` frame shown in the session transcript.
+  if (t.startsWith('GUEST_REPORT:')) return true;
   // Harness task notifications — Monitor events AND subagent/background-task
   // completions. Live-probed 2026-08-19 (CC 2.1.235): the harness wraps the
   // emitter's stdout in an envelope before it reaches this hook —
