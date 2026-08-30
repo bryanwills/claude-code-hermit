@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.52] - 2026-08-30
 
 ### Added
 - `/watch session <name> [note]` subscribes to another local session's next idle notice via `SendMessage` with `notify_when_idle` as a pure subscription with no message, lists it in `/watch status`, and relays the one-shot finished or expired notice to the operator's channel; like every watch, it dies with the session. On a hermit that holds peer messages for approval the notice reaches the operator's screen instead of the session, so the watch is declined up front rather than registered as live.

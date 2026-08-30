@@ -1,7 +1,7 @@
 <p align="center">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.51-green.svg" alt="Version 1.2.51" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.52-green.svg" alt="Version 1.2.52" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -117,6 +117,8 @@ The wizard sets up your agent's identity, scans your folder, generates `OPERATOR
 > **Just trying it?** After `hatch`, run `.claude-code-hermit/bin/hermit-start --no-tmux` for sessions, routines, heartbeat, and the learning loop without 24/7 autonomy. Run `/claude-code-hermit:channel-setup` first if you want Discord or Telegram.
 
 ### 3. Go Always-on
+
+> **Prerequisites:** [Docker Compose](https://docs.docker.com/compose/install/) v2, or [tmux](https://github.com/tmux/tmux/wiki/Installing) for the no-Docker path.
 
 ```
 /claude-code-hermit:docker-setup
