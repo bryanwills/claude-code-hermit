@@ -43,7 +43,15 @@ Run `git status` and `git diff HEAD` (or `git diff` if nothing staged yet). Scan
 
 If anything suspicious appears, pause and ask the user before continuing.
 
-### 2. Update CHANGELOG.md (skip for `$SCOPE = root`)
+### 2. Run /simplify on the change
+
+Invoke the `simplify` skill, scoped to the paths from step 0 (the change about to be committed). It runs three reviewers in parallel and applies the surviving edits to the working tree, so the tidied version is what gets recorded — no "fix typo" follow-up commit a minute later.
+
+This is not optional and has no diff-size or file-type exemption: a markdown-only change, a one-line fix, and a 300-line refactor all get the pass. Skip it only when the user explicitly passes `--no-simplify` or says in so many words to skip the cleanup — never on your own judgement that the diff looks too small or too trivial to be worth it.
+
+If simplify applied edits, re-read them before continuing: they are auto-applied changes to the code you are about to commit, and they belong in the same commit as the work itself. Surface its report (or note that it found nothing) when you get to step 4.
+
+### 3. Update CHANGELOG.md (skip for `$SCOPE = root`)
 
 For `$SCOPE = root`: skip this step entirely. Root-scope edits (CI tweaks, root README, `.github/`) never ship to operators, so there is no operator-facing changelog to update.
 
@@ -55,11 +63,11 @@ Follow the changelog-bullet format defined canonically in root `CLAUDE.md` §Com
 
 Do not create a new version header (`## [X.Y.Z]`). That belongs to `/release`.
 
-### 3. Draft the commit message
+### 4. Draft the commit message
 
 Write a short imperative first line (≤72 chars). Add a body only if the why isn't obvious from the diff. Show the proposed message to the user and wait for approval.
 
-### 4. Commit
+### 5. Commit
 
 Once approved, stage path-scoped (never `-A`):
 

@@ -155,6 +155,27 @@ export function findResident(runtime: any, configDir?: string): SessionEntry | n
 }
 
 /**
+ * The hermit record governing `cwd`, or null when none does.
+ *
+ * The same bounded walk-up cc-compat.ts's hermitDir() does, reimplemented here
+ * rather than imported: this module is read by hooks and must stay free of
+ * cc-compat's git spawn. A single `<cwd>/.claude-code-hermit` probe would miss
+ * a resident whose session was launched from a subdirectory of its project and
+ * hand a notice to another hermit instead of a person.
+ */
+function hermitMarkerFor(cwd: string): any | null {
+  let dir = cwd;
+  for (let i = 0; i < 8; i++) {
+    const marker = readRuntimeJson(path.join(dir, '.claude-code-hermit', 'state'));
+    if (marker) return marker;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
  * The freshest recently-transitioned interactive session that is not managed
  * by this or another hermit, if one can be validated.
  */
@@ -163,17 +184,24 @@ export function findPeerTargets(
   { maxIdleMs }: { maxIdleMs: number },
   configDir?: string,
 ): SessionEntry[] {
+  // Without our own pid there is no way to rule ourselves out: the caller's own
+  // runtime.json IS the marker read below, so a missing `session_pid` makes the
+  // sender its own freshest peer and the notice loops back into this session.
+  // A session that booted before the stamp existed is the documented case.
+  if (typeof runtime?.session_pid !== 'number') return [];
   const cutoff = Date.now() - maxIdleMs;
   const candidates = readRegistry(configDir)
     .filter((entry) => entry.kind === 'interactive')
-    .filter((entry) => entry.pid !== runtime?.session_pid)
+    .filter((entry) => entry.pid !== runtime.session_pid)
     .filter((entry) => entry.statusUpdatedAt >= cutoff)
+    // parseEntry validates only the fields it keys on, and the registry format
+    // is undocumented — an entry missing either of these would throw out of the
+    // walk below (or out of net.connect), taking every other candidate with it.
+    .filter((entry) => typeof entry.cwd === 'string'
+      && typeof entry.messagingSocketPath === 'string' && entry.messagingSocketPath.length > 0)
     .sort((a, b) => b.statusUpdatedAt - a.statusUpdatedAt);
   // Sorted first so this stops at the freshest survivor instead of reading
   // every candidate's resident marker only to discard all but the top one.
-  const winner = candidates.find((entry) => {
-    const marker = readRuntimeJson(path.join(entry.cwd, '.claude-code-hermit', 'state'));
-    return marker?.session_pid !== entry.pid;
-  });
+  const winner = candidates.find((entry) => hermitMarkerFor(entry.cwd)?.session_pid !== entry.pid);
   return winner ? [winner] : [];
 }
