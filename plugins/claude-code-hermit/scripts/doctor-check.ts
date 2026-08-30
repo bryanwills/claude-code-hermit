@@ -1126,7 +1126,10 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
           const e = JSON.parse(line);
           if (e.ts < cutoff) continue;
           if (e.action === 'restart') restarts++;
-          else if (e.action === 'nudge') nudges++;
+          // 'nudge-socket' is the same wedge nudge delivered over the session's
+          // inbox socket instead of typed — counting only 'nudge' would report 0
+          // for every episode the socket wake resolved.
+          else if (e.action === 'nudge' || e.action === 'nudge-socket') nudges++;
           else if (e.action === 're-arm-fallback') rearms++;
           else if (e.action === 'context-clear') clears++;
           else if (e.action === 'context-compact') compacts++;

@@ -21,7 +21,9 @@ if (!socketPath) {
   process.exit(1);
 }
 
-const text = inlineText ?? (await readStdin()).trim();
+// A TTY stdin never emits 'end', so reading it would hang until the caller's own
+// timeout. Treat "no argument, nothing piped" as the empty message it is.
+const text = inlineText ?? (process.stdin.isTTY ? '' : (await readStdin()).trim());
 
 if (!text) {
   console.error('[hermit] peer-post: empty message — nothing to send.');

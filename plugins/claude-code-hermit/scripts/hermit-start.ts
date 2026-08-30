@@ -959,15 +959,19 @@ function writeSettingsEnv(
   //
   // Only for that mode: everywhere else the default already delivers, and writing
   // the key would widen inbound handling for no gain.
+  //
+  // Only ever REMOVE the value this function wrote. A repo-scope settings file may
+  // tighten crossSessionInbound, so an operator's own `hold`/`refuse` there is live
+  // — deleting it on every boot would strip an opt-out the operator set deliberately.
   if (config.permission_mode === 'bypassPermissions') settings.crossSessionInbound = 'accept';
-  else delete settings.crossSessionInbound;
+  else if (settings.crossSessionInbound === 'accept') delete settings.crossSessionInbound;
 
   // Messages to a session on ANOTHER machine travel through Anthropic's servers;
   // same-machine peers never do. `remote` is this hermit's own switch for leaving
   // the box, so it decides here too — off means every cross-machine send needs the
   // operator's approval first, even under bypassPermissions. A `true` from any
   // settings scope applies, so this can tighten but never loosen.
-  if (!pyTruthy('remote' in config ? config.remote : false)) settings.isolatePeerMachines = true;
+  if (!pyTruthy('remote' in config ? config.remote : true)) settings.isolatePeerMachines = true;
   else delete settings.isolatePeerMachines;
 
   // Malformed file — warned above, left byte-for-byte intact. The profile is
