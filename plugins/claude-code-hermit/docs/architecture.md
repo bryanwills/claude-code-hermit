@@ -144,7 +144,7 @@ your-project/
 │   ├── compiled/review-weekly-YYYY-Www.md  # Weekly review reports (weekly-review.ts; type: review)
 │   ├── templates/
 │   ├── state/                        # Runtime observations (agent-owned, not operator-configured)
-│   │   ├── runtime.json              # Session state: in_progress/waiting/idle (authoritative since v0.3.2), plus the launch env stamp (config_dir, env_auth) and peer_name — the --name requested this boot (Claude Code renames it silently on a collision with a live session of the same name; not independently confirmed here)
+│   │   ├── runtime.json              # Session state: in_progress/waiting/idle, plus the session stamp (config_dir, env_auth, inbox_socket, session_pid) and requested peer_name
 │   │   ├── alert-state.json          # Alert dedup state + self-eval evidence (heartbeat-owned)
 │   │   ├── reflection-state.json     # Last reflection timestamp (reflect-owned)
 │   │   ├── channel-activity.json     # Last channel interaction timestamp (channel-hook-owned)
@@ -180,11 +180,11 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 
 **The single-session guarantee does not extend to hooks.** Claude Code does not serialise hook invocations: one assistant turn issuing parallel tool calls spawns several hook processes that run concurrently (probed 2026-08-28 — four denials, four pids, every `START` before the first `END`). A hook that owns a state file therefore cannot rely on the rule above, and must either append rather than read-modify-write (`lib/denial-log.ts`) or take the advisory lock (`lib/lockfile.ts`, as `lib/progress-log.ts` and `permission-denied-notify.ts` do).
 
-`startup-context.ts`'s launch-env stamp is the one read-modify-write on `runtime.json` from a hook, and it is exempt by timing rather than by locking: `SessionStart` fires once per session, seconds after `hermit-start` has finished its own write (which lands within milliseconds of `tmux new-session`, before Claude Code has booted). It is also idempotent — every later `SessionStart` in the same session recomputes the same pair and skips the write when nothing moved, which keeps `updated_at` from drifting forward on a mere compaction and hiding a wedged session from doctor's stale-session check.
+`startup-context.ts`'s session stamp is the one read-modify-write on `runtime.json` from a hook, and it is exempt by timing rather than by locking: `SessionStart` fires once per session, seconds after `hermit-start` has finished its own write (which lands within milliseconds of `tmux new-session`, before Claude Code has booted). It is also idempotent: every later `SessionStart` in the same session recomputes the same four fields and skips the write when nothing moved, which keeps `updated_at` from drifting forward on a mere compaction and hiding a wedged session from doctor's stale-session check.
 
 | File                           | Owner (sole writer)                                 | Readers                                                       |
 | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------- |
-| `state/runtime.json`           | session-archive.ts + cost-tracker + startup-context.ts (launch-env stamp only) | heartbeat, session-start, /hermit-routines (rdw=false suppression), hermit-watchdog (`config_dir`, `env_auth`) |
+| `state/runtime.json`           | session-archive.ts + cost-tracker + startup-context.ts (session stamp) | heartbeat, session-start, /hermit-routines (rdw=false suppression), hermit-watchdog (config/env, registry, inbox), hermit-doctor (peer inbox) |
 | `state/alert-state.json`       | heartbeat only                                      | heartbeat; evaluate-session (read-only nudge computation)     |
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (scheduled-checks display) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |

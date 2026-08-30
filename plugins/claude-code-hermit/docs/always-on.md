@@ -36,7 +36,7 @@ Either way, the first launch needs one attended step to clear the trust gate, th
 | **Docker**               | Container    | `docker compose` v2 (Docker Desktop or modern Docker Engine) — see [Install Docker Compose](https://docs.docker.com/compose/install/) |
 | **Node.js 22+**          | Hooks        | Inside the container — handled by the Dockerfile |
 | **Bun**                  | Plugins      | Inside the container — always included          |
-| **Claude Code v2.1.241+** | Channels, sandbox | Minimum supported version |
+| **Claude Code v2.1.251+** | Channels, sandbox | Minimum supported version |
 
 ---
 
@@ -58,6 +58,8 @@ The wizard scans your project for dependencies, asks about auth, and generates f
 | `docker-entrypoint.hermit.sh` | Onboarding bypass, MCP approval, permission patch, channel symlinks, graceful SIGTERM handling, PID 1 keepalive |
 | `docker-compose.hermit.yml`   | Named volume, bind mounts, env vars, healthcheck, restart policy, kernel-enforced hardening (`no-new-privileges`, `cap_drop: ALL`, `pids_limit`) |
 | `.env`                        | Auth token (appended if file already exists)           |
+
+Customize boot in `<project-root>/docker-entrypoint.hermit-local.sh`; upgrades never touch it. It runs at `pre-boot` (before plugin install) and `pre-launch` (before `hermit-start`) under `set -euo pipefail`. Failures abort boot; changes apply on `hermit-docker restart` without a rebuild.
 
 The wizard also checks `.claude/settings.json` permissions to detect tools your project needs in the container.
 

@@ -10,7 +10,7 @@ tmux-based setup for running your hermit without Docker, plus the lifecycle refe
 | ------------------------ | ------------ | ------------------------------------------ |
 | **tmux**                 | Boot scripts | `brew install tmux` / `apt install tmux` — see [Installing tmux](https://github.com/tmux/tmux/wiki/Installing) for other platforms |
 | **Node.js 22+**          | Hooks        | Cost tracking, session evaluation          |
-| **Claude Code v2.1.241+** | Channels, sandbox | Minimum supported version |
+| **Claude Code v2.1.251+** | Channels, sandbox | Minimum supported version |
 
 tmux is required. Channels are optional.
 
@@ -36,7 +36,7 @@ To pause/resume the running session without stopping it (also triggerable from a
 .claude-code-hermit/bin/hermit-pause on|off|snooze <dur>|status
 ```
 
-**Config options:** If `remote: true`, adds `--remote-control` and names the session after `agent_name`. If `model` is set, passes it to Claude Code.
+**Config options:** If `remote: true`, adds `--remote-control` and names the session after `agent_name`. If `remote: false`, boot writes `isolatePeerMachines: true`, so cross-machine peer messages require operator approval. If `model` is set, passes it to Claude Code.
 
 **Restarting dead sessions.** A tmux hermit dies with its host and nothing brings it back on its own. `.claude-code-hermit/bin/hermit-watchdog install` registers the watchdog on a 5-minute schedule (systemd user timer on Linux/WSL2, LaunchAgent on macOS, a cron line printed as fallback), which restarts dead sessions, nudges wedged ones, and keeps long-running context compacted. On Linux add `loginctl enable-linger` if the hermit has to come back after a reboot before anyone logs in. Docker hermits need none of this — the entrypoint runs the same watchdog on its own cycle, and the container restart policy handles a dead session.
 
@@ -248,7 +248,7 @@ Not suitable for routines whose value is chat or transcript output (subagent out
 
 **4. Checklist curation.** A shorter, sharper `HEARTBEAT.md` lets the free OK precheck path fire more often, skipping the full LLM eval. `/claude-code-hermit:heartbeat edit` warns when the list exceeds 10 items.
 
-**Measure before and after:** run `/claude-code-hermit:cost-reflect` to see spend broken down by trigger source (`heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, `other`) and by token type. The routine rows are the ones a per-routine model override shrinks; `heartbeat` responds to interval/checklist changes; `channel:<name>` identifies channel-triggered turns; `other` covers interactive and unattributed turns.
+**Measure before and after:** run `/claude-code-hermit:cost-reflect` to see spend broken down by trigger source (`heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, `peer`, `other`) and by token type. The routine rows are the ones a per-routine model override shrinks; `heartbeat` responds to interval/checklist changes; `channel:<name>` identifies channel-triggered turns; `peer` appears as "other sessions on this machine"; `other` covers interactive and unattributed turns.
 
 ---
 

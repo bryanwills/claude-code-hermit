@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-[Claude Code](https://code.claude.com) v2.1.241+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3 — the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
+[Claude Code](https://code.claude.com) v2.1.251+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3; the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
 
 ---
 
@@ -156,7 +156,7 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 ├── proposals/
 │   └── PROP-001.md            <- improvement ideas
 ├── state/                     <- runtime observations (agent-owned)
-│   ├── runtime.json           <- session state (in_progress/waiting/idle) + launch env stamp
+│   ├── runtime.json           <- session state + config/auth, inbox/PID, and peer-name stamp
 │   ├── alert-state.json       <- heartbeat alert dedup + self-eval evidence
 │   ├── reflection-state.json  <- last reflection timestamp + scheduled check state
 │   ├── routine-metrics.jsonl <- append-only routine fire log

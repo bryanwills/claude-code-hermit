@@ -40,7 +40,7 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 - **Agent Routines** Add your own routines that run from one persistent `Monitor` subprocess that decides eligibility outside the session, so a skipped fire costs zero tokens and co-due routines batch into one wake; a daily `CronCreate` anchor re-arms it. Falls back to per-routine `CronCreate` where `Monitor` is unavailable. Managed by `/hermit-routines`.
 - **Heartbeat** polls from a persistent `Monitor` subprocess — a filesystem-only precheck decides every tick, and the model only wakes (and only bills) when something actually changed.
 - **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
-- **Operate it from your phone.** Hermit pings you first when it needs a decision. From a trusted Discord or Telegram chat, send work, accept proposals, change settings, check on it with `/status`, hold it with `/pause`, `/resume` and `/snooze`, or drive Claude Code itself with `/model`, `/effort`, `/permission-mode`, `/compact`, `/clear`, and `/advisor`. Pause is enforced at the tool boundary, not merely treated as a conversational request.
+- **Operate it from your phone.** Hermit pings you first when it needs a decision. From a trusted Discord or Telegram chat, send work, accept proposals, change settings, check on it with `/status`, hold it with `/pause`, `/resume` and `/snooze`, or drive Claude Code itself with `/model`, `/effort`, `/permission-mode`, `/compact`, `/clear`, `/advisor`, `/doctor`, and `/code-review`. `/doctor` needs settings authority; reviews refuse `ultra`, `--post`, and `--comment`. Pause is enforced at the tool boundary, not merely treated as a conversational request.
 - **Spawn new sessions remotely.** You run `/rc-gate` to open a Remote Control gate so the Claude app can start sessions in isolated worktrees, with cleanup for worktrees left behind after archival.
 - **Native Claude Code Artifacts integration** publishes a live Hermit Dashboard, open proposals, weekly reviews, and any compiled document you request as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs, with organization sharing where supported. Point `artifacts.backend` at your own MCP artifact server to publish there instead.
 - **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget on fresh and resumed starts. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
@@ -88,7 +88,7 @@ On-demand skills — pullable from the Claude app, your terminal, or a DM:
 - **`/recall`** — full-text search over past sessions, compiled knowledge, proposals, and your channel DM history ("what did I decide about X?")
 - **`/hermit-evolution`** — cost trend and behavior drift over weeks
 - **`/hermit-health`** — alerts, routines, channels, heartbeat state, plus fragile zones, stale proposals, and recent learnings
-- **`/hermit-doctor`** — proactive install diagnostic, from hook registration to heartbeat and routine-monitor liveness; the weekly check stays silent when green and alerts only on new problems
+- **`/hermit-doctor`**: proactive install diagnostic, from hook registration to heartbeat and routine-monitor liveness; its scheduled precheck stays silent when green, and every run sends one routed two-leg summary
 - **`/cost-reflect`** — structural cost audit: which token types and trigger sources drive spend
 - **`/brief`** — current status and a summary of recent work
 
@@ -96,7 +96,7 @@ On-demand skills — pullable from the Claude app, your terminal, or a DM:
 
 ## Quick Start
 
-> **Prerequisites:** [Claude Code](https://code.claude.com) v2.1.241+, a Claude plan (Pro, Max, Teams, or Enterprise), and [Bun](https://bun.sh) 1.3+. Linux, macOS, and Windows via WSL2 — see [FAQ](docs/faq.md).
+> **Prerequisites:** [Claude Code](https://code.claude.com) v2.1.251+, a Claude plan (Pro, Max, Teams, or Enterprise), and [Bun](https://bun.sh) 1.3+. Linux, macOS, and Windows via WSL2; see [FAQ](docs/faq.md).
 
 ### 1. Install
 
@@ -154,7 +154,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `channels` | Discord / Telegram / iMessage (+ `allowed_users`) |
 | `channels.primary` | which channel gets outbound pings |
 | `push_notifications` | native/mobile push on alerts — **`true`** |
-| `remote` | remote control via claude.ai/code — **`true`** |
+| `remote` | remote control; `false` also requires approval for cross-machine peer messages; **`true`** |
 | `ask_gate` | route unattended questions to a paired channel — **`true`** |
 | `budget` | optional daily / weekly / monthly caps; **`alert`** or binding `pause` action |
 | `artifacts` | dashboard / proposals / weekly review — **all enabled** |
@@ -187,7 +187,7 @@ Full schema in the [Config Reference](docs/config-reference.md)
 
 ## Tips & tuning
 
-Settings apply without a reboot. Channel writes follow tiered authority: execution-adjacent changes require a one-time confirmation code, and channel enrollment stays terminal-only.
+Settings apply without a reboot. For execution-adjacent changes, `settings_policy` decides whether chat applies them directly (`allow`), asks for a code (`ask`), or defers to the terminal (`deny`). `settings_permissions` can re-tier non-enrollment paths; enrollment stays terminal-only.
 
 - **Model & Auto mode.** Defaults to Sonnet — a good balance of reasoning and cost for an unattended session. Auto mode is generally available to all users across subscription plans and API usage; supported models and provider configuration can still vary, so if Claude reports the current selection unavailable, choose a supported model or another permission mode. Switch to `opus` for heavier reasoning; per-routine `model: "haiku"` remains useful for lightweight, isolated work.
 
@@ -207,7 +207,7 @@ Full reference: [Config Reference](docs/config-reference.md).
 
 You run on your own Claude subscription — no per-runtime-hour billing — and every token is logged where you can see it. Optional daily, weekly, and monthly Hermit caps can alert you or enforce a binding pause when a limit is reached.
 
-- **Per-call** token usage logged to `.claude/cost-log.jsonl` (model, input/output/cache split, USD estimate, and what triggered the turn — `heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, or interactive/unattributed `other`).
+- **Per-call** token usage logged to `.claude/cost-log.jsonl` (model, input/output/cache split, USD estimate, and what triggered the turn: `heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, `peer` for another local session, or interactive/unattributed `other`).
 - **Per-session** running total in `.status.json`; carried into archived session reports as frontmatter `cost_usd`.
 - **Per-day** rollup in `cost-summary.md`, regenerated on every cost-tracker tick.
 - **On demand** through `/cost-reflect`, `/hermit-doctor`, and the dashboard, plus a one-line spend summary in the weekly review. Routine briefs and status replies stay outcome-only; spend interrupts them only when a cap is approached or breached.

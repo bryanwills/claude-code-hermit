@@ -243,7 +243,9 @@ After the user approves:
 
 1. Apply only the approved edits to the current working tree with `apply_patch`.
    Never edit a tag.
-2. Match each document's existing style.
+2. Match each document's existing style. Keep edits succinct: prefer one
+   sentence or one table-cell correction, and do not restate a full policy when
+   its established term or canonical link is enough.
 3. Re-read the changed passages and run `git diff --check`.
 4. Do not add a changelog entry for documentation-only edits; repository
    guidance explicitly excludes them.
