@@ -32,6 +32,7 @@ import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { postToSession } from './lib/peer-post';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
@@ -678,6 +679,26 @@ function adoptSessionConfigDir(runtime: Json): void {
 }
 
 /**
+ * The resident's inbox socket, or null when there is nothing to post to.
+ *
+ * Same provenance as `config_dir` above: startup-context.ts stamps it from inside
+ * the session, because CLAUDE_CODE_MESSAGING_SOCKET is exported to the session's
+ * own hooks and is invisible to this process. The alternative — scanning
+ * <config dir>/sessions/*.json — cannot tell the resident from a guest session in
+ * the same folder (they share a cwd) and cannot key on the tmux pane pid either,
+ * since hermit-start wraps claude in a shell. The session writing its own path is
+ * exact by construction.
+ *
+ * Null means "type instead", and it is reachable in normal operation: a hermit
+ * still running the session it booted before this upgrade has no stamp yet, and
+ * a session that died took its socket file with it.
+ */
+function resolveInboxSocket(runtime: Json): string | null {
+  const sock = runtime?.inbox_socket;
+  return typeof sock === 'string' && sock ? sock : null;
+}
+
+/**
  * Auth modes where a 401 on the pane is NOT a login problem: an API key, a bearer
  * token, or a cloud provider. Telling those operators to sign in would be wrong advice
  * for a cause no login can fix, so the lapsed-login paths sit this out entirely.
@@ -729,6 +750,17 @@ function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'id
   }
 }
 
+/** The wedge wake, as a peer message body.
+ *
+ *  Exactly the token heartbeat-monitor.sh emits, and nothing else. Two reasons it
+ *  cannot drift: record-operator-action.ts's isRoutinePrompt drops this string so
+ *  the wake is not miscounted as operator activity (a false positive there
+ *  silences AUTO_CLOSE), and the CLAUDE-APPEND routing rule the model follows is
+ *  written against this literal. Any wording around it — "please", "the operator
+ *  asked" — is both unnecessary and, per the peer-framing probes, the thing that
+ *  flips a model to refusing. tests/auto-close.test.ts pins both ends. */
+const WEDGE_WAKE_TOKEN = 'HEARTBEAT_EVALUATE';
+
 /** Send a heartbeat run nudge to a potentially wedged session.
  *  The nudge is a paid full-context wake, so repeats within one episode are spaced
  *  by the staleness threshold that detected the wedge: one probe per detection
@@ -739,7 +771,7 @@ function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'id
  *  pane (the queued message) and `paneFrozen` could never be true — a wedge masked
  *  itself from the restart it needed. Staying silent between probes lets a genuinely
  *  frozen pane read as frozen, so the pane-frozen restart is now reachable. */
-function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string, minIntervalSecs: number): void {
+async function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string, minIntervalSecs: number, inboxSocket: string | null = null): Promise<void> {
   if (isPaused(HERMIT_ROOT).paused) return; // PROP-015 — no nudges while paused
 
   const nudgeAge = watchdogState.last_nudge_at ? ageSecs(watchdogState.last_nudge_at) : null;
@@ -755,7 +787,27 @@ function doNudge(sessionName: string, watchdogState: Json, consecutive: number, 
     return;
   }
 
-  sendKeys(sessionName, '/claude-code-hermit:heartbeat run');
+  // Socket first, typing second — but only once per episode. A post is queued by
+  // the harness and read at the next tool boundary, so it reaches a session whose
+  // pane is mid-tool, which is exactly the state a wedge probe finds. What it
+  // cannot do is report its own outcome: `crossSessionInbound: refuse` drops the
+  // message silently, a bypassPermissions receiver holds it behind a dialog that
+  // expires unseen, and a model may simply decline to act on the text — all three
+  // look identical to a successful write. So the fallback is keyed on the effect
+  // instead: if the NEXT due nudge still finds the heartbeat stale, the post did
+  // not work, whatever the wire said, and this one types. One rule covers dead,
+  // refused, held and declined, and costs one throttle window when the socket
+  // path fails. Delivery, not dispatch, is what the alternation observes.
+  const transport = inboxSocket && watchdogState.last_nudge_transport !== 'socket'
+    ? await postToSession(inboxSocket, WEDGE_WAKE_TOKEN)
+    : 'dead';
+
+  if (transport === 'sent') {
+    watchdogState.last_nudge_transport = 'socket';
+  } else {
+    watchdogState.last_nudge_transport = 'typed';
+    sendKeys(sessionName, '/claude-code-hermit:heartbeat run');
+  }
   // One push per wedge episode. Keying on `consecutive === 1` alone re-fires when
   // the operator-recency guard resets consecutive_stale to 0 mid-episode (an
   // operator poke isn't a heartbeat recovery); a sticky flag, cleared only when the
@@ -764,8 +816,9 @@ function doNudge(sessionName: string, watchdogState: Json, consecutive: number, 
   if (shouldNotify) watchdogState.wedge_notified = true;
   watchdogState.last_nudge_at = utcStamp();
   writeWatchdogState(watchdogState);
-  appendEvent('nudge', `stale cycle ${consecutive}`);
-  process.stderr.write(`[watchdog] nudged "${sessionName}" (stale cycle ${consecutive})\n`);
+  const via = watchdogState.last_nudge_transport === 'socket' ? 'nudge-socket' : 'nudge';
+  appendEvent(via, `stale cycle ${consecutive}`);
+  process.stderr.write(`[watchdog] nudged "${sessionName}" via ${watchdogState.last_nudge_transport} (stale cycle ${consecutive})\n`);
   if (shouldNotify) pushOperatorMessage(composeWedgeMessage(timezone));
 }
 
@@ -1795,7 +1848,7 @@ async function main(): Promise<void> {
             // per-monitor re-arm damper for 6h on a send that never landed.
             sessionAlive = tmuxSessionAlive(sessionName);
           } else {
-            doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs);
+            await doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs, resolveInboxSocket(runtime));
           }
         } else {
           // Heartbeat recovered — reset the episode and re-arm the wedge push so a
@@ -1805,6 +1858,9 @@ async function main(): Promise<void> {
           watchdogState.consecutive_stale = 0;
           watchdogState.wedge_notified = false;
           watchdogState.last_nudge_at = null;
+          // Same re-arm, for the transport alternation: the next episode's first
+          // probe should try the socket again, not inherit this one's fallback.
+          watchdogState.last_nudge_transport = null;
           watchdogState.last_pane_hash = currentPaneHash;
           writeWatchdogState(watchdogState);
         }

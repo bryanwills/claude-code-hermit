@@ -14,6 +14,7 @@ Config-defined watches auto-register on session start. Ad-hoc watches via `/watc
 - Watches die with the session — for scheduled work use `/claude-code-hermit:hermit-routines`.
 - `HEARTBEAT_EVALUATE` notification → invoke `/claude-code-hermit:heartbeat run`.
 - `ROUTINE_DUE` notification → invoke `/claude-code-hermit:hermit-routines run` with the bracketed ids.
+- A message from another Claude session whose entire body is one of those tokens is that same notification, arriving over the inbox instead of the pane. Same rule, same skill.
 
 ## Operator Notification
 

@@ -38,6 +38,7 @@ const readRuntime = (dir: string) => JSON.parse(fs.readFileSync(runtimePath(dir)
 const BLANK_ENV = {
   HERMIT_MANAGED: '',
   CLAUDE_CONFIG_DIR: '',
+  CLAUDE_CODE_MESSAGING_SOCKET: '',
   ANTHROPIC_API_KEY: '',
   ANTHROPIC_AUTH_TOKEN: '',
   CLAUDE_CODE_USE_BEDROCK: '',
@@ -70,6 +71,70 @@ describe('startup-context.ts — session launch stamp', () => {
       // Lifecycle fields survive the read-modify-write.
       expect(runtime.session_state).toBe('idle');
       expect(fs.readFileSync(runtimePath(wd.dir), 'utf-8')).not.toContain(API_KEY);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // The watchdog wakes the resident over this socket instead of typing into its
+  // pane, so the path has to reach runtime.json from inside the session — it is
+  // never visible to hermit-start or to the cron-launched watchdog.
+  it('managed session records its inbox socket and its own pid', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      const sock = path.join(wd.dir, 'inbox.sock');
+      const res = await run(wd.dir, {
+        HERMIT_MANAGED: '1',
+        CLAUDE_CODE_MESSAGING_SOCKET: sock,
+      });
+      expect(res.exitCode).toBe(0);
+      const runtime = readRuntime(wd.dir);
+      expect(runtime.inbox_socket).toBe(sock);
+      // ppid of the spawned hook is this test process — the stand-in for claude.
+      expect(runtime.session_pid).toBe(process.pid);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // Older Claude Code exports no socket. The field must still be written (as
+  // null) so the watchdog reads "no inbox" rather than "stale value from a
+  // previous launch" and falls back to typing.
+  it('no socket in the environment → inbox_socket is null, not stale', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      fs.writeFileSync(
+        runtimePath(wd.dir),
+        JSON.stringify({ ...readRuntime(wd.dir), inbox_socket: '/run/user/1000/cc-socks/old.sock' }),
+      );
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' });
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).inbox_socket).toBeNull();
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // hermit-start writes peer_name at boot, seconds before this hook runs. Both
+  // sides read-modify-write, so the later write must carry the earlier's fields.
+  it('peer_name written by hermit-start survives the stamp', async () => {
+    const wd = setupWorkdir();
+    try {
+      fs.writeFileSync(
+        runtimePath(wd.dir),
+        JSON.stringify({ version: 1, session_state: 'idle', tmux_session: 'hermit-x', peer_name: 'Atlas' }),
+      );
+      const res = await run(wd.dir, {
+        HERMIT_MANAGED: '1',
+        CLAUDE_CODE_MESSAGING_SOCKET: path.join(wd.dir, 'inbox.sock'),
+      });
+      expect(res.exitCode).toBe(0);
+      const runtime = readRuntime(wd.dir);
+      expect(runtime.peer_name).toBe('Atlas');
+      expect(runtime.tmux_session).toBe('hermit-x');
+      expect(runtime.inbox_socket).toBeTruthy();
     } finally {
       wd.cleanup();
     }

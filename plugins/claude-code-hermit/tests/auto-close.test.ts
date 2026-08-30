@@ -595,10 +595,29 @@ describe('record-operator-action: monitor emission strings stay in sync', () => 
     return literals;
   }
 
+  // The watchdog posts its wedge wake straight onto the session's inbox socket
+  // rather than typing it, so the body is a TS constant, not a shell echo. Same
+  // contract as the emitters: renaming it without teaching isRoutinePrompt would
+  // make every socket wake read as operator activity and silence AUTO_CLOSE.
+  function extractWedgeWakeToken(): string {
+    const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'hermit-watchdog.ts'), 'utf-8');
+    const m = src.match(/const WEDGE_WAKE_TOKEN = '([^']+)'/);
+    if (!m) throw new Error('WEDGE_WAKE_TOKEN not found in hermit-watchdog.ts');
+    return m[1];
+  }
+
   const literals = [
     ...extractEchoLiterals('heartbeat-monitor.sh'),
     ...extractEchoLiterals('routine-monitor.sh'),
+    extractWedgeWakeToken(),
   ];
+
+  // The wake is only useful if the model's routing rule recognizes it, and that
+  // rule is written against the monitor's own token — so the two must be the
+  // same string, not merely both droppable.
+  test('the watchdog socket wake reuses a heartbeat-monitor emission verbatim', () => {
+    expect(extractEchoLiterals('heartbeat-monitor.sh')).toContain(extractWedgeWakeToken());
+  });
 
   test('sweep finds the known monitor emission literals', () => {
     expect(literals.length).toBeGreaterThanOrEqual(4); // EVALUATE, 2x ERROR variants, MONITOR_ERROR
