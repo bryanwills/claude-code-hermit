@@ -128,6 +128,7 @@ The render script derives every `{{PLACEHOLDER}}` internally and fails loud (wri
 - `agentHookProfile` — always `"strict"` for Docker (enforces `always_on` deny patterns inside the container).
 - `networkMode` — `docker.network_mode` (`"bridge"` or `"host"`, Step 2).
 - `gitIdentityMount` — the Step 1 preflight `gitconfigExists`. When **false**, the `.gitconfig` bind-mount is dropped and you must add to the summary: "No ~/.gitconfig found — git commits inside the container will have no author identity. Create one on the host and re-run docker-setup, or set git config manually inside the container."
+- `fleetMesh` - read `docker.fleet_mesh` from the project's `.claude-code-hermit/config.json`; absent means `false`. Never ask interactively. When true, tell the operator that the two external volumes and the `hermit-fleet-pidns` holder in `docs/always-on.md` must exist before `hermit-docker up`.
 
 ### 5. Auto-memory seed
 
@@ -311,7 +312,8 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/render-docker-templates.ts <PROJECT_ROOT> <<'H
   "channels": { "envLines": [...], "volumeLines": [...] },
   "agentHookProfile": "strict",
   "networkMode": "bridge" | "host",
-  "gitIdentityMount": true | false
+  "gitIdentityMount": true | false,
+  "fleetMesh": true | false
 }
 HERMIT_RENDER_JSON
 ```

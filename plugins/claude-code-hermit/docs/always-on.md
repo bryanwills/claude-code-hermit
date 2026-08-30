@@ -105,6 +105,30 @@ Reverse anytime: re-run `/docker-security` and answer No to every prompt, or `rm
 
 ---
 
+## Fleet mesh (opt-in)
+
+Fleet mesh lets Docker hermits on the same host discover and message each other with Claude Code's native `ListAgents` and `SendMessage` tools. Each hermit appears in `ListAgents` under its configured `agent_name`.
+
+Create the shared volumes and PID namespace holder once on the host:
+
+```bash
+docker volume create hermit-fleet-sessions
+docker volume create hermit-fleet-socks
+docker run -d --name hermit-fleet-pidns --restart unless-stopped --init alpine sleep infinity
+```
+
+Set `docker.fleet_mesh` to `true` in each hermit's `.claude-code-hermit/config.json`, re-run `/docker-setup`, then apply the rendered files:
+
+```bash
+.claude-code-hermit/bin/hermit-docker update
+```
+
+Every hermit in the mesh must run as the **same host UID**. The shared socket directory is `0700` and the shared `sessions/` volume is owned by whichever hermit mounted it first, so a hermit started by a different host user cannot read either: Claude Code silently falls back to `/tmp` for its inbox socket and the hermit stays invisible to its peers, with only a `[hermit] Cannot secure socket directory` line in `hermit-docker logs` to say so. Compose reads the UID from `${UID:-1000}` in the launching shell.
+
+The generated Compose file uses `pid: "container:hermit-fleet-pidns"` so peer registry filenames use unique PIDs without exposing host processes. The holder is a hard dependency: if it is removed or recreated, every mesh hermit must be recreated too (`hermit-docker update`), since a container cannot rejoin a namespace that went away. As a manual alternative, replace that line with `pid: host`. Host PID mode removes the holder dependency, but every hermit can then see and signal every process on the host, not only other hermits.
+
+---
+
 ## Managing Your Hermit
 
 | Action    | Command                                                       |
