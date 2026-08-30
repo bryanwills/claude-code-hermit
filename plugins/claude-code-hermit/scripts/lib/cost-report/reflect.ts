@@ -29,13 +29,14 @@ const MAX_CHARS = 1500;
 // days — the trailing-7-day baseline compareToTypical averages (today excluded).
 const PLAIN_LOOKBACK_DAYS = 7;
 
-// Buckets the raw `source` values (heartbeat / routine:<id> / channel:<kind> / other)
+// Buckets the raw `source` values (heartbeat / routine:<id> / channel:<kind> / peer / other)
 // into the plain-language groupings a non-dev operator recognizes — never the raw
 // source string itself.
 function labelSource(src: string): string {
   if (src === 'heartbeat') return 'background check-ins';
   if (src.startsWith('routine:')) return 'scheduled routines';
   if (src.startsWith('channel:')) return 'your messages';
+  if (src === 'peer') return 'other sessions on this machine';
   return 'our conversations';
 }
 

@@ -21,6 +21,7 @@ import {
   maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
 import { startHttpStub, type Stub } from './helpers/http-stub';
+import { localIdentity } from './helpers/registry-fixture';
 
 // The one line to flip when hermit-watchdog is ported to TypeScript.
 // (Absolute bun path via process.execPath: Bun.spawn resolves the executable
@@ -1374,6 +1375,129 @@ test('stamped socket path no longer exists → falls through to typing', withHer
   expect(r.exitCode).toBe(0);
   expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat run');
   expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('typed');
+}));
+
+// -------------------------------------------------------
+// 5a-bis. Registry-backed liveness
+//
+// Claude Code publishes each session's own state at <config dir>/sessions/<pid>.json.
+// The watchdog reads the resident's entry (keyed on runtime.session_pid, the session's
+// own stamp) for two decisions the pane cannot answer: whether a dialog is blocking it
+// (status `waiting`, whatever the modal looks like), and whether a socket wake ever
+// started a turn (`idle` since before the post was written).
+//
+// The fixture uses the TEST RUNNER's pid, because the entry must survive the lib's
+// validation — pid alive, procStart matching /proc, pidDomain matching this host — and
+// the runner is the one process guaranteed to be alive while the watchdog subprocess
+// reads it.
+// -------------------------------------------------------
+
+/** A registry entry for this process, valid on this host, under a throwaway config dir. */
+function writeRegistryEntry(h: Hermit, patch: Record<string, unknown> = {}): string {
+  const configDir = path.join(h.dir, 'config-dir');
+  fs.mkdirSync(path.join(configDir, 'sessions'), { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, 'sessions', `${process.pid}.json`),
+    JSON.stringify({
+      ...localIdentity(),
+      kind: 'interactive',
+      status: 'idle',
+      statusUpdatedAt: Date.now(),
+      cwd: h.dir,
+      name: 'hermit',
+      messagingSocketPath: path.join(h.dir, 'inbox.sock'),
+      ...patch,
+    }),
+  );
+  return configDir;
+}
+
+test('registry says the resident is waiting on a dialog → alert, no nudge', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  // A pane the scanner does NOT recognise as a dialog — the registry is the only signal.
+  writeFakeTmux(h, 0, 'some modal the pane scanner does not know');
+  writeFakePgrep(h, 1);
+  const configDir = writeRegistryEntry(h, { status: 'waiting' });
+  patchRuntime(h, { config_dir: configDir, session_pid: process.pid });
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('stall-question-detected');
+  expect(events).toContain('via registry');
+  // Step 4 never runs behind a pending dialog.
+  expect(tmuxCalls(h)).not.toContain('heartbeat run');
+}));
+
+test('registry says the resident is busy → 3b stays quiet, nudge proceeds', withHermit(async (h) => {
+  writeConfig(h, '30m');
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const configDir = writeRegistryEntry(h, { status: 'busy' });
+  patchRuntime(h, { config_dir: configDir, session_pid: process.pid });
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+
+  const r = await watchdog(h, 'run');
+
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).not.toContain('stall-question-detected');
+  expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat run');
+}));
+
+test('socket nudge never started a turn (idle since before the post) → types now, throttle bypassed', withHermit(async (h) => {
+  const inbox = await fakeInbox(h);
+  try {
+    writeConfig(h, '30m');
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    // Idle since two minutes ago; the socket nudge went out one minute ago, so it
+    // cannot have been read — the session never left the idle it was already in.
+    const configDir = writeRegistryEntry(h, { status: 'idle', statusUpdatedAt: Date.now() - 120_000 });
+    patchRuntime(h, { config_dir: configDir, session_pid: process.pid, inbox_socket: inbox.path });
+    touchAgo(state(h, '.heartbeat'), 5 * 3600);
+    fs.writeFileSync(
+      state(h, 'watchdog-state.json'),
+      JSON.stringify({ last_nudge_transport: 'socket', last_nudge_at: isoAgoSeconds(1 / 60) }) + '\n',
+    );
+
+    const r = await watchdog(h, 'run');
+
+    expect(r.exitCode).toBe(0);
+    expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat run');
+    expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('typed');
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('socket undelivered');
+    expect(events).not.toContain('nudge-throttled');
+    expect(inbox.lines).toHaveLength(0); // no second post
+  } finally {
+    inbox.close();
+  }
+}));
+
+test('socket nudge landed (resident busy since the post) → throttled, no retype', withHermit(async (h) => {
+  const inbox = await fakeInbox(h);
+  try {
+    writeConfig(h, '30m');
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    const configDir = writeRegistryEntry(h, { status: 'busy', statusUpdatedAt: Date.now() });
+    patchRuntime(h, { config_dir: configDir, session_pid: process.pid, inbox_socket: inbox.path });
+    touchAgo(state(h, '.heartbeat'), 5 * 3600);
+    fs.writeFileSync(
+      state(h, 'watchdog-state.json'),
+      JSON.stringify({ last_nudge_transport: 'socket', last_nudge_at: isoAgoSeconds(1 / 60) }) + '\n',
+    );
+
+    const r = await watchdog(h, 'run');
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('nudge-throttled');
+    expect(tmuxCalls(h)).not.toContain('heartbeat run');
+  } finally {
+    inbox.close();
+  }
 }));
 
 // -------------------------------------------------------

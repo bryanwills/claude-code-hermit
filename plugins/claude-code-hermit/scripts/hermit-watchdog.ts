@@ -33,6 +33,7 @@ import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as der
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { postToSession } from './lib/peer-post';
+import { findResident, type SessionEntry } from './lib/session-registry';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
@@ -699,6 +700,23 @@ function resolveInboxSocket(runtime: Json): string | null {
 }
 
 /**
+ * The resident's own entry in Claude Code's session registry, or null.
+ *
+ * Same provenance again: `session_pid` comes from the session's own stamp, and
+ * nothing else can pick the resident out of the registry — guests share its cwd.
+ * Null is the normal degraded case (no stamp yet, entry gone, a status the
+ * reader doesn't recognise), and every caller below keeps the behavior it had
+ * without the registry, because this file is undocumented and may change.
+ */
+function resolveResident(runtime: Json): SessionEntry | null {
+  try {
+    return findResident(runtime);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Auth modes where a 401 on the pane is NOT a login problem: an API key, a bearer
  * token, or a cloud provider. Telling those operators to sign in would be wrong advice
  * for a cause no login can fix, so the lapsed-login paths sit this out entirely.
@@ -771,11 +789,29 @@ const WEDGE_WAKE_TOKEN = 'HEARTBEAT_EVALUATE';
  *  pane (the queued message) and `paneFrozen` could never be true — a wedge masked
  *  itself from the restart it needed. Staying silent between probes lets a genuinely
  *  frozen pane read as frozen, so the pane-frozen restart is now reachable. */
-async function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string, minIntervalSecs: number, inboxSocket: string | null = null): Promise<void> {
+async function doNudge(sessionName: string, watchdogState: Json, consecutive: number, paneHash: string | null, timezone: string, minIntervalSecs: number, wake: { inboxSocket: string | null; resident: SessionEntry | null } = { inboxSocket: null, resident: null }): Promise<void> {
+  // Bundled rather than two more trailing positionals: both describe where the
+  // wake goes and how its landing is observed, and a bare `string | null` next
+  // to `paneHash` is a transposition TypeScript would not catch.
+  const { inboxSocket, resident } = wake;
   if (isPaused(HERMIT_ROOT).paused) return; // PROP-015 — no nudges while paused
 
   const nudgeAge = watchdogState.last_nudge_at ? ageSecs(watchdogState.last_nudge_at) : null;
-  const due = nudgeAge === null || nudgeAge >= minIntervalSecs;
+  // The registry answers the one question the socket write cannot: did the post
+  // start a turn? A delivered message flips `status` off `idle` within ~3s, and
+  // `statusUpdatedAt` stamps the START of the current state — so a resident
+  // still sitting in an `idle` that began BEFORE the post was written never read
+  // it (refused, held behind a dialog nobody is watching, or declined by the
+  // model). That is the whole throttle window recovered: without this the
+  // fallback waits for the next due nudge, up to `wedge_floor` (4h default),
+  // to learn what the registry already knows on the next tick.
+  const socketUndelivered =
+    watchdogState.last_nudge_transport === 'socket' &&
+    typeof watchdogState.last_nudge_at === 'string' &&
+    resident !== null &&
+    resident.status === 'idle' &&
+    resident.statusUpdatedAt < Date.parse(watchdogState.last_nudge_at);
+  const due = socketUndelivered || nudgeAge === null || nudgeAge >= minIntervalSecs;
 
   watchdogState.consecutive_stale = consecutive;
   watchdogState.last_pane_hash = paneHash;
@@ -797,7 +833,9 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
   // instead: if the NEXT due nudge still finds the heartbeat stale, the post did
   // not work, whatever the wire said, and this one types. One rule covers dead,
   // refused, held and declined, and costs one throttle window when the socket
-  // path fails. Delivery, not dispatch, is what the alternation observes.
+  // path fails. Delivery, not dispatch, is what the alternation observes — and
+  // `socketUndelivered` above is that same observation made a whole window
+  // earlier when the registry is readable.
   const transport = inboxSocket && watchdogState.last_nudge_transport !== 'socket'
     ? await postToSession(inboxSocket, WEDGE_WAKE_TOKEN)
     : 'dead';
@@ -817,7 +855,7 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
   watchdogState.last_nudge_at = utcStamp();
   writeWatchdogState(watchdogState);
   const via = watchdogState.last_nudge_transport === 'socket' ? 'nudge-socket' : 'nudge';
-  appendEvent(via, `stale cycle ${consecutive}`);
+  appendEvent(via, socketUndelivered ? `stale cycle ${consecutive} — socket undelivered` : `stale cycle ${consecutive}`);
   process.stderr.write(`[watchdog] nudged "${sessionName}" via ${watchdogState.last_nudge_transport} (stale cycle ${consecutive})\n`);
   if (shouldNotify) pushOperatorMessage(composeWedgeMessage(timezone));
 }
@@ -1558,6 +1596,9 @@ async function main(): Promise<void> {
   // The session's launch environment, adopted before any auth decision below.
   adoptSessionConfigDir(runtime);
   const sessionEnvAuth = typeof runtime.env_auth === 'boolean' ? runtime.env_auth : null;
+  // Read once per tick, AFTER the config dir is adopted (the registry lives
+  // under it) and shared by 3b and step 4.
+  const resident = resolveResident(runtime);
 
   // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
   //
@@ -1714,13 +1755,20 @@ async function main(): Promise<void> {
   // dialogs and harness-rendered prompts below the tool layer. Notify only, once per
   // episode (re-arms when the pane clears) — never auto-answer or send Escape, that's
   // always the operator's call.
-  const pendingQuestion = paneContent !== null && hasPendingQuestion(paneContent);
+  //
+  // The registry's `waiting` status is the shape-independent second trigger:
+  // the harness sets it for any permission dialog, so a modal whose footer the
+  // pane scanner above doesn't recognise — a future CC release's, or one that
+  // scrolled — is still caught, and caught by the session's own account of
+  // itself rather than by a regex over rendered text.
+  const registryWaiting = resident?.status === 'waiting';
+  const pendingQuestion = (paneContent !== null && hasPendingQuestion(paneContent)) || registryWaiting;
   {
     const watchdogState = readWatchdogState();
     if (pendingQuestion) {
       if (!watchdogState.stall_question_notified) {
         pushOperatorMessage(composeStallQuestionMessage(timezone));
-        appendEvent('stall-question-detected', 'pending dialog on pane, session alive');
+        appendEvent('stall-question-detected', registryWaiting ? 'pending dialog, session alive — via registry' : 'pending dialog on pane, session alive');
         watchdogState.stall_question_notified = true;
         writeWatchdogState(watchdogState);
       }
@@ -1848,7 +1896,7 @@ async function main(): Promise<void> {
             // per-monitor re-arm damper for 6h on a send that never landed.
             sessionAlive = tmuxSessionAlive(sessionName);
           } else {
-            await doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs, resolveInboxSocket(runtime));
+            await doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs, { inboxSocket: resolveInboxSocket(runtime), resident });
           }
         } else {
           // Heartbeat recovered — reset the episode and re-arm the wedge push so a
