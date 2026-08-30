@@ -193,7 +193,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/session-diff.json`      | session-diff.ts only                                | session-close (display)                                       |
 | `state/observations.jsonl`     | reflect-precheck (`cost-spike`, `startup-drift`) + transcript-digest `--record-observation` (`behavior-digest`) + session-close and channel-responder via `observations.ts` (`skill-correction`) + reflect (`quick-deferral`, `reflect-noticed`); append only | reflect (step 3b graduation), reflection-judge (§1.4 ledger verification) |
 | `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal.ts metrics (read-only)   |
-| `state/usage-metrics.jsonl`    | usage-track.ts (Skill/Read PostToolUse) + record-operator-action.ts (operator-typed `/skill`, append only; compacted >180d by weekly-review) | weekly-review (untouched-knowledge/dormant-skill suggestions) |
+| `state/usage-metrics.jsonl`    | usage-track.ts (Skill/Read PostToolUse) + record-operator-action.ts (operator-typed `/skill`, append only; compacted >180d by weekly-review) | weekly-review (untouched-knowledge suggestions) |
 | `state/micro-proposals.json`   | reflect + channel-bridged skills (queue, schema owned by reflect § Queuing procedure) + channel-responder/brief (resolve) | brief, generate-summary.ts |
 | `state/state-summary.md`       | generate-summary.ts only                            | humans                                                        |
 | `state/monitors.runtime.json`  | watch skill only                                    | session-start (clear on start), session-close (stop all)      |

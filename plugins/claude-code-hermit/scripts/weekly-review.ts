@@ -303,7 +303,7 @@ try {
   }
 } catch {}
 
-// --- Usage (usage-metrics.jsonl → auto-archive + dormant-skill suggestions) ---
+// --- Usage (usage-metrics.jsonl → auto-archive of untouched compiled/ docs) ---
 // Subagent reads do reach the ledger (PostToolUse fires for sidechain calls,
 // probed on CC 2.1.239), so "no tracked use" is real evidence — docs with none
 // in the window are archived move-only, with the digest as the operator's veto.
@@ -338,8 +338,8 @@ try {
       const tsMs = Date.parse(e.ts);
       if (!Number.isFinite(tsMs)) continue;
       if (ledgerStartMs === null || tsMs < ledgerStartMs) ledgerStartMs = tsMs;
-      if ((e.kind === 'skill' || e.kind === 'compiled') && typeof e.name === 'string') {
-        if (e.kind === 'compiled') compiledEvidence = true;
+      if (e.kind === 'compiled' && typeof e.name === 'string') {
+        compiledEvidence = true;
         const key = `${e.kind}:${e.name}`;
         const prev = lastUsedMs.get(key);
         if (prev === undefined || tsMs > prev) lastUsedMs.set(key, tsMs);
@@ -349,10 +349,9 @@ try {
 } catch {}
 
 let untouchedDocs: { stem: string; lastRead: number | null; date: Date }[] = [];
-const dormantSkills: { name: string; lastUsed: number }[] = [];
 
 // Guard: a ledger younger than the staleness window (or missing entirely)
-// would make every doc/skill look unused — say nothing rather than mislead.
+// would make every doc look unused — say nothing rather than mislead.
 if (ledgerStartMs !== null && (now.getTime() - ledgerStartMs) >= usageStaleMs) {
   const cutoffMs = now.getTime() - usageStaleMs;
 
@@ -374,12 +373,6 @@ if (ledgerStartMs !== null && (now.getTime() - ledgerStartMs) >= usageStaleMs) {
     }
   } catch {}
   untouchedDocs.sort((a, b) => a.date.getTime() - b.date.getTime());
-
-  for (const [key, ts] of lastUsedMs) {
-    if (!key.startsWith('skill:') || ts >= cutoffMs) continue;
-    dormantSkills.push({ name: key.slice('skill:'.length), lastUsed: ts });
-  }
-  dormantSkills.sort((a, b) => a.lastUsed - b.lastUsed);
 }
 
 // Archive the untouched docs: move-only into compiled/.archive/, reported in
@@ -439,11 +432,11 @@ if (usageAutoArchive && compiledEvidence && untouchedDocs.length > 0) {
   }
 }
 
-const usageUntouchedCount = untouchedDocs.length + dormantSkills.length;
+const usageUntouchedCount = untouchedDocs.length;
 
 let usageSection = '';
-if (autoArchived.length > 0 || untouchedDocs.length > 0 || dormantSkills.length > 0) {
-  const DOC_CAP = 10, SKILL_CAP = 10;
+if (autoArchived.length > 0 || untouchedDocs.length > 0) {
+  const DOC_CAP = 10;
   usageSection = `### Usage (no tracked use ≥${usageStaleDays}d)\n`;
   for (const stem of autoArchived) {
     usageSection += `- compiled/${stem}.md — auto-archived to compiled/.archive/ (restore by moving it back)\n`;
@@ -453,14 +446,10 @@ if (autoArchived.length > 0 || untouchedDocs.length > 0 || dormantSkills.length 
     usageSection += `- compiled/${d.stem}.md — last tracked read ${lastReadStr}, updated ${d.date.toISOString().slice(0, 10)}\n`;
   }
   if (untouchedDocs.length > DOC_CAP) usageSection += `- (+${untouchedDocs.length - DOC_CAP} more)\n`;
-  for (const s of dormantSkills.slice(0, SKILL_CAP)) {
-    usageSection += `- skill ${s.name} — last tracked use ${new Date(s.lastUsed).toISOString().slice(0, 10)}\n`;
-  }
-  if (dormantSkills.length > SKILL_CAP) usageSection += `- (+${dormantSkills.length - SKILL_CAP} more)\n`;
   if (usageAutoArchive && !compiledEvidence) {
     usageSection += `Nothing was auto-archived: the ledger holds no compiled/ read at all, which reads as a tracking gap rather than as disuse. These stay suggestions until it records one.\n`;
   }
-  usageSection += `Tracked sources: skill-tool calls, operator slash commands, and compiled/ Reads (subagent reads included); startup injection is not tracked.\n\n`;
+  usageSection += `Tracked sources: compiled/ Reads (subagent reads included); startup injection is not tracked.\n\n`;
 }
 
 // --- Build report ---
