@@ -305,7 +305,7 @@ describe('weekly-review.ts — Usage section', () => {
     expect(body).not.toContain('### Usage');
   }));
 
-  test('a dormant skill (no tracked use in 60+ days) is listed under Usage', withHermitDir(async (hermitDir) => {
+  test('skill rows in the ledger produce no Usage section — skills are not tracked for dormancy', withHermitDir(async (hermitDir) => {
     writeLedgerLines(hermitDir, [
       { ts: daysAgoIso(90), kind: 'meta', event: 'ledger-start' },
       { ts: daysAgoIso(75), kind: 'skill', name: 'claude-code-hermit:migrate', source: 'skill-tool' },
@@ -313,20 +313,8 @@ describe('weekly-review.ts — Usage section', () => {
     const r = await runScript('weekly-review.ts', { args: [hermitDir] });
     expect(r.exitCode).toBe(0);
     const { fm, body } = readReview(hermitDir);
-    expect(body).toContain('### Usage');
-    expect(body).toContain('skill claude-code-hermit:migrate');
-    expect(fm.usage_untouched_count).toBe('1');
-  }));
-
-  test('a recently-used skill is not listed as dormant', withHermitDir(async (hermitDir) => {
-    writeLedgerLines(hermitDir, [
-      { ts: daysAgoIso(90), kind: 'meta', event: 'ledger-start' },
-      { ts: daysAgoIso(5), kind: 'skill', name: 'claude-code-hermit:migrate', source: 'skill-tool' },
-    ]);
-    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
-    expect(r.exitCode).toBe(0);
-    const { body } = readReview(hermitDir);
     expect(body).not.toContain('### Usage');
+    expect(fm.usage_untouched_count).toBe('0');
   }));
 
   test('ledger compaction: collapses stale (>180d) duplicate events to the newest per name, keeps meta and recent events', withHermitDir(async (hermitDir) => {
