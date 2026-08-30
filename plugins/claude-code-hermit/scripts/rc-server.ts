@@ -12,7 +12,7 @@
 // it stops.
 //
 // Reached via: .claude-code-hermit/bin/hermit-run rc-server <subcommand>
-// Subcommands: start | stop | status | gc
+// Subcommands: start | stop | status | gc | sweep
 //
 // Status is a single one-shot pane capture, never a tail: the server's TUI
 // redraws its status line continuously and floods any log follower.
@@ -64,10 +64,15 @@ function statusFromPane(pane: string): string {
   return 'starting';
 }
 
-/** One-line status derived from a single pane capture. */
+/** Gate status, followed by live spawn worktrees when any can be inspected. */
 function statusLine(): string {
-  if (!sessionAlive()) return 'down';
-  return statusFromPane(capturePane());
+  const status = sessionAlive() ? statusFromPane(capturePane()) : 'down';
+  const worktrees = bridgeWorktrees(repoRoot());
+  if (worktrees.length === 0) return status;
+  const cwds = liveCwds();
+  if (cwds === null) return status;
+  const live = worktrees.filter(({ dir }) => inUse(cwds, dir)).map(({ name }) => name);
+  return `${status}\nspawns: ${live.length} live${live.length ? ` (${live.join(', ')})` : ''}`;
 }
 
 function start(): number {
@@ -179,6 +184,40 @@ function inUse(cwds: Set<string>, dir: string): boolean {
   return false;
 }
 
+function bridgeWorktrees(root: string): Array<{ name: string; dir: string }> {
+  const wtDir = path.join(root, '.claude', 'worktrees');
+  try {
+    // Directories only: a stray `bridge-*` file is not a worktree, and the
+    // automatic sweep would otherwise fail to remove it on every single tick.
+    return fs.readdirSync(wtDir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name.startsWith('bridge-'))
+      .map(e => ({ name: e.name, dir: path.join(wtDir, e.name) }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The unattended sweep leaves worktrees younger than this alone.
+ *
+ * `git worktree add` finishes before the spawned session has chdir-ed into the
+ * new worktree, and in that window the tree is clean and no process holds it —
+ * both of gc's guards pass. That was harmless while gc only ran when the
+ * operator asked for it; on a timer it means a tick can delete a phone spawn
+ * that is still starting, along with its branch. Operator-invoked `gc`/`stop`
+ * keep sweeping everything: they run when the operator knows what is spawning.
+ */
+const AUTO_SWEEP_MIN_AGE_MS = 120_000;
+
+/** Worktree age, from the `.git` file `git worktree add` writes once at creation. */
+function worktreeAgeMs(dir: string): number {
+  try {
+    return Date.now() - fs.statSync(path.join(dir, '.git')).mtimeMs;
+  } catch {
+    return Infinity; // not a worktree we created — no reason to hold the sweep back
+  }
+}
+
 /**
  * Branch checked out in each worktree, by worktree path. Read rather than
  * derived: a worktree's directory name and its branch name are independent, so
@@ -205,17 +244,14 @@ function worktreeBranches(root: string): Map<string, string> {
  * a delete of exactly that. An orphan holding a spawned session's unsaved work
  * is the operator's to resolve; gc reports it and moves on. Committed work is
  * covered separately, by deleting the branch with -d rather than -D.
+ *
+ * `auto` marks the unattended timer sweep (the `sweep` verb): it reports
+ * nothing on success and skips brand-new worktrees, per AUTO_SWEEP_MIN_AGE_MS.
  */
-function gc(): number {
+function gc(auto = false): number {
   const root = repoRoot();
-  const wtDir = path.join(root, '.claude', 'worktrees');
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(wtDir).filter(n => n.startsWith('bridge-'));
-  } catch {
-    return 0; // no worktrees dir → nothing to sweep
-  }
-  if (entries.length === 0) return 0;
+  const worktrees = bridgeWorktrees(root);
+  if (worktrees.length === 0) return 0;
 
   const cwds = liveCwds();
   if (cwds === null) {
@@ -225,12 +261,12 @@ function gc(): number {
 
   const branches = worktreeBranches(root);
   let removed = 0;
-  for (const name of entries) {
-    const dir = path.join(wtDir, name);
+  for (const { name, dir } of worktrees) {
     if (inUse(cwds, dir)) continue;
+    if (auto && worktreeAgeMs(dir) < AUTO_SWEEP_MIN_AGE_MS) continue;
     // Untracked files count: a spawned session's new files are usually the work.
     if (sh('git', ['-C', dir, 'status', '--porcelain']).stdout.trim()) {
-      console.log(`kept ${name} (uncommitted changes)`);
+      if (!auto) console.log(`kept ${name} (uncommitted changes)`);
       continue;
     }
     sh('git', ['-C', root, 'worktree', 'unlock', dir]); // absent lock → non-zero, ignored
@@ -247,7 +283,7 @@ function gc(): number {
     // destroying the commits behind it.
     const branch = branches.get(dir);
     if (branch) sh('git', ['-C', root, 'branch', '-d', branch]);
-    console.log(`removed ${name}`);
+    if (!auto) console.log(`removed ${name}`);
     removed++;
   }
   if (removed) sh('git', ['-C', root, 'worktree', 'prune']);
@@ -270,8 +306,9 @@ function main(argv: string[]): number {
     case 'stop': return stop();
     case 'status': console.log(statusLine()); return 0;
     case 'gc': return gc();
+    case 'sweep': return gc(true);
     default:
-      console.error('Usage: hermit-run rc-server <start|stop|status|gc>');
+      console.error('Usage: hermit-run rc-server <start|stop|status|gc|sweep>');
       return 2;
   }
 }

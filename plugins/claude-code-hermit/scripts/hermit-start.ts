@@ -168,6 +168,7 @@ const DEFAULT_CONFIG: Json = {
   docker: {
     packages: [],
     recommended_plugins: [],
+    fleet_mesh: false,
   },
   compact: {
     monitoring_threshold: 30,

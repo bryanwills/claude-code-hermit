@@ -13,9 +13,10 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { runScript, runProposal, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
-import { setupWorkdir, fixturesDir, withDir, writeConfig, type Workdir } from './helpers/workdir';
+import { setupGitWorkdir, setupWorkdir, fixturesDir, withDir, writeConfig, type Workdir } from './helpers/workdir';
 import { assistantEntry } from './helpers/transcript';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
 import { logRoutineEvent } from '../scripts/lib/routines/event';
@@ -2687,6 +2688,32 @@ describe('routine-monitor', () => {
     const r = await rtMonitorOnce('process.stdout.write("");\n');
     r.cleanup();
     expect(r.stdout).toBe('');
+  });
+
+  test('routine-monitor silently sweeps an orphaned locked bridge worktree', async () => {
+    const wd = setupGitWorkdir();
+    const stub = makeRtStub('process.stdout.write("");\n');
+    try {
+      const rtDir = path.join(wd.dir, '.claude-code-hermit');
+      const wt = path.join(wd.dir, '.claude', 'worktrees', 'bridge-monitor');
+      fs.mkdirSync(rtDir, { recursive: true });
+      execFileSync('git', ['-C', wd.dir, 'worktree', 'add', '-q', '-b', 'bridge-monitor', wt]);
+      execFileSync('git', ['-C', wd.dir, 'worktree', 'lock', wt]);
+      // Past the unattended sweep's brand-new grace period (rc-server.ts).
+      const aged = new Date(Date.now() - 10 * 60_000);
+      fs.utimesSync(path.join(wt, '.git'), aged, aged);
+
+      const r = await runBash(RT_MONITOR_SH, {
+        args: ['60', rtDir],
+        env: { ROUTINE_MONITOR_ONCE: '1', ROUTINE_DUE_SCRIPT: stub.path },
+      });
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toBe('');
+      expect(fs.existsSync(wt)).toBe(false);
+    } finally {
+      stub.cleanup();
+      wd.cleanup();
+    }
   });
 
   test('routine-monitor (routine-due nonzero exit → ROUTINE_MONITOR_ERROR)', async () => {

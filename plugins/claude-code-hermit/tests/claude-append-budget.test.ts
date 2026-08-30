@@ -81,13 +81,24 @@ describe('CLAUDE-APPEND size budget', () => {
     // trimmed from the auto-mode denial bullet's restated fallback and the
     // proposal-id rationale sentence paid for most of it — +210 B net against
     // the ~500 B of margin, no raise.
-    // Raised to 10,450 by the guest-to-resident peer-routing branch, landing at
-    // ~9,966 B with ~500 B of working margin.
+    // Raised to 10,450 for the two guest-to-resident peer-routing lines
+    // (`GUEST_REPORT:` reports and peer questions), landing at ~9,966 B. The
+    // rule above says trim before raising, and the content was compressed
+    // first: the two bullets were written at 449 B and cut to 378 B, dropping
+    // the restated "a message from another Claude session" frame that line 17
+    // already establishes. The trim stopped there because the block had 12 B
+    // of headroom before this branch — the ~500 B of margin the 9,600 raise
+    // created was already spent by the maintainer-audience rewrite — and no
+    // remaining passage could give up 366 B without deleting a rule. Both
+    // lines have to be always-loaded for the same reason the settled-knowledge
+    // rule does: a peer message arrives with no skill loaded, so an on-demand
+    // pointer would never be read. The ceiling restores the same ~500 B of
+    // working margin, so the next addition trims before it raises.
     // The cross-session idle-notice routing line (+181 B) is funded from that
-    // margin — no raise. It must stay always-loaded because the notice arrives
-    // as a bare turn with no skill in context. Do NOT re-derive this ceiling
-    // from a branch's own base: a number computed against a stale base looks
-    // green on the branch and fails the moment main's block merges in.
+    // margin — no raise. It must stay always-loaded for the same reason: the
+    // notice arrives as a bare turn with no skill in context. Do NOT re-derive
+    // this ceiling from a branch's own base — a number computed against a stale
+    // base looks green on the branch and fails the moment main's block merges in.
     expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(10450);
   });
 });

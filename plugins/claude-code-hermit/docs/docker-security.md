@@ -37,6 +37,7 @@ The wizard makes the container *meaningfully harder to abuse*. It does not make 
 - **mDNS / `.local`** doesn't resolve through dnsmasq. Services must be referenced by IP address (with a LAN carve-out) rather than `.local` hostnames.
 - **Host-bound services unreachable in bridge+containment mode** — `localhost`/`127.0.0.1` on the host is only reachable when `network_mode: host`. Operators wanting both LAN containment AND host-bound access need to refactor their host service to bind on the bridge IP and add a carve-out for that IP.
 - **Sidecar crash isolates hermit** — because hermit shares hermit-netguard's network namespace, if the sidecar dies hermit loses *all* networking until you bring it back up. The sidecar has `restart: unless-stopped` and a fail-safe entrypoint (loads-rules-or-tail-stay-up rather than crash-loop), but a misconfigured `nftables.conf` can still strand hermit. If this happens, `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml logs hermit-netguard` will tell you what went wrong.
+- **Fleet mesh weakens sibling isolation.** Every mesh container shares a PID namespace, so it can see and signal every other hermit's processes. The shared `sessions/` volume also holds every hermit's peer auth key, so a compromised hermit can message any sibling. Fleet mesh is for hermits on one host only; `isolatePeerMachines` remains unaffected.
 
 ## How to run it
 

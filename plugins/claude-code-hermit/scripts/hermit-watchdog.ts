@@ -521,6 +521,27 @@ function checkProcessRunning(pattern: string): boolean {
   return spawnSync('pgrep', ['-f', pattern], { stdio: 'ignore' }).status === 0;
 }
 
+/** ERE metacharacter escape, for embedding a literal path in a `pgrep -f` pattern. */
+function ereEscape(literal: string): string {
+  return literal.replace(/[.[\]{}()*+?^$|\\]/g, '\\$&');
+}
+
+/**
+ * True when THIS hermit's heartbeat monitor subprocess is not running.
+ *
+ * Anchored on this hermit's own state dir, not on the bare script name: `pgrep`
+ * scans the whole PID namespace, and `docker.fleet_mesh` hermits deliberately
+ * SHARE one (`pid: container:hermit-fleet-pidns`). A bare `heartbeat-monitor.sh`
+ * match there finds a SIBLING hermit's monitor and reports this hermit's dead
+ * one as alive, permanently suppressing the pane-frozen restart escalation.
+ * The monitor is registered as `bash <script> <interval> $PWD/.claude-code-hermit`
+ * (heartbeat/SKILL.md § start), so the resolved hermit root disambiguates it.
+ */
+function heartbeatMonitorDead(): boolean {
+  const root = ereEscape(path.resolve(HERMIT_ROOT));
+  return !checkProcessRunning(`heartbeat-monitor\\.sh .*${root}`);
+}
+
 /**
  * True if the `daily-auto-close` routine's next fire is within `windowSecs` of now.
  * The post-close /clear (maybePostCloseClear) already resets context for free right
@@ -1882,7 +1903,7 @@ async function main(): Promise<void> {
             process.exit(0);
           }
 
-          const monitorDead = !checkProcessRunning('heartbeat-monitor.sh');
+          const monitorDead = heartbeatMonitorDead();
 
           const prevHash = watchdogState.last_pane_hash;
           const paneFrozen =

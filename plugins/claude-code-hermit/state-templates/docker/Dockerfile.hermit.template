@@ -24,12 +24,15 @@ ARG HOST_UID=1000
 ARG CLAUDE_CODE_VERSION=latest
 ARG BUN_VERSION=1.4.0
 RUN userdel -r ubuntu 2>/dev/null; \
-    useradd -m -s /bin/bash -u ${HOST_UID} claude
+    useradd -m -s /bin/bash -u ${HOST_UID} claude && \
+    mkdir -p /run/hermit-fleet && \
+    chown claude:claude /run/hermit-fleet && \
+    chmod 0700 /run/hermit-fleet
 
 USER claude
 
-# Pre-create the config dir so the named volume inherits claude ownership on first mount
-RUN mkdir -p /home/claude/.claude
+# Pre-create the config dirs so named volumes inherit claude ownership on first mount
+RUN mkdir -p /home/claude/.claude/sessions
 
 # Install npm globals as claude user so Claude Code can self-update without sudo
 ENV NPM_CONFIG_PREFIX=/home/claude/.npm-global

@@ -103,6 +103,27 @@ describe('render-docker-templates.ts', () => {
     expect(compose(hostDir)).toContain('network_mode: host');
   });
 
+  test('fleet mesh wiring is present only when explicitly enabled', async () => {
+    const absentDir = freshDir();
+    await render(absentDir);
+    expect(compose(absentDir)).not.toContain('hermit-fleet');
+
+    const disabledDir = freshDir();
+    await render(disabledDir, { fleetMesh: false });
+    expect(compose(disabledDir)).not.toContain('hermit-fleet');
+
+    const enabledDir = freshDir();
+    await render(enabledDir, { fleetMesh: true });
+    const enabledCompose = compose(enabledDir);
+    expect(enabledCompose).toContain('pid: "container:hermit-fleet-pidns"');
+    expect(enabledCompose).toContain('XDG_RUNTIME_DIR=/run/hermit-fleet');
+    expect(enabledCompose).toMatch(/^ {6}- hermit-fleet-sessions:\/home\/claude\/\.claude\/sessions$/m);
+    expect(enabledCompose).toMatch(/^ {6}- hermit-fleet-socks:\/run\/hermit-fleet$/m);
+    expect(enabledCompose.match(/^ {4}external: true$/gm)).toHaveLength(2);
+    expect(enabledCompose).not.toMatch(/\{\{[A-Z][A-Z0-9_]*\}\}/);
+    expect(dockerfile(enabledDir)).toBe(dockerfile(disabledDir));
+  });
+
   test('api-key auth adds ANTHROPIC_API_KEY env line; oauth does not', async () => {
     const keyDir = freshDir();
     await render(keyDir, { auth: 'api-key' });

@@ -289,6 +289,16 @@ describe('last-operator-action.json signal', () => {
     expect(fs.existsSync(lastOp(dir))).toBe(false);
   }));
 
+  test('hook smoke: GUEST_REPORT: prefix → file NOT written', withTmp(async (dir) => {
+    await recordHook(dir, '{"prompt":"GUEST_REPORT: merged #900, touched scripts/x.ts"}');
+    expect(fs.existsSync(lastOp(dir))).toBe(false);
+  }));
+
+  test('hook smoke: prose mentioning GUEST_REPORT: mid-sentence → file IS written', withTmp(async (dir) => {
+    await recordHook(dir, '{"prompt":"what does GUEST_REPORT: mean?"}');
+    expect(fs.existsSync(lastOp(dir))).toBe(true);
+  }));
+
   // f. hook smoke: plain operator prompt → file IS written
   test('hook smoke: plain operator prompt → file IS written', withTmp(async (dir) => {
     await recordHook(dir, '{"prompt":"hello"}');

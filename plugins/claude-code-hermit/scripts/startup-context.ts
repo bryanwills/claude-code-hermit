@@ -23,6 +23,7 @@ import { isResetBreadcrumb } from './lib/progress-log';
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
+import { findResident } from './lib/session-registry';
 import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
 import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
@@ -259,9 +260,25 @@ function residentSessionActive(agentDir: string): boolean {
   return tmuxSessionAlive(tmuxSession);
 }
 
-// The guest injection: identity, the one fact that matters, and the three
-// things only the resident may do. Deliberately short — a guest session is here
-// to do ordinary work, not to be briefed on the hermit.
+// The name a peer must address to reach the resident. `peer_name` is only the
+// name the resident *requested* at boot — Claude Code renames a session that
+// collides with a live one already holding it, so the registry entry's own
+// `name` is authoritative and `peer_name` is the fallback for a resident that
+// booted before the `session_pid` stamp existed (or on a host whose registry
+// can't be validated). The registry is read under the resident's own recorded
+// config dir: a guest may have been launched with a different CLAUDE_CONFIG_DIR.
+// Empty means there is no addressable resident.
+function residentPeerName(agentDir: string): string {
+  const runtime = readRuntimeJson(path.resolve(agentDir, 'state'));
+  if (!runtime) return '';
+  const configDir = typeof runtime.config_dir === 'string' && runtime.config_dir ? runtime.config_dir : undefined;
+  const registered = findResident(runtime, configDir);
+  if (registered && typeof registered.name === 'string' && registered.name) return registered.name;
+  return typeof runtime.peer_name === 'string' ? runtime.peer_name : '';
+}
+
+// Keep the guest injection short because a guest session is here to do
+// ordinary work, not to be briefed on the hermit.
 function emitGuestBanner(agentDir: string): void {
   const project = path.basename(path.dirname(path.resolve(agentDir)));
   console.log('---Guest Session---');
@@ -269,6 +286,14 @@ function emitGuestBanner(agentDir: string): void {
   console.log('You are a guest, not the hermit. Do not answer channel messages, do not write');
   console.log('sessions/SHELL.md or other hermit state, and do not start the heartbeat, routines,');
   console.log('or watches — the resident session owns all of that. Otherwise work normally.');
+  // Dropped entirely when the resident has no resolvable name: "Resident: @."
+  // is an instruction the guest cannot act on, and inventing a name would send
+  // the report to whatever session happens to answer to it.
+  const peerName = residentPeerName(agentDir);
+  if (peerName) {
+    console.log(`Resident: @${safe(peerName)}. SendMessage it one line starting GUEST_REPORT: when work here is finished.`);
+    console.log('Ask it for history instead of reading hermit state.');
+  }
 }
 
 // --- Launch stamp: the session's own auth environment -------------------
