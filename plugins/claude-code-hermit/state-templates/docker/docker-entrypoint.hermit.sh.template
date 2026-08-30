@@ -569,6 +569,14 @@ if [ "${HERMIT_FORCE_BOOT:-0}" != "1" ]; then
 fi
 rm -f "${AGENT_DIR}/state/.boot-conflict" 2>/dev/null || true
 
+# Keep Claude Code on the configured inbox socket directory. It rejects
+# group- or world-writable directories and otherwise silently falls back to /tmp.
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  if ! mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || ! chmod 0700 "$XDG_RUNTIME_DIR" 2>/dev/null; then
+    printf '[hermit] Cannot secure socket directory %s; fix with: docker volume rm hermit-fleet-socks, then hermit-docker up\n' "$XDG_RUNTIME_DIR" >&2
+  fi
+fi
+
 # --- 4c. Operator sidecar: pre-launch ---
 export HERMIT_ENTRY_PHASE=pre-launch
 if [ -f "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh" ]; then . "${PROJECT_DIR}/docker-entrypoint.hermit-local.sh"; fi

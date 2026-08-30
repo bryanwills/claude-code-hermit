@@ -514,6 +514,7 @@ Modify with `/hermit-settings scheduled-checks`.
 |-----|------|---------|-------------|
 | `packages` | array | `[]` | System packages (`apt-get`) to install in the Docker image. |
 | `recommended_plugins` | array | `[]` | Plugins to install on container boot. Empty by default — entries are only added when the operator explicitly opts in during `/docker-setup` or `/hermit-settings docker`. |
+| `fleet_mesh` | boolean | `false` | Opt-in, same-box Docker peer discovery and messaging. Requires the two external volumes and the pid namespace holder documented in [Always-On Mode](always-on.md#fleet-mesh-opt-in). Set it in `config.json`, then re-run `/docker-setup`. |
 
 ### `recommended_plugins` entry schema
 

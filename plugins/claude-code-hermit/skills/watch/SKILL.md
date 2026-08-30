@@ -16,6 +16,8 @@ Two classes:
 ```
 /claude-code-hermit:watch <instruction>            — start ad-hoc (poll, default 5m interval)
 /claude-code-hermit:watch <stream-command>         — start ad-hoc stream
+/claude-code-hermit:watch session <name> [note]    — watch a local session until its next idle notice
+/claude-code-hermit:watch notice <text>            — [internal] handle a watched-session notice
 /claude-code-hermit:watch start                    — register all enabled config watches
 /claude-code-hermit:watch stop [id]                — stop by id (or auto if 1 active)
 /claude-code-hermit:watch stop --all               — stop all watches
@@ -37,6 +39,14 @@ This is the **sole source of truth** — not SHELL.md.
       "started_at": "2026-04-12T15:00:00Z",
       "source": "config",
       "class": "stream"
+    },
+    {
+      "id": "session-migration-1775991600-b7c1",
+      "description": "database migration",
+      "target": "migration",
+      "started_at": "2026-04-12T15:00:00Z",
+      "source": "adhoc",
+      "class": "peer-idle"
     }
   ],
   "last_cleared": "2026-04-12T15:00:00Z"
@@ -71,6 +81,26 @@ them for decisions. Start/stop decisions read from the runtime registry.
 8. Write registry back
 9. Log to SHELL.md `## Monitoring`: `- [ACTIVE] <instruction> (started HH:MM)`
 
+### Starting a session watch (`/watch session <name> [note]`)
+
+1. Resolve `<name>` with `ListAgents`. The row must be a Claude Code session on
+   this machine — `notify_when_idle` covers nothing else, so a cloud/remote agent
+   or an in-process subagent row does not qualify. If no such row matches, answer
+   `No session named <name> is reachable from here.` and do not write the registry.
+2. Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
+   `message`: this is a pure subscription, costs the watched session nothing, and
+   fires immediately if it is already idle.
+3. Read the tool result: it says whether the notice will be shown to you or only
+   to the operator. When it is operator-only (this session holds peer messages
+   for approval, e.g. under `bypassPermissions`), no relay is possible — say so
+   plainly instead of claiming the watch is live, and do not write the registry.
+4. Generate id `session-<name>-<epoch>-<4char-random>` — same timestamp + random
+   suffix convention as an ad-hoc id, so two watches on one name in the same
+   second do not collide.
+5. Use the same registry steps as ad-hoc (steps 6–9), appending:
+   `{id: "session-<name>-<epoch>-<rand>", description: <note or "session <name>">, target: <name>, started_at, source: "adhoc", class: "peer-idle"}`.
+   Do not add `task_id`.
+
 ### Starting config watches (`/watch start`)
 
 Called automatically by session-start (step 11b). Can also be called manually.
@@ -96,14 +126,17 @@ Called automatically by session-start (step 11b). Can also be called manually.
 ### Stopping a watch
 
 1. Parse id from operator message (or `--all` flag)
-2. **`stop <id>`:** Look up `task_id` in registry → `TaskStop` → remove entry from registry → update SHELL.md `[ACTIVE]` to `[STOPPED]`
+2. **`stop <id>`:** Look up the entry in the registry. When it has a `task_id`,
+   call `TaskStop`; a `peer-idle` entry has none, so just remove it. Then update
+   SHELL.md `[ACTIVE]` to `[STOPPED]`.
 3. **`stop` (no id):**
-   - Count ad-hoc watches in registry (`source: "adhoc"`)
+   - Count ad-hoc watches in registry (`source: "adhoc"`), including `peer-idle`
    - 0 active: "No active watches to stop."
    - 1 active: stop it without asking
    - 2+ active: list them, ask which one (or use `--all`)
-4. **`stop --all`:** For each entry in registry, call `TaskStop` with its `task_id`.
-   Clear all entries from registry. Log to SHELL.md.
+4. **`stop --all`:** For each entry with a `task_id`, call `TaskStop`. Remove
+   entries without one, including `peer-idle`, without calling `TaskStop`. Clear
+   all entries from the registry and log to SHELL.md.
 5. After any stop: write registry back
 
 Note: If `TaskStop` returns an error for a given task_id (the watch already
@@ -117,10 +150,13 @@ died), remove the entry from the registry anyway. A dead watch's entry is stale.
 
 ```
 Active watches:
-  ID             SOURCE   CLASS   STARTED    DESCRIPTION
-  deploy-errors  config   stream  15:00      errors in deploy.log
-  adhoc-...      adhoc    poll    16:30      check error rate in app metrics
+  ID             SOURCE   CLASS      STARTED    DESCRIPTION
+  deploy-errors  config   stream     15:00      errors in deploy.log
+  adhoc-...      adhoc    poll       16:30      check error rate in app metrics
+  session-...    adhoc    peer-idle  17:00      database migration
 ```
+
+Show `peer-idle` as-is in the CLASS column.
 
 ### Handling self-exit notifications
 
@@ -133,6 +169,28 @@ CC sends a completion notification into the conversation. On seeing this:
 
 If the notification is missed (compaction, context pressure), the stale entry is
 harmless. The next session start clears the registry unconditionally.
+
+### Handling idle notices (`/watch notice <text>`)
+
+On a cross-session idle notice naming session X, or a subscription-expiry notice
+for X:
+
+1. Find a `peer-idle` entry whose `target === X`. If none exists, do nothing: no
+   reply, channel notification, or log entry.
+2. Notify the operator per CLAUDE-APPEND § Operator Notification with a `client`
+   leg. For an idle notice, use `"<note>: <name> finished. Last status: «<one-line status>»"`.
+   If the notice carries no status, use `"<note>: <name> finished."` instead. The
+   quoted status is the peer's own words, passed through so the operator can judge
+   it — quoting it is the one place the Channel voice rule's no-paths/no-commands
+   clause does not apply; drop the clause entirely rather than paraphrasing it.
+   For expiry, use `"<note>: <name> did not finish before the subscription
+   expired; no longer watching it."` — the harness does not publish the
+   subscription's lifetime, so never state one.
+3. Name the session by display name only, never by socket path or pid. Remove the
+   entry, write the registry, and log one SHELL.md line.
+
+Never message the watched session back. The notice fires when X's turn ends, not
+when its background work ends.
 
 ## Notes
 
