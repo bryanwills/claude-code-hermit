@@ -22,7 +22,8 @@
  *       },
  *       "agentHookProfile": "strict",
  *       "networkMode": "bridge" | "host",
- *       "gitIdentityMount": true
+ *       "gitIdentityMount": true,
+ *       "fleetMesh": true            // optional; absent == false
  *     }
  *   channels.envLines / volumeLines carry the line BODY (the text after
  *   `      - `); this script owns the compose indentation.
@@ -58,6 +59,7 @@ interface Inputs {
   agentHookProfile: string;
   networkMode: 'bridge' | 'host';
   gitIdentityMount: boolean;
+  fleetMesh?: boolean;
 }
 
 function packagesBlock(packages: string[]): string {
@@ -79,8 +81,22 @@ function indentedLines(bodies: string[]): string {
 export function render(inputs: Inputs): { dockerfile: string; compose: string } {
   const packages = inputs.packages ?? [];
   const channels = inputs.channels ?? {};
-  const envLines = channels.envLines ?? [];
-  const volumeLines = channels.volumeLines ?? [];
+  // envLines/volumeLines feed the CHANNEL_ENV_LINES and CHANNEL_VOLUME_LINES
+  // placeholders, which are really just "extra env/volume lines" despite the
+  // channel-specific name — fleet mesh reuses them instead of adding its own.
+  const envLines = [
+    ...(channels.envLines ?? []),
+    ...(inputs.fleetMesh ? ['XDG_RUNTIME_DIR=/run/hermit-fleet'] : []),
+  ];
+  const volumeLines = [
+    ...(channels.volumeLines ?? []),
+    ...(inputs.fleetMesh
+      ? [
+          'hermit-fleet-sessions:/home/claude/.claude/sessions',
+          'hermit-fleet-socks:/run/hermit-fleet',
+        ]
+      : []),
+  ];
 
   const dockerfileTemplate = fs.readFileSync(
     path.join(TEMPLATES_DIR, 'Dockerfile.hermit.template'), 'utf8');
@@ -113,6 +129,16 @@ export function render(inputs: Inputs): { dockerfile: string; compose: string } 
   const networkModeLine = inputs.networkMode === 'host'
     ? '    # WARNING: host networking exposes all host-local services to the container.\n    network_mode: host'
     : '';
+  // FLEET_MESH_PID_LINE shares a template line with NETWORK_MODE_LINE, so it
+  // carries its own leading newline — but only when NETWORK_MODE_LINE is
+  // non-empty, otherwise the default bridge case gains a stray blank line.
+  const fleetMeshPidLine = inputs.fleetMesh
+    ? `${networkModeLine ? '\n' : ''}    pid: "container:hermit-fleet-pidns"`
+    : '';
+  // Appended straight after "claude-config:" on the same template line.
+  const fleetMeshVolumeDeclarations = inputs.fleetMesh
+    ? '\n  hermit-fleet-sessions:\n    external: true\n  hermit-fleet-socks:\n    external: true'
+    : '';
 
   const compose = renderTemplate(composeTemplate, {
     AUTH_ENV_LINE: authEnvLine,
@@ -120,6 +146,8 @@ export function render(inputs: Inputs): { dockerfile: string; compose: string } 
     CHANNEL_VOLUME_LINES: indentedLines(volumeLines),
     AGENT_HOOK_PROFILE: inputs.agentHookProfile,
     NETWORK_MODE_LINE: networkModeLine,
+    FLEET_MESH_PID_LINE: fleetMeshPidLine,
+    FLEET_MESH_VOLUME_DECLARATIONS: fleetMeshVolumeDeclarations,
   });
 
   return { dockerfile, compose };

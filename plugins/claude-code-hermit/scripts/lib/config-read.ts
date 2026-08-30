@@ -80,7 +80,7 @@ const TABLE: Record<string, Spec> = {
   boot_skill: str(null),
   shutdown_skill: str(null),
   scheduled_checks: arr,
-  docker: shape({ packages: arr, recommended_plugins: arr }),
+  docker: shape({ packages: arr, recommended_plugins: arr, fleet_mesh: bool(false) }),
   compact: shape({
     monitoring_threshold: num(30),
     monitoring_keep: num(20),

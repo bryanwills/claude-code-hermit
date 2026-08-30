@@ -31,7 +31,7 @@ services:
       # guard for split-state recovery (HERMIT_FORCE_BOOT=1 hermit-docker up).
       - HERMIT_FORCE_BOOT=${HERMIT_FORCE_BOOT:-0}
 {{AUTH_ENV_LINE}}{{CHANNEL_ENV_LINES}}
-{{NETWORK_MODE_LINE}}
+{{NETWORK_MODE_LINE}}{{FLEET_MESH_PID_LINE}}
     # Defense in depth — rationale and override path: run /claude-code-hermit:docker-security.
     cap_drop:
       - ALL
@@ -73,4 +73,4 @@ services:
       start_period: 30s
 
 volumes:
-  claude-config:
+  claude-config:{{FLEET_MESH_VOLUME_DECLARATIONS}}
