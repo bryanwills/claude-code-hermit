@@ -16,13 +16,12 @@
 import path from 'node:path';
 import { resolve as resolveOutboundChannel, resolveMaintainerTarget } from '../resolve-outbound-channel';
 import { logMessage, isLoggingEnabled } from './channel-log';
-import { settleConfig, readConfigRaw, readSettledConfig } from './config-read';
+import { settleConfig, readConfigRaw, readSettledConfig, agentNameFromConfig } from './config-read';
 import { readChannelToken } from './channel-token';
 import { recordChannelHealth } from './channel-health';
 import { appendShellLine } from './md-write';
 import { findPeerTargets } from './session-registry';
 import { postToSession } from './peer-post';
-import { agentNameFromConfig } from './dashboard';
 import { readRuntimeJson } from './runtime';
 
 type Json = any;
@@ -285,7 +284,9 @@ export async function sendOperatorNotice(hermitDir: string, notice: OperatorNoti
         if (verdict === 'sent' && isLoggingEnabled(config)) {
           const logResult = logMessage(hermitDir, {
             source: 'peer',
-            chat_id: target.name,
+            // `name` is not one of the fields parseEntry validates; the pid is
+            // always there and still identifies the row's destination.
+            chat_id: typeof target.name === 'string' && target.name ? target.name : String(target.pid),
             direction: 'out',
             text,
           });
@@ -294,8 +295,11 @@ export async function sendOperatorNotice(hermitDir: string, notice: OperatorNoti
           }
         }
       }
-    } catch {
-      out.peer = { ok: false, route: 'peer', delivered: false, error: 'no_peer_target' };
+    } catch (e: any) {
+      // Distinct from 'no_peer_target': the lookup itself broke (unreadable
+      // registry dir, a socket path net.connect rejects), which is a different
+      // thing to report than "nobody was live".
+      out.peer = { ok: false, route: 'peer', delivered: false, error: `peer_lookup_failed: ${e?.message || e}` };
     }
   }
 

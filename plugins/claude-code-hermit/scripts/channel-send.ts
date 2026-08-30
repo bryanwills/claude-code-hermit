@@ -25,6 +25,9 @@
 
 import { assertStateDir, hermitDir as ownStateDir } from './lib/cc-compat';
 import { sendToChannel, sendOperatorNotice, type SendResult } from './lib/channel-send';
+import { readSettledConfig } from './lib/config-read';
+
+type Json = any;
 
 // The state dir is not caller-chosen. Reachable through a pre-approved
 // `Bash(bun */scripts/channel-send.ts*)` grant that covers every argument, so an
@@ -159,8 +162,17 @@ async function runNotice(hermitDir: string): Promise<void> {
   const delivered = legs.length > 0 && legs.every(legDelivered);
   const degraded = out.maintainer?.route === 'findings' && out.maintainer?.delivered === false;
   const no_channel = legs.length > 0 && legs.every((r) => r.error === 'no_reachable_channel');
+  // `no_channel` alone cannot tell "the operator configured no channels" from
+  // "a configured channel is unreachable" — resolveOutboundChannel returns null
+  // for an enabled-but-unpaired channel and for an empty `allowed_users` too,
+  // and both surface as the same `no_reachable_channel`. Only the second is a
+  // fault worth an issue, so the caller needs this second bit to tell them apart.
+  const channels: Json = readSettledConfig(hermitDir).channels ?? {};
+  const channels_configured = Object.entries(channels).some(
+    ([id, ch]: [string, Json]) => id !== 'primary' && !!ch && typeof ch === 'object' && ch.enabled !== false,
+  );
 
-  process.stdout.write(JSON.stringify({ delivered, degraded, no_channel, result: out }) + '\n');
+  process.stdout.write(JSON.stringify({ delivered, degraded, no_channel, channels_configured, result: out }) + '\n');
   process.exit(delivered ? 0 : 1);
 }
 

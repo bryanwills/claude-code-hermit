@@ -17,7 +17,7 @@ import { formatTokens } from './format';
 import { sha256 } from './hash';
 import { readMergedAlerts, PROPOSAL_PREFIX } from './alert-state';
 import { todayYMD } from './time';
-import { readSettledConfig } from './config-read';
+import { readSettledConfig, agentNameFromConfig } from './config-read';
 import { costIndexPath, readCostIndex } from './cost-log';
 import { rebuildIndex, type ProposalsIndex } from './proposals/index-rebuild';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './liveness';
@@ -279,10 +279,6 @@ function alertMessage(key: string, v: Json, s: ArtifactStrings): string {
     return fmt(s.budget_text, { period, state, amounts });
   }
   return escapeHtml(key);
-}
-
-export function agentNameFromConfig(config: Json): string {
-  return typeof config?.agent_name === 'string' && config.agent_name.trim() ? config.agent_name : 'Hermit';
 }
 
 /** The hermit's own name, used to lead both page titles. Shared with

@@ -572,7 +572,7 @@ describe('sendOperatorNotice tiering', () => {
 // channel-send.ts --notice — the model-facing proactive-notify CLI boundary.
 // Drives the subprocess (not sendOperatorNotice in-process) so these tests also
 // cover payload parsing/validation and the normalized {delivered,degraded,
-// no_channel,result} stdout contract, not just the routing sendOperatorNotice
+// no_channel,channels_configured,result} stdout contract, not just the routing sendOperatorNotice
 // already owns (covered above).
 describe('channel-send CLI --notice', () => {
   const findings = (wd: Workdir) => fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf8');
@@ -750,7 +750,30 @@ describe('channel-send CLI --notice', () => {
       expect(r.exitCode).not.toBe(0);
       const out = JSON.parse(r.stdout);
       expect(out.no_channel).toBe(true);
+      expect(out.channels_configured).toBe(false);
       expect(out.delivered).toBe(false);
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // An enabled-but-unpaired channel resolves to no target exactly like an empty
+  // channels block, so `no_channel` alone would tell the caller to stay quiet
+  // about a channel that is actually broken. `channels_configured` separates them.
+  test('an enabled but unpaired channel is no_channel with channels_configured:true', async () => {
+    const wd = setupWorkdir();
+    write(hermit(wd.dir, 'config.json'), JSON.stringify({
+      channels: { primary: 'telegram', telegram: { enabled: true, allowed_users: [] } },
+    }));
+    try {
+      const r = await runChannelSend({
+        args: [hermit(wd.dir), '--notice'],
+        stdin: JSON.stringify({ client: 'hello' }),
+      });
+      expect(r.exitCode).toBe(1);
+      const out = JSON.parse(r.stdout);
+      expect(out.no_channel).toBe(true);
+      expect(out.channels_configured).toBe(true);
     } finally {
       wd.cleanup();
     }

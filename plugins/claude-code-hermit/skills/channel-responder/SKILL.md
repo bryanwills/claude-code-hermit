@@ -266,17 +266,20 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
 
   Compose each version in the operator's configured `language`.
 
-  The script prints `{ "delivered", "degraded", "no_channel", "result" }`.
+  The script prints `{ "delivered", "degraded", "no_channel", "channels_configured", "result" }`.
   - **Exit 0** — every leg landed. Done.
   - **Exit 2** — the payload was rejected (unknown key, empty audience, bad value; the reason is on
     stderr and nothing was sent). Fix the payload and re-run. This is your error, not the channel's:
     do not push and do not record a `channel-send-unavailable` issue.
   - **Exit 1** — a leg did not land (including `degraded: true`, where maintainer detail reached only
-    SHELL.md Findings because a configured maintainer chat was unreachable). With `no_channel: true`,
-    fire `PushNotification(message="<condensed one line, per § Operator Notification push format>",
-    status="proactive")` when `push_notifications === true` and respond in conversation either way;
-    empty-channels config is intentional, so do not record a `channel-send-unavailable` issue. Otherwise,
-    when push is enabled fire it, log the undelivered content to SHELL.md Findings, and record a deduped
+    SHELL.md Findings because a configured maintainer chat was unreachable). When
+    `push_notifications === true`, fire `PushNotification(message="<condensed one line, per
+    § Operator Notification push format>", status="proactive")` and respond in conversation either way.
+    Whether that failure is also worth an issue is decided by `channels_configured`, not `no_channel`:
+    with `no_channel: true` **and** `channels_configured: false` the operator configured no channel at
+    all — that is intentional, so do not record a `channel-send-unavailable` issue. In every other case
+    a channel is configured and did not take the message (unpaired, empty `allowed_users`, unreadable
+    config, platform error): log the undelivered content to SHELL.md Findings and record a deduped
     `channel-send-unavailable` issue.
 - Never send a proactive notice through a channel reply tool, and never advise `/<channel>:access`
   for a maintainer chat — the maintainer chat is reached by direct API POST, not `access.json` pairing (its one inbound authority is the settings tier, `docs/security.md` § Tiered settings authority, not reply routing).

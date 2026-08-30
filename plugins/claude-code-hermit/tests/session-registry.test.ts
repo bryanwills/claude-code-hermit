@@ -169,6 +169,44 @@ describe('findPeerTargets', () => {
     )).toEqual([]);
   });
 
+  test('skips a hermit resident whose session cwd is a subdirectory of its project', () => {
+    const c = registryDir();
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-peer-cwd-')));
+    dirs.push(root);
+    fs.mkdirSync(path.join(root, '.claude-code-hermit', 'state'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, '.claude-code-hermit', 'state', 'runtime.json'),
+      JSON.stringify({ session_pid: process.pid }),
+    );
+    const cwd = path.join(root, 'packages', 'api');
+    fs.mkdirSync(cwd, { recursive: true });
+    writeEntry(c, process.pid, { cwd });
+
+    expect(findPeerTargets({ session_pid: 4_194_304 }, { maxIdleMs: 30_000 }, c)).toEqual([]);
+  });
+
+  test('no own session_pid means no target — the sender cannot rule itself out', () => {
+    const c = registryDir();
+    writeEntry(c, process.pid, { statusUpdatedAt: Date.now() });
+
+    expect(findPeerTargets({}, { maxIdleMs: 30_000 }, c)).toEqual([]);
+    expect(findPeerTargets(null, { maxIdleMs: 30_000 }, c)).toEqual([]);
+  });
+
+  test('an entry missing cwd or messagingSocketPath is skipped, not thrown on', () => {
+    const c = registryDir();
+    const other = liveChild();
+    const now = Date.now();
+    writeEntry(c, process.pid, { statusUpdatedAt: now, cwd: undefined });
+    writeEntry(c, other.pid, { statusUpdatedAt: now - 1_000 });
+
+    expect(findPeerTargets(
+      { session_pid: 4_194_304 },
+      { maxIdleMs: 30_000 },
+      c,
+    ).map((entry) => entry.pid)).toEqual([other.pid]);
+  });
+
   test('an empty registry directory reads as unknown', () => {
     expect(findPeerTargets(
       { session_pid: process.pid },

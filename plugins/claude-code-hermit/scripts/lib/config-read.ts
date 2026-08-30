@@ -188,6 +188,14 @@ export function configExists(dir: string): boolean {
   return fs.existsSync(path.join(dir, 'config.json'));
 }
 
+/** The hermit's own name, or 'Hermit'. Lives here, not with its first caller
+ *  (lib/dashboard.ts): channel-send needs it on the per-prompt/per-Stop hook
+ *  path, and importing the dashboard renderer for one field would drag its whole
+ *  artifact graph into every one of those hook processes. */
+export function agentNameFromConfig(config: Json): string {
+  return typeof config?.agent_name === 'string' && config.agent_name.trim() ? config.agent_name : 'Hermit';
+}
+
 /** Never throws: unreadable or malformed config settles to full defaults. */
 export function readSettledConfig(dir: string): SettledConfig {
   const raw = readConfigRaw(dir);
