@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 
 import { parseDuration } from './lib/time';
@@ -29,6 +30,7 @@ import { promptTokensOf, compactibleTokens } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
 import { readJson } from './lib/cli';
+import { findResident } from './lib/session-registry';
 
 type Json = any;
 
@@ -2092,6 +2094,88 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
 }
 
 /**
+ * Peer inbox — can the watchdog's socket wake actually reach the resident?
+ *
+ * The wake is invisible on the wire: `postToSession` reports that bytes were
+ * written, never that a turn started, and every way the message dies (a refusing
+ * receiver, a bypass hermit holding it behind a dialog nobody answers, a session
+ * whose socket went with it) looks identical to success. This check is the only
+ * place that path is examined before it is needed.
+ *
+ * Connect-only, never a post: a post starts a turn, and a diagnostic must not
+ * bill the operator for a full-context wake.
+ *
+ * Never `fail`, by design. Typing into the pane remains a working fallback for
+ * every warn below, so a red line here would overstate a degraded-but-recovering
+ * path — the check reports that the wake will type, not that the hermit is broken.
+ */
+async function checkPeerInbox(p: DoctorPaths = PATHS) {
+  const { stateDir } = p;
+  const id = 'peer-inbox';
+  try {
+    const runtimePath = path.join(stateDir, 'runtime.json');
+    if (!fs.existsSync(runtimePath)) return { id, status: 'ok', detail: 'no runtime state' };
+    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+
+    // The stamp is written by the resident's own SessionStart hook, so it is
+    // absent exactly while no managed session has started since the upgrade.
+    if (typeof rt.session_pid !== 'number') {
+      return { id, status: 'warn', detail: 'session not registered yet (no session_pid stamp) — wedge nudge will type' };
+    }
+    const resident = findResident(rt);
+    if (!resident) {
+      return { id, status: 'warn', detail: `no live registry entry for pid ${rt.session_pid} — wedge nudge will type` };
+    }
+
+    const notes: string[] = [];
+    // Must be a string, not merely truthy: net.connect() reads a number as a TCP
+    // port on localhost, so an unexpected shape in this undocumented file would
+    // turn a local-socket probe into a TCP dial.
+    const sock = resident.messagingSocketPath;
+    const reachable = typeof sock === 'string' && sock ? await socketAccepts(sock) : false;
+    if (!reachable) notes.push('inbox socket not accepting connections — wedge nudge will type');
+
+    // A rename means peers address the hermit by a name it no longer answers to;
+    // Claude Code renames silently on a collision with a live session.
+    if (typeof rt.peer_name === 'string' && rt.peer_name && resident.name !== rt.peer_name) {
+      notes.push(`registered as "${resident.name}", not "${rt.peer_name}"`);
+    }
+
+    // A bypassPermissions receiver HOLDS an unauthenticated post behind an
+    // approval dialog that expires unseen, and repo-scope settings cannot lower
+    // that (they are consulted only when they tighten). So the wake is inert
+    // there regardless of what this hermit wrote at boot.
+    const read = readConfigOrCovered(id, p);
+    if (!('covered' in read) && read.config?.permission_mode === 'bypassPermissions') {
+      notes.push('bypassPermissions holds peer messages — wedge nudge will type');
+    }
+
+    if (notes.length > 0) return { id, status: 'warn', detail: notes.join('; ') };
+    return { id, status: 'ok', detail: `resident "${resident.name}" registered (${resident.status}), inbox reachable` };
+  } catch (e: any) {
+    return { id, status: 'warn', detail: `check failed: ${e.message}` };
+  }
+}
+
+/** Connect to a Unix socket and hang up. Never writes a frame — a write would
+ *  start a turn in the receiving session. */
+function socketAccepts(socketPath: string, timeoutMs = 2000): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      try { conn.destroy(); } catch {}
+      resolve(ok);
+    };
+    const conn = net.connect(socketPath);
+    conn.setTimeout(timeoutMs, () => done(false));
+    conn.on('connect', () => done(true));
+    conn.on('error', () => done(false));
+  });
+}
+
+/**
  * Voice carrier — has config.voice actually reached the system prompt?
  *
  * A drift check, not an ownership one: `config.voice` is the operator's answer and
@@ -2291,7 +2375,11 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkContextScan(p),
     checkVoiceCarrier(p),
     checkClassifierDenials(p),
-    await checkChannelLiveness(p),
+    // Both do outbound I/O behind their own timeouts (channel HTTP calls, the
+    // peer socket connect) and share no state, so they run concurrently rather
+    // than adding both timeouts to every doctor run. Promise.all preserves
+    // order, so the pinned check-id sequence is unchanged.
+    ...(await Promise.all([checkChannelLiveness(p), checkPeerInbox(p)])),
   ];
 }
 
@@ -2420,7 +2508,7 @@ export {
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
   checkRoutinePrecheck, checkRawSize,
-  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkClassifierDenials, checkChannelLiveness,
+  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkClassifierDenials, checkChannelLiveness, checkPeerInbox,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
   resolvePaths,

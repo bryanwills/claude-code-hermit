@@ -3726,6 +3726,26 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
     expect(classifySource('<channel source="telegram" chat_id="789">hi</channel>')).toBe('channel:telegram');
   });
 
+  // classifySource: peer messages from another local Claude Code session.
+  // The frames are the harness's own: a raw socket post renders as "Another
+  // Claude session sent a message:", a named peer as "Message from @<name>".
+  test('cost-tracker: classifySource(Another Claude session sent a message) = peer', () => {
+    expect(classifySource('Another Claude session sent a message:\nfinished the migration')).toBe('peer');
+  });
+  test('cost-tracker: classifySource(Message from @name) = peer', () => {
+    expect(classifySource('Message from @scout: build is green')).toBe('peer');
+  });
+  // The watchdog's own wedge wake arrives inside the SAME peer frame. It is a
+  // heartbeat, and the earlier matcher must keep it — otherwise every socket
+  // nudge is double-counted as peer traffic.
+  test('cost-tracker: classifySource(peer frame carrying HEARTBEAT_EVALUATE) = heartbeat', () => {
+    expect(classifySource('Another Claude session sent a message:\nHEARTBEAT_EVALUATE')).toBe('heartbeat');
+  });
+  test('cost-tracker: classifySource(peer frame carrying ROUTINE_DUE) = routine:<id>', () => {
+    expect(classifySource('Another Claude session sent a message:\nROUTINE_DUE [hermit-routine:daily-brief]'))
+      .toBe('routine:daily-brief');
+  });
+
   // classifySource: channel source charset guard — placeholder/glob noise → other
   test('cost-tracker: classifySource rejects <channel source="*">', () => {
     expect(classifySource('<channel source="*" chat_id="1">hi</channel>')).toBe('other');

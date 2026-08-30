@@ -59,6 +59,18 @@ function classifySource(triggerText: string): string {
   // is bucketed as `other` rather than leaking a `channel:plugin:…` garbage bucket
   // — same fail-closed stance normalizeChannelSource takes for config lookup.
   if (channelKind && !channelKind.includes(':')) return `channel:${channelKind.slice(0, 64)}`;
+  // Another local Claude Code session posted into this one's inbox socket. The
+  // frame is the harness's own wording: a raw post renders as "Another Claude
+  // session sent a message:", a named peer as "Message from @<name>".
+  //
+  // LAST on purpose. The watchdog's own wedge wake arrives inside that same
+  // frame carrying HEARTBEAT_EVALUATE, and it is a heartbeat, not a peer — the
+  // matchers above already claimed it, so ordering alone keeps the wake out of
+  // this bucket without a second copy of their grammar here.
+  if (triggerText.includes('Another Claude session sent a message') ||
+      triggerText.includes('Message from @')) {
+    return 'peer';
+  }
   return 'other';
 }
 
