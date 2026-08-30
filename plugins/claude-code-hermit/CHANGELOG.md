@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `/watch session <name> [note]` subscribes to another local session's next idle notice via `SendMessage` with `notify_when_idle` as a pure subscription with no message, lists it in `/watch status`, and relays the one-shot finished or expired notice to the operator's channel; like every watch, it dies with the session. On a hermit that holds peer messages for approval the notice reaches the operator's screen instead of the session, so the watch is declined up front rather than registered as live.
 - `docker.fleet_mesh` shares the session registry, inbox sockets, and a PID namespace between Docker hermits on one box so they can address each other with `ListAgents`/`SendMessage`. Opt-in because it needs two host-created volumes and a PID-namespace holder container that the plugin cannot provision: enable it in `config.json`, then run `/docker-setup` and `hermit-docker update`.
 - Automatic silent sweep of dead, clean `.claude/worktrees/bridge-*` worktrees while the routine monitor runs, plus a live-spawn summary from `rc-server status`.
 - Guest sessions in hatched folders can report finished work and ask the resident history questions over cross-session messaging, while `GUEST_REPORT:` turns do not count as operator activity.

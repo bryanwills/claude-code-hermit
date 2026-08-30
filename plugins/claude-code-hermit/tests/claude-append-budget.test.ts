@@ -94,6 +94,11 @@ describe('CLAUDE-APPEND size budget', () => {
     // rule does: a peer message arrives with no skill loaded, so an on-demand
     // pointer would never be read. The ceiling restores the same ~500 B of
     // working margin, so the next addition trims before it raises.
+    // The cross-session idle-notice routing line (+181 B) is funded from that
+    // margin — no raise. It must stay always-loaded for the same reason: the
+    // notice arrives as a bare turn with no skill in context. Do NOT re-derive
+    // this ceiling from a branch's own base — a number computed against a stale
+    // base looks green on the branch and fails the moment main's block merges in.
     expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(10450);
   });
 });
@@ -116,6 +121,7 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
     'hermit-run channel-send .claude-code-hermit --notice',
     'HEARTBEAT_EVALUATE',                              // heartbeat notification trigger
     'ROUTINE_DUE',                                      // routine-monitor notification trigger
+    'idle notice',                                      // cross-session idle notification trigger
     'covered-by-memory',                               // canonical memory-suppression code
     // The audience rule: decision-seeking notices must reach the client chat.
     // Composed maintainer-only, they misroute (maintainer chat configured) or
