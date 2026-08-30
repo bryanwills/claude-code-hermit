@@ -81,7 +81,10 @@ describe('CLAUDE-APPEND size budget', () => {
     // trimmed from the auto-mode denial bullet's restated fallback and the
     // proposal-id rationale sentence paid for most of it — +210 B net against
     // the ~500 B of margin, no raise.
-    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(9600);
+    // Raised to 9,800 for the cross-session idle-notice routing line, landing at
+    // 9,769 B. It must stay always-loaded because the notice arrives as a bare
+    // turn with no skill in context.
+    expect(Buffer.byteLength(append, 'utf8')).toBeLessThanOrEqual(9800);
   });
 });
 
@@ -103,6 +106,7 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
     'hermit-run channel-send .claude-code-hermit --notice',
     'HEARTBEAT_EVALUATE',                              // heartbeat notification trigger
     'ROUTINE_DUE',                                      // routine-monitor notification trigger
+    'idle notice',                                      // cross-session idle notification trigger
     'covered-by-memory',                               // canonical memory-suppression code
     // The audience rule: decision-seeking notices must reach the client chat.
     // Composed maintainer-only, they misroute (maintainer chat configured) or
