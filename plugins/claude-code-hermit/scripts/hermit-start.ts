@@ -954,8 +954,17 @@ function writeSettingsEnv(
   // that expires after dialogExpiry. The watchdog's post claims no class at all,
   // so on a bypassPermissions hermit the wake would sit in a dialog nobody is
   // watching and be dropped five minutes later — and the socket write returns
-  // success either way, so nothing downstream can see it happen. `accept` is what
-  // makes an unattended bypass hermit reachable.
+  // success either way, so nothing downstream can see it happen.
+  //
+  // The `accept` below does NOT fix that, and cannot: Claude Code consults a
+  // project/local settings file for this key only when it TIGHTENS the value
+  // ({accept:0, hold:1, refuse:2}, applied only if the repo value is strictly
+  // greater), so an `accept` written here can never lower strictness and the mode
+  // default (`hold`) stands. Reaching a bypass hermit means user-scope settings, a
+  // `--settings` file, or managed policy — each of which changes sessions this
+  // hermit does not own, so it is the operator's call, not a boot side effect. The
+  // write is kept only so the value is already correct if that scope ever moves;
+  // a bypass hermit's wedge nudge falls back to typing, as it did before.
   //
   // Only for that mode: everywhere else the default already delivers, and writing
   // the key would widen inbound handling for no gain.
