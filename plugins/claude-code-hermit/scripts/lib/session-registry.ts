@@ -197,8 +197,8 @@ export function findPeerTargets(
     // parseEntry validates only the fields it keys on, and the registry format
     // is undocumented — an entry missing either of these would throw out of the
     // walk below (or out of net.connect), taking every other candidate with it.
-    .filter((entry) => typeof entry.cwd === 'string' && !!entry.messagingSocketPath
-      && typeof entry.messagingSocketPath === 'string')
+    .filter((entry) => typeof entry.cwd === 'string'
+      && typeof entry.messagingSocketPath === 'string' && entry.messagingSocketPath.length > 0)
     .sort((a, b) => b.statusUpdatedAt - a.statusUpdatedAt);
   // Sorted first so this stops at the freshest survivor instead of reading
   // every candidate's resident marker only to discard all but the top one.
