@@ -4,6 +4,7 @@
 
 ### Added
 - Compose and Dockerfile templates are now evolve-managed. Upstream template hunks are merged into the live files while preserving operator customizations, with verified pristine bytes retained as the next 3-way base.
+- `/watch session <name>` accepts a glob (`*`, `?`) to match several local sessions at once, showing each match's live status and asking for one confirmation before subscribing to all of them.
 
 ### Fixed
 - Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
