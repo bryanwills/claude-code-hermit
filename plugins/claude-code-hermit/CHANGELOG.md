@@ -15,17 +15,13 @@
 - `heartbeat.ts alert-state` appends its own monitoring lines to SHELL.md and reports `appended`/`append_error` instead of handing the lines back for the model to apply one edit at a time.
 - The routine and heartbeat monitors, the watchdog and `/hermit-doctor` now share one liveness predicate (`scripts/lib/monitor-health.ts`), so "is this monitor alive" has a single definition. Doctor status strings are unchanged.
 - Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
+- `/docker-setup` and `/docker-security` are operator-invoked only. Both stay reachable by typing `/name` in a terminal or the Claude app; neither can be triggered by the model or from a Discord/Telegram message, so a running hermit cannot start its own deployment or rewrite its container networking. Asking for either from a channel now gets pointed at the terminal or the Claude app, and the `docker-security` remedies in `/hermit-doctor` say the same instead of a command the hermit can no longer run.
+- Quick hatch no longer auto-chains into the next skill. It ends at its report like Advanced always has, and the operator runs the printed next steps — which are now numbered, since `/reload-plugins` must go first, and closed with what is not yet running.
 
 ### Fixed
 - Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
 
 ### Upgrade Instructions
-- Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
-### Changed
-- `/docker-setup` and `/docker-security` are operator-invoked only. Both stay reachable by typing `/name` in a terminal or the Claude app; neither can be triggered by the model or from a Discord/Telegram message, so a running hermit cannot start its own deployment or rewrite its container networking. Asking for either from a channel now gets pointed at the terminal or the Claude app, and the `docker-security` remedies in `/hermit-doctor` say the same instead of a command the hermit can no longer run.
-- Quick hatch no longer auto-chains into the next skill. It ends at its report like Advanced always has, and the operator runs the printed next steps — which are now numbered, since `/reload-plugins` must go first, and closed with what is not yet running.
-- Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
-
 1. Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
 2. Optional: run `/claude-code-hermit:hermit-routines load --reset` once to pick up the anchor's new short-circuit prompt immediately. Any restart already does this on its next `load`, because the boot-id mismatch forces a re-create, so it only matters for a hermit that never restarts.
 3. No heartbeat action is needed. `/claude-code-hermit:heartbeat start` now returns `FRESH` against a healthy monitor registered by the current boot, and leaves it alone.
