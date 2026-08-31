@@ -19,14 +19,14 @@ Claude Code plugin that turns a Claude Code instance into a 24/7 agent. **Statef
 Setup your agent in any folder, empty or existing project with `/hatch` and shape its identity, priorities, routines, knowledge, autonomy, guardrails and make it yours.
 
 ```
-# Install (Linux, macOS, WSL2)
+# 1. Install (Linux, macOS, WSL2)
 cd /path/to/your/project
 curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 
-# Boot Claude Code and run the setup wizard
+# 2. Boot Claude Code and run the setup wizard
 claude "/claude-code-hermit:hatch"
 
-# Always-on: pick one
+# 3. Always-on: pick one
 .claude-code-hermit/bin/hermit-start          # tmux, same machine, no image
 /claude-code-hermit:docker-setup              # Docker, isolated, restarts with the daemon
 ```
