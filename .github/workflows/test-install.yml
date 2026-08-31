@@ -1,0 +1,102 @@
+name: Installer
+
+# Runs scripts/install.sh end to end on clean runners — the only place the
+# "nothing is installed yet" path is actually exercised. Deliberately NOT folded
+# into test-macos-compat.yml: every path filter there is plugins/**, so a change
+# to root scripts/ would never trigger it.
+#
+# macOS is the load-bearing half. The version comparison in install.sh uses awk
+# rather than `sort -V` precisely because BSD userland is where that breaks, and
+# this job is what proves it.
+#
+# No setup-bun and no Claude Code preinstall step: watching the script provision
+# both from nothing is the point. Runners carry no Claude credentials, so this
+# also exercises the logged-out closing state, which is the realistic fresh-VPS
+# path.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/install.sh'
+      - '.github/workflows/test-install.yml'
+  pull_request:
+    paths:
+      - 'scripts/install.sh'
+      - '.github/workflows/test-install.yml'
+  workflow_dispatch:
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    # Generous: a cold `brew install tmux` on a macOS runner is minutes, and the
+    # marketplace clone attempts SSH before falling back to HTTPS.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the installer in a scratch project
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/proj" "$RUNNER_TEMP/cfg"
+          cd "$RUNNER_TEMP/proj"
+          CLAUDE_CONFIG_DIR="$RUNNER_TEMP/cfg" \
+            bash "$GITHUB_WORKSPACE/scripts/install.sh" 2>&1 | tee "$RUNNER_TEMP/out.txt"
+
+      # A fresh shell on purpose: the installer's own PATH exports die with it,
+      # which is exactly why the closing block tells the operator to reload.
+      - name: Assert the tools are installed and clear their floors
+        if: '!cancelled()'
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+
+          # Source the installer rather than re-typing its ver_ge and floor
+          # parsing, so a fix to either cannot silently drift from what this
+          # assertion checks. main() is guarded, so sourcing defines functions
+          # without re-running the install. load_floors reads the same URL the
+          # installer read, so a floor raised in an unmerged PR cannot fail this
+          # job spuriously.
+          source "$GITHUB_WORKSPACE/scripts/install.sh"
+          load_floors
+
+          # load_floors empties both floors on a failed fetch, and ver_ge treats
+          # an empty floor as 0.0.0 — every comparison below would then pass
+          # vacuously. Fail loudly instead of silently asserting nothing.
+          test -n "$CLAUDE_FLOOR" || { echo "could not read CLAUDE_FLOOR"; exit 1; }
+          test -n "$BUN_FLOOR"    || { echo "could not read BUN_FLOOR"; exit 1; }
+
+          cv="$(claude --version | awk '{print $1}')"
+          bv="$(bun --version)"
+          echo "claude=$cv bun=$bv (floors: $CLAUDE_FLOOR / $BUN_FLOOR)"
+
+          ver_ge "$cv" "$CLAUDE_FLOOR"
+          ver_ge "$bv" "$BUN_FLOOR"
+
+      - name: Assert the plugin landed at local scope
+        if: '!cancelled()'
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/proj/.claude/settings.local.json"
+          grep -q 'claude-code-hermit@claude-code-hermit' \
+            "$RUNNER_TEMP/proj/.claude/settings.local.json"
+
+      - name: Assert the closing block told the operator what to run
+        if: '!cancelled()'
+        run: |
+          set -euo pipefail
+          grep -q 'Prerequisites set' "$RUNNER_TEMP/out.txt"
+          grep -q 'claude-code-hermit:hatch' "$RUNNER_TEMP/out.txt"
+
+      - name: Assert a second run is a no-op that still exits 0
+        if: '!cancelled()'
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/proj"
+          CLAUDE_CONFIG_DIR="$RUNNER_TEMP/cfg" \
+            bash "$GITHUB_WORKSPACE/scripts/install.sh" 2>&1 | tee "$RUNNER_TEMP/out2.txt"
+          grep -q 'already registered' "$RUNNER_TEMP/out2.txt"
