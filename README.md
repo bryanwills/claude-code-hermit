@@ -19,12 +19,12 @@ Claude Code plugin that turns a Claude Code instance into a 24/7 agent. **Statef
 Setup your agent in any folder, empty or existing project with `/hatch` and shape its identity, priorities, routines, knowledge, autonomy, guardrails and make it yours.
 
 ```
-# Install
-claude plugin marketplace add gtapps/claude-code-hermit
-claude plugin install claude-code-hermit@claude-code-hermit --scope local
+# Install (Linux, macOS, WSL2)
+cd /path/to/your/project
+curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 
 # Boot Claude Code and run the setup wizard
-/claude-code-hermit:hatch
+claude "/claude-code-hermit:hatch"
 
 # Always-on: pick one
 .claude-code-hermit/bin/hermit-start          # tmux, same machine, no image
@@ -113,15 +113,16 @@ On-demand skills — pullable from the Claude app, your terminal, or a DM:
 
 ## Quick Start
 
-> **Prerequisites:** [Claude Code](https://code.claude.com) v2.1.251+, a Claude plan (Pro, Max, Teams, or Enterprise), and [Bun](https://bun.sh) 1.3+. Linux, macOS, and Windows via WSL2; see [FAQ](plugins/claude-code-hermit/docs/faq.md).
+> **Prerequisites:** a Claude plan (Pro, Max, Teams, or Enterprise). Linux, macOS, or Windows via WSL2; see [FAQ](plugins/claude-code-hermit/docs/faq.md).
 
 ### 1. Install
 
 ```bash
 cd /path/to/your/project   # or any folder — even an empty one
-claude plugin marketplace add gtapps/claude-code-hermit
-claude plugin install claude-code-hermit@claude-code-hermit --scope local
+curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 ```
+
+Installs [Claude Code](https://code.claude.com) and [Bun](https://bun.sh) if they're missing, adds tmux, registers the marketplace, and installs the plugin for this folder. It stops there and tells you what to run next. Prefer to read it first, or do it by hand? [Manual install](plugins/claude-code-hermit/docs/how-to-use.md#manual-install).
 
 ### 2. Initialize
 

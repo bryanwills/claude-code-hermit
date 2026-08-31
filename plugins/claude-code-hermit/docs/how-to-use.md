@@ -2,7 +2,9 @@
 
 ## Prerequisites
 
-[Claude Code](https://code.claude.com) v2.1.251+ and a paid Claude plan (Pro, Max, Teams, or Enterprise). **Bun** ≥1.3; the hooks and scripts are TypeScript run directly by `bun`. Optional: **tmux** for always-on mode.
+A paid Claude plan (Pro, Max, Teams, or Enterprise). Linux, macOS, or Windows via WSL2.
+
+The installer below provisions the rest: [Claude Code](https://code.claude.com) v2.1.251+, **Bun** ≥1.3 (the hooks and scripts are TypeScript run directly by `bun`), and **tmux** for always-on mode.
 
 ---
 
@@ -10,9 +12,32 @@
 
 ```bash
 cd /path/to/your/project   # or any folder — even an empty one
+curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
+```
+
+It installs anything missing, registers the marketplace, installs the plugin for this folder, and stops — printing the exact command to run next. It never runs `/hatch` for you, and it takes no arguments.
+
+To read it before running it:
+
+```bash
+curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+### Manual install
+
+The installer is a convenience, not a requirement. With Claude Code and Bun already present:
+
+```bash
+cd /path/to/your/project
 claude plugin marketplace add gtapps/claude-code-hermit
 claude plugin install claude-code-hermit@claude-code-hermit --scope local
 ```
+
+`--scope local` keeps the hermit personal to this folder rather than committing it to the repo for everyone. `/hatch` asks the shared-vs-personal question separately.
+
+> **Upgrading is not a second `curl`.** Once installed, use `.claude-code-hermit/bin/hermit-update` (local/tmux), `.claude-code-hermit/bin/hermit-docker update` (Docker), or `claude plugin update claude-code-hermit@claude-code-hermit --scope local`. Re-running the installer is harmless but moves nothing.
 
 ---
 
