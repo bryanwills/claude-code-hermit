@@ -278,12 +278,13 @@ closing_block() {
 }
 
 # The countdown launch needs two things: /dev/tty must open (no controlling
-# terminal in CI / `ssh host 'curl|bash'` / provisioning), and stdout or stderr
-# must still be a terminal (CI pipes both through tee, and a runner where
-# /dev/tty happens to open must not hang on an interactive claude).
+# terminal in CI / `ssh host 'curl|bash'` / provisioning), and stdout must
+# still be a terminal — claude's interactive UI writes to fd 1, so a
+# redirected run (`bash install.sh > install.log`, `... | tee`) must take the
+# printed fallback instead of streaming a TUI into the file.
 can_launch() {
   { : </dev/tty; } 2>/dev/null || return 1
-  [ -t 1 ] || [ -t 2 ]
+  [ -t 1 ]
 }
 
 hatch_countdown() {
