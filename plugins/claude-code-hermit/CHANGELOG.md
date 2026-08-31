@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The daily `heartbeat-restart` fire asks `routines.ts arm anchor` whether anything is actually stale and stops on a `HEALTHY` verdict. A healthy hermit's 4am re-arm no longer tears down and rebuilds a working monitor, so it costs about two model calls instead of eleven to fifteen.
+- `hermit-routines load` is driven by `routines.ts arm begin`/`arm commit`: the script plans the teardown, the Monitor command, the cron diff and the anchor prompt, and the model makes only the `Monitor`/`TaskStop`/`Cron*` calls. It short-circuits on the same `HEALTHY` verdict.
+- `heartbeat start` asks `heartbeat.ts start-check` first and stops on `FRESH|interval=<s>` when the live monitor already matches config; `start-commit` records the registration and waits for the first liveness tick.
+- A waking heartbeat tick runs `heartbeat.ts tick`, which returns the precheck verdict plus the waiting-timeout transition and any composed budget alerts in one JSON line. Budget entries carry a `mark_key`, and `notified` is still only flipped after a confirmed send.
+- `heartbeat.ts alert-state` appends its own monitoring lines to SHELL.md and reports `appended`/`append_error` instead of handing the lines back for the model to apply one edit at a time.
+- The routine and heartbeat monitors, the watchdog and `/hermit-doctor` now share one liveness predicate (`scripts/lib/monitor-health.ts`), so "is this monitor alive" has a single definition. Doctor status strings are unchanged.
+
+### Upgrade Instructions
+
+1. Run `/claude-code-hermit:hermit-routines load --reset` once. This re-registers the `heartbeat-restart` anchor with the new short-circuit prompt; without it, the anchor keeps firing yesterday's prompt until a restart's boot-id mismatch or the 5-day age cliff replaces it.
+2. No heartbeat action is needed — `/claude-code-hermit:heartbeat start` now returns `FRESH` against a healthy monitor and leaves it alone.
+3. Confirm the permission refresh ran: `.claude/settings.local.json` should list `Bash(bun */scripts/routines.ts arm*)` and the three `heartbeat.ts tick|start-check|start-commit` globs. If not, run `/claude-code-hermit:hermit-doctor` and re-run the settings step it names.
+
 ## [1.2.52] - 2026-08-30
 
 ### Added

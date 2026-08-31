@@ -108,6 +108,14 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/routines.ts finish*)',
   'Bash(bun */scripts/routines.ts cron-registry*)',
   'Bash(bun */scripts/routines.ts health*)',
+  // The arming and tick verbs the daily anchor, `hermit-routines load` and
+  // `heartbeat run/start` call on every wake. Per-verb like the entries above:
+  // the dispatcher's own verb whitelist is the real gate, these only keep a
+  // deterministic call out of the permission engine.
+  'Bash(bun */scripts/routines.ts arm*)',
+  'Bash(bun */scripts/heartbeat.ts tick*)',
+  'Bash(bun */scripts/heartbeat.ts start-check*)',
+  'Bash(bun */scripts/heartbeat.ts start-commit*)',
   // Domain plugins reach core's shared scripts through the project-resident
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
   // cache dir). Pinned to the two verbs they actually need, not a bare
