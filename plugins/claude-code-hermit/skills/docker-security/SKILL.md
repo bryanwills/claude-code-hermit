@@ -1,6 +1,7 @@
 ---
 name: docker-security
 description: Opt-in advanced Docker security hardening beyond the v1.0.26 baseline — LAN containment with DNS policy, resource bounds with kernel-hygiene sysctls, and a boot-time plugin install audit log. Applied as a reversible docker-compose overlay (does not touch the base compose file) and verified against the live container. Run after /docker-setup; requires bridge networking.
+disable-model-invocation: true
 ---
 
 # Docker Security

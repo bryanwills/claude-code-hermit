@@ -1,6 +1,7 @@
 ---
 name: docker-setup
 description: Host-only, operator-invoked. Generates Docker scaffolding and walks the operator through token setup, build, start, MCP plugin configuration, workspace trust, and verification. Offers to back up and overwrite existing Docker files. Run after /hatch.
+disable-model-invocation: true
 ---
 # Docker Setup
 

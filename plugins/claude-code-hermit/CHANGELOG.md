@@ -11,6 +11,8 @@
 ### Upgrade Instructions
 - Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
 ### Changed
+- `/docker-setup` and `/docker-security` are operator-invoked only. Both stay reachable by typing `/name` in a terminal or the Claude app; neither can be triggered by the model or from a Discord/Telegram message, so a running hermit cannot start its own deployment or rewrite its container networking.
+- Quick hatch no longer auto-chains into the next skill. It ends at its report like Advanced always has, and the operator runs the printed next steps — which are now numbered, since `/reload-plugins` must go first, and closed with what is not yet running.
 - Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
 
 ## [1.2.52] - 2026-08-30
