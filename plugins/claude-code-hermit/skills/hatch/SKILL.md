@@ -145,8 +145,8 @@ Record: `escalation` (conservative/balanced/autonomous), `remote` (true/false), 
 questions: [
   {
     header: "Channels",
-    question: "Configure a notification channel for this project?",
-    options: [{ label: "Discord (recommended)", description: "Set up Discord notifications" }, { label: "Telegram", description: "Set up Telegram notifications" }, { label: "Only Claude App", description: "No chat channel — push notifications, plus Remote Control if you enabled it" }]
+    question: "How do you want to communicate with your agent?",
+    options: [{ label: "Discord", description: "Communicate with your agent via Discord" }, { label: "Telegram", description: "Communicate with your agent via Telegram" }, { label: "Only Claude App", description: "Communicate only via Claude App and Remote Control" }]
   }
 ]
 ```
