@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Compose and Dockerfile templates are now evolve-managed. Upstream template hunks are merged into the live files while preserving operator customizations, with verified pristine bytes retained as the next 3-way base.
+
+### Fixed
+- Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
+
+### Upgrade Instructions
+- Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
+
 ## [1.2.52] - 2026-08-30
 
 ### Added

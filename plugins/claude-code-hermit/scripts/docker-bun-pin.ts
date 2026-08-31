@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { sha256 } from './lib/hash';
 import { pinStateDirOrExit } from './lib/cc-compat';
+import { writePristineBaselines } from './lib/pristine-baseline';
 
 const MANIFEST_KEY = 'docker/Dockerfile.hermit.template';
 const TEMPLATE = path.resolve(
@@ -97,13 +98,19 @@ function readManifest(): { path: string; data: any } | null {
 // generations behind in everything except the bun block we just spliced in.
 function writeBaseline(manifest: { path: string; data: any } | null): void {
   if (!manifest) return;
+  const template = fs.readFileSync(TEMPLATE);
   manifest.data.files[MANIFEST_KEY] = {
-    sha256: sha256(fs.readFileSync(TEMPLATE)),
+    sha256: sha256(template),
     plugin_version: pluginVersion,
   };
   const tmp = manifest.path + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(manifest.data, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, manifest.path);
+  try {
+    writePristineBaselines(stateDir, [{ key: MANIFEST_KEY, buf: template }]);
+  } catch (err: any) {
+    die(err.message);
+  }
 }
 
 function commit(contents: string, verdict: string): never {

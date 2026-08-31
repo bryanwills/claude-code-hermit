@@ -65,6 +65,31 @@ _require_running() {
   fi
 }
 
+_validate_compose() {
+  local detail backup="" candidate
+  if detail="$(cd "$PROJECT_DIR" && "${DC[@]}" config -q 2>&1)"; then
+    return 0
+  fi
+
+  echo "[hermit] Docker Compose validation failed; refusing to build or start." >&2
+  printf '%s\n' "$detail" >&2
+  # config -q validates the merged base + overlay, so the error above may name
+  # docker-compose.security.yml instead — read it before restoring anything.
+  if [ -f "$COMPOSE_SEC" ]; then
+    echo "[hermit] Note: the security overlay is merged too; the error may point at $COMPOSE_SEC." >&2
+  fi
+  for candidate in "$PROJECT_DIR"/.claude-code-hermit/state/docker-compose.hermit.yml.*.bak; do
+    [ -f "$candidate" ] && backup="$candidate"
+  done
+  if [ -n "$backup" ]; then
+    echo "[hermit] If the error is in the base compose, restore the last operator copy and retry:" >&2
+    echo "  cp '$backup' '$COMPOSE'" >&2
+  else
+    echo "[hermit] No docker-compose.hermit.yml .bak was found to restore." >&2
+  fi
+  exit 1
+}
+
 _entrypoint_stale_warn() {
   echo "[hermit] Warning: docker-entrypoint.hermit.sh changed since the image was built —" >&2
   echo "[hermit]          the container is running a stale entrypoint. Rebuild to apply:" >&2
@@ -193,6 +218,7 @@ _enumerate_plugin_errors() {
 
 case "$CMD" in
   up)
+    _validate_compose
     echo "[hermit] Starting Docker container..."
     # Clear any stale conflict marker from a prior inert boot before starting, so
     # the poll below only trips on a marker THIS boot's entrypoint writes.
@@ -360,6 +386,7 @@ case "$CMD" in
       echo "[hermit] ERROR: 'restart' no longer accepts service args. Use 'hermit-docker restart' to restart everything." >&2
       exit 2
     fi
+    _validate_compose
     echo "[hermit] Restarting container..."
     cd "$PROJECT_DIR" && "${DC[@]}" down && "${DC[@]}" up -d
     _warn_if_entrypoint_stale
@@ -432,6 +459,7 @@ case "$CMD" in
       if [ -z "$CC_BUILD_VERSION" ] || [ "$CC_BUILD_VERSION" = "unknown" ] || [ "$CC_BUILD_VERSION" = "(skipped)" ]; then
         CC_BUILD_VERSION="latest"
       fi
+      _validate_compose
       echo "[hermit] Rebuilding image with latest Claude Code (${CC_BUILD_VERSION})..."
       if ! (cd "$PROJECT_DIR" && "${DC[@]}" build --pull --build-arg "CLAUDE_CODE_VERSION=${CC_BUILD_VERSION}"); then
         echo "[hermit] Image build failed — old container still running, no changes applied." >&2
@@ -567,12 +595,11 @@ case "$CMD" in
         fi
       fi
       # The image was already rebuilt above, before evolve ran. If evolve now refreshes
-      # docker-entrypoint.hermit.sh from the new template, the just-built image is stale
-      # against it — a second rebuild is required, and no in-band check can see the async
-      # evolve's result from here. Flag it so the operator knows to run update again.
+      # any managed docker file, the just-built image is stale against it. The async
+      # result is not visible here, so tell the operator where the definitive report is.
       if [ "$EVOLVE_SENT" = true ]; then
-        echo "[hermit] Note: if hermit-evolve reports it refreshed docker-entrypoint.hermit.sh," >&2
-        echo "[hermit]       run 'hermit-docker update' once more so the image rebuilds with it." >&2
+        echo "[hermit] Note: if hermit-evolve reports a merged compose/Dockerfile or refreshed entrypoint," >&2
+        echo "[hermit]       run 'hermit-docker update' once more so the image uses that file." >&2
       fi
     fi
 

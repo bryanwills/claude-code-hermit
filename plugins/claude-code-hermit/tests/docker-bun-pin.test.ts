@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
+import { sha256 } from '../scripts/lib/hash';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-dbp-');
 afterAll(cleanup);
@@ -195,6 +196,48 @@ describe('docker-bun-pin.ts', () => {
     expect(entry.plugin_version).toBe('1.2.46');
     expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(entry.sha256).not.toBe('b'.repeat(64));
+  });
+
+  // Both rows seed a STALE baseline pair (hash + bytes of a template generation
+  // that has since moved), so the expected hash distinguishes the two contracts:
+  // `repinned` re-records upstream, `converged` deliberately leaves the stale
+  // drift signal standing. Seeding the current template would make both rows
+  // pass whether or not writeBaseline ran.
+  const STALE_TEMPLATE = TEMPLATE + '\n# generation behind\n';
+  test.each([
+    [
+      'OK|repinned',
+      TEMPLATE.replace('ARG BUN_VERSION=1.4.0', 'ARG BUN_VERSION=1.3.11'),
+      sha256(TEMPLATE),
+    ],
+    [
+      'OK|converged',
+      LEGACY,
+      sha256(STALE_TEMPLATE),
+    ],
+  ])('keeps the manifest hash and pristine bytes aligned after %s', async (verdict, contents, expectedRecorded) => {
+    const dir = project(contents, {
+      version: 1,
+      files: {
+        'docker/Dockerfile.hermit.template': {
+          sha256: sha256(STALE_TEMPLATE),
+          plugin_version: '1.2.40',
+        },
+      },
+    });
+    const pristinePath = path.join(
+      dir,
+      '.claude-code-hermit/state/pristine/docker/Dockerfile.hermit.template',
+    );
+    fs.mkdirSync(path.dirname(pristinePath), { recursive: true });
+    fs.writeFileSync(pristinePath, STALE_TEMPLATE);
+
+    const r = await pin(dir);
+
+    expect(r.verdict).toStartWith(verdict);
+    const recorded = manifest(dir).files['docker/Dockerfile.hermit.template'].sha256;
+    expect(recorded).toBe(expectedRecorded);
+    expect(sha256(fs.readFileSync(pristinePath))).toBe(recorded);
   });
 
   // A converged pre-1.2.0 scaffold matches the shipped template in its bun

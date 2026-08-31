@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { sha256 } from './lib/hash';
 import { pinStateDirOrExit } from './lib/cc-compat';
+import { writePristineBaselines } from './lib/pristine-baseline';
 
 function die(msg: string): never {
   console.error(`manifest-seed: ${msg}`);
@@ -141,31 +142,10 @@ function apply(raw: string): void {
   // back to today's replace + .bak), never one that disagrees with the hash —
   // tmp + rename per file, since a truncated baseline would silently feed a
   // wrong diff to the migration, which never re-checks the hash.
-  const pristineRoot = path.join(stateDir, 'state', 'pristine');
-  // A key becomes a real filesystem path here, not just a JSON object key, so a
-  // `..` segment would drop these bytes anywhere the process can write. Checked
-  // for every key before the first write, so a bad payload lands nothing.
-  for (const { key } of pristine) {
-    const dest = path.join(pristineRoot, key);
-    if (!dest.startsWith(pristineRoot + path.sep)) {
-      die(`key '${key}' escapes state/pristine — refusing to write a baseline copy`);
-    }
-  }
-  for (const { key, buf } of pristine) {
-    const dest = path.join(pristineRoot, key);
-    const destTmp = dest + '.tmp';
-    try {
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(destTmp, buf);
-      fs.renameSync(destTmp, dest);
-    } catch (err: any) {
-      // The manifest already carries the NEW hash, so a surviving OLD copy is a
-      // stale base the migration would diff against without noticing. Drop it —
-      // missing is the safe state (evolve falls back to replace + .bak).
-      try { fs.rmSync(dest, { force: true }); } catch { /* best effort */ }
-      try { fs.rmSync(destTmp, { force: true }); } catch { /* best effort */ }
-      die(`cannot write pristine baseline for key '${key}': ${err.message}`);
-    }
+  try {
+    writePristineBaselines(stateDir, pristine);
+  } catch (err: any) {
+    die(err.message);
   }
 
   console.log(`seeded ${Object.keys(seeded).length} entries, preserved ${preserved} foreign keys`);

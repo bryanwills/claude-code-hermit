@@ -7,9 +7,10 @@
 // Also computes sibling hermit plans (registry-driven from _hermit_versions)
 // so Step 7 doesn't rely on in-context LLM detection.
 //
-// Pure analyzer: never writes or copies. Fail-open: always exits 0; problems
-// are recorded in the `errors` array (objects of {code, message}), never
-// thrown. No stdin (skill-invoked, like doctor-check.ts / resolve-outbound-channel.ts).
+// Analyzer with one bounded write: rendered Docker merge inputs are parked in
+// the hermit's state tree. Fail-open: always exits 0; problems are recorded in
+// the `errors` array (objects of {code, message}), never thrown. No stdin
+// (skill-invoked, like doctor-check.ts / resolve-outbound-channel.ts).
 //
 // Usage: bun evolve-plan.ts [hermit-dir] --hatch-target=<local|committed>
 //                           [--plugin-list-json=<path>]
@@ -24,6 +25,8 @@ import path from 'node:path';
 import { sha256 } from './lib/hash';
 import { cmpSemver } from './lib/semver';
 import { newConfigKeys, isPlainObject } from './lib/evolve-config';
+import { deriveRenderInputs } from './lib/derive-render-inputs';
+import { renderSources } from './render-docker-templates';
 
 type Json = any;
 
@@ -31,9 +34,10 @@ type FileClass = 'missing' | 'unmodified' | 'customized-kept' | 'conflict';
 interface ClassifiedFile {
   name: string; class: FileClass; boot_critical?: boolean; bootstrap?: boolean;
   // Absolute path to the recorded baseline CONTENT (state/pristine/<key>), when
-  // manifest-seed kept one. Present only on the docker entrypoint: Step 5c diffs
-  // it against the operator's copy to migrate their hunks into the sidecar.
+  // manifest-seed kept one. Docker migration steps diff it against the
+  // operator's copy to migrate their hunks.
   base_path?: string;
+  theirs_path?: string;
 }
 
 interface SiblingPlanEntry {
@@ -218,6 +222,15 @@ function classifyFiles(
   return result;
 }
 
+function readVerifiedPristine(pristinePath: string, recordedHash: string): Buffer | null {
+  try {
+    const pristine = fs.readFileSync(pristinePath);
+    return sha256(pristine) === recordedHash ? pristine : null;
+  } catch {
+    return null;
+  }
+}
+
 // F1 — classify the deployed docker entrypoint. It is now placeholder-free
 // (rendered == upstream byte-for-byte), so it joins the manifest system exactly
 // like a boot-critical bin/ wrapper. Upstream is `<name>.template`; on-disk is
@@ -267,45 +280,118 @@ function classifyDockerEntrypoint(
   if (e !== null && hasBaseline) {
     const basePath = path.join(
       hermitDir, 'state', 'pristine', 'docker', 'docker-entrypoint.hermit.sh');
-    try {
-      const recorded = manifestFiles!['docker/docker-entrypoint.hermit.sh'].sha256;
-      if (sha256(fs.readFileSync(basePath)) === recorded) e.base_path = basePath;
-    } catch { /* absent or unreadable -> no base, same as never recorded */ }
+    const recorded = manifestFiles!['docker/docker-entrypoint.hermit.sh'].sha256;
+    if (readVerifiedPristine(basePath, recorded) !== null) e.base_path = basePath;
   }
   return e;
 }
 
-// F2 — report-only upstream-drift signal for the wizard-rendered docker files
-// (compose + Dockerfile). These carry placeholders, so rendered bytes never
-// match upstream — we can only compare the UPSTREAM template hash against the
-// baseline recorded by docker-setup. status: "changed" (upstream moved since
-// last render) | "unknown" (no baseline recorded — pre-this-version deploy).
-// Skips files with no rendered counterpart in the project (no docker deploy).
-function classifyDockerTemplates(
+const DOCKER_TEMPLATE_FILES = [
+  { tmpl: 'docker-compose.hermit.yml.template', rendered: 'docker-compose.hermit.yml', field: 'compose' },
+  { tmpl: 'Dockerfile.hermit.template', rendered: 'Dockerfile.hermit', field: 'dockerfile' },
+] as const;
+
+function reportDockerTemplateDrift(
   stDir: string,
   projectRoot: string,
   manifestFiles: Record<string, { sha256: string }> | null,
 ): Json[] {
   const out: Json[] = [];
-  const files = [
-    { tmpl: 'docker-compose.hermit.yml.template', rendered: 'docker-compose.hermit.yml' },
-    { tmpl: 'Dockerfile.hermit.template', rendered: 'Dockerfile.hermit' },
-  ];
-  for (const f of files) {
+  for (const f of DOCKER_TEMPLATE_FILES) {
     let srcBuf: Buffer;
     try {
       srcBuf = fs.readFileSync(path.join(stDir, 'docker', f.tmpl));
     } catch {
-      continue; // no upstream template -> nothing to compare
+      continue;
     }
-    if (!fs.existsSync(path.join(projectRoot, f.rendered))) continue; // not deployed
+    if (!fs.existsSync(path.join(projectRoot, f.rendered))) continue;
     const baseline = manifestFiles ? manifestFiles[`docker/${f.tmpl}`] : null;
     if (baseline == null) {
       out.push({ name: f.rendered, status: 'unknown' });
     } else if (sha256(srcBuf) !== baseline.sha256) {
       out.push({ name: f.rendered, status: 'changed' });
     }
-    // upstream unchanged since last render -> omit
+  }
+  return out;
+}
+
+// F2: classify rendered compose/Dockerfile against a verified, re-rendered
+// pristine template. If live inputs cannot be derived, retain the report-only
+// output used by older hermits.
+function classifyDockerTemplates(
+  stDir: string,
+  projectRoot: string,
+  manifestFiles: Record<string, { sha256: string }> | null,
+  hermitDirArg?: string,
+): Json[] {
+  // Same dir buildPlan was invoked with — never re-derived from a fixed name,
+  // so a caller passing an alternate hermit dir still reads its own config.
+  const hermitDir = hermitDirArg ?? path.join(projectRoot, '.claude-code-hermit');
+  const inputs = deriveRenderInputs(
+    path.join(hermitDir, 'config.json'),
+    path.join(projectRoot, 'docker-compose.hermit.yml'),
+  );
+  if (inputs === null) return reportDockerTemplateDrift(stDir, projectRoot, manifestFiles);
+
+  const out: Json[] = [];
+  // Wiped per run: a `base` left by a previous run is rendered from a template
+  // that has since moved, and nothing else prunes this scratch tree.
+  const renderRoot = path.join(hermitDir, 'state', 'evolve-docker');
+  fs.rmSync(renderRoot, { recursive: true, force: true });
+  const theirsDir = path.join(renderRoot, 'theirs');
+  fs.mkdirSync(theirsDir, { recursive: true });
+  const renderScript = path.join(path.dirname(stDir), 'scripts', 'render-docker-templates.ts');
+  const rendered = Bun.spawnSync({
+    cmd: [process.execPath, renderScript, projectRoot, '--to', theirsDir],
+    stdin: Buffer.from(JSON.stringify(inputs)),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (rendered.exitCode !== 0) {
+    throw new Error(`render-docker-templates failed: ${rendered.stderr.toString().trim()}`);
+  }
+
+  const currentSources = {
+    compose: fs.readFileSync(path.join(stDir, 'docker', 'docker-compose.hermit.yml.template'), 'utf8'),
+    dockerfile: fs.readFileSync(path.join(stDir, 'docker', 'Dockerfile.hermit.template'), 'utf8'),
+  };
+  for (const f of DOCKER_TEMPLATE_FILES) {
+    let ours: Buffer;
+    try {
+      ours = fs.readFileSync(path.join(projectRoot, f.rendered));
+    } catch {
+      continue;
+    }
+    const theirsPath = path.join(theirsDir, f.rendered);
+    const theirs = fs.readFileSync(theirsPath);
+    const manifestKey = `docker/${f.tmpl}`;
+    const pristinePath = path.join(hermitDir, 'state', 'pristine', 'docker', f.tmpl);
+    const recorded = manifestFiles?.[manifestKey]?.sha256;
+    let baseRendered: string | null = null;
+    if (recorded) {
+      const pristine = readVerifiedPristine(pristinePath, recorded);
+      if (pristine !== null) {
+        const baseSources = { ...currentSources, [f.field]: pristine.toString('utf8') };
+        baseRendered = renderSources(inputs, baseSources)[f.field];
+      }
+    }
+
+    const baseline = baseRendered === null
+      ? null
+      : { [manifestKey]: { sha256: sha256(Buffer.from(baseRendered)) } };
+    const entry = classifyOne(f.rendered, theirs, ours, baseline, manifestKey, false);
+    if (entry === null) continue;
+    entry.theirs_path = theirsPath;
+    if (baseRendered === null) {
+      entry.bootstrap = true;
+    } else {
+      const baseDir = path.join(renderRoot, 'base');
+      fs.mkdirSync(baseDir, { recursive: true });
+      const basePath = path.join(baseDir, f.rendered);
+      fs.writeFileSync(basePath, baseRendered);
+      entry.base_path = basePath;
+    }
+    out.push(entry);
   }
   return out;
 }
@@ -780,9 +866,8 @@ function buildPlan({ hermitDir, pluginRoot, hatchTarget, pluginListJsonPath }: {
   }
   plan.bin_changed = classifyFiles(binSrc, path.join(hermitDir, 'bin'), binNames, manifestFiles, 'bin', true);
 
-  // Docker drift. F1: the placeholder-free entrypoint is manifest-managed like a
-  // boot-critical bin/ wrapper. F2: compose/Dockerfile are report-only (rendered,
-  // so only upstream-template drift is detectable). Both fail open to safe defaults.
+  // Docker drift. F1 manages the placeholder-free entrypoint. F2 reconciles
+  // compose/Dockerfile when live render inputs are derivable and reports only otherwise.
   const projectRoot = path.resolve(hermitDir, '..');
   try {
     plan.docker_entrypoint = classifyDockerEntrypoint(stDir, projectRoot, hermitDir, manifestFiles);
@@ -791,7 +876,7 @@ function buildPlan({ hermitDir, pluginRoot, hatchTarget, pluginListJsonPath }: {
     errors.push({ code: 'docker_entrypoint_classify_failed', message: e.message });
   }
   try {
-    plan.docker_templates = classifyDockerTemplates(stDir, projectRoot, manifestFiles);
+    plan.docker_templates = classifyDockerTemplates(stDir, projectRoot, manifestFiles, hermitDir);
   } catch (e: any) {
     plan.docker_templates = [];
     errors.push({ code: 'docker_templates_classify_failed', message: e.message });
