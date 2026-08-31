@@ -60,21 +60,37 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 
 ## Learning Loop
 
-A hermit watches what keeps going wrong across sessions, proposes a fix, and asks you yes or no. It won't propose the same thing twice.
+Hermit reviews evidence from its work and operation. Durable lessons go to memory; non-trivial ideas that would change its behavior are verified, deduplicated, and brought to you for approval.
 
-At natural pauses — session end, idle ticks, scheduled cadence — it reflects. Most reflections never reach the model: a precheck script decides whether any phase (compute, resolution check, cost spike, digest, newborn) is actually due. In Monitor mode, that check runs before the wake, so an empty day costs zero model tokens; CronCreate fallback still wakes before checking but does not load the reflect skill when there is nothing to do. When a phase is due, two subagents vet the candidate before it reaches you:
-
-- **`reflection-judge`** confirms the cited evidence actually exists in the session reports, so a proposal can't certify itself.
-- **`proposal-triage`** deduplicates against open proposals, cross-checks your `MEMORY.md` and `OPERATOR.md`, and applies a three-condition bar.
-
-Survivors land as a proposal you can act on from anywhere — including a DM:
-
+```text
+Work produces evidence
+          │
+          ▼
+Reflect when due
+          │
+          ▼
+Verify and deduplicate
+          │
+     ┌────┴────┐
+     ▼         ▼
+Remember    Propose
+a lesson    a change
+                 │
+                 ▼
+           You approve?
+              │     │
+             no    yes
+              │     │
+         No change  Implement
+                        │
+                        ▼
+                  Verify result
+                        │
+                        ▼
+                  Future evidence
 ```
-/claude-code-hermit:proposal-list                  # see what it found
-/claude-code-hermit:proposal-act accept PROP-003    # or just reply "accept PROP-003"
-```
 
-What it proposes: improvements, routines, new capabilities (skills, agents, heartbeat checks), guardrails (OPERATOR.md guidance you confirm), and bugs. When it catches itself repeating the same multi-step procedure across sessions, it drafts the skill and asks before installing. It improves its own skills too: when one keeps getting corrected or reworked across sessions, that graduates into a skill-improvement proposal, and on your okay it revises the skill. Accepted proposals can carry a measurable success signal and auto-resolve when met. You're the acceptance gate for every change. Raw session journals distill into compiled artifacts that reload next session — the [raw/compiled pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) Karpathy described for his wiki-LLM.
+Reflection runs at eligible task or session pauses, daily, and after routines configured with `reflect_after`. Scheduled no-op runs are skipped before the model wakes in Monitor mode. Weak signals stay in an observation ledger; approved changes can start now, become a task, or be left for manual implementation. Hermit then resolves the proposal when verification passes or later evidence shows the problem is gone.
 
 ---
 
