@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.53] - 2026-08-31
 
 ### Added
 - Compose and Dockerfile templates are now evolve-managed. Upstream template hunks are merged into the live files while preserving operator customizations, with verified pristine bytes retained as the next 3-way base.

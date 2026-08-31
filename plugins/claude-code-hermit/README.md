@@ -1,7 +1,7 @@
 <p align="center">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.52-green.svg" alt="Version 1.2.52" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.2.53-green.svg" alt="Version 1.2.53" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -205,7 +205,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `context_hygiene.compact` | compact long-running active context — **enabled**, `100000` compactible tokens / `4h` cooldown |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | auto-compact at % of context — **`65`** |
 | `MAX_THINKING_TOKENS` | thinking-token cap per turn — **`10000`** |
-| `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it, and so does `bin/hermit-watchdog install` the first time it registers a systemd/launchd timer |
+| `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it |
 
 
 Full schema in the [Config Reference](docs/config-reference.md)
