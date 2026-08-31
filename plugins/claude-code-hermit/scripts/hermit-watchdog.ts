@@ -2042,9 +2042,34 @@ function printCronFallback(root: string, unitPath: string): void {
     `2>>.claude-code-hermit/state/watchdog.log`;
   console.log('[watchdog] Add the following line via `crontab -e`:');
   console.log(`  ${cronLine}`);
+  console.log(
+    '[watchdog] Restarts stay off until watchdog.enabled is true — enable it via ' +
+      '`/claude-code-hermit:hermit-settings watchdog`.'
+  );
 }
 
 const run = (cmd: string, args: string[]) => spawnSync(cmd, args, { stdio: 'inherit' });
+
+/**
+ * Flip watchdog.enabled through the audited settings-edit path (validated, logged to the
+ * settings ledger — same call /docker-setup makes). Only called from branches that actually
+ * registered a timer; the cron fallback prints guidance instead, since flipping there would
+ * claim an activation that never happened. No-ops when there is no config to flip, or the
+ * value already matches, so re-running install to fix a stale unit PATH stays quiet.
+ */
+function setWatchdogEnabled(value: boolean): void {
+  if (!fs.existsSync(CONFIG_PATH)) return;
+  const config: Json = readSettledConfig(HERMIT_ROOT);
+  if (config.watchdog?.enabled === value) return;
+  run(process.execPath, [
+    path.join(import.meta.dir, 'settings-edit.ts'),
+    CONFIG_PATH,
+    'set',
+    'watchdog.enabled',
+    String(value),
+  ]);
+  console.log(`[watchdog] ${value ? 'Enabled' : 'Disabled'} watchdog.enabled in config.json.`);
+}
 
 /** Platform-dispatching install: systemd (Linux/WSL), launchd (macOS), cron fallback. */
 function cmdInstall(): void {
@@ -2089,6 +2114,7 @@ function cmdInstall(): void {
     run('systemctl', ['--user', 'daemon-reload']);
     run('systemctl', ['--user', 'enable', '--now', `${serviceName}.timer`]);
     console.log(`[watchdog] Installed systemd user timer: ${serviceName}.timer`);
+    setWatchdogEnabled(true);
     console.log('[watchdog] To persist across reboots without a user session: loginctl enable-linger');
   } else if (process.platform === 'darwin') {
     const launchAgents = path.join(os.homedir(), 'Library', 'LaunchAgents');
@@ -2129,6 +2155,7 @@ function cmdInstall(): void {
     spawnSync('launchctl', ['unload', plistPath], { stdio: 'ignore' });
     run('launchctl', ['load', plistPath]);
     console.log(`[watchdog] Installed LaunchAgent: ${plistName}`);
+    setWatchdogEnabled(true);
   } else {
     console.log('[watchdog] systemd and launchd not available on this platform.');
     printCronFallback(root, unitPath);
@@ -2156,6 +2183,7 @@ function cmdUninstall(): void {
     }
     run('systemctl', ['--user', 'daemon-reload']);
     console.log(`[watchdog] Removed systemd timer: ${serviceName}.timer`);
+    setWatchdogEnabled(false);
   } else if (process.platform === 'darwin') {
     const plistName = `com.hermit.watchdog.${name}.plist`;
     const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', plistName);
@@ -2164,6 +2192,7 @@ function cmdUninstall(): void {
       fs.unlinkSync(plistPath);
     }
     console.log(`[watchdog] Removed LaunchAgent: ${plistName}`);
+    setWatchdogEnabled(false);
   } else {
     console.log('[watchdog] Cron entries must be removed manually with `crontab -e`.');
   }

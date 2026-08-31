@@ -8,6 +8,7 @@
 
 ### Fixed
 - Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
+- `bin/hermit-watchdog install` now enables `watchdog.enabled` in `config.json` when it registers a systemd/launchd timer, and `uninstall` disables it back — previously the timer fired every 5 minutes with the restart/wedge tier silently off. The cron fallback (no systemctl/launchd) leaves `enabled` untouched and prints the enable step instead, since nothing was actually scheduled.
 
 ### Upgrade Instructions
 - Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.

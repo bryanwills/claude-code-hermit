@@ -2537,6 +2537,70 @@ test.if(isLinux)('uninstall without systemctl → exit 0, no traceback', withHer
 }));
 
 // -------------------------------------------------------
+// install/uninstall flip watchdog.enabled — issue #895. Only where a timer was
+// actually registered (systemd/launchd); the cron fallback prints guidance instead
+// of claiming an activation that never happened.
+// -------------------------------------------------------
+
+const configPath = (h: Hermit) => path.join(h.dir, '.claude-code-hermit', 'config.json');
+
+test.if(isLinux)('install with systemd → flips watchdog.enabled true, preserves siblings', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  const fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-')));
+  try {
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+    const config = readJson(configPath(h));
+    expect(config.watchdog.enabled).toBe(true);
+    expect(config.watchdog.stale_factor).toBe(2);
+    expect(config.watchdog.escalate_after).toBe(3);
+    expect(config.watchdog.operator_grace).toBe('15m');
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+}));
+
+test.if(isLinux)('uninstall with systemd → flips watchdog.enabled false', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: true });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  const fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-')));
+  try {
+    const r = await watchdog(h, 'uninstall', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+    const config = readJson(configPath(h));
+    expect(config.watchdog.enabled).toBe(false);
+  } finally {
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  }
+}));
+
+test.if(isLinux)('install without systemctl → leaves watchdog.enabled false, prints enable guidance', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'install', { restrictPath: true });
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout + r.stderr).toContain('Restarts stay off until watchdog.enabled is true');
+  const config = readJson(configPath(h));
+  expect(config.watchdog.enabled).toBe(false);
+}));
+
+test('install with no config.json → exit 0, creates no config', withHermit(async (h) => {
+  // setupHermit() does not write config.json; writeConfig() is what creates it,
+  // and this test deliberately skips that call.
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'install', { restrictPath: true });
+  expect(r.exitCode).toBe(0);
+  expect(fs.existsSync(configPath(h))).toBe(false);
+}));
+
+// -------------------------------------------------------
 // Unit PATH baking. A generated unit runs without ~/.bun/bin on PATH, so the
 // shim's bare `bun` exits 127 on every tick — silently, forever. These assert on
 // the PATH the unit actually ends up running with, not on the text of the line
