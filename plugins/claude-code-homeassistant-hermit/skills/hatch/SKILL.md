@@ -1,6 +1,7 @@
 ---
 name: hatch
 description: One-time Home Assistant setup for this hermit. Configures HA access, connects to the official Home Assistant MCP Server integration, and verifies both the CLI and HA MCP. Run once per project after /claude-code-hermit:hatch.
+disable-model-invocation: true
 ---
 
 # Home Assistant Hatch
@@ -13,13 +14,16 @@ Set up the Home Assistant layer for this project. Idempotent — safe to re-run;
 
 Check whether `.claude-code-hermit/config.json` exists.
 
-- If it is missing:
-  - `AskUserQuestion`: "Core hermit is not initialized. Run `/claude-code-hermit:hatch` now?"
-  - Yes → Follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
-    1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "claude-code-homeassistant-hermit:hatch" }`.
-    2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/claude-code-homeassistant-hermit:hatch`.)"
-    3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
-  - No → stop and explain what is required.
+- If it is missing, print this block and stop:
+
+  ```markdown
+  ## ▶ Next step — type this now
+
+      /claude-code-hermit:hatch
+
+  I can't run setup wizards for you (they're operator-run by design).
+  After it finishes, come back and type `/claude-code-homeassistant-hermit:hatch`.
+  ```
 - If it is present: run `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-homeassistant-hermit` and parse the JSON verdict. Branch on `action`:
   - `upgrade-core-package` / `upgrade-core-applied` → relay the `remedy` string verbatim to the operator and stop.
   - `verify` → `AskUserQuestion`: "Already set up. Re-verify HA access only (skip setup wizard)?". Yes → skip to §5. No → continue.

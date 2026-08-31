@@ -64,7 +64,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 
 ### 1. Read config
 
-Read `.claude-code-hermit/config.json`. If it doesn't exist, inform the operator: "No config found. Run `/claude-code-hermit:hatch` first."
+Read `.claude-code-hermit/config.json`. If it doesn't exist, inform the operator: "No config found — type `/claude-code-hermit:hatch` first, in a terminal or the Claude app."
 
 Scalar and enum edits below are written through `scripts/settings-edit.ts`, which read-modify-writes the whole config (preserving every sibling key) and refuses a malformed file. Shorthand used in this skill:
 
@@ -178,7 +178,7 @@ Channels:
 "briefing chat" is `default_chat_id` — where unattended sends go — falling back to the learned `dm_channel_id` when the pin isn't seeded yet (say "not paired yet" when both are empty).
 Ask: "Add, remove, edit, or set primary? (add discord / add telegram / remove <name> / edit <name> / primary <name> / primary clear / done) [done]"
 Loop until operator says "done":
-- **add <name>:** Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`), then write the whole entry in one call: `set channels.<name> '{"enabled":true,"dm_channel_id":null,"default_chat_id":null,"allowed_users":[...],"state_dir":"...","settings_policy":"allow"}'`. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`."
+- **add <name>:** Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`), then write the whole entry in one call: `set channels.<name> '{"enabled":true,"dm_channel_id":null,"default_chat_id":null,"allowed_users":[...],"state_dir":"...","settings_policy":"allow"}'`. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`. Type it in a terminal or the Claude app."
 - **remove <name>:** `unset channels.<name>`. If `channels.primary === <name>`, run `unset channels.primary` **first** (a dangling pointer fails validation and the write would be refused) and tell the operator: "Also cleared `channels.primary` (was pointing at the removed channel)."
 - **edit <name>:** Sub-menu — "What to change? (allowed_users / briefing_chat / morning_brief / settings_policy / enabled / done)"
   - **allowed_users:** "Paste user IDs (space-separated), or 'clear' to allow everyone, or 'block' for empty array." → `set channels.<name>.allowed_users '["id",...]'` (clear ⇒ `unset channels.<name>.allowed_users`).

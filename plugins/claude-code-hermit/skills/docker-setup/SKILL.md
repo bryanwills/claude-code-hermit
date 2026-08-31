@@ -43,7 +43,7 @@ Run the pre-flight probe once and parse its JSON: `bun ${CLAUDE_PLUGIN_ROOT}/scr
 
 Determine whether to run in **Quick** or **Advanced** mode.
 
-**Argument-driven**: if invoked with the positional argument `quick` (e.g. `/claude-code-hermit:docker-setup quick`), skip the question below and run Quick directly. This is what `hatch` chains to at the end of a Quick hatch run. The operator can always re-invoke `/claude-code-hermit:docker-setup` without the arg later to drop into Advanced.
+**Argument-driven**: if invoked with the positional argument `quick` (e.g. `/claude-code-hermit:docker-setup quick`), skip the question below and run Quick directly. The operator can always re-invoke `/claude-code-hermit:docker-setup` without the arg later to drop into Advanced.
 
 **Otherwise, ask:**
 
