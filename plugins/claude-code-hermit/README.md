@@ -18,18 +18,12 @@ Claude Code plugin that turns a Claude Code instance into a 24/7 agent. **Statef
 
 Setup your agent in any folder, empty or existing project with `/hatch` and shape its identity, priorities, routines, knowledge, autonomy, guardrails and make it yours.
 
-```
-# Install (Linux, macOS, WSL2)
-cd /path/to/your/project
+```bash
+cd /path/to/your/project   # any folder, even an empty one — Linux, macOS, WSL2
 curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
-
-# Boot Claude Code and run the setup wizard
-claude "/claude-code-hermit:hatch"
-
-# Always-on: pick one
-.claude-code-hermit/bin/hermit-start          # tmux, same machine, no image
-/claude-code-hermit:docker-setup              # Docker, isolated, restarts with the daemon
 ```
+
+The installer provisions everything and launches the setup wizard. When it finishes, it hands you the always-on step: `hermit-start` (tmux, same machine) or `/docker-setup` (isolated container).
 
 ---
 
@@ -122,15 +116,15 @@ cd /path/to/your/project   # or any folder — even an empty one
 curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 ```
 
-Installs [Claude Code](https://code.claude.com) and [Bun](https://bun.sh) if they're missing, adds tmux, registers the marketplace, and installs the plugin for this folder. It stops there and tells you what to run next. Prefer to read it first, or do it by hand? [Manual install](docs/how-to-use.md#manual-install).
+Installs [Claude Code](https://code.claude.com) and [Bun](https://bun.sh) if they're missing, adds tmux, registers the marketplace, and installs the plugin for this folder — then launches the setup wizard. Prefer to read it first, or do it by hand? [Manual install](docs/how-to-use.md#manual-install).
 
-### 2. Initialize
+### 2. Hatch
+
+The wizard sets up your agent's identity, scans your folder, generates `OPERATOR.md`, and offers Quick (4 questions) or Advanced (full wizard). Skipped the countdown, or no terminal? Run it yourself:
 
 ```
-claude /claude-code-hermit:hatch
+claude "/claude-code-hermit:hatch"
 ```
-
-The wizard sets up your agent's identity, scans your folder, generates `OPERATOR.md`, and offers Quick (4 questions) or Advanced (full wizard).
 
 > **Just trying it?** After `hatch`, run `.claude-code-hermit/bin/hermit-start --no-tmux` for sessions, routines, heartbeat, and the learning loop without 24/7 autonomy. Run `/claude-code-hermit:channel-setup` first if you want Discord or Telegram.
 

@@ -15,7 +15,7 @@ cd /path/to/your/project   # or any folder — even an empty one
 curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 ```
 
-It installs anything missing, registers the marketplace, installs the plugin for this folder, and stops — printing the exact command to run next. It never runs `/hatch` for you, and it takes no arguments.
+It installs anything missing, registers the marketplace, installs the plugin for this folder, then launches Claude Code with the `/hatch` setup wizard after a short countdown (Ctrl+C skips the launch and prints the command to run instead; so does running without a terminal, e.g. over plain ssh or in CI). It takes no arguments.
 
 To read it before running it:
 
