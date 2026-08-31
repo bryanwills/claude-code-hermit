@@ -23,6 +23,16 @@ Orchestrate a multi-plugin release: determines order, runs each plugin's `/relea
 
 Run `git branch --show-current`. If not on `main` or the repo's default branch: stop and tell the user to switch to main before running a fleet release.
 
+### 1.5. Refresh the knowledge graph (fleet-wide)
+
+`/release` only refreshes the root graph plus its own target plugin's graph (single-plugin scope). A fleet release touches multiple plugins at once, so refresh everything in one shot before the per-plugin `/release` runs:
+
+```bash
+bash scripts/graphify-refresh.sh
+```
+
+AST-only, no API cost. Skips silently if `graphify` isn't installed or the session is in a worktree; a single plugin's update failure warns and continues rather than aborting — a stale graph must never block a release.
+
 ### 2. Determine target plugins
 
 **Explicit slugs:** validate each exists at `plugins/<slug>/.claude-plugin/plugin.json`. For any unknown slug, abort and list available slugs.

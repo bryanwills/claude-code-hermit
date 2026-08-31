@@ -2,7 +2,15 @@
 # Refresh the root graph plus one graph per plugin. AST-only, no API key needed.
 # Root answers cross-plugin questions; each plugin graph answers questions scoped
 # to that plugin, where the root graph loses the answer to test-harness noise.
-set -euo pipefail
+# Safe to call unconditionally from release skills: skips silently if graphify
+# isn't installed, and a single plugin's failure warns and continues rather
+# than aborting the rest — a stale graph must never block a release.
+set -uo pipefail
+
+if ! command -v graphify >/dev/null; then
+  echo "graphify-refresh: graphify not installed, skipping" >&2
+  exit 0
+fi
 
 if [ "$(git rev-parse --path-format=absolute --git-dir)" \
      != "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
@@ -13,9 +21,9 @@ fi
 cd "$(git rev-parse --show-toplevel)"
 
 echo "--- root"
-graphify update .
+graphify update . || echo "graphify-refresh: root update failed, continuing" >&2
 for d in plugins/*/; do
   [ -f "${d}.claude-plugin/plugin.json" ] || continue
   echo "--- ${d}"
-  (cd "$d" && graphify update .)
+  (cd "$d" && graphify update .) || echo "graphify-refresh: ${d} update failed, continuing" >&2
 done
