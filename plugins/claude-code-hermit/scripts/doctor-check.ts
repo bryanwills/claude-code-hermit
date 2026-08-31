@@ -31,7 +31,8 @@ import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
 import { readJson } from './lib/cli';
 import { findResident } from './lib/session-registry';
-import { monitorFreshness } from './lib/monitor-health';
+import { bootMismatch, monitorFreshness } from './lib/monitor-health';
+import { readBootId } from './lib/routines/registry';
 
 type Json = any;
 
@@ -1359,13 +1360,22 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     // prior session's monitor (a tick older than started_at is stale, not proof
     // the current monitor is alive) and to bound the startup grace below.
     let startedAt: number | null = null;
+    let monRt: Json = null;
     try {
-      const monRt = JSON.parse(fs.readFileSync(path.join(stateDir, 'heartbeat-monitor.runtime.json'), 'utf-8'));
+      monRt = JSON.parse(fs.readFileSync(path.join(stateDir, 'heartbeat-monitor.runtime.json'), 'utf-8'));
       if (typeof monRt.started_at === 'string') {
         const t = Date.parse(monRt.started_at);
         if (Number.isFinite(t)) startedAt = t;
       }
     } catch { /* missing or unparseable */ }
+
+    if (bootMismatch(monRt?.boot_id, readBootId(hermitDir))) {
+      return {
+        id: 'heartbeat',
+        status: 'fail',
+        detail: 'heartbeat monitor registered by a previous boot — re-arm with /claude-code-hermit:heartbeat start',
+      };
+    }
 
     const livenessPath = path.join(stateDir, 'heartbeat-liveness.json');
     let lastPeekAt: number | null = null;
@@ -1419,9 +1429,12 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
 // startup-grace and trust-liveness-against-started_at logic. Two differences:
 // (1) enabled/scope is derived from config.routines (any non-anchor enabled entry),
 // not a single heartbeat.enabled flag; (2) a croncreate-fallback mode (Monitor tool
-// unavailable) is reported ok rather than evaluated for liveness at all.
+// unavailable) is reported ok rather than evaluated for liveness at all — it writes no
+// liveness file. The boot gate still applies to it, and is the only thing that can
+// catch it: its CronCreates are durable:false, so a fallback registration stamped by a
+// previous boot describes crons that died with that process.
 function checkRoutineMonitor(p: DoctorPaths = PATHS) {
-  const { stateDir } = p;
+  const { stateDir, hermitDir } = p;
   try {
     const read = readConfigOrCovered('routine-monitor', p);
     if ('covered' in read) return read.covered;
@@ -1439,17 +1452,28 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
     if (!monRt) {
       return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: not yet loaded (run /claude-code-hermit:hermit-routines load)' };
     }
+    // Read the session state before the mode branch so the boot gate can cover
+    // croncreate-fallback too; the ok-verdict order below is unchanged.
+    const runtimePath = path.join(stateDir, 'runtime.json');
+    const runtimeExists = fs.existsSync(runtimePath);
+    const sessionState = runtimeExists ? JSON.parse(fs.readFileSync(runtimePath, 'utf-8')).session_state : null;
+    const sessionActive = sessionState === 'in_progress' || sessionState === 'waiting';
+
+    if (sessionActive && bootMismatch(monRt.boot_id, readBootId(hermitDir))) {
+      return {
+        id: 'routine-monitor',
+        status: 'fail',
+        detail: 'routine-monitor registered by a previous boot — re-arm with /claude-code-hermit:hermit-routines load',
+      };
+    }
+
     if (monRt.mode === 'croncreate-fallback') {
       return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: croncreate-fallback mode (Monitor unavailable)' };
     }
-
-    const runtimePath = path.join(stateDir, 'runtime.json');
-    if (!fs.existsSync(runtimePath)) {
+    if (!runtimeExists) {
       return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: enabled, no runtime state' };
     }
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    const sessionState = rt.session_state;
-    if (sessionState !== 'in_progress' && sessionState !== 'waiting') {
+    if (!sessionActive) {
       return { id: 'routine-monitor', status: 'ok', detail: `routine-monitor: enabled, no active session (state=${sessionState ?? 'unknown'})` };
     }
 

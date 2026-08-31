@@ -48,7 +48,8 @@ import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 import { lastRoutineFire } from './lib/routines/history';
 import { ensureLedgerFile } from './lib/append-jsonl';
-import { monitorFreshness } from './lib/monitor-health';
+import { bootMismatch, monitorFreshness } from './lib/monitor-health';
+import { readBootId } from './lib/routines/registry';
 
 type Json = any;
 
@@ -908,12 +909,20 @@ function doRearm(sessionName: string, config: Json): void {
 // ~26h — a model-issued metric that can be missing entirely, leaving that fallback
 // permanently inert. This step keys off ground truth instead: the per-poll liveness
 // files the monitors themselves stamp. Its staleness logic mirrors doctor's
-// checkHeartbeat/checkRoutineMonitor (trusted-tick vs started_at, startup grace) so a
-// doctor 'fail' and a watchdog re-arm trip on the same signal.
+// checkHeartbeat/checkRoutineMonitor (trusted-tick vs started_at, startup grace, boot
+// gate) so a doctor 'fail' and a watchdog re-arm trip on the same signal.
 
 // A monitor writes liveness on its first loop iteration, so a real tick lands within
 // seconds of spawn; the grace only needs to cover spawn + first precheck.
 const MONITOR_STARTUP_GRACE_SECS = 120;
+// Grace before a boot mismatch is trusted, measured from the `.boot-id` marker's mtime.
+// hermit-start stamps that marker itself, but the monitors are re-registered by the
+// bootstrap turn that follows it (`/heartbeat start`, `/hermit-routines load`), so in
+// between the runtime files legitimately still carry the previous boot's id — re-arming
+// there would duplicate an injection already in flight. A boot that still has not
+// re-registered after this window is genuinely stuck, and the re-arm is then correct.
+// Wider than MONITOR_STARTUP_GRACE_SECS because it must cover a whole model turn.
+const BOOT_GATE_GRACE_SECS = 600;
 // One re-arm attempt per monitor per this window. Essential: where Monitor spawn is
 // blocked outright (seccomp / nested-userns), an undamped liveness-keyed re-arm would
 // re-inject every tick forever — each injection a paid full-context wake.
@@ -948,12 +957,27 @@ function monitorLivenessStale(livenessFile: string, runtimeData: Json, threshold
   ).fresh;
 }
 
+/**
+ * Does this registration belong to a dead previous boot? Liveness alone cannot see
+ * that: a monitor dies with its session, so its last tick is at most one interval old
+ * and still reads "fresh" for the rest of the window (90 min at the default heartbeat
+ * `every`). Held behind BOOT_GATE_GRACE_SECS so a bootstrap still in flight is not
+ * mistaken for one that never re-registered. Absent marker or absent stored id →
+ * false, falling through to the plain freshness check (see `bootMismatch`).
+ */
+function monitorBootStale(runtimeData: Json): boolean {
+  if (!bootMismatch(runtimeData?.boot_id, readBootId(HERMIT_ROOT))) return false;
+  const markerAgeSecs = getFileAgeSecs(path.join(STATE_DIR, '.boot-id'));
+  return markerAgeSecs !== null && markerAgeSecs >= BOOT_GATE_GRACE_SECS;
+}
+
 /** Heartbeat monitor stale? Gated + thresholded exactly as doctor's checkHeartbeat. */
 function heartbeatMonitorStale(config: Json): boolean {
   const hbCfg = config?.heartbeat;
   if (!hbCfg || typeof hbCfg !== 'object' || Array.isArray(hbCfg) || !hbCfg.enabled) return false;
   const thresholdSecs = 3 * parseDuration(hbCfg.every ?? '30m');
   const monRt = readJson(path.join(STATE_DIR, 'heartbeat-monitor.runtime.json'));
+  if (monitorBootStale(monRt)) return true;
   return monitorLivenessStale('heartbeat-liveness.json', monRt, thresholdSecs);
 }
 
@@ -963,7 +987,11 @@ function routineMonitorStale(config: Json): boolean {
   const anyEnabled = routines.some((r: Json) => r && r.enabled === true && r.id !== 'heartbeat-restart');
   if (!anyEnabled) return false;
   const monRt = readJson(path.join(STATE_DIR, 'routine-monitor.runtime.json'));
-  if (!monRt || monRt.mode === 'croncreate-fallback') return false; // not loaded, or CronCreate fallback (no Monitor)
+  if (!monRt) return false; // not loaded — session-start's job, not the watchdog's
+  // Boot gate ahead of the fallback bail: croncreate-fallback writes no liveness file,
+  // so the boot id is the only evidence its durable:false crons died with that process.
+  if (monitorBootStale(monRt)) return true;
+  if (monRt.mode === 'croncreate-fallback') return false; // CronCreate fallback (no Monitor)
   const interval = typeof monRt.interval === 'number' && monRt.interval > 0 ? monRt.interval : 60;
   const thresholdSecs = Math.max(10 * interval, 10 * 60);
   return monitorLivenessStale('routine-monitor-liveness.json', monRt, thresholdSecs);

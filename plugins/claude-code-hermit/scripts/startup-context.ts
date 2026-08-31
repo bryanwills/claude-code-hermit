@@ -373,7 +373,7 @@ function main(source: string | null, sessionId: string | null) {
     return;
   }
   // No resident but a marker from an earlier SessionStart of this same session id
-  // (resume/clear/compact all reuse it): this session is the resident now, so drop
+  // (resume/compact reuse it; /clear mints a new one): this session is the resident now, so drop
   // the verdict rather than leave it silently muting its own liveness signal.
   clearGuest(stateDir, sessionId);
   if (source === 'compact') {

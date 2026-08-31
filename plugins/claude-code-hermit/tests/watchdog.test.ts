@@ -2199,6 +2199,67 @@ test('routine monitor in croncreate-fallback mode → no re-arm', withHermit(asy
   expect(events(h)).not.toContain('monitor-rearm');
 }));
 
+// A monitor that died with its session keeps a fresh-looking liveness file for the rest
+// of its window, so only the boot marker can expose it. Marker age gates the check: the
+// bootstrap turn re-registers after hermit-start stamps the marker.
+const writeBootMarker = (h: Hermit, id: string, ageMins: number) => {
+  const p = state(h, '.boot-id');
+  fs.writeFileSync(p, id + '\n');
+  const t = new Date(Date.now() - ageMins * 60_000);
+  fs.utimesSync(p, t, t);
+};
+
+test('heartbeat monitor from a previous boot → re-arm despite fresh liveness', withHermit(async (h) => {
+  writeConfig(h);
+  writeBootMarker(h, 'boot-B', 30); // booted 30 min ago, past the 10-min grace
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(5 / 60), boot_id: 'boot-A' });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(1 / 60) }); // would read fresh
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('monitor-rearm');
+  expect(tmuxCalls(h)).toContain('/claude-code-hermit:heartbeat start');
+}));
+
+test('previous-boot mismatch inside the boot grace → no re-arm', withHermit(async (h) => {
+  writeConfig(h);
+  writeBootMarker(h, 'boot-B', 2); // bootstrap still in flight — it owns the re-arm
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(5 / 60), boot_id: 'boot-A' });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(1 / 60) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).not.toContain('monitor-rearm');
+}));
+
+test('registration predating the boot_id field → falls through to freshness', withHermit(async (h) => {
+  writeConfig(h);
+  writeBootMarker(h, 'boot-B', 30);
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(5 / 60) }); // no boot_id
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(1 / 60) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).not.toContain('monitor-rearm');
+}));
+
+test('croncreate-fallback from a previous boot → re-arm', withHermit(async (h) => {
+  // Fallback writes no liveness file, so the boot id is the only evidence its
+  // durable:false crons died with the previous process.
+  writeRoutineMonitorConfig(h);
+  writeBootMarker(h, 'boot-B', 30);
+  writeState(h, 'routine-monitor.runtime.json', { started_at: isoAgo(5 / 60), interval: 60, mode: 'croncreate-fallback', boot_id: 'boot-A' });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('monitor-rearm');
+  expect(tmuxCalls(h)).toContain('/claude-code-hermit:hermit-routines load');
+}));
+
 // 11f. The same re-arms on an IDLE session arc.
 //
 // A hermit rests at 'idle' between arcs, so that is where a Monitor that died has to be
