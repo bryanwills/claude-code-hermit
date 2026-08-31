@@ -38,30 +38,30 @@ claude plugin install claude-code-hermit@claude-code-hermit --scope local
 Hermit adds a persistent operating layer around Claude Code, a learning loop, and a quick setup to wire everything.
 
 - **Stateful** live working state, archived session handoffs, runtime observations, lessons, findings, blockers, completed tasks, files created/modified/deleted.
-- **Agent Routines** Add your own routines that run from one persistent `Monitor` subprocess that decides eligibility outside the session, so a skipped fire costs zero tokens and co-due routines batch into one wake; a daily `CronCreate` anchor re-arms it. Falls back to per-routine `CronCreate` where `Monitor` is unavailable. Managed by `/hermit-routines`.
-- **Heartbeat** polls from a persistent `Monitor` subprocess — a filesystem-only precheck decides every tick, and the model only wakes (and only bills) when something actually changed.
-- **`/watch`** wraps `Monitor` streams that die with the session: it auto-starts from config (or plain language) and routes findings to your notifications, silent when quiet.
-- **Operate it from your phone.** Hermit pings you first when it needs a decision. From a trusted Discord or Telegram chat, send work, accept proposals, change settings, check on it with `/status`, hold it with `/pause`, `/resume` and `/snooze`, or drive Claude Code itself with `/model`, `/effort`, `/permission-mode`, `/compact`, `/clear`, `/advisor`, `/doctor`, and `/code-review`. `/doctor` needs settings authority; reviews refuse `ultra`, `--post`, and `--comment`. Pause is enforced at the tool boundary, not merely treated as a conversational request.
+- **Agent Routines** Add your own scheduled routines. Give any routine a small precheck script so it only wakes Claude when there is work. Quiet skips use zero model tokens, and routines due at the same time share one wake. Managed by `/hermit-routines`.
+- **Heartbeat** uses the checks you define in `HEARTBEAT.md` together with the agent's saved state, including pending decisions, active alerts, and stale work, to know when something needs attention. You can edit the list at any time or ask the agent to update it. Claude wakes only when needed; quiet ticks use zero model tokens.
+- **`/watch`** watches logs, files, and other changing sources in the background, then notifies you when something happens. It stays silent when nothing changes.
+- **Operate it from your phone.** The agent pings you first when it needs a decision. From a trusted [Claude Code Channel](https://code.claude.com/docs/en/channels) (Discord or Telegram), send work, accept proposals, change settings, check on it with `/status`, hold it with `/pause`, `/resume` and `/snooze`, or drive Claude Code itself with `/model`, `/effort`, `/permission-mode`, `/compact`, `/clear`, `/advisor`, `/doctor`, and `/code-review`. `/doctor` needs settings authority; reviews refuse `ultra`, `--post`, and `--comment`. Pause is enforced at the tool boundary, not merely treated as a conversational request.
 - **Spawn new sessions remotely.** You run `/rc-gate` to open a Remote Control gate so the Claude app can start sessions in isolated worktrees, with cleanup for worktrees left behind after archival.
-- **Native Claude Code Artifacts integration** publishes a live Hermit Dashboard, open proposals, weekly reviews, and any compiled document you request as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs, with organization sharing where supported. Point `artifacts.backend` at your own MCP artifact server to publish there instead.
-- **Auto-memory + knowledge** Two layers. Claude Code's native auto-memory holds operator facts and preferences (how to work with you); on top, the hermit adds a `raw/` → `compiled/` knowledge base — domain outputs and living topic pages updated in place — re-injected as a catalog within a context budget on fresh and resumed starts. Your Discord/Telegram DM text is also captured locally, so decisions made over chat outlive the thread: `weekly-review` distills them into memory (opt out with `knowledge.channel_log_enabled: false`). `/recall` searches across all of it.
+- **Native Artifacts Integration** The agent publishes its Dashboard, open proposals, weekly reviews, and requested compiled documents as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs and support organization sharing where available. You can use your own artifact server instead.
+- **Auto-memory + knowledge** Claude Code's auto-memory holds facts and preferences about how to work with you. The agent also maintains a `raw/` → `compiled/` living knowledge base for domain work and topic pages, carries a bounded catalog across sessions, and makes all of it searchable with `/recall`. Discord and Telegram DMs are captured locally by default so chat decisions outlive the thread; `weekly-review` distills them into memory. [Channel capture can be disabled](plugins/claude-code-hermit/docs/config-reference.md#knowledge).
 - **Plan tracking** lives in the SHELL.md Progress Log — timestamped steps that survive compaction, restart, and every model tier.
 - **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context. A second session in the same folder is mechanically recognized as a guest and framed not to answer channels, write resident state, or start schedulers.
 - **Orchestrator** instructed to delegate tasks & exploration to other agents, main context stays clean for token efficiency.
 
 **Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, clears stale context after a midnight close, and compacts long-running context so cold wakes don't re-pay the full accumulated history — recovery never depends on the session being conscious.
 
-**Context-efficient continuity.** After compaction, Hermit reloads only a bounded lifecycle/task/progress capsule instead of the full startup bundle. Structured report frontmatter lets briefs, reflections, and weekly reviews inspect history without rereading every report body.
+**Context-efficient continuity.** After compaction, the agent reloads only a bounded lifecycle/task/progress capsule instead of the full startup bundle. Structured report frontmatter lets briefs, reflections, and weekly reviews inspect history without rereading every report body.
 
 **It reaches you first.** Notifications default to a native push (headless-friendly), or a Discord/Telegram DM you can reply to if you've paired a channel.
 
-**Cost scales with events, not time.** Nothing wakes the model until something happens, so an idle hermit is effectively free.
+The agent checks whether there is work before waking Claude. Quiet heartbeats and skipped routines use no model tokens, routines due at the same time share one wake, and long-running sessions periodically trim old context.
 
 ---
 
 ## Learning Loop
 
-Hermit reviews evidence from its work and operation. Durable lessons go to memory; non-trivial ideas that would change its behavior are verified, deduplicated, and brought to you for approval.
+The agent reviews evidence from its work and operation. Durable lessons go to memory; non-trivial ideas that would change its behavior are verified, deduplicated, and brought to you for approval.
 
 ```text
 Work produces evidence
@@ -91,13 +91,13 @@ a lesson    a change
                   Future evidence
 ```
 
-Reflection runs at eligible task or session pauses, daily, and after routines configured with `reflect_after`. Scheduled no-op runs are skipped before the model wakes in Monitor mode. Weak signals stay in an observation ledger; approved changes can start now, become a task, or be left for manual implementation. Hermit then resolves the proposal when verification passes or later evidence shows the problem is gone.
+Reflection runs at eligible task or session pauses, daily, and after routines configured with `reflect_after`. Scheduled no-op runs are skipped before the model wakes in Monitor mode. Weak signals stay in an observation ledger; approved changes can start now, become a task, or be left for manual implementation. The agent then resolves the proposal when verification passes or later evidence shows the problem is gone.
 
 ---
 
 ## Observable
 
-The native Hermit Dashboard, proposals page, and weekly review stay current as Claude Code Artifacts at stable URLs — or on a self-hosted artifact server, if you configure one.
+The agent uses [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts) for observability: its Dashboard, proposals page, and weekly review stay current at stable URLs. You can use your own artifact server instead.
 
 On-demand skills — pullable from the Claude app, your terminal, or a DM:
 
@@ -239,7 +239,7 @@ You run on your own Claude subscription — no per-runtime-hour billing — and 
 - **Per-day** rollup in `cost-summary.md`, regenerated on every cost-tracker tick.
 - **On demand** through `/cost-reflect`, `/hermit-doctor`, and the dashboard, plus a one-line spend summary in the weekly review. Routine briefs and status replies stay outcome-only; spend interrupts them only when a cap is approached or breached.
 
-Because idle always-on cost is effectively zero, one Claude subscription can run several hermits at once.
+Quiet polling usually stays outside the model, so one Claude subscription can run several agents. Actual usage depends on their routines and work.
 
 ---
 
