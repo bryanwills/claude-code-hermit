@@ -14,14 +14,14 @@ Two classes:
 ## Usage
 
 ```
-/claude-code-hermit:watch <instruction>            — start ad-hoc (poll, default 5m interval)
-/claude-code-hermit:watch <stream-command>         — start ad-hoc stream
-/claude-code-hermit:watch session <name> [note]    — watch a local session until its next idle notice
-/claude-code-hermit:watch notice <text>            — [internal] handle a watched-session notice
-/claude-code-hermit:watch start                    — register all enabled config watches
-/claude-code-hermit:watch stop [id]                — stop by id (or auto if 1 active)
-/claude-code-hermit:watch stop --all               — stop all watches
-/claude-code-hermit:watch status                   — list active watches from registry
+/claude-code-hermit:watch <instruction>              — start ad-hoc (poll, default 5m interval)
+/claude-code-hermit:watch <stream-command>           — start ad-hoc stream
+/claude-code-hermit:watch session <name|glob> [note] — watch local session(s) until their next idle notice
+/claude-code-hermit:watch notice <text>              — [internal] handle a watched-session notice
+/claude-code-hermit:watch start                      — register all enabled config watches
+/claude-code-hermit:watch stop [id]                  — stop by id (or auto if 1 active)
+/claude-code-hermit:watch stop --all                 — stop all watches
+/claude-code-hermit:watch status                     — list active watches from registry
 ```
 
 ## Runtime Registry
@@ -87,6 +87,17 @@ them for decisions. Start/stop decisions read from the runtime registry.
    this machine — `notify_when_idle` covers nothing else, so a cloud/remote agent
    or an in-process subagent row does not qualify. If no such row matches, answer
    `No session named <name> is reachable from here.` and do not write the registry.
+
+   **Glob target:** if `<name>` contains `*` or `?`, match it against every
+   `ListAgents` row that already qualifies above, excluding this session and,
+   in a hatched folder, the resident/guest pair. No match: answer
+   `No session matching <name> is reachable from here.` and do not write the
+   registry. One or more matches: show the operator each matched name with the
+   live status its row reports (e.g. `idle`, `busy`, `waiting`, `shell`) and
+   wait for confirmation before doing anything else — an already-idle match
+   fires its notice as soon as it is subscribed. On confirmation, run steps
+   2–5 below once per matched name, each producing its own registry entry. A
+   plain (non-glob) `<name>` skips this branch and needs no confirmation.
 2. Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
    `message`: this is a pure subscription, costs the watched session nothing, and
    fires immediately if it is already idle.
