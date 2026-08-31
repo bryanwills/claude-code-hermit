@@ -2,8 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+- `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment. Docker still applies the hardened deny-pattern profile when chosen.
+- The `/hatch` channel question labels the no-channel option `Only Claude App` instead of `None`, and says what you still get: push notifications, plus Remote Control if enabled.
+- The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
+
 ### Fixed
 - `/hermit-doctor` and the watchdog now compare a monitor's registration against `state/.boot-id`, so one left behind by a previous boot is reported and re-armed instead of reading healthy on its last pre-crash tick for up to 90 minutes. This also covers routines in `croncreate-fallback` mode, where the boot id is the only available evidence, and interactive (`--no-tmux`) starts now stamp the marker so the check works there too.
+- `/hatch` now supplies a description for every `AskUserQuestion` option in both branches, so the identity batch and the OPERATOR.md questionnaire no longer fail with `Invalid tool parameters`.
+- The tmux next step in `hatch-report.ts` now prefixes `.claude-code-hermit/bin/hermit-start` with `!`, so it can run directly in the current Claude Code session.
 
 ## [1.2.53] - 2026-08-31
 

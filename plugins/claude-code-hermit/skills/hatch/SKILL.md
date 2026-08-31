@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Set up the autonomous agent for this project. This creates the per-project state directory, configures the project for session-based work, and optionally activates hermits.
 
+**`AskUserQuestion` convention — applies to every question in this skill, both branches.** Each question needs 2-4 `options` (Other is auto-provided for free text), and each option needs both a `label` and a `description`; a bare label is rejected as an invalid tool parameter. Where a step lists options as bare labels (the tables in Step 5a, the activation prompts), write a short description for each before sending the call.
+
 ## Plan
 
 ### 1. Check if already initialized
@@ -103,7 +105,7 @@ If the list is non-empty:
 
 ### 4. Setup wizard
 
-Collect project preferences in 4–5 interactions. Use `AskUserQuestion` for all questions. Every question requires 2-4 `options` — users can always type free text via the auto-provided "Other" option.
+Collect project preferences in 4–5 interactions. Use `AskUserQuestion` for all questions, following the label+description convention at the top of this skill.
 
 #### Phase 1 — Auto-detect (already done in Step 1.5)
 
@@ -144,12 +146,12 @@ questions: [
   {
     header: "Channels",
     question: "Configure a notification channel for this project?",
-    options: [{ label: "Discord (recommended)" }, { label: "Telegram" }, { label: "None — skip channel setup" }]
+    options: [{ label: "Discord (recommended)", description: "Set up Discord notifications" }, { label: "Telegram", description: "Set up Telegram notifications" }, { label: "Only Claude App", description: "No chat channel — push notifications, plus Remote Control if you enabled it" }]
   }
 ]
 ```
 
-- **If None:** record `channels: {}`. Proceed to Phase 5. Do not ask channel follow-ups.
+- **If Only Claude App:** record `channels: {}`. Proceed to Phase 5. Do not ask channel follow-ups.
 - **If Discord or Telegram:** create a channel entry under the `channels` object (e.g., `channels.discord`). Boot script maps the key to the full plugin identifier. Then ask follow-ups below.
 - Channel plugins require Bun and manual setup (bot creation, token, pairing). After saving the preference to `config.json`, note:
 
@@ -337,7 +339,7 @@ Write the draft to `.claude-code-hermit/OPERATOR.md`.
 
 #### Phase 3 — Targeted questions (AskUserQuestion batch)
 
-Questions are split into two `AskUserQuestion` calls (max 4 per call). Q1–Q4 are never skipped and always form the first call. Q5–Q7 are conditional and form a second call only if any are included.
+Questions are split into two `AskUserQuestion` calls (max 4 per call). Q1–Q4 are never skipped and always form the first call. Call 2 carries exactly one follow-up, picked by the Phase 1 scan.
 
 **Call 1 — always sent (4 questions):**
 
@@ -350,15 +352,12 @@ Questions are split into two `AskUserQuestion` calls (max 4 per call). Q1–Q4 a
 
 Accept any answer including free-text via Other. Expand Q1–Q3 into OPERATOR.md prose in Phase 4 — don't take options too literally. Q4 is not OPERATOR.md material: it feeds Phase 4b and nothing else.
 
-**Call 2 — only if any of Q5–Q7 apply (skip conditions below):**
+**Call 2 — one question, chosen by the scan:**
 
-| #   | Header  | Question                                                                                     | Options                                   | Skip if...                                      |
-| --- | ------- | -------------------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------- |
-| 5   | CI/CD   | "Any CI/CD quirks I should know about? (flaky tests, required checks, deploy process)"       | Standard / Has quirks                     | No CI config found in Phase 1                   |
-| 6   | Testing | "How should I handle testing? (run before commit, specific commands, coverage requirements)" | Before commit / CI handles it / As needed | CLAUDE.md already covers testing                |
-| 7   | Team    | "Who's working on this? (solo / small team / large team — and any ownership boundaries)"     | Solo / Small team / Large team            | Skip if Q5 or Q6 is included (batch already ≥2) |
-
-If none of Q5–Q7 apply, skip Call 2 entirely.
+| #   | Header  | Question                                                                                 | Options                        | Ask when...                          |
+| --- | ------- | ---------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------ |
+| 5   | CI/CD   | "Any CI/CD quirks I should know about? (flaky tests, required checks, deploy process)"   | Standard / Has quirks          | Phase 1 found a CI config             |
+| 6   | Team    | "Who's working on this? (solo / small team / large team — and any ownership boundaries)" | Solo / Small team / Large team | Phase 1 found no CI config (Q5 skipped) |
 
 Tell the operator before Call 1: "I've scanned your project and drafted OPERATOR.md. A few questions to fill in what I couldn't infer:"
 
@@ -606,25 +605,25 @@ questions: [
     header: "Agent name",
     question: "What should I be called?",
     options: [
-      { label: "Atlas" },
-      { label: "Hermit" },
-      { label: "Skip" }
+      { label: "Atlas", description: "Use Atlas as agent name" },
+      { label: "Hermit", description: "Use Hermit as agent name" },
+      { label: "Skip", description: "Leave agent name unset" }
     ]
   },
   {
     header: "Language",
     question: "Primary language?",
     options: [
-      { label: "<auto-detected from Step 1.5> (auto-detected)" },
-      { label: "<one common alternative — e.g. en if auto = pt, otherwise pt>" }
+      { label: "<auto-detected from Step 1.5> (auto-detected)", description: "Use detected primary language" },
+      { label: "<one common alternative — e.g. en if auto = pt, otherwise pt>", description: "Use suggested alternative language" }
     ]
   },
   {
     header: "Timezone",
     question: "Timezone?",
     options: [
-      { label: "<auto-detected from Step 1.5> (auto-detected)" },
-      { label: "UTC" }
+      { label: "<auto-detected from Step 1.5> (auto-detected)", description: "Use detected local timezone" },
+      { label: "UTC", description: "Use Coordinated Universal Time" }
     ]
   }
 ]
@@ -643,17 +642,17 @@ questions: [
     header: "Sign-off",
     question: "How should I close messages?",
     options: [
-      { label: "{name} out." },
-      { label: "-- {initial}." },
-      { label: "Skip" }
+      { label: "{name} out.", description: "Close with full agent name" },
+      { label: "-- {initial}.", description: "Close with agent initial" },
+      { label: "Skip", description: "Omit a message sign-off" }
     ]
   },
   {
     header: "Deployment",
     question: "How will you run hermit?",
     options: [
-      { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
       { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; add bin/hermit-watchdog install for restarts" },
+      { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
       { label: "Interactive", description: "Just trying it. /session in your terminal" }
     ]
   },
@@ -661,9 +660,9 @@ questions: [
     header: "Channel",
     question: "Notification channel?",
     options: [
-      { label: "None" },
-      { label: "Discord" },
-      { label: "Telegram" }
+      { label: "Only Claude App", description: "No chat channel — push notifications, plus Remote Control if you enabled it" },
+      { label: "Discord", description: "Send notifications through Discord" },
+      { label: "Telegram", description: "Send notifications through Telegram" }
     ]
   },
   {
@@ -677,7 +676,7 @@ questions: [
 ]
 ```
 
-Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `channel` (one of `none` / `discord` / `telegram`), `idle_behavior` (one of `discover` / `wait`).
+Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `channel` (one of `none` / `discord` / `telegram`), `idle_behavior` (one of `discover` / `wait`). Map the labels to those values — **"Only Claude App" is `none`**, not the label text; downstream code (the confirm bundle, Step 5's `channels` overlay) compares against the sentinel.
 
 `push_notifications` is left at the template default (`true`) — no follow-up question. Push is dormant whenever a channel is reachable (the runtime guard in CLAUDE-APPEND.md sends channel-first) and fires only as fallback when a channel is unreachable or absent.
 
