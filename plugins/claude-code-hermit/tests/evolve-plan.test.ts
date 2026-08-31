@@ -13,8 +13,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { runScript } from './helpers/run';
-import { markerOnward, extractSiblingMarker } from '../scripts/evolve-plan';
+import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { markerOnward, extractSiblingMarker, classifyDockerTemplates } from '../scripts/evolve-plan';
+import { render, renderSources } from '../scripts/render-docker-templates';
 
 const MARKER = '<!-- claude-code-hermit: Session Discipline -->';
 const SIBLING_MARKER = '<!-- claude-code-dev-hermit: Dev Workflow -->';
@@ -547,6 +548,124 @@ test('docker with manifest: compose match omitted, stale Dockerfile -> changed, 
   expect(names).not.toContain('docker-compose.hermit.yml'); // upstream unchanged -> omitted
   expect(d.docker_templates).toContainEqual({ name: 'Dockerfile.hermit', status: 'changed' });
 }));
+
+const DOCKER_INPUTS = {
+  packages: ['ffmpeg'],
+  auth: 'oauth-token' as const,
+  channels: { envLines: [] as string[], volumeLines: [] as string[] },
+  agentHookProfile: 'strict',
+  networkMode: 'bridge' as const,
+  gitIdentityMount: true,
+  fleetMesh: false,
+};
+
+function writeDerivableDockerConfig(proj: string): void {
+  writeConfig(proj, JSON.stringify({
+    _hermit_versions: { 'claude-code-hermit': '1.1.6' },
+    channels: {},
+    docker: {
+      packages: DOCKER_INPUTS.packages,
+      network_mode: DOCKER_INPUTS.networkMode,
+      fleet_mesh: DOCKER_INPUTS.fleetMesh,
+    },
+  }));
+}
+
+function realDockerSources() {
+  const dockerDir = path.join(PLUGIN_ROOT, 'state-templates', 'docker');
+  return {
+    compose: fs.readFileSync(path.join(dockerDir, 'docker-compose.hermit.yml.template'), 'utf8'),
+    dockerfile: fs.readFileSync(path.join(dockerDir, 'Dockerfile.hermit.template'), 'utf8'),
+  };
+}
+
+function writePristineCompose(proj: string, contents: string): string {
+  const pristinePath = path.join(
+    hermitDir(proj),
+    'state/pristine/docker/docker-compose.hermit.yml.template',
+  );
+  fs.mkdirSync(path.dirname(pristinePath), { recursive: true });
+  fs.writeFileSync(pristinePath, contents);
+  return pristinePath;
+}
+
+function classifyRealDockerTemplates(proj: string, composeHash: string) {
+  return classifyDockerTemplates(
+    path.join(PLUGIN_ROOT, 'state-templates'),
+    proj,
+    { 'docker/docker-compose.hermit.yml.template': { sha256: composeHash } },
+  );
+}
+
+test('docker templates: verified pristine bytes expose a rendered base_path', withProj((proj) => {
+  writeDerivableDockerConfig(proj);
+  const current = realDockerSources();
+  const baseCompose = current.compose.replace('# Defense in depth', '# Previous defense in depth');
+  const baseRendered = renderSources(DOCKER_INPUTS, { ...current, compose: baseCompose });
+  deployDocker(proj, {
+    compose: `${baseRendered.compose}\nx-operator-setting: true\n`,
+    dockerfile: baseRendered.dockerfile,
+  });
+  writePristineCompose(proj, baseCompose);
+
+  const entries = classifyRealDockerTemplates(proj, sha256(Buffer.from(baseCompose)));
+  const compose = entries.find((entry: any) => entry.name === 'docker-compose.hermit.yml');
+  expect(compose.class).toBe('conflict');
+  expect(compose.bootstrap).toBeUndefined();
+  expect(fs.existsSync(compose.base_path)).toBe(true);
+  expect(fs.existsSync(compose.theirs_path)).toBe(true);
+}));
+
+test('docker templates: stale pristine bytes force bootstrap without base_path', withProj((proj) => {
+  writeDerivableDockerConfig(proj);
+  const current = realDockerSources();
+  const rendered = render(DOCKER_INPUTS);
+  deployDocker(proj, { compose: `${rendered.compose}\nx-operator-setting: true\n`, dockerfile: rendered.dockerfile });
+  writePristineCompose(proj, `${current.compose}\nSTALE`);
+
+  const entries = classifyRealDockerTemplates(proj, sha256(Buffer.from(current.compose)));
+  const compose = entries.find((entry: any) => entry.name === 'docker-compose.hermit.yml');
+  expect(compose.bootstrap).toBe(true);
+  expect(compose.base_path).toBeUndefined();
+  expect(fs.existsSync(compose.theirs_path)).toBe(true);
+}));
+
+test('docker templates: absent pristine bytes force bootstrap without base_path', withProj((proj) => {
+  writeDerivableDockerConfig(proj);
+  const current = realDockerSources();
+  const rendered = render(DOCKER_INPUTS);
+  deployDocker(proj, { compose: `${rendered.compose}\nx-operator-setting: true\n`, dockerfile: rendered.dockerfile });
+
+  const entries = classifyRealDockerTemplates(proj, sha256(Buffer.from(current.compose)));
+  const compose = entries.find((entry: any) => entry.name === 'docker-compose.hermit.yml');
+  expect(compose.bootstrap).toBe(true);
+  expect(compose.base_path).toBeUndefined();
+}));
+
+test('docker templates: underivable inputs retain report-only output', withProj((proj) => {
+  writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
+  deployDocker(proj, { compose: 'rendered\n', dockerfile: 'rendered\n' });
+  const current = realDockerSources();
+  const entries = classifyDockerTemplates(
+    path.join(PLUGIN_ROOT, 'state-templates'),
+    proj,
+    { 'docker/docker-compose.hermit.yml.template': { sha256: sha256(Buffer.from(`${current.compose}old`)) } },
+  );
+
+  expect(entries).toContainEqual({ name: 'docker-compose.hermit.yml', status: 'changed' });
+}));
+
+test('evolve reference places the base_path and bootstrap merge branches in section 5d', () => {
+  const reference = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills/hermit-evolve/reference.md'), 'utf8');
+  const section5c = reference.indexOf('### 5c.');
+  const section5d = reference.indexOf('### 5d.');
+  const section6 = reference.indexOf('### 6.', section5d);
+  const body = reference.slice(section5d, section6);
+
+  expect(section5d).toBeGreaterThan(section5c);
+  expect(body).toContain('base_path');
+  expect(body).toContain('bootstrap: true');
+});
 
 test('docker entrypoint per-file bootstrap: manifest present but NO docker key + customized entrypoint -> unmodified + bootstrap (forces .bak)', withProj(async (proj) => {
   writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');

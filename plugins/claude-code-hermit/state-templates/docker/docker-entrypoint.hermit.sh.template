@@ -451,9 +451,9 @@ for (const entry of plugins) {
   // Schema check: marketplace must be org/repo. Pre-v1.0.34 entries that stored
   // the literal name (e.g. 'claude-plugins-official' instead of
   // 'anthropics/claude-plugins-official') hit this path. One warning, skip,
-  // operator re-runs /docker-setup to rebuild config from the current host plugin list.
+  // then the operator repairs the entry in config.json from the host.
   if (!marketplace.includes("/")) {
-    console.log(`[docker-entrypoint] Warning: ${plugin} entry has outdated marketplace "${marketplace}" (expected org/repo) — re-run /claude-code-hermit:docker-setup to rebuild config.`);
+    console.log(`[docker-entrypoint] Warning: ${plugin} entry has outdated marketplace "${marketplace}" (expected org/repo). Operator action from a host shell: update docker.recommended_plugins in .claude-code-hermit/config.json, then run hermit-docker restart.`);
     continue;
   }
 

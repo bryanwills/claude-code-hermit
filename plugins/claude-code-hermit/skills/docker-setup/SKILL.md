@@ -1,6 +1,6 @@
 ---
 name: docker-setup
-description: Generates Docker scaffolding and walks the operator through the full deployment — token setup, build, start, MCP plugin configuration, workspace trust, and verification. Offers to back up and overwrite existing Docker files. Run after /hatch.
+description: Host-only, operator-invoked. Generates Docker scaffolding and walks the operator through token setup, build, start, MCP plugin configuration, workspace trust, and verification. Offers to back up and overwrite existing Docker files. Run after /hatch.
 ---
 # Docker Setup
 
@@ -580,6 +580,8 @@ If something looks wrong, help diagnose — suggest concrete next steps.
 ---
 
 ## Notes
+
+**Operator-side invocation block.** Keep this skill model-invocable because the Quick hatch Docker chain calls it. An operator who wants a hard manual-only boundary can set `skillOverrides: "user-invocable-only"` in their Claude Code configuration.
 
 **Why `.hermit` suffix?** The project may already have its own `Dockerfile` / `docker-compose.yml`. Hermit-namespaced files avoid conflicts.
 

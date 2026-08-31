@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
+import { deriveRenderInputs } from '../scripts/lib/derive-render-inputs';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-rdt-');
 afterAll(cleanup);
@@ -170,6 +171,49 @@ describe('render-docker-templates.ts', () => {
     expect(c).toMatch(/^ {6}- DISCORD_STATE_DIR=\$\{PWD\}\/\.claude\.local\/channels\/discord$/m);
   });
 
+  test('derives the renderer inputs from config and rendered compose', async () => {
+    const dir = freshDir();
+    const input = {
+      packages: ['libsqlite3-dev', 'ffmpeg'],
+      auth: 'api-key' as const,
+      channels: {
+        envLines: ['DISCORD_STATE_DIR=${PWD}/.claude.local/channels/discord'],
+        volumeLines: ['${PWD}/.claude.local/channels/discord:/home/claude/.claude/channels/discord'],
+      },
+      agentHookProfile: 'strict',
+      networkMode: 'host' as const,
+      gitIdentityMount: false,
+      fleetMesh: true,
+    };
+    await render(dir, input);
+    const configPath = path.join(dir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      channels: { discord: { enabled: true } },
+      docker: {
+        packages: input.packages,
+        network_mode: input.networkMode,
+        fleet_mesh: input.fleetMesh,
+      },
+    }));
+
+    expect(deriveRenderInputs(configPath, path.join(dir, 'docker-compose.hermit.yml'))).toEqual(input);
+  });
+
+  // The shipped config template has no `network_mode` key, and neither does any
+  // deploy predating it — rejecting those would strand them on report-only.
+  test('absent docker.network_mode derives as bridge, not as underivable', async () => {
+    const dir = freshDir();
+    await render(dir, { channels: { envLines: [], volumeLines: [] } });
+    const configPath = path.join(dir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      channels: {},
+      docker: { packages: [], fleet_mesh: false },
+    }));
+
+    const derived = deriveRenderInputs(configPath, path.join(dir, 'docker-compose.hermit.yml'));
+    expect(derived?.networkMode).toBe('bridge');
+  });
+
   test('no channels leaves no channel state-dir wiring', async () => {
     const dir = freshDir();
     await render(dir, { channels: { envLines: [], volumeLines: [] } });
@@ -204,5 +248,19 @@ describe('render-docker-templates.ts', () => {
     expect(r.exitCode).toBe(0);
     const out = JSON.parse(r.stdout);
     for (const w of out.written) expect(path.isAbsolute(w)).toBe(true);
+  });
+
+  test('--to writes only under the requested output directory', async () => {
+    const projectRoot = freshDir();
+    const outputDir = freshDir();
+    const r = await runScript('render-docker-templates.ts', {
+      args: [projectRoot, '--to', outputDir], stdin: JSON.stringify(BASE_INPUT),
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(path.join(outputDir, 'Dockerfile.hermit'))).toBe(true);
+    expect(fs.existsSync(path.join(outputDir, 'docker-compose.hermit.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(outputDir, 'docker-entrypoint.hermit.sh'))).toBe(true);
+    expect(fs.readdirSync(projectRoot)).toEqual([]);
   });
 });
