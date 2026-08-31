@@ -7,6 +7,8 @@
 - `/watch session <name>` accepts a glob (`*`, `?`) to match several local sessions at once, showing each match's live status and asking for one confirmation before subscribing to all of them.
 
 ### Changed
+- `/hatch` and `/channel-setup` are operator-invoked only through `disable-model-invocation`, matching `/docker-setup` and `/docker-security` so the model cannot start setup wizards.
+- The domain-hatch continuation marker protocol is removed. Core hatch now prints each pending domain-hatch command for the operator to type instead of invoking it automatically.
 - The daily `heartbeat-restart` fire asks `routines.ts arm anchor` whether anything is actually stale and stops on a `HEALTHY` verdict. A healthy hermit's 4am re-arm no longer tears down and rebuilds a working monitor, so it costs about two model calls instead of eleven to fifteen.
 - `hermit-routines load` is driven by `routines.ts arm begin`/`arm commit`: the script plans the teardown, the Monitor command, the cron diff and the anchor prompt, and the model makes only the `Monitor`/`TaskStop`/`Cron*` calls. It short-circuits on the same `HEALTHY` verdict, which is scoped to the current boot so a monitor left behind by a previous session never reads as live.
 - The `heartbeat-restart` anchor no longer runs `routines.ts precheck`, so a `precheck` or `reflect_after` set on that one routine has no effect. `validate-config` already warned about `precheck` there and now warns about `reflect_after` too.
@@ -27,6 +29,7 @@
 1. Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
 2. Optional: run `/claude-code-hermit:hermit-routines load --reset` once to pick up the anchor's new short-circuit prompt immediately. Any restart already does this on its next `load`, because the boot-id mismatch forces a re-create, so it only matters for a hermit that never restarts.
 3. No heartbeat action is needed. `/claude-code-hermit:heartbeat start` now returns `FRESH` against a healthy monitor registered by the current boot, and leaves it alone.
+4. Delete `.claude-code-hermit/state/hatch-resume.json` if present. It is a stale continuation marker and is no longer consumed.
 
 ## [1.2.52] - 2026-08-30
 

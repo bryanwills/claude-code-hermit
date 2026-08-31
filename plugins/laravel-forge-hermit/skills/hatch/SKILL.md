@@ -1,6 +1,7 @@
 ---
 name: hatch
 description: One-time Laravel Forge hermit setup. Installs the Forge PHP SDK, verifies credentials, and wires the estate scan into config.json. Run once per project after /claude-code-hermit:hatch.
+disable-model-invocation: true
 ---
 
 # Hatch — laravel-forge-hermit
@@ -15,15 +16,16 @@ Check whether `.claude-code-hermit/config.json` exists.
 
 If it does not:
 
-> "The base hermit is not set up yet. Run `/claude-code-hermit:hatch` first, then return here."
+Print this block and stop:
 
-Use `AskUserQuestion`: "Would you like to run `/claude-code-hermit:hatch` now? (yes / no)"
+```markdown
+## ▶ Next step — type this now
 
-- **yes** → Follow the domain hatch continuation protocol (documented in `claude-code-hermit:hatch`):
-  1. Write `.claude-code-hermit/state/hatch-resume.json` with `{ "skill": "laravel-forge-hermit:hatch" }`.
-  2. Print: "(If setup doesn't continue automatically when core finishes, re-run `/laravel-forge-hermit:hatch`.)"
-  3. Invoke `/claude-code-hermit:hatch` **via the Skill tool** — terminal action, stop after the call.
-- **no** → stop.
+    /claude-code-hermit:hatch
+
+I can't run setup wizards for you (they're operator-run by design).
+After it finishes, come back and type `/laravel-forge-hermit:hatch`.
+```
 
 If it does exist, run `.claude-code-hermit/bin/hermit-run domain-hatch preflight laravel-forge-hermit` and parse the JSON verdict. Branch on `action`:
 

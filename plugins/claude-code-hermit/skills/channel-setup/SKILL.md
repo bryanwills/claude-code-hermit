@@ -1,6 +1,7 @@
 ---
 name: channel-setup
 description: Guided channel activation for local/tmux users — adds a channel entry when none is configured, installs the plugin, configures the bot token in the project-local state dir, and walks through pairing. Run after hatch, or any time to add or re-enable a channel.
+disable-model-invocation: true
 ---
 # Channel Setup
 

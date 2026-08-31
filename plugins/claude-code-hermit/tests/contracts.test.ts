@@ -1434,7 +1434,7 @@ describe('model-invocable inventory', () => {
       return fs.existsSync(skillPath)
         && isModelInvocationDisabled(fs.readFileSync(skillPath, 'utf8'));
     }).sort();
-    expect(flagged).toEqual(['docker-security', 'docker-setup', 'rc-gate']);
+    expect(flagged).toEqual(['channel-setup', 'docker-security', 'docker-setup', 'hatch', 'rc-gate']);
   });
 });
 

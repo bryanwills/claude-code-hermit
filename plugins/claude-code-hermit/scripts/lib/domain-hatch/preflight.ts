@@ -90,7 +90,7 @@ export function preflight(input: PreflightInput): Preflight {
       ok: true,
       plugin: pluginId,
       action: 'bootstrap-core',
-      remedy: 'Core hermit is not initialized in this project. Follow the domain hatch continuation protocol: write state/hatch-resume.json, then invoke /claude-code-hermit:hatch.',
+      remedy: `Core hermit is not initialized in this project. Have the operator type /claude-code-hermit:hatch, then re-run /${pluginId}:hatch after it finishes.`,
     };
   }
 

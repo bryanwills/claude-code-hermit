@@ -1,6 +1,7 @@
 ---
 name: hatch
 description: One-time setup for hermit-scribe — appends the Issue Filing block to CLAUDE.md/CLAUDE.local.md and seeds an auto-mode environment entry naming api.github.com as a trusted, always operator-confirmed destination. Run once per project; re-run to refresh after an upgrade.
+disable-model-invocation: true
 ---
 
 # Activate hermit-scribe
