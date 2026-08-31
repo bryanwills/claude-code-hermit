@@ -21,7 +21,7 @@ function writeJson(filePath: string, value: unknown): void {
 }
 
 /** Per-monitor override wins; explicit null omits boot_id entirely; undefined falls back to the shared id. */
-function resolveBootId(specific: string | null | undefined, fallback: string | undefined): string | undefined {
+function resolveBootId(specific: string | null | undefined, fallback: string | null | undefined): string | undefined {
   if (specific !== null && specific !== undefined) return specific;
   if (specific === undefined && fallback) return fallback;
   return undefined;
