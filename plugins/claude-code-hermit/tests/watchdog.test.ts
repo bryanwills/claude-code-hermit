@@ -2537,6 +2537,107 @@ test.if(isLinux)('uninstall without systemctl → exit 0, no traceback', withHer
 }));
 
 // -------------------------------------------------------
+// install/uninstall flip watchdog.enabled — issue #895. Only where a timer was
+// actually registered (systemd/launchd); the cron fallback prints guidance instead
+// of claiming an activation that never happened.
+// -------------------------------------------------------
+
+const configPath = (h: Hermit) => path.join(h.dir, '.claude-code-hermit', 'config.json');
+
+/** Install writes units under $HOME — never the maintainer's real one. */
+async function withFakeHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fakehome-')));
+  try {
+    return await fn(home);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test.if(isLinux)('install with systemd → flips watchdog.enabled true, preserves siblings', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  await withFakeHome(async (fakeHome) => {
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+    const config = readJson(configPath(h));
+    expect(config.watchdog.enabled).toBe(true);
+    expect(config.watchdog.stale_factor).toBe(2);
+    expect(config.watchdog.escalate_after).toBe(3);
+    expect(config.watchdog.operator_grace).toBe('15m');
+  });
+}));
+
+test.if(isLinux)('uninstall with systemd → flips watchdog.enabled false', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: true });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  await withFakeHome(async (fakeHome) => {
+    const r = await watchdog(h, 'uninstall', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+    const config = readJson(configPath(h));
+    expect(config.watchdog.enabled).toBe(false);
+  });
+}));
+
+// Re-running install is the doctor's own remedy for a stale tick or an unbaked unit
+// PATH, and hygiene-only (timer installed, restarts off) is a state it reports as ok.
+test.if(isLinux)('re-install over an existing timer → leaves a deliberate false alone', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  await withFakeHome(async (fakeHome) => {
+    await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    writeConfig(h, '2h', { enabled: false });
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout + r.stderr).toContain('Restarts stay off until watchdog.enabled is true');
+    expect(readJson(configPath(h)).watchdog.enabled).toBe(false);
+  });
+}));
+
+test.if(isLinux)('systemctl enable failure → exit 1, watchdog.enabled untouched', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h, 1);
+  await withFakeHome(async (fakeHome) => {
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toContain('Failed to install systemd user timer');
+    expect(readJson(configPath(h)).watchdog.enabled).toBe(false);
+  });
+}));
+
+test.if(isLinux)('install without systemctl → leaves watchdog.enabled false, prints enable guidance', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'install', { restrictPath: true });
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout + r.stderr).toContain('Restarts stay off until watchdog.enabled is true');
+  const config = readJson(configPath(h));
+  expect(config.watchdog.enabled).toBe(false);
+}));
+
+test.if(isLinux)('install with no config.json → exit 0, creates no config', withHermit(async (h) => {
+  // setupHermit() does not write config.json; writeConfig() is what creates it,
+  // and this test deliberately skips that call.
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  writeFakeSystemctl(h);
+  await withFakeHome(async (fakeHome) => {
+    const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(configPath(h))).toBe(false);
+  });
+}));
+
+// -------------------------------------------------------
 // Unit PATH baking. A generated unit runs without ~/.bun/bin on PATH, so the
 // shim's bare `bun` exits 127 on every tick — silently, forever. These assert on
 // the PATH the unit actually ends up running with, not on the text of the line
@@ -2545,9 +2646,9 @@ test.if(isLinux)('uninstall without systemctl → exit 0, no traceback', withHer
 // -------------------------------------------------------
 
 /** Fake systemctl: succeeds at everything, so install can render real units. */
-function writeFakeSystemctl(h: Hermit): void {
+function writeFakeSystemctl(h: Hermit, exitCode = 0): void {
   const stub = path.join(h.fakeBin, 'systemctl');
-  fs.writeFileSync(stub, '#!/usr/bin/env bash\nexit 0\n');
+  fs.writeFileSync(stub, `#!/usr/bin/env bash\nexit ${exitCode}\n`);
   fs.chmodSync(stub, 0o755);
 }
 

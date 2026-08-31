@@ -18,6 +18,8 @@
 
 ### Fixed
 - Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
+- `bin/hermit-watchdog install` now enables `watchdog.enabled` in `config.json` the first time it registers a systemd/launchd timer, and `uninstall` disables it back — previously the timer fired every 5 minutes with the restart/wedge tier silently off. Re-running install over an existing timer (the doctor's remedy for a stale tick or an unbaked unit PATH) leaves the setting alone and reports it instead, so a hygiene-only hermit keeps restarts off. The cron fallback leaves `enabled` untouched and prints the enable step, since nothing was actually scheduled.
+- `bin/hermit-watchdog install` no longer reports success when the unit templates are missing or `systemctl --user` / `launchctl load` fails; it prints the failure and exits 1.
 
 ### Upgrade Instructions
 

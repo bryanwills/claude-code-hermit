@@ -247,7 +247,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Then ask each field in sequence.
 - Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
-  - Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall`. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
+  - Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall` — on systemd/launchd hosts, a first install enables it and uninstall disables it, so you don't need to set `watchdog.enabled` by hand there; a later re-install leaves your setting alone. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
 - **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above, same as `context_clear_tokens`): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```
   Context hygiene compact sub-fields (press Enter to keep current value):
