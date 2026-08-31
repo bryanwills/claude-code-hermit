@@ -7,7 +7,7 @@ import path from 'node:path';
 import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { heartbeatHealth, livenessReason, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
-import { monitorFreshness } from '../monitor-health';
+import { bootMismatch, monitorFreshness, waitForFirstTick } from '../monitor-health';
 import { isPaused } from '../pause';
 import { resolveHermitNowMs } from '../time';
 import { logRoutineEvent } from './event';
@@ -105,6 +105,12 @@ function monitorHealth(ctx: Context): LegHealth {
       : { healthy: false, reason: 'fallback-drift' };
   }
   if (runtime?.mode !== 'monitor') return { healthy: false, reason: 'runtime-missing' };
+  // Same check as the heartbeat leg (lib/heartbeat/monitor-cmd.ts) — see bootMismatch
+  // for why. The anchor plan catches this too whenever the anchor is enabled; this
+  // covers the config that disables it.
+  if (bootMismatch(runtime.boot_id, ctx.bootId)) {
+    return { healthy: false, reason: 'boot-mismatch' };
+  }
   if (runtime.command !== routineCommand(ctx) && ctx.scheduled.length > 0) {
     return { healthy: false, reason: 'command-drift' };
   }
@@ -168,7 +174,8 @@ function renderAnchorPrompt(ctx: Context): string {
   return [
     `[hermit-routine:${ANCHOR_ID}]`,
     `Run: ${cli} arm anchor ${ctx.hermitDir} ${ctx.pluginRoot}`,
-    'If the first line is SKIP, stop. If it is HEALTHY, reply with one short healthy line and stop without TaskStop, Monitor, Cron, or file writes.',
+    'If the first line is SKIP, or is an ARM line whose reason starts with check-error, stop and report that line — the check could not read state, so there is nothing safe to re-arm.',
+    'If it is HEALTHY, reply with one short healthy line and stop without TaskStop, Monitor, Cron, or file writes.',
     'If it is ARM and the legs include routines, invoke /claude-code-hermit:hermit-routines load.',
     'If it is ARM and the legs include heartbeat, invoke /claude-code-hermit:heartbeat start.',
     `Then run: ${cli} finish ${ANCHOR_ID} cron-create`,
@@ -227,7 +234,11 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   if (runtime?.boot_id && runtime.boot_id === ctx.bootId && typeof runtime.task_id === 'string') {
     process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
-  if (firstTransition) process.stdout.write('FIRST_TRANSITION:1\n');
+  // Only ever a transition INTO monitor mode. The line tells the skill to CronDelete
+  // every non-anchor `[hermit-routine:*]` entry, which is right when those crons are
+  // being replaced by a monitor — and wrong in fallback mode, where they ARE the
+  // routines and only the ids carrying a `CREATE:` line would come back.
+  if (firstTransition && !fallback) process.stdout.write('FIRST_TRANSITION:1\n');
   if (reset || firstTransition) {
     try { fs.rmSync(path.join(ctx.hermitDir, 'state', 'routine-schedule.json'), { force: true }); } catch {}
   }
@@ -253,16 +264,6 @@ function commitMirror(ctx: Context, fallback: boolean, reset: boolean, created: 
   writeJson(ctx.mirrorPath, next);
 }
 
-async function waitForLiveness(file: string): Promise<boolean> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() <= deadline) {
-    const live = readJson(file);
-    if (typeof live?.last_peek_at === 'string') return true;
-    await Bun.sleep(100);
-  }
-  return false;
-}
-
 async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise<void> {
   const fallback = taskId === 'fallback';
   const reset = flags.includes('--reset');
@@ -284,7 +285,7 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
   }
 
   const noMonitor = taskId === 'none';
-  const live = noMonitor || await waitForLiveness(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
+  const live = noMonitor || await waitForFirstTick(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
   const runtime: Json = {
     description: 'routine-monitor',
     command: routineCommand(ctx),

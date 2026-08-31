@@ -232,7 +232,7 @@ describe('heartbeat tick', () => {
 const MONITOR_SH = path.join(PLUGIN_ROOT, 'scripts', 'heartbeat-monitor.sh');
 
 /** The registration a healthy 30m monitor would have left behind. */
-function seedMonitor(hermit: string, opts: { interval?: number; startedAt?: string; lastPeek?: string | null } = {}) {
+function seedMonitor(hermit: string, opts: { interval?: number; startedAt?: string; lastPeek?: string | null; bootId?: string } = {}) {
   const interval = opts.interval ?? 1800;
   write(hermit, 'state/heartbeat-monitor.runtime.json', {
     description: 'heartbeat-monitor',
@@ -240,6 +240,7 @@ function seedMonitor(hermit: string, opts: { interval?: number; startedAt?: stri
     command: `bash ${MONITOR_SH} ${interval} ${hermit}`,
     interval,
     started_at: opts.startedAt ?? new Date(NOW_MS - 3600_000).toISOString(),
+    ...(opts.bootId ? { boot_id: opts.bootId } : {}),
   });
   if (opts.lastPeek !== null) {
     write(hermit, 'state/heartbeat-liveness.json',
@@ -289,6 +290,23 @@ describe('heartbeat start-check', () => {
     const hermit = fixture();
     seedMonitor(hermit, { lastPeek: new Date(NOW_MS - 4 * 3600_000).toISOString() });
     expect(lines(await run('start-check', [hermit]))[0]).toBe('REARM|liveness-predates-start');
+  });
+
+  // A Monitor dies with the session that registered it, but its last tick is only
+  // one interval old — well inside the 3x window — so liveness alone would call a
+  // previous boot's registration healthy and leave the new session with no heartbeat.
+  test('a registration from a previous boot re-arms even while its liveness looks fresh', async () => {
+    const hermit = fixture();
+    seedMonitor(hermit, { bootId: 'boot-old' });
+    fs.writeFileSync(path.join(hermit, 'state', '.boot-id'), 'boot-new\n');
+    expect(lines(await run('start-check', [hermit]))[0]).toBe('REARM|boot-mismatch');
+  });
+
+  test('a matching boot marker still reads FRESH', async () => {
+    const hermit = fixture();
+    seedMonitor(hermit, { bootId: 'boot-a' });
+    fs.writeFileSync(path.join(hermit, 'state', '.boot-id'), 'boot-a\n');
+    expect(lines(await run('start-check', [hermit]))).toEqual(['FRESH|interval=1800']);
   });
 
   // `disabled` reads healthy to the daily anchor, which must leave a deliberately

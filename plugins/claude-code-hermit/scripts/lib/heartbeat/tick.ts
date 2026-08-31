@@ -28,7 +28,7 @@ import { readMergedAlerts } from '../alert-state';
 import { isPaused } from '../pause';
 import { appendShellLine } from '../md-write';
 import { readRuntimeJson, writeRuntimeJson } from '../runtime';
-import { currentHHMM, parseDuration, resolveHermitNowMs } from '../time';
+import { currentHHMMOrUTC, parseDuration, resolveHermitNowMs } from '../time';
 import { HEARTBEAT, resolveLocale } from '../messages';
 
 type Json = any;
@@ -116,7 +116,7 @@ export async function run(args: string[]): Promise<void> {
     if (result.verdict === 'AUTO_CLOSE') {
       // Step 2 of the auto-close sequence replaces SHELL.md with a fresh template,
       // so this line has to land before the skill starts closing.
-      const hhmm = currentHHMM(config.timezone ?? 'UTC', new Date(nowMs)) ?? new Date(nowMs).toISOString().slice(11, 16);
+      const hhmm = currentHHMMOrUTC(config.timezone ?? 'UTC', new Date(nowMs));
       appendShellLine(path.join(hermitDir, 'sessions'), 'Monitoring', `[${hhmm}] Heartbeat: auto-closed.`);
     } else if (result.verdict === 'EVALUATE' || result.verdict === 'ALERT') {
       // Both gates are pre-dispatch and read no HEARTBEAT.md, so a suspended

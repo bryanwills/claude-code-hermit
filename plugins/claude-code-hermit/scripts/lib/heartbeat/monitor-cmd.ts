@@ -9,7 +9,8 @@
 
 import path from 'node:path';
 import { readJson } from '../cli';
-import { monitorFreshness } from '../monitor-health';
+import { bootMismatch, monitorFreshness } from '../monitor-health';
+import { readBootId } from '../routines/registry';
 import { parseDuration } from '../time';
 
 type Json = any;
@@ -46,6 +47,9 @@ export function heartbeatHealth(hermitDir: string, pluginRoot: string, config: J
   if (config?.heartbeat?.enabled === false) return { healthy: true, reason: 'disabled' };
   const runtime = readJson(path.join(hermitDir, 'state', 'heartbeat-monitor.runtime.json'));
   if (!runtime) return { healthy: false, reason: 'runtime-missing' };
+  if (bootMismatch(runtime.boot_id, readBootId(hermitDir))) {
+    return { healthy: false, reason: 'boot-mismatch' };
+  }
   const interval = heartbeatInterval(config);
   if (runtime.interval !== interval) return { healthy: false, reason: 'interval-drift' };
   if (runtime.command !== heartbeatCommand(pluginRoot, hermitDir, config)) {

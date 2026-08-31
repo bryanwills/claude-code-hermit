@@ -1013,7 +1013,7 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
       alerts, self_eval: {}, total_ticks: 345, last_clean_eval_at: null, last_digest_date: '2026-07-10', // digest already sent today
     }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([])); // model reports nothing new
+    const { state, stdout } = await updateAlertState(dir, firingPayload([])); // model reports nothing new
     expect(stdout.heartbeat_result).toBe('OK');
     expect(state.last_clean_eval_at).toBe(NOW);
     expect(stdout.notifications).toEqual([]);
@@ -1111,7 +1111,7 @@ describe('update-alert-state', () => {
   test('update-alert-state (derives heartbeat_result ALERT from a pending micro-proposal even when model firing is empty)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
     write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [{ id: 'MP-1', status: 'pending', tier: 1, question: 'Proceed?' }] }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([])); // model reports nothing
+    const { state, stdout } = await updateAlertState(dir, firingPayload([])); // model reports nothing
     expect(stdout.heartbeat_result).toBe('ALERT');
     expect(state.alerts['micro-proposal-pending:MP-1']).toBeDefined();
     expect(state.alerts['micro-proposal-pending:MP-1'].text).toContain("micro-proposal 'MP-1' awaiting operator input — Proceed?");
@@ -1203,7 +1203,7 @@ describe('update-alert-state', () => {
       alerts: { 'proposal-pending:PROP-005': { count: 6, consecutive_clean: 0, suppressed: true, first_seen: '2026-07-01', last_seen: '2026-07-09', text: 'PROP-005 "Add retry logic"' } },
       self_eval: {}, total_ticks: 30, last_digest_date: null,
     }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     const digest = stdout.notifications.find((n: string) => n.startsWith('Suppressed alert digest:'));
     expect(digest).toContain('Add retry logic');
     // Age, never the evaluation count: "8x" reads as eight messages sent when
@@ -1224,7 +1224,7 @@ describe('update-alert-state', () => {
       alerts: { 'proposal-pending:PROP-005': { count: 6, consecutive_clean: 0, suppressed: true, first_seen: '2026-07-01', last_seen: '2026-07-09', text: 'PROP-005 "Add retry logic"', channelText: 'proposal "Add retry logic" awaiting review' } },
       self_eval: {}, total_ticks: 30, last_digest_date: null,
     }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     expect(stdout.notifications.some((n: string) => n.startsWith('Suppressed alert digest:'))).toBe(false);
     expect(state.alerts['proposal-pending:PROP-005'].consecutive_clean).toBe(1);
     expect(state.last_digest_date).toBe('2026-07-10');
@@ -1236,7 +1236,7 @@ describe('update-alert-state', () => {
       alerts: { 'checklist:zzz99999': { count: 6, consecutive_clean: 0, suppressed: true, first_seen: '2026-07-01', last_seen: '2026-07-09', text: 'noisy' } },
       self_eval: {}, total_ticks: 30, last_digest_date: '2026-07-11', // already "today" in +14, would wrongly re-fire under UTC's 2026-07-10
     }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     expect(stdout.notifications).toEqual([]); // no repeat digest — tz-local today already matches last_digest_date
     expect(state.last_digest_date).toBe('2026-07-11');
   }));
@@ -1249,7 +1249,7 @@ describe('update-alert-state', () => {
       alerts: { 'proposal-pending:PROP-005': { count: 5, consecutive_clean: 0, suppressed: false, first_seen: '2026-07-01', last_seen: '2026-07-09', text: 'PROP-005 "Add retry logic"', channelText: 'proposal "Add retry logic" awaiting review' } },
       self_eval: {}, total_ticks: 20, last_digest_date: '2026-07-10', // digest already sent today — isolate the suppression notification
     }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     expect(state.alerts['proposal-pending:PROP-005']).toMatchObject({ count: 6, suppressed: true });
     expect(stdout.notifications.length).toBe(1);
     expect(stdout.notifications[0]).toContain('Add retry logic'); // named, not "above alert"
@@ -1278,7 +1278,7 @@ describe('update-alert-state', () => {
     // frozen is empty (no prior micro alert), so hasFrozen would miss this — the read failure itself is the signal.
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5,"last_clean_eval_at":"2026-06-01T00:00:00.000Z"}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json');
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     expect(stdout.heartbeat_result).toBe('ALERT');
     expect(state.last_clean_eval_at).toBeNull();
   }));
@@ -1293,7 +1293,7 @@ describe('update-alert-state', () => {
       self_eval: {}, total_ticks: 30, last_digest_date: null,
     }));
     write(hermit(dir, 'state', 'micro-proposals.json'), '{not-json'); // ambiguous → freeze micro prefix, structuredReadOk=false
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     // digest suppressed despite the checklist alert being due; the only notification
     // is the read-failure one (#764), which is precisely not a digest
     expect(stdout.notifications.filter((n: string) => /digest/i.test(n))).toEqual([]);
@@ -1344,7 +1344,7 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
     write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [] }));
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
     expect(stdout.notifications).toEqual([]);
     expect(stdout.heartbeat_result).toBe('OK');
     expect(state.structured_read_failure_notified_date).toBeNull();
@@ -1363,7 +1363,7 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
     write(hermit(dir, 'sessions', 'SHELL.md'), '# Active Session\n\n## Progress Log\n- [09:00] last thing\n');
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]), { HERMIT_NOW: '2026-07-10T15:00:00.000Z' });
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]), { HERMIT_NOW: '2026-07-10T15:00:00.000Z' });
     expect(stdout.heartbeat_result).toBe('ALERT');
     expect(state.alerts[STALE_KEY]).toBeDefined();
     expect(state.alerts[STALE_KEY].text).toContain('[09:00]');
@@ -1376,7 +1376,7 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'sessions', 'SHELL.md'),
       '# Active Session\n\n## Progress Log\n- [21:23] worked on queue item 1\n- [14:38] resumed queue work\n- [15:50] finished item 3\n');
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
-    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]), { HERMIT_NOW: '2026-07-14T16:30:00.000Z' });
+    const { state, stdout } = await updateAlertState(dir, firingPayload([]), { HERMIT_NOW: '2026-07-14T16:30:00.000Z' });
     expect(state.alerts[STALE_KEY]).toBeUndefined();
     expect(stdout.heartbeat_result).toBe('OK');
   }));

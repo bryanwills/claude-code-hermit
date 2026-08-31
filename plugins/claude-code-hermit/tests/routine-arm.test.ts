@@ -96,6 +96,19 @@ test('anchor arms only the stale leg and stamps started without fired', async ()
   expect(events).toEqual(['started']);
 });
 
+// The routine monitor dies with its session too, and its last 60s tick is far
+// fresher than the 10-minute staleness threshold. Without the boot marker a
+// restart inside that window reads as a live monitor and nothing re-arms.
+test('anchor re-arms a routine monitor registered by a previous boot', async () => {
+  const f = fixture();
+  const runtimePath = path.join(f.state, 'routine-monitor.runtime.json');
+  const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+  runtime.boot_id = 'boot-old';
+  fs.writeFileSync(runtimePath, JSON.stringify(runtime));
+  const result = await arm(f.hermit, ['anchor']);
+  expect(result.stdout).toContain('routines:boot-mismatch');
+});
+
 test('anchor pause short-circuits and stamps skipped-paused', async () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.state, 'operator-pause.json'), JSON.stringify({

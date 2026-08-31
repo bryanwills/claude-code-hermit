@@ -26,8 +26,9 @@ import path from 'node:path';
 import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { appendShellLine } from '../md-write';
+import { waitForFirstTick } from '../monitor-health';
 import { readBootId } from '../routines/registry';
-import { currentHHMM, resolveHermitNowMs } from '../time';
+import { currentHHMMOrUTC, resolveHermitNowMs } from '../time';
 import { heartbeatCommand, heartbeatHealth, heartbeatInterval } from './monitor-cmd';
 
 type Json = any;
@@ -72,20 +73,10 @@ function cmdCheck(hermitDir: string, config: Json): void {
   process.stdout.write(`CMD:${heartbeatCommand(PLUGIN_ROOT, hermitDir, config)}\n`);
 }
 
-/** A healthy monitor writes liveness on its first loop iteration, before any sleep. */
-async function waitForLiveness(file: string): Promise<boolean> {
-  const deadline = Date.now() + 10_000;
-  while (Date.now() <= deadline) {
-    if (typeof readJson(file)?.last_peek_at === 'string') return true;
-    await Bun.sleep(100);
-  }
-  return false;
-}
-
 async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promise<void> {
   const interval = heartbeatInterval(config);
   const nowMs = resolveHermitNowMs();
-  const live = await waitForLiveness(livenessPath(hermitDir));
+  const live = await waitForFirstTick(livenessPath(hermitDir));
 
   writeJson(runtimePath(hermitDir), {
     description: 'heartbeat-monitor',
@@ -100,7 +91,7 @@ async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promi
     process.stdout.write('DEAD|liveness-absent\n');
     return;
   }
-  const hhmm = currentHHMM(config?.timezone ?? 'UTC', new Date(nowMs)) ?? new Date(nowMs).toISOString().slice(11, 16);
+  const hhmm = currentHHMMOrUTC(config?.timezone ?? 'UTC', new Date(nowMs));
   appendShellLine(
     path.join(hermitDir, 'sessions'),
     'Monitoring',
