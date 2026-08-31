@@ -250,7 +250,7 @@ describe('static file checks', () => {
 // -------------------------------------------------------
 
 describe('hermit-docker running-container gate', () => {
-  function fixture(mode: 'running' | 'stopped' | 'failed') {
+  function fixture(mode: 'running' | 'stopped' | 'failed' | 'invalid') {
     const wd = setupWorkdir();
     const proj = wd.dir;
     const binDir = hermit(proj, 'bin');
@@ -279,6 +279,10 @@ describe('hermit-docker running-container gate', () => {
     fs.mkdirSync(stubDir, { recursive: true });
     write(path.join(stubDir, 'docker'), `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$DOCKER_STUB_CALLS"
+if [[ " $* " == *" config -q "* ]] && [ "$DOCKER_STUB_MODE" = "invalid" ]; then
+  printf 'services.hermit.volumes must be a list\n' >&2
+  exit 42
+fi
 if [[ " $* " == *" ps --status running "* ]]; then
   case "$DOCKER_STUB_MODE" in
     running) printf 'hermit\n'; exit 0 ;;
@@ -359,6 +363,28 @@ exit 0
       expect(diagnosticLines).toHaveLength(5);
       expect(diagnosticLines.every(line => line.length <= 300)).toBe(true);
       expect(r.stderr).not.toContain('probe-line-6:');
+    } finally {
+      f.wd.cleanup();
+    }
+  });
+
+  test('hermit-docker refuses up when compose config -q fails', async () => {
+    const f = fixture('invalid');
+    try {
+      const backup = hermit(f.proj, 'state', 'docker-compose.hermit.yml.20260831T010203Z.bak');
+      write(backup, 'services:\n  hermit:\n    image: previous\n');
+      const r = await runBash(hermit(f.proj, 'bin', 'hermit-docker'), {
+        args: ['up'],
+        cwd: f.proj,
+        env: f.env,
+      });
+
+      expect(r.exitCode).not.toBe(0);
+      expect(r.stderr).toContain('services.hermit.volumes must be a list');
+      expect(r.stderr).toContain(backup);
+      const calls = fs.readFileSync(f.callsFile, 'utf8');
+      expect(calls).toContain('config -q');
+      expect(calls).not.toContain('up -d');
     } finally {
       f.wd.cleanup();
     }

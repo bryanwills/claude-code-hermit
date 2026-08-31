@@ -198,6 +198,34 @@ After a migration the operator's next upgrade sees `unmodified` and Step 5c is a
 
 The replaced entrypoint takes effect only after a rebuild (Step 10 carries the reminder).
 
+### 5d. Merge compose and Dockerfile template changes in place
+
+Each `docker_templates` entry is a classified `{ name, class, base_path?, theirs_path, bootstrap }`. It names either `<project-root>/docker-compose.hermit.yml` or `<project-root>/Dockerfile.hermit`. `theirs_path` is a fresh render from the current upstream template. A `base_path` is present only when the prior pristine template passed its recorded-hash check and was re-rendered with the same live inputs. These files have no phase sidecar: reconcile the operator's changes into the managed file itself.
+
+**Entries that are not merged at all — check these first, before touching any file:**
+
+- **An entry with `status` instead of `class`** (`{ name, status: "changed" | "unknown" }`) is the report-only fallback: the plan could not derive the live render inputs, so there is no `theirs_path` to install and nothing to diff. Never write to the project file for such an entry. Collect the names and report `Docker templates: report-only(<names>)`.
+- **`class: "customized-kept"`** means the operator edited the file and the upstream template did **not** move since the recorded baseline. There is no upstream change to merge — keep the operator's file untouched, write no `.bak`, no patch, and no new baseline. Summary line: "Kept operator-customized `<name>`." Do not report it as merged, and do not emit a rebuild notice for it.
+- **`Docker rebuild: base-patched`** (set by a surgical migration such as the bun pin) already refreshed `Dockerfile.hermit` and re-recorded its baseline. Skip the `Dockerfile.hermit` entry entirely in this step.
+
+**`class: "unmodified"` without `bootstrap`** means the operator never touched the file and upstream moved: copy `theirs_path` over the project file, record the new baseline, and report `merged(3-way)`. No `.bak`, no patch, no hunk re-application — there is no operator delta to preserve.
+
+Everything below applies only to `class: "conflict"`, and to `bootstrap: true` entries (whose class always reads `unmodified` because no baseline was recordable).
+
+Use one UTC timestamp for every path created while handling an entry. First copy the operator's file to `.claude-code-hermit/state/<name>.<UTC-timestamp>.bak`. Never place the backup beside the project file.
+
+**Verified 3-way branch (`base_path` present).** Install `theirs_path` over the project file, then park the operator delta with `diff -u <base_path> <the .bak> > .claude-code-hermit/state/docker-<name>.delta.<UTC-timestamp>.patch || true`. Apply every operator hunk from that patch onto the new project file in place. Do not create a `.new` file or a sidecar. The bun-pin migration runs before this step, so a bun install-block change is not an operator hunk and must not be re-applied.
+
+**Bootstrap 2-way branch (`bootstrap: true`, no `base_path`).** Reconcile the `.bak` directly against `theirs_path` and write the result to the project file. Use the existing `changelog_slice` already supplied by the plan to decide direction: a line absent from theirs is retained only when it is an operator addition; an upstream removal stays removed. Do not re-read the CHANGELOG. If the slice and the two files do not make the direction unambiguous, report only and leave the operator file in place rather than guessing.
+
+Validate the merged file three ways before calling the branch successful:
+
+1. Re-read the merged file, `theirs_path`, and every hunk in the parked patch. Confirm that every operator hunk survived and every upstream change landed. If any hunk cannot be confirmed, restore the `.bak`, report every hunk as unmoved, and stop this merge.
+2. Scan for conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) and required structure. Compose must still parse as one document with top-level `services` and `volumes`, plus `services.hermit`; Dockerfile must retain its `FROM`, build arguments, entrypoint copy, and final non-root `USER`. On failure, restore the `.bak` and report every hunk as unmoved.
+3. The host wrapper runs `docker compose config -q` before every `up` or `build`. It refuses the action on failure, prints Compose's error, and names the state-tree `.bak` the operator can restore.
+
+After all validation succeeds, record the new baseline through `manifest-seed.ts` with the source set to the corresponding rendered-from-upstream template in `<plugin_root>/state-templates/docker/`, never the merged project file. This keeps `state/pristine/docker/<template>` and the manifest hash on upstream bytes, so the next change has a verified 3-way base. Report `Docker templates: <name> merged(3-way)` or `<name> merged(bootstrap)` — the exact field name and spelling the report contract expects, comma-separated across entries; Step 10 matches on it to emit the rebuild notice.
+
 **After resolving Steps 5 (templates), 5b (bin/), and 5c (docker entrypoint)**, record the new pristine-baselines in `state/template-manifest.json` via `manifest-seed.ts` — **do not hand-compute the hashes** (the script makes them correct by construction; an LLM cannot sha256 reliably). Decide *which* files to record, then hand them to the script:
 - **Which files:** every file that was copied, replaced, or restored in Steps 5/5b/5c. Build one `{ "key": "<prefix>/<name>", "file": "<on-disk path of the new content>" }` entry per such file. Prefixes: `templates/` (file `.claude-code-hermit/templates/<name>`), `bin/` (file `.claude-code-hermit/bin/<name>`), and for the entrypoint the literal key `docker/docker-entrypoint.hermit.sh` (file: the project-root `docker-entrypoint.hermit.sh`).
 - **`customized-kept` files:** do NOT include them — the script preserves their existing manifest entry unchanged via foreign-key preservation.

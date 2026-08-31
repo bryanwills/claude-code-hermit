@@ -15,6 +15,16 @@
 1. Run `/claude-code-hermit:hermit-routines load --reset` once. This re-registers the `heartbeat-restart` anchor with the new short-circuit prompt; without it, the anchor keeps firing yesterday's prompt until a restart's boot-id mismatch or the 5-day age cliff replaces it.
 2. No heartbeat action is needed — `/claude-code-hermit:heartbeat start` now returns `FRESH` against a healthy monitor and leaves it alone.
 3. Confirm the permission refresh ran: `.claude/settings.local.json` should list `Bash(bun */scripts/routines.ts arm*)` and the three `heartbeat.ts tick|start-check|start-commit` globs. If not, run `/claude-code-hermit:hermit-doctor` and re-run the settings step it names.
+### Added
+- Compose and Dockerfile templates are now evolve-managed. Upstream template hunks are merged into the live files while preserving operator customizations, with verified pristine bytes retained as the next 3-way base.
+
+### Fixed
+- Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
+
+### Upgrade Instructions
+- Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
+### Changed
+- Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
 
 ## [1.2.52] - 2026-08-30
 

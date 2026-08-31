@@ -11,7 +11,7 @@
  * regenerated). All rendering + validation happens in memory; nothing is
  * written unless every file passes the fail-loud placeholder check.
  *
- * Usage: bun render-docker-templates.ts <project-root>
+ * Usage: bun render-docker-templates.ts <project-root> [--to <output-dir>]
  *   stdin JSON:
  *     {
  *       "packages": ["libsqlite3-dev", ...],
@@ -48,11 +48,11 @@ const TEMPLATES_DIR = path.join(PLUGIN_ROOT, 'state-templates', 'docker');
 
 const ENV_INDENT = '      - ';
 
-interface Channels {
+export interface Channels {
   envLines?: string[];
   volumeLines?: string[];
 }
-interface Inputs {
+export interface Inputs {
   packages?: string[];
   auth: 'setup-token' | 'oauth-token' | 'api-key';
   channels?: Channels;
@@ -60,6 +60,11 @@ interface Inputs {
   networkMode: 'bridge' | 'host';
   gitIdentityMount: boolean;
   fleetMesh?: boolean;
+}
+
+export interface TemplateSources {
+  dockerfile: string;
+  compose: string;
 }
 
 function packagesBlock(packages: string[]): string {
@@ -77,8 +82,11 @@ function indentedLines(bodies: string[]): string {
   return bodies.map((b) => ENV_INDENT + b).join('\n');
 }
 
-/** Build every rendered file in memory. Throws on any unsubstituted placeholder. */
-export function render(inputs: Inputs): { dockerfile: string; compose: string } {
+/** Build every rendered file from supplied template sources. */
+export function renderSources(
+  inputs: Inputs,
+  templates: TemplateSources,
+): { dockerfile: string; compose: string } {
   const packages = inputs.packages ?? [];
   const channels = inputs.channels ?? {};
   // envLines/volumeLines feed the CHANNEL_ENV_LINES and CHANNEL_VOLUME_LINES
@@ -98,10 +106,8 @@ export function render(inputs: Inputs): { dockerfile: string; compose: string } 
       : []),
   ];
 
-  const dockerfileTemplate = fs.readFileSync(
-    path.join(TEMPLATES_DIR, 'Dockerfile.hermit.template'), 'utf8');
-  let composeTemplate = fs.readFileSync(
-    path.join(TEMPLATES_DIR, 'docker-compose.hermit.yml.template'), 'utf8');
+  const dockerfileTemplate = templates.dockerfile;
+  let composeTemplate = templates.compose;
 
   // Git identity has no placeholder in the template — it is a fixed bind-mount
   // line the skill removes when the host has no ~/.gitconfig.
@@ -153,6 +159,14 @@ export function render(inputs: Inputs): { dockerfile: string; compose: string } 
   return { dockerfile, compose };
 }
 
+/** Build every rendered file in memory. Throws on any unsubstituted placeholder. */
+export function render(inputs: Inputs): { dockerfile: string; compose: string } {
+  return renderSources(inputs, {
+    dockerfile: fs.readFileSync(path.join(TEMPLATES_DIR, 'Dockerfile.hermit.template'), 'utf8'),
+    compose: fs.readFileSync(path.join(TEMPLATES_DIR, 'docker-compose.hermit.yml.template'), 'utf8'),
+  });
+}
+
 function pluginVersion(): string {
   const pj = JSON.parse(
     fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8'));
@@ -160,7 +174,17 @@ function pluginVersion(): string {
 }
 
 if (import.meta.main) {
-  const projectRoot = path.resolve(process.argv[2] || process.cwd());
+  const argv = process.argv.slice(2);
+  const toIndex = argv.indexOf('--to');
+  if (toIndex !== -1 && !argv[toIndex + 1]) {
+    console.error('render-docker-templates: --to requires an output directory');
+    process.exit(1);
+  }
+  const projectRootArg = argv.find(
+    (arg, index) => arg !== '--to' && (toIndex === -1 || index !== toIndex + 1),
+  );
+  const projectRoot = path.resolve(projectRootArg || process.cwd());
+  const outputDir = toIndex === -1 ? projectRoot : path.resolve(argv[toIndex + 1]);
 
   let raw = '';
   process.stdin.setEncoding('utf8');
@@ -178,10 +202,14 @@ if (import.meta.main) {
       if (!fs.existsSync(entrypointSrc)) throw new Error(`missing entrypoint template: ${entrypointSrc}`);
       const version = pluginVersion();
 
-      const dockerfilePath = path.join(projectRoot, 'Dockerfile.hermit');
-      const composePath = path.join(projectRoot, 'docker-compose.hermit.yml');
-      const entrypointPath = path.join(projectRoot, 'docker-entrypoint.hermit.sh');
+      const dockerfilePath = path.join(outputDir, 'Dockerfile.hermit');
+      const composePath = path.join(outputDir, 'docker-compose.hermit.yml');
+      const entrypointPath = path.join(outputDir, 'docker-entrypoint.hermit.sh');
 
+      // `--to` may name a scratch dir that does not exist yet (evolve's
+      // `state/evolve-docker/theirs`). Still after render+validate, so a
+      // rendering failure creates nothing.
+      fs.mkdirSync(outputDir, { recursive: true });
       fs.writeFileSync(dockerfilePath, dockerfile);
       fs.writeFileSync(composePath, compose);
       fs.copyFileSync(entrypointSrc, entrypointPath);
