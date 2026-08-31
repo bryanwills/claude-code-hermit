@@ -4,7 +4,7 @@ A maintainer utility skill that files GitHub issues via a configured GitHub App 
 
 ## This Repo is a Plugin
 
-This repo is structured as a Claude Code plugin. It is NOT a standalone project. It requires `claude-code-hermit` ≥1.2.34; upgrade core with `/claude-code-hermit:hermit-evolve` before installing or running this release. It gets installed into other projects via:
+This repo is structured as a Claude Code plugin. It is NOT a standalone project. It requires `claude-code-hermit` ≥1.2.53; upgrade core with `/claude-code-hermit:hermit-evolve` before installing or running this release. It gets installed into other projects via:
 
 ```
 claude plugin marketplace add gtapps/claude-code-hermit

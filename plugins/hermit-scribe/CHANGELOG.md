@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.2] - 2026-08-31
 
 ### Changed
 - `hatch` is operator-invoked only through `disable-model-invocation`, so it runs only when the operator types `/hermit-scribe:hatch`.
