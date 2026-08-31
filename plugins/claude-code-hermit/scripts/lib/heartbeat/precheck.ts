@@ -4,6 +4,11 @@
 // Exit 0 always. Without --peek: writes updated alert-state.json (increments total_ticks).
 // With --peek: read-only — computes the same verdict without any state mutation.
 //
+// `runPrecheck(stateDir, peek)` is the same logic as a value-returning core, so
+// `lib/heartbeat/tick.ts` can run the mutating tick in-process instead of paying a
+// second spawn. `main()` below is the CLI wrapper and is the only caller that
+// writes stdout or exits, keeping the verb's output byte-identical.
+//
 // Owner contract (write-field split with SKILL.md):
 //   This script owns: alert-state.json total_ticks, last_stale_wake_at, last_micro_corrupt_wake_at;
 //                     pending-close-drain.json (shared with lib/routines/due.ts, non-peek only)
@@ -25,48 +30,16 @@ import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrai
 
 type Json = any;
 
-function emit(verdict: string): never {
-  process.stdout.write(verdict + '\n');
-  process.exit(0);
-}
-
-const peek = process.argv[2] === '--peek';
-const stateDir = peek ? process.argv[3] : process.argv[2];
-if (!stateDir) emit('EVALUATE');
-
-const alertStatePath = path.join(stateDir, 'state', 'alert-state.json');
-
-// An un-notified budget alert in the merged alert view (cost-tracker writes
-// budget-alerts.json; readMergedAlerts unions the per-writer files). Shared by
-// the pause-escape gate, the pending-budget gate, and the injection branch.
-const budgetPending = (dir: string): boolean =>
-  Object.values(readMergedAlerts(dir)).some((e: Json) => e?.kind === 'budget' && e.notified === false);
-
-// Earliest gate (PROP-015) — ahead of the pending-close drain below, so a
-// paused hermit also suppresses AUTO_CLOSE, not just the checklist. Read-only:
-// identical under --peek since it writes nothing.
-const pauseStatus = isPaused(stateDir);
-if (pauseStatus.paused) {
-  // PROP-016: a budget-triggered pause is itself the enforcement action, so the
-  // plain SKIP|paused below would also silence the one wake needed to tell the
-  // operator why every tool is now denied and how to resume. Let exactly one
-  // EVALUATE escape when an un-notified budget alert is waiting — the pending-budget
-  // gate further down (after alert-state is loaded) is what actually emits it; the
-  // heartbeat skill announces and marks `notified:true`, and every subsequent tick
-  // falls back to the plain SKIP|paused here (no un-notified entry left to escape on).
-  if (pauseStatus.reason === 'budget') {
-    if (!budgetPending(stateDir)) emit('SKIP|paused');
-    // else fall through to the gates below, which will reach the pending-budget
-    // check and emit EVALUATE.
-  } else {
-    emit('SKIP|paused');
-  }
-}
-
 const readJSON = (p: string): Json => {
   try { return JSON.parse(fs.readFileSync(p, 'utf-8')); }
   catch { return null; }
 };
+
+// An un-notified budget alert in the merged alert view (cost-tracker writes
+// budget-alerts.json; readMergedAlerts unions the per-writer files). Shared by
+// the pause-escape gate, the pending-budget gate, and the injection branch.
+export const budgetPending = (dir: string): boolean =>
+  Object.values(readMergedAlerts(dir)).some((e: Json) => e?.kind === 'budget' && e.notified === false);
 
 // True when an in_progress session has been operator-quiet for >12h (prefers
 // last-operator-action.json, falls back to SHELL.md mtime). Pure read; fail-open
@@ -177,254 +150,293 @@ function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evalua
   return 'clean';
 }
 
-// Settled config, read once. Declared here rather than beside the active-hours gate
-// below because the pending-close drain — which runs before every other gate — sizes
-// its cooldown from heartbeat.every. The reader never writes and never throws, so the
-// paths that emit before that gate only pay one extra small read.
-const config = readSettledConfig(stateDir);
-const hbConfig = config.heartbeat;
+/**
+ * The verdict, as a value. Every `emit(x)` in the original top-level script is a
+ * `return x` here; the gate order and every predicate are otherwise unchanged.
+ */
+export function runPrecheck(stateDir: string, peek: boolean): string {
+  if (!stateDir) return 'EVALUATE';
 
-// Resolve "now" once: real wall-clock, overridable by HERMIT_NOW for deterministic
-// tests. Shared by the pending-close drain and the in_progress 12h check below.
-let now = Date.now();
-if (process.env.HERMIT_NOW) {
-  const d = new Date(process.env.HERMIT_NOW).getTime();
-  if (!isNaN(d)) now = d;
-}
+  const alertStatePath = path.join(stateDir, 'state', 'alert-state.json');
 
-// Pending-close drain: if the daily-auto-close routine queued a close because the
-// operator was active at midnight, drain it as soon as a 10-min lull appears.
-// Runs BEFORE every other gate (HEARTBEAT.md presence, active-hours, 20-tick,
-// micro-proposal) — the close is the signal, not a notification, and must not
-// depend on operator-editable HEARTBEAT.md being present.
-// The verdict itself lives in lib/auto-close.ts so the routine poll (lib/routines/
-// due.ts) drains on the same terms — this tick is not the only drainer, and is
-// absent entirely when heartbeat.enabled is false.
-//
-// Both guards are shared with that poll. The lull inside pendingCloseDrainDue ages
-// from prompt submission, so an operator watching a long agent turn reads as away
-// while still present — the turn marker is what catches that. The cooldown bounds a
-// close that never completes: without it every tick re-emits, and each emission is a
-// paid full-context wake. Under --peek the verdict is computed but not stamped, so a
-// peek never consumes the cooldown the real tick needs.
-//
-// Hence the half-interval cap below: a cooldown as long as this poller's own interval
-// can never expire on the next tick (drainCooldownExpired's note has the derivation),
-// which is what made a failing close retry only every other tick once heartbeat.every
-// became 30m (#771). The min() only tightens the shared 30-min ceiling, never widens
-// it. Config is read live here while the monitor baked its interval in at launch, so
-// an `every` edited mid-session can diverge from the real poll cadence until the
-// monitor restarts — bounded, self-healing, and never worse than the old behavior.
-//
-// Below a 30-min interval the shipped flat cooldown already expires within a tick or
-// two, so there is nothing to fix and halving would only shorten the backoff: an
-// `every` of 5m would re-wake a failing close every 5 min instead of every ~35. A
-// suppressed tick costs nothing (the peek never wakes the model), so short intervals
-// keep the flat 30. Also absorbs `every: "0m"`, which would otherwise disable the gate.
-const everyMin = parseDuration(hbConfig.every, 30 * 60_000) / 60_000;
-const drainCooldownMin = everyMin < PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
-  ? PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
-  : Math.min(PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES, everyMin / 2);
-if (
-  pendingCloseDrainDue(stateDir, now) &&
-  !operatorTurnOpen(stateDir, now) &&
-  drainCooldownExpired(stateDir, now, drainCooldownMin)
-) {
-  if (peek || stampDrainCooldown(stateDir, now)) emit('AUTO_CLOSE');
-}
-
-let heartbeatContent: string;
-try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }
-catch { emit('SKIP|HEARTBEAT.md missing'); }
-
-const checklistItems = heartbeatContent
-  .split('\n')
-  .map(l => l.trim())
-  .filter(l => /^[-*+]\s/.test(l));
-
-if (checklistItems.length === 0) emit('SKIP|HEARTBEAT.md has no checklist items');
-
-// Injection gate: HEARTBEAT.md is model-editable and feeds the autonomous
-// evaluation subagent verbatim, so a poisoned item written in one session
-// would steer every future wake. On a hit, ALERT wakes the model to notify
-// the operator WITHOUT evaluating the checklist; the announced-hash damper
-// (state/injection-alert.json, written by the SKILL.md ALERT branch) keeps
-// it to one alert per file version. Deterministic operator-safety escalations
-// survive the suspension: a pending budget alert pierces the damper (the SKILL
-// ALERT branch delivers it without reading HEARTBEAT.md), and a due stale
-// auto-close still fires (AUTO_CLOSE never reads HEARTBEAT.md). One verdict per
-// tick, budget before the destructive close. Scan errors fall through — never
-// block the tick. Pause still pre-empts this (gate at top of file).
-try {
-  const hit = scanForInjection(heartbeatContent);
-  if (hit) {
-    const hash = sha256(heartbeatContent).slice(0, 8);
-    const verdict = `ALERT|injection-suspect:${hash}|${hit.cls} at line ${hit.line}`;
-    if (budgetPending(stateDir)) emit(verdict);
-    if (staleAutoCloseDue(stateDir, now)) emit('AUTO_CLOSE');
-    const announced = readJSON(path.join(stateDir, 'state', 'injection-alert.json'));
-    if (announced?.hash === hash) emit('SKIP|injection-suspect (announced)');
-    emit(verdict);
-  }
-} catch { /* fail-open: scan trouble must not block the tick */ }
-
-const timezone = config.timezone ?? 'UTC';
-const activeHours = hbConfig.active_hours;
-
-if (activeHours?.start && activeHours?.end) {
-  const hhmm = currentHHMM(timezone);
-  if (hhmm !== null && (hhmm < activeHours.start || hhmm >= activeHours.end)) {
-    emit('SKIP|outside active hours');
-  }
-}
-
-// Split read from parse so a transient read error never destroys a healthy file:
-// only a genuine parse failure (corrupt) quarantines and rebuilds. ioerror
-// (EACCES/EMFILE/EIO) leaves the file untouched and re-evaluates next tick.
-const r = readAlertState(alertStatePath);
-let alertState: Json;
-if (r.kind === 'ok') {
-  alertState = r.value;
-} else if (r.kind === 'missing') {
-  alertState = defaultAlertState();
-} else if (r.kind === 'corrupt') {
-  if (!peek) quarantineAlertState(alertStatePath, now);
-  emit('EVALUATE');
-} else {
-  // ioerror — never reinit skill-owned alerts/self_eval over a file we couldn't read.
-  emit('EVALUATE');
-}
-if (typeof alertState.total_ticks !== 'number' || !Number.isFinite(alertState.total_ticks)) {
-  alertState.total_ticks = 0;
-}
-const microScan = resolveMicroPendingScan(stateDir, alertState.alerts ?? {});
-// Recovery clears the damper: a file repaired and re-broken inside the 24h window is a
-// NEW corruption, and inheriting the previous one's stamp would silence its wake. Folded
-// into the tick-increment write below rather than a second writeAlertState call, since
-// precheck runs on every heartbeat poll.
-if (microScan !== 'corrupt' && !peek && typeof alertState.last_micro_corrupt_wake_at === 'string') {
-  delete alertState.last_micro_corrupt_wake_at;
-}
-if (!peek) {
-  alertState.total_ticks += 1;
-  writeAlertState(alertStatePath, alertState);
-}
-
-// peek fires one tick early; the subsequent mutating call lands on the multiple-of-20
-if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20 === 0) emit('EVALUATE');
-
-if (microScan === 'evaluate') emit('EVALUATE');
-// Corrupt file: wake so the tick can tell the operator, but at most once a day —
-// the file stays corrupt until a human fixes it, and waking every poll to repeat
-// that is the same unbounded-wake shape the pending-micro damper just removed.
-if (microScan === 'corrupt') {
-  const lastWake = typeof alertState.last_micro_corrupt_wake_at === 'string'
-    ? new Date(alertState.last_micro_corrupt_wake_at).getTime()
-    : NaN;
-  if (isNaN(lastWake) || (now - lastWake) >= 24 * 3600000) {
-    if (!peek) {
-      alertState.last_micro_corrupt_wake_at = new Date(now).toISOString();
-      writeAlertState(alertStatePath, alertState);
+  // Earliest gate (PROP-015) — ahead of the pending-close drain below, so a
+  // paused hermit also suppresses AUTO_CLOSE, not just the checklist. Read-only:
+  // identical under --peek since it writes nothing.
+  const pauseStatus = isPaused(stateDir);
+  if (pauseStatus.paused) {
+    // PROP-016: a budget-triggered pause is itself the enforcement action, so the
+    // plain SKIP|paused below would also silence the one wake needed to tell the
+    // operator why every tool is now denied and how to resume. Let exactly one
+    // EVALUATE escape when an un-notified budget alert is waiting — the pending-budget
+    // gate further down (after alert-state is loaded) is what actually emits it; the
+    // heartbeat skill announces and marks `notified:true`, and every subsequent tick
+    // falls back to the plain SKIP|paused here (no un-notified entry left to escape on).
+    if (pauseStatus.reason === 'budget') {
+      if (!budgetPending(stateDir)) return 'SKIP|paused';
+      // else fall through to the gates below, which will reach the pending-budget
+      // check and emit EVALUATE.
+    } else {
+      return 'SKIP|paused';
     }
-    emit('EVALUATE');
   }
-}
 
-// PROP-016: an un-notified budget alert (cost-tracker.ts writes these directly,
-// bypassing the LLM-owned suppressed/digest dance the generic checklist alerts use)
-// forces an immediate EVALUATE — this is both how `action:"alert"` breaches surface
-// at all, and the mechanism the pause-escape gate above depends on to actually emit
-// EVALUATE rather than just falling through.
-if (budgetPending(stateDir)) emit('EVALUATE');
+  // Settled config, read once. Declared here rather than beside the active-hours gate
+  // below because the pending-close drain — which runs before every other gate — sizes
+  // its cooldown from heartbeat.every. The reader never writes and never throws, so the
+  // paths that emit before that gate only pay one extra small read.
+  const config = readSettledConfig(stateDir);
+  const hbConfig = config.heartbeat;
 
-const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
-const sessionState = runtime.session_state ?? 'idle';
+  // Resolve "now" once: real wall-clock, overridable by HERMIT_NOW for deterministic
+  // tests. Shared by the pending-close drain and the in_progress 12h check below.
+  let now = Date.now();
+  if (process.env.HERMIT_NOW) {
+    const d = new Date(process.env.HERMIT_NOW).getTime();
+    if (!isNaN(d)) now = d;
+  }
 
-if (sessionState === 'in_progress') {
-  // 12h operator-quiet → auto-close. The action-file resolution below is kept
-  // only to feed the separate stale-EVALUATE damper (different threshold/purpose).
-  if (staleAutoCloseDue(stateDir, now)) emit('AUTO_CLOSE');
-  // Prefer last-operator-action.json: records genuine operator prompts only, unaffected
-  // by routine writes (reflect, scheduled-checks, heartbeat alerts) that bump SHELL.md mtime.
-  // Absent/malformed → !usedActionFile leaves opQuiet true, so the damper still wakes.
-  let usedActionFile = false;
-  let lastActionAt = NaN;
+  // Pending-close drain: if the daily-auto-close routine queued a close because the
+  // operator was active at midnight, drain it as soon as a 10-min lull appears.
+  // Runs BEFORE every other gate (HEARTBEAT.md presence, active-hours, 20-tick,
+  // micro-proposal) — the close is the signal, not a notification, and must not
+  // depend on operator-editable HEARTBEAT.md being present.
+  // The verdict itself lives in lib/auto-close.ts so the routine poll (lib/routines/
+  // due.ts) drains on the same terms — this tick is not the only drainer, and is
+  // absent entirely when heartbeat.enabled is false.
+  //
+  // Both guards are shared with that poll. The lull inside pendingCloseDrainDue ages
+  // from prompt submission, so an operator watching a long agent turn reads as away
+  // while still present — the turn marker is what catches that. The cooldown bounds a
+  // close that never completes: without it every tick re-emits, and each emission is a
+  // paid full-context wake. Under --peek the verdict is computed but not stamped, so a
+  // peek never consumes the cooldown the real tick needs.
+  //
+  // Hence the half-interval cap below: a cooldown as long as this poller's own interval
+  // can never expire on the next tick (drainCooldownExpired's note has the derivation),
+  // which is what made a failing close retry only every other tick once heartbeat.every
+  // became 30m (#771). The min() only tightens the shared 30-min ceiling, never widens
+  // it. Config is read live here while the monitor baked its interval in at launch, so
+  // an `every` edited mid-session can diverge from the real poll cadence until the
+  // monitor restarts — bounded, self-healing, and never worse than the old behavior.
+  //
+  // Below a 30-min interval the shipped flat cooldown already expires within a tick or
+  // two, so there is nothing to fix and halving would only shorten the backoff: an
+  // `every` of 5m would re-wake a failing close every 5 min instead of every ~35. A
+  // suppressed tick costs nothing (the peek never wakes the model), so short intervals
+  // keep the flat 30. Also absorbs `every: "0m"`, which would otherwise disable the gate.
+  const everyMin = parseDuration(hbConfig.every, 30 * 60_000) / 60_000;
+  const drainCooldownMin = everyMin < PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
+    ? PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
+    : Math.min(PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES, everyMin / 2);
+  if (
+    pendingCloseDrainDue(stateDir, now) &&
+    !operatorTurnOpen(stateDir, now) &&
+    drainCooldownExpired(stateDir, now, drainCooldownMin)
+  ) {
+    if (peek || stampDrainCooldown(stateDir, now)) return 'AUTO_CLOSE';
+  }
+
+  let heartbeatContent: string;
+  try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }
+  catch { return 'SKIP|HEARTBEAT.md missing'; }
+
+  const checklistItems = heartbeatContent
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => /^[-*+]\s/.test(l));
+
+  if (checklistItems.length === 0) return 'SKIP|HEARTBEAT.md has no checklist items';
+
+  // Injection gate: HEARTBEAT.md is model-editable and feeds the autonomous
+  // evaluation subagent verbatim, so a poisoned item written in one session
+  // would steer every future wake. On a hit, ALERT wakes the model to notify
+  // the operator WITHOUT evaluating the checklist; the announced-hash damper
+  // (state/injection-alert.json, written by the SKILL.md ALERT branch) keeps
+  // it to one alert per file version. Deterministic operator-safety escalations
+  // survive the suspension: a pending budget alert pierces the damper (the SKILL
+  // ALERT branch delivers it without reading HEARTBEAT.md), and a due stale
+  // auto-close still fires (AUTO_CLOSE never reads HEARTBEAT.md). One verdict per
+  // tick, budget before the destructive close. Scan errors fall through — never
+  // block the tick. Pause still pre-empts this (gate at top of file).
   try {
-    const lastAction = readJSON(path.join(stateDir, 'state', 'last-operator-action.json'));
-    if (lastAction && typeof lastAction.at === 'string') {
-      const t = new Date(lastAction.at).getTime();
-      if (!isNaN(t)) {
-        usedActionFile = true;
-        lastActionAt = t;
-      }
+    const hit = scanForInjection(heartbeatContent);
+    if (hit) {
+      const hash = sha256(heartbeatContent).slice(0, 8);
+      const verdict = `ALERT|injection-suspect:${hash}|${hit.cls} at line ${hit.line}`;
+      if (budgetPending(stateDir)) return verdict;
+      if (staleAutoCloseDue(stateDir, now)) return 'AUTO_CLOSE';
+      const announced = readJSON(path.join(stateDir, 'state', 'injection-alert.json'));
+      if (announced?.hash === hash) return 'SKIP|injection-suspect (announced)';
+      return verdict;
     }
-  } catch { /* fail-open */ }
+  } catch { /* fail-open: scan trouble must not block the tick */ }
 
-  // Stale-session check: wake once per stale_threshold, not every tick.
-  // Falls back to EVALUATE when last-operator-action.json is absent (pre-upgrade installs),
-  // mtime fallback was used, or timestamp is future-dated (clock skew / cross-machine).
-  // Damped by last_stale_wake_at: if the staleness condition is unchanged and stale_threshold
-  // hasn't elapsed since last wake, fall through to the digest/checklist gates instead of
-  // emitting EVALUATE — identical operator-visible behavior, 1 LLM wake per interval instead of N.
-  const staleMs = parseDuration(hbConfig.stale_threshold, 2 * 3600000);
-  const opQuiet = !usedActionFile || lastActionAt > now || (now - lastActionAt) > staleMs;
-  const staleAlertActive = !!(alertState.alerts ?? {})['stale-session'];
-  if (opQuiet || staleAlertActive) {
-    const lastStaleWakeAt = typeof alertState.last_stale_wake_at === 'string'
-      ? new Date(alertState.last_stale_wake_at).getTime()
+  const timezone = config.timezone ?? 'UTC';
+  const activeHours = hbConfig.active_hours;
+
+  if (activeHours?.start && activeHours?.end) {
+    const hhmm = currentHHMM(timezone);
+    if (hhmm !== null && (hhmm < activeHours.start || hhmm >= activeHours.end)) {
+      return 'SKIP|outside active hours';
+    }
+  }
+
+  // Split read from parse so a transient read error never destroys a healthy file:
+  // only a genuine parse failure (corrupt) quarantines and rebuilds. ioerror
+  // (EACCES/EMFILE/EIO) leaves the file untouched and re-evaluates next tick.
+  const r = readAlertState(alertStatePath);
+  let alertState: Json;
+  if (r.kind === 'ok') {
+    alertState = r.value;
+  } else if (r.kind === 'missing') {
+    alertState = defaultAlertState();
+  } else if (r.kind === 'corrupt') {
+    if (!peek) quarantineAlertState(alertStatePath, now);
+    return 'EVALUATE';
+  } else {
+    // ioerror — never reinit skill-owned alerts/self_eval over a file we couldn't read.
+    return 'EVALUATE';
+  }
+  if (typeof alertState.total_ticks !== 'number' || !Number.isFinite(alertState.total_ticks)) {
+    alertState.total_ticks = 0;
+  }
+  const microScan = resolveMicroPendingScan(stateDir, alertState.alerts ?? {});
+  // Recovery clears the damper: a file repaired and re-broken inside the 24h window is a
+  // NEW corruption, and inheriting the previous one's stamp would silence its wake. Folded
+  // into the tick-increment write below rather than a second writeAlertState call, since
+  // precheck runs on every heartbeat poll.
+  if (microScan !== 'corrupt' && !peek && typeof alertState.last_micro_corrupt_wake_at === 'string') {
+    delete alertState.last_micro_corrupt_wake_at;
+  }
+  if (!peek) {
+    alertState.total_ticks += 1;
+    writeAlertState(alertStatePath, alertState);
+  }
+
+  // peek fires one tick early; the subsequent mutating call lands on the multiple-of-20
+  if (peek ? (alertState.total_ticks + 1) % 20 === 0 : alertState.total_ticks % 20 === 0) return 'EVALUATE';
+
+  if (microScan === 'evaluate') return 'EVALUATE';
+  // Corrupt file: wake so the tick can tell the operator, but at most once a day —
+  // the file stays corrupt until a human fixes it, and waking every poll to repeat
+  // that is the same unbounded-wake shape the pending-micro damper just removed.
+  if (microScan === 'corrupt') {
+    const lastWake = typeof alertState.last_micro_corrupt_wake_at === 'string'
+      ? new Date(alertState.last_micro_corrupt_wake_at).getTime()
       : NaN;
-    const operatorAdvanced = usedActionFile && !isNaN(lastStaleWakeAt) && lastActionAt > lastStaleWakeAt;
-    const wakeDue = isNaN(lastStaleWakeAt) || operatorAdvanced || (now - lastStaleWakeAt) >= staleMs;
-    if (wakeDue) {
+    if (isNaN(lastWake) || (now - lastWake) >= 24 * 3600000) {
       if (!peek) {
-        alertState.last_stale_wake_at = new Date(now).toISOString();
+        alertState.last_micro_corrupt_wake_at = new Date(now).toISOString();
         writeAlertState(alertStatePath, alertState);
       }
-      emit('EVALUATE');
+      return 'EVALUATE';
     }
   }
-}
 
-// waiting-timeout check requires elapsed computation — delegate to LLM
-if (sessionState === 'waiting' && hbConfig.waiting_timeout) emit('EVALUATE');
+  // PROP-016: an un-notified budget alert (cost-tracker.ts writes these directly,
+  // bypassing the LLM-owned suppressed/digest dance the generic checklist alerts use)
+  // forces an immediate EVALUATE — this is both how `action:"alert"` breaches surface
+  // at all, and the mechanism the pause-escape gate above depends on to actually emit
+  // EVALUATE rather than just falling through.
+  if (budgetPending(stateDir)) return 'EVALUATE';
 
-const alerts: Json = alertState.alerts ?? {};
-const alertValues = Object.values(alerts);
-const hasSuppressed = alertValues.some((e: Json) => e?.suppressed === true);
-const today = todayYMD(timezone);
-if (hasSuppressed && alertState.last_digest_date !== today) emit('EVALUATE');
+  const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
+  const sessionState = runtime.session_state ?? 'idle';
 
-// Clean-recheck damper: suppress re-evaluation for clean_recheck_cooldown after a tick
-// concludes nothing actionable. Sits after all change-detecting gates so stale/micro-
-// proposal/suppressed-digest still pre-empt it. Active alerts (unsuppressed or resolving)
-// bypass the damper so a firing alert is never masked. `null` cooldown disables it.
-if (hbConfig.clean_recheck_cooldown !== null) {
-  const hasActiveFollowup = alertValues.some(
-    (e: Json) => e && (e.suppressed !== true || (e.consecutive_clean ?? 0) > 0));
-  const lastCleanEvalAt = typeof alertState.last_clean_eval_at === 'string'
-    ? new Date(alertState.last_clean_eval_at).getTime()
-    : NaN;
-  const cooldownMs = parseDuration(hbConfig.clean_recheck_cooldown, 6 * 3600000);
-  if (!hasActiveFollowup && !isNaN(lastCleanEvalAt) && lastCleanEvalAt <= now &&
-      (now - lastCleanEvalAt) < cooldownMs) {
-    emit('OK');
+  if (sessionState === 'in_progress') {
+    // 12h operator-quiet → auto-close. The action-file resolution below is kept
+    // only to feed the separate stale-EVALUATE damper (different threshold/purpose).
+    if (staleAutoCloseDue(stateDir, now)) return 'AUTO_CLOSE';
+    // Prefer last-operator-action.json: records genuine operator prompts only, unaffected
+    // by routine writes (reflect, scheduled-checks, heartbeat alerts) that bump SHELL.md mtime.
+    // Absent/malformed → !usedActionFile leaves opQuiet true, so the damper still wakes.
+    let usedActionFile = false;
+    let lastActionAt = NaN;
+    try {
+      const lastAction = readJSON(path.join(stateDir, 'state', 'last-operator-action.json'));
+      if (lastAction && typeof lastAction.at === 'string') {
+        const t = new Date(lastAction.at).getTime();
+        if (!isNaN(t)) {
+          usedActionFile = true;
+          lastActionAt = t;
+        }
+      }
+    } catch { /* fail-open */ }
+
+    // Stale-session check: wake once per stale_threshold, not every tick.
+    // Falls back to EVALUATE when last-operator-action.json is absent (pre-upgrade installs),
+    // mtime fallback was used, or timestamp is future-dated (clock skew / cross-machine).
+    // Damped by last_stale_wake_at: if the staleness condition is unchanged and stale_threshold
+    // hasn't elapsed since last wake, fall through to the digest/checklist gates instead of
+    // emitting EVALUATE — identical operator-visible behavior, 1 LLM wake per interval instead of N.
+    const staleMs = parseDuration(hbConfig.stale_threshold, 2 * 3600000);
+    const opQuiet = !usedActionFile || lastActionAt > now || (now - lastActionAt) > staleMs;
+    const staleAlertActive = !!(alertState.alerts ?? {})['stale-session'];
+    if (opQuiet || staleAlertActive) {
+      const lastStaleWakeAt = typeof alertState.last_stale_wake_at === 'string'
+        ? new Date(alertState.last_stale_wake_at).getTime()
+        : NaN;
+      const operatorAdvanced = usedActionFile && !isNaN(lastStaleWakeAt) && lastActionAt > lastStaleWakeAt;
+      const wakeDue = isNaN(lastStaleWakeAt) || operatorAdvanced || (now - lastStaleWakeAt) >= staleMs;
+      if (wakeDue) {
+        if (!peek) {
+          alertState.last_stale_wake_at = new Date(now).toISOString();
+          writeAlertState(alertStatePath, alertState);
+        }
+        return 'EVALUATE';
+      }
+    }
   }
-}
 
-// OK fires only when every item in HEARTBEAT.md is satisfied. The default
-// proposals-scan item is resolved against real proposal frontmatter (so a hermit
-// with no proposals awaiting review reaches OK without an LLM wake); every other
-// item needs a matching entry in alerts{} that is suppressed (count > 5) and not
-// approaching resolution (consecutive_clean === 0).
-for (const item of checklistItems) {
-  if (isProposalScanItem(item)) {
-    if (resolveProposalScanItem(stateDir, alerts) === 'evaluate') emit('EVALUATE');
-    continue;
+  // waiting-timeout check requires elapsed computation — delegate to LLM
+  if (sessionState === 'waiting' && hbConfig.waiting_timeout) return 'EVALUATE';
+
+  const alerts: Json = alertState.alerts ?? {};
+  const alertValues = Object.values(alerts);
+  const hasSuppressed = alertValues.some((e: Json) => e?.suppressed === true);
+  const today = todayYMD(timezone);
+  if (hasSuppressed && alertState.last_digest_date !== today) return 'EVALUATE';
+
+  // Clean-recheck damper: suppress re-evaluation for clean_recheck_cooldown after a tick
+  // concludes nothing actionable. Sits after all change-detecting gates so stale/micro-
+  // proposal/suppressed-digest still pre-empt it. Active alerts (unsuppressed or resolving)
+  // bypass the damper so a firing alert is never masked. `null` cooldown disables it.
+  if (hbConfig.clean_recheck_cooldown !== null) {
+    const hasActiveFollowup = alertValues.some(
+      (e: Json) => e && (e.suppressed !== true || (e.consecutive_clean ?? 0) > 0));
+    const lastCleanEvalAt = typeof alertState.last_clean_eval_at === 'string'
+      ? new Date(alertState.last_clean_eval_at).getTime()
+      : NaN;
+    const cooldownMs = parseDuration(hbConfig.clean_recheck_cooldown, 6 * 3600000);
+    if (!hasActiveFollowup && !isNaN(lastCleanEvalAt) && lastCleanEvalAt <= now &&
+        (now - lastCleanEvalAt) < cooldownMs) {
+      return 'OK';
+    }
   }
-  const key = normalizeItemKey(item);
-  if (!key) emit('EVALUATE');
-  const entry = alerts[key];
-  if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) emit('EVALUATE');
+
+  // OK fires only when every item in HEARTBEAT.md is satisfied. The default
+  // proposals-scan item is resolved against real proposal frontmatter (so a hermit
+  // with no proposals awaiting review reaches OK without an LLM wake); every other
+  // item needs a matching entry in alerts{} that is suppressed (count > 5) and not
+  // approaching resolution (consecutive_clean === 0).
+  for (const item of checklistItems) {
+    if (isProposalScanItem(item)) {
+      if (resolveProposalScanItem(stateDir, alerts) === 'evaluate') return 'EVALUATE';
+      continue;
+    }
+    const key = normalizeItemKey(item);
+    if (!key) return 'EVALUATE';
+    const entry = alerts[key];
+    if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) return 'EVALUATE';
+  }
+
+  return 'OK';
 }
 
-emit('OK');
+/** CLI wrapper for `heartbeat.ts precheck` — the only writer of stdout here. */
+export function main(): void {
+  const peek = process.argv[2] === '--peek';
+  const stateDir = peek ? process.argv[3] : process.argv[2];
+  process.stdout.write(runPrecheck(stateDir, peek) + '\n');
+  process.exit(0);
+}

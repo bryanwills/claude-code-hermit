@@ -4,6 +4,17 @@
 
 ### Added
 - Compose and Dockerfile templates are now evolve-managed. Upstream template hunks are merged into the live files while preserving operator customizations, with verified pristine bytes retained as the next 3-way base.
+- `/watch session <name>` accepts a glob (`*`, `?`) to match several local sessions at once, showing each match's live status and asking for one confirmation before subscribing to all of them.
+
+### Changed
+- The daily `heartbeat-restart` fire asks `routines.ts arm anchor` whether anything is actually stale and stops on a `HEALTHY` verdict. A healthy hermit's 4am re-arm no longer tears down and rebuilds a working monitor, so it costs about two model calls instead of eleven to fifteen.
+- `hermit-routines load` is driven by `routines.ts arm begin`/`arm commit`: the script plans the teardown, the Monitor command, the cron diff and the anchor prompt, and the model makes only the `Monitor`/`TaskStop`/`Cron*` calls. It short-circuits on the same `HEALTHY` verdict, which is scoped to the current boot so a monitor left behind by a previous session never reads as live.
+- The `heartbeat-restart` anchor no longer runs `routines.ts precheck`, so a `precheck` or `reflect_after` set on that one routine has no effect. `validate-config` already warned about `precheck` there and now warns about `reflect_after` too.
+- `heartbeat start` asks `heartbeat.ts start-check` first and stops on `FRESH|interval=<s>` when the live monitor already matches config and was registered by the current boot; `start-commit` records the registration and waits for the first liveness tick.
+- A waking heartbeat tick runs `heartbeat.ts tick`, which returns the precheck verdict plus the waiting-timeout transition and any composed budget alerts in one JSON line. Budget entries carry a `mark_key`, and `notified` is still only flipped after a confirmed send.
+- `heartbeat.ts alert-state` appends its own monitoring lines to SHELL.md and reports `appended`/`append_error` instead of handing the lines back for the model to apply one edit at a time.
+- The routine and heartbeat monitors, the watchdog and `/hermit-doctor` now share one liveness predicate (`scripts/lib/monitor-health.ts`), so "is this monitor alive" has a single definition. Doctor status strings are unchanged.
+- Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
 
 ### Fixed
 - Regenerating Docker scaffolding is no longer the only refresh path for a customized `docker-compose.hermit.yml` or `Dockerfile.hermit`; hermit-evolve reconciles each changed file in place and validates the result before it can be built.
@@ -14,6 +25,10 @@
 - `/docker-setup` and `/docker-security` are operator-invoked only. Both stay reachable by typing `/name` in a terminal or the Claude app; neither can be triggered by the model or from a Discord/Telegram message, so a running hermit cannot start its own deployment or rewrite its container networking. Asking for either from a channel now gets pointed at the terminal or the Claude app, and the `docker-security` remedies in `/hermit-doctor` say the same instead of a command the hermit can no longer run.
 - Quick hatch no longer auto-chains into the next skill. It ends at its report like Advanced always has, and the operator runs the printed next steps — which are now numbered, since `/reload-plugins` must go first, and closed with what is not yet running.
 - Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
+
+1. Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
+2. Optional: run `/claude-code-hermit:hermit-routines load --reset` once to pick up the anchor's new short-circuit prompt immediately. Any restart already does this on its next `load`, because the boot-id mismatch forces a re-create, so it only matters for a hermit that never restarts.
+3. No heartbeat action is needed. `/claude-code-hermit:heartbeat start` now returns `FRESH` against a healthy monitor registered by the current boot, and leaves it alone.
 
 ## [1.2.52] - 2026-08-30
 

@@ -38,7 +38,7 @@
 
 export {}; // module scope: every import here is dynamic, and top-level await needs it
 
-const USAGE = 'Usage: bun routines.ts <due|precheck|finish|cron-registry|tz-shift|log-event|health> [args...]';
+const USAGE = 'Usage: bun routines.ts <due|precheck|finish|cron-registry|tz-shift|log-event|health|arm> [args...]';
 
 const verb = process.argv[2];
 const rest = process.argv.slice(3);
@@ -81,6 +81,11 @@ switch (verb) {
   case 'health': {
     const { run } = await import('./lib/routines/health');
     run(rest);
+    break;
+  }
+  case 'arm': {
+    const { run } = await import('./lib/routines/arm');
+    await run(rest);
     break;
   }
 

@@ -211,10 +211,16 @@ describe('sealed registries', () => {
     expect(HERMIT_ALLOW).not.toContain('Bash(bash */scripts/*.sh *)');
   });
 
+  // The command is rendered by `arm begin` and passed through verbatim, so the
+  // no-shell-expansion guard belongs on the renderer: `$PWD` in a Monitor command
+  // trips Claude Code's simple_expansion approval even with the grant present.
   test('the routine Monitor command uses an absolute state path without shell expansion', () => {
+    const arm = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'lib', 'routines', 'arm.ts'), 'utf8');
+    expect(arm).toContain("path.resolve(hermitDirArg)");
+    expect(arm).toContain("path.join(ctx.pluginRoot, 'scripts', 'routine-monitor.sh')");
+    expect(arm).not.toContain('$PWD');
     const skill = fs.readFileSync(path.join(import.meta.dir, '..', 'skills', 'hermit-routines', 'SKILL.md'), 'utf8');
-    expect(skill).toContain('routine-monitor.sh 60 <abs-project-dir>/.claude-code-hermit');
-    expect(skill).not.toContain('routine-monitor.sh 60 $PWD/.claude-code-hermit');
+    expect(skill).toContain('the string verbatim, unedited');
   });
 
   // finish resolves the hermit dir itself. A state-dir argument under a wildcard

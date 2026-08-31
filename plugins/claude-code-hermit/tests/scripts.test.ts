@@ -864,12 +864,25 @@ describe('update-alert-state', () => {
 
   async function updateAlertState(dir: string, payload: string, env: Record<string, string> = { HERMIT_NOW: NOW }) {
     const stateFile = hermit(dir, 'state', 'alert-state.json');
+    const shellPath = hermit(dir, 'sessions', 'SHELL.md');
+    const before = monitoringLines(shellPath);
     const r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: payload, env });
     expect(r.exitCode).toBe(0);
     return {
       state: fs.existsSync(stateFile) ? readJson(stateFile) : null,
       stdout: r.stdout.trim() ? JSON.parse(r.stdout.trim()) : null,
+      // The script appends these itself now, so the assertions read the file it
+      // wrote rather than a list it handed back for the model to apply.
+      monitoring: monitoringLines(shellPath).slice(before.length),
     };
+  }
+
+  // `## Monitoring` body lines, minus the `<!-- none -->` placeholder the template ships.
+  function monitoringLines(shellPath: string): string[] {
+    if (!fs.existsSync(shellPath)) return [];
+    const body = fs.readFileSync(shellPath, 'utf-8').split(/^## Monitoring$/m)[1] ?? '';
+    return body.split(/^## /m)[0].split('\n').map(l => l.trim())
+      .filter(l => l && l !== '<!-- none -->');
   }
 
   const firingPayload = (firing: Array<{ key: string; text: string }>, self_eval_updates: object = {}) =>
@@ -877,13 +890,13 @@ describe('update-alert-state', () => {
 
   test('update-alert-state (new firing item creates entry, notifies once, preserves total_ticks)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
-    const { state, stdout } = await updateAlertState(dir, firingPayload([{ key: 'checklist:idle0001', text: 'Session idle 3h' }]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([{ key: 'checklist:idle0001', text: 'Session idle 3h' }]));
     expect(state.alerts['checklist:idle0001']).toEqual({
       count: 1, consecutive_clean: 0, suppressed: false, first_seen: '2026-07-10', last_seen: '2026-07-10', text: 'Session idle 3h',
     });
     expect(state.total_ticks).toBe(5); // precheck-owned — must survive untouched
     expect(stdout.heartbeat_result).toBe('ALERT');
-    expect(stdout.monitoring_lines).toEqual(['[12:00] Heartbeat: Session idle 3h']);
+    expect(monitoring).toEqual(['[12:00] Heartbeat: Session idle 3h']);
     expect(stdout.notifications).toEqual(['Session idle 3h']); // first observation notifies
   }));
 
@@ -900,12 +913,12 @@ describe('update-alert-state', () => {
       },
       self_eval: {}, total_ticks: 2,
     }));
-    const { state, stdout } = await updateAlertState(dir, firingPayload([{ key: 'checklist:keepme', text: 'keep me' }]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([{ key: 'checklist:keepme', text: 'keep me' }]));
 
     expect(state.alerts['doctor:permissions']).toBeUndefined();       // gone in ONE tick, not aged over two
     expect(state.alerts['checklist:keepme']).toBeDefined();           // unrelated keys untouched
-    expect(stdout.monitoring_lines.join('\n')).not.toContain('undefined');
-    expect(stdout.monitoring_lines.join('\n')).not.toContain('doctor:');
+    expect(monitoring.join('\n')).not.toContain('undefined');
+    expect(monitoring.join('\n')).not.toContain('doctor:');
     expect(stdout.notifications.join('\n')).not.toContain('doctor:'); // silent — no resolution ping
   }));
 
@@ -920,31 +933,31 @@ describe('update-alert-state', () => {
   test('update-alert-state (repeat fire increments count, no notification on ticks 2-4)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{"checklist:idle0001":{"count":1,"consecutive_clean":0,"suppressed":false,"first_seen":"2026-07-08","last_seen":"2026-07-08","text":"old text"}},"self_eval":{},"total_ticks":10}');
-    const { state, stdout } = await updateAlertState(dir, firingPayload([{ key: 'checklist:idle0001', text: 'Session idle 5h' }]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([{ key: 'checklist:idle0001', text: 'Session idle 5h' }]));
     expect(state.alerts['checklist:idle0001'].count).toBe(2);
     expect(state.alerts['checklist:idle0001'].suppressed).toBe(false);
     expect(state.alerts['checklist:idle0001'].text).toBe('Session idle 5h'); // label refreshed
-    expect(stdout.monitoring_lines).toEqual(['[12:00] Heartbeat: Session idle 5h']);
+    expect(monitoring).toEqual(['[12:00] Heartbeat: Session idle 5h']);
     expect(stdout.notifications).toEqual([]); // repeat fire — no re-notification
   }));
 
   test('update-alert-state (sixth fire suppresses — count:6, monitoring + notification once)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{"checklist:abc12345":{"count":5,"consecutive_clean":0,"suppressed":false,"first_seen":"2026-07-01","last_seen":"2026-07-09","text":"disk 90% full"}},"self_eval":{},"total_ticks":20,"last_digest_date":"2026-07-10"}'); // digest already sent today — isolates this assertion to the suppression transition alone
-    const { state, stdout } = await updateAlertState(dir, firingPayload([{ key: 'checklist:abc12345', text: 'disk 90% full' }]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([{ key: 'checklist:abc12345', text: 'disk 90% full' }]));
     expect(state.alerts['checklist:abc12345']).toMatchObject({ count: 6, suppressed: true, consecutive_clean: 0 });
     // Monitoring line (SHELL.md) keeps "above alert"; the channel notification names the alert instead.
-    expect(stdout.monitoring_lines).toEqual(['[12:00] Heartbeat: above alert suppressed after 5 fires (first: 2026-07-01). Daily digest only.']);
+    expect(monitoring).toEqual(['[12:00] Heartbeat: above alert suppressed after 5 fires (first: 2026-07-01). Daily digest only.']);
     expect(stdout.notifications).toEqual(['Heartbeat: "disk 90% full" suppressed after 5 fires — daily digest only.']);
   }));
 
   test('update-alert-state (seventh fire — silent, stays suppressed, no notification)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{"checklist:abc12345":{"count":6,"consecutive_clean":0,"suppressed":true,"first_seen":"2026-07-01","last_seen":"2026-07-09","text":"disk 90% full"}},"self_eval":{},"total_ticks":21,"last_digest_date":"2026-07-10"}');
-    const { state, stdout } = await updateAlertState(dir, firingPayload([{ key: 'checklist:abc12345', text: 'disk 90% full' }]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([{ key: 'checklist:abc12345', text: 'disk 90% full' }]));
     expect(state.alerts['checklist:abc12345'].count).toBe(7);
     expect(state.alerts['checklist:abc12345'].suppressed).toBe(true);
-    expect(stdout.monitoring_lines).toEqual([]);
+    expect(monitoring).toEqual([]);
     expect(stdout.notifications).toEqual([]); // last_digest_date already today — no repeat digest
   }));
 
@@ -956,10 +969,10 @@ describe('update-alert-state', () => {
       },
       self_eval: {}, total_ticks: 15,
     }));
-    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
     expect(state.alerts).not.toHaveProperty('checklist:aaa11111');
     expect(state.alerts).not.toHaveProperty('checklist:bbb22222');
-    expect(stdout.monitoring_lines).toEqual(['[12:00] Heartbeat: resolved — flaky check']); // suppressed one resolves silently
+    expect(monitoring).toEqual(['[12:00] Heartbeat: resolved — flaky check']); // suppressed one resolves silently
   }));
 
   test('update-alert-state (self_eval_updates overlays self_eval; wrong-type value coerced to {})', withDir(async (dir) => {
@@ -1109,14 +1122,14 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [{ id: 'MP-1', status: 'pending', tier: 1, question: 'Proceed?' }] }));
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
     fs.writeFileSync(hermit(dir, 'proposals', 'PROP-009-test-120000.md'), '---\nid: PROP-009\nstatus: proposed\ntitle: Retry queue\n---\nbody\n');
-    const { state, stdout } = await updateAlertState(dir, firingPayload([]));
+    const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
     // Both structured keys are new this tick — monitoring lines (file-only) may
     // carry the id, but notifications (operator channel) must not.
     expect(state.alerts['micro-proposal-pending:MP-1']).toBeDefined();
     expect(state.alerts['proposal-pending:PROP-009']).toBeDefined();
     expect(stdout.notifications).toEqual([]);
-    expect(stdout.monitoring_lines.some((l: string) => l.includes('MP-1'))).toBe(true);
-    expect(stdout.monitoring_lines.some((l: string) => l.includes('PROP-009'))).toBe(true);
+    expect(monitoring.some((l: string) => l.includes('MP-1'))).toBe(true);
+    expect(monitoring.some((l: string) => l.includes('PROP-009'))).toBe(true);
   }));
 
   test('update-alert-state (#594 regression: model omitting/garbling a pending micro-proposal key never resolves it)', withDir(async (dir) => {
@@ -1296,7 +1309,7 @@ describe('update-alert-state', () => {
     const first = await updateAlertState(dir, firingPayload([]));
     expect(first.stdout.notifications).toHaveLength(1);
     expect(first.stdout.notifications[0]).not.toMatch(/micro-proposals\.json|MP-/); // channel voice: no paths, no ids
-    expect(first.stdout.monitoring_lines.join('\n')).toContain('micro-proposals.json'); // technical detail is file-only
+    expect(first.monitoring.join('\n')).toContain('micro-proposals.json'); // technical detail is file-only
     expect(first.state.structured_read_failure_notified_date).toBe('2026-07-10'); // NOW, tz UTC
 
     const second = await updateAlertState(dir, firingPayload([]));

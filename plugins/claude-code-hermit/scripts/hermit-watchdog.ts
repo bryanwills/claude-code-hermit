@@ -48,6 +48,7 @@ import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 import { lastRoutineFire } from './lib/routines/history';
 import { ensureLedgerFile } from './lib/append-jsonl';
+import { monitorFreshness } from './lib/monitor-health';
 
 type Json = any;
 
@@ -935,23 +936,16 @@ export const WEDGE_FLOOR_DEFAULT = '4h';
 function monitorLivenessStale(livenessFile: string, runtimeData: Json, thresholdSecs: number): boolean {
   const startedAt: string | null =
     runtimeData && typeof runtimeData.started_at === 'string' ? runtimeData.started_at : null;
-  const startedAtMs = startedAt !== null ? Date.parse(startedAt) : NaN;
-
   const liveness = readJson(path.join(STATE_DIR, livenessFile));
   const lastPeekAt: string | null =
     liveness && typeof liveness.last_peek_at === 'string' ? liveness.last_peek_at : null;
-  const lastPeekMs = lastPeekAt !== null ? Date.parse(lastPeekAt) : NaN;
-
-  const trusted = Number.isFinite(lastPeekMs) && (!Number.isFinite(startedAtMs) || lastPeekMs >= startedAtMs);
-  if (trusted) {
-    const age = ageSecs(lastPeekAt!);
-    return age !== null && age > thresholdSecs;
-  }
-  if (Number.isFinite(startedAtMs)) {
-    const startAge = ageSecs(startedAt!);
-    return startAge !== null && startAge >= MONITOR_STARTUP_GRACE_SECS;
-  }
-  return false;
+  return !monitorFreshness(
+    startedAt,
+    lastPeekAt,
+    thresholdSecs,
+    MONITOR_STARTUP_GRACE_SECS,
+    Date.now(),
+  ).fresh;
 }
 
 /** Heartbeat monitor stale? Gated + thresholded exactly as doctor's checkHeartbeat. */

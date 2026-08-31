@@ -1,6 +1,5 @@
 // Pure predicate shared by lib/heartbeat/precheck.ts and its coherence test.
-// Extracted so both reference one definition — importing lib/heartbeat/precheck.ts
-// directly would fire its top-level emit()/process.exit().
+// Extracted so both reference one definition.
 //
 // Does a HEARTBEAT.md checklist item represent the default proposal-scan item?
 // Matches the shipped default ("Review `proposals/` for any with `status:

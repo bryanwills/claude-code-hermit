@@ -26,8 +26,9 @@ claude plugin install claude-code-hermit@claude-code-hermit --scope local
 # Boot Claude Code and run the setup wizard
 /claude-code-hermit:hatch
 
-# Go always-on
-/claude-code-hermit:docker-setup
+# Always-on: pick one
+.claude-code-hermit/bin/hermit-start          # tmux, same machine, no image
+/claude-code-hermit:docker-setup              # Docker, isolated, restarts with the daemon
 ```
 
 ---
@@ -134,15 +135,23 @@ The wizard sets up your agent's identity, scans your folder, generates `OPERATOR
 
 ### 3. Go Always-on
 
-> **Prerequisites:** [Docker Compose](https://docs.docker.com/compose/install/) v2, or [tmux](https://github.com/tmux/tmux/wiki/Installing) for the no-Docker path.
+Pick one. Same hermit either way (heartbeat, routines, channels).
+
+**tmux** (fastest onboard). Needs [tmux](https://github.com/tmux/tmux/wiki/Installing).
+
+```
+.claude-code-hermit/bin/hermit-start
+```
+
+`/sandbox` is recommended so Bash is isolated on the host (optional; hermit does not enable it). Add `.claude-code-hermit/bin/hermit-watchdog install` if a dead session should come back. Walkthrough: [Always-On Operations](docs/always-on-ops.md).
+
+**Docker** (isolated, restarts with the daemon). Needs [Docker Compose](https://docs.docker.com/compose/install/) v2.
 
 ```
 /claude-code-hermit:docker-setup
 ```
 
-Generates the Docker scaffolding, builds the image, starts the container, and walks through auth and channel pairing. The container ships with the hardening baseline (`cap_drop: ALL`, `no-new-privileges`, `pids_limit`). Want stronger isolation? Run [`/docker-security`](docs/docker-security.md) for opt-in LAN containment + DNS allowlist + resource bounds.
-
-See [Always-On Setup](docs/always-on.md) for the full guide. Want always-on without Docker? See [Always-On Operations](docs/always-on-ops.md) for bare tmux.
+Generates the Docker scaffolding, builds the image, starts the container, and walks through auth and channel pairing. The container ships with the hardening baseline (`cap_drop: ALL`, `no-new-privileges`, `pids_limit`). Want stronger isolation? Run [`/docker-security`](docs/docker-security.md) for opt-in LAN containment + DNS allowlist + resource bounds. Walkthrough: [Always-On Setup](docs/always-on.md). Comparison of the two is at the top of that page.
 
 ### Upgrading
 

@@ -1644,9 +1644,16 @@ describe('hermit-routines model contract', () => {
 describe('hermit-routines diff-registration contract', () => {
   const skillContent = read(path.join(SKILLS, 'hermit-routines', 'SKILL.md'));
 
-  test('SKILL.md wires the diff planner into load\'s success path', () => {
-    expect(skillContent).toContain('routines.ts cron-registry plan');
-    expect(skillContent).toContain('routines.ts cron-registry commit');
+  test('SKILL.md wires the arm verbs into load\'s success path', () => {
+    expect(skillContent).toContain('routines.ts arm begin');
+    expect(skillContent).toContain('routines.ts arm commit');
+  });
+
+  // The saving is entirely in this branch: a healthy monitor must cost one script
+  // call and a log line, not a teardown-and-rebuild the operator pays for daily.
+  test('SKILL.md documents the HEALTHY fast path as a full stop', () => {
+    expect(skillContent).toContain('HEALTHY|routines=');
+    expect(skillContent).toContain('**Log that one line and stop.**');
   });
 
   test('load\'s default success path is no longer an unconditional CronList sweep', () => {
@@ -1655,12 +1662,20 @@ describe('hermit-routines diff-registration contract', () => {
 
   test('SKILL.md documents the KEEP-only fast path (no CronList/CronCreate/CronDelete)', () => {
     expect(skillContent).toContain('KEEP:<n>');
-    expect(skillContent).toContain('No `CronList`, no `CronCreate`, no `CronDelete` this run.');
+    expect(skillContent).toContain('No `CronList`, no `CronCreate`, no `CronDelete` this run');
   });
 
   test('SKILL.md documents load --reset as the unconditional escape hatch', () => {
     expect(skillContent).toContain('load --reset');
-    expect(skillContent).toContain('--force');
+    expect(skillContent).toContain('--reset');
+  });
+
+  // The anchor's prompt is what makes tomorrow's fire short-circuit, and the
+  // planner's promptHash is computed over the rendered text — a model-composed
+  // one drifts and re-registers the anchor every day.
+  test('SKILL.md uses the script-rendered anchor prompt verbatim', () => {
+    expect(skillContent).toContain('ANCHOR_PROMPT_BEGIN');
+    expect(skillContent).toContain('ANCHOR_PROMPT_END');
   });
 
   test('SKILL.md documents the boot-id mirror-invalidation mechanism', () => {
@@ -3563,9 +3578,29 @@ describe('heartbeat eval-runner return contract', () => {
     }
   });
 
-  test('SKILL.md reads monitoring_lines/notifications/heartbeat_result from the script, not the subagent', () => {
-    expect(skill).toContain('"monitoring_lines": [...], "notifications": [...], "heartbeat_result"');
+  test('SKILL.md reads appended/notifications/heartbeat_result from the script, not the subagent', () => {
+    expect(skill).toContain('{"appended": <n>, "append_error": "<msg>"?, "notifications": [...], "heartbeat_result"');
     expect(skill).toContain("per the **script's** `heartbeat_result`");
+  });
+
+  // The script appends the monitoring lines itself now. If SKILL.md were to hand
+  // them back to the model again, every tick would re-pay an Edit per line — the
+  // exact per-call cost this verb exists to remove.
+  test('SKILL.md no longer receives monitoring lines to append', () => {
+    expect(skill).not.toContain('monitoring_lines');
+  });
+
+  // `run` and `start` are the two paths the monitor and the daily anchor take on
+  // every wake, so each needs its deterministic half behind one script call.
+  test('SKILL.md run drives the tick verb and marks budget alerts by mark_key', () => {
+    expect(skill).toContain('scripts/heartbeat.ts tick');
+    expect(skill).toContain('--mark-budget-notified <mark_key>');
+  });
+
+  test('SKILL.md start short-circuits on FRESH and commits the task id', () => {
+    expect(skill).toContain('scripts/heartbeat.ts start-check');
+    expect(skill).toContain('scripts/heartbeat.ts start-commit');
+    expect(skill).toContain('FRESH|interval=');
   });
 
   // Issue #690: this guard used to read only heartbeat's two files, so when
