@@ -103,7 +103,10 @@ load_floors() {
 
 # ------------------------------------------------------------ claude code ----
 
-claude_version() { claude --version 2>/dev/null | awk '{print $1}'; }
+# `|| true` inside the pipeline: with `set -o pipefail` a claude that exists but
+# errors (stale npm wrapper, missing node) would otherwise abort the whole
+# installer at the assignment below, silently and with no message.
+claude_version() { { claude --version 2>/dev/null || true; } | awk '{print $1}'; }
 
 ensure_claude() {
   if ! command -v claude >/dev/null 2>&1; then
@@ -120,6 +123,8 @@ ensure_claude() {
 
   local v
   v="$(claude_version)"
+  [ -n "$v" ] \
+    || die "'claude' is on PATH but 'claude --version' failed. Repair or reinstall Claude Code, then re-run: https://code.claude.com/docs/en/setup"
   if [ -n "$CLAUDE_FLOOR" ] && ! ver_ge "$v" "$CLAUDE_FLOOR"; then
     work "claude" "$v is below $CLAUDE_FLOOR, updating..."
     claude update >/dev/null 2>&1 || true
@@ -134,16 +139,24 @@ ensure_claude() {
 
 ensure_bun() {
   local v=""
-  command -v bun >/dev/null 2>&1 && v="$(bun --version 2>/dev/null)"
+  # `|| true`: the assignment follows the final `&&`, so `set -e` applies to it.
+  # A bun on PATH that errors (broken shim, missing glibc) would otherwise abort
+  # the installer with no output at all.
+  command -v bun >/dev/null 2>&1 && v="$(bun --version 2>/dev/null || true)"
 
   if [ -z "$v" ] || { [ -n "$BUN_FLOOR" ] && ! ver_ge "$v" "$BUN_FLOOR"; }; then
     work "bun" "installing..."
     curl -fsSL --max-time 20 https://bun.sh/install | bash >/dev/null 2>&1 \
-      || die "Bun install failed. Install it manually, then re-run: https://bun.sh"
+      || die "Bun install failed. It needs 'unzip', which minimal images often lack. Install unzip, or install Bun manually, then re-run: https://bun.sh"
     export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
     export PATH="$BUN_INSTALL/bin:$PATH"
     v="$(bun --version 2>/dev/null || true)"
     [ -n "$v" ] || die "Bun installed but 'bun' is not on PATH. Open a new shell and re-run."
+    # Same re-verification ensure_claude does: an install that exits 0 without
+    # replacing a below-floor bun must not be reported as success.
+    if [ -n "$BUN_FLOOR" ] && ! ver_ge "$v" "$BUN_FLOOR"; then
+      die "Bun $v is still below the required $BUN_FLOOR after install. Install it manually, then re-run: https://bun.sh"
+    fi
   fi
   ok "bun" "$v"
 }
@@ -159,28 +172,33 @@ ensure_tmux() {
     return
   fi
 
-  local sudo=""
-  if [ "$(id -u)" != "0" ]; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo="sudo"
-    else
-      warn "tmux" "not installed and no sudo; install it yourself for the tmux always-on path"
-      return
-    fi
-  fi
-
-  work "tmux" "installing..."
+  # brew is checked before the sudo gate: it never needs root, so a box with
+  # Homebrew but no `sudo` binary should still get tmux.
   if command -v brew >/dev/null 2>&1; then
+    work "tmux" "installing..."
     brew install tmux >/dev/null 2>&1 || true
-  elif command -v apt-get >/dev/null 2>&1; then
-    $sudo apt-get update -qq >/dev/null 2>&1 || true
-    $sudo apt-get install -y tmux >/dev/null 2>&1 || true
-  elif command -v dnf >/dev/null 2>&1; then
-    $sudo dnf install -y tmux >/dev/null 2>&1 || true
-  elif command -v apk >/dev/null 2>&1; then
-    $sudo apk add tmux >/dev/null 2>&1 || true
-  elif command -v pacman >/dev/null 2>&1; then
-    $sudo pacman -S --noconfirm tmux >/dev/null 2>&1 || true
+  else
+    local sudo=""
+    if [ "$(id -u)" != "0" ]; then
+      if command -v sudo >/dev/null 2>&1; then
+        sudo="sudo"
+      else
+        warn "tmux" "not installed and no sudo; install it yourself for the tmux always-on path"
+        return
+      fi
+    fi
+
+    work "tmux" "installing..."
+    if command -v apt-get >/dev/null 2>&1; then
+      $sudo apt-get update -qq >/dev/null 2>&1 || true
+      $sudo apt-get install -y tmux >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+      $sudo dnf install -y tmux >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+      $sudo apk add tmux >/dev/null 2>&1 || true
+    elif command -v pacman >/dev/null 2>&1; then
+      $sudo pacman -S --noconfirm tmux >/dev/null 2>&1 || true
+    fi
   fi
 
   if command -v tmux >/dev/null 2>&1; then
@@ -193,12 +211,16 @@ ensure_tmux() {
 # ------------------------------------------------------------------ plugin ----
 
 install_plugin() {
-  if claude plugin marketplace list 2>/dev/null | grep -q 'claude-code-hermit'; then
+  # Anchored to the marketplace-name line ("  > claude-code-hermit"). A bare
+  # substring match also hits the "Source: GitHub (owner/claude-code-hermit)"
+  # line, so a fork registered under a different marketplace name would skip the
+  # add and then fail the install below on an unregistered marketplace id.
+  if claude plugin marketplace list 2>/dev/null | grep -qE 'claude-code-hermit[[:space:]]*$'; then
     ok "marketplace" "$MARKETPLACE (already registered)"
   else
     work "marketplace" "adding $MARKETPLACE..."
     claude plugin marketplace add "$MARKETPLACE" >/dev/null 2>&1 \
-      || die "Could not add the marketplace. Check network access to github.com and re-run."
+      || die "Could not add the marketplace. It clones over git, so this needs 'git' installed and network access to github.com. On macOS a missing Xcode CLT makes git prompt instead of run."
     ok "marketplace" "$MARKETPLACE"
   fi
 
@@ -236,18 +258,20 @@ closing_block() {
 
   say "Prerequisites set. Time to hatch your agent:"
   printf '\n'
+  # Not mutually exclusive: a Claude Code this script just installed is by
+  # definition logged out, so the fresh-install path needs the login line too.
   if [ "$CLAUDE_WAS_INSTALLED" = "1" ]; then
     say "    exec \$SHELL"
-    say "    claude \"/claude-code-hermit:hatch\""
-    printf '\n'
-    say "The first reloads your shell so \`claude\` is on PATH."
-  elif ! has_credentials; then
-    say "    claude          # not logged in on this machine? /login first"
-    say "    claude \"/claude-code-hermit:hatch\""
-  else
-    say "    claude \"/claude-code-hermit:hatch\""
   fi
+  if ! has_credentials; then
+    say "    claude          # not logged in on this machine? /login first"
+  fi
+  say "    claude \"/claude-code-hermit:hatch\""
   printf '\n'
+  if [ "$CLAUDE_WAS_INSTALLED" = "1" ]; then
+    say "The first reloads your shell so \`claude\` is on PATH."
+    printf '\n'
+  fi
   rule
 }
 

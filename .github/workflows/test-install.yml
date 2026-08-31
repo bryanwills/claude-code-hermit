@@ -64,6 +64,12 @@ jobs:
           source "$GITHUB_WORKSPACE/scripts/install.sh"
           load_floors
 
+          # load_floors empties both floors on a failed fetch, and ver_ge treats
+          # an empty floor as 0.0.0 — every comparison below would then pass
+          # vacuously. Fail loudly instead of silently asserting nothing.
+          test -n "$CLAUDE_FLOOR" || { echo "could not read CLAUDE_FLOOR"; exit 1; }
+          test -n "$BUN_FLOOR"    || { echo "could not read BUN_FLOOR"; exit 1; }
+
           cv="$(claude --version | awk '{print $1}')"
           bv="$(bun --version)"
           echo "claude=$cv bun=$bv (floors: $CLAUDE_FLOOR / $BUN_FLOOR)"
