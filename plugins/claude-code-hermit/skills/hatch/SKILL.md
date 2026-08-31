@@ -651,7 +651,7 @@ questions: [
     header: "Deployment",
     question: "How will you run hermit?",
     options: [
-      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; add bin/hermit-watchdog install for restarts" },
+      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; add .claude-code-hermit/bin/hermit-watchdog install for restarts" },
       { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
       { label: "Interactive", description: "Just trying it. /session in your terminal" }
     ]
@@ -661,8 +661,8 @@ questions: [
     question: "How do you want to communicate with your agent?",
     options: [
       { label: "Claude app (for now)", description: "Push notifications + Remote Control. Pair Discord or Telegram anytime later." },
-      { label: "Discord", description: "Communicate with your agent via Discord" },
-      { label: "Telegram", description: "Communicate with your agent via Telegram" }
+      { label: "Discord + Remote Control", description: "Communicate with your agent via Discord + Remote Control if available" },
+      { label: "Telegram + Remote Control", description: "Communicate with your agent via Telegram + Remote Control if available" }
     ]
   },
   {
@@ -698,9 +698,9 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-report.ts confirm <PROJECT_ROOT> <<'HERM
 HERMIT_ANSWERS
 ```
 
-Print its output verbatim. Nothing has been written at this point — the preview says so.
+**Write the script's output verbatim as message text before calling `AskUserQuestion`.** The operator cannot see Bash output — the transcript collapses it to "Ran 1 shell command" — so your re-print is the only place the preview exists. Calling `AskUserQuestion` without having written the full table first means the operator approves a configuration they never saw. Do not summarize or narrate around it; emit the table exactly as printed. Nothing has been written at this point — the preview says so.
 
-Ask:
+Then ask:
 
 ```
 questions: [
@@ -745,7 +745,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-report.ts final <PROJECT_ROOT> --deployment <docker|tmux|interactive>
 ```
 
-Print its output verbatim. It reads the written `config.json`, the stamped `hatch-options.json`, and the filesystem — it takes no file list from this session, because a model-composed report can claim a file was written that the operator declined. Anything it could not observe is reported as absent, and a run that never wrote `config.json` is reported as an incomplete hatch rather than a success.
+**Write its output verbatim as message text** — the operator cannot see Bash output (the transcript collapses it), so your re-print is the report. It reads the written `config.json`, the stamped `hatch-options.json`, and the filesystem — it takes no file list from this session, because a model-composed report can claim a file was written that the operator declined. Anything it could not observe is reported as absent, and a run that never wrote `config.json` is reported as an incomplete hatch rather than a success.
 
 `--deployment` is the one thing it cannot read: Quick Turn 3 asks for it and nothing persists it. On the Advanced branch, pass the deployment the operator described, or `interactive` if they didn't say.
 
