@@ -4,7 +4,7 @@
 
 ## Channels Not Responding
 
-- **Not set up yet (local/tmux)?** Run `/claude-code-hermit:channel-setup` — it installs the plugin, writes the token, and guides pairing. Requires [Bun](https://bun.sh).
+- **Not set up yet (local/tmux)?** Type `/claude-code-hermit:channel-setup` in a terminal or the Claude app — it installs the plugin, writes the token, and guides pairing. Requires [Bun](https://bun.sh).
 - Verify Claude Code was started with `--channels`. Check boot script output for `[hermit] Channels: discord`. If hermit-start printed a bun or token warning, that channel was skipped.
 - Check bot token and bot online status.
 - **Stale token in settings.local.json:** If `.claude/settings.local.json` has `DISCORD_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN` in its `env` key, it overrides the token file at `.claude.local/channels/<plugin>/.env`. Remove the token from settings.local.json — it should only live in the channel's `.env` file. `hermit-start` cleans these automatically on boot, but if the token was added manually or by a previous channel plugin setup, it may persist.
@@ -213,5 +213,5 @@ Usually a UID mismatch between the host and the container user. The generated Do
 - For Telegram: ensure `channels.telegram.state_dir` is set and the bot token is in the state directory's `.env` file.
 
 **Local/tmux:**
-- Run `/claude-code-hermit:channel-setup` to verify and repair the full setup (bun, plugin, token, pairing, access.json location).
+- Type `/claude-code-hermit:channel-setup` in a terminal or the Claude app to verify and repair the full setup (bun, plugin, token, pairing, access.json location).
 - Check `hermit-start` output for bun or token warnings — the channel is skipped if either is missing.

@@ -77,7 +77,7 @@ Reply in ≤1500 chars. Use exactly this section structure:
 
 ### Channel availability
 - [channel]: ready (chat id set) [or "not yet paired"]
-(or: No channels configured — run /claude-code-hermit:channel-setup.)
+(or: No channels configured — type /claude-code-hermit:channel-setup in a terminal or the Claude app.)
 
 ### Fragile zones
 - [tag or theme]: [one-line reason]

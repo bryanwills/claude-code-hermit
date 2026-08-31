@@ -7,7 +7,7 @@
 - `/watch session <name>` accepts a glob (`*`, `?`) to match several local sessions at once, showing each match's live status and asking for one confirmation before subscribing to all of them.
 
 ### Changed
-- `/hatch` and `/channel-setup` are operator-invoked only through `disable-model-invocation`, matching `/docker-setup` and `/docker-security` so the model cannot start setup wizards.
+- `/hatch` and `/channel-setup` are operator-invoked only, matching `/docker-setup` and `/docker-security` so the model cannot start setup wizards. Both stay reachable by typing `/name` in a terminal or the Claude app.
 - The domain-hatch continuation marker protocol is removed. Core hatch now prints each pending domain-hatch command for the operator to type instead of invoking it automatically.
 - The daily `heartbeat-restart` fire asks `routines.ts arm anchor` whether anything is actually stale and stops on a `HEALTHY` verdict. A healthy hermit's 4am re-arm no longer tears down and rebuilds a working monitor, so it costs about two model calls instead of eleven to fifteen.
 - `hermit-routines load` is driven by `routines.ts arm begin`/`arm commit`: the script plans the teardown, the Monitor command, the cron diff and the anchor prompt, and the model makes only the `Monitor`/`TaskStop`/`Cron*` calls. It short-circuits on the same `HEALTHY` verdict, which is scoped to the current boot so a monitor left behind by a previous session never reads as live.
@@ -17,7 +17,7 @@
 - `heartbeat.ts alert-state` appends its own monitoring lines to SHELL.md and reports `appended`/`append_error` instead of handing the lines back for the model to apply one edit at a time.
 - The routine and heartbeat monitors, the watchdog and `/hermit-doctor` now share one liveness predicate (`scripts/lib/monitor-health.ts`), so "is this monitor alive" has a single definition. Doctor status strings are unchanged.
 - Weekly review no longer reports dormant skills to the operator; the offer to "archive them" was only ever actionable for a `compiled/` doc. The usage ledger keeps recording skill invocations unchanged, and Claude Code's own `/skill-doctor` is what reports unused skills against their context cost.
-- `/docker-setup` and `/docker-security` are operator-invoked only. Both stay reachable by typing `/name` in a terminal or the Claude app; neither can be triggered by the model or from a Discord/Telegram message, so a running hermit cannot start its own deployment or rewrite its container networking. Asking for either from a channel now gets pointed at the terminal or the Claude app, and the `docker-security` remedies in `/hermit-doctor` say the same instead of a command the hermit can no longer run.
+- `/docker-setup` and `/docker-security` are operator-invoked only, so a running hermit cannot start its own deployment or rewrite its container networking. Both stay reachable by typing `/name` in a terminal or the Claude app. The `docker-security` remedies in `/hermit-doctor` now say the same instead of naming a command the hermit can no longer run.
 - Quick hatch no longer auto-chains into the next skill. It ends at its report like Advanced always has, and the operator runs the printed next steps — which are now numbered, since `/reload-plugins` must go first, and closed with what is not yet running.
 
 ### Fixed

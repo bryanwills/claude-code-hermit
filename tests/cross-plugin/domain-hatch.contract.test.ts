@@ -295,6 +295,11 @@ describe('core side of the contract', () => {
   });
 });
 
+// Only the cross-plugin half lives here. The core-side inventory (which of
+// core's own skills carry the flag) is asserted exactly, not as a subset, by
+// plugins/claude-code-hermit/tests/contracts.test.ts § model-invocable
+// inventory — and this workflow's path filters do not even watch core's
+// non-hatch skill dirs, so a copy here would never fire on an edit to them.
 describe('operator-only wizard contract', () => {
   test('every hatch skill disables model invocation', () => {
     const hatchSkills = [...pluginSlugs(), 'claude-code-hermit']
@@ -303,14 +308,6 @@ describe('operator-only wizard contract', () => {
 
     expect(hatchSkills.length).toBeGreaterThan(0);
     for (const file of hatchSkills) {
-      expect(isModelInvocationDisabled(fs.readFileSync(file, 'utf-8'))).toBe(true);
-    }
-  });
-
-  test('core operator-only wizards disable model invocation', () => {
-    const coreSkills = path.join(PLUGINS_DIR, 'claude-code-hermit', 'skills');
-    for (const skill of ['hatch', 'docker-setup', 'docker-security', 'rc-gate', 'channel-setup']) {
-      const file = path.join(coreSkills, skill, 'SKILL.md');
       expect(isModelInvocationDisabled(fs.readFileSync(file, 'utf-8'))).toBe(true);
     }
   });

@@ -756,7 +756,9 @@ Print its output verbatim. It reads the written `config.json`, the stamped `hatc
 
 ### Hand off pending domain hatches
 
-Applies on **both** Quick and Advanced paths and is the **last** action of the skill. After the report, compare `detected_hermits` from Step 1.5 with `config.json._hermit_versions`. For each detected sibling absent from `_hermit_versions` whose `installPath` contains `skills/hatch/SKILL.md`, print the block below with its command namespace substituted for `<slug>`. Repeat the complete block once per pending sibling. Do not invoke the Skill tool. If none are pending, stop after the report.
+Applies on **both** Quick and Advanced paths and is the **last** action of the skill. After the report, build the pending set from `detected_hermits` (Step 1.5). A sibling is **pending** when a file exists at `<installPath>/skills/hatch/SKILL.md` and its `plugin` was **not** already present in `config.json._hermit_versions` when Step 1 read the config. A hermit activated in Step 3 is always pending: Step 5 stamps its version into `_hermit_versions` without ever running its wizard, so never filter it out on that stamp.
+
+For each pending sibling, print the block below with its `plugin` field substituted for `<slug>` — the bare plugin name, not `id`, which carries an `@marketplace` suffix. Repeat the complete block once per pending sibling. Do not invoke the Skill tool. If none are pending, stop after the report.
 
 ```markdown
 ## ▶ Next step — type this now

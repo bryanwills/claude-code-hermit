@@ -63,7 +63,7 @@ bun <plugin_root>/scripts/evolve-plan.ts .claude-code-hermit --hatch-target=<hat
 
 Parse stdout as JSON (the "plan"). The plan's `errors` array is the **sole error channel** — objects of `{code, message}`:
 
-- If `errors` contains an entry with `code == "no_config"` → report "No config found. Run `/claude-code-hermit:hatch` first." and stop.
+- If `errors` contains an entry with `code == "no_config"` → report "No config found — type `/claude-code-hermit:hatch` first, in a terminal or the Claude app." and stop.
 - Else if `errors` is non-empty (any other code, e.g. `no_hatch_target`) **or** stdout is not valid JSON → report "evolve-plan failed: <joined messages> — re-run or report." and stop. Do not fall back to reading and diffing the files by hand.
 
 **Stale-runtime check (before everything else):** if the plan's `loaded_core_older_than_applied` is `true`, this session loaded an older plugin copy (v`to`) than the version this hermit has already applied (v`from`) — a stale install, not a pending upgrade. Report: "This session is running plugin v<to>, older than this hermit's applied state v<from> — a stale plugin install. hermit-evolve cannot fix it: update the install that resolves to this plugin root, then re-run." **Stop there.** Do not run any other step: Step 7's sibling migrations would apply while Step 9 refuses to stamp, leaving siblings migrated but unstamped and replaying on the next run. Sibling work waits until the install is fixed — sibling stamps stay where they are and re-plan cleanly.
