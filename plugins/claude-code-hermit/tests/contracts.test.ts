@@ -1407,22 +1407,34 @@ describe('hermit-settings channel reachability', () => {
 //
 // disable-model-invocation is a reachability flag, not a security control — the
 // guards above exist because both times it was applied to a machine-invoked
-// skill it silently broke a path. rc-gate is the one sanctioned use: the spawn
-// gate is opened by the operator, nothing programmatic invokes it, and the
-// flag also drops its description from the always-loaded context.
+// skill it silently broke a path.
 //
-// Asserting the whole inventory (rather than rc-gate alone) is what catches the
-// flag spreading to a skill a routine or another skill reaches for.
+// What the flag actually selects is the AUDIENCE, not the authority: a flagged
+// skill stays reachable from a terminal and from the Claude app (both parse a
+// typed `/name`), and becomes unreachable from Discord/Telegram, where a channel
+// message arrives as plain prompt text and the model can only satisfy `/name` by
+// calling the Skill tool. It also drops the skill's description from the
+// always-loaded context.
+//
+// So a skill may carry it only when NOTHING but a human invokes it. Watch for the
+// non-obvious caller: a skill that ends by printing `/other-skill` as a handoff is
+// a Skill-tool caller, because the harness does not parse an emitted slash command
+// — the model delegates. hatch used to chain /docker-setup that way; that chain was
+// removed, which is what freed docker-setup to carry the flag.
+//
+// Asserting the whole inventory (rather than the flagged skills alone) is what
+// catches the flag spreading to a skill a routine or another skill reaches for.
 // ============================================================
 
 describe('model-invocable inventory', () => {
-  test('rc-gate is the only skill with model invocation disabled', () => {
+  test('only the operator-invoked wizards have model invocation disabled', () => {
+    // Sorted: readdirSync returns directory order, which is arbitrary.
     const flagged = fs.readdirSync(SKILLS).filter((dir) => {
       const skillPath = path.join(SKILLS, dir, 'SKILL.md');
       return fs.existsSync(skillPath)
         && isModelInvocationDisabled(fs.readFileSync(skillPath, 'utf8'));
-    });
-    expect(flagged).toEqual(['rc-gate']);
+    }).sort();
+    expect(flagged).toEqual(['docker-security', 'docker-setup', 'rc-gate']);
   });
 });
 

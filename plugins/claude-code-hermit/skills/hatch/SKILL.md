@@ -701,7 +701,6 @@ Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `cha
 **Derived values from this turn (used in the confirm bundle and Step 5 overlay):**
 - `permission_mode`: `auto` (same default for both Docker and non-Docker deployments). Generally available to all users across subscription plans and API usage; supported models and provider configuration can vary. If Claude reports it unavailable for the current selection, choose a supported model or run `/hermit-settings permissions` to select another mode.
 - Deny pattern profile: Docker → hardened (default + always_on), else → minimal (default only). Applied at Step 9 silently.
-- `auto-chain target`: see "Quick — auto-chain at end of Step 10" table.
 
 ### Quick Turn 4 — OPERATOR.md questionnaire (run "5a. OPERATOR.md onboarding" verbatim)
 
@@ -758,26 +757,6 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
 | Step 9c | Artifact publish permission | same as Advanced — `artifact-allow` applied silently (skip entirely if all three `artifacts.*` are `false`) and `artifacts.publish_authorized` set to `true` in config |
 
-### Quick — auto-chain at end of Step 10
-
-**Skip this entire auto-chain if `.claude-code-hermit/state/hatch-resume.json` exists.** A domain hatch is pending, and the "Resume pending domain hatch" terminus below will drive continuation instead — the two continuations must never both fire (whichever runs first drops the other). When a marker is present, emit no auto-chain slash command and fall straight through to the terminus.
-
-After Step 10 prints the standard report, output the next slash command on its own line so Claude Code's harness can pick it up and run it. Map from Turn 3's deployment + channel:
-
-| Deployment | Channel | Output |
-|---|---|---|
-| Docker | any | `/claude-code-hermit:docker-setup quick` |
-| tmux | configured | First print boot command `.claude-code-hermit/bin/hermit-start`, then `/claude-code-hermit:channel-setup` |
-| tmux | none | Print boot command `.claude-code-hermit/bin/hermit-start` (no skill chain) |
-| Interactive | configured | `/claude-code-hermit:channel-setup`, then `/claude-code-hermit:session` |
-| Interactive | none | `/claude-code-hermit:session` |
-
-The `quick` positional arg passed to `docker-setup` tells it to skip its setup-mode gate and run Quick directly (same `quick` arg the operator can use manually). For chained skills with no `quick` arg (channel-setup, session), they run their normal interactive flows.
-
-**Operator can interrupt** before the chained skill executes by hitting Esc — at which point they can re-run any of the printed slash commands later.
-
----
-
 ### 10. Report results
 
 ```bash
@@ -788,13 +767,13 @@ Print its output verbatim. It reads the written `config.json`, the stamped `hatc
 
 `--deployment` is the one thing it cannot read: Quick Turn 3 asks for it and nothing persists it. On the Advanced branch, pass the deployment the operator described, or `interactive` if they didn't say.
 
-**Quick-mode report adjustment**: collapse "Pick how you'll run hermit" to one line confirming Turn 3's deployment + channel, then emit the auto-chain slash command(s) per the mapping in "Quick — auto-chain at end of Step 10". Keep the "Anytime:" block unchanged.
+**Quick-mode report adjustment**: add one line above the report confirming Turn 3's deployment + channel (Quick never showed them back). Keep the script's own output — including the "Next steps" and "Anytime:" blocks — exactly as printed: it is the operator's handoff, and nothing runs on its own after this.
 
 ---
 
 ### Resume pending domain hatch
 
-Applies on **both** Quick and Advanced paths and is the **last** action of the skill. On Quick, when a marker is present the Step-10 auto-chain is skipped (see above), so this terminus is the sole continuation — the two never both fire.
+Applies on **both** Quick and Advanced paths and is the **last** action of the skill.
 
 1. Attempt to read `.claude-code-hermit/state/hatch-resume.json`. If the file does not exist or is empty, stop — no domain hatch is pending.
 2. Read the `skill` field (e.g. `"laravel-forge-hermit:hatch"`).

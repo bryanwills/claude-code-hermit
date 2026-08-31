@@ -560,20 +560,20 @@ function checkDockerSecurity(p: DoctorPaths = PATHS) {
     );
 
     if (!declared && !overlayPresent) {
-      return { id: 'docker-security', status: 'ok', detail: 'not configured (run /docker-security to enable)' };
+      return { id: 'docker-security', status: 'ok', detail: 'not configured (type /docker-security in a terminal or the Claude app to enable)' };
     }
     if (declared && !overlayPresent) {
       return {
         id: 'docker-security',
         status: 'warn',
-        detail: 'posture declared in config but docker-compose.security.yml is missing — re-run /docker-security',
+        detail: 'posture declared in config but docker-compose.security.yml is missing — ask your operator to re-run /docker-security from a terminal or the Claude app',
       };
     }
     if (!declared && overlayPresent) {
       return {
         id: 'docker-security',
         status: 'warn',
-        detail: 'overlay present but no posture declared in config — likely a manual edit; re-run /docker-security to reconcile',
+        detail: 'overlay present but no posture declared in config — likely a manual edit; ask your operator to re-run /docker-security from a terminal or the Claude app to reconcile',
       };
     }
 
@@ -620,7 +620,7 @@ function checkDockerSecurity(p: DoctorPaths = PATHS) {
       return {
         id: 'docker-security',
         status: 'fail',
-        detail: 'hermit service has ports: but uses network_mode:service:hermit-netguard — Docker will reject this. Re-run /docker-security → "Move ports to netguard", then delete the ports: block from docker-compose.hermit.yml.',
+        detail: 'hermit service has ports: but uses network_mode:service:hermit-netguard — Docker will reject this. Ask your operator to re-run /docker-security from a terminal or the Claude app → "Move ports to netguard", then delete the ports: block from docker-compose.hermit.yml.',
       };
     }
 
@@ -659,7 +659,7 @@ function checkDockerSecurity(p: DoctorPaths = PATHS) {
               return {
                 id: 'docker-security',
                 status: 'warn',
-                detail: `overlay subnet ${overlaySubnet} overlaps Docker network "${net}" (${subnet}). Re-run /docker-security to auto-pick a fresh subnet.`,
+                detail: `overlay subnet ${overlaySubnet} overlaps Docker network "${net}" (${subnet}). Ask your operator to re-run /docker-security from a terminal or the Claude app to auto-pick a fresh subnet.`,
               };
             }
           }
