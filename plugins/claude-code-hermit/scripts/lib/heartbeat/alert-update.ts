@@ -11,9 +11,13 @@
 // HEARTBEAT_OK. Only a genuinely unparseable input payload exits 1 (unchanged
 // from before this refactor).
 //
-// On success, prints one JSON line on stdout: the monitoring lines and
-// operator notifications derived from this tick's transitions, plus the
-// derived heartbeat_result — so side effects are gated on a durable write.
+// On success, appends this tick's monitoring lines to SHELL.md itself and prints
+// one JSON line on stdout: how many landed, the operator notifications derived
+// from this tick's transitions, and the derived heartbeat_result — so side
+// effects are gated on a durable write. The lines were previously handed back for
+// the model to append one Edit at a time; nothing about that needed a model, and
+// each Edit was a full-context call. Sending stays with the caller, which owns the
+// channel.
 //
 // The eval JSON is read from stdin (not argv) so free-text alert content can't
 // break shell quoting.
@@ -27,6 +31,7 @@ import {
 } from '../alert-state';
 import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from '../time';
 import { readSettledConfig } from '../config-read';
+import { appendShellLine } from '../md-write';
 
 type Json = any;
 
@@ -224,8 +229,22 @@ function apply(payloadJson: string): void {
   const wrote = writeAlertState(stateFile, updated);
   if (!wrote) process.exit(0); // fail-safe: no durable write → emit no side effects
 
+  // Ordered, after the durable write. Every failure mode here is file-level (SHELL.md
+  // unreadable, no ## Monitoring section, write refused), so the first error is the
+  // whole story and retrying the remaining lines would only repeat it. Reported
+  // in-band rather than thrown: alert-state.json is already committed, and the
+  // notifications below matter more than the audit trail.
+  let appended = 0;
+  let appendError: string | null = null;
+  for (const line of result.monitoringLines) {
+    appendError = appendShellLine(path.join(stateDir, 'sessions'), 'Monitoring', line);
+    if (appendError) break;
+    appended++;
+  }
+
   process.stdout.write(JSON.stringify({
-    monitoring_lines: result.monitoringLines,
+    appended,
+    ...(appendError ? { append_error: appendError } : {}),
     notifications: result.notifications,
     // Never OK when a structured pending decision couldn't be verified this tick.
     heartbeat_result: hasStructuredReadFailure ? 'ALERT' : result.heartbeatResult,

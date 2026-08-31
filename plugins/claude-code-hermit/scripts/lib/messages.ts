@@ -167,6 +167,21 @@ export const BUDGET: Localized<BudgetMessages> = {
   },
 };
 
+// ---------- heartbeat tick (lib/heartbeat/tick.ts) ----------
+
+export interface HeartbeatMessages {
+  waitingTimeout(timeout: string): string;
+}
+
+export const HEARTBEAT: Localized<HeartbeatMessages> = {
+  en: {
+    waitingTimeout: (timeout) => `Waiting timeout reached after ${timeout} — session returning to idle.`,
+  },
+  'pt-PT': {
+    waitingTimeout: (timeout) => `Tempo de espera esgotado ao fim de ${timeout} — a sessão volta a ficar inativa.`,
+  },
+};
+
 // ---------- auto-mode denial (permission-denied-notify.ts) ----------
 // `maintainer*` provides the technical frame for the operator who owns the
 // maintainer channel / SHELL.md Findings. `maintainerSuppressed` reports the

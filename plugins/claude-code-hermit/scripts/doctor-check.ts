@@ -31,6 +31,7 @@ import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
 import { readJson } from './lib/cli';
 import { findResident } from './lib/session-registry';
+import { monitorFreshness } from './lib/monitor-health';
 
 type Json = any;
 
@@ -1376,12 +1377,18 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
       }
     } catch { /* missing or unparseable */ }
 
-    const trusted = lastPeekAt !== null && (startedAt === null || lastPeekAt >= startedAt);
+    const health = monitorFreshness(
+      startedAt === null ? null : new Date(startedAt).toISOString(),
+      lastPeekAt === null ? null : new Date(lastPeekAt).toISOString(),
+      threshold / 1000,
+      STARTUP_GRACE_MS / 1000,
+      now,
+    );
 
-    if (trusted) {
+    if (health.reason === 'fresh' || health.reason === 'stale') {
       const ageMs = now - lastPeekAt!;
       const tickStr = `${Math.round(ageMs / 60000)}m ago`;
-      if (ageMs > threshold) {
+      if (!health.fresh) {
         return {
           id: 'heartbeat',
           status: 'fail',
@@ -1393,7 +1400,7 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
 
     // No trustworthy tick. Flag once the monitor has had longer than the startup
     // grace to write its first one; otherwise it is still warming up.
-    if (startedAt !== null && (now - startedAt) >= STARTUP_GRACE_MS) {
+    if (!health.fresh) {
       const tickStr = lastPeekAt !== null ? `${Math.round((now - lastPeekAt) / 60000)}m ago (predates current monitor — stale)` : 'never';
       return {
         id: 'heartbeat',
@@ -1467,12 +1474,18 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
       }
     } catch { /* missing or unparseable */ }
 
-    const trusted = lastPeekAt !== null && (startedAt === null || lastPeekAt >= startedAt);
+    const health = monitorFreshness(
+      startedAt === null ? null : new Date(startedAt).toISOString(),
+      lastPeekAt === null ? null : new Date(lastPeekAt).toISOString(),
+      threshold / 1000,
+      STARTUP_GRACE_MS / 1000,
+      now,
+    );
 
-    if (trusted) {
+    if (health.reason === 'fresh' || health.reason === 'stale') {
       const ageMs = now - lastPeekAt!;
       const tickStr = `${Math.round(ageMs / 60000)}m ago`;
-      if (ageMs > threshold) {
+      if (!health.fresh) {
         return {
           id: 'routine-monitor',
           status: 'fail',
@@ -1482,7 +1495,7 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
       return { id: 'routine-monitor', status: 'ok', detail: `routine-monitor: ticking (last tick ${tickStr})` };
     }
 
-    if (startedAt !== null && (now - startedAt) >= STARTUP_GRACE_MS) {
+    if (!health.fresh) {
       const tickStr = lastPeekAt !== null ? `${Math.round((now - lastPeekAt) / 60000)}m ago (predates current monitor — stale)` : 'never';
       return {
         id: 'routine-monitor',
