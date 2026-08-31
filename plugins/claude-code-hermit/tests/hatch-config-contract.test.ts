@@ -38,7 +38,7 @@ describe('hatch-config.ts', () => {
     const answers = {
       project_name: 'my-project',
       activated_hermit: {
-        slug: 'claude-code-dev-hermit', version: '9.9.9',
+        slug: 'claude-code-dev-hermit',
         boot_skill: '/claude-code-dev-hermit:dev-boot',
       },
       agent_name: 'Aria', language: 'en', timezone: 'Europe/London', sign_off: 'Aria out.',
@@ -56,7 +56,7 @@ describe('hatch-config.ts', () => {
       agent_name: 'Aria', language: 'en', timezone: 'Europe/London', sign_off: 'Aria out.',
       escalation: 'balanced', operator_profile: 'technical', remote: true, idle_behavior: 'discover', permission_mode: 'auto',
       boot_skill: '/claude-code-dev-hermit:dev-boot',
-      _hermit_versions: { 'claude-code-hermit': CORE_VERSION, 'claude-code-dev-hermit': '9.9.9' },
+      _hermit_versions: { 'claude-code-hermit': CORE_VERSION },
       routines: [
         ...template.routines,
         { id: 'morning', schedule: '30 8 * * *', skill: 'claude-code-hermit:brief --morning', enabled: true, run_during_waiting: true },
@@ -116,7 +116,7 @@ describe('hatch-config.ts', () => {
       agent_name: 'Aria2',
       routines: { enabled: true, morning_time: '09:00', evening_time: '21:00' },
       channels: { discord: { allowed_users: ['999'] } },
-      activated_hermit: { slug: 'claude-code-dev-hermit', version: '2.0.0', boot_skill: '/claude-code-dev-hermit:dev-boot' },
+      activated_hermit: { slug: 'claude-code-dev-hermit', boot_skill: '/claude-code-dev-hermit:dev-boot' },
     };
     const r = await runHatchConfig(dir, answers, true);
     expect(r.exitCode).toBe(0);
@@ -126,9 +126,9 @@ describe('hatch-config.ts', () => {
     expect(out.foo_custom).toBe(true);
     expect(out.push_notifications).toBe(false);
 
-    // _hermit_versions: not advanced, new sibling added since it was absent
+    // _hermit_versions: not advanced; activated sibling is not stamped by core
     expect(out._hermit_versions['claude-code-hermit']).toBe('1.0.0');
-    expect(out._hermit_versions['claude-code-dev-hermit']).toBe('2.0.0');
+    expect(out._hermit_versions['claude-code-dev-hermit']).toBeUndefined();
 
     // channels: discord field-merged (dm_channel_id preserved, allowed_users updated),
     // mycustom + primary fully preserved
@@ -222,18 +222,31 @@ describe('hatch-config.ts', () => {
     expect(fs.readFileSync(path.join(hermit, 'config.json'), 'utf8')).toBe(malformed);
   });
 
-  test('malformed activated_hermit (missing slug or version) is refused, no file written', async () => {
+  test('malformed activated_hermit (missing or empty slug) is refused, no file written', async () => {
     for (const activated_hermit of [
       { version: '1.2.3' },                       // missing slug
-      { slug: 'x' },                              // missing version
       { slug: '', version: '1.2.3' },             // empty slug
-      { slug: 'x', version: 42 },                 // non-string version
     ]) {
       const dir = freshDir();
       const r = await runHatchConfig(dir, { project_name: 'x', activated_hermit });
       expect(r.exitCode).not.toBe(0);
       expect(fs.existsSync(configPathFor(dir))).toBe(false);
     }
+  });
+
+  test('activated_hermit with a stray version key is tolerated and not stamped', async () => {
+    const dir = freshDir();
+    const r = await runHatchConfig(dir, {
+      project_name: 'x',
+      activated_hermit: {
+        slug: 'claude-code-dev-hermit', version: '9.9.9',
+        boot_skill: '/claude-code-dev-hermit:dev-boot',
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    const out = JSON.parse(fs.readFileSync(configPathFor(dir), 'utf8'));
+    expect(out._hermit_versions).toEqual({ 'claude-code-hermit': CORE_VERSION });
+    expect(out.boot_skill).toBe('/claude-code-dev-hermit:dev-boot');
   });
 
   test('null channels payload is refused cleanly, not crashed', async () => {

@@ -8,6 +8,7 @@
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
 
 ### Fixed
+- Activating a domain hermit during core `/hatch` no longer pre-stamps its `_hermit_versions` entry, so the domain plugin's own hatch preflight offers the full wizard instead of a misleading re-verify (#902).
 - `/hermit-doctor` and the watchdog now compare a monitor's registration against `state/.boot-id`, so one left behind by a previous boot is reported and re-armed instead of reading healthy on its last pre-crash tick for up to 90 minutes. This also covers routines in `croncreate-fallback` mode, where the boot id is the only available evidence, and interactive (`--no-tmux`) starts now stamp the marker so the check works there too.
 - `/hatch` now supplies a description for every `AskUserQuestion` option in both branches, so the identity batch and the OPERATOR.md questionnaire no longer fail with `Invalid tool parameters`.
 - The tmux next step in `hatch-report.ts` now prefixes `.claude-code-hermit/bin/hermit-start` with `!`, so it can run directly in the current Claude Code session.
