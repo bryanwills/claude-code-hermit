@@ -6,16 +6,16 @@
 // per-plugin path filters, and a per-plugin copy would have to be remembered
 // five times.
 //
-// Discovery is derived from the filesystem. The two hardcoded lists this
-// replaces (hatch-resume-contract's DOMAIN_SLUGS, hatch-options-contract's
-// single dev-hermit check) both went stale when a fifth plugin shipped, so a
-// sixth must be covered the day it lands, without anyone updating a list.
+// Discovery is derived from the filesystem. Earlier hardcoded lists went stale
+// when a fifth plugin shipped, so a sixth must be covered the day it lands
+// without anyone updating a list.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { extractSiblingMarker, closingMarkerFor } from '../../plugins/claude-code-hermit/scripts/evolve-plan';
+import { isModelInvocationDisabled } from '../../plugins/claude-code-hermit/tests/helpers/skill-frontmatter';
 
 const REPO_ROOT = path.resolve(import.meta.dir, '../..');
 const PLUGINS_DIR = path.join(REPO_ROOT, 'plugins');
@@ -281,10 +281,34 @@ describe('core side of the contract', () => {
     expect(hatch).not.toContain('"Bash(.claude-code-hermit/bin/hermit-run domain-hatch');
   });
 
+  test('core hatch keys "already initialized" on config.json', () => {
+    const hatch = fs.readFileSync(path.join(PLUGINS_DIR, 'claude-code-hermit', 'skills', 'hatch', 'SKILL.md'), 'utf-8');
+    expect(hatch).toContain('.claude-code-hermit/config.json');
+    expect(hatch).toContain('already initialized');
+  });
+
   test('the marker parser stays single-sourced in evolve-plan', () => {
     const block = fs.readFileSync(path.join(coreScripts, 'lib', 'domain-hatch', 'block.ts'), 'utf-8');
     expect(block).toContain("from '../../evolve-plan'");
     const evolvePlan = fs.readFileSync(path.join(coreScripts, 'evolve-plan.ts'), 'utf-8');
     expect(evolvePlan).toMatch(/export \{[^}]*isAmbiguousBlock/);
+  });
+});
+
+// Only the cross-plugin half lives here. The core-side inventory (which of
+// core's own skills carry the flag) is asserted exactly, not as a subset, by
+// plugins/claude-code-hermit/tests/contracts.test.ts § model-invocable
+// inventory — and this workflow's path filters do not even watch core's
+// non-hatch skill dirs, so a copy here would never fire on an edit to them.
+describe('operator-only wizard contract', () => {
+  test('every hatch skill disables model invocation', () => {
+    const hatchSkills = [...pluginSlugs(), 'claude-code-hermit']
+      .map((slug) => path.join(PLUGINS_DIR, slug, 'skills', 'hatch', 'SKILL.md'))
+      .filter((file) => fs.existsSync(file));
+
+    expect(hatchSkills.length).toBeGreaterThan(0);
+    for (const file of hatchSkills) {
+      expect(isModelInvocationDisabled(fs.readFileSync(file, 'utf-8'))).toBe(true);
+    }
   });
 });

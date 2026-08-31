@@ -33,7 +33,7 @@ After install, run `/feed-hermit:hatch` in the target project. The core hermit (
 
 ## Hatch target routing
 
-`/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight feed-hermit`; core's `scripts/domain-hatch.ts` resolves the target and stamps `hatch-options.json`. Step 5 records any operator override with `domain-hatch ensure-target feed-hermit --target <choice>` and appends the block with `domain-hatch sync-block feed-hermit`. If core hatch hasn't run, the skill offers to run it first via the domain-hatch continuation protocol (writes `state/hatch-resume.json`, invokes `/claude-code-hermit:hatch`, which returns here).
+`/hatch` Step 1 runs `.claude-code-hermit/bin/hermit-run domain-hatch preflight feed-hermit`; core's `scripts/domain-hatch.ts` resolves the target and stamps `hatch-options.json`. Step 5 records any operator override with `domain-hatch ensure-target feed-hermit --target <choice>` and appends the block with `domain-hatch sync-block feed-hermit`. If core hatch hasn't run, the skill prints `/claude-code-hermit:hatch` for the operator to type, then stops. After core finishes, the operator re-runs `/feed-hermit:hatch`.
 
 ## Data ownership
 
