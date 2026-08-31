@@ -106,7 +106,10 @@ function readTemplate(): Json {
 
 export function renderConfirm(answers: Json): string {
   const t = readTemplate();
-  const row = (label: string, value: string) => `| **${label}** | ${value} |`;
+  // Free-text answers (Other) can carry `|` or newlines, which would split the
+  // GFM table into extra cells/rows — neutralize just those two.
+  const cell = (v: string) => v.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  const row = (label: string, value: string) => `| **${label}** | ${cell(value)} |`;
   const def = (label: string, value: string) => row(label, `${value} *(default)*`);
   const out: string[] = ['## Hatch preview', '', '| | |', '|---|---|'];
 
@@ -147,7 +150,8 @@ export function renderConfirm(answers: Json): string {
   const infra = (t.routines ?? [])
     .filter((r: Json) => r.enabled !== false && !['heartbeat-restart', 'scheduled-checks'].includes(r.id))
     .map((r: Json) => r.id.replace(/-/g, ' '));
-  const briefs = answers.routines?.enabled === false ? [] : ['briefs 08:30 + 22:30'];
+  const briefs = answers.routines?.enabled === false ? []
+    : [`briefs ${answers.routines?.morning_time ?? '08:30'} + ${answers.routines?.evening_time ?? '22:30'}`];
   if (briefs.length || infra.length) out.push(row('Routines', [...briefs, ...infra].join(' · ')));
   if (t.push_notifications !== undefined) {
     let notifications = 'push off';
@@ -196,7 +200,13 @@ export function renderFinal(o: Observed, deployment: string): string {
   // fix is one message away. (Filesystem-observed, never a remembered file
   // list; git repo absence is not warned — existing projects legitimately vary.)
   const missing: string[] = [];
-  if (!o.binScripts.length) missing.push('`.claude-code-hermit/bin/` scripts');
+  // Compare against the shipped template set, not just "empty": a partial
+  // scaffold (missing hermit-run, hermit-update, ...) must surface too.
+  // Operator add-ons in bin/ are fine — only absences are reported.
+  let expectedBin: string[] = [];
+  try { expectedBin = fs.readdirSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin')); } catch { /* no template dir — skip the check */ }
+  const missingBin = expectedBin.filter(b => !o.binScripts.includes(b));
+  if (missingBin.length) missing.push(`\`.claude-code-hermit/bin/\` scripts (${missingBin.join(', ')})`);
   if (!o.claudeBlock) missing.push('CLAUDE session-discipline block');
   if (!o.gitignore) missing.push('`.gitignore` hermit entries');
   if (!o.worktreeinclude) missing.push('`.worktreeinclude` managed block');

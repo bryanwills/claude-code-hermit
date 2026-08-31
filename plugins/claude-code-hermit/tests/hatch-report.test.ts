@@ -31,7 +31,9 @@ function hatched(o: HatchedOpts = {}): string {
   const hermit = path.join(root, '.claude-code-hermit');
   fs.mkdirSync(path.join(hermit, 'state'), { recursive: true });
   fs.mkdirSync(path.join(hermit, 'bin'), { recursive: true });
-  for (const b of ['hermit-start', 'hermit-stop', 'hermit-status']) {
+  // The full shipped set: renderFinal warns on any template bin script that is
+  // absent, so a fixture with a partial set would read as a broken scaffold.
+  for (const b of fs.readdirSync(path.join(import.meta.dir, '..', 'state-templates', 'bin'))) {
     fs.writeFileSync(path.join(hermit, 'bin', b), '#!/bin/sh\n');
   }
   fs.writeFileSync(path.join(hermit, 'config.json'), JSON.stringify({
@@ -85,6 +87,12 @@ describe('final reports disk truth, not a remembered file list', () => {
   test('a declined permissions merge surfaces as a warning', () => {
     const root = hatched({ claudeTarget: 'CLAUDE.md', gitignore: true, worktreeinclude: true, settings: null });
     expect(renderFinal(observe(root), 'tmux')).toMatch(/Not present:.*permissions/);
+  });
+
+  test('a partial bin scaffold names the missing scripts', () => {
+    const root = hatched({ claudeTarget: 'CLAUDE.md', gitignore: true, worktreeinclude: true, settings: 'local' });
+    fs.rmSync(path.join(root, '.claude-code-hermit', 'bin', 'hermit-run'));
+    expect(renderFinal(observe(root), 'tmux')).toMatch(/Not present:.*bin.*hermit-run/);
   });
 
   test('a skipped git init is not warned about', () => {
