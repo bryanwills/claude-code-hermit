@@ -63,41 +63,38 @@ function hatched(o: HatchedOpts = {}): string {
 }
 
 describe('final reports disk truth, not a remembered file list', () => {
-  test('a fully-completed hatch reports every artifact present', () => {
+  test('a fully-completed hatch shows no warnings and names the agent', () => {
     const root = hatched({ claudeTarget: 'CLAUDE.local.md', gitignore: true, worktreeinclude: true, settings: 'local', git: true });
     const out = renderFinal(observe(root), 'docker');
-    expect(out).toContain('CLAUDE.local.md');
-    expect(out).toContain('hermit entries present');
-    expect(out).toContain('managed block present');
-    expect(out).toContain('.claude/settings.local.json');
-    expect(out).toContain('Git repo:');
+    expect(out).toContain('Atlas is hatched');
+    expect(out).not.toContain('Not present');
   });
 
-  test('a declined .gitignore append reports as not present, never as created', () => {
-    const root = hatched({ claudeTarget: 'CLAUDE.local.md', gitignore: false, settings: 'local' });
+  test('a declined .gitignore append surfaces as a warning, never as created', () => {
+    const root = hatched({ claudeTarget: 'CLAUDE.local.md', gitignore: false, worktreeinclude: true, settings: 'local' });
     const out = renderFinal(observe(root), 'interactive');
-    expect(out).toMatch(/\.gitignore:\s+not present/);
+    expect(out).toMatch(/Not present:.*\.gitignore/);
     expect(out).not.toContain('Created');
   });
 
-  test('a declined .worktreeinclude reports as not present', () => {
-    const root = hatched({ worktreeinclude: false, settings: 'local' });
-    expect(renderFinal(observe(root), 'tmux')).toMatch(/\.worktreeinclude:\s+not present/);
+  test('a declined .worktreeinclude surfaces as a warning', () => {
+    const root = hatched({ claudeTarget: 'CLAUDE.md', gitignore: true, worktreeinclude: false, settings: 'local' });
+    expect(renderFinal(observe(root), 'tmux')).toMatch(/Not present:.*\.worktreeinclude/);
   });
 
-  test('a declined permissions merge reports no hermit permissions found', () => {
-    const root = hatched({ settings: null });
-    expect(renderFinal(observe(root), 'tmux')).toContain('no hermit permissions found');
+  test('a declined permissions merge surfaces as a warning', () => {
+    const root = hatched({ claudeTarget: 'CLAUDE.md', gitignore: true, worktreeinclude: true, settings: null });
+    expect(renderFinal(observe(root), 'tmux')).toMatch(/Not present:.*permissions/);
   });
 
-  test('a skipped git init reports no repo', () => {
-    const root = hatched({ git: false });
-    expect(renderFinal(observe(root), 'interactive')).toMatch(/Git repo:\s+not present/);
+  test('a skipped git init is not warned about', () => {
+    const root = hatched({ claudeTarget: 'CLAUDE.md', gitignore: true, worktreeinclude: true, settings: 'local', git: false });
+    expect(renderFinal(observe(root), 'interactive')).not.toContain('Not present');
   });
 
-  test('a "keep" on the CLAUDE block still finds the existing marker', () => {
-    const root = hatched({ claudeTarget: 'CLAUDE.md' });
-    expect(renderFinal(observe(root), 'tmux')).toContain('CLAUDE.md');
+  test('a "keep" on the CLAUDE block still finds the existing marker (no warning)', () => {
+    const root = hatched({ claudeTarget: 'CLAUDE.md', gitignore: true, worktreeinclude: true, settings: 'local' });
+    expect(renderFinal(observe(root), 'tmux')).not.toMatch(/Not present:.*CLAUDE/);
   });
 
   test('an aborted hatch (no config.json) reports failure, not success', () => {
@@ -105,7 +102,7 @@ describe('final reports disk truth, not a remembered file list', () => {
     fs.mkdirSync(path.join(root, '.claude-code-hermit'), { recursive: true });
     const out = renderFinal(observe(root), 'docker');
     expect(out).toContain('did not complete');
-    expect(out).not.toContain('Autonomous agent initialized');
+    expect(out).not.toContain('is hatched');
   });
 });
 
@@ -138,26 +135,34 @@ describe('final next-steps keys off deployment', () => {
   test('CLI final exits 0 and prints the report', async () => {
     const r = await runScript('hatch-report.ts', { args: ['final', hatched(), '--deployment', 'tmux'] });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('Autonomous agent initialized');
+    expect(r.stdout).toContain('is hatched');
   });
 });
 
 describe('confirm previews intent, before anything is written', () => {
-  test('renders the operator choices and says nothing is written yet', () => {
+  test('renders the operator choices verbatim and says nothing is written yet', () => {
     const out = renderConfirm({
       agent_name: 'Atlas', language: 'pt', timezone: 'Europe/Lisbon',
       deployment: 'docker', channel: 'discord', hatch_target: 'local',
     });
     expect(out).toContain('Atlas');
-    expect(out).toContain('docker');
-    expect(out).toContain('discord');
+    expect(out).toContain('Docker always-on');
+    expect(out).toContain('Discord — pairing comes after setup');
     expect(out).toContain('Nothing has been written yet');
   });
 
-  test('a skipped agent name does not render as undefined', () => {
+  test('defaults come from the shipped template, tagged as defaults', () => {
+    const out = renderConfirm({ deployment: 'tmux' });
+    // sonnet is the template's model; a template change should change this test's
+    // fixture expectation only via the template itself.
+    expect(out).toMatch(/Model \/ Effort.*sonnet.*\(default\)/);
+    expect(out).toMatch(/Permission mode.*auto.*\(default\)/);
+  });
+
+  test('a skipped agent name renders no Name row and never "undefined"', () => {
     const out = renderConfirm({ language: 'en', deployment: 'tmux' });
     expect(out).not.toContain('undefined');
-    expect(out).toContain('no name');
+    expect(out).not.toContain('Name');
   });
 
   test('CLI confirm reads the payload from stdin', async () => {

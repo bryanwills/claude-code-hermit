@@ -5,12 +5,14 @@
 #   curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 #
 # Provisions what a bare box needs (Claude Code, Bun, tmux), registers the
-# marketplace and installs the plugin at local scope in the current directory,
-# then stops. It does NOT run /hatch: that is an interactive model turn with no
-# non-interactive equivalent.
+# marketplace and installs the plugin at local scope in the current directory.
+# When a controlling terminal is available it then launches Claude Code with
+# /hatch after a short countdown (Ctrl+C falls back to printed instructions);
+# without one (CI, ssh without -t, provisioning) it prints the instructions.
 #
 # No flags, no prompts by design. Under `curl | bash` the script itself is on
-# stdin, so any `read` would either hang or eat script text.
+# stdin, so any `read` from stdin would either hang or eat script text — which
+# is why the launch redirects claude's stdin from /dev/tty instead.
 #
 # Kept bash 3.2 compatible: macOS ships bash 3.2 as /bin/bash, so no associative
 # arrays, no `readarray`, no `${var^^}`.
@@ -275,6 +277,35 @@ closing_block() {
   rule
 }
 
+# The countdown launch needs two things: /dev/tty must open (no controlling
+# terminal in CI / `ssh host 'curl|bash'` / provisioning), and stdout or stderr
+# must still be a terminal (CI pipes both through tee, and a runner where
+# /dev/tty happens to open must not hang on an interactive claude).
+can_launch() {
+  { : </dev/tty; } 2>/dev/null || return 1
+  [ -t 1 ] || [ -t 2 ]
+}
+
+hatch_countdown() {
+  printf '\n'
+  rule
+  say "Prerequisites set. Time to hatch your agent."
+  if [ "$CLAUDE_WAS_INSTALLED" = "1" ]; then
+    say "(afterwards, open a new shell so 'claude' is on your PATH)"
+  fi
+  if ! has_credentials; then
+    say "(you'll be asked to log in first)"
+  fi
+  printf '\n'
+  trap 'printf "\n"; trap - INT; closing_block; exit 0' INT
+  printf '  Launching Claude Code in 3… '
+  sleep 1; printf '2… '
+  sleep 1; printf '1…   (Ctrl+C to do it later)\n'
+  sleep 1
+  trap - INT
+  exec claude "/claude-code-hermit:hatch" </dev/tty
+}
+
 # ------------------------------------------------------------------- main ----
 
 main() {
@@ -289,7 +320,11 @@ main() {
   ensure_tmux
   install_plugin
 
-  closing_block
+  if [ ! -f ".claude-code-hermit/config.json" ] && can_launch; then
+    hatch_countdown
+  else
+    closing_block
+  fi
 }
 
 # Guarded so CI can `source` this file to reuse ver_ge and load_floors without

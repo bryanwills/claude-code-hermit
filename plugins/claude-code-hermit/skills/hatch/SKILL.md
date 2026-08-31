@@ -146,12 +146,12 @@ questions: [
   {
     header: "Channels",
     question: "How do you want to communicate with your agent?",
-    options: [{ label: "Discord", description: "Communicate with your agent via Discord" }, { label: "Telegram", description: "Communicate with your agent via Telegram" }, { label: "Only Claude App", description: "Communicate only via Claude App and Remote Control" }]
+    options: [{ label: "Discord", description: "Communicate with your agent via Discord" }, { label: "Telegram", description: "Communicate with your agent via Telegram" }, { label: "Claude app (for now)", description: "Push notifications + Remote Control. Pair Discord or Telegram anytime later." }]
   }
 ]
 ```
 
-- **If Only Claude App:** record `channels: {}`. Proceed to Phase 5. Do not ask channel follow-ups.
+- **If Claude app (for now):** record `channels: {}`. Proceed to Phase 5. Do not ask channel follow-ups.
 - **If Discord or Telegram:** create a channel entry under the `channels` object (e.g., `channels.discord`). Boot script maps the key to the full plugin identifier. Then ask follow-ups below.
 - Channel plugins require Bun and manual setup (bot creation, token, pairing). After saving the preference to `config.json`, note:
 
@@ -657,12 +657,12 @@ questions: [
     ]
   },
   {
-    header: "Channel",
-    question: "Notification channel?",
+    header: "Chat",
+    question: "How do you want to communicate with your agent?",
     options: [
-      { label: "Only Claude App", description: "No chat channel — push notifications, plus Remote Control if you enabled it" },
-      { label: "Discord", description: "Send notifications through Discord" },
-      { label: "Telegram", description: "Send notifications through Telegram" }
+      { label: "Claude app (for now)", description: "Push notifications + Remote Control. Pair Discord or Telegram anytime later." },
+      { label: "Discord", description: "Communicate with your agent via Discord" },
+      { label: "Telegram", description: "Communicate with your agent via Telegram" }
     ]
   },
   {
@@ -676,7 +676,7 @@ questions: [
 ]
 ```
 
-Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `channel` (one of `none` / `discord` / `telegram`), `idle_behavior` (one of `discover` / `wait`). Map the labels to those values — **"Only Claude App" is `none`**, not the label text; downstream code (the confirm bundle, Step 5's `channels` overlay) compares against the sentinel.
+Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `channel` (one of `none` / `discord` / `telegram`), `idle_behavior` (one of `discover` / `wait`). Map the labels to those values — **"Claude app (for now)" is `none`**, not the label text; downstream code (the confirm bundle, Step 5's `channels` overlay) compares against the sentinel.
 
 `push_notifications` is left at the template default (`true`) — no follow-up question. Push is dormant whenever a channel is reachable (the runtime guard in CLAUDE-APPEND.md sends channel-first) and fires only as fallback when a channel is unreachable or absent.
 
@@ -749,7 +749,7 @@ Print its output verbatim. It reads the written `config.json`, the stamped `hatc
 
 `--deployment` is the one thing it cannot read: Quick Turn 3 asks for it and nothing persists it. On the Advanced branch, pass the deployment the operator described, or `interactive` if they didn't say.
 
-**Quick-mode report adjustment**: add one line above the report confirming Turn 3's deployment + channel (Quick never showed them back). Keep the script's own output — including the "Next steps" and "Anytime:" blocks — exactly as printed: it is the operator's handoff, and nothing runs on its own after this.
+Keep the script's own output — including the "Next" and "Anytime:" blocks — exactly as printed: it is the operator's handoff, and nothing runs on its own after this. (Deployment and channel were already shown back in the Turn 5 confirm preview; no extra line needed here.)
 
 ---
 

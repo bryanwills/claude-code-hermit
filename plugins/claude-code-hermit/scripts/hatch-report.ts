@@ -27,6 +27,14 @@ import { readConfigRaw } from './lib/config-read';
 
 type Json = any;
 
+// Both renders emit GFM for the model to re-print: the transcript collapses raw
+// Bash output ("Ran 1 shell command"), so the model's own message is the only
+// display surface, and it renders markdown.
+const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
+const TEMPLATE_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'config.json.template');
+const CONFIG_REFERENCE_URL =
+  'https://github.com/gtapps/claude-code-hermit/blob/main/plugins/claude-code-hermit/docs/config-reference.md';
+
 const DEPLOYMENTS = ['docker', 'tmux', 'interactive'];
 const CLAUDE_MARKER = 'claude-code-hermit: Session Discipline';
 const WORKTREE_MARKER = '# >>> claude-code-hermit';
@@ -76,10 +84,6 @@ export function observe(root: string): Observed {
   };
 }
 
-function line(label: string, value: string): string {
-  return `  ${(label + ':').padEnd(20)}${value}`;
-}
-
 function channelSummary(config: Json): string {
   const channels = config?.channels ?? {};
   const names = Object.keys(channels).filter(k => k !== 'primary');
@@ -88,25 +92,90 @@ function channelSummary(config: Json): string {
   return on.length ? on.join(', ') : `${names.join(', ')} (not enabled)`;
 }
 
+const DEPLOYMENT_LABELS: Record<string, string> = {
+  docker: 'Docker always-on', tmux: 'tmux always-on', interactive: 'Interactive',
+};
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// Permissive: an unreadable template degrades the preview to chosen rows
+// only, it never blocks the confirm turn.
+function readTemplate(): Json {
+  return readJson(TEMPLATE_PATH) ?? {};
+}
+
 export function renderConfirm(answers: Json): string {
-  const out: string[] = ['Quick setup will apply:', ''];
-  const identity = [answers.agent_name ?? 'no name', answers.language, answers.timezone]
-    .filter(Boolean).join(', ');
-  out.push(line('Identity', identity + (answers.sign_off ? `, sign-off="${answers.sign_off}"` : '')));
-  out.push(line('Behavior', `idle=${answers.idle_behavior ?? 'discover'}, escalation + remote at template defaults`));
-  out.push(line('Deployment', `${answers.deployment ?? 'interactive'}, permission=${answers.permission_mode ?? 'auto'}`));
-  out.push(line('Channel', answers.channel && answers.channel !== 'none'
-    ? `${answers.channel} (allow-everyone; token + pairing later)` : 'none'));
-  out.push(line('Plugins', answers.plugins?.length ? answers.plugins.join(', ') : 'all recommended'));
-  out.push(line('Routines', answers.routines?.enabled === false
-    ? 'heartbeat re-arm only' : 'morning, evening, heartbeat re-arm'));
-  out.push(line('Visibility', answers.hatch_target === 'committed'
-    ? 'committed files' : '.local files (gitignored)'));
-  if (answers.activated_hermit?.slug) out.push(line('Hermit ext', answers.activated_hermit.slug));
-  if (answers.git_init) out.push(line('Git', 'initialize a local repo here'));
+  const t = readTemplate();
+  const row = (label: string, value: string) => `| **${label}** | ${value} |`;
+  const def = (label: string, value: string) => row(label, `${value} *(default)*`);
+  const out: string[] = ['## Hatch preview', '', '| | |', '|---|---|'];
+
+  // Chosen rows — each echoes a wizard answer verbatim, only when it was given.
+  if (answers.agent_name) {
+    out.push(row('🪪 Name', answers.agent_name
+      + (answers.sign_off ? ` — sign-off "${answers.sign_off}"` : '')));
+  }
+  const locale = [answers.language, answers.timezone].filter(Boolean).join(' · ');
+  if (locale) out.push(row('🌍 Language / Timezone', locale));
+  if (answers.activated_hermit?.slug) out.push(row('🧩 Hermit extension', answers.activated_hermit.slug));
+  if (answers.plugins?.length) out.push(row('🧩 Plugins', answers.plugins.join(' · ')));
+  if (answers.deployment) out.push(row('🚀 Deployment', DEPLOYMENT_LABELS[answers.deployment] ?? answers.deployment));
+  if (answers.channel) {
+    out.push(row('💬 Chat', answers.channel === 'none'
+      ? 'Claude app (for now)' : `${cap(answers.channel)} — pairing comes after setup`));
+  }
+  if (answers.idle_behavior) out.push(row('🧭 Idle', cap(answers.idle_behavior)));
+
+  // Default rows — read live from the same template hatch-config.ts overlays,
+  // so they track the shipped defaults instead of prose that drifts.
+  if (t.model) out.push(def('Model / Effort', `${t.model} · effort ${t.effort ?? 'unset'}`));
+  const permission = answers.permission_mode ?? t.permission_mode;
+  if (permission) {
+    out.push(permission === t.permission_mode
+      ? def('Permission mode', `\`${permission}\``)
+      : row('Permission mode', `\`${permission}\``));
+  }
+  if (t.escalation) out.push(def('Autonomy', `${t.escalation} · remote control ${t.remote ? 'on' : 'off'}`));
+  if (t.heartbeat) {
+    const hours = t.heartbeat.active_hours;
+    out.push(def('Heartbeat', t.heartbeat.enabled
+      ? `every ${t.heartbeat.every}${hours ? `, ${hours.start}–${hours.end}` : ''}, quiet ticks free`
+      : 'off'));
+  }
+  // heartbeat-restart and scheduled-checks are plumbing, not something the
+  // operator would recognize as "a routine that wakes the agent".
+  const infra = (t.routines ?? [])
+    .filter((r: Json) => r.enabled !== false && !['heartbeat-restart', 'scheduled-checks'].includes(r.id))
+    .map((r: Json) => r.id.replace(/-/g, ' '));
+  const briefs = answers.routines?.enabled === false ? [] : ['briefs 08:30 + 22:30'];
+  if (briefs.length || infra.length) out.push(row('Routines', [...briefs, ...infra].join(' · ')));
+  if (t.push_notifications !== undefined) {
+    let notifications = 'push off';
+    if (t.push_notifications) {
+      notifications = 'push on';
+      if (answers.channel && answers.channel !== 'none') {
+        notifications += `, dormant once ${cap(answers.channel)} is paired`;
+      }
+    }
+    out.push(def('Notifications', notifications));
+  }
+  const pages = Object.entries(t.artifacts ?? {})
+    .filter(([k, v]) => ['dashboard', 'proposals', 'weekly_review'].includes(k) && v)
+    .map(([k]) => k.replace('_', ' '));
+  if (pages.length) out.push(def('Artifact pages', pages.join(' · ')));
+  if (t.budget) {
+    const caps = ['daily_usd', 'weekly_usd', 'monthly_usd'].filter(k => t.budget[k] != null);
+    out.push(def('Budget caps', caps.length ? caps.map(k => `${k.replace('_usd', '')} $${t.budget[k]}`).join(' · ') : `none, ${t.budget.action ?? 'alert'}-only`));
+  }
+  if (answers.deployment) {
+    out.push(row('Safety rules', answers.deployment === 'docker'
+      ? 'hardened deny profile (from Docker choice)' : 'minimal deny profile'));
+  }
+  out.push(row('Files', (answers.hatch_target === 'committed' ? 'committed files' : '`.local` (gitignored)')
+    + (answers.git_init ? ' · git repo initialized' : '')));
+
   out.push('');
-  out.push('Nothing has been written yet. Customize restarts the wizard in Advanced;');
-  out.push('your Quick answers will not carry over.');
+  out.push('Nothing has been written yet. Every *(default)* is tunable later with `/hermit-settings`.');
   return out.join('\n');
 }
 
@@ -120,69 +189,54 @@ export function renderFinal(o: Observed, deployment: string): string {
       'Re-run /claude-code-hermit:hatch; nothing below would be accurate.';
   }
 
-  out.push('Autonomous agent initialized.', '');
-  out.push('Identity:');
-  out.push(line('Agent name', c.agent_name ?? 'none'));
-  out.push(line('Language', c.language ?? 'none'));
-  out.push(line('Timezone', c.timezone ?? 'none'));
-  out.push(line('Escalation', c.escalation ?? 'balanced'));
-  out.push(line('Sign-off', c.sign_off ?? 'none'));
-  out.push('');
+  out.push(`## 🐣 ${c.agent_name ?? 'Your agent'} is hatched`);
 
-  out.push('Configured:');
-  out.push(line('Channels', channelSummary(c)));
-  out.push(line('Push notifications', c.push_notifications === false ? 'disabled' : 'enabled'));
-  out.push(line('Heartbeat', c.heartbeat?.enabled ? `every ${c.heartbeat.every}` : 'disabled'));
-  out.push(line('Permission mode', c.permission_mode ?? 'auto'));
-  out.push(line('Routines', `${(c.routines ?? []).length} registered`));
-  out.push(line('Scheduled checks', `${(c.scheduled_checks ?? []).length} registered`));
-  out.push(line('Hermit ext', Object.keys(c._hermit_versions ?? {}).filter(k => k !== 'claude-code-hermit').join(', ') || 'none'));
-  out.push('');
+  // Warn-only disk audit: the happy path shows nothing, but a declined or
+  // failed write surfaces — the operator is still in the hatch session, so the
+  // fix is one message away. (Filesystem-observed, never a remembered file
+  // list; git repo absence is not warned — existing projects legitimately vary.)
+  const missing: string[] = [];
+  if (!o.binScripts.length) missing.push('`.claude-code-hermit/bin/` scripts');
+  if (!o.claudeBlock) missing.push('CLAUDE session-discipline block');
+  if (!o.gitignore) missing.push('`.gitignore` hermit entries');
+  if (!o.worktreeinclude) missing.push('`.worktreeinclude` managed block');
+  if (!o.settingsFile) missing.push('hermit permissions in `.claude/` settings');
+  if (missing.length) {
+    out.push('');
+    for (const m of missing) out.push(`⚠ Not present: ${m} — tell me to fix it and I will.`);
+  }
 
-  // Every row below is a filesystem observation. "Present" rather than
-  // "Created" — this runs after the fact and cannot know who wrote a file, only
-  // that it is there. A declined step correctly reports "not present".
-  out.push('Present on disk:');
-  out.push(line('State dir', `.claude-code-hermit/ (${o.binScripts.length} bin scripts)`));
-  out.push(line('CLAUDE block', o.claudeBlock ?? 'not present'));
-  out.push(line('.gitignore', o.gitignore ? 'hermit entries present' : 'not present'));
-  out.push(line('.worktreeinclude', o.worktreeinclude ? 'managed block present' : 'not present'));
-  out.push(line('Settings', o.settingsFile ?? 'no hermit permissions found'));
-  out.push(line('Target', o.hatchOptions?.target ?? 'not stamped'));
-  out.push(line('Git repo', o.gitRepo ? 'present' : 'not present'));
   out.push('');
-
   // Nothing chains from here — the operator runs each of these. Numbered because
   // the order is load-bearing, closed by a consequence line spelling out what is
   // still not running.
-  out.push('Next steps — nothing is running yet:');
+  out.push('**Next — nothing is running yet:**');
   // Hatch installs the recommended plugins mid-run, and Claude Code only exposes
   // them to the *current* session after a reload — so this line goes first, ahead
   // of anything that would use them.
-  const steps: string[] = ['/reload-plugins                      load newly installed plugins in this session'];
+  const steps: string[] = ['`/reload-plugins` — load newly installed plugins in this session'];
   let consequence: string;
   // The consequence names the step that actually starts something, not "the last
   // step" — on tmux with a channel, pairing comes after the boot, so the hermit is
   // already awake by the time the list ends.
   if (deployment === 'docker') {
-    steps.push('/claude-code-hermit:docker-setup      build and start the container');
+    steps.push('`/claude-code-hermit:docker-setup` — build and start the container');
     consequence = `No container exists until step ${steps.length} finishes.`;
   } else if (deployment === 'tmux') {
     // This is the only shell command here; ! makes it runnable in the current session.
-    steps.push('!.claude-code-hermit/bin/hermit-start boot the always-on session');
+    steps.push('`!.claude-code-hermit/bin/hermit-start` — boot the always-on session');
     consequence = `The hermit is not awake until step ${steps.length} finishes.`;
-    if (channelSummary(c) !== 'none') steps.push('/claude-code-hermit:channel-setup     set the bot token and pair');
+    if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
   } else {
-    if (channelSummary(c) !== 'none') steps.push('/claude-code-hermit:channel-setup     set the bot token and pair');
-    steps.push('/claude-code-hermit:session           start working');
+    if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
+    steps.push('`/claude-code-hermit:session` — start working');
     consequence = `No session is open until step ${steps.length} finishes.`;
   }
-  steps.forEach((s, i) => out.push(`  ${i + 1}. ${s}`));
+  steps.forEach((s, i) => out.push(`${i + 1}. ${s}`));
   out.push('');
-  out.push(`  ${consequence}`);
+  out.push(consequence);
   out.push('');
-  out.push('  Anytime: /hermit-settings to change settings, /hermit-evolve after plugin');
-  out.push('  updates, /hermit-doctor to troubleshoot. Refine OPERATOR.md by telling me what changed.');
+  out.push(`Anytime: \`/hermit-settings\` to change settings ([full reference](${CONFIG_REFERENCE_URL})), \`/hermit-evolve\` after plugin updates, \`/hermit-doctor\` to troubleshoot. Refine OPERATOR.md by telling me what changed.`);
 
   return out.join('\n');
 }
