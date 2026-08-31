@@ -124,7 +124,7 @@ Modify with `/hermit-settings heartbeat`.
 
 ## `watchdog`
 
-Out-of-session supervisor that detects dead or wedged sessions and restarts them. Default disabled — opt in by setting `enabled: true`, then run `bin/hermit-watchdog install` to register the OS timer. **Docker hermits:** `/docker-setup` sets `enabled: true` automatically at the end of setup; the entrypoint loop already runs the watchdog, so no `install` step is needed.
+Out-of-session supervisor that detects dead or wedged sessions and restarts them. Default disabled — `bin/hermit-watchdog install` registers the OS timer and sets `enabled: true` on that first registration, or set it yourself with `/hermit-settings watchdog`. **Docker hermits:** `/docker-setup` sets `enabled: true` automatically at the end of setup; the entrypoint loop already runs the watchdog, so no `install` step is needed.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -157,7 +157,7 @@ Steps 1–3 are **scheduler-owned context-hygiene** — the watchdog script runs
 
 Recovery actions and alerts — including context resets, nudges, restarts, re-arms, `stall-question-detected`, and `session-wedged` — are appended to `state/watchdog-events.jsonl`. Restarts also set `runtime.json.watchdog_restart_reason`; `session-start` announces the restart to the operator channel.
 
-**Install:** `bin/hermit-watchdog install` — systemd user timer on Linux/WSL2, LaunchAgent on macOS, cron line printed as fallback. Docker hermits don't need `install` — the entrypoint already runs the watchdog on its own ~5 min cycle.
+**Install:** `bin/hermit-watchdog install` — systemd user timer on Linux/WSL2, LaunchAgent on macOS, cron line printed as fallback. A first registration also flips `enabled: true`; re-running install to repair a unit (the doctor's remedy for a stale tick or an unbaked unit PATH) leaves `enabled` as the operator set it, so a hygiene-only hermit keeps the restart tier off. The cron fallback never flips it — nothing was scheduled. `uninstall` flips it back to `false`. Docker hermits don't need `install` — the entrypoint already runs the watchdog on its own ~5 min cycle.
 
 Modify with `/hermit-settings watchdog`.
 

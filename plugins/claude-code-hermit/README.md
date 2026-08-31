@@ -205,7 +205,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `context_hygiene.compact` | compact long-running active context — **enabled**, `100000` compactible tokens / `4h` cooldown |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | auto-compact at % of context — **`65`** |
 | `MAX_THINKING_TOKENS` | thinking-token cap per turn — **`10000`** |
-| `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it, and `bin/hermit-watchdog` install enables it too when it registers a systemd/launchd timer |
+| `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it, and so does `bin/hermit-watchdog install` the first time it registers a systemd/launchd timer |
 
 
 Full schema in the [Config Reference](docs/config-reference.md)

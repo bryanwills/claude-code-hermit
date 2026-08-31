@@ -2042,33 +2042,59 @@ function printCronFallback(root: string, unitPath: string): void {
     `2>>.claude-code-hermit/state/watchdog.log`;
   console.log('[watchdog] Add the following line via `crontab -e`:');
   console.log(`  ${cronLine}`);
-  console.log(
-    '[watchdog] Restarts stay off until watchdog.enabled is true — enable it via ' +
-      '`/claude-code-hermit:hermit-settings watchdog`.'
-  );
+  // In the Docker container this same fallback prints from the "systemctl not found"
+  // branch, where /docker-setup has already set enabled: true — so only say it when it
+  // is actually false.
+  if (readWatchdogEnabled() === false) console.log(ENABLE_GUIDANCE);
 }
 
 const run = (cmd: string, args: string[]) => spawnSync(cmd, args, { stdio: 'inherit' });
+
+const ENABLE_GUIDANCE =
+  '[watchdog] Restarts stay off until watchdog.enabled is true — enable it via ' +
+  '`/claude-code-hermit:hermit-settings watchdog`.';
+
+/** The settled watchdog.enabled value, or undefined when the project has no config.json. */
+function readWatchdogEnabled(): boolean | undefined {
+  if (!fs.existsSync(CONFIG_PATH)) return undefined;
+  const config: Json = readSettledConfig(HERMIT_ROOT);
+  return config.watchdog?.enabled === true;
+}
 
 /**
  * Flip watchdog.enabled through the audited settings-edit path (validated, logged to the
  * settings ledger — same call /docker-setup makes). Only called from branches that actually
  * registered a timer; the cron fallback prints guidance instead, since flipping there would
  * claim an activation that never happened. No-ops when there is no config to flip, or the
- * value already matches, so re-running install to fix a stale unit PATH stays quiet.
+ * value already matches.
  */
 function setWatchdogEnabled(value: boolean): void {
-  if (!fs.existsSync(CONFIG_PATH)) return;
-  const config: Json = readSettledConfig(HERMIT_ROOT);
-  if (config.watchdog?.enabled === value) return;
-  run(process.execPath, [
+  const current = readWatchdogEnabled();
+  if (current === undefined || current === value) return;
+  const r = run(process.execPath, [
     path.join(import.meta.dir, 'settings-edit.ts'),
     CONFIG_PATH,
     'set',
     'watchdog.enabled',
     String(value),
   ]);
+  if (r.status !== 0) {
+    console.log('[watchdog] Could not write watchdog.enabled to config.json — set it manually.');
+    process.exitCode = 1;
+    return;
+  }
   console.log(`[watchdog] ${value ? 'Enabled' : 'Disabled'} watchdog.enabled in config.json.`);
+}
+
+/**
+ * Install turns the restart tier on for a *first* registration only. Re-running install is
+ * the doctor's own remedy for a stale tick or an unbaked unit PATH, and hygiene-only
+ * (`enabled: false` with the timer installed) is a state the doctor reports as ok — so a
+ * repair run reports what is off instead of silently switching restarts on.
+ */
+function enableAfterInstall(firstRegistration: boolean): void {
+  if (firstRegistration) setWatchdogEnabled(true);
+  else if (readWatchdogEnabled() === false) console.log(ENABLE_GUIDANCE);
 }
 
 /** Platform-dispatching install: systemd (Linux/WSL), launchd (macOS), cron fallback. */
@@ -2098,7 +2124,9 @@ function cmdInstall(): void {
     const systemdDir = path.join(os.homedir(), '.config', 'systemd', 'user');
     fs.mkdirSync(systemdDir, { recursive: true });
     const serviceName = `hermit-watchdog@${name}`;
+    const firstRegistration = !fs.existsSync(path.join(systemdDir, `${serviceName}.timer`));
 
+    let rendered = true;
     for (const [tplName, outName] of [
       ['hermit-watchdog@.service', `${serviceName}.service`],
       ['hermit-watchdog@.timer', `${serviceName}.timer`],
@@ -2108,19 +2136,29 @@ function cmdInstall(): void {
         fs.writeFileSync(path.join(systemdDir, outName), render(tpl, escapeSystemd));
       } else {
         process.stderr.write(`[watchdog] template ${tplName} not found; skipping\n`);
+        rendered = false;
       }
     }
 
-    run('systemctl', ['--user', 'daemon-reload']);
-    run('systemctl', ['--user', 'enable', '--now', `${serviceName}.timer`]);
+    // `systemctl --user` fails routinely over SSH (no user D-Bus session, no lingering).
+    // Reporting an install that did not happen would leave the operator with a config
+    // flag on and nothing behind it.
+    const reloaded = run('systemctl', ['--user', 'daemon-reload']).status === 0;
+    const registered = run('systemctl', ['--user', 'enable', '--now', `${serviceName}.timer`]).status === 0;
+    if (!rendered || !reloaded || !registered) {
+      console.log(`[watchdog] Failed to install systemd user timer: ${serviceName}.timer`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(`[watchdog] Installed systemd user timer: ${serviceName}.timer`);
-    setWatchdogEnabled(true);
+    enableAfterInstall(firstRegistration);
     console.log('[watchdog] To persist across reboots without a user session: loginctl enable-linger');
   } else if (process.platform === 'darwin') {
     const launchAgents = path.join(os.homedir(), 'Library', 'LaunchAgents');
     fs.mkdirSync(launchAgents, { recursive: true });
     const plistName = `com.hermit.watchdog.${name}.plist`;
     const plistPath = path.join(launchAgents, plistName);
+    const firstRegistration = !fs.existsSync(plistPath);
 
     if (templates) {
       const tpl = fs.readFileSync(path.join(templates, 'com.hermit.watchdog.plist'), 'utf-8');
@@ -2153,9 +2191,13 @@ function cmdInstall(): void {
     // the documented remedy for a bad unit — would silently keep the old plist.
     // Ignore output: on a first install there is nothing to unload.
     spawnSync('launchctl', ['unload', plistPath], { stdio: 'ignore' });
-    run('launchctl', ['load', plistPath]);
+    if (run('launchctl', ['load', plistPath]).status !== 0) {
+      console.log(`[watchdog] Failed to install LaunchAgent: ${plistName}`);
+      process.exitCode = 1;
+      return;
+    }
     console.log(`[watchdog] Installed LaunchAgent: ${plistName}`);
-    setWatchdogEnabled(true);
+    enableAfterInstall(firstRegistration);
   } else {
     console.log('[watchdog] systemd and launchd not available on this platform.');
     printCronFallback(root, unitPath);
