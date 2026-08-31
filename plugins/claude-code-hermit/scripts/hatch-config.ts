@@ -22,9 +22,9 @@
  * _hermit_versions: the core version is read from THIS script's own plugin.json, never
  * from the answers payload — an operator-supplied version could otherwise advance
  * `_hermit_versions["claude-code-hermit"]` on re-init and erase the upgrade gap
- * hermit-evolve's evolve-plan.ts reads to discover pending migrations. Every entry
- * (core + any activated sibling) is stamped add-if-absent, never bumped — mirrors
- * evolve-finalize.ts's sibling-version contract.
+ * hermit-evolve's evolve-plan.ts reads to discover pending migrations. The core
+ * entry is stamped add-if-absent, never bumped — mirrors evolve-finalize.ts's
+ * sibling-version contract. Domain plugins stamp themselves from their own hatch.
  *
  * Validation: this script does not re-implement answer validation. It overlays by
  * presence (Object.hasOwn, never truthiness, so `remote:false`/`null` apply) and lets
@@ -151,22 +151,16 @@ if (Object.hasOwn(answers, 'routines')) {
 config._hermit_versions =
   config._hermit_versions && typeof config._hermit_versions === 'object' ? config._hermit_versions : {};
 
-function stampIfAbsent(key: string, version: string): void {
-  if (!Object.hasOwn(config._hermit_versions, key)) config._hermit_versions[key] = version;
+if (!Object.hasOwn(config._hermit_versions, 'claude-code-hermit')) {
+  config._hermit_versions['claude-code-hermit'] = coreVersion;
 }
-
-stampIfAbsent('claude-code-hermit', coreVersion);
 if (Object.hasOwn(answers, 'activated_hermit') && answers.activated_hermit) {
-  // slug/version are hand-built by the model from detected_hermits + the sibling's
-  // plugin.json — refuse a malformed pair rather than stamp `_hermit_versions["undefined"]`
-  // (which evolve-plan.ts would then treat as a real sibling) or an undefined value
-  // (which JSON.stringify silently drops, desyncing the written file from validate()).
-  const { slug, version } = answers.activated_hermit;
+  // slug is hand-built by the model from detected_hermits — refuse a malformed
+  // slug rather than let hatch-report.ts render an undefined Hermit-ext name.
+  // A stray `version` key (older skill text) is ignored; domain plugins stamp
+  // `_hermit_versions` from their own hatch.
+  const { slug } = answers.activated_hermit;
   if (typeof slug !== 'string' || !slug) die('activated_hermit.slug must be a non-empty string');
-  if (typeof version !== 'string' || !version) {
-    die(`activated_hermit.version must be a non-empty string (slug "${slug}")`);
-  }
-  stampIfAbsent(slug, version);
 }
 
 // --- boot_skill: only touched when a hermit was (re)activated this run ---

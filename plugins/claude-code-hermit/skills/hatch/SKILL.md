@@ -100,7 +100,7 @@ If the list is non-empty:
 - If the operator selects one: record the full entry from `detected_hermits` as `activated_hermit` (carries `plugin`, `id`, `marketplace_name`, `installPath`).
   - Read `<activated_hermit.installPath>/state-templates/CLAUDE-APPEND.md` and append it to the target project's CLAUDE.md (after the core append in step 5).
   - Read `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json`: if it declares a `hermit.boot_skill` field (e.g. `"/claude-code-homeassistant-hermit:ha-boot"`), record it for step 5 to write as `boot_skill` in `config.json`. This replaces the default `/claude-code-hermit:session` bootstrap so the domain hermit's custom boot logic fires on every always-on launch. If the field is absent, leave `boot_skill` unset (core behavior).
-  - Read `<activated_hermit.installPath>/.claude-plugin/plugin.json` for its `version` field — this, together with `activated_hermit.plugin` (as `slug`) and the `boot_skill` above, is what Step 5 sends as `activated_hermit` in the `hatch-config.ts` answers payload.
+  - Step 5 sends `activated_hermit.plugin` as `slug` together with the `boot_skill` above in the `hatch-config.ts` answers payload. Do not read the sibling's `plugin.json` version — core does not stamp `_hermit_versions` for an activated hermit.
 - If the list is empty or the operator declines: skip.
 
 ### 4. Setup wizard
@@ -251,7 +251,7 @@ with the answers payload as JSON on stdin. The script reads the template (or, on
 ```json
 {
   "project_name": "<project directory name, fresh hatch only>",
-  "activated_hermit": { "slug": "<plugin>", "version": "<sibling's plugin.json version>", "boot_skill": "<hermit.boot_skill from hermit-meta.json, or null>" },
+  "activated_hermit": { "slug": "<plugin>", "boot_skill": "<hermit.boot_skill from hermit-meta.json, or null>" },
   "agent_name": "...", "language": "...", "timezone": "...", "sign_off": "...",
   "escalation": "...", "remote": true, "idle_behavior": "...",
   "permission_mode": "...",
@@ -264,7 +264,7 @@ with the answers payload as JSON on stdin. The script reads the template (or, on
 - **Phase 3** → `escalation`, `remote`, `idle_behavior`.
 - **Phase 4** → `channels.<name>`: `enabled`, `allowed_users` (omit if the operator skipped access control), `morning_brief_time` (omit if declined; on re-init, send it as `null` to turn off a brief the operator previously enabled). The script fills in `dm_channel_id: null`, `default_chat_id: null`, and `state_dir: .claude.local/channels/<name>` on first creation and preserves all three (plus any other channel it doesn't recognize, `channels.primary`, and third-party `marketplace` channels) on re-init merge. Do **not** include `push_notifications` in the payload — the script never touches it; it stays at the template default (`true`) or, on re-init, whatever value is already on disk. The runtime channel-first/push-fallback guard in CLAUDE-APPEND.md already prevents double-notification.
 - **Phase 5** → `permission_mode`, `routines` (morning/evening only — `heartbeat-restart` and the other infrastructure routines are already in the template and are never touched by this payload).
-- **Step 3 hermit activation** → `activated_hermit`. `version` is read from `<activated_hermit.installPath>/.claude-plugin/plugin.json`; `boot_skill` is read from `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json`'s `hermit.boot_skill` field (or `null` if absent).
+- **Step 3 hermit activation** → `activated_hermit`. `slug` is `activated_hermit.plugin`; `boot_skill` is read from `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json`'s `hermit.boot_skill` field (or `null` if absent).
 
 **Re-initialization** is `--reinit` on the same call — the script reads the existing config as its base (never the template), so any field the payload doesn't mention (custom operator keys, `push_notifications`, `docker`, `monitors`, ...) survives untouched, `_hermit_versions` entries are never advanced (only added if a slug is newly absent), and `scheduled_checks`/`channels`/`routines` are reconciled/merged by id rather than replaced wholesale. `shutdown_skill` is never written by this script — leave it `null`; the operator sets it via config edit if they run always-on services that need stopping on full close.
 
@@ -595,7 +595,7 @@ Replaces Steps 3-4 with batched turns + confirm; resumes shared Steps 5-9 after 
 
 Only fires if `detected_hermits` from Step 1.5 is non-empty. Same prompt shape as Step 3 of the Advanced branch — uses the cached candidate list, does not re-glob. If multiple hermits detected, list all + Skip. If none, this turn is skipped entirely.
 
-If a hermit is selected: record the full entry from `detected_hermits` as `activated_hermit` (carries `plugin`, `id`, `marketplace_name`, `installPath`). Read `<activated_hermit.installPath>/state-templates/CLAUDE-APPEND.md` and stash for Step 6's CLAUDE.md append. Read `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json` for the `hermit.boot_skill` field and `<activated_hermit.installPath>/.claude-plugin/plugin.json` for its `version`; stash both for Step 5's `hatch-config.ts` answers payload.
+If a hermit is selected: record the full entry from `detected_hermits` as `activated_hermit` (carries `plugin`, `id`, `marketplace_name`, `installPath`). Read `<activated_hermit.installPath>/state-templates/CLAUDE-APPEND.md` and stash for Step 6's CLAUDE.md append. Read `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json` for the `hermit.boot_skill` field; stash it for Step 5's `hatch-config.ts` answers payload.
 
 ### Quick Turn 2 — Identity batch (one `AskUserQuestion`, 3 questions)
 
@@ -755,7 +755,7 @@ Print its output verbatim. It reads the written `config.json`, the stamped `hatc
 
 ### Hand off pending domain hatches
 
-Applies on **both** Quick and Advanced paths and is the **last** action of the skill. After the report, build the pending set from `detected_hermits` (Step 1.5). A sibling is **pending** when a file exists at `<installPath>/skills/hatch/SKILL.md` and its `plugin` was **not** already present in `config.json._hermit_versions` when Step 1 read the config. A hermit activated in Step 3 is always pending: Step 5 stamps its version into `_hermit_versions` without ever running its wizard, so never filter it out on that stamp.
+Applies on **both** Quick and Advanced paths and is the **last** action of the skill. After the report, build the pending set from `detected_hermits` (Step 1.5). A sibling is **pending** when a file exists at `<installPath>/skills/hatch/SKILL.md` and its `plugin` was **not** already present in `config.json._hermit_versions` when Step 1 read the config. An activated hermit is never stamped by core, so the generic rule covers it.
 
 For each pending sibling, print the block below with its `plugin` field substituted for `<slug>` — the bare plugin name, not `id`, which carries an `@marketplace` suffix. Repeat the complete block once per pending sibling. Do not invoke the Skill tool. If none are pending, stop after the report.
 
