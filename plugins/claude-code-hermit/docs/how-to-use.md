@@ -250,6 +250,6 @@ Most common actions auto-trigger from natural language — just say what you mea
 | **Monitoring** | `watch`, `heartbeat`                                               |
 | **Learning**   | `proposal-create`, `proposal-list`, `proposal-act`, `reflect`      |
 | **Config**     | `hermit-settings`, `hatch`, `hermit-evolve`                        |
-| **Docker**     | `docker-setup`                                                     |
+| **Docker**     | `docker-setup`, `docker-security` — type these; they never auto-trigger |
 | **Channels**   | `channel-responder`                                                |
 | **Summaries**  | `hermit-evolution`, `hermit-health`, `weekly-review`              |

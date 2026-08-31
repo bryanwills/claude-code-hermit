@@ -767,7 +767,7 @@ Print its output verbatim. It reads the written `config.json`, the stamped `hatc
 
 `--deployment` is the one thing it cannot read: Quick Turn 3 asks for it and nothing persists it. On the Advanced branch, pass the deployment the operator described, or `interactive` if they didn't say.
 
-**Quick-mode report adjustment**: collapse "Pick how you'll run hermit" to one line confirming Turn 3's deployment + channel. Keep the "Next steps" and "Anytime:" blocks exactly as the script prints them — they are the operator's handoff, and nothing runs on its own after this.
+**Quick-mode report adjustment**: add one line above the report confirming Turn 3's deployment + channel (Quick never showed them back). Keep the script's own output — including the "Next steps" and "Anytime:" blocks — exactly as printed: it is the operator's handoff, and nothing runs on its own after this.
 
 ---
 

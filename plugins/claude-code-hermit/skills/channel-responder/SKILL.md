@@ -120,7 +120,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 
 - **Slash command** (message starts with `/`, e.g. `/claude-code-hermit:simplify`, `/plugin:command`)
   - Invoke the matching skill, slash command, or subagent via the appropriate tool. Pass any remaining text as arguments/prompt.
-  - A native command the `Skill` tool refuses with `disable-model-invocation` (`/init`, `/debug`, `/security-review`, and similar commands) is not a match. Say it must be typed in a terminal, and never substitute a look-alike hermit skill.
+  - A command the `Skill` tool refuses with `disable-model-invocation` — native ones (`/init`, `/debug`, `/security-review`, and similar) and the hermit's own operator-only wizards, whose descriptions the flag also hides from you — is not a match. Say it must be typed in a terminal or the Claude app, and never substitute a look-alike hermit skill.
   - If nothing matches, say so briefly.
 
 - **Status request** ("what are you working on?", "how's it going", "progress", or a bare "status" — the deterministic reply needs `/status`, so anything short of that reaches you)

@@ -161,17 +161,20 @@ export function renderFinal(o: Observed, deployment: string): string {
   // of anything that would use them.
   const steps: string[] = ['/reload-plugins                      load newly installed plugins in this session'];
   let consequence: string;
+  // The consequence names the step that actually starts something, not "the last
+  // step" — on tmux with a channel, pairing comes after the boot, so the hermit is
+  // already awake by the time the list ends.
   if (deployment === 'docker') {
     steps.push('/claude-code-hermit:docker-setup      build and start the container');
-    consequence = 'No container exists until the last step finishes.';
+    consequence = `No container exists until step ${steps.length} finishes.`;
   } else if (deployment === 'tmux') {
     steps.push('.claude-code-hermit/bin/hermit-start  boot the always-on session');
+    consequence = `The hermit is not awake until step ${steps.length} finishes.`;
     if (channelSummary(c) !== 'none') steps.push('/claude-code-hermit:channel-setup     set the bot token and pair');
-    consequence = 'The hermit is not awake until the last step finishes.';
   } else {
     if (channelSummary(c) !== 'none') steps.push('/claude-code-hermit:channel-setup     set the bot token and pair');
     steps.push('/claude-code-hermit:session           start working');
-    consequence = 'No session is open until the last step finishes.';
+    consequence = `No session is open until step ${steps.length} finishes.`;
   }
   steps.forEach((s, i) => out.push(`  ${i + 1}. ${s}`));
   out.push('');
