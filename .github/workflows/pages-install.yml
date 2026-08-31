@@ -1,0 +1,68 @@
+name: Publish installer
+
+# Serves scripts/install.sh at https://gtapps.github.io/claude-code-hermit/install.sh
+#
+# Actions-based deploy rather than a gh-pages orphan branch on purpose: the file
+# people pipe to bash must be the same file reviewed in PRs on main. An orphan
+# branch would let the two drift silently, which is the last place you want drift.
+#
+# Pages is already configured for this repo with build_type=workflow; this
+# workflow only publishes to it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/install.sh'
+      - '.github/workflows/pages-install.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; queue instead of cancelling, so a merge train
+# still ends with the newest installer live.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble site
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp scripts/install.sh site/install.sh
+          # Actions-based Pages does not run Jekyll, but this costs nothing and
+          # removes the question entirely.
+          touch site/.nojekyll
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>claude-code-hermit</title>
+          <meta http-equiv="refresh" content="0; url=https://github.com/gtapps/claude-code-hermit">
+          <link rel="canonical" href="https://github.com/gtapps/claude-code-hermit">
+          <p>Redirecting to <a href="https://github.com/gtapps/claude-code-hermit">github.com/gtapps/claude-code-hermit</a>.</p>
+          <p>Installer: <code>curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash</code></p>
+          HTML
+
+      - name: Verify the published file matches the repo
+        run: diff -q scripts/install.sh site/install.sh
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
