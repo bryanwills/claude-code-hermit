@@ -127,6 +127,9 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+          # test -f first: grep on a missing file exits 2, which `!` would turn
+          # into a vacuous pass.
+          test -f "$RUNNER_TEMP/proj/.claude/settings.local.json"
           ! grep -q 'claude-code-hermit@claude-code-hermit' \
             "$RUNNER_TEMP/proj/.claude/settings.local.json"
           test -f "$RUNNER_TEMP/proj/.claude-code-hermit/config.json"

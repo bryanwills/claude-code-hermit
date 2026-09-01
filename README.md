@@ -175,6 +175,8 @@ Or run `.claude-code-hermit/bin/hermit-update` (local/tmux) or `.claude-code-her
 
 ### Uninstalling
 
+From the hermit's folder:
+
 ```
 curl -fsSL https://gtapps.github.io/claude-code-hermit/uninstall.sh | bash
 ```

@@ -86,8 +86,13 @@ stop_session() {
   stop_wrapper=".claude-code-hermit/bin/hermit-stop"
   runtime_file=".claude-code-hermit/state/runtime.json"
 
+  # runtime_mode is frozen at boot and never cleared on stop, so it alone does
+  # not mean a session is live. Mirror hermit-start's cleanlyStopped test:
+  # session_state "idle" or a non-null shutdown_completed_at means it is down.
   if [ -f "$runtime_file" ] \
-    && grep -q '"runtime_mode"[[:space:]]*:[[:space:]]*"interactive"' "$runtime_file"; then
+    && grep -q '"runtime_mode"[[:space:]]*:[[:space:]]*"interactive"' "$runtime_file" \
+    && ! grep -q '"session_state"[[:space:]]*:[[:space:]]*"idle"' "$runtime_file" \
+    && ! grep -qE '"shutdown_completed_at"[[:space:]]*:[[:space:]]*"[^"]+"' "$runtime_file"; then
     INTERACTIVE_GATE=1
     warn "session" "interactive Claude session detected; close it in its terminal first"
   fi
@@ -153,10 +158,12 @@ uninstall_plugin() {
   combined="${local_output}
 ${project_output}"
 
-  if printf '%s\n' "$combined" | grep -qiE 'not installed|no installed plugin'; then
-    ok "plugin" "already uninstalled in this folder"
-  elif printf '%s\n' "$combined" | grep -qiE 'user[ -]scope|scope[^[:alnum:]]+user|installed[^[:cntrl:]]+user'; then
+  # User scope is checked first: it is the decisive message, and one scope can
+  # report "not found" while the other reports the user-scope install.
+  if printf '%s\n' "$combined" | grep -qiE 'user[ -]scope|scope[^[:alnum:]]+user|installed[^[:cntrl:]]+user'; then
     warn "plugin" "the user-scope install is shared by every folder and was left alone"
+  elif printf '%s\n' "$combined" | grep -qiE 'not installed|no installed plugin|not found in installed plugins'; then
+    ok "plugin" "already uninstalled in this folder"
   else
     record_failure "plugin uninstall failed at local and project scope" "plugin" "both uninstall attempts failed"
     say "A user-scope install is shared by every folder and is left alone."
@@ -234,8 +241,11 @@ print_cleanup_prompt() {
   say "Claude cleanup prompt (review every diff before accepting):"
   printf '\n```text\n%s\n```\n' "$prompt"
 
-  one_line="$(printf '%s' "$prompt" | tr '\n' ' ' | sed 's/[\\$`\"]/\\&/g')"
-  printf '\n  claude "%s"\n' "$one_line"
+  # Single quotes, not double: the prompt contains "<!--", and `!` inside double
+  # quotes fires history expansion in an interactive shell ("!-: event not
+  # found"), which is exactly where the operator pastes this.
+  one_line="$(printf '%s' "$prompt" | tr '\n' ' ' | sed "s/'/'\\\\''/g")"
+  printf "\n  claude '%s'\n" "$one_line"
   rule
 }
 
