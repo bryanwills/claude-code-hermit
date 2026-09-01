@@ -54,6 +54,7 @@ async function scenario(opts: {
   registry?: Record<string, unknown> | 'none';
   config?: Record<string, unknown>;
   listen?: boolean;
+  overlay?: Record<string, unknown>;
 }) {
   const projectRoot = freshDir();
   const hermitDir = path.join(projectRoot, '.claude-code-hermit');
@@ -75,6 +76,9 @@ async function scenario(opts: {
     path.join(hermitDir, 'config.json'),
     JSON.stringify({ agent_name: 'hermit', ...(opts.config ?? {}) }),
   );
+  if (opts.overlay) {
+    fs.writeFileSync(path.join(stateDir, 'claude-settings.overlay.json'), JSON.stringify(opts.overlay));
+  }
 
   try {
     return await checkPeerInbox(resolvePaths(hermitDir, PLUGIN_ROOT));
@@ -114,12 +118,24 @@ describe('doctor peer-inbox', () => {
     expect(r.detail).toContain('registered as "hermit"');
   });
 
-  // The wake is inert under bypassPermissions whatever the socket says: the
-  // receiver holds an unauthenticated post behind a dialog that expires unseen.
-  test.serial('bypassPermissions hermit → warn even with a reachable inbox', async () => {
+  // Without the overlay's `accept`, the wake is inert under bypassPermissions
+  // whatever the socket says: the receiver holds an unauthenticated post behind a
+  // dialog that expires unseen.
+  test.serial('bypassPermissions hermit with no overlay accept → warn even with a reachable inbox', async () => {
     const r = await scenario({ config: { permission_mode: 'bypassPermissions' }, listen: true });
     expect(r.status).toBe('warn');
     expect(r.detail).toContain('bypassPermissions');
+  });
+
+  // The launch overlay is the one scope that can loosen the key, so once it
+  // carries `accept` the wake lands and this warn would be a false alarm.
+  test.serial('bypassPermissions hermit launched with the accept overlay → ok', async () => {
+    const r = await scenario({
+      config: { permission_mode: 'bypassPermissions' },
+      overlay: { crossSessionInbound: 'accept' },
+      listen: true,
+    });
+    expect(r.status).toBe('ok');
   });
 
   test.serial('no runtime.json at all → ok, nothing to diagnose', async () => {
