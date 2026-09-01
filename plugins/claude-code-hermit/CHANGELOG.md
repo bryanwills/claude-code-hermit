@@ -7,7 +7,8 @@
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed
-- `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment. Docker still applies the hardened deny-pattern profile when chosen.
+- Permissions seed as native Claude Code `permissions.deny` / `permissions.ask` entries with hatch tiers (Hardened / Standard / Skip). Evolve extends asks additively and never removes operator-owned rules.
+- `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment.
 - The `/hatch` channel question asks "How do you want to communicate with your agent?" in both branches, and labels the no-channel option `Claude app (for now)` instead of `None`: push notifications + Remote Control, with Discord/Telegram pairable later.
 - The `/hatch` confirm preview renders as a single markdown table — chosen answers echoed verbatim plus template-derived defaults tagged `(default)` — ending with a `/hermit-settings` pointer. The final report is now minimal: agent-name headline, warn-only disk audit (missing artifacts surface as fixable warnings instead of a full file table), next steps, and a config-reference link.
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
@@ -19,11 +20,16 @@
 - `/hatch` now supplies a description for every `AskUserQuestion` option in both branches, so the identity batch and the OPERATOR.md questionnaire no longer fail with `Invalid tool parameters`.
 - The tmux next step in `hatch-report.ts` now prefixes `.claude-code-hermit/bin/hermit-start` with `!`, so it can run directly in the current Claude Code session.
 
+### Removed
+- The `enforce-deny-patterns` PreToolUse hook. Runtime enforcement is Claude Code's native permission engine.
+- The hook-only settings/voice-file shell-redirect deny patterns, retired with the hook (redirects are classifier-watched). The OPERATOR.md redirect pair stays seeded as native `permissions.deny`.
+
 ### Upgrade Instructions
 1. Run `/claude-code-hermit:hermit-evolve` as usual. The missing-key config merge (`newConfigKeys()`: missing leaves under present parents are adopted) adds `watchdog.scheduler_enabled: true` to existing configs. This is default-on. Existing `watchdog.enabled: false` values are never rewritten.
 2. The next tmux always-on boot performs one scheduler registration. That flip of `watchdog.enabled: true` happens only on a genuinely first registration (no timer/unit already present). A hygiene-only install (`enabled: false`, unit already present) stays hygiene-only.
 3. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both `scheduler_enabled` and `enabled` false. Setting `watchdog.scheduler_enabled: false` in `config.json` by hand only stops future boots from re-registering; a timer already installed keeps ticking and keeps restarting. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
 4. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
+5. Run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny ask-only`. Resolve `hatch_target` the same way Step 1 already does (`.claude-code-hermit/state/hatch-options.json` `target` → `.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Additive and unattended-safe: if the target already carries at least one seeded deny entry, merge the ask list into `permissions.ask` and touch nothing else; if none are present, print `skip-preserved` and write nothing. Report the outcome (entries added, or `skip-preserved`). Legacy hard blocks (`npm publish`, `git push --force`, `git push origin main`, `git reset --hard`, `--no-verify`) stay blocked; to convert them to approval prompts run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny convert-legacy` from a terminal session (`deny standard` is purely additive and never removes them).
 
 ## [1.2.53] - 2026-08-31
 

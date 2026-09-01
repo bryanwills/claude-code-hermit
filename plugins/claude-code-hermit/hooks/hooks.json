@@ -14,18 +14,6 @@
         "description": "Deny every tool call while state/pause.json is set, except a channel reply tool and PushNotification"
       },
       {
-        "matcher": "Bash|Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/enforce-deny-patterns.ts"],
-            "timeout": 3
-          }
-        ],
-        "description": "Enforce deny-patterns (always_on incl. OPERATOR.md only when AGENT_HOOK_PROFILE=strict), warn on template edits"
-      },
-      {
         "matcher": "Edit|Write",
         "hooks": [
           {

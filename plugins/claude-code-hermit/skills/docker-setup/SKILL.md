@@ -126,7 +126,7 @@ The render script derives every `{{PLACEHOLDER}}` internally and fails loud (wri
   - env body: `<VAR>_STATE_DIR=${PWD}/.claude.local/channels/<plugin>` (VAR = `DISCORD` / `TELEGRAM`)
   - volume body: `${PWD}/.claude.local/channels/<plugin>:/home/claude/.claude/channels/<plugin>` (keeps channel writes inside the project tree — no permission prompts under `bypassPermissions`)
   - No channels → both arrays empty.
-- `agentHookProfile` — always `"strict"` for Docker (enforces `always_on` deny patterns inside the container).
+- `agentHookProfile` — always `"strict"` for Docker (the profile the remaining hooks read; permission rules are native `permissions.deny` / `permissions.ask`, not profile-gated).
 - `networkMode` — `docker.network_mode` (`"bridge"` or `"host"`, Step 2).
 - `gitIdentityMount` — the Step 1 preflight `gitconfigExists`. When **false**, the `.gitconfig` bind-mount is dropped and you must add to the summary: "No ~/.gitconfig found — git commits inside the container will have no author identity. Create one on the host and re-run docker-setup, or set git config manually inside the container."
 - `fleetMesh` - read `docker.fleet_mesh` from the project's `.claude-code-hermit/config.json`; absent means `false`. Never ask interactively. When true, tell the operator that the two external volumes and the `hermit-fleet-pidns` holder in `docs/always-on.md` must exist before `hermit-docker up`.
@@ -152,16 +152,7 @@ Only the top-level project memory is seeded — not agent-scoped memories at `<p
    **If subscription (oauth):** No auth var needed in `.env`. Check whether `ANTHROPIC_API_KEY` is set (non-empty) in `.env`. If so, warn and ask with `AskUserQuestion` (header: "API key"): **Yes — comment out** (prefix with # to disable it) / **No — keep** (container will run in API key mode).
    Also remove any `CLAUDE_CODE_OAUTH_TOKEN` line you find in `.env` — this is not a preference. A token stored there is baked in at container creation, so renewing it would require recreating the container from the host, which is exactly the manual access token mode exists to remove. The hermit stores it on the config volume and exports it at process start instead.
 3. Ensure `.env` is listed in both `.gitignore` and `.dockerignore` (create the files if needed, append if missing).
-4. **Deny patterns:** Merge the `default` deny set into the target settings file.
-
-   **Resolve `hatch_target`** using the same fallback chain as `hermit-evolve` SKILL.md §2a (`.claude-code-hermit/state/hatch-options.json` `"target"` field → marker scan of `CLAUDE.local.md` / `CLAUDE.md` → `claude plugin list --json` scope detection). Do not silently default to committed when the state file is absent — that can leak operator-personal hardening into the repo. Map: `hatch_target == "local"` → `.claude/settings.local.json`; `hatch_target == "committed"` → `.claude/settings.json`.
-
-   Run: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny minimal`
-   (Reads canonical default set from `state-templates/deny-patterns.json`; never removes existing entries. Does NOT include `always_on` patterns — docker/ssh/kubectl are valid for later steps and are enforced at runtime by the hook under strict profile.)
-
-   Tell the operator: "Added safety deny rules for always-on operation — protects against destructive commands and casual credential dumps. Container-specific rules (docker, ssh, kubectl) are enforced by the hook at runtime. Written to {.claude/settings.local.json | .claude/settings.json}."
-
-5. **Sandbox note:** Hermit does not configure the Claude Code bash sandbox for container deployments — that's the operator's call via `/sandbox`. `bubblewrap`/`socat` are installed in the image so it's available if wanted. The container boundary (`cap_drop:ALL`, `no-new-privileges`, network policy) is the isolation layer here, per Anthropic recommendation for unattended runs (https://code.claude.com/docs/en/sandbox-environments), so the nested bwrap sandbox is optional rather than required. Note: on Ubuntu 24.04+/26.04 hosts (and any host with `kernel.apparmor_restrict_unprivileged_userns=1`) the AppArmor `docker-default` policy blocks `bwrap` from creating user-namespaces in-container, so an in-container sandbox may not start there and could kill heartbeat and `/watch` monitors if forced on regardless.
+4. **Sandbox note:** Hermit does not configure the Claude Code bash sandbox for container deployments — that's the operator's call via `/sandbox`. `bubblewrap`/`socat` are installed in the image so it's available if wanted. The container boundary (`cap_drop:ALL`, `no-new-privileges`, network policy) is the isolation layer here, per Anthropic recommendation for unattended runs (https://code.claude.com/docs/en/sandbox-environments), so the nested bwrap sandbox is optional rather than required. Note: on Ubuntu 24.04+/26.04 hosts (and any host with `kernel.apparmor_restrict_unprivileged_userns=1`) the AppArmor `docker-default` policy blocks `bwrap` from creating user-namespaces in-container, so an in-container sandbox may not start there and could kill heartbeat and `/watch` monitors if forced on regardless.
 
 ### 7. Channel setup
 
@@ -548,6 +539,17 @@ Why this step exists: mid-setup, claude REPL starts before plugins are fully ena
 
 Why not `hermit-docker restart`: Docker's default stop_grace_period is 10s, which is shorter than the entrypoint's 30-iteration session-close poll — SIGKILL can land mid-close. (We raised `stop_grace_period` to 60s in the compose template, so `restart` is now also safe in principle, but `down+up` gives a recreated container which is stronger: clears ephemeral container-layer state and re-runs the entrypoint from a clean slate.)
 
+### 8c. Seed permission rules
+
+Runs whether or not steps 8/8b were skipped. This step sits after the deployment steps on purpose: it seeds `Bash(docker *)` / `Bash(ssh *)` / `Bash(kubectl *)` into `permissions.ask`, and ask rules hot-reload — seeding earlier would make every `docker compose` call in steps 8/8b raise its own approval prompt mid-wizard.
+
+**Resolve `hatch_target`** using the same fallback chain as `hermit-evolve` SKILL.md §2a (`.claude-code-hermit/state/hatch-options.json` `"target"` field → marker scan of `CLAUDE.local.md` / `CLAUDE.md` → `claude plugin list --json` scope detection). Do not silently default to committed when the state file is absent — that can leak operator-personal hardening into the repo. Map: `hatch_target == "local"` → `.claude/settings.local.json`; `hatch_target == "committed"` → `.claude/settings.json`.
+
+Run: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny standard`
+(Reads canonical `deny` + `ask` from `state-templates/deny-patterns.json`. Purely additive and idempotent — it never removes an existing entry, so a hermit hatched Hardened keeps its hard blocks and a hermit already seeded at hatch gets nothing new. Risky ops such as docker/ssh/kubectl land as `permissions.ask`, so future host sessions prompt on them rather than hard-block.)
+
+Tell the operator: "Added safety deny rules for always-on operation — protects against destructive commands and casual credential dumps. Risky ops (docker, ssh, kubectl, git push, settings edits) prompt for approval. Written to {.claude/settings.local.json | .claude/settings.json}."
+
 ### 9. Verify
 
 **Enable the Docker watchdog.** Docker hermits run the watchdog from the entrypoint loop, so turn it on now:
@@ -556,7 +558,7 @@ Why not `hermit-docker restart`: Docker's default stop_grace_period is 10s, whic
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json set watchdog.enabled true
 ```
 
-This only flips `.watchdog.enabled` — the other watchdog tuning keys (`stale_factor`, `wedge_floor`, `escalate_after`, `operator_grace`) are preserved, the whole config is validated, and the change lands in the settings ledger. Never write `config.json` with Edit/Write or a shell redirect; under the strict profile both are hook-blocked.
+This only flips `.watchdog.enabled` — the other watchdog tuning keys (`stale_factor`, `wedge_floor`, `escalate_after`, `operator_grace`) are preserved, the whole config is validated, and the change lands in the settings ledger. Never write `config.json` with Edit/Write or a shell redirect; direct `Edit` calls raise an approval prompt (seeded ask rule) and skip validation and the ledger.
 
 Run `.claude-code-hermit/bin/hermit-status` and show output. `no session` is the expected output on a fresh setup — it means the container is up and will start its first session on the next cron routine or channel message. Do **not** add `sleep` before `hermit-status`; if you need to wait for a session to appear, use `Monitor` with an `until`-loop (not chained sleeps).
 

@@ -113,7 +113,7 @@ Default: idle transition when work finishes. Waiting when blocked on operator in
   Morning: brief + priority check. Evening: daily journal.
 ```
 
-**Hooks fire throughout the session:** `cost-tracker.ts` (costs), `session-diff.ts` (changed files), and `evaluate-session.ts` (quality nudges) run on every assistant turn (Stop). At the strict profile, `enforce-deny-patterns.ts` blocks banned commands before execution (PreToolUse), and `channel-hook.ts` + `heartbeat-touch.ts` run on tool use (PostToolUse).
+**Hooks fire throughout the session:** `cost-tracker.ts` (costs), `session-diff.ts` (changed files), and `evaluate-session.ts` (quality nudges) run on every assistant turn (Stop). `channel-hook.ts` + `heartbeat-touch.ts` run on tool use (PostToolUse). Banned commands are native `permissions.deny` / `permissions.ask` entries, not a PreToolUse hook.
 
 ### When learning fires
 

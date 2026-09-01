@@ -242,9 +242,9 @@ The value is process-scoped: it reaches the managed session through the tmux env
 
 ## Safety Rails
 
-Hermit includes by default some deny patterns that block dangerous operations regardless of permission mode — `rm -rf`, `git push --force`, `chmod 777`, casual credential dumps, and more. The `/hatch` wizard generates these automatically, with a hardened set for always-on deployments.
+Hermit seeds native Claude Code permission rules that apply regardless of permission mode. Standard (the `/hatch` default) hard-blocks `rm -rf`, `chmod 777`, casual credential dumps and more in `permissions.deny`, and puts risky-but-legitimate operations (`ssh`, `docker`, `kubectl`, `npm publish`, `git push --force`, `--no-verify`, settings and OPERATOR.md edits) behind an approval prompt in `permissions.ask`. Hardened puts both classes in `permissions.deny`.
 
-See [Security](security.md) for the full deny list and defense-in-depth model.
+See [Security](security.md) for the full rule list and defense-in-depth model.
 
 ---
 

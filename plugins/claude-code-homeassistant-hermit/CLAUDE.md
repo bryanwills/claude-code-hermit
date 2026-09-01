@@ -159,7 +159,7 @@ Before changing HA endpoint usage, verify against upstream (WebFetch or the `fin
 - When aligning with a new hermit version, include `docs/` in terminology sweeps — `docs/knowledge-schema.md` and other doc files carry hermit-facing terms that go stale. Verification: `grep -rn "<old-term>" skills/ agents/ state-templates/ docs/ CLAUDE.md .claude-plugin/`
 - The CLI and both hooks are TypeScript run directly by bun (`bun src/cli.ts`, `bun hooks/*.ts`) with zero runtime dependencies — bun is guaranteed by the core hermit requirement. No shipped code runs Python; the only Python in the test suite is a fixture (`tests/gate-corpus.test.ts` replays the retired Python hooks from git history at `42c0c8f~1`, `tests/yaml-parity.test.ts` compares against PyYAML).
 - The safety hook fails closed — if an MCP call's target cannot be resolved to concrete entity IDs, it is blocked. Changes to `hooks/mcp-safety-gate.ts` or `src/policy.ts` must keep `tests/gate-corpus.test.ts` (golden byte-equivalence vs the retired Python gate) and `tests/gate-fuzz.test.ts` (fail-closed property) green.
-- The deny-pattern hook blocks Bash commands whose arguments contain the literal string `TOKEN`. Read credentials via the CLI (`bin/ha-agent-lab boot status`), never `cat .env` / `echo $HOMEASSISTANT_TOKEN`.
+- Read credentials via the CLI (`bin/ha-agent-lab boot status`), never `cat .env` / `echo $HOMEASSISTANT_TOKEN` — core's seeded permission rules deny `cat .env*` dumps, and expanding an unlisted credential var still puts the value in the transcript.
 - Agent references in skill instructions must use the full namespaced form (e.g., `claude-code-homeassistant-hermit:ha-safety-reviewer`). Bare names will fail at dispatch.
 
 ## Routines and Scheduled Checks

@@ -1,4 +1,4 @@
-// Shared stdin-drain + profile-parsing helper for PreToolUse hooks.
+// Shared stdin-drain helper for PreToolUse hooks.
 //
 // Every hook must consume stdin to completion even past a size cap (avoids
 // broken-pipe errors and keeps the "hooks must never leave the pipe half
@@ -39,14 +39,6 @@ export async function readHookInput(
   } catch {
     return null;
   }
-}
-
-export function hookProfile(): string {
-  return (process.env.AGENT_HOOK_PROFILE || 'standard').trim().toLowerCase();
-}
-
-export function isStrictProfile(): boolean {
-  return hookProfile() === 'strict';
 }
 
 // Standard drain-parse-dispatch-exit(0) wrapper for hooks whose `main` is a

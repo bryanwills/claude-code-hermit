@@ -172,8 +172,7 @@ export function renderConfirm(answers: Json): string {
     out.push(def('Budget caps', caps.length ? caps.map(k => `${k.replace('_usd', '')} $${t.budget[k]}`).join(' · ') : `none, ${t.budget.action ?? 'alert'}-only`));
   }
   if (answers.deployment) {
-    out.push(row('Safety rules', answers.deployment === 'docker'
-      ? 'hardened deny profile (from Docker choice)' : 'minimal deny profile'));
+    out.push(row('Safety rules', 'standard (safety denies + approval prompts)'));
   }
   out.push(row('Files', (answers.hatch_target === 'committed' ? 'committed files' : '`.local` (gitignored)')
     + (answers.git_init ? ' · git repo initialized' : '')));

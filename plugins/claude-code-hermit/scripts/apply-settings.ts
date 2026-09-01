@@ -34,7 +34,16 @@
  *                            project settings file in Claude Code 2.1.207, so this verb's writes
  *                            were silently ignored. The sealed entries now ship in the per-session
  *                            overlay hermit-start renders (lib/settings/automode-entries.ts).
- *   deny <minimal|hardened>  Merge deny-patterns from state-templates/deny-patterns.json
+ *   deny <standard|hardened|ask-only|convert-legacy>
+ *                            Seed native permissions from state-templates/deny-patterns.json.
+ *                            `standard` merges `deny` into permissions.deny and `ask` into
+ *                            permissions.ask — purely additive, removes nothing.
+ *                            `hardened` merges both arrays into permissions.deny.
+ *                            `ask-only` merges ask when the target already carries ≥1 seeded
+ *                            deny entry; otherwise prints skip-preserved and writes nothing.
+ *                            `convert-legacy` seeds like standard, then strips the five legacy
+ *                            hard-block strings from deny (the operator's attended conversion).
+ *                            `minimal` aliases `standard`.
  *   channel-env <CH> <dir>   Set env.<CH>_STATE_DIR and strip any stale env.*_BOT_TOKEN
  *
  * Rules:
@@ -42,8 +51,10 @@
  *   any *_BOT_TOKEN from the env block (tokens must live only in .env, never settings),
  *   permissions-sync, which removes only entries named in the sealed HERMIT_OBSOLETE /
  *   HERMIT_OBSOLETE_DENY registries below (rules this plugin itself seeded and has
- *   since retired), and
- *   voice-render, which replaces outputStyle by design — config.json owns that key.
+ *   since retired),
+ *   voice-render, which replaces outputStyle by design — config.json owns that key, and
+ *   `deny standard`, which removes five legacy exact strings from permissions.deny
+ *   (the old hardened extras that now live as ask entries).
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
  */
@@ -209,23 +220,13 @@ const HERMIT_OBSOLETE = [
 // seeded (via the `deny` op) and has since retired, matched as exact strings, so an
 // operator's own deny rules cannot be caught. These three were unanchored credential
 // word globs — trivially bypassable, and they blocked ordinary work (a grep, a commit
-// message). The hook stopped enforcing them from the template; this is what reaches
-// the copy `deny` wrote into already-hatched hermits' settings.
+// message). This is what reaches the copy `deny` wrote into already-hatched hermits'
+// settings. Not extended with the five legacy hardened extras: those are still
+// legitimate Hardened seeds, and sync would re-strip them every run.
 const HERMIT_OBSOLETE_DENY = [
   'Bash(*API_KEY*)',
   'Bash(*SECRET*)',
   'Bash(*TOKEN*)',
-];
-
-// Hardened extras — a subset of always_on patterns safe to persist to settings.
-// Excludes docker/kubectl/ssh: valid in devops contexts on the host; hook-enforced at runtime.
-// Matches what hatch Step 9 "hardened" option produces.
-const HARDENED_DENY_EXTRAS = [
-  'Bash(npm publish*)',
-  'Bash(git push --force*)',
-  'Bash(git push origin main*)',
-  'Bash(git reset --hard*)',
-  'Bash(*--no-verify*)',
 ];
 
 type Json = any;
@@ -264,22 +265,27 @@ function readTargetJson(filePath: string): Json {
 }
 
 function writeJson(filePath: string, data: Json): void {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  writeFileAtomic(filePath, JSON.stringify(data, null, 2) + '\n');
 }
 
-// Returns the entries that were newly added (absent before) — the `allow` op
-// prints these so hermit-evolve's Step 8 report can list what it granted.
-function mergeAllow(settings: Json, entries: string[]): string[] {
+// Merges entries into permissions.<key>, deduping against what's already there,
+// and returns the entries newly added (absent before) — the `allow` op prints
+// these so hermit-evolve's Step 8 report can list what it granted, and the
+// `deny` op's seeding paths print them as `added:` lines.
+function mergePermissionKey(settings: Json, key: 'allow' | 'deny' | 'ask', entries: string[]): string[] {
   settings.permissions ??= {};
-  settings.permissions.allow ??= [];
-  const existing = new Set<string>(settings.permissions.allow);
+  settings.permissions[key] ??= [];
+  const existing = new Set<string>(settings.permissions[key]);
   const added: string[] = [];
   for (const e of entries) {
-    if (!existing.has(e)) { settings.permissions.allow.push(e); added.push(e); }
+    if (!existing.has(e)) { settings.permissions[key].push(e); added.push(e); }
   }
   return added;
+}
+
+function mergeAllow(settings: Json, entries: string[]): string[] {
+  return mergePermissionKey(settings, 'allow', entries);
 }
 
 interface PermissionsPlan {
@@ -312,28 +318,11 @@ function removePermissions(settings: Json, key: 'allow' | 'deny', entries: strin
 }
 
 function mergeDeny(settings: Json, entries: string[]): void {
-  settings.permissions ??= {};
-  settings.permissions.deny ??= [];
-  const existing = new Set<string>(settings.permissions.deny);
-  for (const e of entries) {
-    if (!existing.has(e)) settings.permissions.deny.push(e);
-  }
+  mergePermissionKey(settings, 'deny', entries);
 }
 
-// Claude Code's permission engine treats an Edit(glob) rule as covering the
-// Write tool too, and (v2.1.211+) warns at boot on Write(glob) rules. So a
-// Write(<glob>) whose Edit(<glob>) twin is present is a dead no-op that only
-// produces that warning — drop it before seeding settings.json. deny-patterns.json
-// keeps both spellings on purpose: the runtime enforce-deny-patterns hook matches
-// tool-name-specifically and still needs the Write variant.
-function dropRedundantWriteRules(entries: string[]): string[] {
-  const editGlobs = new Set(
-    entries.map((e) => e.match(/^Edit\((.+)\)$/)?.[1]).filter(Boolean) as string[],
-  );
-  return entries.filter((e) => {
-    const writeGlob = e.match(/^Write\((.+)\)$/)?.[1];
-    return writeGlob === undefined || !editGlobs.has(writeGlob);
-  });
+function mergeAsk(settings: Json, entries: string[]): string[] {
+  return mergePermissionKey(settings, 'ask', entries);
 }
 
 const [, , targetFile, op, ...rest] = process.argv;
@@ -460,18 +449,58 @@ switch (op) {
   }
 
   case 'deny': {
-    const profile = rest[0];
-    if (profile !== 'minimal' && profile !== 'hardened') {
-      console.error(`deny requires 'minimal' or 'hardened', got: ${profile ?? '(none)'}`);
+    const raw = rest[0];
+    const profile = raw === 'minimal' ? 'standard' : raw;
+    if (profile !== 'standard' && profile !== 'hardened' && profile !== 'ask-only' && profile !== 'convert-legacy') {
+      console.error(`deny requires 'standard', 'hardened', 'ask-only', or 'convert-legacy', got: ${raw ?? '(none)'}`);
       process.exit(1);
     }
     const patternsFile = path.join(PLUGIN_ROOT, 'state-templates', 'deny-patterns.json');
     const patterns = readJson(patternsFile);
-    const deny = [
-      ...(patterns.default ?? []),
-      ...(profile === 'hardened' ? HARDENED_DENY_EXTRAS : []),
-    ];
-    mergeDeny(settings, dropRedundantWriteRules(deny));
+    const denyEntries: string[] = Array.isArray(patterns.deny) ? patterns.deny : [];
+    const askEntries: string[] = Array.isArray(patterns.ask) ? patterns.ask : [];
+
+    if (profile === 'ask-only') {
+      const existingDeny = new Set<string>(
+        Array.isArray(settings?.permissions?.deny) ? settings.permissions.deny : [],
+      );
+      const seeded = denyEntries.some((e) => existingDeny.has(e));
+      if (!seeded) {
+        console.log('skip-preserved');
+        readOnly = true;
+        break;
+      }
+      const added = mergeAsk(settings, askEntries);
+      for (const e of added) console.log(`added:${e}`);
+      if (added.length === 0) readOnly = true;
+      break;
+    }
+
+    if (profile === 'hardened') {
+      mergeDeny(settings, [...denyEntries, ...askEntries]);
+      break;
+    }
+
+    // standard and convert-legacy share the same seed; only convert-legacy may
+    // remove anything. Keeping standard purely additive is what lets hatch and
+    // docker-setup call it without ever demoting a Hardened install — the
+    // legacy-deny → ask conversion happens only when the operator personally
+    // runs convert-legacy from a terminal (the CHANGELOG cleanup one-liner).
+    mergeDeny(settings, denyEntries);
+    const added = mergeAsk(settings, askEntries);
+    for (const e of added) console.log(`added:${e}`);
+    if (profile === 'convert-legacy') {
+      const legacyHardBlocks = [
+        'Bash(npm publish*)',
+        'Bash(git push --force*)',
+        'Bash(git push origin main*)',
+        'Bash(git reset --hard*)',
+        'Bash(*--no-verify*)',
+      ];
+      const present = legacyHardBlocks.filter((e) => settings.permissions.deny.includes(e));
+      removePermissions(settings, 'deny', present);
+      for (const e of present) console.log(`removed:${e}`);
+    }
     break;
   }
 

@@ -132,7 +132,7 @@ Finally, refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md` (si
 
 If the proposal affects security boundaries — permissions, network access, credential handling — clearly note the security impact so the operator can make an informed decision.
 
-When your operational scope changes (new API, new local service, new publishing channel), create a PROP recommending deny pattern additions or networking changes. Never modify `deny-patterns.json` or Docker config directly. The operator implements security changes.
+When your operational scope changes (new API, new local service, new publishing channel), create a PROP recommending permission-rule additions or networking changes. Never modify `deny-patterns.json` or Docker config directly. The operator implements security changes.
 
 When the proposed solution involves creating a new agent, skill, heartbeat item, or OPERATOR.md change, think hard and make the Suggested Plan self-contained:
 

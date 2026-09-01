@@ -167,8 +167,15 @@ describe('check-upgrade.sh always_on banner', () => {
 describe('static file checks', () => {
   test('deny-patterns.json', () => {
     const d = readJson(path.join(PLUGIN_ROOT, 'state-templates', 'deny-patterns.json'));
-    expect(Array.isArray(d.default)).toBe(true);
-    expect(Array.isArray(d.always_on)).toBe(true);
+    expect(Object.keys(d).sort()).toEqual(['ask', 'deny']);
+    expect(Array.isArray(d.deny)).toBe(true);
+    expect(Array.isArray(d.ask)).toBe(true);
+    // The OPERATOR.md redirect pair is deny, never ask: unlike the settings redirect
+    // twins (hook-only, retired with the hook), these were always native profile-
+    // independent denies, and there is no sanctioned shell-redirect path into the
+    // operator-curated file that an approval prompt would legitimize.
+    expect(d.deny).toContain('Bash(*> *.claude-code-hermit/OPERATOR.md*)');
+    expect(d.deny).toContain('Bash(*>.claude-code-hermit/OPERATOR.md*)');
   });
 
   test('bin scripts executable', () => {

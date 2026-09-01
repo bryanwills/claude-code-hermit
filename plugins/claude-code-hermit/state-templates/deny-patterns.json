@@ -1,5 +1,5 @@
 {
-  "default": [
+  "deny": [
     "Bash(rm -rf *)",
     "Bash(rm -fr *)",
     "Bash(rm -r -f *)",
@@ -28,35 +28,21 @@
     "Bash(*${HERMIT_TELEMETRY_TOKEN*)",
     "Bash(*> *.claude-code-hermit/OPERATOR.md*)",
     "Bash(*>.claude-code-hermit/OPERATOR.md*)",
-    "Edit(*/.claude/plugins/marketplaces/*)",
-    "Write(*/.claude/plugins/marketplaces/*)"
+    "Edit(*/.claude/plugins/marketplaces/*)"
   ],
-  "always_on": [
+  "ask": [
     "Bash(ssh *)",
     "Bash(docker *)",
     "Bash(kubectl *)",
     "Bash(npm publish*)",
-    "Bash(git push --force*)",
     "Bash(git push origin main*)",
+    "Bash(git push --force*)",
     "Bash(git reset --hard*)",
     "Bash(*--no-verify*)",
-    "Edit(*.claude-code-hermit/OPERATOR.md)",
-    "Write(*.claude-code-hermit/OPERATOR.md)",
-    "Edit(*.claude-code-hermit/config.json)",
-    "Write(*.claude-code-hermit/config.json)",
     "Edit(*.claude/settings.json)",
-    "Write(*.claude/settings.json)",
     "Edit(*.claude/settings.local.json)",
-    "Write(*.claude/settings.local.json)",
-    "Edit(*.claude/output-styles/hermit-voice.md)",
-    "Write(*.claude/output-styles/hermit-voice.md)",
-    "Bash(*> *.claude/settings.json*)",
-    "Bash(*> *.claude/settings.local.json*)",
-    "Bash(*> *.claude/output-styles/hermit-voice.md*)",
-    "Bash(*> *.claude-code-hermit/config.json*)",
-    "Bash(*>.claude/settings.json*)",
-    "Bash(*>.claude/settings.local.json*)",
-    "Bash(*>.claude/output-styles/hermit-voice.md*)",
-    "Bash(*>.claude-code-hermit/config.json*)"
+    "Edit(*.claude-code-hermit/config.json)",
+    "Edit(*.claude-code-hermit/OPERATOR.md)",
+    "Edit(*.claude/output-styles/hermit-voice.md)"
   ]
 }
