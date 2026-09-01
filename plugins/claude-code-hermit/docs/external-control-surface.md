@@ -148,6 +148,13 @@ Argument: `root`. No `source` parameter; the payload is always
 If the hermit is paused: `{delivery:"suppressed", reason:"paused"}` and no
 socket write. Pause exists to prevent paid turns; wake does not bypass it.
 
+Suppression is not transient, and this surface cannot lift it: resuming is
+out of scope for v1, so retrying only produces the same refusal. Only the
+operator can resume, from their own chat or a terminal. An unattended
+orchestrator should treat `suppressed` as "stop and surface to a human",
+not as a retryable failure, and can confirm the state out of band via
+`paused` on `get_status` or `list_hermits`.
+
 Otherwise the response is
 `{write_status:"flushed"|"unreachable", delivery:"unconfirmed"}`.
 `flushed` means bytes reached the socket (or the docker relay exited 0).
