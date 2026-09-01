@@ -245,7 +245,7 @@ export function renderFinal(o: Observed, deployment: string): string {
   out.push('');
   out.push(consequence);
   out.push('');
-  out.push(`Anytime: \`/hermit-settings\` to change settings ([full reference](${CONFIG_REFERENCE_URL})), \`/hermit-evolve\` after plugin updates, \`/hermit-doctor\` to troubleshoot. Refine OPERATOR.md by telling me what changed.`);
+  out.push(`Anytime: \`/hermit-settings\` to change settings ([full reference](${CONFIG_REFERENCE_URL})), \`/hermit-evolve\` after plugin updates, \`/hermit-doctor\` to troubleshoot, \`.claude-code-hermit/bin/hermit-run backup setup\` (from a terminal) to back up hermit state to git. Refine OPERATOR.md by telling me what changed.`);
 
   return out.join('\n');
 }

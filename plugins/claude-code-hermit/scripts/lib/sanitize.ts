@@ -50,22 +50,40 @@ function safeForLLMMultiline(s: any): string {
 // Deliberately minimal: hermit's own compiled/ security artifacts quote
 // injection phrases, so every pattern here must be near-zero-FP on prose
 // *about* injection. A hit blocks one injected entry (file stays on disk).
-const INJECTION_MARKERS: [RegExp, string][] = [
+const INJECTION_PHRASES: [RegExp, string][] = [
   [/ignore\s+(?:all\s+)?previous\s+instructions/i, 'injection phrase'],
   [/disregard\s+(?:all\s+)?(?:prior|previous)\s+(?:instructions|context)/i, 'injection phrase'],
+];
+
+// The credential half, split out so callers that must not refuse prose *about*
+// injection can scan for credentials alone (backup's refusal screen: hermit's own
+// compiled/ security notes quote injection phrases and must still be backed up).
+// Same patterns, same order — INJECTION_MARKERS below is unchanged in behavior.
+const CREDENTIAL_MARKERS: [RegExp, string][] = [
   [/sk-ant-[A-Za-z0-9_-]{20,}/, 'credential-shaped string (anthropic key)'],
   [/AKIA[0-9A-Z]{16}/, 'credential-shaped string (aws access key)'],
   [/ghp_[A-Za-z0-9]{36}/, 'credential-shaped string (github token)'],
   [/xox[bap]-[A-Za-z0-9-]{10,}/, 'credential-shaped string (slack token)'],
 ];
 
+const INJECTION_MARKERS: [RegExp, string][] = [...INJECTION_PHRASES, ...CREDENTIAL_MARKERS];
+
 // Returns the block reason for the first marker hit, or null when clean.
 function scanInjected(s: any): string | null {
+  return scanWith(INJECTION_MARKERS, s);
+}
+
+// Credential markers only — no injection phrases. See CREDENTIAL_MARKERS.
+function scanCredentials(s: any): string | null {
+  return scanWith(CREDENTIAL_MARKERS, s);
+}
+
+function scanWith(markers: [RegExp, string][], s: any): string | null {
   const text = String(s ?? '');
-  for (const [re, reason] of INJECTION_MARKERS) {
+  for (const [re, reason] of markers) {
     if (re.test(text)) return reason;
   }
   return null;
 }
 
-export { safe, safeForLLM, INJECTION_TAGS, safeMultiline, safeForLLMMultiline, scanInjected };
+export { safe, safeForLLM, INJECTION_TAGS, safeMultiline, safeForLLMMultiline, scanInjected, scanCredentials };

@@ -72,6 +72,17 @@ describe('final reports disk truth, not a remembered file list', () => {
     expect(out).not.toContain('Not present');
   });
 
+  test('a workspace-backup .gitignore still reads as configured', () => {
+    // Workspace-mode backup rewrites the hermit block into a marker line so state
+    // can be committed. The marker keeps the `.claude-code-hermit` substring on
+    // purpose — without it this probe would report the gitignore as missing.
+    const root = hatched({ claudeTarget: 'CLAUDE.local.md', worktreeinclude: true, settings: 'local', git: true });
+    fs.writeFileSync(path.join(root, '.gitignore'),
+      '# .claude-code-hermit state is tracked here (backup: workspace mode)\n.claude.local/\n.env\n');
+    const out = renderFinal(observe(root), 'interactive');
+    expect(out).not.toMatch(/Not present:.*\.gitignore/);
+  });
+
   test('a declined .gitignore append surfaces as a warning, never as created', () => {
     const root = hatched({ claudeTarget: 'CLAUDE.local.md', gitignore: false, worktreeinclude: true, settings: 'local' });
     const out = renderFinal(observe(root), 'interactive');
