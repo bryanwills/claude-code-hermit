@@ -1366,9 +1366,11 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     const STARTUP_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
 
-    // Monitor registration time. Used both to reject a liveness tick left by a
-    // prior session's monitor (a tick older than started_at is stale, not proof
-    // the current monitor is alive) and to bound the startup grace below.
+    // The registration's first confirmed tick (`start-commit` adopts it), or the
+    // commit time when no tick could be attributed to this arm. Used both to reject
+    // a liveness tick left by a prior session's monitor (a tick older than
+    // started_at is stale, not proof the current monitor is alive) and to bound the
+    // startup grace below.
     let startedAt: number | null = null;
     let monRt: Json = null;
     try {
@@ -1412,7 +1414,7 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
         return {
           id: 'heartbeat',
           status: 'fail',
-          detail: `heartbeat not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container); shell /watch streams are dead too. Last tick: ${tickStr}.`,
+          detail: `heartbeat not ticking — last tick ${tickStr}. Monitor spawned then stopped — re-arm with /claude-code-hermit:heartbeat start`,
         };
       }
       return { id: 'heartbeat', status: 'ok', detail: `heartbeat: ticking (last tick ${tickStr})` };
@@ -1421,11 +1423,20 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     // No trustworthy tick. Flag once the monitor has had longer than the startup
     // grace to write its first one; otherwise it is still warming up.
     if (!health.fresh) {
-      const tickStr = lastPeekAt !== null ? `${Math.round((now - lastPeekAt) / 60000)}m ago (predates current monitor — stale)` : 'never';
+      if (health.reason === 'liveness-predates-start') {
+        const tickStr = `${Math.round((now - lastPeekAt!) / 60000)}m ago`;
+        return {
+          id: 'heartbeat',
+          status: 'fail',
+          detail: `heartbeat liveness belongs to another registration (last tick ${tickStr}) — re-arm with /claude-code-hermit:heartbeat start`,
+        };
+      }
+      // Only `liveness-absent` is left, and it means no parseable tick has ever
+      // landed — `liveness-predates-start` returned above.
       return {
         id: 'heartbeat',
         status: 'fail',
-        detail: `heartbeat not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container); shell /watch streams are dead too. Last tick: ${tickStr}.`,
+        detail: 'heartbeat not ticking — no tick ever landed. Monitor subprocess spawn likely blocked (seccomp / nested-userns in container); shell /watch streams are dead too.',
       };
     }
 

@@ -2128,7 +2128,8 @@ describe('doctor-check', () => {
     write(hermit(dir, 'state', 'heartbeat-liveness.json'), `{"last_peek_at":"${stale}"}`);
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('fail');
-    expect(c.detail).toContain('Monitor subprocess spawn');
+    expect(c.detail).toContain('spawned then stopped');
+    expect(c.detail).toContain('/claude-code-hermit:heartbeat start');
   }));
 
   test('doctor-check heartbeat: active session + liveness missing + recent started_at → ok (warming up)', withDir(async (dir) => {
@@ -2170,7 +2171,8 @@ describe('doctor-check', () => {
     write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${started}"}`);
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('fail');
-    expect(c.detail).toContain('Monitor subprocess spawn');
+    expect(c.detail).toContain('another registration');
+    expect(c.detail).toContain('/claude-code-hermit:heartbeat start');
   }));
 
   test('doctor-check heartbeat: liveness missing + started_at past startup grace → fail', withDir(async (dir) => {

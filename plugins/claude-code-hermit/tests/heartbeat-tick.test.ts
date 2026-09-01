@@ -275,6 +275,17 @@ describe('heartbeat start-check', () => {
     expect(out.some(l => l.startsWith('OLD_TASK:'))).toBe(false);
   });
 
+  // The verb stamps `armed_at` into the runtime file, so an arm abandoned before
+  // start-commit leaves a record with no `started_at`. That is still "never
+  // registered", not a drifted interval.
+  test('an abandoned arm still reads as a FIRST_START re-arm', async () => {
+    const hermit = fixture();
+    await run('start-check', [hermit]);
+    const out = lines(await run('start-check', [hermit]));
+    expect(out[0]).toBe('REARM|runtime-missing');
+    expect(out).toContain('FIRST_START:1');
+  });
+
   // A trusted tick (later than started_at) that has since aged past 3× the interval.
   test('a registered monitor that stopped ticking re-arms', async () => {
     const hermit = fixture();
@@ -347,11 +358,41 @@ describe('heartbeat start-commit', () => {
 
   // The whole point of the record: the two independent staleness readers must
   // accept what start-commit wrote, or the watchdog re-arms a healthy monitor.
+  // A real monitor stamps whole seconds, so the tick is strictly earlier than a
+  // millisecond nowMs — seed that shape, not last_peek_at === HERMIT_NOW.
   test('the record it writes reads as healthy to start-check', async () => {
     const hermit = fixture();
-    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: NOW });
+    const tick = '2026-07-10T11:59:55Z';
+    write(hermit, 'state/heartbeat-monitor.runtime.json', { armed_at: '2026-07-10T11:59:50Z' });
+    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: tick });
     await run('start-commit', [hermit, 'task-new']);
-    expect(lines(await run('start-check', [hermit]))).toEqual(['FRESH|interval=1800']);
+    const runtime = read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json'));
+    expect(runtime.started_at).toBe(tick);
+    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:05:00Z' })))
+      .toEqual(['FRESH|interval=1800']);
+  });
+
+  // heartbeat-monitor.sh stamps `date -u +%Y-%m-%dT%H:%M:%SZ`. Without flooring
+  // armed_at to whole seconds, a tick in the same second as the arm is rejected.
+  test('adopts a tick truncated to the same whole second as armed_at', async () => {
+    const hermit = fixture();
+    const tick = '2026-07-10T12:00:25Z';
+    write(hermit, 'state/heartbeat-monitor.runtime.json', { armed_at: '2026-07-10T12:00:25.409Z' });
+    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: tick });
+    await run('start-commit', [hermit, 'task-new']);
+    expect(read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json')).started_at).toBe(tick);
+  });
+
+  // No armed_at → no provenance, so a leftover tick must not mark a spawn-blocked
+  // monitor fresh.
+  test('a leftover tick with no armed_at is not adopted', async () => {
+    const hermit = fixture();
+    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: '2026-07-10T11:50:00Z' });
+    await run('start-commit', [hermit, 'task-new']);
+    expect(Date.parse(read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json')).started_at))
+      .toBe(NOW_MS);
+    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:05:00Z' }))[0])
+      .toBe('REARM|liveness-predates-start');
   });
 
   test('the record it writes reads as healthy to the routine anchor', async () => {
