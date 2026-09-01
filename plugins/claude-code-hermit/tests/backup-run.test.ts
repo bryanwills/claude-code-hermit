@@ -41,7 +41,11 @@ function fixture(over: any = {}): Fixture {
   fs.mkdirSync(path.join(hermit, 'sessions'), { recursive: true });
 
   const bare = path.join(freshDir(), 'remote.git');
-  execFileSync('git', ['init', '-q', '--bare', bare]);
+  // Pin the bare's HEAD symref to the branch the workspace repo uses below.
+  // Without -b it follows the machine's init.defaultBranch, so on a host where
+  // that is master the pushed `main` is a non-HEAD ref and `rev-parse HEAD`
+  // resolves nothing — green locally, red on CI.
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', bare]);
 
   const configDir = freshDir();
   const key = root.replace(/[^a-zA-Z0-9]/g, '-');
