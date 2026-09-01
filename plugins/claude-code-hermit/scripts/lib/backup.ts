@@ -55,8 +55,10 @@ const CHANNEL_LOG_RE = /^channel-log\.sqlite(-wal|-shm)?$/;
 // them makes every run produce a diff even when nothing else changed, so the
 // history stops meaning "hermit state moved". A lock is held during our own
 // `git add`; the backup's status and cursor are rewritten by the run itself.
-// Neither is needed to restore.
-const TRANSIENT_RE = /(\.lock$|^\.steal\.|^backup-status\.json$|^backup-schedule\.json$)/;
+// Neither is needed to restore. Lock takeover markers and atomic-write temps are
+// suffixed, not prefixed (`.foo.lock.steal.<ino>.<mtime>`, `<file>.<pid>.tmp`),
+// so both shapes are matched on the tail rather than the head.
+const TRANSIENT_RE = /(\.lock$|\.lock\.|\.\d+\.tmp$|^backup-status\.json$|^backup-schedule\.json$)/;
 
 export interface RefusedPath { path: string; reason: string; }
 

@@ -22,6 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
 import { readConfigRaw, readSettledConfig, agentNameFromConfig } from './lib/config-read';
 import { readRuntimeJson } from './lib/runtime';
+import { flagValue } from './lib/cli';
 import { defaultConfigDir } from './lib/setup-token';
 import { safe } from './lib/sanitize';
 import { utcISOStamp } from './lib/time';
@@ -161,14 +162,24 @@ function doRun(hermitDir: string, root: string, configDir: string, quiet = false
     if (mirror) {
       syncMirror(root, repo, refused);
       syncMemoryMirror(path.join(repo, HERMIT_DIR), configDir, root, include);
+      // The memory mirror lands inside the mirror repo, after the scan above could
+      // see it — workspace mode catches it in `git status`, mirror mode only here.
+      // docs/backup.md promises the same refusal table in both modes, and an
+      // over-95MB transcript committed once breaks every later push permanently.
+      refused.push(...scanRefusedPaths(repo, walkManifest(repo, [`${HERMIT_DIR}/memory-mirror`])));
     }
 
-    const roots = mirror ? BACKUP_MANIFEST.filter(e => fs.existsSync(path.join(repo, e))) : ['.'];
-    const excludes = refused.map(r => `:(exclude)${r.path}`);
-    git(repo, ['add', '-A', '--ignore-errors', '--', ...roots, ...excludes]);
+    // `.` in both modes: filtering to entries that still exist would leave a
+    // deleted manifest entry (or a whole removed subtree) tracked forever, since
+    // `git add -A` only stages a deletion the pathspec still reaches.
+    const excludes = refused.map(r => `:(exclude,literal)${r.path}`);
+    const added = git(repo, ['add', '-A', '--ignore-errors', '--', '.', ...excludes]);
 
     const agent = agentNameFromConfig(config);
     if (git(repo, ['diff', '--cached', '--quiet']).ok) {
+      // An add that staged nothing *and* failed is a silent no-backup: reporting
+      // it as nothing-to-commit would stamp last_success_at and keep doctor green.
+      if (!added.ok) return fail(status, 'error', safe(added.stderr).slice(0, 200) || 'git add failed');
       status.last_result = 'nothing-to-commit';
     } else {
       const subject = `hermit backup ${nowStamp().slice(0, 16)}Z`;
@@ -220,20 +231,21 @@ function porcelainCandidates(repo: string): string[] {
   return out;
 }
 
-function walkManifest(root: string): string[] {
+/** Every file under `entries`, as paths relative to `root`. */
+function walkManifest(root: string, entries: string[] = BACKUP_MANIFEST): string[] {
   const out: string[] = [];
   const walk = (rel: string) => {
     const abs = path.join(root, rel);
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
+    let children: fs.Dirent[];
+    try { children = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+    for (const e of children) {
       if (e.name === '.git') continue;
       const childRel = `${rel}/${e.name}`;
       if (e.isDirectory()) walk(childRel);
       else if (e.isFile()) out.push(childRel);
     }
   };
-  for (const entry of BACKUP_MANIFEST) {
+  for (const entry of entries) {
     const abs = path.join(root, entry);
     if (!fs.existsSync(abs)) continue;
     if (fs.statSync(abs).isDirectory()) walk(entry);
@@ -305,11 +317,6 @@ function doPush(repo: string, root: string, backup: Json, status: Json): void {
 // ---------------------------------------------------------------------------
 // setup
 // ---------------------------------------------------------------------------
-
-function flagValue(argv: string[], flag: string): string | undefined {
-  const i = argv.indexOf(flag);
-  return i >= 0 ? argv[i + 1] : undefined;
-}
 
 async function doSetup(hermitDir: string, root: string, configDir: string, argv: string[]): Promise<number> {
   if (!readConfigRaw(hermitDir)) {
