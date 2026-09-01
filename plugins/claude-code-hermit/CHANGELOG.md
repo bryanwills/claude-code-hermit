@@ -23,6 +23,8 @@
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
 
 ### Fixed
+- A channel harness command sent while the hermit is mid-reply is no longer lost: the acknowledgement turn makes no tool call, so Claude Code does not absorb the next queued message, and a command that still misses the recorder gets a resend request instead of wrong terminal-only advice.
+- A guest session no longer reports the resident's `/model` or `/effort` switch, nor clears the resident's verification marker before it is read.
 - A lapsed credential on a hermit with no channel, or one whose send fails, no longer respawns the re-auth relay every tick: the relay stamps `state/relay-unreachable.json` and the watchdog honours it for 24h before retrying.
 - `heartbeat start` records `started_at` from the first tick after arming, so a healthy monitor no longer reads as `REARM|liveness-predates-start`. `/hermit-doctor` reports spawn-blocked only when no tick ever landed, and the watchdog no longer wakes to re-arm a live monitor (#909).
 - Activating a domain hermit during core `/hatch` no longer pre-stamps its `_hermit_versions` entry, so the domain plugin's own hatch preflight offers the full wizard instead of a misleading re-verify (#902).
