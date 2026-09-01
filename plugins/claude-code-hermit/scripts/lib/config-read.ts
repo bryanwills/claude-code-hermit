@@ -64,6 +64,7 @@ const TABLE: Record<string, Spec> = {
   voice: shape({ style: str(null), prose: str(null) }),
   channels: map,
   remote: bool(true),
+  auth_mode: str(null),
   model: str('sonnet'),
   effort: str(null),
   permission_mode: str('auto'),

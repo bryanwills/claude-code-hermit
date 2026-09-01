@@ -221,6 +221,15 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     errors.push(`remote: expected boolean, got ${typeof config.remote}`);
   }
 
+  // null/unset is a real state, not a default: it means "nobody has said", which
+  // resolveAuthMode answers from the credential volume. `external` is derived, never
+  // declared, so it is not accepted here.
+  if (config.auth_mode !== undefined && config.auth_mode !== null) {
+    if (config.auth_mode !== 'login' && config.auth_mode !== 'token') {
+      errors.push(`auth_mode: "${config.auth_mode}" not in [login, token]`);
+    }
+  }
+
   if (config.idle_behavior !== undefined && config.idle_behavior !== null) {
     if (!VALID_IDLE_BEHAVIOR.includes(config.idle_behavior)) {
       errors.push(`idle_behavior: "${config.idle_behavior}" not in [${VALID_IDLE_BEHAVIOR.join(', ')}]`);

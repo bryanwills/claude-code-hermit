@@ -3,16 +3,24 @@
 ## [Unreleased]
 
 ### Added
+- `auth_mode` (`login` / `token` / unset) records which credential a hermit runs on. Unset resolves from the credential volume, so existing installs are unchanged; `login` is the mode Remote Control needs. Change it with `/hermit-settings auth-mode`.
+- Login-mode renewal over the channel: the relay signs in against a staging config dir and the watchdog commits the credential inside its own restart, where nothing is refreshing `.credentials.json` underneath the write.
+- `hermit-run setup-token-mint stamp-auth-mode` records the mode an existing install already uses, from what is on its volume.
 - MCP stdio control surface (`hermit-run mcp-server --roots …`) exposes `list_hermits`, `get_status`, `get_health`, `get_brief`, `get_version`, and `wake` for external orchestrators.
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed
+- Core declares one dynamic `claude-subscription` credential in place of `setup-token`; doctor's `credential-expiry` probe reads whichever credential the mode resolves to and warns 3 days out in both modes (was 14 for the token).
+- `/docker-setup` asks a neutral two-option auth question (claude.ai sign-in vs long-lived token) with no recommendation, citing Claude Code's authentication docs.
+- `hermit-docker login` switches a running token hermit to a claude.ai sign-in through the staged relay instead of refusing; a container with no session yet keeps the interactive REPL path.
+
 - `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment. Docker still applies the hardened deny-pattern profile when chosen.
 - The `/hatch` channel question asks "How do you want to communicate with your agent?" in both branches, and labels the no-channel option `Claude app (for now)` instead of `None`: push notifications + Remote Control, with Discord/Telegram pairable later.
 - The `/hatch` confirm preview renders as a single markdown table — chosen answers echoed verbatim plus template-derived defaults tagged `(default)` — ending with a `/hermit-settings` pointer. The final report is now minimal: agent-name headline, warn-only disk audit (missing artifacts surface as fixable warnings instead of a full file table), next steps, and a config-reference link.
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
 
 ### Fixed
+- A lapsed credential on a hermit with no channel, or one whose send fails, no longer respawns the re-auth relay every tick: the relay stamps `state/relay-unreachable.json` and the watchdog honours it for 24h before retrying.
 - `heartbeat start` records `started_at` from the first tick after arming, so a healthy monitor no longer reads as `REARM|liveness-predates-start`. `/hermit-doctor` reports spawn-blocked only when no tick ever landed, and the watchdog no longer wakes to re-arm a live monitor (#909).
 - Activating a domain hermit during core `/hatch` no longer pre-stamps its `_hermit_versions` entry, so the domain plugin's own hatch preflight offers the full wizard instead of a misleading re-verify (#902).
 - `/hermit-doctor` and the watchdog now compare a monitor's registration against `state/.boot-id`, so one left behind by a previous boot is reported and re-armed instead of reading healthy on its last pre-crash tick for up to 90 minutes. This also covers routines in `croncreate-fallback` mode, where the boot id is the only available evidence, and interactive (`--no-tmux`) starts now stamp the marker so the check works there too.
@@ -20,10 +28,13 @@
 - The tmux next step in `hatch-report.ts` now prefixes `.claude-code-hermit/bin/hermit-start` with `!`, so it can run directly in the current Claude Code session.
 
 ### Upgrade Instructions
-1. Run `/claude-code-hermit:hermit-evolve` as usual. The missing-key config merge (`newConfigKeys()`: missing leaves under present parents are adopted) adds `watchdog.scheduler_enabled: true` to existing configs. This is default-on. Existing `watchdog.enabled: false` values are never rewritten.
-2. The next tmux always-on boot performs one scheduler registration. That flip of `watchdog.enabled: true` happens only on a genuinely first registration (no timer/unit already present). A hygiene-only install (`enabled: false`, unit already present) stays hygiene-only.
-3. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both `scheduler_enabled` and `enabled` false. Setting `watchdog.scheduler_enabled: false` in `config.json` by hand only stops future boots from re-registering; a timer already installed keeps ticking and keeps restarting. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
-4. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
+1. Run `.claude-code-hermit/bin/hermit-run setup-token-mint stamp-auth-mode` before the template merge. It records `auth_mode: token` when a `.hermit-setup-token` file is on the credential volume, `auth_mode: login` when a usable claude.ai sign-in is stored there, and writes nothing otherwise. It asks no question, never overwrites an `auth_mode` already set, and skips hermits authenticating from an environment credential (API key, bearer, Bedrock/Vertex/Foundry). Report which of the three it printed (`detected` / `kept` / `unresolved`).
+2. The template merge then adds `auth_mode: null` only where step 1 wrote nothing — an unset value resolves from the credential volume at read time, so such a hermit behaves exactly as it did before.
+3. Nothing restarts. `auth_mode` records which credential the hermit *should* use; the credential itself only changes when the operator runs `/claude-code-hermit:relogin`, `hermit-docker login`, or `hermit-docker setup-token`.
+4. Run `/claude-code-hermit:hermit-evolve` as usual. The missing-key config merge (`newConfigKeys()`: missing leaves under present parents are adopted) adds `watchdog.scheduler_enabled: true` to existing configs. This is default-on. Existing `watchdog.enabled: false` values are never rewritten.
+5. The next tmux always-on boot performs one scheduler registration. That flip of `watchdog.enabled: true` happens only on a genuinely first registration (no timer/unit already present). A hygiene-only install (`enabled: false`, unit already present) stays hygiene-only.
+6. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both `scheduler_enabled` and `enabled` false. Setting `watchdog.scheduler_enabled: false` in `config.json` by hand only stops future boots from re-registering; a timer already installed keeps ticking and keeps restarting. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
+7. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
 
 ## [1.2.53] - 2026-08-31
 

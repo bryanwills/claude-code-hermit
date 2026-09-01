@@ -39,8 +39,9 @@ import { readSettledConfig, readConfigRaw } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
-import { defaultConfigDir, envAuthPresent, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
+import { credentialsFilePath, defaultConfigDir, envAuthPresent, inspectStoredLogin, msUntilExpiry, msUntilLoginExpiry, resolveAuthMode, storedLoginUsable } from './lib/setup-token';
 import { isContainer } from './lib/container';
+import { writeFileAtomic } from './lib/md-write';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
 import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
@@ -62,7 +63,13 @@ const CLEAR_REQUESTED_JSON = path.join(STATE_DIR, 'clear-requested.json');
 // joined at their use sites off world.paths.stateDir, not pinned here.
 const HERMIT_ROOT = path.dirname(STATE_DIR); // '.claude-code-hermit' — isPaused() joins its own 'state/pause.json'
 const REAUTH_MARKER_JSON = path.join(STATE_DIR, 'reauth-relay.json');
+/** A signed-in credential staged by the mint, waiting for this watchdog to commit it. */
+const PENDING_CREDENTIAL_JSON = path.join(STATE_DIR, 'pending-credential.json');
+/** Written by the relay when its own send failed. Honoured for a day, then retried. */
+const RELAY_UNREACHABLE_JSON = path.join(STATE_DIR, 'relay-unreachable.json');
+const RELAY_UNREACHABLE_MAX_AGE_MS = 24 * 3600000;
 const REAUTH_MINT_SCRIPT = path.join(import.meta.dir, 'setup-token-mint.ts');
+const SETTINGS_EDIT_SCRIPT = path.join(import.meta.dir, 'settings-edit.ts');
 // Backstop against PID reuse on a long-lived box; liveness is the real signal.
 const REAUTH_MARKER_MAX_AGE_MS = 26 * 3600000;
 // Skill-driven mints have no usable PID (verb per process), so age is the only
@@ -587,6 +594,78 @@ function writeWatchdogState(state: Json, world: World = REAL_WORLD): void {
 
 // --- Actions ---
 
+/**
+ * Move a staged claude.ai sign-in into place. Called from inside doRestart's
+ * kill→verify→start boundary and nowhere else, because that is the only window in
+ * which no session is refreshing `.credentials.json` underneath the write.
+ *
+ * Rollback is doing nothing: the staged file is only ever moved over a live one
+ * after it has been re-checked as usable, and the previous credential is parked
+ * rather than deleted. A staged file that did not survive the wait is dropped and
+ * the restart proceeds on whatever the live dir already holds.
+ */
+function commitPendingCredential(): void {
+  const pending = readJson(PENDING_CREDENTIAL_JSON);
+  if (!pending || typeof pending.staged_dir !== 'string') return;
+
+  const stagedDir: string = pending.staged_dir;
+  const configDir = defaultConfigDir();
+  const clear = () => {
+    try {
+      fs.unlinkSync(PENDING_CREDENTIAL_JSON);
+    } catch {}
+    fs.rmSync(stagedDir, { recursive: true, force: true });
+  };
+
+  // Re-checked here, not trusted from the mint: the mint ran minutes to hours ago.
+  const status = inspectStoredLogin(stagedDir).status;
+  if (status !== 'usable') {
+    clear();
+    appendEvent('credential-commit-skipped', status);
+    return;
+  }
+
+  try {
+    const live = credentialsFilePath(configDir);
+    if (fs.existsSync(live)) fs.renameSync(live, `${live}.pre-login.bak`);
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.renameSync(credentialsFilePath(stagedDir), live);
+    copyOauthAccount(stagedDir, configDir);
+    clear();
+    // Recorded now rather than by the mint: the mode is only true once the
+    // credential it names is the one the next session will actually read.
+    spawnSync(process.execPath, [SETTINGS_EDIT_SCRIPT, path.join(HERMIT_ROOT, 'config.json'), 'set', 'auth_mode', 'login'], {
+      stdio: 'ignore',
+    });
+    appendEvent('credential-committed', 'login');
+  } catch (e) {
+    // The live credential is either untouched or already parked beside its
+    // replacement; either way the restart proceeds and the operator is told.
+    appendEvent('credential-commit-skipped', `commit failed: ${e}`);
+    clear();
+  }
+}
+
+/**
+ * Carry the signed-in identity across. `claude auth status` reads the email and org
+ * from `.claude.json`'s `oauthAccount`, not from the credential file (probed), so a
+ * commit that moved only `.credentials.json` would leave the hermit authenticated as
+ * the new account while still reporting the old one.
+ */
+function copyOauthAccount(stagedDir: string, configDir: string): void {
+  try {
+    const staged = JSON.parse(fs.readFileSync(path.join(stagedDir, '.claude.json'), 'utf8'));
+    if (!staged?.oauthAccount) return;
+    const livePath = path.join(configDir, '.claude.json');
+    let live: Json = {};
+    try {
+      live = JSON.parse(fs.readFileSync(livePath, 'utf8'));
+    } catch {}
+    live.oauthAccount = staged.oauthAccount;
+    writeFileAtomic(livePath, JSON.stringify(live, null, 2) + '\n');
+  } catch {}
+}
+
 /** Try-acquire lock, mark runtime, kill session, verify the old tree died, spawn hermit-start. */
 async function doRestart(sessionName: string, reason: string, runtime: Json, timezone: string): Promise<void> {
   if (!tryAcquireLifecycleLock()) {
@@ -616,6 +695,12 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
       pushOperatorMessage(composeOrphanMessage(timezone));
       return;
     }
+
+    // The one moment nothing is holding the credential file: the old session is
+    // verifiably dead and the new one has not started. A renewal written at any
+    // other time can be clobbered by the resident's own ~8-hourly refresh, which is
+    // why the mint stages it and leaves the commit here.
+    commitPendingCredential();
 
     // Release before spawning hermit-start (it re-acquires)
     releaseLock(LIFECYCLE_LOCK);
@@ -662,6 +747,14 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
 
 /** True when a relay process is genuinely still working. Clears a dead marker. */
 function reauthRelayActive(): boolean {
+  // A staged sign-in waiting for the next restart IS a renewal in flight — the mint
+  // process is already gone, and spawning another would reset the staging dir out
+  // from under a credential this watchdog has been told to commit.
+  const pending = readJson(PENDING_CREDENTIAL_JSON);
+  if (pending) {
+    const age = ageSecs(pending.staged_at ?? '');
+    if (age !== null && age * 1000 < REAUTH_SKILL_MARKER_MAX_AGE_MS) return true;
+  }
   const marker = readJson(REAUTH_MARKER_JSON);
   if (!marker) return false;
   const age = ageSecs(marker.updated_at ?? marker.started_at ?? '');
@@ -765,13 +858,42 @@ function envAuthOwnsCredential(sessionEnvAuth: boolean | null): boolean {
  * reading healthy while every request 401s, and the wedge tiers below would answer
  * that with restart churn. The pane says what the record can't.
  */
-function evaluateReauth(authLapsed: boolean = false): 'active' | 'spawned' | 'idle' {
+function evaluateReauth(
+  config: Json,
+  authLapsed: boolean = false,
+  sessionEnvAuth: boolean | null = null,
+): 'active' | 'spawned' | 'idle' | 'unreachable' {
   if (reauthRelayActive()) return 'active';
-  if (!tokenModeActive(defaultConfigDir())) return 'idle';
-  const msLeft = msUntilExpiry(HERMIT_ROOT);
-  const expiredByRecord = msLeft !== null && msLeft <= 0;
-  if (!expiredByRecord && !authLapsed) return 'idle';
-  const trigger = expiredByRecord ? 'setup-token expired' : 'auth failure on pane';
+  const configDir = defaultConfigDir();
+  // envAuthOwnsCredential, not envAuthPresent: the key lives in the SESSION's
+  // environment, which this process does not share — the launch stamp is the only
+  // place the watchdog can see it. Getting this wrong would spawn a sign-in relay
+  // at an API-key hermit, whose 401 no login can fix.
+  const mode = resolveAuthMode(config, configDir, envAuthOwnsCredential(sessionEnvAuth));
+  // An env credential is nobody's to renew from here — no relay can fix it.
+  if (mode === 'external') return 'idle';
+
+  // In login mode the durable expiry is the stored credential's own
+  // refreshTokenExpiresAt; a lapse stub reports -1, so one comparison covers both
+  // "the sign-in ran out" and "the sign-in was spent".
+  const msLeft = mode === 'login' ? msUntilLoginExpiry(configDir) : msUntilExpiry(HERMIT_ROOT);
+  const expired = msLeft !== null && msLeft <= 0;
+  if (!expired && !authLapsed) return 'idle';
+
+  // The relay's own send is the reachability test, and it stamps this file when it
+  // fails. Honouring it for 24h is what stops a hermit with no channel — or a dead
+  // one — from respawning a relay nobody can answer on every single tick.
+  const stamp = readJson(RELAY_UNREACHABLE_JSON);
+  if (stamp) {
+    const age = ageSecs(stamp.at ?? '');
+    if (age !== null && age * 1000 < RELAY_UNREACHABLE_MAX_AGE_MS) return 'unreachable';
+  }
+
+  const trigger = expired
+    ? mode === 'login'
+      ? 'claude.ai login expired'
+      : 'setup-token expired'
+    : 'auth failure on pane';
 
   try {
     const child = spawn(process.execPath, [REAUTH_MINT_SCRIPT, 'relay'], {
@@ -1714,14 +1836,18 @@ async function main(): Promise<void> {
   // can't do useful work, so the nudge/wedge tiers below are suppressed: they'd
   // be noise, and an escalated restart mid-flow would churn the session the
   // relay is about to bounce itself.
-  const reauth = evaluateReauth(authLapsed);
+  const reauth = evaluateReauth(config, authLapsed, sessionEnvAuth);
   if (reauth === 'spawned' || reauth === 'active') process.exit(0);
 
-  // 3a-bis. The same lapse on a hermit with no setup-token to mint. There is no
-  // deterministic recovery here — renewing a /login credential needs a browser on the
-  // machine itself — so the whole tier is one notice, and then silence: restarting or
+  // 3a-bis. The same lapse on a hermit the relay cannot reach — no channel, or one
+  // whose send failed. There is no deterministic recovery there: the sign-in link has
+  // nowhere to go, so the whole tier is one notice, and then silence. Restarting or
   // nudging a session that cannot authenticate only produces churn and misleading
   // "I restarted your hermit" pushes, which is what this hermit did before.
+  //
+  // Keyed on the relay's own verdict rather than on the auth mode: a login-mode hermit
+  // WITH a working channel is now recoverable (evaluateReauth spawns the relay above
+  // and returns 'spawned'), so mode is no longer what decides whether help is possible.
   //
   // Re-arming is keyed on a usable credential returning, never on the pane clearing.
   // Two reasons, both observed: the error scrolls off as soon as anything else renders,
@@ -1729,7 +1855,7 @@ async function main(): Promise<void> {
   // and the file still exists while the hermit stays just as dead. `notified_at` also
   // ages out after a day, so a lapse nobody has fixed says so again tomorrow rather
   // than going quiet forever.
-  if (authLapsed && !tokenModeActive(defaultConfigDir())) {
+  if (authLapsed && reauth === 'unreachable') {
     const ws = readWatchdogState();
     const notifiedAt = typeof ws.lapsed_login_notified_at === 'string' ? ws.lapsed_login_notified_at : null;
     const age = notifiedAt ? ageSecs(notifiedAt) : null;
@@ -1786,10 +1912,19 @@ async function main(): Promise<void> {
       appendEvent('env-auth-failure-recovered', 'pane no longer shows an auth failure');
       recovered = true;
     }
-    if (ws.lapsed_login_notified_at && storedLoginUsable(defaultConfigDir())) {
+    const loginUsable = storedLoginUsable(defaultConfigDir());
+    if (ws.lapsed_login_notified_at && loginUsable) {
       delete ws.lapsed_login_notified_at;
       appendEvent('lapsed-login-recovered', 'usable stored login present again');
       recovered = true;
+    }
+    // The unreachable stamp is a suppression, so it has to be cleared by the same
+    // signal that ends the lapse — otherwise a hermit whose channel came back would
+    // stay silently suppressed until the 24h age-out.
+    if (loginUsable) {
+      try {
+        fs.unlinkSync(RELAY_UNREACHABLE_JSON);
+      } catch {}
     }
     if (recovered) writeWatchdogState(ws);
   }

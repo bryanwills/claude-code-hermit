@@ -7,9 +7,14 @@ import path from 'node:path';
 import { runScript } from './helpers/run';
 import {
   credentialsFilePath,
+  detectAuthModeFromVolume,
+  inspectStoredLogin,
   installToken,
   isPlausibleToken,
   msUntilExpiry,
+  msUntilLoginExpiry,
+  resolveAuthMode,
+  storedLoginUsable,
   parkCredentialsFile,
   parkedCredentialsFilePath,
   readTokenRecord,
@@ -171,45 +176,199 @@ describe('auth-mode detection', () => {
 });
 
 describe('doctor expiry probe', () => {
-  const probe = async (hermitDir: string) =>
-    (await runScript('setup-token-mint.ts', { args: ['probe', hermitDir] })).stdout.trim();
+  // The probe is argument-free in hermit-meta.json, so a fixture is pointed at the
+  // same way doctor points at the real thing: both dirs come from the child env.
+  // CLAUDE_CONFIG_DIR is load-bearing here — without it the probe resolves the auth
+  // mode from the test runner's own ~/.claude and the verdict stops being about the
+  // fixture at all.
+  const rawProbe = (hermitDir: string, configDir: string) =>
+    runScript('setup-token-mint.ts', {
+      args: ['probe'],
+      env: { HERMIT_DIR: hermitDir, CLAUDE_CONFIG_DIR: configDir },
+    });
+  const probe = async (hermitDir: string, configDir: string) =>
+    (await rawProbe(hermitDir, configDir)).stdout.trim();
 
-  test('no record → OK (not token mode is not a problem)', async () => {
-    const root = tmpdir();
-    try {
-      expect(await probe(path.join(root, '.claude-code-hermit'))).toBe('OK');
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test('record present → EXPIRES:<iso> matching the record', async () => {
-    const root = tmpdir();
-    try {
-      const hermitDir = path.join(root, '.claude-code-hermit');
-      const configDir = path.join(root, 'config');
-      fs.mkdirSync(hermitDir, { recursive: true });
-      fs.mkdirSync(configDir, { recursive: true });
-      const record = installToken(hermitDir, configDir, VALID);
-      expect(await probe(hermitDir)).toBe(`EXPIRES:${record.expires_at}`);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test('probe prints exactly one line (doctor parses only the first)', async () => {
+  const withFixture = (fn: (hermitDir: string, configDir: string) => Promise<void>) => async () => {
     const root = tmpdir();
     try {
       const hermitDir = path.join(root, '.claude-code-hermit');
       const configDir = path.join(root, 'config');
       fs.mkdirSync(hermitDir, { recursive: true });
       fs.mkdirSync(configDir, { recursive: true });
+      await fn(hermitDir, configDir);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const writeLogin = (configDir: string, oauth: Record<string, unknown>) =>
+    fs.writeFileSync(credentialsFilePath(configDir), JSON.stringify({ claudeAiOauth: oauth }));
+
+  test('token mode, record present → EXPIRES:<iso> matching the record', withFixture(async (hermitDir, configDir) => {
+    const record = installToken(hermitDir, configDir, VALID);
+    expect(await probe(hermitDir, configDir)).toBe(`EXPIRES:${record.expires_at}`);
+  }));
+
+  test('token mode with no record → OK (nothing to check is not a problem)', withFixture(async (hermitDir, configDir) => {
+    fs.writeFileSync(tokenFilePath(configDir), `${VALID}\n`, { mode: 0o600 });
+    expect(await probe(hermitDir, configDir)).toBe('OK');
+  }));
+
+  test('login mode, usable credential → EXPIRES: from refreshTokenExpiresAt', withFixture(async (hermitDir, configDir) => {
+    const at = Date.now() + 30 * 24 * 3600_000;
+    writeLogin(configDir, { accessToken: 'a', refreshToken: 'r', refreshTokenExpiresAt: at });
+    expect(await probe(hermitDir, configDir)).toBe(`EXPIRES:${new Date(at).toISOString()}`);
+  }));
+
+  test('login mode, usable credential without the field → OK', withFixture(async (hermitDir, configDir) => {
+    writeLogin(configDir, { accessToken: 'a', refreshToken: 'r' });
+    expect(await probe(hermitDir, configDir)).toBe('OK');
+  }));
+
+  test('login mode, lapse stub → EXPIRED', withFixture(async (hermitDir, configDir) => {
+    writeLogin(configDir, { accessToken: '', refreshToken: '', expiresAt: 0 });
+    expect(await probe(hermitDir, configDir)).toBe('EXPIRED');
+  }));
+
+  test('login mode, nothing on the volume → EXPIRED', withFixture(async (hermitDir, configDir) => {
+    expect(await probe(hermitDir, configDir)).toBe('EXPIRED');
+  }));
+
+  test('an env credential is external → OK, whatever is on the volume', withFixture(async (hermitDir, configDir) => {
+    writeLogin(configDir, { accessToken: '', refreshToken: '', expiresAt: 0 });
+    const out = await runScript('setup-token-mint.ts', {
+      args: ['probe'],
+      env: { HERMIT_DIR: hermitDir, CLAUDE_CONFIG_DIR: configDir, ANTHROPIC_API_KEY: 'sk-fixture' },
+    });
+    expect(out.stdout.trim()).toBe('OK');
+  }));
+
+  test('probe prints exactly one line (doctor parses only the first)', withFixture(async (hermitDir, configDir) => {
+    installToken(hermitDir, configDir, VALID);
+    const out = (await rawProbe(hermitDir, configDir)).stdout;
+    expect(out.trim().split('\n')).toHaveLength(1);
+    expect(out).not.toContain(VALID);
+  }));
+});
+
+describe('stored /login inspection', () => {
+  const writeCreds = (configDir: string, body: unknown) =>
+    fs.writeFileSync(credentialsFilePath(configDir), JSON.stringify(body));
+
+  test('absent file', withDirs((_h, configDir) => {
+    expect(inspectStoredLogin(configDir)).toEqual({ status: 'absent', refreshExpiresAt: null });
+  }));
+
+  test('unparseable file is malformed, not a stub', withDirs((_h, configDir) => {
+    fs.writeFileSync(credentialsFilePath(configDir), '{not json');
+    expect(inspectStoredLogin(configDir)).toEqual({ status: 'malformed', refreshExpiresAt: null });
+  }));
+
+  test('empty accessToken is the lapse stub Claude Code writes in place', withDirs((_h, configDir) => {
+    writeCreds(configDir, { claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0 } });
+    expect(inspectStoredLogin(configDir)).toEqual({ status: 'stub', refreshExpiresAt: null });
+    expect(storedLoginUsable(configDir)).toBe(false);
+  }));
+
+  test('usable login surfaces refreshTokenExpiresAt', withDirs((_h, configDir) => {
+    writeCreds(configDir, {
+      claudeAiOauth: {
+        accessToken: 'a',
+        refreshToken: 'r',
+        expiresAt: 0,
+        refreshTokenExpiresAt: 4200,
+      },
+    });
+    expect(inspectStoredLogin(configDir)).toEqual({ status: 'usable', refreshExpiresAt: 4200 });
+    expect(storedLoginUsable(configDir)).toBe(true);
+  }));
+
+  test('usable login without the field is still usable', withDirs((_h, configDir) => {
+    writeCreds(configDir, { claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: 0 } });
+    expect(inspectStoredLogin(configDir)).toEqual({ status: 'usable', refreshExpiresAt: null });
+  }));
+
+  test('msUntilLoginExpiry: delta, stub negative, otherwise null', withDirs((_h, configDir) => {
+    expect(msUntilLoginExpiry(configDir, 1000)).toBeNull();
+
+    writeCreds(configDir, { claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0 } });
+    expect(msUntilLoginExpiry(configDir, 1000)).toBe(-1);
+
+    writeCreds(configDir, {
+      claudeAiOauth: { accessToken: 'a', refreshToken: 'r', refreshTokenExpiresAt: 5000 },
+    });
+    expect(msUntilLoginExpiry(configDir, 1000)).toBe(4000);
+
+    // Usable but undated: nothing to measure, and -1 would falsely read as expired.
+    writeCreds(configDir, { claudeAiOauth: { accessToken: 'a', refreshToken: 'r' } });
+    expect(msUntilLoginExpiry(configDir, 1000)).toBeNull();
+  }));
+});
+
+describe('resolveAuthMode', () => {
+  const usableLogin = (configDir: string) =>
+    fs.writeFileSync(
+      credentialsFilePath(configDir),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r' } }),
+    );
+
+  // tokenModeActive() consults the env var first, so every case here has to run
+  // with it unset or the volume never gets a say.
+  const withoutEnvToken = <T,>(fn: () => T): T => {
+    const saved = process.env[TOKEN_ENV_VAR];
+    delete process.env[TOKEN_ENV_VAR];
+    try {
+      return fn();
+    } finally {
+      if (saved !== undefined) process.env[TOKEN_ENV_VAR] = saved;
+    }
+  };
+
+  test('explicit auth_mode wins over what is on the volume', withDirs((hermitDir, configDir) => {
+    withoutEnvToken(() => {
       installToken(hermitDir, configDir, VALID);
-      const out = (await runScript('setup-token-mint.ts', { args: ['probe', hermitDir] })).stdout;
-      expect(out.trim().split('\n')).toHaveLength(1);
-      expect(out).not.toContain(VALID);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
-  });
+      expect(resolveAuthMode({ auth_mode: 'login' }, configDir, false)).toBe('login');
+      expect(resolveAuthMode({ auth_mode: 'token' }, configDir, false)).toBe('token');
+    });
+  }));
+
+  test('unset + token file → token', withDirs((hermitDir, configDir) => {
+    withoutEnvToken(() => {
+      installToken(hermitDir, configDir, VALID);
+      expect(resolveAuthMode({}, configDir, false)).toBe('token');
+    });
+  }));
+
+  test('unset + usable login → login', withDirs((_h, configDir) => {
+    withoutEnvToken(() => {
+      usableLogin(configDir);
+      expect(resolveAuthMode({}, configDir, false)).toBe('login');
+    });
+  }));
+
+  test('unset or unrecognized + nothing on the volume → login is the residual', withDirs((_h, configDir) => {
+    withoutEnvToken(() => {
+      expect(resolveAuthMode({}, configDir, false)).toBe('login');
+      expect(resolveAuthMode({ auth_mode: 'oauth' }, configDir, false)).toBe('login');
+    });
+  }));
+
+  test('an env credential is external regardless of files or config', withDirs((hermitDir, configDir) => {
+    withoutEnvToken(() => {
+      installToken(hermitDir, configDir, VALID);
+      expect(resolveAuthMode({ auth_mode: 'login' }, configDir, true)).toBe('external');
+      expect(resolveAuthMode({}, configDir, true)).toBe('external');
+    });
+  }));
+
+  test('detectAuthModeFromVolume prefers the token file, else a usable login', withDirs((hermitDir, configDir) => {
+    withoutEnvToken(() => {
+      expect(detectAuthModeFromVolume(configDir)).toBeNull();
+      usableLogin(configDir);
+      expect(detectAuthModeFromVolume(configDir)).toBe('login');
+      installToken(hermitDir, configDir, VALID); // parks the login on the way in
+      expect(detectAuthModeFromVolume(configDir)).toBe('token');
+    });
+  }));
 });

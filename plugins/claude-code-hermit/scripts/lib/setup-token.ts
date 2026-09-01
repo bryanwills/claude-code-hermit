@@ -203,25 +203,111 @@ export function msUntilExpiry(hermitDir: string, now: number = Date.now()): numb
   return Date.parse(rec.expires_at) - now;
 }
 
+/** How this hermit authenticates. `external` = an env credential outranks both files. */
+export type AuthMode = 'login' | 'token' | 'external';
+
+/** What a stored /login credential file is, for callers that need more than a boolean. */
+export type StoredLoginStatus = 'absent' | 'malformed' | 'stub' | 'usable';
+
 /**
- * True when a stored /login credential still carries a token — i.e. somebody could
- * work with it. Deliberately NOT an expiry check: the access token refreshes silently
- * roughly every 8h, so a past `expiresAt` says nothing (doctor-check makes the same
- * point where it declines to warn on that field).
+ * Classify the stored /login credential, and surface the one expiry field that means
+ * anything.
  *
- * The empty case is the load-bearing one. Observed live on CC 2.1.251: when a refresh
+ * The `stub` case is the load-bearing one. Observed live on CC 2.1.251: when a refresh
  * fails, Claude Code rewrites the file in place as
  * `{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,…}}` — the file
  * survives as an inert stub. So "the file exists" and "the file changed" both keep
  * reading healthy through a lapse, and only the token's presence distinguishes a
  * hermit that can work from one that can't. `/logout` leaves the same stub.
+ *
+ * `expiresAt` stays rejected as an expiry signal: the access token refreshes silently
+ * roughly every 8h, so a past value says nothing (doctor-check makes the same point
+ * where it declines to warn on that field). `refreshTokenExpiresAt` is the field
+ * refresh does NOT move — Claude Code computes it once at sign-in as
+ * `now + refresh_token_expires_in * 1000` (~30 days for a claude.ai login) and carries
+ * it forward untouched. It is the only durable "this hermit goes dark on" date a
+ * stored login has.
+ */
+export function inspectStoredLogin(configDir: string): {
+  status: StoredLoginStatus;
+  refreshExpiresAt: number | null;
+} {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(credentialsFilePath(configDir), 'utf8');
+  } catch {
+    return { status: 'absent', refreshExpiresAt: null };
+  }
+  let creds: any;
+  try {
+    creds = JSON.parse(raw);
+  } catch {
+    return { status: 'malformed', refreshExpiresAt: null };
+  }
+  const token = creds?.claudeAiOauth?.accessToken;
+  if (typeof token !== 'string' || token.length === 0) {
+    return { status: 'stub', refreshExpiresAt: null };
+  }
+  const exp = creds?.claudeAiOauth?.refreshTokenExpiresAt;
+  return {
+    status: 'usable',
+    refreshExpiresAt: typeof exp === 'number' && Number.isFinite(exp) ? exp : null,
+  };
+}
+
+/**
+ * True when a stored /login credential still carries a token — i.e. somebody could
+ * work with it. Deliberately NOT an expiry check; see inspectStoredLogin.
  */
 export function storedLoginUsable(configDir: string): boolean {
-  try {
-    const creds = JSON.parse(fs.readFileSync(credentialsFilePath(configDir), 'utf8'));
-    const token = creds?.claudeAiOauth?.accessToken;
-    return typeof token === 'string' && token.length > 0;
-  } catch {
-    return false; // absent, unreadable, or malformed — nothing usable either way
+  return inspectStoredLogin(configDir).status === 'usable';
+}
+
+/**
+ * Milliseconds until a stored /login goes dark, or null when there is nothing to
+ * measure. A stub returns -1: that credential is already spent, so callers comparing
+ * `<= 0` treat "lapsed" and "expired" alike without a second check.
+ */
+export function msUntilLoginExpiry(configDir: string, now: number = Date.now()): number | null {
+  const { status, refreshExpiresAt } = inspectStoredLogin(configDir);
+  if (status === 'stub') return -1;
+  if (status !== 'usable' || refreshExpiresAt === null) return null;
+  return refreshExpiresAt - now;
+}
+
+/**
+ * What is actually on the credential volume, for installs that predate `auth_mode` and
+ * have to be stamped from evidence rather than asked. Null means "nothing conclusive" —
+ * leave the key unset rather than guess.
+ */
+export function detectAuthModeFromVolume(configDir: string): 'login' | 'token' | null {
+  if (readTokenValue(configDir) !== null) return 'token';
+  if (storedLoginUsable(configDir)) return 'login';
+  return null;
+}
+
+/**
+ * How this hermit authenticates, in precedence order:
+ *
+ *   1. an env credential (API key, bearer, cloud provider) outranks both files and is
+ *      nobody's to renew from chat → `external`
+ *   2. the operator's explicit `auth_mode` in config
+ *   3. macOS with no .credentials.json: the login lives in the Keychain, which this
+ *      code cannot inspect → `external`
+ *   4. otherwise the volume decides, with `login` as the residual — a hermit with
+ *      neither artifact has not signed in yet, and the flow it should get is the
+ *      claude.ai one.
+ */
+export function resolveAuthMode(
+  config: any,
+  configDir: string,
+  envAuth: boolean = envAuthPresent(),
+): AuthMode {
+  if (envAuth) return 'external';
+  const declared = config?.auth_mode;
+  if (declared === 'login' || declared === 'token') return declared;
+  if (process.platform === 'darwin' && !fs.existsSync(credentialsFilePath(configDir))) {
+    return 'external';
   }
+  return tokenModeActive(configDir) ? 'token' : 'login';
 }

@@ -21,7 +21,7 @@ import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
 import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
 import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
-import { tokenModeActive, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, storedLoginUsable, CREDENTIALS_FILENAME } from './lib/setup-token';
+import { resolveAuthMode, readTokenValue, tokenFilePath, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, storedLoginUsable, CREDENTIALS_FILENAME, TOKEN_FILENAME } from './lib/setup-token';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
 import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
@@ -1785,15 +1785,25 @@ function probeDeclaredCredentials(p: DoctorPaths): { okCount: number; badNotes: 
   return { okCount, badNotes };
 }
 
-// A stored /login credential sitting next to a setup-token is a live hazard, not
-// an expiry question: interactive Claude Code sessions prefer .credentials.json
-// over CLAUDE_CODE_OAUTH_TOKEN, so the hermit 401s when that stored access token
-// lapses (~8h) even though the year-long token is valid. Only a credential that
-// still carries a token shadows — a parked file or a /logout stub (empty
-// accessToken) is inert, so those return null.
-function shadowingCredentialNote(): string | null {
+// Two credentials on one volume, and which one is the hazard depends on the mode.
+//
+// In token mode a stored /login sitting next to the token is a live hazard, not an
+// expiry question: interactive Claude Code sessions prefer .credentials.json over
+// CLAUDE_CODE_OAUTH_TOKEN, so the hermit 401s when that stored access token lapses
+// (~8h) even though the year-long token is valid. Only a credential that still
+// carries a token shadows — a parked file or a /logout stub is inert.
+//
+// In login mode the leftover token file is the confusing artifact rather than a
+// hazard: nothing reads it, but its presence is why an operator thinks a renewal
+// "did nothing". External mode has no file this hermit owns, so it says nothing.
+function shadowingCredentialNote(config: Json = {}): string | null {
   const configDir = defaultConfigDir();
-  if (!tokenModeActive(configDir)) return null;
+  const mode = resolveAuthMode(config, configDir);
+  if (mode === 'external') return null;
+  if (mode === 'login') {
+    if (readTokenValue(configDir) === null) return null;
+    return `stray ${TOKEN_FILENAME} is ignored in login mode — remove it (rm ${tokenFilePath(configDir)}) or set auth_mode: token`;
+  }
   // absent, unreadable, or an inert stub (parked file, /logout) — nothing to shadow
   if (!storedLoginUsable(configDir)) return null;
   return `stored ${CREDENTIALS_FILENAME} will shadow the login token in interactive sessions — park it (mv ${credentialsFilePath(configDir)} ${parkedCredentialsFilePath(configDir)}) and restart`;
@@ -1802,7 +1812,9 @@ function shadowingCredentialNote(): string | null {
 function checkCredentialExpiry(p: DoctorPaths = PATHS) {
   try {
     const sib = probeDeclaredCredentials(p);
-    const shadow = shadowingCredentialNote();
+    // The mode is a config question, so the note needs the config. An unreadable one
+    // resolves from the volume, which is the same answer the probe itself used.
+    const shadow = shadowingCredentialNote(readConfigRaw(p.hermitDir) ?? {});
     const parts = [...sib.badNotes];
     if (shadow) parts.push(shadow);
     const status = parts.length > 0 ? 'warn' : 'ok';

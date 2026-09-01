@@ -1772,6 +1772,29 @@ describe('hydrateSetupTokenEnv', () => {
     expect(process.env[TOKEN_ENV_VAR]).toBe('sk-ant-oat01-explicit-override-value-here');
   });
 
+  // In login mode the hermit runs on the stored claude.ai credential. A setup-token
+  // in the environment would outrank it for API calls — the very credential the
+  // operator chose to stop using — so the file is not read at all.
+  test('login mode → the installed token file is not read', () => {
+    fs.writeFileSync(path.join(dir, '.hermit-setup-token'), `${VALID}\n`, { mode: 0o600 });
+    hydrateSetupTokenEnv('login');
+    expect(process.env[TOKEN_ENV_VAR]).toBeUndefined();
+  });
+
+  // "Don't set it" would not undo an inheritance — a stale .env, a parent shell, or
+  // a leftover compose value all arrive already set.
+  test('login mode → an inherited token var is removed, not merely left unset', () => {
+    process.env[TOKEN_ENV_VAR] = 'sk-ant-oat01-inherited-from-somewhere-else';
+    hydrateSetupTokenEnv('login');
+    expect(process.env[TOKEN_ENV_VAR]).toBeUndefined();
+  });
+
+  test('external mode → the environment is left exactly as it is', () => {
+    fs.writeFileSync(path.join(dir, '.hermit-setup-token'), `${VALID}\n`, { mode: 0o600 });
+    hydrateSetupTokenEnv('external');
+    expect(process.env[TOKEN_ENV_VAR]).toBeUndefined();
+  });
+
   // tmux spawns a shell that does NOT inherit this process's environment, so the
   // token only reaches claude if it is in the forwarded set. Dropping it from
   // that list would leave the token exported here and absent where it is used.

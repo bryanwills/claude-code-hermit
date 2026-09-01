@@ -270,6 +270,9 @@ Docker hermits on subscription auth can hold a long-lived `setup-token` (offered
 | `<config-dir>/.hermit-setup-token` | Yes, `0600` | Persistent volume, survives restarts, rotatable in place |
 | `state/setup-token.json` | No — only `{minted_at, expires_at}` | Doctor and the watchdog need expiry, not the secret |
 | `.env` / docker-compose | **No, deliberately** | `env_file` applies at container creation, so a token there could not be rotated without a host-side recreate |
+| `<config-dir>/.hermit-login-staging/` | Yes, transiently, `0700` | Where a relayed claude.ai sign-in lands in `auth_mode: login`. Emptied before each attempt, removed on abort, and consumed by the watchdog's commit during the next restart — so it holds a live credential only between a sign-in and the restart that follows it |
+| `state/pending-credential.json` | No — only `{staged_dir, staged_at}` | The watchdog needs to know a credential is waiting, not what it is |
+| `state/relay-unreachable.json` | No — only `{at}` | A suppression timestamp; carries nothing about the operator or the credential |
 | tmux env-file (`/tmp/.hermit-env-*`) | Transiently, `0600` | Sourced then deleted by the shell that launches claude |
 | Mint pane scrollback + capture file | Transiently, `0600` | Both destroyed on every exit path, including aborts |
 

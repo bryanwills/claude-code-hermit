@@ -236,6 +236,31 @@ describe('static file checks', () => {
     expect(gateIdx).toBeLessThan(mintIdx);
   });
 
+  test('hermit-docker login switches a running hermit through the staged relay', () => {
+    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), 'utf8');
+    const login = src.slice(src.indexOf('\n  login)'), src.indexOf('\n  logs)'));
+
+    // A running container already has a tmux server, so the sign-in goes through the
+    // same staged path a channel-relayed renewal uses.
+    const aliveIdx = login.indexOf('tmux has-session -t "$TMUX_SESSION"');
+    const relayIdx = login.indexOf('setup-token-mint terminal --target login');
+    expect(aliveIdx).toBeGreaterThan(-1);
+    expect(relayIdx).toBeGreaterThan(aliveIdx);
+    expect(login).toContain('hermit-watchdog restart reauth');
+
+    // Token mode no longer dead-ends: it explains the switch and continues.
+    expect(login).toContain('Continuing switches it to a claude.ai sign-in');
+    expect(login.slice(login.indexOf('$TOKEN_MODE'), aliveIdx)).not.toContain('exit 0');
+
+    // The REPL path stays for a container with no session yet, and the mode is
+    // written only AFTER the credential check — never before one exists.
+    const replIdx = login.indexOf('Opening Claude Code REPL for login');
+    const checkIdx = login.indexOf('.credentials.json not found');
+    const writeIdx = login.indexOf("set auth_mode login");
+    expect(replIdx).toBeGreaterThan(relayIdx);
+    expect(writeIdx).toBeGreaterThan(checkIdx);
+  });
+
   test('hermit-exec reports version skew, not corruption, on a missing script', () => {
     const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-exec.sh'), 'utf8');
     expect(src).not.toContain('may be corrupted');

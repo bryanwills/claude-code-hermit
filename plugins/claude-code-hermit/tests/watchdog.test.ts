@@ -283,6 +283,89 @@ describe('dead session', () => {
 // 5d. Dead session + FRESH shared liveness → orphan, abort restart
 // -------------------------------------------------------
 
+// -------------------------------------------------------
+// 5c-bis. Committing a staged claude.ai sign-in inside the restart boundary
+// -------------------------------------------------------
+
+describe('staged credential commit', () => {
+  /** A staging dir holding a sign-in, plus the pointer the mint leaves behind. */
+  function stage(h: Hermit, accessToken: string): { configDir: string; stagedDir: string } {
+    const configDir = path.join(h.dir, 'claude-config');
+    const stagedDir = path.join(configDir, '.hermit-login-staging');
+    fs.mkdirSync(stagedDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'old-one', refreshToken: 'r' } }),
+    );
+    fs.writeFileSync(path.join(configDir, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'old@x' } }));
+    fs.writeFileSync(
+      path.join(stagedDir, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken, refreshToken: 'r2', refreshTokenExpiresAt: 42 } }),
+    );
+    fs.writeFileSync(path.join(stagedDir, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'new@x' } }));
+    fs.writeFileSync(
+      state(h, 'pending-credential.json'),
+      JSON.stringify({ staged_dir: stagedDir, staged_at: new Date().toISOString() }),
+    );
+    return { configDir, stagedDir };
+  }
+
+  test('a usable staged sign-in replaces the live credential and parks the old one', withHermit(async (h) => {
+    writeConfig(h);
+    writeFakeTmux(h, 1); // dead session → restart path
+    writeFakePgrep(h, 1);
+    const { configDir, stagedDir } = stage(h, 'sk-ant-oat01-freshfreshfresh');
+    const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' } });
+    expect(r.exitCode).toBe(0);
+
+    const live = readJson(path.join(configDir, '.credentials.json'));
+    expect(live.claudeAiOauth.accessToken).toBe('sk-ant-oat01-freshfreshfresh');
+    // Parked, not destroyed — a deliberate rollback has something to go back to.
+    expect(readJson(path.join(configDir, '.credentials.json.pre-login.bak')).claudeAiOauth.accessToken).toBe('old-one');
+    // `claude auth status` reads the identity from .claude.json, not the credential
+    // file, so a commit that moved only the credential would report the old account.
+    expect(readJson(path.join(configDir, '.claude.json')).oauthAccount.emailAddress).toBe('new@x');
+    expect(fs.existsSync(stagedDir)).toBe(false);
+    expect(fs.existsSync(state(h, 'pending-credential.json'))).toBe(false);
+    expect(readJson(path.join(h.dir, '.claude-code-hermit', 'config.json')).auth_mode).toBe('login');
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('credential-committed');
+  }));
+
+  test('a staged file that lapsed while waiting is dropped, live untouched', withHermit(async (h) => {
+    writeConfig(h);
+    writeFakeTmux(h, 1);
+    writeFakePgrep(h, 1);
+    const { configDir, stagedDir } = stage(h, ''); // the lapse stub
+    const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' } });
+    expect(r.exitCode).toBe(0);
+
+    expect(readJson(path.join(configDir, '.credentials.json')).claudeAiOauth.accessToken).toBe('old-one');
+    expect(fs.existsSync(path.join(configDir, '.credentials.json.pre-login.bak'))).toBe(false);
+    expect(fs.existsSync(stagedDir)).toBe(false);
+    expect(fs.existsSync(state(h, 'pending-credential.json'))).toBe(false);
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('credential-commit-skipped');
+    expect(events).not.toContain('credential-committed');
+  }));
+
+  // The commit sits after the survivors check for a reason: an aborted restart means
+  // the old session is still running and still refreshing the file we would overwrite.
+  test('an aborted restart commits nothing', withHermit(async (h) => {
+    writeConfig(h);
+    writeFakeTmux(h, 1);
+    writeFakePgrep(h, 1);
+    fs.writeFileSync(state(h, 'routine-monitor-liveness.json'), '{}'); // orphan guard trips
+    const { configDir, stagedDir } = stage(h, 'sk-ant-oat01-freshfreshfresh');
+    const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' } });
+    expect(r.exitCode).toBe(0);
+
+    expect(readJson(path.join(configDir, '.credentials.json')).claudeAiOauth.accessToken).toBe('old-one');
+    expect(fs.existsSync(stagedDir)).toBe(true);
+    expect(fs.existsSync(state(h, 'pending-credential.json'))).toBe(true);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).not.toContain('credential-commit');
+  }));
+});
+
 describe('dead session with fresh liveness (orphan guard)', () => {
   test('fresh liveness + no tmux → restart aborted, no hermit-start spawned', withHermit(async (h) => {
     writeConfig(h);
@@ -872,7 +955,10 @@ describe('hasLapsedLogin pane scan', () => {
   });
 });
 
-test('lapsed /login → notice, record stamped, no nudge or restart', withHermit(async (h) => {
+// A lapsed /login on a hermit that HAS a channel is now recoverable without box
+// access: the relay sends the sign-in link out over that channel. The one-notice
+// tier below is reserved for the case where that send is impossible.
+test('lapsed /login with a channel → relay spawned, nudge and restart suppressed', withHermit(async (h) => {
   writeConfig(h);
   configureChannel(h);
   writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
@@ -880,6 +966,27 @@ test('lapsed /login → notice, record stamped, no nudge or restart', withHermit
   // Stale enough that a nudge would normally fire — proving the tier suppresses it.
   touchAgo(state(h, '.heartbeat'), 6 * 3600);
   const configDir = writeStoredLogin(h);
+  const r = await watchdog(h, 'run', {
+    env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' },
+  });
+  expect(r.exitCode).toBe(0);
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('reauth-relay');
+  expect(events).not.toContain('lapsed-login-detected');
+  expect(events).not.toContain('nudge');
+  expect(events).not.toContain('restart');
+}));
+
+// The other half: the relay already tried and could not reach anybody. Without this
+// stamp the watchdog respawns that same doomed relay on every tick, forever.
+test('lapsed /login + a fresh unreachable stamp → one notice, no relay', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 6 * 3600);
+  const configDir = writeStoredLogin(h);
+  fs.writeFileSync(state(h, 'relay-unreachable.json'), JSON.stringify({ at: isoAgo(1) }));
   const stub = startHttpStub();
   try {
     const r = await watchdog(h, 'run', {
@@ -888,6 +995,7 @@ test('lapsed /login → notice, record stamped, no nudge or restart', withHermit
     expect(r.exitCode).toBe(0);
     const events = fs.readFileSync(eventsFile(h), 'utf-8');
     expect(events).toContain('lapsed-login-detected');
+    expect(events).not.toContain('reauth-relay');
     expect(events).not.toContain('nudge');
     expect(events).not.toContain('restart');
     expect(stub.requests.length).toBe(1);
@@ -896,6 +1004,69 @@ test('lapsed /login → notice, record stamped, no nudge or restart', withHermit
   } finally {
     stub.stop();
   }
+}));
+
+// The stamp is a suppression, not a verdict: after a day the hermit tries again,
+// because "unreachable" is usually a channel outage, not a permanent condition.
+test('lapsed /login + a stamp older than 24h → relay retried', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h);
+  fs.writeFileSync(state(h, 'relay-unreachable.json'), JSON.stringify({ at: isoAgo(25 * 3600) }));
+  const r = await watchdog(h, 'run', {
+    env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' },
+  });
+  expect(r.exitCode).toBe(0);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('reauth-relay');
+}));
+
+// A hermit whose login is fine has nothing to renew — the relay must not fire on a
+// healthy credential just because login mode is now a thing.
+test('login mode with a healthy credential and a clean pane → nothing fires', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, 'all quiet');
+  writeFakePgrep(h, 1);
+  const configDir = path.join(h.dir, 'claude-config');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(configDir, '.credentials.json'),
+    JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'sk-ant-oat01-live', refreshToken: 'r',
+        refreshTokenExpiresAt: Date.now() + 20 * 24 * 3600_000,
+      },
+    }),
+  );
+  const r = await watchdog(h, 'run', {
+    env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' },
+  });
+  expect(r.exitCode).toBe(0);
+  const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+  expect(events).not.toContain('reauth-relay');
+  expect(events).not.toContain('lapsed-login-detected');
+}));
+
+// A credential the mint already staged IS a renewal in flight. Spawning another
+// relay would reset the staging dir out from under it.
+test('a pending staged credential counts as a relay already in flight', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, LAPSED_LOGIN_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeStoredLogin(h);
+  fs.writeFileSync(
+    state(h, 'pending-credential.json'),
+    JSON.stringify({ staged_dir: path.join(configDir, '.hermit-login-staging'), staged_at: new Date().toISOString() }),
+  );
+  const r = await watchdog(h, 'run', {
+    env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' },
+  });
+  expect(r.exitCode).toBe(0);
+  const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+  expect(events).not.toContain('relay spawned');
 }));
 
 test('lapsed /login, second tick within the day → deduped, no second push', withHermit(async (h) => {
@@ -1037,8 +1208,12 @@ test('stamped config dir overrides the watchdog process env', withHermit(async (
   });
   expect(r.exitCode).toBe(0);
   const events = fs.readFileSync(eventsFile(h), 'utf-8');
-  expect(events).toContain('lapsed-login-detected'); // /login tier, per the session
-  expect(events).not.toContain('reauth-relay');
+  // Both dirs would spawn a relay, so the discriminator is the RECORDED REASON.
+  // The session dir holds a spent /login (empty accessToken → a spent credential),
+  // which reports as expired; the watchdog's own token dir has no expiry record at
+  // all and would have been logged as a bare pane failure instead.
+  expect(events).toContain('claude.ai login expired');
+  expect(events).not.toContain('auth failure on pane');
 }));
 
 // An API-key hermit's 401 is not a login lapse. The key lives in the operator's
@@ -1135,7 +1310,7 @@ test('no env_auth stamp → the /login tier still owns the 401, not the env-auth
   const r = await watchdog(h, 'run', { env: UNIT_ENV(h) });
   expect(r.exitCode).toBe(0);
   const events = fs.readFileSync(eventsFile(h), 'utf-8');
-  expect(events).toContain('lapsed-login-detected');
+  expect(events).toContain('reauth-relay'); // the /login tier, which now recovers
   expect(events).not.toContain('env-auth-failure-detected');
 }));
 
@@ -1148,7 +1323,9 @@ test('no stamp → falls back to the watchdog process env', withHermit(async (h)
   const configDir = writeStoredLogin(h, '');
   const r = await watchdog(h, 'run', { env: { ...UNIT_ENV(h), CLAUDE_CONFIG_DIR: configDir } });
   expect(r.exitCode).toBe(0);
-  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('lapsed-login-detected');
+  const events = fs.readFileSync(eventsFile(h), 'utf-8');
+  expect(events).toContain('reauth-relay');
+  expect(events).not.toContain('env-auth-failure-detected');
 }));
 
 // The stamp is authoritative in BOTH directions. A unit or crontab that happens to
@@ -1164,7 +1341,9 @@ test('stamped env_auth=false beats a key in the watchdog process env', withHermi
     env: { ...UNIT_ENV(h), ANTHROPIC_API_KEY: 'sk-ant-api03-watchdog-unit-only' },
   });
   expect(r.exitCode).toBe(0);
-  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('lapsed-login-detected');
+  // Honouring the process env would resolve `external`, and external is exactly the
+  // mode that spawns nothing — so the relay firing is what proves the stamp won.
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('reauth-relay');
 }));
 
 // Regression: a pending pane whose in-session heartbeat has ALSO gone stale must

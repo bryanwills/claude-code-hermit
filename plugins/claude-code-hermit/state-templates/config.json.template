@@ -12,6 +12,7 @@
   },
   "channels": {},
   "remote": true,
+  "auth_mode": null,
   "model": "sonnet",
   "effort": null,
   "permission_mode": "auto",

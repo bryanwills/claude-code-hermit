@@ -12,11 +12,16 @@ reboot or a network flap.
 
 ## Prerequisites
 
-- **A claude.ai `/login` on this machine.** Remote Control rejects setup-token
-  auth outright ("must be logged in… only available with claude.ai
-  subscriptions"). Adding `/login` to a setup-token box flips that install's
-  auth precedence for everything on it — it is an either/or per machine, not an
-  addition.
+- **A claude.ai `/login` on this machine, and `auth_mode: login` on the hermit.**
+  Remote Control rejects setup-token auth outright ("must be logged in… only
+  available with claude.ai subscriptions"). A credential is an either/or per
+  machine, not an addition, so the hermit has to be told which one it runs on:
+  set it with `/claude-code-hermit:hermit-settings auth-mode login` (or
+  `hermit-run settings-edit .claude-code-hermit/config.json set auth_mode login`),
+  then sign in with `hermit-docker login` — under Docker that switches a running
+  token hermit through the staged relay and restarts it. A hermit left on
+  `auth_mode: token` keeps hydrating `CLAUDE_CODE_OAUTH_TOKEN` at boot, and
+  `remote: true` stays inert on it with no error.
 - Linux with systemd user units. macOS/launchd is unwritten; the unit below does
   not translate directly.
 - A machine that stays awake. Laptops sleep; this recipe assumes a box that

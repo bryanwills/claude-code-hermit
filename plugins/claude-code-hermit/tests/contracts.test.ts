@@ -2634,12 +2634,24 @@ describe('doctor credential-expiry check', () => {
     );
   };
 
-  // Core self-declares its setup-token credential, so even with no siblings and
-  // no token installed there is exactly one probe — and it reports ok, because
-  // "this hermit doesn't use token auth" is not a credential problem.
-  test('no siblings and no token installed → ok', withTmpdir(async (dir) => {
+  /** A signed-in claude.ai credential, optionally dated `days` from now. */
+  const writeStoredLogin = (credDir: string, days: number | null) => {
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(path.join(credDir, '.credentials.json'), JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'live', refreshToken: 'r', expiresAt: Date.now() - 3600000,
+        ...(days === null ? {} : { refreshTokenExpiresAt: Date.now() + days * 24 * 3600000 }),
+      },
+    }));
+  };
+
+  // Core self-declares one dynamic `claude-subscription` credential, so even with
+  // no siblings there is exactly one probe. A hermit signed in with a claude.ai
+  // login that carries no expiry field has nothing to measure — that reports ok.
+  test('no siblings, signed in, nothing to measure → ok', withTmpdir(async (dir) => {
     writeConfig(dir, {});
-    const credDir = path.join(dir, 'no-such-cred-dir');
+    const credDir = path.join(dir, 'creds');
+    writeStoredLogin(credDir, null);
     const r = await runScript('doctor-check.ts', {
       args: ['.claude-code-hermit'], cwd: dir,
       env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: credDir, ANTHROPIC_API_KEY: '' },
@@ -2650,24 +2662,25 @@ describe('doctor credential-expiry check', () => {
     expect(c.detail).toContain('1 plugin credential(s) ok');
   }), 20000);
 
-  // The point of the whole feature: a setup-token inside its 14-day window must
-  // warn, and must name the skill that renews it.
-  test('setup-token expiring within the 14d window → warn naming the skill', withTmpdir(async (dir) => {
-    writeConfig(dir, {});
-    writeTokenRecord(dir, 13);
+  // The point of the whole feature: a credential inside its warn window must warn,
+  // and must name the skill that renews it. 3 days for both modes, matching the
+  // window Claude Code itself warns on.
+  test('setup-token expiring within the 3d window → warn naming the skill', withTmpdir(async (dir) => {
+    writeConfig(dir, { auth_mode: 'token' });
+    writeTokenRecord(dir, 2);
     const r = await runScript('doctor-check.ts', {
       args: ['.claude-code-hermit'], cwd: dir,
       env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: path.join(dir, 'creds'), ANTHROPIC_API_KEY: '' },
     });
     const c = credCheck(JSON.parse(r.stdout));
     expect(c.status).toBe('warn');
-    expect(c.detail).toContain('setup-token');
+    expect(c.detail).toContain('claude-subscription');
     expect(c.detail).toContain('/claude-code-hermit:relogin');
   }), 20000);
 
   // Just outside the window: silent. Guards against the warn firing all year.
-  test('setup-token beyond the 14d window → ok', withTmpdir(async (dir) => {
-    writeConfig(dir, {});
+  test('setup-token beyond the 3d window → ok', withTmpdir(async (dir) => {
+    writeConfig(dir, { auth_mode: 'token' });
     writeTokenRecord(dir, 30);
     const r = await runScript('doctor-check.ts', {
       args: ['.claude-code-hermit'], cwd: dir,
@@ -2677,21 +2690,71 @@ describe('doctor credential-expiry check', () => {
     expect(c.status).toBe('ok');
   }), 20000);
 
-  // 14 not 7: a lapsed setup-token needs a human at a browser, so the default
-  // window would be too short. This asserts warn_days is actually honoured —
-  // at 10 days out the shared 7d default would stay silent.
-  test('setup-token at 10d out warns (warn_days=14 beats the 7d default)', withTmpdir(async (dir) => {
-    writeConfig(dir, {});
-    writeTokenRecord(dir, 10);
+  // A ~30-day login is the short one, so the window is measured against it: at 10
+  // days out — a third of that credential's life — the hermit must still stay quiet.
+  test('login mode at 10d out → ok (warn_days=3 is honoured, not the 7d default)', withTmpdir(async (dir) => {
+    writeConfig(dir, { auth_mode: 'login' });
+    const credDir = path.join(dir, 'creds');
+    writeStoredLogin(credDir, 10);
     const r = await runScript('doctor-check.ts', {
       args: ['.claude-code-hermit'], cwd: dir,
-      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: path.join(dir, 'creds'), ANTHROPIC_API_KEY: '' },
+      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: credDir, ANTHROPIC_API_KEY: '' },
     });
-    expect(credCheck(JSON.parse(r.stdout)).status).toBe('warn');
+    expect(credCheck(JSON.parse(r.stdout)).status).toBe('ok');
+  }), 20000);
+
+  test('login mode within the 3d window → warn naming the skill', withTmpdir(async (dir) => {
+    writeConfig(dir, { auth_mode: 'login' });
+    const credDir = path.join(dir, 'creds');
+    writeStoredLogin(credDir, 2);
+    const r = await runScript('doctor-check.ts', {
+      args: ['.claude-code-hermit'], cwd: dir,
+      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: credDir, ANTHROPIC_API_KEY: '' },
+    });
+    const c = credCheck(JSON.parse(r.stdout));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('/claude-code-hermit:relogin');
+  }), 20000);
+
+  // The lapse stub Claude Code writes in place when a refresh fails. The file is
+  // still there and still parses, so only the empty token distinguishes it.
+  test('login mode with a lapse stub → warn EXPIRED', withTmpdir(async (dir) => {
+    writeConfig(dir, { auth_mode: 'login' });
+    const credDir = path.join(dir, 'creds');
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(path.join(credDir, '.credentials.json'), JSON.stringify({
+      claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0 },
+    }));
+    const r = await runScript('doctor-check.ts', {
+      args: ['.claude-code-hermit'], cwd: dir,
+      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: credDir, ANTHROPIC_API_KEY: '' },
+    });
+    const c = credCheck(JSON.parse(r.stdout));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('EXPIRED');
+  }), 20000);
+
+  // A leftover token file in login mode is confusing, not dangerous: nothing reads
+  // it, but its presence is why a renewal looks like it did nothing.
+  test('login mode + a stray token file → warn about the stray file, not parking', withTmpdir(async (dir) => {
+    writeConfig(dir, { auth_mode: 'login' });
+    const credDir = path.join(dir, 'creds');
+    writeStoredLogin(credDir, 30);
+    fs.writeFileSync(path.join(credDir, '.hermit-setup-token'), `${VALID_OAT}\n`);
+    const r = await runScript('doctor-check.ts', {
+      args: ['.claude-code-hermit'], cwd: dir,
+      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: credDir, ANTHROPIC_API_KEY: '', CLAUDE_CODE_OAUTH_TOKEN: '' },
+    });
+    const c = credCheck(JSON.parse(r.stdout));
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('stray');
+    expect(c.detail).not.toContain('shadow');
   }), 20000);
 
   test('already-expired setup-token → warn EXPIRED', withTmpdir(async (dir) => {
-    writeConfig(dir, {});
+    // auth_mode pinned so the EXPIRED verdict provably comes from the token record
+    // and not from login mode finding no credential on an empty fixture dir.
+    writeConfig(dir, { auth_mode: 'token' });
     writeTokenRecord(dir, -1);
     const r = await runScript('doctor-check.ts', {
       args: ['.claude-code-hermit'], cwd: dir,
@@ -2709,10 +2772,11 @@ describe('doctor credential-expiry check', () => {
   test('expired Claude Code session credentials are not flagged → ok', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     const credDir = path.join(dir, 'creds');
-    fs.mkdirSync(credDir, { recursive: true });
-    fs.writeFileSync(path.join(credDir, '.credentials.json'), JSON.stringify({
-      claudeAiOauth: { expiresAt: Date.now() - 3600000 },
-    }));
+    // A signed-in credential whose ACCESS token lapsed hours ago. That is the
+    // ordinary steady state — Claude Code refreshes it silently — so `expiresAt`
+    // being in the past must still read as healthy. Only an empty accessToken (the
+    // lapse stub) or a past refreshTokenExpiresAt is a real problem.
+    writeStoredLogin(credDir, 90);
     const r = await runScript('doctor-check.ts', {
       args: ['.claude-code-hermit'], cwd: dir,
       env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_CONFIG_DIR: credDir, ANTHROPIC_API_KEY: '' },
