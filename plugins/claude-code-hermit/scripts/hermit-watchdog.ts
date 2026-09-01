@@ -51,7 +51,7 @@ import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { defaultConfigDir, envAuthPresent, msUntilExpiry, storedLoginUsable, tokenModeActive } from './lib/setup-token';
 import { isContainer } from './lib/container';
 import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
-import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
+import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS, isOwnTurn } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
@@ -100,7 +100,7 @@ export type World = {
   /** Per-tick memo for the cost-log read, shared by both hygiene tiers (one
    *  process per scheduler tick, so its lifetime is the tick). Lives on the world
    *  rather than in module scope so each fake world in a test starts cold. */
-  memo: { costLogEntry?: { sessionId: string; entry: Json } };
+  memo: { costLogEntry?: { sessionId: string; entry: Json }; hygieneSessionId?: string };
 };
 
 const REAL_WORLD: World = {
@@ -1179,10 +1179,10 @@ function getLastCostLogEntry(sessionId: string, world: World = REAL_WORLD): Json
     if (!line) continue;
     try {
       const e = JSON.parse(line);
-      // Subagent lines are appended after the dispatching turn's main line
-      // (cost-tracker.ts) and carry their own small token count — the hygiene
-      // mechanisms want the main turn's context size, not a subagent's.
-      if (e && e.session_id === sessionId && e.subagent !== true) lastEntry = e;
+      // isOwnTurn (lib/context-signal.ts) owns the match rule, shared with
+      // doctor-check.ts's mirror of this scan so the two cannot drift on what
+      // counts as this session's own turn.
+      if (isOwnTurn(e, sessionId)) lastEntry = e;
     } catch {}
   }
   world.memo.costLogEntry = { sessionId, entry: lastEntry };
@@ -1214,16 +1214,27 @@ function poisonedEntrySkip(entry: Json, runtime: Json): PoisonReason | null {
   return null;
 }
 
-/** Active arc ID, falling back to the harness session id cost-tracker persists to
- *  sessions/.status.json (cost-tracker.ts:runtimeSessionId || sessionId) — the same
- *  value used to key cost-log entries when no S-NNN arc is open (idle-phase wakes:
- *  heartbeat/routines/channel messages). Without this fallback both hygiene tiers
- *  are blind to exactly the accumulation they exist to catch. */
+/** The resident's own Claude Code session id, stamped by startup-context.ts under
+ *  HERMIT_MANAGED. This is the ONLY acceptable identity for a hygiene decision.
+ *
+ *  Neither of the two ids this used to consult identifies a harness session:
+ *  `runtime.session_id` is the S-NNN work-arc label, which cost-tracker stamps onto
+ *  every session's rows while an arc is open, and `sessions/.status.json` is rewritten
+ *  by whichever session's Stop hook fired last — a worktree guest, a hand-launched
+ *  maintenance session, anyone in the folder. Measured live (issue #916): 13 of 14
+ *  watchdog compactions read another session's context, citing 177k-272k while the
+ *  resident sat at 67k-117k, and typed /compact into the resident's pane anyway.
+ *
+ *  Absent (a hermit that has not booted a managed session since the upgrade) resolves
+ *  to '' and both tiers skip. Skipping is the safe failure: a real resident turn
+ *  restamps within one wake. */
 function resolveHygieneSessionId(runtime: Json, world: World = REAL_WORLD): string {
-  const sid: string = runtime.session_id ?? '';
-  if (sid) return sid;
-  const status = world.files.readJson(path.join(world.paths.hermitRoot, 'sessions', '.status.json'));
-  return status && typeof status.session_id === 'string' ? status.session_id : '';
+  const sid: unknown = runtime.cc_session_id;
+  const resolved = typeof sid === 'string' ? sid : '';
+  // Sole writer of the tick's identity, so every eval stamped after this point names
+  // the session the reading came from without threading it through four helpers.
+  world.memo.hygieneSessionId = resolved;
+  return resolved;
 }
 
 /** The two ways a cost-log entry can be poisoned (see poisonedEntrySkip). Typed so
@@ -1267,6 +1278,11 @@ export function setHygieneEval(world: World, ws: Json, mechanism: 'clear' | 'com
   ws.last_hygiene_eval[mechanism] = {
     ts: worldStamp(world),
     outcome,
+    // Which session's context this verdict describes. Absent until the tick's first
+    // resolution; the clear tier runs before the compact tier, so a later compact skip
+    // can carry an id its own gate never reached. Harmless — the resident's id does not
+    // change mid-tick — and nothing branches on the field, it is forensics only.
+    ...(world.memo.hygieneSessionId ? { cc_session_id: world.memo.hygieneSessionId } : {}),
     ...(promptTokensVal != null ? { prompt_tokens: promptTokensVal } : {}),
     ...(compactibleVal != null ? { compactible_tokens: compactibleVal } : {}),
   };
@@ -1376,14 +1392,15 @@ export function maybeContextClear(config: Json, world: World = REAL_WORLD): Hygi
     });
     world.tmux.send(sessionName, '/clear');
     watchdogState.last_cleared_cost_ts = lastEntry.timestamp;
-    // Cross-stamp: runtime.session_id short-circuits resolveHygieneSessionId when an
-    // arc is open, so cache deletion alone can't stop the compact tier from resolving
-    // this same (now-destroyed) entry — mark it consumed for compact too.
+    // Cross-stamp: runtime.cc_session_id survives the reset (only the next
+    // SessionStart restamps it), so the compact tier can still resolve this same
+    // (now-destroyed) entry on the next tick — mark it consumed for compact too.
+    // The stale-entry guard covers it as well; this is belt-and-braces redundancy.
     watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
     watchdogState.last_pane_hash_ctx = null; // reset so next bloat cycle re-arms
     setHygieneEval(world, watchdogState, 'clear', 'fired', prompt);
     writeWatchdogState(watchdogState, world);
-    appendEvent('context-clear', `prompt tokens ${prompt} over threshold ${threshold}`, world);
+    appendEvent('context-clear', `prompt tokens ${prompt} over threshold ${threshold}, cc_session_id ${sessionId}`, world);
   } finally {
     releaseLock(lifecycleLockPath(world));
   }
@@ -1540,7 +1557,7 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
     world.files.rm(markerPath); // consume the boundary waiver now that it fired
     // Both token counts travel in the event so the next cost-log entry gives a
     // before/after for free — feeds /hermit-evolution and threshold calibration.
-    appendEvent('context-compact', `prompt tokens ${prompt} (compactible ~${compactible}) over threshold ${threshold}, flavor ${flavor}`, world);
+    appendEvent('context-compact', `prompt tokens ${prompt} (compactible ~${compactible}) over threshold ${threshold}, flavor ${flavor}, cc_session_id ${sessionId}`, world);
   } finally {
     releaseLock(lifecycleLockPath(world));
   }

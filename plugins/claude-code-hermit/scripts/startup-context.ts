@@ -318,7 +318,7 @@ function emitGuestBanner(agentDir: string): void {
 // hermit-start rewrites runtime.json moments after spawning tmux, seconds before
 // Claude Code boots and fires this hook; both sides read-modify-write, so the
 // later write preserves the earlier one's fields.
-function stampSessionEnv(stateDir: string): void {
+function stampSessionEnv(stateDir: string, sessionId: string | null): void {
   if (process.env.HERMIT_MANAGED !== '1') return;
   try {
     const runtime = readRuntimeJson(stateDir);
@@ -336,8 +336,15 @@ function stampSessionEnv(stateDir: string): void {
     // so ppid is the claude process.
     const inboxSocket = process.env.CLAUDE_CODE_MESSAGING_SOCKET || null;
     const sessionPid = process.ppid;
-    // All four describe the launch, so every later SessionStart (resume, clear,
-    // compact) recomputes the same values. Skip the write when nothing moved:
+    // The resident's own Claude Code session id. `session_id` holds the S-NNN work-arc
+    // label (session-archive.ts) and is null between arcs, so it can't identify which
+    // harness session the resident is — and the hygiene tiers were falling back to
+    // sessions/.status.json, which every session in the folder overwrites on Stop.
+    // Under HERMIT_MANAGED this hook IS the resident, so the payload id is exact.
+    const ccSessionId = sessionId || null;
+    // All five describe the launch, so every later SessionStart (resume, compact)
+    // recomputes the same values; /clear mints a new session id, which is a real
+    // change and must be written. Skip the write when nothing moved:
     // writeRuntimeJson stamps updated_at, and refreshing that on the strength of a
     // compaction alone would hide a wedged session from doctor's stale-session
     // check. stampContextReset in lib/context-reset.ts avoids the same hazard by
@@ -346,7 +353,8 @@ function stampSessionEnv(stateDir: string): void {
       runtime.config_dir === configDir &&
       runtime.env_auth === envAuth &&
       runtime.inbox_socket === inboxSocket &&
-      runtime.session_pid === sessionPid
+      runtime.session_pid === sessionPid &&
+      runtime.cc_session_id === ccSessionId
     ) {
       return;
     }
@@ -354,6 +362,7 @@ function stampSessionEnv(stateDir: string): void {
     runtime.env_auth = envAuth;
     runtime.inbox_socket = inboxSocket;
     runtime.session_pid = sessionPid;
+    runtime.cc_session_id = ccSessionId;
     writeRuntimeJson(runtime, stateDir);
   } catch {
     // fail-open — the watchdog falls back to its own env, and to typing, when the
@@ -363,7 +372,7 @@ function stampSessionEnv(stateDir: string): void {
 
 function main(source: string | null, sessionId: string | null) {
   const stateDir = path.resolve(AGENT_DIR, 'state');
-  stampSessionEnv(stateDir);
+  stampSessionEnv(stateDir, sessionId);
   pruneGuestMarkers(stateDir);
   if (residentSessionActive(AGENT_DIR)) {
     // The banner only reaches the model; the marker is what the state-writing

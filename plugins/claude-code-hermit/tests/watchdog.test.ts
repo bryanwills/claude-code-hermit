@@ -3045,18 +3045,25 @@ test('post_close_clear: invalidates sessions/.status.json so a stale pre-clear c
 // -------------------------------------------------------
 
 const SESSION_ID = 'S-001';
+/** The resident's Claude Code session id — the identity the hygiene tiers key on. */
+const CC_SESSION_ID = 'cc-resident-001';
 
 /** Write a cost-log entry under <hermit.dir>/.claude/cost-log.jsonl. */
 function writeCostLog(h: Hermit, entries: {
   session_id: string; input_tokens: number; cache_write_tokens: number; cache_read_tokens: number;
   timestamp?: string; api_calls?: number; max_prompt_tokens?: number; subagent?: boolean;
   observed_at?: string; last_call_prompt_tokens?: number;
+  /** Defaults to CC_SESSION_ID — the resident. Pass another id (or `guest`) to model a
+   *  row written by a different session in the same folder. */
+  cc_session_id?: string; guest?: boolean;
 }[]): void {
   const dir = path.join(h.dir, '.claude');
   fs.mkdirSync(dir, { recursive: true });
   const lines = entries.map(e => JSON.stringify({
     timestamp: e.timestamp ?? new Date().toISOString(),
     session_id: e.session_id,
+    cc_session_id: e.cc_session_id ?? CC_SESSION_ID,
+    ...(e.guest ? { guest: true } : {}),
     input_tokens: e.input_tokens,
     cache_write_tokens: e.cache_write_tokens,
     cache_read_tokens: e.cache_read_tokens,
@@ -3080,9 +3087,12 @@ function writeContextClearConfig(h: Hermit, threshold = 700000): void {
   }, null, 2) + '\n');
 }
 
-/** Write runtime.json for an always-on hermit with given session_state. */
+/** Write runtime.json for an always-on hermit with given session_state.
+ *  `cc_session_id` is what the hygiene tiers resolve on (startup-context.ts stamps it
+ *  under HERMIT_MANAGED); `session_id` is the S-NNN arc label, kept because other
+ *  watchdog paths still read it. */
 function writeAlwaysOnRuntime(h: Hermit, session_state = 'idle'): void {
-  patchRuntime(h, { session_state, runtime_mode: 'tmux', session_id: SESSION_ID });
+  patchRuntime(h, { session_state, runtime_mode: 'tmux', session_id: SESSION_ID, cc_session_id: CC_SESSION_ID });
 }
 
 /** Write watchdog-state with a specific last_pane_hash_ctx (simulates second tick). */
@@ -3494,19 +3504,14 @@ test('context_compact: subagent tail entry is ignored — bloated main line stil
     expect(tmuxLog).toContain('/compact');
   }));
 
-test('context_compact: idle-phase session-id fallback via sessions/.status.json',
+test('context_compact: idle-phase compaction keys on cc_session_id, with no S-NNN arc open',
   withHermit(async (h) => {
     writeContextCompactConfig(h);
     // No open S-NNN arc — runtime.session_id is null, as it is for most of an
-    // always-on hermit's life between sessions.
-    patchRuntime(h, { session_state: 'idle', runtime_mode: 'tmux', session_id: null });
-    const harnessSid = 'harness-uuid-1234';
-    fs.mkdirSync(path.join(h.dir, '.claude-code-hermit', 'sessions'), { recursive: true });
-    fs.writeFileSync(
-      path.join(h.dir, '.claude-code-hermit', 'sessions', '.status.json'),
-      JSON.stringify({ session_id: harnessSid }) + '\n',
-    );
-    writeCostLog(h, [{ session_id: harnessSid, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
+    // always-on hermit's life between sessions. cc_session_id does not follow the arc,
+    // so the resident stays identifiable and the tier still fires.
+    patchRuntime(h, { session_state: 'idle', runtime_mode: 'tmux', session_id: null, cc_session_id: CC_SESSION_ID });
+    writeCostLog(h, [{ session_id: 'S-001', input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
     fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
     writeFakeTmux(h, 0, 'static pane content');
     writeFakePgrep(h, 1);
@@ -3516,6 +3521,42 @@ test('context_compact: idle-phase session-id fallback via sessions/.status.json'
     expect(r2.exitCode).toBe(0);
     const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
     expect(tmuxLog).toContain('/compact');
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain(`cc_session_id ${CC_SESSION_ID}`);
+  }));
+
+test('context_compact: another session in the folder cannot drive the resident\'s compaction',
+  withHermit(async (h) => {
+    // Issue #916, the measured defect: a worktree/guest session's bloated turn used to be
+    // read as the resident's own context (via the shared S-NNN label or .status.json) and
+    // typed /compact into the resident's pane while it sat well under threshold.
+    writeContextCompactConfig(h);
+    writeAlwaysOnRuntime(h, 'idle');
+    fs.mkdirSync(path.join(h.dir, '.claude-code-hermit', 'sessions'), { recursive: true });
+    fs.writeFileSync(
+      path.join(h.dir, '.claude-code-hermit', 'sessions', '.status.json'),
+      JSON.stringify({ session_id: 'cc-other-session' }) + '\n',
+    );
+    writeCostLog(h, [
+      // Resident's own turn: ~90k, comfortably under the 100k compactible threshold.
+      { session_id: SESSION_ID, cc_session_id: CC_SESSION_ID, input_tokens: 40000, cache_write_tokens: 0, cache_read_tokens: 100000 },
+      // A guest's turn afterwards, same arc label, 250k — the newest row in the log.
+      { session_id: SESSION_ID, cc_session_id: 'cc-other-session', guest: true, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 },
+    ]);
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
+    writeFakeTmux(h, 0, 'static pane content');
+    writeFakePgrep(h, 1);
+
+    await watchdog(h, 'run');
+    const r2 = await watchdog(h, 'run');
+    expect(r2.exitCode).toBe(0);
+    // The tier bails on the token gate before any pane work, so tmux is never invoked
+    // and the log may not exist at all — either way, nothing was typed.
+    const tmuxLogPath = path.join(h.dir, 'tmux-calls.log');
+    const tmuxLog = fs.existsSync(tmuxLogPath) ? fs.readFileSync(tmuxLogPath, 'utf-8') : '';
+    expect(tmuxLog).not.toContain('/compact');
+    const ws = readJson(state(h, 'watchdog-state.json'));
+    expect(ws.last_hygiene_eval?.compact?.outcome).toBe('skip:under-threshold');
+    expect(ws.last_hygiene_eval?.compact?.cc_session_id).toBe(CC_SESSION_ID);
   }));
 
 test('context_clear: legacy multi-call entry averages down — no destructive misfire; still compact-eligible',
@@ -4315,6 +4356,7 @@ function setupCascade(): Cascade {
     runtime_mode: 'tmux',
     tmux_session: 'hermit-test',
     session_id: 'S-001',
+    cc_session_id: CC_SESSION_ID,
     shutdown_requested_at: null,
     shutdown_completed_at: null,
   }, null, 2) + '\n');
@@ -4349,6 +4391,7 @@ function patchCascadeRuntime(c: Cascade, patch: Record<string, unknown>): void {
 function writeCostEntry(c: Cascade, over: Record<string, unknown> = {}): void {
   const entry = {
     session_id: 'S-001',
+    cc_session_id: CC_SESSION_ID,
     timestamp: agoISO(60),
     observed_at: agoISO(60),
     last_call_prompt_tokens: 900_000,
@@ -4520,14 +4563,30 @@ describe('maybeContextClear (in-process) — outcome per gate', () => {
   }));
 
   test('no-session-id', withCascade((c) => {
-    patchCascadeRuntime(c, { session_id: '' });
+    // An S-NNN arc label is not an identity: only cc_session_id is.
+    patchCascadeRuntime(c, { cc_session_id: '' });
+    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-session-id');
+  }));
+
+  test('no-session-id: an arc label without cc_session_id resolves nothing', withCascade((c) => {
+    // The pre-#916 shape — S-NNN present, no harness id stamped. A bloated row keyed on
+    // that label must not be readable, or the drift the fix removes comes straight back.
+    const { cc_session_id: _dropped, ...rest } = c.runtime();
+    c.world.files.writeJson(path.join(c.world.paths.stateDir, 'runtime.json'), { ...rest, session_id: 'S-001' });
+    writeCostEntry(c, { cc_session_id: undefined });
     expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-session-id');
   }));
 
   test('no-cost-entry when the log has nothing for this session', withCascade((c) => {
     expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-cost-entry');
-    writeCostEntry(c, { session_id: 'S-OTHER' });
+    writeCostEntry(c, { cc_session_id: 'cc-other-session' });
     c.world.memo.costLogEntry = undefined; // new tick
+    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-cost-entry');
+  }));
+
+  test('no-cost-entry: a guest row carrying the resident id is ignored', withCascade((c) => {
+    // A guest in the same folder cannot borrow the resident's identity.
+    writeCostEntry(c, { guest: true });
     expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-cost-entry');
   }));
 
@@ -4594,7 +4653,7 @@ describe('maybeContextClear (in-process) — outcome per gate', () => {
     expect(c.sent).toEqual([{ session: 'hermit-test', text: '/clear' }]);
     const ws = c.wdState();
     expect(ws.last_hygiene_eval.clear).toEqual({
-      ts: '2026-08-14T12:00:00Z', outcome: 'fired', prompt_tokens: 900_000,
+      ts: '2026-08-14T12:00:00Z', outcome: 'fired', cc_session_id: CC_SESSION_ID, prompt_tokens: 900_000,
     });
     expect(ws.last_cleared_cost_ts).toBe(agoISO(60));
     // cross-stamped so the compact tier can't act on the same destroyed context
@@ -4708,7 +4767,8 @@ describe('maybeContextCompact (in-process) — outcome per gate', () => {
     expect(c.sent[0].text).toBe(composeCompactSteeringMessage('mid-arc'));
     const ws = c.wdState();
     expect(ws.last_hygiene_eval.compact).toEqual({
-      ts: '2026-08-14T12:00:00Z', outcome: 'fired', prompt_tokens: 900_000, compactible_tokens: 850_000,
+      ts: '2026-08-14T12:00:00Z', outcome: 'fired', cc_session_id: CC_SESSION_ID,
+      prompt_tokens: 900_000, compactible_tokens: 850_000,
     });
     expect(ws.last_compacted_at).toBe('2026-08-14T12:00:00Z');
     expect(ws.last_pane_hash_compact).toBeNull();

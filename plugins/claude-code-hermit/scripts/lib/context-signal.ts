@@ -62,3 +62,20 @@ export function isEstimateOnly(entry: Json): boolean {
 export function compactibleTokens(entry: Json, surfaceUpperBound: number | null): number {
   return Math.max(0, promptTokensOf(entry) - (surfaceUpperBound ?? ASSUMED_SURFACE_TOKENS));
 }
+
+/**
+ * True when a cost-log entry is this session's own main turn.
+ *
+ * Three clauses, each load-bearing: `cc_session_id` is the harness id of the session that
+ * produced the turn (`session_id` is the shared S-NNN arc label and matches every session
+ * in the folder), subagent lines carry their own small token count rather than the main
+ * turn's context size, and a guest row can only carry the resident's id if it IS the
+ * resident, which the marker denies. Rows predating `cc_session_id` never match, which
+ * ages out within a wake.
+ *
+ * Shared by hermit-watchdog's hygiene tiers and doctor-check's context tripwire — the
+ * same anti-drift reason promptTokensOf lives here (issue #916).
+ */
+export function isOwnTurn(entry: Json, sessionId: string): boolean {
+  return entry?.cc_session_id === sessionId && entry.subagent !== true && entry.guest !== true;
+}

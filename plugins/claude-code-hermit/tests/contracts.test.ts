@@ -2501,7 +2501,8 @@ describe('doctor context-age check', () => {
   function writeCostLogEntry(dir: string, sessionId: string, maxPromptTokens: number) {
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     const entry = {
-      timestamp: new Date().toISOString(), session_id: sessionId, source: 'interactive', model: 'sonnet',
+      timestamp: new Date().toISOString(), session_id: 'S-001', cc_session_id: sessionId,
+      source: 'interactive', model: 'sonnet',
       input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 0, output_tokens: 0,
       total_tokens: maxPromptTokens, api_calls: 1, max_prompt_tokens: maxPromptTokens,
       estimated_cost_usd: 0,
@@ -2509,9 +2510,12 @@ describe('doctor context-age check', () => {
     fs.writeFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), JSON.stringify(entry) + '\n');
   }
 
+  // cc_session_id is the resident's harness id — what the check resolves on, matching the
+  // watchdog's hygiene tiers. session_id is the S-NNN arc label and identifies nothing.
   function writeRuntime(dir: string, sessionState: string, sessionId: string) {
     fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'runtime.json'), JSON.stringify({
-      session_state: sessionState, session_id: sessionId, updated_at: new Date().toISOString(),
+      session_state: sessionState, session_id: 'S-001', cc_session_id: sessionId,
+      updated_at: new Date().toISOString(),
     }));
   }
 
@@ -2584,7 +2588,8 @@ describe('doctor context-age check', () => {
     writeRuntime(dir, 'in_progress', 'sess-1');
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     const entry = {
-      timestamp: new Date().toISOString(), session_id: 'sess-1', source: 'interactive', model: 'sonnet',
+      timestamp: new Date().toISOString(), session_id: 'S-001', cc_session_id: 'sess-1',
+      source: 'interactive', model: 'sonnet',
       input_tokens: 6000, cache_write_tokens: 0, cache_read_tokens: 0, output_tokens: 0,
       total_tokens: 6000, api_calls: 3, // no max_prompt_tokens → avg 2000 > 1000 threshold
       estimated_cost_usd: 0,

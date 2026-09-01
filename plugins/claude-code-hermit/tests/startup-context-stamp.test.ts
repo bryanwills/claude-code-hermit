@@ -46,9 +46,9 @@ const BLANK_ENV = {
   CLAUDE_CODE_USE_FOUNDRY: '',
 };
 
-async function run(dir: string, env: Record<string, string>) {
+async function run(dir: string, env: Record<string, string>, sessionId?: string) {
   return runScript('startup-context.ts', {
-    stdin: JSON.stringify({ source: 'startup' }),
+    stdin: JSON.stringify({ source: 'startup', ...(sessionId ? { session_id: sessionId } : {}) }),
     env: { AGENT_DIR: path.join(dir, '.claude-code-hermit'), ...BLANK_ENV, ...env },
   });
 }
@@ -194,6 +194,51 @@ describe('startup-context.ts — session launch stamp', () => {
       const runtime = readRuntime(wd.dir);
       expect(runtime.config_dir).toBeUndefined();
       expect(runtime.env_auth).toBeUndefined();
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // Issue #916: the hygiene tiers had no way to tell the resident's own context from any
+  // other session's in the folder. runtime.session_id is the S-NNN arc label (null between
+  // arcs, shared while one is open) and sessions/.status.json follows whoever wrote last.
+  // Under HERMIT_MANAGED this hook IS the resident, so its payload id is the exact answer.
+  it('managed session records its own Claude Code session id', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-resident-abc');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-resident-abc');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // /clear mints a new session id. The stamp's no-op guard must not treat that as
+  // "nothing moved", or the tiers keep reading the dead session's rows forever.
+  it('a new session id replaces the previous one', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-old');
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-new');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-new');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // A guest carries no HERMIT_MANAGED, so it must never claim the resident's identity.
+  it('unmanaged session never stamps a session id over the resident\'s', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-resident-abc');
+      const res = await run(wd.dir, {}, 'cc-guest-xyz');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-resident-abc');
     } finally {
       wd.cleanup();
     }

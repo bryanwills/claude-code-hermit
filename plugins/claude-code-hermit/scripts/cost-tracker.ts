@@ -23,6 +23,7 @@ import { classifySource } from './lib/trigger-source';
 import { runtimeTmpPath } from './lib/runtime';
 import { readContextSurface, writeContextSurface } from './lib/context-surface';
 import { MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
+import { isGuest } from './lib/guest-marker';
 
 type Json = any;
 
@@ -879,6 +880,12 @@ async function run(data: Json): Promise<string | null> {
     // do not apply.
     const logEntry = buildMainCostRow({
       sessionId: runtimeSessionId || sessionId,
+      // The harness id of the session that actually ran this turn — never the runtime
+      // override above, which is the shared S-NNN arc label. Paired with `guest`, this is
+      // what lets a reader tell the resident's rows from every other session's in the
+      // same project folder (issue #916).
+      ccSessionId: sessionId,
+      guest: isGuest(path.join(HERMIT_DIR, 'state'), sessionId),
       source,
       model,
       inputTokens,

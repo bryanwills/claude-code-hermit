@@ -361,6 +361,13 @@ function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; run
 type MainCostObservation = {
   timestamp?: string;
   sessionId: string;
+  /** The Claude Code session that produced this turn — always the hook payload's own id,
+   *  never runtime.json's S-NNN work-arc label. `sessionId` above is that label (shared by
+   *  every session in the folder while an arc is open), so it cannot say which harness
+   *  session a row describes; the hygiene tiers read this field instead. */
+  ccSessionId: string;
+  /** Only stamped when the writing session is marked a guest, never as `false`. */
+  guest?: boolean;
   source: string;
   model: string;
   inputTokens: number;
@@ -400,6 +407,8 @@ function buildMainCostRow(o: MainCostObservation): Json {
   return {
     timestamp: o.timestamp ?? new Date().toISOString(),
     session_id: o.sessionId,
+    cc_session_id: o.ccSessionId,
+    ...(o.guest ? { guest: true } : {}),
     source: o.source,
     model: o.model,
     input_tokens: o.inputTokens,
