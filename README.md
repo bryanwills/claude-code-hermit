@@ -23,7 +23,7 @@ cd /path/to/your/project   # any folder, even an empty one — Linux, macOS, WSL
 curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 ```
 
-The installer provisions everything and launches the setup wizard. When it finishes, it hands you the always-on step: `hermit-start` (tmux, same machine) or `/docker-setup` (isolated container).
+The installer provisions everything and launches the setup wizard. 
 
 ---
 
