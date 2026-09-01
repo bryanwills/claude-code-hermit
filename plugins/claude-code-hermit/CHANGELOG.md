@@ -9,6 +9,8 @@
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed
+- Permissions seed as native Claude Code `permissions.deny` / `permissions.ask` entries with hatch tiers (Hardened / Standard / Skip). Evolve extends asks additively and never removes operator-owned rules.
+- `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment.
 - Every `backup.*` key joins the nonce tier: changing them needs the settings chat plus a confirmation code, and `backup setup` is terminal-only. A remote set from content the hermit merely read would be a standing exfiltration path.
 - `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment. Docker still applies the hardened deny-pattern profile when chosen.
 - The `/hatch` channel question asks "How do you want to communicate with your agent?" in both branches, and labels the no-channel option `Claude app (for now)` instead of `None`: push notifications + Remote Control, with Discord/Telegram pairable later.
@@ -22,12 +24,18 @@
 - `/hatch` now supplies a description for every `AskUserQuestion` option in both branches, so the identity batch and the OPERATOR.md questionnaire no longer fail with `Invalid tool parameters`.
 - The tmux next step in `hatch-report.ts` now prefixes `.claude-code-hermit/bin/hermit-start` with `!`, so it can run directly in the current Claude Code session.
 
+### Removed
+- The `enforce-deny-patterns` PreToolUse hook. Runtime enforcement is Claude Code's native permission engine.
+- The hook-only settings/voice-file shell-redirect deny patterns, retired with the hook (redirects are classifier-watched). The OPERATOR.md redirect pair stays seeded as native `permissions.deny`.
+
 ### Upgrade Instructions
 1. Run `/claude-code-hermit:hermit-evolve` as usual. The missing-key config merge (`newConfigKeys()`: missing leaves under present parents are adopted) adds `watchdog.scheduler_enabled: true` to existing configs. This is default-on. Existing `watchdog.enabled: false` values are never rewritten.
 2. The next tmux always-on boot performs one scheduler registration. That flip of `watchdog.enabled: true` happens only on a genuinely first registration (no timer/unit already present). A hygiene-only install (`enabled: false`, unit already present) stays hygiene-only.
 3. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both `scheduler_enabled` and `enabled` false. Setting `watchdog.scheduler_enabled: false` in `config.json` by hand only stops future boots from re-registering; a timer already installed keeps ticking and keeps restarting. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
-4. The same merge adds the inert `backup` block (`enabled: false`). To turn it on, run `.claude-code-hermit/bin/hermit-run backup setup` from a terminal — never from chat; it asks for a mode, a schedule and a private remote, rewrites `.gitignore` in workspace mode, and takes the first snapshot. Docker installs also need `HERMIT_BACKUP_TOKEN=<token>` in the project-root `.env` followed by `hermit-docker update`; `github.com` is already in the netguard allowlist. Leave the block untouched to keep backups off.
-5. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
+4. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
+5. Run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny ask-only`. Resolve `hatch_target` the same way Step 1 already does (`.claude-code-hermit/state/hatch-options.json` `target` → `.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Additive and unattended-safe: if the target already carries at least one seeded deny entry, merge the ask list into `permissions.ask` and touch nothing else; if none are present, print `skip-preserved` and write nothing. Report the outcome (entries added, or `skip-preserved`). Legacy hard blocks (`npm publish`, `git push --force`, `git push origin main`, `git reset --hard`, `--no-verify`) stay blocked; to convert them to approval prompts run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny convert-legacy` from a terminal session (`deny standard` is purely additive and never removes them).
+6. The same merge adds the inert `backup` block (`enabled: false`). To turn it on, run `.claude-code-hermit/bin/hermit-run backup setup` from a terminal — never from chat; it asks for a mode, a schedule and a private remote, rewrites `.gitignore` in workspace mode, and takes the first snapshot. Docker installs also need `HERMIT_BACKUP_TOKEN=<token>` in the project-root `.env` followed by `hermit-docker update`; `github.com` is already in the netguard allowlist. Leave the block untouched to keep backups off.
+7. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
 
 ## [1.2.53] - 2026-08-31
 

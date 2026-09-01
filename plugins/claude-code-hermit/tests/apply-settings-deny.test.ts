@@ -1,11 +1,24 @@
 import { describe, test, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { runScript } from './helpers/run';
+import { runScript, PLUGIN_ROOT } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-deny-');
 afterAll(cleanup);
+
+const PATTERNS = JSON.parse(
+  fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'deny-patterns.json'), 'utf8'),
+) as { deny: string[]; ask: string[] };
+const DENY = PATTERNS.deny;
+const ASK = PATTERNS.ask;
+const LEGACY_HARD_BLOCKS = [
+  'Bash(npm publish*)',
+  'Bash(git push --force*)',
+  'Bash(git push origin main*)',
+  'Bash(git reset --hard*)',
+  'Bash(*--no-verify*)',
+];
 
 function seedSettings(dir: string, settings: any): string {
   const claude = path.join(dir, '.claude');
@@ -19,53 +32,118 @@ function readSettings(file: string): any {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-// Regression for the deny-pattern normalization pass: `deny minimal` merges
-// state-templates/deny-patterns.json's `default` array verbatim into the
-// native settings.json permissions.deny array — this is the portable half of
-// the fix, reaching Claude Code's own deny engine (not just the runtime hook).
 describe('apply-settings.ts deny', () => {
-  test('deny minimal merges the new rm flag-order/path-prefixed patterns', async () => {
+  test('deny standard seeds deny + ask and removes nothing — a Hardened install keeps its hard blocks', async () => {
     const dir = freshDir();
-    const file = seedSettings(dir, {});
-    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'minimal'] });
+    const file = seedSettings(dir, {
+      permissions: { deny: [...LEGACY_HARD_BLOCKS, 'Bash(operator-own*)'] },
+    });
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'standard'] });
     expect(r.exitCode).toBe(0);
-    const deny = readSettings(file).permissions.deny;
-    for (const pattern of [
-      'Bash(rm -rf *)',
-      'Bash(rm -fr *)',
-      'Bash(rm -r -f *)',
-      'Bash(rm -f -r *)',
-      'Bash(*/rm -rf *)',
-      'Bash(*/rm -fr *)',
-      'Bash(*/rm -r -f *)',
-      'Bash(*/rm -f -r *)',
-    ]) {
-      expect(deny).toContain(pattern);
+    const settings = readSettings(file);
+    const deny = settings.permissions.deny;
+    const ask = settings.permissions.ask;
+    for (const pattern of DENY) expect(deny).toContain(pattern);
+    for (const pattern of ASK) expect(ask).toContain(pattern);
+    for (const pattern of LEGACY_HARD_BLOCKS) expect(deny).toContain(pattern);
+    expect(r.stdout).not.toContain('removed:');
+    expect(deny).toContain('Bash(operator-own*)');
+    expect(JSON.stringify(settings)).not.toContain('Write(');
+  });
+
+  test('deny convert-legacy seeds like standard and strips the 5 legacy hard blocks, naming each', async () => {
+    const dir = freshDir();
+    const file = seedSettings(dir, {
+      permissions: { deny: [...LEGACY_HARD_BLOCKS, 'Bash(operator-own*)'] },
+    });
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'convert-legacy'] });
+    expect(r.exitCode).toBe(0);
+    const settings = readSettings(file);
+    const deny = settings.permissions.deny;
+    const ask = settings.permissions.ask;
+    for (const pattern of DENY) expect(deny).toContain(pattern);
+    for (const pattern of ASK) expect(ask).toContain(pattern);
+    for (const pattern of LEGACY_HARD_BLOCKS) {
+      expect(deny).not.toContain(pattern);
+      expect(r.stdout).toContain(`removed:${pattern}`);
     }
+    expect(deny).toContain('Bash(operator-own*)');
+    expect(JSON.stringify(settings)).not.toContain('Write(');
   });
 
-  test('deny minimal is additive and idempotent — running twice does not duplicate', async () => {
+  test('deny hardened merges both arrays into deny and strips nothing', async () => {
     const dir = freshDir();
-    const file = seedSettings(dir, { permissions: { deny: ['Bash(some-other-tool*)'] } });
-    await runScript('apply-settings.ts', { args: [file, 'deny', 'minimal'] });
-    await runScript('apply-settings.ts', { args: [file, 'deny', 'minimal'] });
-    const deny = readSettings(file).permissions.deny;
-    expect(deny).toContain('Bash(some-other-tool*)');
-    expect(deny.filter((p: string) => p === 'Bash(rm -fr *)').length).toBe(1);
+    const file = seedSettings(dir, {
+      permissions: { deny: ['Bash(operator-own*)'] },
+    });
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'hardened'] });
+    expect(r.exitCode).toBe(0);
+    const settings = readSettings(file);
+    const deny = settings.permissions.deny;
+    for (const pattern of DENY) expect(deny).toContain(pattern);
+    for (const pattern of ASK) expect(deny).toContain(pattern);
+    expect(settings.permissions.ask).toBeUndefined();
+    expect(deny).toContain('Bash(operator-own*)');
+    for (const pattern of LEGACY_HARD_BLOCKS) expect(deny).toContain(pattern);
+    expect(r.stdout).not.toContain('removed:');
+    expect(JSON.stringify(settings)).not.toContain('Write(');
   });
 
-  // A Write(glob) whose Edit(glob) twin is present is a dead no-op in Claude
-  // Code's engine (Edit covers Write) and trips the v2.1.211 boot warning — it
-  // must not be seeded into settings.json. deny-patterns.json keeps both spellings
-  // for the tool-specific runtime hook; the seed drops the redundant Write.
-  test('deny drops redundant Write(glob) rules whose Edit(glob) twin is seeded', async () => {
+  test('deny ask-only seeds asks on a previously-seeded file and leaves deny untouched', async () => {
+    const dir = freshDir();
+    const file = seedSettings(dir, {
+      permissions: { deny: [DENY[0], 'Bash(operator-own*)'] },
+    });
+    const before = fs.readFileSync(file, 'utf8');
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'ask-only'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('skip-preserved');
+    const settings = readSettings(file);
+    expect(settings.permissions.deny).toEqual([DENY[0], 'Bash(operator-own*)']);
+    for (const pattern of ASK) expect(settings.permissions.ask).toContain(pattern);
+    expect(before).not.toBe(fs.readFileSync(file, 'utf8'));
+    expect(JSON.stringify(settings)).not.toContain('Write(');
+  });
+
+  test('deny ask-only prints skip-preserved and writes nothing on a virgin file', async () => {
+    const dir = freshDir();
+    const file = seedSettings(dir, { permissions: { deny: ['Bash(operator-own*)'] } });
+    const before = fs.readFileSync(file, 'utf8');
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'ask-only'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('skip-preserved');
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  test('deny minimal aliases standard', async () => {
     const dir = freshDir();
     const file = seedSettings(dir, {});
     const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'minimal'] });
     expect(r.exitCode).toBe(0);
-    const deny = readSettings(file).permissions.deny;
-    expect(deny).toContain('Edit(*/.claude/plugins/marketplaces/*)');
-    expect(deny).not.toContain('Write(*/.claude/plugins/marketplaces/*)');
-    expect(deny.some((p: string) => /^Write\(/.test(p))).toBe(false);
+    const settings = readSettings(file);
+    for (const pattern of DENY) expect(settings.permissions.deny).toContain(pattern);
+    for (const pattern of ASK) expect(settings.permissions.ask).toContain(pattern);
+  });
+
+  test('re-runs add nothing — additive and idempotent', async () => {
+    const dir = freshDir();
+    const file = seedSettings(dir, { permissions: { deny: ['Bash(operator-own*)'] } });
+    await runScript('apply-settings.ts', { args: [file, 'deny', 'standard'] });
+    const once = readSettings(file);
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'standard'] });
+    expect(r.exitCode).toBe(0);
+    const twice = readSettings(file);
+    expect(twice.permissions.deny).toEqual(once.permissions.deny);
+    expect(twice.permissions.ask).toEqual(once.permissions.ask);
+    expect(twice.permissions.deny.filter((p: string) => p === 'Bash(rm -fr *)').length).toBe(1);
+    expect(twice.permissions.ask.filter((p: string) => p === 'Bash(ssh *)').length).toBe(1);
+    expect(twice.permissions.deny).toContain('Bash(operator-own*)');
+  });
+
+  test('unknown deny arg exits 1', async () => {
+    const dir = freshDir();
+    const file = seedSettings(dir, {});
+    const r = await runScript('apply-settings.ts', { args: [file, 'deny', 'consent'] });
+    expect(r.exitCode).toBe(1);
   });
 });

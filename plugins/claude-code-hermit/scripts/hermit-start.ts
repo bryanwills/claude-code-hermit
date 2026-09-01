@@ -47,13 +47,14 @@ type BootMode = 'interactive' | 'tmux';
 /**
  * The hook profile a launch gets when nobody has said otherwise.
  *
- * A managed (tmux) hermit runs unattended, so it defaults to `strict` — that is
- * what makes the config.json / OPERATOR.md / settings guards in
- * deny-patterns.json actually enforce, and it is what a Docker hermit has always
- * had via its compose environment block. An interactive launch stays `standard`:
- * the operator is present, and the strict set is scoped to the unattended
- * session by design — the native `permissions.deny` list is the one that reaches
- * an operator's own sessions, which is why the two legitimately differ.
+ * A managed (tmux) hermit runs unattended, so it defaults to `strict` — the
+ * tighter setting for the hooks that still read the profile (stop-pipeline,
+ * evaluate-session, and the dev hermit's git-push-guard), and it is what a
+ * Docker hermit has always had via its compose environment block. An
+ * interactive launch stays `standard`: the operator is present. The profile no
+ * longer gates any permission rule — the config.json / OPERATOR.md / settings
+ * guards are native `permissions.deny` / `permissions.ask` entries seeded once
+ * at hatch, and those reach every session regardless of profile.
  */
 function defaultProfileFor(bootMode: BootMode): string {
   return bootMode === 'tmux' ? 'strict' : 'standard';

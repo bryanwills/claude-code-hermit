@@ -91,21 +91,16 @@ Or edit `.claude-code-hermit/config.json` directly: `"env": { "AGENT_HOOK_PROFIL
 
 ---
 
-## Core Deny Patterns
+## Core permission rules
 
-Core hermit ships its own `enforce-deny-patterns.ts` `PreToolUse` hook that provides broader protections:
+Core hermit seeds native Claude Code `permissions.deny` / `permissions.ask` at hatch. Standard (default) hard-blocks catastrophic commands (`rm -rf`, credential dumps, marketplace edits) and prompts for risky ops (`ssh`, `docker`, `kubectl`, `npm publish`, force push, `--no-verify`, settings / OPERATOR.md edits). Hardened puts both classes in `permissions.deny`. Skip seeds nothing.
 
-- **`default` tier** (always active): catastrophic commands (`rm -rf`, credential access, OPERATOR.md bash redirects)
-- **`always_on` tier** (when `always_on: true` in config): `ssh`, `docker`, `kubectl`, `npm publish`, force push, `--no-verify`, OPERATOR.md Edit/Write, settings file modification
-
-`git-push-guard` is **complementary**, not redundant. The two hooks activate under different conditions:
+`git-push-guard` is **complementary**, not redundant. It activates under `AGENT_HOOK_PROFILE=strict` and is independent of the seeded rules:
 
 | Trigger | Covers |
 |---------|--------|
-| Core deny patterns (`always_on` tier) | Autonomous Docker/tmux mode with `always_on: true` |
+| Core seeded permission rules | Hatch-time Standard/Hardened entries in the project settings file |
 | `git-push-guard` (`strict` profile) | Interactive or autonomous mode with `AGENT_HOOK_PROFILE=strict` |
-
-In a typical always-on Docker deployment with strict profile, both run and complement each other; core's `PreToolUse` fires first.
 
 ---
 

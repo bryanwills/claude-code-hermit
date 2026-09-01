@@ -2,9 +2,9 @@
 // Spawning is intentional here — these tests exercise the process boundary
 // Claude Code sees (stdin in, exit code/stdout/stderr out, fail-open).
 // Do not convert a caller to an in-process import unless the assertion is
-// purely about a pure exported decision helper (e.g. enforce-deny-patterns'
-// `decide`, doctor-check's `cidrOverlap`); anything that depends on stdin
-// parsing, env plumbing, the stdin cap, or the exit code stays a spawn.
+// purely about a pure exported decision helper (e.g. doctor-check's
+// `cidrOverlap`); anything that depends on stdin parsing, env plumbing, the
+// stdin cap, or the exit code stays a spawn.
 
 import fs from 'node:fs';
 import path from 'node:path';

@@ -91,7 +91,7 @@ Within `changelog_slice` (already ordered oldest-first), each version entry may 
 1. Find the `### Upgrade Instructions` section within each version's entry
 2. If found, execute every instruction in that section — these are the authoritative migration steps
 3. Collect any version-specific operator notes for the step-10 report (delegated mode has no operator to present to live)
-4. **Delegated mode:** if a step is interactive (poses an either/or), do not ask. Apply the non-destructive default (e.g. a delete/cleanup offer → keep the file) and note it for step 10. If the step has **no safe default**, **defer** — skip it and record a verbatim deferred-migration block per the Delegated mode rules.
+4. **Delegated mode:** if a step is interactive (poses an either/or), do not ask. Apply the non-destructive default (e.g. a delete/cleanup offer → keep the file; a single command such as `deny ask-only`) and note the outcome for step 10. If the step has **no safe default**, **defer** — skip it and record a verbatim deferred-migration block per the Delegated mode rules.
 
 The CHANGELOG.md `### Upgrade Instructions` sections are the single source of truth for migrations — do not skip or merely display them. The same pattern applies to sibling-hermit upgrades in Step 7.
 

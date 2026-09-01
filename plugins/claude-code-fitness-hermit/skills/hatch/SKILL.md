@@ -42,7 +42,7 @@ If it does exist, run `.claude-code-hermit/bin/hermit-run domain-hatch preflight
 
 ## Step 2 — .env verification
 
-**IMPORTANT: Do NOT use `grep`, `cat`, `echo`, or any Bash command to read `.env`. Three of the four required variables contain the literal string `TOKEN` in their name, which triggers the base hermit's deny-patterns hook on any Bash command argument. Use the `Read` tool only.**
+**IMPORTANT: Do NOT use `grep`, `cat`, `echo`, or any Bash command to read `.env`. `Bash(cat .env*)` is a seeded native deny, and the values would land in the transcript. Use the `Read` tool only.**
 
 Tell the operator:
 

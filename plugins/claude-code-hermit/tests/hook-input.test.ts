@@ -1,13 +1,13 @@
-// Unit tests for scripts/lib/hook-input.ts — the shared stdin-drain +
-// profile-parsing helper for PreToolUse hooks. Pure exported helpers, so
-// tested in-process (not via runScript) per the repo convention (see
-// tests/hooks.contract.test.ts header). readHookInput takes an injectable
-// source since the real process.stdin isn't mockable in-process.
+// Unit tests for scripts/lib/hook-input.ts — the shared stdin-drain helper
+// for PreToolUse hooks. Pure exported helpers, so tested in-process (not via
+// runScript) per the repo convention (see tests/hooks.contract.test.ts
+// header). readHookInput takes an injectable source since the real
+// process.stdin isn't mockable in-process.
 //
 // Usage: bun test tests/hook-input.test.ts   (from the plugin root)
 
 import { describe, test, expect } from 'bun:test';
-import { readHookInput, hookProfile, isStrictProfile, MAX_HOOK_STDIN, OVERSIZE } from '../scripts/lib/hook-input';
+import { readHookInput, MAX_HOOK_STDIN, OVERSIZE } from '../scripts/lib/hook-input';
 
 async function* chunksOf(...parts: string[]): AsyncIterable<string> {
   for (const p of parts) yield p;
@@ -63,48 +63,5 @@ describe('readHookInput', () => {
     }
     const result = await readHookInput(MAX_HOOK_STDIN, throwing());
     expect(result).toBeNull();
-  });
-});
-
-describe('hookProfile / isStrictProfile', () => {
-  const ORIGINAL = process.env.AGENT_HOOK_PROFILE;
-  function withProfile(value: string | undefined, fn: () => void) {
-    if (value === undefined) delete process.env.AGENT_HOOK_PROFILE;
-    else process.env.AGENT_HOOK_PROFILE = value;
-    try { fn(); } finally {
-      if (ORIGINAL === undefined) delete process.env.AGENT_HOOK_PROFILE;
-      else process.env.AGENT_HOOK_PROFILE = ORIGINAL;
-    }
-  }
-
-  test('unset — standard, not strict', () => {
-    withProfile(undefined, () => {
-      expect(hookProfile()).toBe('standard');
-      expect(isStrictProfile()).toBe(false);
-    });
-  });
-
-  test('"strict" — strict', () => {
-    withProfile('strict', () => {
-      expect(isStrictProfile()).toBe(true);
-    });
-  });
-
-  test('"Strict" (capitalized) — still strict (case-insensitive)', () => {
-    withProfile('Strict', () => {
-      expect(isStrictProfile()).toBe(true);
-    });
-  });
-
-  test('" strict  " (whitespace) — still strict', () => {
-    withProfile(' strict  ', () => {
-      expect(isStrictProfile()).toBe(true);
-    });
-  });
-
-  test('"minimal" — not strict', () => {
-    withProfile('minimal', () => {
-      expect(isStrictProfile()).toBe(false);
-    });
   });
 });

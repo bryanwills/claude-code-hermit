@@ -521,29 +521,27 @@ The bare `.claude-code-hermit` argv is cwd-relative, which is safe here: `hatch`
 
 ### 9. Generate deny patterns (AskUserQuestion, single question)
 
-Add safety deny rules to the target settings file's `permissions.deny` to prevent destructive operations. The target file is the same as Step 8 (`hatch_target == "local"` → `.claude/settings.local.json`; else → `.claude/settings.json`).
+Seed native Claude Code permission rules into the target settings file. Canonical source: `state-templates/deny-patterns.json` (`deny` + `ask`). The target file is the same as Step 8 (`hatch_target == "local"` → `.claude/settings.local.json`; else → `.claude/settings.json`). After this seed, the operator owns the file — later upgrades never re-apply or remove these entries.
 
 ```
 questions: [
   {
     header: "Safety rules",
-    question: "Planning always-on operation (Docker/tmux)? This determines which deny rules to apply.",
+    question: "Which permission rules should I seed?",
     options: [
-      { label: "Yes — hardened", description: "Adds git push, npm publish, and unattended-operation protections" },
-      { label: "No — minimal", description: "Blocks destructive commands and casual credential dumps (default)" },
-      { label: "Skip", description: "No deny rules — add later in settings.json" }
+      { label: "Standard", description: "Safety denies + approval prompts for risky ops (default)" },
+      { label: "Hardened", description: "Everything hard-blocked — client-facing/prompt-averse" },
+      { label: "Skip", description: "Nothing seeded — add later in the settings file" }
     ]
   }
 ]
 ```
 
-- If **hardened** (always-on): default + always-on additions (excluding docker/kubectl/ssh — valid in devops contexts on host). Canonical source: `state-templates/deny-patterns.json`.
-- If **minimal** (default): default set only. Same canonical source: `state-templates/deny-patterns.json`.
-- If **skip**: note: "You can add deny rules later in .claude/settings.json under permissions.deny."
+- If **Standard** (default): run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny standard`. Merges `deny` into `permissions.deny` and `ask` into `permissions.ask`.
+- If **Hardened**: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny hardened`. Merges both arrays into `permissions.deny`.
+- If **Skip**: seed nothing. Note: "You can add rules later in the settings file under `permissions.deny` / `permissions.ask`. To seed Standard later from a terminal session: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny standard`."
 
-Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny <minimal|hardened>` to merge selected rules (never removes existing entries). The script reads the canonical deny list from `state-templates/deny-patterns.json`.
-
-Do NOT include `Bash(docker *)`, `Bash(kubectl *)`, `Bash(ssh *)` in hatch — these are valid in devops contexts on the host. Docker-setup includes them because the container should not spawn child containers or SSH out.
+If the operator picked `permission_mode: dontAsk` earlier in hatch, note: "`permission_mode: dontAsk` turns ask entries into denies — Standard's approval prompts will hard-block instead of prompting."
 
 ### 9a. Sandbox nudge (informational only, no question, no write)
 
@@ -684,7 +682,7 @@ Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `cha
 
 **Derived values from this turn (used in the confirm bundle and Step 5 overlay):**
 - `permission_mode`: `auto` (same default for both Docker and non-Docker deployments). Generally available to all users across subscription plans and API usage; supported models and provider configuration can vary. If Claude reports it unavailable for the current selection, choose a supported model or run `/hermit-settings permissions` to select another mode.
-- Deny pattern profile: Docker → hardened (default + always_on), else → minimal (default only). Applied at Step 9 silently.
+- Deny pattern profile: Standard (`deny standard`). Applied at Step 9 silently.
 
 ### Quick Turn 4 — OPERATOR.md questionnaire (run "5a. OPERATOR.md onboarding" verbatim)
 
@@ -738,7 +736,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Step 7a | .worktreeinclude managed block | apply silently (marker-block idempotent — skip if marker already present) |
 | Step 7.5 | git init (fresh dirs only) | run `git init` if `git_init_eligible`; omit otherwise |
 | Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file (auto-mode policy needs no seeding — it ships in the per-session overlay `hermit-start` renders at boot) |
-| Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
+| Step 9 | deny patterns (target settings file) | Standard (`deny standard`) silently; write to `hatch_target` settings file |
 | Step 9c | Artifact publish permission | same as Advanced — `artifact-allow` applied silently (skip entirely if all three `artifacts.*` are `false`) and `artifacts.publish_authorized` set to `true` in config |
 
 ### 10. Report results
