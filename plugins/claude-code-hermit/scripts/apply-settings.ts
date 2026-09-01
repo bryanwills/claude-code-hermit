@@ -53,7 +53,7 @@
  *   HERMIT_OBSOLETE_DENY registries below (rules this plugin itself seeded and has
  *   since retired),
  *   voice-render, which replaces outputStyle by design — config.json owns that key, and
- *   `deny standard`, which removes five legacy exact strings from permissions.deny
+ *   `deny convert-legacy`, which removes five legacy exact strings from permissions.deny
  *   (the old hardened extras that now live as ask entries).
  * - Permission sets are read from state-templates — callers cannot inject arbitrary JSON.
  * - Safe to call under AGENT_HOOK_PROFILE=strict: writes via fs, not the Edit/Write tools.
