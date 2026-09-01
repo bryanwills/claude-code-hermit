@@ -96,7 +96,7 @@ Writes are gated by two independent layers — neither is optional:
 
 - **Surface-then-approve** — the canonical target is relayed and approved before any write re-runs with `--confirm`.
 - **Logs are scrubbed** — deployment and server logs may carry secrets; they're scrubbed before relay and before persistence.
-- **TOKEN-pattern guard** — the base hermit's deny-patterns hook blocks any Bash arg containing the literal `TOKEN`. Credential state is checked with `forge.php check`, never by reading `.env`.
+- **`.env` stays off the shell** — there is no `Bash(*TOKEN*)` substring deny. `Bash(cat .env*)` is a seeded native deny. Credential state is checked with `forge.php check`, never by reading `.env`.
 
 ---
 

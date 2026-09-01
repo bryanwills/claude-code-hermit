@@ -102,7 +102,6 @@ Skills are namespaced `/claude-code-hermit:*`; the full set is listed in the plu
 
 | Hook                | Trigger      | Profile   | What it does                                           |
 | ------------------- | ------------ | --------- | ------------------------------------------------------ |
-| Deny enforcer       | PreToolUse   | strict    | Blocks banned bash patterns before execution           |
 | Channel hook        | PostToolUse  | strict    | Forwards tool events to configured channel             |
 | Heartbeat touch     | PostToolUse  | strict    | Marks activity for heartbeat gap detection             |
 | Contract tests      | PostToolUse  | strict    | Runs plugin contract tests after changes               |

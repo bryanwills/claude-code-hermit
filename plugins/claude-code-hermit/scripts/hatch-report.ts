@@ -172,8 +172,7 @@ export function renderConfirm(answers: Json): string {
     out.push(def('Budget caps', caps.length ? caps.map(k => `${k.replace('_usd', '')} $${t.budget[k]}`).join(' · ') : `none, ${t.budget.action ?? 'alert'}-only`));
   }
   if (answers.deployment) {
-    out.push(row('Safety rules', answers.deployment === 'docker'
-      ? 'hardened deny profile (from Docker choice)' : 'minimal deny profile'));
+    out.push(row('Safety rules', 'standard (safety denies + approval prompts)'));
   }
   out.push(row('Files', (answers.hatch_target === 'committed' ? 'committed files' : '`.local` (gitignored)')
     + (answers.git_init ? ' · git repo initialized' : '')));
@@ -246,7 +245,7 @@ export function renderFinal(o: Observed, deployment: string): string {
   out.push('');
   out.push(consequence);
   out.push('');
-  out.push(`Anytime: \`/hermit-settings\` to change settings ([full reference](${CONFIG_REFERENCE_URL})), \`/hermit-evolve\` after plugin updates, \`/hermit-doctor\` to troubleshoot. Refine OPERATOR.md by telling me what changed.`);
+  out.push(`Anytime: \`/hermit-settings\` to change settings ([full reference](${CONFIG_REFERENCE_URL})), \`/hermit-evolve\` after plugin updates, \`/hermit-doctor\` to troubleshoot, \`.claude-code-hermit/bin/hermit-run backup setup\` (from a terminal) to back up hermit state to git. Refine OPERATOR.md by telling me what changed.`);
 
   return out.join('\n');
 }

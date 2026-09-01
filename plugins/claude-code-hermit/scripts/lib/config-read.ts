@@ -129,6 +129,14 @@ const TABLE: Record<string, Spec> = {
     interval_hours: num(24),
     redact_operator_text: bool(true),
   }),
+  backup: shape({
+    enabled: bool(false),
+    mode: str('workspace'),
+    schedule: str('0 3 * * *'),
+    remote: str(null),
+    push: bool(true),
+    include: arr,
+  }),
   artifacts: shape({
     dashboard: bool(true),
     proposals: bool(true),

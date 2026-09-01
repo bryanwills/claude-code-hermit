@@ -29,6 +29,8 @@ export const BUDGET_ACTION = ['alert', 'pause'] as const;
 // persists the lowercase key (read off the shipped binary — the docs never state it).
 export const VOICE_STYLE = ['default', 'Concise', 'custom'] as const;
 export const TELEMETRY_DEST = ['webhook'] as const;
+export const BACKUP_MODE = ['workspace', 'mirror'] as const;
+export const BACKUP_INCLUDE = ['transcripts'] as const;
 // `auth_mode`. Only the two an operator can choose: `external` (an env credential
 // outranks both files) is derived by resolveAuthMode, never declared in config.
 export const AUTH_MODE = ['login', 'token'] as const;

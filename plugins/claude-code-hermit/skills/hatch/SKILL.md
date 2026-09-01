@@ -269,7 +269,7 @@ with the answers payload as JSON on stdin. The script reads the template (or, on
 
 **Re-initialization** is `--reinit` on the same call — the script reads the existing config as its base (never the template), so any field the payload doesn't mention (custom operator keys, `push_notifications`, `docker`, `monitors`, ...) survives untouched, `_hermit_versions` entries are never advanced (only added if a slug is newly absent), and `scheduled_checks`/`channels`/`routines` are reconciled/merged by id rather than replaced wholesale. `shutdown_skill` is never written by this script — leave it `null`; the operator sets it via config edit if they run always-on services that need stopping on full close.
 
-**Template-only fields** (the wizard never asks about these — they come straight from `config.json.template`, and `hatch-config.ts` never touches them; the operator can tune them via `/hermit-settings` later): `model`, `effort`, `auto_session`, `always_on`, `chrome`, `monitors`, `compact`, `heartbeat`, `knowledge`, `env`, `quality_gate`, `watchdog`, `budget`, `telemetry_export`, `artifacts`, `context_hygiene`, `reflection`, `routine_wake_lint`, `doctor`, `storage_drift`, `post_close_clear`, `ask_gate`, `operator_profile`. `voice` is the one exception in the other direction: the template ships it unset and **§5a Phase 4b** writes it through `settings-edit`, not through this payload — the questionnaire that asks for it runs after this step.
+**Template-only fields** (the wizard never asks about these — they come straight from `config.json.template`, and `hatch-config.ts` never touches them; the operator can tune them via `/hermit-settings` later): `model`, `effort`, `auto_session`, `always_on`, `chrome`, `monitors`, `compact`, `heartbeat`, `knowledge`, `env`, `quality_gate`, `watchdog`, `budget`, `telemetry_export`, `artifacts`, `context_hygiene`, `reflection`, `routine_wake_lint`, `doctor`, `storage_drift`, `backup`, `post_close_clear`, `ask_gate`, `operator_profile`. `backup` ships off (`enabled: false`) — a scheduled git commit-and-push of the whole hermit footprint, driven by the watchdog tick with no model turn; the operator enables it from a terminal with `.claude-code-hermit/bin/hermit-run backup setup` (see [docs/backup.md](../../docs/backup.md)), never from chat. `voice` is the one exception in the other direction: the template ships it unset and **§5a Phase 4b** writes it through `settings-edit`, not through this payload — the questionnaire that asks for it runs after this step.
 
 `operator_profile` ships `"technical"` (the operator on the channel is the person who runs the box, so technical/ops/spend detail may reach the primary chat). A **client-facing install** (where the person on the channel is a client or end-user, not the maintainer) sets it to `"non-technical"`, which forces technical alerts and spend figures to a `maintainer_channel_id` (or SHELL.md Findings when none is set) and deflects client-chat spend questions. It also decides settings authority: on a `technical` install with no `maintainer_channel_id`, the hermit's own home chat carries the security tier, while a `non-technical` install keeps that tier terminal-only until a maintainer chat is configured — so it changes only from a terminal session. When a channel is configured, the plain framing for choosing this is "who reads this chat — you, or a client/end-user?"; a client answer means `non-technical`. Set it in `config.json` directly or via `/hermit-settings`; `hatch-config.ts` leaves the template default in place. The Quick branch and Advanced wizard both leave these at template defaults. `routine_wake_lint.max_windows` (default 6) is the wake-clustering lint threshold — `hermit-routines load` warns when enabled routines' fire-times spread across more than this many distinct 30-min windows. `doctor.routine_cost_floor_usd` (default 2) is the noise floor for the `routine-cost` doctor check: a routine warns only when its `$/run` exceeds both 3× the peer median (the other routines' median) and this floor, so a lone or uniformly-priced fleet never warns. `budget` ships inert (all caps `null`, `action: "alert"`) — see [`docs/config-reference.md`](../../docs/config-reference.md#budget) for daily/weekly/monthly USD caps and the `alert`/`pause` enforcement action. `telemetry_export` ships disabled (`enabled: false`, `destination.url: null`) — opt-in webhook export of a sanitized health/cost bundle from the watchdog tick, see [`docs/config-reference.md`](../../docs/config-reference.md#telemetry_export). `artifacts.dashboard`/`artifacts.proposals`/`artifacts.weekly_review` ship enabled (`true`) — three script-rendered, hash-gated Artifact pages (dashboard, open-proposals, weekly-review), refreshed by `brief`/`weekly-review`/`proposal-create`/`proposal-act`; see [`docs/artifacts.md`](../../docs/artifacts.md) and [`docs/config-reference.md`](../../docs/config-reference.md#artifacts). Publish authorization for unattended sessions is Step 9c below. `ask_gate` ships enabled (`true`) — on an `always_on` session with a reachable channel, it denies `AskUserQuestion` and redirects the model to the channel reply tool plus a durable micro-proposal entry; set to `false` to opt out, see [`docs/config-reference.md`](../../docs/config-reference.md#ask_gate). Settings authority from chat is per channel, not template-wide: `hatch-config.ts` stamps `channels.<name>.settings_policy: "allow"` on a channel entry it creates for a single operator (`"ask"` when that entry already names a `maintainer_channel_id` or allowlists more than one id; a pre-existing entry is left alone, so re-init never relaxes one), so the operator's own chat can change security-tier settings (permission mode, `env`, monitors, boot skill, remote, escalation, Docker, artifact backend) without a confirmation code. Set it to `"ask"` when more than one person can post in that chat, or `"deny"` to keep everything above the safe tier terminal-only there — both from a terminal, see [`docs/config-reference.md`](../../docs/config-reference.md#settings_policy).
 
@@ -436,6 +436,8 @@ If a hermit was activated in step 3, also append `<activated_hermit.installPath>
 
 Use `${CLAUDE_SKILL_DIR}/../../state-templates/GITIGNORE-APPEND.txt`.
 
+**First, check for the backup marker.** If `.gitignore` contains the line `# .claude-code-hermit state is tracked here`, workspace-mode backup owns this file — it deliberately un-ignored the hermit-state lines so they can be committed. Skip this whole step silently; re-adding them would silently stop that hermit's backups.
+
 Read the template. Determine which lines are missing from the project's `.gitignore` (per-line idempotent check — do not re-add lines already present). Only the missing lines are candidates to append.
 
 - If `.gitignore` exists and candidate lines are non-empty: show the operator only the missing lines that will be appended, and ask with `AskUserQuestion` (header: "Update .gitignore") — options: **Yes — append** (add missing entries, default) / **No — skip** (you'll manage .gitignore manually). Append only if confirmed.
@@ -520,29 +522,27 @@ The bare `.claude-code-hermit` argv is cwd-relative, which is safe here: `hatch`
 
 ### 9. Generate deny patterns (AskUserQuestion, single question)
 
-Add safety deny rules to the target settings file's `permissions.deny` to prevent destructive operations. The target file is the same as Step 8 (`hatch_target == "local"` → `.claude/settings.local.json`; else → `.claude/settings.json`).
+Seed native Claude Code permission rules into the target settings file. Canonical source: `state-templates/deny-patterns.json` (`deny` + `ask`). The target file is the same as Step 8 (`hatch_target == "local"` → `.claude/settings.local.json`; else → `.claude/settings.json`). After this seed, the operator owns the file — later upgrades never re-apply or remove these entries.
 
 ```
 questions: [
   {
     header: "Safety rules",
-    question: "Planning always-on operation (Docker/tmux)? This determines which deny rules to apply.",
+    question: "Which permission rules should I seed?",
     options: [
-      { label: "Yes — hardened", description: "Adds git push, npm publish, and unattended-operation protections" },
-      { label: "No — minimal", description: "Blocks destructive commands and casual credential dumps (default)" },
-      { label: "Skip", description: "No deny rules — add later in settings.json" }
+      { label: "Standard", description: "Safety denies + approval prompts for risky ops (default)" },
+      { label: "Hardened", description: "Everything hard-blocked — client-facing/prompt-averse" },
+      { label: "Skip", description: "Nothing seeded — add later in the settings file" }
     ]
   }
 ]
 ```
 
-- If **hardened** (always-on): default + always-on additions (excluding docker/kubectl/ssh — valid in devops contexts on host). Canonical source: `state-templates/deny-patterns.json`.
-- If **minimal** (default): default set only. Same canonical source: `state-templates/deny-patterns.json`.
-- If **skip**: note: "You can add deny rules later in .claude/settings.json under permissions.deny."
+- If **Standard** (default): run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny standard`. Merges `deny` into `permissions.deny` and `ask` into `permissions.ask`.
+- If **Hardened**: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny hardened`. Merges both arrays into `permissions.deny`.
+- If **Skip**: seed nothing. Note: "You can add rules later in the settings file under `permissions.deny` / `permissions.ask`. To seed Standard later from a terminal session: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny standard`."
 
-Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny <minimal|hardened>` to merge selected rules (never removes existing entries). The script reads the canonical deny list from `state-templates/deny-patterns.json`.
-
-Do NOT include `Bash(docker *)`, `Bash(kubectl *)`, `Bash(ssh *)` in hatch — these are valid in devops contexts on the host. Docker-setup includes them because the container should not spawn child containers or SSH out.
+If the operator picked `permission_mode: dontAsk` earlier in hatch, note: "`permission_mode: dontAsk` turns ask entries into denies — Standard's approval prompts will hard-block instead of prompting."
 
 ### 9a. Sandbox nudge (informational only, no question, no write)
 
@@ -683,7 +683,7 @@ Record `sign_off`, `deployment` (one of `docker` / `tmux` / `interactive`), `cha
 
 **Derived values from this turn (used in the confirm bundle and Step 5 overlay):**
 - `permission_mode`: `auto` (same default for both Docker and non-Docker deployments). Generally available to all users across subscription plans and API usage; supported models and provider configuration can vary. If Claude reports it unavailable for the current selection, choose a supported model or run `/hermit-settings permissions` to select another mode.
-- Deny pattern profile: Docker → hardened (default + always_on), else → minimal (default only). Applied at Step 9 silently.
+- Deny pattern profile: Standard (`deny standard`). Applied at Step 9 silently.
 
 ### Quick Turn 4 — OPERATOR.md questionnaire (run "5a. OPERATOR.md onboarding" verbatim)
 
@@ -737,7 +737,7 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Step 7a | .worktreeinclude managed block | apply silently (marker-block idempotent — skip if marker already present) |
 | Step 7.5 | git init (fresh dirs only) | run `git init` if `git_init_eligible`; omit otherwise |
 | Step 8 | plugin permissions (target settings file) | merge silently into `hatch_target` settings file (auto-mode policy needs no seeding — it ships in the per-session overlay `hermit-start` renders at boot) |
-| Step 9 | deny patterns (target settings file) | derived profile silently (Docker → hardened, else → minimal); write to `hatch_target` settings file |
+| Step 9 | deny patterns (target settings file) | Standard (`deny standard`) silently; write to `hatch_target` settings file |
 | Step 9c | Artifact publish permission | same as Advanced — `artifact-allow` applied silently (skip entirely if all three `artifacts.*` are `false`) and `artifacts.publish_authorized` set to `true` in config |
 
 ### 10. Report results

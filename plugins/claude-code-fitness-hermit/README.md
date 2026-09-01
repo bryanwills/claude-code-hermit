@@ -104,7 +104,7 @@ claude plugin update claude-code-fitness-hermit@claude-code-hermit --scope local
 - **Blocked outright** — `mcp__strava__star-segment`, `mcp__strava__connect-strava`, `mcp__strava__disconnect-strava` (denied via `settings.json`). The hermit reads your Strava account and never modifies it.
 - **Credentials stay local** — `.env` and `.mcp.json` are gitignored. The four Strava credentials in `.env` are written as literal values into `.mcp.json` (required for the MCP server's child process) and never committed.
 - **No token leakage** — never logs, prints, or writes token values to session files, proposals, or memory.
-- **TOKEN-pattern guard** — the base hermit's deny-patterns hook blocks any Bash command whose argument string contains the literal `TOKEN`. Hatch reads `.env` via the `Read` tool, not shell commands.
+- **`.env` stays off the shell** — there is no `Bash(*TOKEN*)` substring deny. `Bash(cat .env*)` is a seeded native deny, and credential values must not land in the transcript. Hatch reads `.env` via the `Read` tool, not shell commands.
 
 ---
 

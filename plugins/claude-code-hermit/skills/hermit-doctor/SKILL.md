@@ -1,11 +1,11 @@
 ---
 name: hermit-doctor
-description: Returns a thirty-check health report on the hermit installation (runtime, config, hooks, state-file integrity, cost, proposals, deps, version currency, permissions, docker, archival, auto-close queue, reflect loop, scheduler, watchdog, context age, opus-wake spend, routine cost, heartbeat, routine monitor, routine precheck, raw storage size, plugin credential expiry, model pricing, memory size, context scan, voice carrier, classifier denials, channel liveness, peer inbox). Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
+description: Returns a thirty-one-check health report on the hermit installation (runtime, config, hooks, state-file integrity, cost, proposals, deps, version currency, permissions, docker, archival, auto-close queue, reflect loop, scheduler, watchdog, context age, opus-wake spend, routine cost, heartbeat, routine monitor, routine precheck, raw storage size, plugin credential expiry, model pricing, memory size, context scan, voice carrier, classifier denials, channel liveness, peer inbox, backup). Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
 ---
 
 # Hermit Doctor
 
-Runs thirty read-only health checks against the current hermit install (`channel-liveness`
+Runs thirty-one read-only health checks against the current hermit install (`channel-liveness`
 is the only one that performs outbound API calls — see Notes) and surfaces the summary. Safe
 to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
@@ -35,19 +35,19 @@ route: audience is decided by the row's own tier and the operator's config, not 
    JSON to stdout. It exits 0 unconditionally — on any internal failure the failing
    check reports `status: "fail"` in its own entry rather than crashing the report.
 
-2. Parse the JSON. For each of the thirty checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
+2. Parse the JSON. For each of the thirty-one checks in the report (`runtime`, `config`, `hooks`, `state`, `cost`,
    `proposals`, `dependencies`, `version-currency`, `permissions`, `docker-security`, `archive`, `auto-close`, `reflect`, `scheduler`, `watchdog`,
-   `context-age`, `opus-wake`, `routine-cost`, `heartbeat`, `routine-monitor`, `routine-precheck`, `raw-size`, `credential-expiry`, `model-pricing-known`, `memory-size`, `context-scan`, `voice-carrier`, `classifier-denials`, `channel-liveness`, `peer-inbox`), emit one line using this format:
+   `context-age`, `opus-wake`, `routine-cost`, `heartbeat`, `routine-monitor`, `routine-precheck`, `raw-size`, `credential-expiry`, `model-pricing-known`, `memory-size`, `context-scan`, `voice-carrier`, `classifier-denials`, `channel-liveness`, `peer-inbox`, `backup`), emit one line using this format:
    - `✓ <id> — <detail>` when `status: ok`
    - `⚠ <id> — <detail>` when `status: warn`
    - `✗ <id> — <detail>` when `status: fail`
 
 3. Append a summary section to `.claude-code-hermit/sessions/SHELL.md` under a new
-   `## Doctor Report (<ts>)` heading. Use the same thirty lines from step 2. Place it
+   `## Doctor Report (<ts>)` heading. Use the same thirty-one lines from step 2. Place it
    above the `## Monitoring` section so it sits with session-level context, not
    with monitoring chatter.
 
-4. Return the thirty lines to the caller. Cap total output at 32 lines.
+4. Return the thirty-one lines to the caller. Cap total output at 32 lines.
 
 5. **Escalation.** The script already computed this — do not recompute it, and do not write alert
    state yourself. Read the `escalation` object from the step-1 JSON:
@@ -103,10 +103,10 @@ route: audience is decided by the row's own tier and the operator's config, not 
 
 ## Silence policy
 
-- If every check is `ok`, return only: `All thirty checks passed.` Do not notify via
+- If every check is `ok`, return only: `All thirty-one checks passed.` Do not notify via
   channel (Tier 0). Still append to SHELL.md so the run is traceable. Clearing the stale
   `doctor:*` entries is the script's job, not yours — it happens on every run.
-- If any check is `warn` or `fail`, return the full thirty-line summary. Notification is
+- If any check is `warn` or `fail`, return the full thirty-one-line summary. Notification is
   governed by `escalation.new` (step 5), not a blanket per-run ping: only findings not yet
   confirmed delivered notify the selected route.
 
@@ -145,6 +145,7 @@ route: audience is decided by the row's own tier and the operator's config, not 
 | `channel-liveness` | For each enabled channel in `config.channels`, resolves its bot token from `<state_dir>/.env` and makes one token-authed liveness call (Telegram `getMe`, Discord `/users/@me`) with a 5s timeout. The only check that leaves the machine. | `ok` if reachable or no channels configured; `warn` if unreachable (timeout/network error) or no token configured; `fail` if the platform rejects the token (401/403 — bot token invalid or revoked). |
 | `peer-inbox` | Whether the watchdog's socket wake can actually reach the resident. Resolves `state/runtime.json`'s `session_pid` stamp to a validated entry in Claude Code's session registry (`<config dir>/sessions/<pid>.json` — pid alive, `procStart` and `pidDomain` matching), connects to that entry's `messagingSocketPath` and hangs up (connect only, never a post — a post would start a paid turn), and compares the registered name against `runtime.json`'s `peer_name`. | `ok` if the resident is registered and its inbox accepts a connection; `warn` if no session has stamped `session_pid` yet, the stamp resolves to no live entry, the socket refuses, the registered name drifted, or `permission_mode` is `bypassPermissions` (which holds peer messages behind a dialog nobody answers). Never `fail` — every warn falls back to typing the nudge into the pane. |
 
+| `backup` | Reads `config.backup`, `state/backup-status.json` and `state/backup-schedule.json`, and derives the two most recent scheduled minutes from the cron in `config.timezone`. The backup itself runs model-free from the watchdog tick, so this row is the only path from a failing backup back into a session. | `ok` when backup is not configured (naming the terminal-only setup command), when it is configured and awaiting its first run, or when the last success is newer than the second-most-recent scheduled fire; `warn` when two scheduled fires passed without a success (naming `last_result` — `dirty-index` and `unsafe-tree` name their own fix), or when the push has failed three times running or the remote diverged (which names `docs/backup.md` for the manual reconcile). Never `fail`: a stale backup does not stop the hermit working. |
 No automatic fixes. Doctor reports; the operator acts.
 
 ## Notes

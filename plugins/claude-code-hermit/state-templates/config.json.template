@@ -97,6 +97,15 @@
     "interval_hours": 24,
     "redact_operator_text": true
   },
+  "backup": {
+    "_note": "Scheduled git snapshot of this hermit's own state. Inert until you run `bin/hermit-run backup setup` from a terminal.",
+    "enabled": false,
+    "mode": "workspace",
+    "schedule": "0 3 * * *",
+    "remote": null,
+    "push": true,
+    "include": []
+  },
   "artifacts": {
     "dashboard": true,
     "proposals": true,

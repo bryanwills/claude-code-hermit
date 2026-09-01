@@ -4127,6 +4127,82 @@ describe('telemetry export (step 0d)', () => {
 });
 
 // -------------------------------------------------------
+// state backup (step 0e: independent of watchdog.enabled, like 0a-0d)
+// -------------------------------------------------------
+
+describe('state backup (step 0e)', () => {
+  /** Backup enabled, watchdog recovery off — the tick must still evaluate the cron. */
+  function writeBackupConfig(h: Hermit, backup: Record<string, unknown>): void {
+    fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
+      watchdog: { enabled: false },
+      timezone: 'UTC',
+      backup: { enabled: true, mode: 'workspace', schedule: '* * * * *', remote: null, push: false, include: [], ...backup },
+    }, null, 2) + '\n');
+  }
+
+  const scheduleFile = (h: Hermit) => state(h, 'backup-schedule.json');
+  const backupEvents = (h: Hermit) =>
+    (fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '')
+      .split('\n').filter(l => l.includes('"backup"'));
+
+  test('first tick seeds the cursor and fires nothing', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    writeBackupConfig(h, {});
+
+    const r = await watchdog(h, 'run', { env: { HERMIT_BACKUP_SCRIPT: '/nonexistent/backup.ts' } });
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(scheduleFile(h))).toBe(true);
+    expect(backupEvents(h)).toEqual([]);
+  }));
+
+  test('a due window spawns the backup and records the event', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    writeBackupConfig(h, {});
+    // Cursor two minutes back: an every-minute schedule has matched since.
+    fs.writeFileSync(scheduleFile(h), JSON.stringify({
+      version: 1,
+      last_consumed_mark: new Date(Date.now() - 120_000).toISOString(),
+    }));
+
+    // Spawning a missing script also proves the async 'error' event is handled:
+    // an unhandled one would throw out of the tick and lose steps 1-6.
+    const r = await watchdog(h, 'run', { env: { HERMIT_BACKUP_SCRIPT: '/nonexistent/backup.ts' } });
+
+    expect(r.exitCode).toBe(0);
+    expect(backupEvents(h).length).toBe(1);
+    expect(backupEvents(h)[0]).toContain('scheduled run spawned');
+  }));
+
+  test('no backup block → no schedule file, no event', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
+      watchdog: { enabled: false },
+    }, null, 2) + '\n');
+
+    const r = await watchdog(h, 'run');
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(scheduleFile(h))).toBe(false);
+    expect(backupEvents(h)).toEqual([]);
+  }));
+
+  test('backup.enabled false → inert', withHermit(async (h) => {
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    writeBackupConfig(h, { enabled: false });
+
+    const r = await watchdog(h, 'run');
+
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(scheduleFile(h))).toBe(false);
+  }));
+});
+
+// -------------------------------------------------------
 // 14. Compose-function localization (PROP-059): the four watchdog message
 //     families compose through WatchdogMessages. `en` stays byte-identical to
 //     the pre-refactor literals (frame asserted around the live HH:MM clock);

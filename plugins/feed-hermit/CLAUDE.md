@@ -72,6 +72,6 @@ Then run `/feed-hermit:hatch` in the target.
 
 - Tests are pure `bun test` from inside the plugin dir (`cd plugins/feed-hermit && bun test`). Helpers resolve paths CWD-relative — run from the plugin dir.
 - Under `claude --plugin-dir`, `${CLAUDE_PLUGIN_ROOT}` is NOT substituted and skills load at session start — use absolute paths when hand-testing hooks/scripts, and relaunch to pick up skill edits.
-- The base hermit's deny-patterns hook blocks any Bash command whose argument contains the literal string `TOKEN` — read `.env` via the `Read` tool, never `cat`/`grep`/`echo`.
+- There is no `Bash(*TOKEN*)` substring deny. `Bash(cat .env*)` is a seeded native deny, and credential values must not land in the transcript — read `.env` via the `Read` tool, never `cat`/`grep`/`echo`.
 - Routine entries in `config.json.routines` use the no-leading-slash form `"claude-code-hermit:session-start"` with the domain behavior in the `prompt_file`. `scheduled_checks[].skill` uses `"feed-hermit:<skill>"`. This plugin ships no `boot_skill`.
 - Every shipped `.ts` must pass repo-wide `bunx tsc` (strict). No runtime `node_modules` imports outside `*.test.ts`.

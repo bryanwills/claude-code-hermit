@@ -40,7 +40,7 @@ Hermit adds a persistent operating layer around Claude Code, a learning loop, an
 - **Native Artifacts Integration** The agent publishes its Dashboard, open proposals, weekly reviews, and requested compiled documents as private, versioned [Claude Code Artifacts](https://code.claude.com/docs/en/artifacts). Pages update in place at stable URLs and support organization sharing where available. You can use your own artifact server instead.
 - **Auto-memory + knowledge** Claude Code's auto-memory holds facts and preferences about how to work with you. The agent also maintains a `raw/` → `compiled/` living knowledge base for domain work and topic pages, carries a bounded catalog across sessions, and makes all of it searchable with `/recall`. Discord and Telegram DMs are captured locally by default so chat decisions outlive the thread; `weekly-review` distills them into memory. [Channel capture can be disabled](docs/config-reference.md#knowledge).
 - **Plan tracking** lives in the SHELL.md Progress Log — timestamped steps that survive compaction, restart, and every model tier.
-- **Unattended safety** combines profile-gated deny patterns + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context. A second session in the same folder is mechanically recognized as a guest and framed not to answer channels, write resident state, or start schedulers.
+- **Unattended safety** combines native permission rules (hard-block + approval-prompt tiers) + sandbox, channel-routed asks, permission-denial alerts, and injection scans on heartbeat and startup context. A second session in the same folder is mechanically recognized as a guest and framed not to answer channels, write resident state, or start schedulers.
 - **Orchestrator** instructed to delegate tasks & exploration to other agents, main context stays clean for token efficiency.
 
 **Sessions self-manage.** Daemons auto-archive at 12h idle and at midnight when you're away, so evidence reaches the learning loop without a manual close. An external watchdog restarts dead sessions, nudges wedged ones, re-arms missed schedules, clears stale context after a midnight close, and compacts long-running context so cold wakes don't re-pay the full accumulated history — recovery never depends on the session being conscious.
@@ -280,6 +280,7 @@ Join the [`claude-code-hermit` Discord community](https://discord.gg/54sJqAxhUh)
 - [Creating Your Own Hermit](docs/creating-your-own-hermit.md)
 - [Docker Security](docs/docker-security.md)
 - [External Control Surface](docs/external-control-surface.md)
+- [Backup](docs/backup.md)
 - [FAQ](docs/faq.md)
 - [Getting Started](docs/how-to-use.md)
 - [Owner's Guide](docs/owners-guide.md)

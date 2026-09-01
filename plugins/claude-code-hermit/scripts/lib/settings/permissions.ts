@@ -93,8 +93,17 @@ const AUTHORITY_KEYS = /^(operator_profile|settings_permissions)(\..+)?$/;
  * is listed rather than the leaf so `set voice '<object>'` cannot smuggle prose past
  * a leaf-only rule; the gate catches `voice.style` on the everyday tier first, which
  * is the whole point — the three sealed style values carry no text.
+ *
+ * `backup` is here for the same persistence-plus-reach reason: `backup.remote` is a
+ * destination the hermit pushes its entire footprint to on a schedule, so a remote
+ * set from content the hermit merely *read* is a one-way exfil that keeps running.
+ * The container is listed rather than the leaves so `set backup '<object>'` cannot
+ * smuggle a remote past a leaf-only rule — and `enabled`, `mode` and `include` all
+ * change what leaves the machine once a remote exists, so none of them is an
+ * everyday-tier write either. Setup itself is terminal-only (it is not reachable
+ * through settings-edit at all).
  */
-const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill|voice)(\..+)?$/;
+const NONCE_REQUIRED = /^(permission_mode|env|monitors|boot_skill|shutdown_skill|voice|backup)(\..+)?$/;
 
 /**
  * A routine's `precheck` is an executable the routine monitor runs unattended at
@@ -223,6 +232,7 @@ export function rulePatternProbe(pattern: string): string {
 const EXECUTION_ADJACENT_SAMPLES = [
   'permission_mode', 'env', 'env.KEY', 'monitors', 'monitors.0', 'monitors.0.command',
   'boot_skill', 'shutdown_skill', 'voice', 'voice.prose',
+  'backup', 'backup.remote',
   'routines.0.precheck', 'routines.0.precheck_timeout_s',
 ];
 

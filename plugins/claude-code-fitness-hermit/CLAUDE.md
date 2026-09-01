@@ -79,7 +79,7 @@ Then run `/claude-code-fitness-hermit:hatch` in the target.
 
 **Development constraints:**
 
-- The base hermit's deny-patterns hook blocks any Bash command whose argument contains the literal string `TOKEN`. The hatch skill reads `.env` via the `Read` tool — never `cat`/`grep`/`echo`.
+- There is no `Bash(*TOKEN*)` substring deny. `Bash(cat .env*)` is a seeded native deny, and credential values must not land in the transcript. The hatch skill reads `.env` via the `Read` tool, never `cat`/`grep`/`echo`.
 - When aligning with a new base hermit version, sweep `skills/`, `agents/`, `state-templates/`, and `docs/` for stale hermit-facing terms. Grep: `grep -rn "stale_term" skills/ agents/ state-templates/ docs/ CLAUDE.md .claude-plugin/`
 - Routine entries in `config.json.routines` use the no-leading-slash form: `"claude-code-fitness-hermit:<skill>"`. `boot_skill` in `hermit-meta.json` uses the leading-slash form: `"/claude-code-fitness-hermit:<skill>"`. This plugin currently ships no `boot_skill`.
 

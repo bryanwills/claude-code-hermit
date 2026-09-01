@@ -5,6 +5,7 @@ import * as ENUM from './lib/settings/enums';
 import { validateExpectArtifact } from './lib/routines/run-record';
 import { validatePrecheckValue, validatePrecheckTimeout } from './lib/routines/gate';
 import { ENV_VAR_RE } from './lib/channel-config';
+import { toPushUrl } from './lib/backup';
 // Shared with channel-settings-gate.ts so the hook that enforces a tier and the
 // validator that reports an unenforceable rule cannot drift on what belongs to
 // which set. From the leaf module rather than the gate itself: this hook runs on
@@ -53,6 +54,8 @@ const VALID_VOICE_STYLE: readonly string[] = ENUM.VOICE_STYLE;
 const SETTINGS_RULE_KEYS = ['allow', 'ask', 'deny'] as const;
 const RULE_STRICTNESS: Record<(typeof SETTINGS_RULE_KEYS)[number], number> = { allow: 0, ask: 1, deny: 2 };
 const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
+const VALID_BACKUP_MODE: readonly string[] = ENUM.BACKUP_MODE;
+const VALID_BACKUP_INCLUDE: readonly string[] = ENUM.BACKUP_INCLUDE;
 const TIME_RE = /^\d{2}:\d{2}$/;
 // Routine ids travel in bracket markers, --ids CSVs, and JSONL output — shared with lib/routines/due.ts.
 const ROUTINE_ID_RE = /^[A-Za-z0-9._-]{1,64}$/;
@@ -667,6 +670,51 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
         }
       } else if (t.enabled === true) {
         errors.push('telemetry_export.destination: required when telemetry_export.enabled is true');
+      }
+    }
+  }
+
+  if (config.backup !== undefined) {
+    if (typeof config.backup !== 'object' || config.backup === null || Array.isArray(config.backup)) {
+      errors.push('backup: must be an object');
+    } else {
+      const b = config.backup;
+      if (b.enabled !== undefined && typeof b.enabled !== 'boolean') {
+        errors.push('backup.enabled: must be a boolean');
+      }
+      if (b.push !== undefined && typeof b.push !== 'boolean') {
+        errors.push('backup.push: must be a boolean');
+      }
+      if (b.mode !== undefined && !VALID_BACKUP_MODE.includes(b.mode)) {
+        errors.push(`backup.mode: "${b.mode}" not in [${VALID_BACKUP_MODE.join(', ')}]`);
+      }
+      if (b.schedule !== undefined) {
+        if (typeof b.schedule !== 'string') {
+          errors.push('backup.schedule: must be a string');
+        } else {
+          const err = validateCronSchedule(b.schedule);
+          if (err) errors.push(`backup.schedule: invalid "${b.schedule}" — ${err}`);
+        }
+      } else if (b.enabled === true) {
+        errors.push('backup.schedule: required when backup.enabled is true');
+      }
+      if (b.remote !== undefined && b.remote !== null) {
+        if (typeof b.remote !== 'string') {
+          errors.push('backup.remote: must be a string or null');
+        } else if (b.remote.trim() && !toPushUrl(b.remote)) {
+          errors.push(`backup.remote: "${b.remote}" is not a pushable remote — use https://, git@host:path, ssh://, file:// or an absolute path`);
+        }
+      }
+      if (b.include !== undefined) {
+        if (!Array.isArray(b.include)) {
+          errors.push('backup.include: must be an array');
+        } else {
+          for (const v of b.include) {
+            if (!VALID_BACKUP_INCLUDE.includes(v)) {
+              errors.push(`backup.include: "${v}" not in [${VALID_BACKUP_INCLUDE.join(', ')}]`);
+            }
+          }
+        }
       }
     }
   }

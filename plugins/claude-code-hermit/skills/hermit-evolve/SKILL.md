@@ -30,8 +30,8 @@ Every run of this skill (interactive or unattended) delegates steps 0–9 to the
 
 Steps 0–9 (in `reference.md`, read only by the `evolve-runner` subagent) are executed with no `AskUserQuestion` — the subagent cannot pause to ask. Each step's **"Delegated mode:"** note states the non-interactive behavior. The rule in every case: never guess on a destructive choice, never block.
 
-- For any interactive choice with a safe non-destructive default (new settings, file deletions, `## Plan` strip, template conflicts), take the default silently and report it.
-- For a genuine either/or with **no safe default** (an `### Upgrade Instructions` migration step in 2b/7), **defer**: skip that step and record a verbatim deferred-migration block in the report (see the report contract in step 10). Never guess. Step 10 resolves it — interactive asks the operator; direct-channel and automated-maintainer execution relay it through their respective delivery routes.
+- For any interactive choice with a safe non-destructive default (new settings, file deletions, `## Plan` strip, template conflicts, an `### Upgrade Instructions` step that names a single non-destructive command such as `deny ask-only`), take the default silently and report the outcome.
+- For a genuine either/or with **no safe default** (an `### Upgrade Instructions` migration step in 2b/7 that poses a choice and names no default), **defer**: skip that step and record a verbatim deferred-migration block in the report (see the report contract in step 10). Never guess. Step 10 resolves it — interactive asks the operator; direct-channel and automated-maintainer execution relay it through their respective delivery routes. Never apply a deferred instruction that would write `.claude/settings*.json` from a channel session.
 
 ### 10. Report
 

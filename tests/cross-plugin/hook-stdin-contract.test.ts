@@ -57,12 +57,6 @@ const SPECS: Spec[] = [
     failExit: 0,
   },
   {
-    name: 'core/enforce-deny-patterns',
-    script: 'plugins/claude-code-hermit/scripts/enforce-deny-patterns.ts',
-    benign: BASH_LS,
-    failExit: 0,
-  },
-  {
     name: 'core/cache-edit-guard',
     script: 'plugins/claude-code-hermit/scripts/cache-edit-guard.ts',
     benign: BENIGN_EDIT,

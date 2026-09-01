@@ -17,6 +17,14 @@
  *   6. Monitor re-arm  — re-arm a heartbeat/routine Monitor whose liveness file
  *                        went stale mid-session (any cause), damped per monitor
  *
+ * Step 0e (state backup) sits with the 0a-0d family above the config gate: it is
+ * model-free maintenance that must keep running on a hermit that never enabled
+ * watchdog recovery. At-most-once, like the routine scheduler (lib/routines/due.ts
+ * "persist before emit"): the cursor is consumed here, before the detached child
+ * starts, so a failed spawn costs that window rather than risking a double run.
+ * The doctor's `backup` check is the recovery path — it warns once two scheduled
+ * windows pass without a success.
+ *
  * Usage: bun scripts/hermit-watchdog.ts [run|install|uninstall]
  *        (invoked by .claude-code-hermit/bin/hermit-watchdog run)
  */
@@ -37,6 +45,7 @@ import { findResident, type SessionEntry } from './lib/session-registry';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
+import { evaluateBackupDue } from './lib/backup';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { credentialsFilePath, defaultConfigDir, envAuthPresent, inspectStoredLogin, msUntilExpiry, msUntilLoginExpiry, resolveAuthMode, storedLoginUsable } from './lib/setup-token';
@@ -70,6 +79,8 @@ const RELAY_UNREACHABLE_JSON = path.join(STATE_DIR, 'relay-unreachable.json');
 const RELAY_UNREACHABLE_MAX_AGE_MS = 24 * 3600000;
 const REAUTH_MINT_SCRIPT = path.join(import.meta.dir, 'setup-token-mint.ts');
 const SETTINGS_EDIT_SCRIPT = path.join(import.meta.dir, 'settings-edit.ts');
+// Overridable so a test can point step 0e at a missing path and prove the tick survives.
+const BACKUP_SCRIPT = process.env.HERMIT_BACKUP_SCRIPT || path.join(import.meta.dir, 'backup.ts');
 // Backstop against PID reuse on a long-lived box; liveness is the real signal.
 const REAUTH_MARKER_MAX_AGE_MS = 26 * 3600000;
 // Skill-driven mints have no usable PID (verb per process), so age is the only
@@ -914,6 +925,28 @@ function evaluateReauth(
   }
 }
 
+/**
+ * Step 0e — spawn the state backup when its cron window is due.
+ *
+ * Detached and unawaited: a first push of a repo carrying binaries can run for
+ * minutes, and dead-session recovery (steps 3-5) is the tick's core promise. The
+ * child writes its own status file and always exits 0, so nothing here waits on
+ * it. `child.on('error')` is required alongside the try/catch — a spawn ENOENT
+ * arrives asynchronously and an unhandled 'error' event on a ChildProcess would
+ * throw out of the whole tick.
+ */
+function maybeSpawnBackup(config: Json): void {
+  try {
+    if (!evaluateBackupDue(config, HERMIT_ROOT, new Date())) return;
+    const child = spawn(process.execPath, [BACKUP_SCRIPT, 'run'], { detached: true, stdio: 'ignore' });
+    child.on('error', (e) => process.stderr.write(`[watchdog] backup spawn failed: ${e}\n`));
+    child.unref();
+    appendEvent('backup', 'scheduled run spawned');
+  } catch (e) {
+    process.stderr.write(`[watchdog] backup spawn failed: ${e}\n`);
+  }
+}
+
 /** The wedge wake, as a peer message body.
  *
  *  Exactly the token heartbeat-monitor.sh emits, and nothing else. Two reasons it
@@ -1745,6 +1778,11 @@ async function main(): Promise<void> {
   if (telemetryResult.ran) {
     appendEvent('telemetry-export', telemetryResult.ok ? 'success' : (telemetryResult.detail ?? 'failed'));
   }
+
+  // 0e. State backup — independent of watchdog.enabled, like 0a-0d; opt-in via
+  // config.backup. Self-gates on the cron cursor and spawns a detached child, so
+  // a slow push can never delay steps 1-6 below.
+  maybeSpawnBackup(config);
 
   // 1. Config gate
   const watchdogCfg = config?.watchdog ?? {};
