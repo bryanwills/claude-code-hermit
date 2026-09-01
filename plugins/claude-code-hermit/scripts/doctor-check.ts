@@ -1412,7 +1412,7 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
         return {
           id: 'heartbeat',
           status: 'fail',
-          detail: `heartbeat not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container); shell /watch streams are dead too. Last tick: ${tickStr}.`,
+          detail: `heartbeat not ticking — last tick ${tickStr}. Monitor spawned then stopped — re-arm with /claude-code-hermit:heartbeat start`,
         };
       }
       return { id: 'heartbeat', status: 'ok', detail: `heartbeat: ticking (last tick ${tickStr})` };
@@ -1421,7 +1421,15 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     // No trustworthy tick. Flag once the monitor has had longer than the startup
     // grace to write its first one; otherwise it is still warming up.
     if (!health.fresh) {
-      const tickStr = lastPeekAt !== null ? `${Math.round((now - lastPeekAt) / 60000)}m ago (predates current monitor — stale)` : 'never';
+      if (health.reason === 'liveness-predates-start') {
+        const tickStr = `${Math.round((now - lastPeekAt!) / 60000)}m ago`;
+        return {
+          id: 'heartbeat',
+          status: 'fail',
+          detail: `heartbeat liveness belongs to another registration (last tick ${tickStr}) — re-arm with /claude-code-hermit:heartbeat start`,
+        };
+      }
+      const tickStr = lastPeekAt !== null ? `${Math.round((now - lastPeekAt) / 60000)}m ago` : 'never';
       return {
         id: 'heartbeat',
         status: 'fail',

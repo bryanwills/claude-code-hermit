@@ -12,6 +12,7 @@
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
 
 ### Fixed
+- `heartbeat start` records `started_at` from the first tick after arming, so a healthy monitor no longer reads as `REARM|liveness-predates-start`. `/hermit-doctor` reports spawn-blocked only when no tick ever landed, and the watchdog no longer wakes to re-arm a live monitor (#909).
 - Activating a domain hermit during core `/hatch` no longer pre-stamps its `_hermit_versions` entry, so the domain plugin's own hatch preflight offers the full wizard instead of a misleading re-verify (#902).
 - `/hermit-doctor` and the watchdog now compare a monitor's registration against `state/.boot-id`, so one left behind by a previous boot is reported and re-armed instead of reading healthy on its last pre-crash tick for up to 90 minutes. This also covers routines in `croncreate-fallback` mode, where the boot id is the only available evidence, and interactive (`--no-tmux`) starts now stamp the marker so the check works there too.
 - `/hatch` now supplies a description for every `AskUserQuestion` option in both branches, so the identity batch and the OPERATOR.md questionnaire no longer fail with `Invalid tool parameters`.

@@ -50,7 +50,8 @@ const livenessPath = (hermitDir: string) =>
 
 function cmdCheck(hermitDir: string, config: Json): void {
   const interval = heartbeatInterval(config);
-  const health = heartbeatHealth(hermitDir, PLUGIN_ROOT, config, resolveHermitNowMs());
+  const nowMs = resolveHermitNowMs();
+  const health = heartbeatHealth(hermitDir, PLUGIN_ROOT, config, nowMs);
   // `disabled` is healthy to the daily anchor, which must leave a deliberately-off
   // heartbeat alone. Reaching `start` at all is an explicit act, so re-arm instead.
   if (health.healthy && health.reason !== 'disabled') {
@@ -65,6 +66,10 @@ function cmdCheck(hermitDir: string, config: Json): void {
   // — otherwise a monitor blocked by seccomp reads as alive, and the doctor flags
   // stale data from the prior session during the startup window.
   try { fs.rmSync(livenessPath(hermitDir), { force: true }); } catch {}
+  // Provenance for start-commit: any tick at or after this instant belongs to the
+  // monitor about to be registered. Spread so task_id / interval / command / boot_id
+  // survive; a bare { armed_at } would drop them.
+  writeJson(runtimePath(hermitDir), { ...runtime, armed_at: new Date(nowMs).toISOString() });
   if (typeof runtime?.task_id === 'string' && runtime.task_id) {
     process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
@@ -76,14 +81,27 @@ function cmdCheck(hermitDir: string, config: Json): void {
 async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promise<void> {
   const interval = heartbeatInterval(config);
   const nowMs = resolveHermitNowMs();
+  // No start-check stamp → leftover ticks are untrusted.
+  const armedAt = readJson(runtimePath(hermitDir))?.armed_at;
   const live = await waitForFirstTick(livenessPath(hermitDir));
+
+  // heartbeat-monitor.sh stamps whole seconds (`date -u +%Y-%m-%dT%H:%M:%SZ`), so a
+  // tick in the same second as armed_at is strictly earlier than the millisecond
+  // stamp. Flooring armed_at is the compensation for that truncation, not a race
+  // window: without it, start-commit writes started_at after its own first tick
+  // and every reader reports the live monitor dead until the next interval.
+  const peekAt = readJson(livenessPath(hermitDir))?.last_peek_at;
+  const peekMs = typeof peekAt === 'string' ? Date.parse(peekAt) : NaN;
+  const armedMs = typeof armedAt === 'string' ? Date.parse(armedAt) : NaN;
+  const adopt = Number.isFinite(peekMs) && Number.isFinite(armedMs)
+    && peekMs >= Math.floor(armedMs / 1000) * 1000;
 
   writeJson(runtimePath(hermitDir), {
     description: 'heartbeat-monitor',
     task_id: taskId,
     command: heartbeatCommand(PLUGIN_ROOT, hermitDir, config),
     interval,
-    started_at: new Date(nowMs).toISOString(),
+    started_at: adopt ? peekAt : new Date(nowMs).toISOString(),
     boot_id: readBootId(hermitDir),
   });
 
