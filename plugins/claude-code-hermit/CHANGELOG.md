@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- MCP stdio control surface (`hermit-run mcp-server --roots …`) exposes `list_hermits`, `get_status`, `get_health`, `get_brief`, `get_version`, and `wake` for external orchestrators.
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed

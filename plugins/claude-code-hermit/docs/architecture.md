@@ -49,6 +49,7 @@ Input-agnostic. Same session discipline regardless of how your hermit is invoked
 | [Remote Control](https://code.claude.com/docs/en/remote-control) | Browser/phone access                 |
 | [Channels](https://code.claude.com/docs/en/channels)             | Telegram, Discord, iMessage          |
 | Headless                                                         | `claude -p "..."` for scripted tasks |
+| [External control surface](external-control-surface.md)          | Orchestrator MCP (stdio)             |
 
 All channels converge on the same `sessions/SHELL.md`.
 
