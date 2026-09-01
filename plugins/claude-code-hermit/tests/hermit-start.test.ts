@@ -1697,9 +1697,8 @@ describe('clearShutdownStampsOnBoot', () => {
 
 // ============================================================
 // clearStatusCacheOnBoot: an always-on boot drops the sessions/.status.json
-// cost cache so the watchdog's idle-phase hygiene fallback can't resolve the
-// defunct prior process's harness session (whose last cost entry predates the
-// restart) and fire a spurious /compact or /clear into the fresh context.
+// cost cache so the first post-boot turn doesn't continue the defunct prior
+// process's cumulative cost/token totals.
 // ============================================================
 
 describe('clearStatusCacheOnBoot', () => {

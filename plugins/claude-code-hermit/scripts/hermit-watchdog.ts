@@ -1225,9 +1225,13 @@ function poisonedEntrySkip(entry: Json, runtime: Json): PoisonReason | null {
  *  watchdog compactions read another session's context, citing 177k-272k while the
  *  resident sat at 67k-117k, and typed /compact into the resident's pane anyway.
  *
- *  Absent (a hermit that has not booted a managed session since the upgrade) resolves
- *  to '' and both tiers skip. Skipping is the safe failure: a real resident turn
- *  restamps within one wake. */
+ *  Absent resolves to '' and both tiers skip. Skipping is the safe failure — acting on a
+ *  frozen row from a session that is not this one is what #916 was. Two writers keep it
+ *  present: the SessionStart hook stamps it at start/resume/compact/clear, and the Stop
+ *  hook re-asserts it on each of the resident's own turns, so a resident already running
+ *  when this version lands is unstamped for one turn rather than until its next restart.
+ *  Both writers refuse when a live registry entry at another pid holds the stamp, which is
+ *  what keeps a claude the resident launched itself from claiming the tiers. */
 function resolveHygieneSessionId(runtime: Json, world: World = REAL_WORLD): string {
   const sid: unknown = runtime.cc_session_id;
   const resolved = typeof sid === 'string' ? sid : '';

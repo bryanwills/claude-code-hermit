@@ -24,6 +24,7 @@ import { runtimeTmpPath } from './lib/runtime';
 import { readContextSurface, writeContextSurface } from './lib/context-surface';
 import { MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
 import { isGuest } from './lib/guest-marker';
+import { ownsResidentIdentity } from './lib/session-registry';
 
 type Json = any;
 
@@ -314,7 +315,11 @@ function readLastTurnUsage(transcriptPath: string): Json {
 // boundary's compactMetadata.postTokens (the summarized conversation alone) is an
 // upper bound on this hermit's fixed surface — the input the watchdog's compact
 // gate subtracts. Runs on the tail readLastTurnUsage already read; a boundary
-// outside that window was recorded on an earlier Stop. peakPromptTokensSinceCompaction
+// outside that window was recorded on an earlier Stop. The record is folder-wide, not
+// resident-owned: any session in the folder that hits a boundary refreshes it, and that is
+// deliberate — the surface is near-identical across sessions in one project, and gating the
+// write would starve a resident that rarely compacts back to ASSUMED_SURFACE_TOKENS.
+// peakPromptTokensSinceCompaction
 // cannot be reused here: it breaks at the turn's user-entry boundary before ever
 // reaching the compact_boundary record. postTokens is an uncontracted harness field
 // (probe-verified, not documented), so every branch validates and skips rather than
@@ -851,13 +856,43 @@ async function run(data: Json): Promise<string | null> {
     // double-bill the spend and republish a dead context size. Same session only — a fresh
     // session legitimately starts from older transcript entries — and legacy rows without
     // observed_at never block, so the first post-upgrade turn always bills.
+    //
+    // "Same session" is cc_session_id, not session_id: the latter is the S-NNN arc label
+    // every session in the folder shares while an arc is open, so a guest's newer row
+    // would suppress the resident's own turn entirely — unbilled spend, and no fresh row
+    // for the hygiene tiers to read (issue #916). Legacy rows have no cc_session_id and
+    // never block, same fail-open as a missing observed_at.
     const lastRow = lastLoggedMainRow();
-    if (observedAt && lastRow && lastRow.session_id === (runtimeSessionId || sessionId)
+    if (observedAt && lastRow && lastRow.cc_session_id === sessionId
         && typeof lastRow.observed_at === 'string' && observedAt <= lastRow.observed_at) {
       return null;
     }
 
     maintainOpenedAt(new Date().toISOString(), sessionId);
+
+    const guest = isGuest(path.join(HERMIT_DIR, 'state'), sessionId);
+    // Keep runtime.cc_session_id pointing at the resident's own harness session. The
+    // SessionStart hook is the primary writer, but it only fires on start/resume/compact/
+    // clear: a resident already running when this version lands stays unstamped — and the
+    // watchdog's hygiene tiers skip entirely without it — until one of those happens. This
+    // is the resident's own turn, so its session id is authoritative; restamping (rather
+    // than filling only when absent) also heals a record left pointing at a session the
+    // resident launched before the SessionStart gate existed.
+    //
+    // Same incumbency rule as stampSessionEnv, or this becomes the hijack path it closes:
+    // a nested claude inherits HERMIT_MANAGED and would otherwise repoint the record on
+    // every one of its own turns. writeRuntimeFields (not lib/runtime's updateRuntimeField)
+    // because this is not a lifecycle event — refreshing updated_at here would hide a
+    // wedged session from doctor's stale-session check.
+    if (!guest && process.env.HERMIT_MANAGED === '1') {
+      const runtime = readRuntimeJsonCached();
+      // Id comparison first: ownsResidentIdentity scans the session registry (a readdir
+      // plus a /proc read per entry) and this runs on every turn, where the steady state
+      // is "already stamped, nothing to do".
+      if (runtime.cc_session_id !== sessionId && ownsResidentIdentity(runtime)) {
+        writeRuntimeFields({ cc_session_id: sessionId });
+      }
+    }
 
     // Read config once per turn — timezone drives by_date/by_week/by_month bucketing and
     // budget-window boundaries (PROP-016); budgetConfig drives the breach check below.
@@ -885,7 +920,7 @@ async function run(data: Json): Promise<string | null> {
       // what lets a reader tell the resident's rows from every other session's in the
       // same project folder (issue #916).
       ccSessionId: sessionId,
-      guest: isGuest(path.join(HERMIT_DIR, 'state'), sessionId),
+      guest,
       source,
       model,
       inputTokens,

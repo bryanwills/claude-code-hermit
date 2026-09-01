@@ -23,7 +23,7 @@ import { isResetBreadcrumb } from './lib/progress-log';
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
-import { findResident } from './lib/session-registry';
+import { findResident, ownsResidentIdentity } from './lib/session-registry';
 import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
 import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
@@ -315,6 +315,13 @@ function emitGuestBanner(agentDir: string): void {
 // never overwrites the resident's record. No secret is written — a path and a
 // boolean.
 //
+// HERMIT_MANAGED alone is not enough, though: it is an exported shell variable,
+// so any `claude` the resident itself launches from its own pane inherits it and
+// would stamp itself as the resident — repointing all five fields, including the
+// wake socket and the session id the watchdog's hygiene tiers judge context by.
+// The incumbency check below is the discriminator: a live registry entry at a pid
+// that is not this hook's parent means someone else already holds the stamp.
+//
 // hermit-start rewrites runtime.json moments after spawning tmux, seconds before
 // Claude Code boots and fires this hook; both sides read-modify-write, so the
 // later write preserves the earlier one's fields.
@@ -323,6 +330,10 @@ function stampSessionEnv(stateDir: string, sessionId: string | null): void {
   try {
     const runtime = readRuntimeJson(stateDir);
     if (runtime === null) return; // no lifecycle record yet — hermit-start owns creating it
+    // A live claude already holds the stamp and it isn't me → a session the resident
+    // launched, not the resident. A restarted resident's dead predecessor is dropped by
+    // the registry, so a reboot stamps freely (see ownsResidentIdentity).
+    if (!ownsResidentIdentity(runtime)) return;
     const configDir = defaultConfigDir();
     const envAuth = envAuthPresent();
     // The session's own inbox socket, exported by Claude Code before any hook

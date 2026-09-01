@@ -71,7 +71,7 @@ export function compactibleTokens(entry: Json, surfaceUpperBound: number | null)
  * in the folder), subagent lines carry their own small token count rather than the main
  * turn's context size, and a guest row can only carry the resident's id if it IS the
  * resident, which the marker denies. Rows predating `cc_session_id` never match, which
- * ages out within a wake.
+ * ages out as soon as the session logs a turn under the new cost-row shape.
  *
  * Shared by hermit-watchdog's hygiene tiers and doctor-check's context tripwire — the
  * same anti-drift reason promptTokensOf lives here (issue #916).
