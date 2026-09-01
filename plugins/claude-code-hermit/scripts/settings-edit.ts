@@ -221,7 +221,7 @@ function statefulRows(config: Json): Array<[string, string, string]> {
     ['Settings policy', policies, 'channels'],
     ['Morning brief', brief, 'brief'],
     ['Heartbeat', hb.enabled ? `every ${hb.every ?? '?'}` : 'disabled', 'heartbeat'],
-    ['Watchdog', wd.enabled ? 'enabled' : 'disabled', 'watchdog'],
+    ['Watchdog', `scheduler ${wd.scheduler_enabled !== false ? 'on' : 'off'}, recovery ${wd.enabled ? 'on' : 'off'}`, 'watchdog'],
     ['Routines', routines.length ? `${routines.filter((r: Json) => r?.enabled).length} of ${routines.length} enabled` : 'none', 'routines'],
     ['Scheduled checks', checks.length ? `${checks.filter((c: Json) => c?.enabled).length} of ${checks.length} enabled` : 'none', 'scheduled-checks'],
     ['Environment', envKeys.length ? envKeys.join(', ') : 'none', 'env'],

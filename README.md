@@ -154,7 +154,7 @@ Pick one. Same hermit either way (heartbeat, routines, channels).
 .claude-code-hermit/bin/hermit-start
 ```
 
-`/sandbox` is recommended so Bash is isolated on the host (optional; hermit does not enable it). Add `.claude-code-hermit/bin/hermit-watchdog install` if a dead session should come back. Walkthrough: [Always-On Operations](plugins/claude-code-hermit/docs/always-on-ops.md).
+`/sandbox` is recommended so Bash is isolated on the host (optional; hermit does not enable it). The first always-on boot registers the watchdog scheduler so a dead session comes back. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` (or `watchdog.scheduler_enabled: false` before the first boot). Walkthrough: [Always-On Operations](plugins/claude-code-hermit/docs/always-on-ops.md).
 
 **Docker** (isolated, restarts with the daemon). Needs [Docker Compose](https://docs.docker.com/compose/install/) v2.
 
@@ -226,7 +226,8 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `context_hygiene.compact` | compact long-running active context — **enabled**, `100000` compactible tokens / `4h` cooldown |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | auto-compact at % of context — **`65`** |
 | `MAX_THINKING_TOKENS` | thinking-token cap per turn — **`10000`** |
-| `watchdog.enabled` | external dead-session recovery — **`false`** (local/tmux); `/docker-setup` enables it |
+| `watchdog.scheduler_enabled` | OS scheduler for the watchdog tick — **`true`** on tmux always-on (auto-installed at boot); `false` or `hermit-watchdog uninstall` opts out |
+| `watchdog.enabled` | recovery/restart tier — **`false`** until first scheduler registration (or `/docker-setup`); hygiene still runs |
 
 
 Full schema in the [Config Reference](plugins/claude-code-hermit/docs/config-reference.md)

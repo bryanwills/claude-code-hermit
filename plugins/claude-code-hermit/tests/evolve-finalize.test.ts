@@ -614,6 +614,23 @@ test('#760: re-run adds nothing and reports an empty settings_added', withTmplRo
   })();
 }));
 
+test('scheduler_enabled is adopted while an operator enabled: false survives', withTmplRoot({
+  watchdog: { enabled: false, scheduler_enabled: true, stale_factor: 2 },
+}, async (pr) => {
+  await withProj(async (dir) => {
+    writeConfig(dir, JSON.stringify({
+      watchdog: { enabled: false, stale_factor: 2 },
+      _hermit_versions: { 'claude-code-hermit': '1.2.5' },
+    }));
+    const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: pr, siblings: [] });
+    expect(result.ok).toBe(true);
+    expect(result.settings_added).toContain('watchdog.scheduler_enabled');
+    const onDisk = readConfig(dir);
+    expect(onDisk.watchdog.scheduler_enabled).toBe(true);
+    expect(onDisk.watchdog.enabled).toBe(false);
+  })();
+}));
+
 test('#760: a value written earlier in the run is never overwritten', withTmplRoot(TMPL, async (pr) => {
   await withProj(async (dir) => {
     // What the runner's language/timezone auto-detect (or a migration) leaves behind.

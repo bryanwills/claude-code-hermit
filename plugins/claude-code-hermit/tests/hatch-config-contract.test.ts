@@ -33,6 +33,11 @@ async function runHatchConfig(projectRoot: string, answers: any, reinit = false)
 }
 
 describe('hatch-config.ts', () => {
+  test('template ships watchdog.scheduler_enabled true', () => {
+    const template = JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8'));
+    expect(template.watchdog.scheduler_enabled).toBe(true);
+  });
+
   test('fresh hatch: full answers produce the exact expected config.json', async () => {
     const dir = freshDir();
     const answers = {

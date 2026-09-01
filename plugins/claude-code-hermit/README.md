@@ -138,7 +138,7 @@ Pick one. Same hermit either way (heartbeat, routines, channels).
 .claude-code-hermit/bin/hermit-start
 ```
 
-`/sandbox` is recommended so Bash is isolated on the host (optional; hermit does not enable it). Add `.claude-code-hermit/bin/hermit-watchdog install` if a dead session should come back. Walkthrough: [Always-On Operations](docs/always-on-ops.md).
+`/sandbox` is recommended so Bash is isolated on the host (optional; hermit does not enable it). The first always-on boot registers the watchdog scheduler so a dead session comes back. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` (or `watchdog.scheduler_enabled: false` before the first boot). Walkthrough: [Always-On Operations](docs/always-on-ops.md).
 
 **Docker** (isolated, restarts with the daemon). Needs [Docker Compose](https://docs.docker.com/compose/install/) v2.
 

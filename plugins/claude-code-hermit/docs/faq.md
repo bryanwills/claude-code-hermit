@@ -62,7 +62,7 @@ Yes. Set `ANTHROPIC_API_KEY` in `.env` and choose "apikey" during `/docker-setup
 
 ## Can I use this without Docker?
 
-Yes. Docker is the guided always-on path, not a requirement. Use `hermit-start`/`hermit-stop` for bare tmux, and `bin/hermit-watchdog install` there if you want dead sessions restarted for you. For interactive-only use, just run `/claude-code-hermit:session` — no tmux or Docker needed.
+Yes. Docker is the guided always-on path, not a requirement. Use `hermit-start`/`hermit-stop` for bare tmux; the first always-on boot registers the watchdog scheduler so dead sessions come back (opt out with `bin/hermit-watchdog uninstall`, or `watchdog.scheduler_enabled: false` before the first boot). For interactive-only use, just run `/claude-code-hermit:session`. No tmux or Docker needed.
 
 ---
 

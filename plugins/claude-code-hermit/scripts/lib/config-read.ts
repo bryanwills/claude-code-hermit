@@ -109,6 +109,7 @@ const TABLE: Record<string, Spec> = {
   }),
   watchdog: shape({
     enabled: bool(false),
+    scheduler_enabled: bool(true),
     stale_factor: num(2),
     wedge_floor: str('4h'),
     escalate_after: num(3),
