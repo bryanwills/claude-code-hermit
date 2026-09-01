@@ -201,7 +201,7 @@ async function collectLines(stream: ReadableStream<Uint8Array>, lines: string[])
   } catch { /* stream closed */ }
 }
 
-async function handshake(session: McpSession, version = '2026-07-28'): Promise<Json> {
+async function handshake(session: McpSession, version = '2025-11-25'): Promise<Json> {
   const init = await session.rpc('initialize', {
     protocolVersion: version,
     capabilities: {},
@@ -229,7 +229,7 @@ describe('handshake', () => {
     const s = McpSession.start();
     try {
       const init = await handshake(s);
-      expect(init.result.protocolVersion).toBe('2026-07-28');
+      expect(init.result.protocolVersion).toBe('2025-11-25');
       expect(init.result.capabilities).toEqual({ tools: {} });
       expect(init.result.serverInfo).toEqual({ name: 'claude-code-hermit', version: PLUGIN_VERSION });
       const pong = await s.rpc('ping');
@@ -243,27 +243,40 @@ describe('handshake', () => {
     }
   });
 
-  test('unsupported protocolVersion → -32022 with supported and requested', async () => {
+  test('an older supported protocolVersion is echoed back unchanged', async () => {
     const s = McpSession.start();
     try {
-      const reply = await s.rpc('initialize', { protocolVersion: '1900-01-01', capabilities: {}, clientInfo: { name: 't', version: '0' } });
-      expect(reply.error.code).toBe(-32022);
-      expect(reply.error.data.requested).toBe('1900-01-01');
-      expect(reply.error.data.supported).toContain('2026-07-28');
+      const init = await handshake(s, '2025-06-18');
+      expect(init.result.protocolVersion).toBe('2025-06-18');
+      const listed = await s.rpc('tools/list');
+      expect(listed.result.tools).toHaveLength(6);
     } finally {
       await s.close();
     }
   });
 
-  test('batch-era protocolVersions are not advertised or accepted', async () => {
+  // 2025-06-18/2025-11-25 lifecycle: an unsupported version is answered with a
+  // successful result naming a version the server does speak, never an error.
+  test('unsupported protocolVersion negotiates down to the latest supported', async () => {
     const s = McpSession.start();
     try {
-      const reply = await s.rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } });
-      expect(reply.error.code).toBe(-32022);
-      expect(reply.error.data.supported).not.toContain('2025-03-26');
-      expect(reply.error.data.supported).not.toContain('2024-11-05');
+      const reply = await s.rpc('initialize', { protocolVersion: '1900-01-01', capabilities: {}, clientInfo: { name: 't', version: '0' } });
+      expect(reply.error).toBeUndefined();
+      expect(reply.result.protocolVersion).toBe('2025-11-25');
     } finally {
       await s.close();
+    }
+  });
+
+  test('batch-era and stateless-era protocolVersions both negotiate down', async () => {
+    for (const requested of ['2025-03-26', '2024-11-05', '2026-07-28']) {
+      const s = McpSession.start();
+      try {
+        const reply = await s.rpc('initialize', { protocolVersion: requested, capabilities: {}, clientInfo: { name: 't', version: '0' } });
+        expect(reply.result.protocolVersion).toBe('2025-11-25');
+      } finally {
+        await s.close();
+      }
     }
   });
 
@@ -275,7 +288,7 @@ describe('handshake', () => {
       expect(err.error.code).toBe(-32700);
       expect(err.id).toBeNull();
       const init = await handshake(s);
-      expect(init.result.protocolVersion).toBe('2026-07-28');
+      expect(init.result.protocolVersion).toBe('2025-11-25');
     } finally {
       await s.close();
     }
@@ -300,7 +313,7 @@ describe('handshake', () => {
       const reply = await callTool(s, 'list_hermits');
       expect(reply.error.code).toBe(-32600);
       const init = await handshake(s);
-      expect(init.result.protocolVersion).toBe('2026-07-28');
+      expect(init.result.protocolVersion).toBe('2025-11-25');
     } finally {
       await s.close();
     }
@@ -453,12 +466,12 @@ describe('list_hermits + get_status', () => {
       env: { HERMIT_MCP_ROOTS: b.dir },
       stdin: JSON.stringify({
         jsonrpc: '2.0', id: 1, method: 'initialize',
-        params: { protocolVersion: '2026-07-28', capabilities: {}, clientInfo: { name: 't', version: '0' } },
+        params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '0' } },
       }) + '\n',
     });
     expect(viaArg.exitCode).toBe(0);
     const init = JSON.parse(viaArg.stdout.trim().split('\n')[0]);
-    expect(init.result.protocolVersion).toBe('2026-07-28');
+    expect(init.result.protocolVersion).toBe('2025-11-25');
 
     const dup = await runScript('mcp-server.ts', { args: ['--roots', `${a.dir},${a.dir}`] });
     expect(dup.exitCode).toBe(1);

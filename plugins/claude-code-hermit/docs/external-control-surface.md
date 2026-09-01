@@ -63,10 +63,21 @@ Aggregating many boxes, many hermits, or many hosts is the orchestrator's job.
 
 ## Handshake
 
-Newline-delimited JSON-RPC 2.0 over stdin/stdout. `initialize` echoes the
-client's `protocolVersion` when supported, otherwise JSON-RPC error `-32022`
-with `data: {supported, requested}`. `capabilities` is `{tools:{}}`.
-`serverInfo.version` is this plugin's `.claude-plugin/plugin.json` version.
+Newline-delimited JSON-RPC 2.0 over stdin/stdout. `capabilities` is
+`{tools:{}}`, and `serverInfo.version` is this plugin's
+`.claude-plugin/plugin.json` version.
+
+The server speaks `2025-11-25` and `2025-06-18`. `initialize` echoes the
+client's `protocolVersion` when it is one of those, and otherwise returns a
+successful result naming `2025-11-25`, per the lifecycle rule for those
+revisions: the server offers a version it supports and the client disconnects
+if it cannot use it. An unsupported version is never answered with an error.
+
+`2026-07-28` is deliberately not advertised. That revision is stateless and
+has no `initialize` handshake at all, carrying the version in each request's
+`_meta`; a client speaking it would find nothing to talk to here. Its
+`-32022 Unsupported protocol version` error belongs to that revision and is
+not used by this server.
 
 ## Tools
 

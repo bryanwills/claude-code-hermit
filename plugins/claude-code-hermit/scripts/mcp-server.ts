@@ -25,13 +25,19 @@ const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.d
 const WAKE_TOKEN = 'HEARTBEAT_EVALUATE';
 const BRIEF_CAP_BYTES = 16 * 1024;
 const RELAY_TIMEOUT_MS = 15_000;
-// 2025-06-18 is the floor on purpose: earlier revisions require receiving
-// JSON-RPC batches, which this server rejects with -32600.
+// This is an `initialize`-handshake server, so the advertised range is bounded
+// on both ends. Ceiling: 2026-07-28 is stateless and has no initialize/ping at
+// all (its spec dir drops lifecycle.mdx and carries the version in per-request
+// _meta), so advertising it would strand modern-only clients on this server's
+// "not initialized" rejection. Floor: revisions before 2025-06-18 require
+// receiving JSON-RPC batches, which this server rejects with -32600.
 const SUPPORTED_PROTOCOL_VERSIONS = [
-  '2026-07-28',
   '2025-11-25',
   '2025-06-18',
 ];
+// The latest version this server speaks; offered to a client that asked for one
+// we do not support, per the lifecycle rule below.
+const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
 
 const ROOT_PROP = {
   type: 'object',
@@ -425,15 +431,17 @@ async function dispatchTool(name: string, args: Json, inventory: string[]): Prom
 
 function handleInitialize(id: Json, params: Json, ctx: { initialized: boolean }): Json {
   const requested = params?.protocolVersion;
-  if (typeof requested !== 'string' || !SUPPORTED_PROTOCOL_VERSIONS.includes(requested)) {
-    return rpcError(id, -32022, 'Unsupported protocol version', {
-      supported: SUPPORTED_PROTOCOL_VERSIONS,
-      requested: typeof requested === 'string' ? requested : null,
-    });
-  }
+  // 2025-06-18 and 2025-11-25 lifecycle: an unsupported version is not an
+  // error. "The server MUST respond with another protocol version it supports
+  // ... If the client does not support the version in the server's response,
+  // it SHOULD disconnect." Answering -32022 instead would deny a legacy client
+  // the chance to negotiate down; that code belongs to the stateless revision.
+  const agreed = typeof requested === 'string' && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+    ? requested
+    : LATEST_PROTOCOL_VERSION;
   ctx.initialized = true;
   return rpcResult(id, {
-    protocolVersion: requested,
+    protocolVersion: agreed,
     capabilities: { tools: {} },
     serverInfo: { name: 'claude-code-hermit', version: pluginVersion() },
   });
