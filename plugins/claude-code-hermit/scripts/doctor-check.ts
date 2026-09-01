@@ -1025,6 +1025,10 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
     const config = readSettledConfig(hermitDir);
     const wCfg = config.watchdog;
 
+    if (wCfg.scheduler_enabled === false) {
+      return { id: 'watchdog', status: 'ok', detail: 'watchdog: scheduler opted out' };
+    }
+
     // Steps 0a-0c (post-close clear, emergency clear, routine-hygiene compact) run
     // independent of watchdog.enabled — a hermit can have the restart tier off and
     // still depend on the scheduler tick for hygiene. Only report the "disabled
@@ -1085,7 +1089,8 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
       } else {
         remedy = 'native: run `bin/hermit-watchdog install`; Docker: recreate the container (`docker compose up -d --force-recreate`)';
       }
-      return { id: 'watchdog', status: 'warn', detail: `watchdog: enabled but not firing (${ageNote}) — ${remedy}` };
+      const staleLabel = wCfg.enabled ? 'enabled but not firing' : "scheduler isn't firing";
+      return { id: 'watchdog', status: 'warn', detail: `watchdog: ${staleLabel} (${ageNote}) — ${remedy}` };
     }
 
     // Pathology: a shutdown stamp on a still-alive session silently bricks context

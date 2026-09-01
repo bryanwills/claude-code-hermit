@@ -2494,7 +2494,23 @@ test('doctor checkWatchdog: restart tier disabled but post_close_clear active �
     setLastRun(h, isoAgo(1)); // stale — the hygiene tier still needs a live scheduler tick
     const w = await doctorWatchdogCheck(h);
     expect(w.status).toBe('warn');
-    expect(w.detail).toContain('not firing');
+    expect(w.detail).toContain("scheduler isn't firing");
+    expect(w.detail).not.toContain('enabled but not firing');
+  }));
+
+test('doctor checkWatchdog: scheduler_enabled false → ok, opted out, no install remedy',
+  withHermit(async (h) => {
+    fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
+      JSON.stringify({
+        watchdog: { enabled: true, scheduler_enabled: false },
+        post_close_clear: true,
+        ...DOCTOR_BASE,
+      }, null, 2) + '\n');
+    setLastRun(h, isoAgo(1));
+    const w = await doctorWatchdogCheck(h);
+    expect(w.status).toBe('ok');
+    expect(w.detail).toContain('scheduler opted out');
+    expect(w.detail).not.toContain('hermit-watchdog install');
   }));
 
 test('doctor checkWatchdog: restart tier disabled + hygiene active + fresh tick → ok, labels the tier split',
@@ -2616,7 +2632,7 @@ async function withFakeHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
 }
 
 test.if(isLinux)('install with systemd → flips watchdog.enabled true, preserves siblings', withHermit(async (h) => {
-  writeConfig(h, '2h', { enabled: false });
+  writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 1);
   writeFakeSystemctl(h);
@@ -2625,14 +2641,15 @@ test.if(isLinux)('install with systemd → flips watchdog.enabled true, preserve
     expect(r.exitCode).toBe(0);
     const config = readJson(configPath(h));
     expect(config.watchdog.enabled).toBe(true);
+    expect(config.watchdog.scheduler_enabled).toBe(true);
     expect(config.watchdog.stale_factor).toBe(2);
     expect(config.watchdog.escalate_after).toBe(3);
     expect(config.watchdog.operator_grace).toBe('15m');
   });
 }));
 
-test.if(isLinux)('uninstall with systemd → flips watchdog.enabled false', withHermit(async (h) => {
-  writeConfig(h, '2h', { enabled: true });
+test.if(isLinux)('uninstall with systemd → flips watchdog.enabled and scheduler_enabled false', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: true, scheduler_enabled: true });
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 1);
   writeFakeSystemctl(h);
@@ -2641,6 +2658,7 @@ test.if(isLinux)('uninstall with systemd → flips watchdog.enabled false', with
     expect(r.exitCode).toBe(0);
     const config = readJson(configPath(h));
     expect(config.watchdog.enabled).toBe(false);
+    expect(config.watchdog.scheduler_enabled).toBe(false);
   });
 }));
 
@@ -2657,7 +2675,9 @@ test.if(isLinux)('re-install over an existing timer → leaves a deliberate fals
     const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
     expect(r.exitCode).toBe(0);
     expect(r.stdout + r.stderr).toContain('Restarts stay off until watchdog.enabled is true');
-    expect(readJson(configPath(h)).watchdog.enabled).toBe(false);
+    const config = readJson(configPath(h));
+    expect(config.watchdog.enabled).toBe(false);
+    expect(config.watchdog.scheduler_enabled).toBe(true);
   });
 }));
 
@@ -2670,7 +2690,9 @@ test.if(isLinux)('systemctl enable failure → exit 1, watchdog.enabled untouche
     const r = await watchdog(h, 'install', { env: { HOME: fakeHome } });
     expect(r.exitCode).toBe(1);
     expect(r.stdout + r.stderr).toContain('Failed to install systemd user timer');
-    expect(readJson(configPath(h)).watchdog.enabled).toBe(false);
+    const config = readJson(configPath(h));
+    expect(config.watchdog.enabled).toBe(false);
+    expect(config.watchdog.scheduler_enabled).toBeUndefined();
   });
 }));
 
@@ -2683,6 +2705,7 @@ test.if(isLinux)('install without systemctl → leaves watchdog.enabled false, p
   expect(r.stdout + r.stderr).toContain('Restarts stay off until watchdog.enabled is true');
   const config = readJson(configPath(h));
   expect(config.watchdog.enabled).toBe(false);
+  expect(config.watchdog.scheduler_enabled).toBeUndefined();
 }));
 
 test.if(isLinux)('install with no config.json → exit 0, creates no config', withHermit(async (h) => {

@@ -35,7 +35,7 @@ import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { postToSession } from './lib/peer-post';
 import { findResident, type SessionEntry } from './lib/session-registry';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
-import { readSettledConfig } from './lib/config-read';
+import { readSettledConfig, readConfigRaw } from './lib/config-read';
 import { wallMinutes } from './lib/cron-shift';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
@@ -2084,38 +2084,44 @@ function readWatchdogEnabled(): boolean | undefined {
 }
 
 /**
- * Flip watchdog.enabled through the audited settings-edit path (validated, logged to the
- * settings ledger — same call /docker-setup makes). Only called from branches that actually
- * registered a timer; the cron fallback prints guidance instead, since flipping there would
- * claim an activation that never happened. No-ops when there is no config to flip, or the
- * value already matches.
+ * Flip a watchdog boolean through the audited settings-edit path (validated, logged
+ * to the settings ledger — same call /docker-setup makes). Only called from branches
+ * that actually registered or removed a timer; the cron fallback prints guidance
+ * instead, since flipping there would claim an activation that never happened.
+ * Reads the raw on-disk value so a missing key is written rather than treated as
+ * already matching the settled default. No-ops when there is no config, or the
+ * raw value already matches.
  */
-function setWatchdogEnabled(value: boolean): void {
-  const current = readWatchdogEnabled();
-  if (current === undefined || current === value) return;
+function setWatchdogConfig(key: 'enabled' | 'scheduler_enabled', value: boolean): void {
+  if (!fs.existsSync(CONFIG_PATH)) return;
+  const raw = readConfigRaw(HERMIT_ROOT);
+  const current = raw?.watchdog?.[key];
+  if (current === value) return;
   const r = run(process.execPath, [
     path.join(import.meta.dir, 'settings-edit.ts'),
     CONFIG_PATH,
     'set',
-    'watchdog.enabled',
+    `watchdog.${key}`,
     String(value),
   ]);
   if (r.status !== 0) {
-    console.log('[watchdog] Could not write watchdog.enabled to config.json — set it manually.');
+    console.log(`[watchdog] Could not write watchdog.${key} to config.json — set it manually.`);
     process.exitCode = 1;
     return;
   }
-  console.log(`[watchdog] ${value ? 'Enabled' : 'Disabled'} watchdog.enabled in config.json.`);
+  console.log(`[watchdog] ${value ? 'Enabled' : 'Disabled'} watchdog.${key} in config.json.`);
 }
 
 /**
- * Install turns the restart tier on for a *first* registration only. Re-running install is
+ * After a successful timer registration: stamp scheduler_enabled true, and turn
+ * the restart tier on for a *first* registration only. Re-running install is
  * the doctor's own remedy for a stale tick or an unbaked unit PATH, and hygiene-only
  * (`enabled: false` with the timer installed) is a state the doctor reports as ok — so a
  * repair run reports what is off instead of silently switching restarts on.
  */
 function enableAfterInstall(firstRegistration: boolean): void {
-  if (firstRegistration) setWatchdogEnabled(true);
+  setWatchdogConfig('scheduler_enabled', true);
+  if (firstRegistration) setWatchdogConfig('enabled', true);
   else if (readWatchdogEnabled() === false) console.log(ENABLE_GUIDANCE);
 }
 
@@ -2247,7 +2253,8 @@ function cmdUninstall(): void {
     }
     run('systemctl', ['--user', 'daemon-reload']);
     console.log(`[watchdog] Removed systemd timer: ${serviceName}.timer`);
-    setWatchdogEnabled(false);
+    setWatchdogConfig('scheduler_enabled', false);
+    setWatchdogConfig('enabled', false);
   } else if (process.platform === 'darwin') {
     const plistName = `com.hermit.watchdog.${name}.plist`;
     const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', plistName);
@@ -2256,7 +2263,8 @@ function cmdUninstall(): void {
       fs.unlinkSync(plistPath);
     }
     console.log(`[watchdog] Removed LaunchAgent: ${plistName}`);
-    setWatchdogEnabled(false);
+    setWatchdogConfig('scheduler_enabled', false);
+    setWatchdogConfig('enabled', false);
   } else {
     console.log('[watchdog] Cron entries must be removed manually with `crontab -e`.');
   }
