@@ -201,11 +201,13 @@ const DEFAULT_CONFIG: Json = {
     channel_log_enabled: true,
     channel_log_retention_days: 90,
   },
-  // wedge_floor is deliberately template-only, not part of this boot merge: the
-  // always-on branch writes the merged config back to disk, and stamping the `4h`
-  // default there on a restart would look like an operator-set value to the
-  // upgrade that derives wedge_floor from the pre-upgrade threshold. The watchdog
-  // reads it through lib/config-read, which supplies the same default.
+  // wedge_floor and scheduler_enabled are deliberately template-only, not part of
+  // this boot merge: the always-on branch writes the merged config back to disk,
+  // and stamping the defaults there on a restart would look like operator-set
+  // values (wedge_floor to the upgrade that derives it; scheduler_enabled would
+  // freeze the default against future changes). The watchdog and the boot
+  // auto-install gate read them through lib/config-read, which supplies the same
+  // defaults.
   watchdog: {
     enabled: false,
     stale_factor: 2,
@@ -1214,6 +1216,42 @@ function refuseIfAnotherInstanceAlive(bootMode: BootMode): void {
 }
 
 /**
+ * Whether a surviving always-on tmux boot should register the watchdog scheduler.
+ * Docker is skipped (the entrypoint loop already ticks); an explicit
+ * `watchdog.scheduler_enabled: false` is the durable opt-out. Absent or
+ * malformed is not `false`, so this only skips for a real opt-out. Pure of
+ * side effects so the gate is unit-testable without tmux.
+ */
+export function shouldInstallWatchdogScheduler(
+  runtimeMode: string,
+  schedulerEnabled: unknown,
+): boolean {
+  return runtimeMode !== 'docker' && schedulerEnabled !== false;
+}
+
+/**
+ * Register the watchdog OS scheduler after a surviving tmux boot. Re-runs install
+ * every boot (idempotent, self-repairing); never fails the boot on a child error.
+ * Spawn is injectable so tests need no tmux and no real watchdog process.
+ */
+export function maybeInstallWatchdogScheduler(
+  runtimeMode: string,
+  schedulerEnabled: unknown,
+  spawn: (
+    command: string,
+    args: string[],
+    options: { stdio: 'inherit' },
+  ) => unknown = spawnSync,
+): void {
+  if (!shouldInstallWatchdogScheduler(runtimeMode, schedulerEnabled)) return;
+  spawn(
+    process.execPath,
+    [path.join(import.meta.dir, 'hermit-watchdog.ts'), 'install'],
+    { stdio: 'inherit' },
+  );
+}
+
+/**
  * Decide what to do when tmux reports the session already exists: refusal lines,
  * or null to report "already running" and exit 0. Pure of side effects so it's
  * unit testable, like shouldRefuseBoot above.
@@ -1540,6 +1578,11 @@ async function main(): Promise<void> {
     writeRuntimeJson(stale);
     execvp(cmd);
   }
+
+  maybeInstallWatchdogScheduler(
+    runtimeMode,
+    config.watchdog?.scheduler_enabled,
+  );
 
   if (hbEnabled) {
     const every = 'every' in hb ? hb.every : '30m';

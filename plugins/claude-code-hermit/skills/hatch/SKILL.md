@@ -651,7 +651,7 @@ questions: [
     header: "Deployment",
     question: "How will you run hermit?",
     options: [
-      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; add .claude-code-hermit/bin/hermit-watchdog install for restarts" },
+      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; the watchdog scheduler installs on first boot (opt out with watchdog.scheduler_enabled: false)" },
       { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
       { label: "Interactive", description: "Just trying it. /session in your terminal" }
     ]

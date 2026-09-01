@@ -76,6 +76,7 @@
   },
   "watchdog": {
     "enabled": false,
+    "scheduler_enabled": true,
     "stale_factor": 2,
     "wedge_floor": "4h",
     "escalate_after": 3,

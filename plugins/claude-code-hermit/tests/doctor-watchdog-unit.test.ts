@@ -165,6 +165,18 @@ describe('watchdog unit status', () => {
     }
   });
 
+  test.serial.if(isLinux)('scheduler_enabled false → ok opted out even when the unit would fail', async () => {
+    writeFakeSystemctl(unitFor(dir), { ExecMainStatus: '127', Result: 'exit-code' });
+    fs.writeFileSync(
+      path.join(hermit, 'config.json'),
+      JSON.stringify({ timezone: 'UTC', watchdog: { enabled: true, scheduler_enabled: false } }),
+    );
+    const check = await watchdogCheck();
+    expect(check.status).toBe('ok');
+    expect(check.detail).toContain('scheduler opted out');
+    expect(check.detail).not.toContain('hermit-watchdog install');
+  });
+
   test.serial.if(isLinux)('the unit name comes from the hermit dir, not the working directory', async () => {
     // The stub only answers for the project's real unit; anything else gets
     // systemd's healthy-looking synthesis. Running the doctor from an unrelated

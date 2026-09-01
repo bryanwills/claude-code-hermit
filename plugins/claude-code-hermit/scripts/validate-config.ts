@@ -545,6 +545,9 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     if (typeof wd.enabled !== 'boolean') {
       warnings.push('watchdog.enabled: should be boolean');
     }
+    if (wd.scheduler_enabled !== undefined && typeof wd.scheduler_enabled !== 'boolean') {
+      warnings.push('watchdog.scheduler_enabled: should be boolean');
+    }
     if (wd.stale_factor !== undefined) {
       if (typeof wd.stale_factor !== 'number' || wd.stale_factor <= 0) {
         warnings.push('watchdog.stale_factor: should be a positive number');

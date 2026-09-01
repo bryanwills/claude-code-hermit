@@ -39,6 +39,8 @@ import {
   clearStatusCacheOnBoot,
   hydrateSetupTokenEnv,
   shouldRefuseBoot,
+  shouldInstallWatchdogScheduler,
+  maybeInstallWatchdogScheduler,
   dockerHermitRunning,
   duplicateSessionRefusal,
   checkForUpgrade,
@@ -324,6 +326,62 @@ describe.if(!IN_CONTAINER)('boot singleton guard', () => {
 });
 
 // ============================================================
+// Watchdog scheduler auto-install (tmux always-on boot)
+// ============================================================
+
+describe('watchdog scheduler auto-install', () => {
+  const fakeSpawn = (record: string[][]) =>
+    (command: string, args: string[]) => {
+      record.push([command, ...args]);
+      return { status: 0 };
+    };
+
+  test('tmux boot invokes install once', () => {
+    const calls: string[][] = [];
+    maybeInstallWatchdogScheduler('tmux', true, fakeSpawn(calls));
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe(process.execPath);
+    expect(calls[0].some((a) => a.endsWith('hermit-watchdog.ts'))).toBe(true);
+    expect(calls[0].at(-1)).toBe('install');
+  });
+
+  test('docker mode skips', () => {
+    expect(shouldInstallWatchdogScheduler('docker', true)).toBe(false);
+    const calls: string[][] = [];
+    maybeInstallWatchdogScheduler('docker', true, fakeSpawn(calls));
+    expect(calls).toHaveLength(0);
+  });
+
+  test('scheduler_enabled: false skips', () => {
+    expect(shouldInstallWatchdogScheduler('tmux', false)).toBe(false);
+    const calls: string[][] = [];
+    maybeInstallWatchdogScheduler('tmux', false, fakeSpawn(calls));
+    expect(calls).toHaveLength(0);
+  });
+
+  test('child exit 1 leaves boot exit 0', () => {
+    const prior = process.exitCode;
+    maybeInstallWatchdogScheduler('tmux', true, () => ({ status: 1 }));
+    expect(process.exitCode).toBe(prior);
+  });
+
+  test('a second boot invokes install again (no suppression state)', () => {
+    const calls: string[][] = [];
+    const spawn = fakeSpawn(calls);
+    maybeInstallWatchdogScheduler('tmux', true, spawn);
+    maybeInstallWatchdogScheduler('tmux', true, spawn);
+    expect(calls).toHaveLength(2);
+  });
+
+  test('absent scheduler_enabled (settled default) installs', () => {
+    expect(shouldInstallWatchdogScheduler('tmux', undefined)).toBe(true);
+    const calls: string[][] = [];
+    maybeInstallWatchdogScheduler('tmux', undefined, fakeSpawn(calls));
+    expect(calls).toHaveLength(1);
+  });
+});
+
+// ============================================================
 // Duplicate-session handling + tri-state runtime read
 // ============================================================
 
@@ -495,6 +553,8 @@ describe('config contract: template and DEFAULT_CONFIG must mirror', () => {
     'doctor', 'doctor.routine_cost_floor_usd',
     // Read by hermit-watchdog through lib/config-read (own default of '4h') — not part of the loadConfig merge.
     'watchdog.wedge_floor',
+    // Settled default-on; boot write-back must not stamp it as operator-set (wedge_floor precedent).
+    'watchdog.scheduler_enabled',
   ]);
 
   test('key path sync: flattened key paths must match (excluding known template-only keys)', () => {

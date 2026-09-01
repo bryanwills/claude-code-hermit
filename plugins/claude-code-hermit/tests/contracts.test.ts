@@ -3203,6 +3203,27 @@ describe('doctor channel-liveness check', () => {
   }), 20000);
 });
 
+describe('watchdog validation', () => {
+  test('template ships scheduler_enabled true and validates cleanly', () => {
+    const template = readJson(path.join(TEMPLATES, 'config.json.template'));
+    expect(template.watchdog.scheduler_enabled).toBe(true);
+    const { errors, warnings } = validate(template);
+    expect(errors).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  test('non-boolean scheduler_enabled warns', () => {
+    const out = runValidate({ watchdog: { enabled: false, scheduler_enabled: 1 } });
+    expect(out.warnings.join(' ')).toContain('scheduler_enabled');
+  });
+
+  test('explicit false scheduler_enabled is accepted', () => {
+    const out = runValidate({ watchdog: { enabled: false, scheduler_enabled: false } });
+    expect(out.warnings.some((w: string) => w.includes('scheduler_enabled'))).toBe(false);
+    expect(out.errors.some((e: string) => e.includes('scheduler_enabled'))).toBe(false);
+  });
+});
+
 describe('doctor routine template contract', () => {
   test('template config validates cleanly with the doctor routine present', () => {
     const template = readJson(path.join(TEMPLATES, 'config.json.template'));
