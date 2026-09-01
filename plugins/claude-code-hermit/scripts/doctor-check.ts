@@ -1760,8 +1760,9 @@ function probeDeclaredCredentials(p: DoctorPaths): { okCount: number; badNotes: 
       const who = `${pluginLabel}/${cred.name || 'credential'}`;
       const fix = cred.reauth_skill ? ` — run ${cred.reauth_skill}` : '';
       // Per-credential lead time: a credential whose renewal needs the operator
-      // to find a browser deserves more notice than the 7d default. Core's
-      // setup-token asks for 14.
+      // to find a browser deserves its own window rather than the 7d default.
+      // Core's `claude-subscription` asks for 3, matching what Claude Code itself
+      // warns on.
       const warnDays = Number(cred.warn_days);
       const warnWindowMs = warnDays > 0 ? warnDays * 24 * 3600000 : CRED_WARN_WINDOW_MS;
       const result = runExpiryProbe(cred.expiry_probe, dir);

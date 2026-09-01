@@ -292,22 +292,31 @@ export function detectAuthModeFromVolume(configDir: string): 'login' | 'token' |
  *   1. an env credential (API key, bearer, cloud provider) outranks both files and is
  *      nobody's to renew from chat → `external`
  *   2. the operator's explicit `auth_mode` in config
- *   3. macOS with no .credentials.json: the login lives in the Keychain, which this
+ *   3. a setup-token on the volume → `token`. This has to outrank the Keychain
+ *      heuristic below, not follow it: installing a token PARKS `.credentials.json`,
+ *      so a macOS token hermit has no credential file by construction and the
+ *      darwin branch would read it as `external` — which stops hermit-start from
+ *      exporting the token and boots the hermit with no credential at all.
+ *   4. macOS with no .credentials.json: the login lives in the Keychain, which this
  *      code cannot inspect → `external`
- *   4. otherwise the volume decides, with `login` as the residual — a hermit with
- *      neither artifact has not signed in yet, and the flow it should get is the
- *      claude.ai one.
+ *   5. otherwise `login` is the residual — a hermit with neither artifact has not
+ *      signed in yet, and the flow it should get is the claude.ai one.
+ *
+ * `platform` is a parameter so the ladder's darwin arm is exercised on Linux CI.
+ * Step 3 exists because a macOS-only ordering bug shipped invisibly without it.
  */
 export function resolveAuthMode(
   config: any,
   configDir: string,
   envAuth: boolean = envAuthPresent(),
+  platform: NodeJS.Platform = process.platform,
 ): AuthMode {
   if (envAuth) return 'external';
   const declared = config?.auth_mode;
   if (declared === 'login' || declared === 'token') return declared;
-  if (process.platform === 'darwin' && !fs.existsSync(credentialsFilePath(configDir))) {
+  if (tokenModeActive(configDir)) return 'token';
+  if (platform === 'darwin' && !fs.existsSync(credentialsFilePath(configDir))) {
     return 'external';
   }
-  return tokenModeActive(configDir) ? 'token' : 'login';
+  return 'login';
 }

@@ -231,8 +231,13 @@ describe('doctor expiry probe', () => {
     expect(await probe(hermitDir, configDir)).toBe('EXPIRED');
   }));
 
-  test('login mode, nothing on the volume → EXPIRED', withFixture(async (hermitDir, configDir) => {
-    expect(await probe(hermitDir, configDir)).toBe('EXPIRED');
+  // An empty volume means "never signed in" on Linux, but on macOS it is the normal
+  // state of a logged-in operator whose credential sits in the Keychain — reporting
+  // EXPIRED there would fire a false alarm on every macOS install.
+  test('nothing on the volume → EXPIRED, except on macOS where it is OK', withFixture(async (hermitDir, configDir) => {
+    expect(await probe(hermitDir, configDir)).toBe(
+      process.platform === 'darwin' ? 'OK' : 'EXPIRED',
+    );
   }));
 
   test('an env credential is external → OK, whatever is on the volume', withFixture(async (hermitDir, configDir) => {
@@ -333,24 +338,39 @@ describe('resolveAuthMode', () => {
     });
   }));
 
-  test('unset + token file → token', withDirs((hermitDir, configDir) => {
+  // installToken() parks .credentials.json, so a macOS token hermit has no
+  // credential file by construction — the token has to outrank the Keychain
+  // heuristic or hermit-start exports nothing and the hermit boots credential-less.
+  test('unset + token file → token, on either platform', withDirs((hermitDir, configDir) => {
     withoutEnvToken(() => {
       installToken(hermitDir, configDir, VALID);
-      expect(resolveAuthMode({}, configDir, false)).toBe('token');
+      expect(resolveAuthMode({}, configDir, false, 'linux')).toBe('token');
+      expect(resolveAuthMode({}, configDir, false, 'darwin')).toBe('token');
     });
   }));
 
   test('unset + usable login → login', withDirs((_h, configDir) => {
     withoutEnvToken(() => {
       usableLogin(configDir);
-      expect(resolveAuthMode({}, configDir, false)).toBe('login');
+      expect(resolveAuthMode({}, configDir, false, 'linux')).toBe('login');
+      expect(resolveAuthMode({}, configDir, false, 'darwin')).toBe('login');
     });
   }));
 
   test('unset or unrecognized + nothing on the volume → login is the residual', withDirs((_h, configDir) => {
     withoutEnvToken(() => {
-      expect(resolveAuthMode({}, configDir, false)).toBe('login');
-      expect(resolveAuthMode({ auth_mode: 'oauth' }, configDir, false)).toBe('login');
+      expect(resolveAuthMode({}, configDir, false, 'linux')).toBe('login');
+      expect(resolveAuthMode({ auth_mode: 'oauth' }, configDir, false, 'linux')).toBe('login');
+    });
+  }));
+
+  // On macOS the login lives in the Keychain, which this code cannot inspect, so an
+  // empty volume means "not ours to renew" rather than "never signed in".
+  test('darwin + nothing on the volume → external, not the login residual', withDirs((_h, configDir) => {
+    withoutEnvToken(() => {
+      expect(resolveAuthMode({}, configDir, false, 'darwin')).toBe('external');
+      // An explicit auth_mode still wins — the heuristic only fills a gap.
+      expect(resolveAuthMode({ auth_mode: 'login' }, configDir, false, 'darwin')).toBe('login');
     });
   }));
 

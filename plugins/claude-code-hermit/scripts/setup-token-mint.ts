@@ -486,9 +486,14 @@ async function runMintFlow(io: OperatorIO, mode: string, requireAck: boolean): P
     // survive until the watchdog commits them inside the restart boundary.
     killMintPane();
     clearMarker();
-    if (expiresAt) {
-      await io.notify(MINT[OPERATOR_LOCALE].signedIn(dates.friendlyDate(OPERATOR_LOCALE, expiresAt)));
-    }
+    // Always confirm: the operator just pasted a code and is waiting to hear that it
+    // landed. Only the renewal date is conditional — an undated credential gets the
+    // dateless phrasing rather than silence.
+    await io.notify(
+      expiresAt
+        ? MINT[OPERATOR_LOCALE].signedIn(dates.friendlyDate(OPERATOR_LOCALE, expiresAt))
+        : MINT[OPERATOR_LOCALE].signedInUndated(),
+    );
     console.log(JSON.stringify({ ok: true, expires_at: expiresAt }));
     return 0;
   }
@@ -600,7 +605,10 @@ async function main(): Promise<void> {
 
   // `--target login|token` overrides the resolved mode for this run only — nothing
   // is written to config until a credential actually exists.
-  const target = flagValue(process.argv, '--target');
+  // `flagValue` reports a trailing `--target` (no value) as undefined, which would
+  // silently fall through to the resolved mode — so the flag's presence decides
+  // whether a value is required, not whether one was found.
+  const target = process.argv.includes('--target') ? (flagValue(process.argv, '--target') ?? '') : undefined;
   if (target === 'login' || target === 'token') AUTH_TARGET = target;
   else if (target !== undefined) {
     console.log(JSON.stringify({ ok: false, error: `--target must be login or token` }));

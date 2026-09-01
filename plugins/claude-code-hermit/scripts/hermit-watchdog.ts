@@ -74,6 +74,14 @@ const HERMIT_ROOT = path.dirname(STATE_DIR); // '.claude-code-hermit' — isPaus
 const REAUTH_MARKER_JSON = path.join(STATE_DIR, 'reauth-relay.json');
 /** A signed-in credential staged by the mint, waiting for this watchdog to commit it. */
 const PENDING_CREDENTIAL_JSON = path.join(STATE_DIR, 'pending-credential.json');
+/**
+ * How long a staged sign-in stays committable. Every front door requests a restart
+ * within seconds of staging, so anything older is a staging whose restart never
+ * happened — and it has to expire rather than linger: while it exists the mint
+ * refuses to start a second sign-in, so a permanent one would lock the operator out
+ * of the very renewal path this feature exists to provide.
+ */
+const PENDING_CREDENTIAL_MAX_AGE_MS = 2 * 3600000;
 /** Written by the relay when its own send failed. Honoured for a day, then retried. */
 const RELAY_UNREACHABLE_JSON = path.join(STATE_DIR, 'relay-unreachable.json');
 const RELAY_UNREACHABLE_MAX_AGE_MS = 24 * 3600000;
@@ -605,28 +613,51 @@ function writeWatchdogState(state: Json, world: World = REAL_WORLD): void {
 
 // --- Actions ---
 
+/** Delete the pending-credential pointer and its staging dir, if any. */
+function clearPendingCredential(stagedDir?: string): void {
+  try {
+    fs.unlinkSync(PENDING_CREDENTIAL_JSON);
+  } catch {}
+  if (stagedDir) {
+    try {
+      fs.rmSync(stagedDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
 /**
  * Move a staged claude.ai sign-in into place. Called from inside doRestart's
  * kill→verify→start boundary and nowhere else, because that is the only window in
  * which no session is refreshing `.credentials.json` underneath the write.
  *
- * Rollback is doing nothing: the staged file is only ever moved over a live one
- * after it has been re-checked as usable, and the previous credential is parked
- * rather than deleted. A staged file that did not survive the wait is dropped and
- * the restart proceeds on whatever the live dir already holds.
+ * Rollback is real, not "do nothing": the previous credential is parked before the
+ * staged one lands, and put back if that move fails — a half-committed dir with the
+ * live file parked and no replacement would boot the hermit with no credential at
+ * all. A staged file that did not survive the wait is dropped and the restart
+ * proceeds on whatever the live dir already holds.
+ *
+ * Never throws: this runs between the kill and the spawn inside doRestart, where an
+ * exception would abort the restart with the session already dead.
  */
 function commitPendingCredential(): void {
   const pending = readJson(PENDING_CREDENTIAL_JSON);
-  if (!pending || typeof pending.staged_dir !== 'string') return;
+  if (!pending || typeof pending.staged_dir !== 'string' || !pending.staged_dir) return;
 
   const stagedDir: string = pending.staged_dir;
   const configDir = defaultConfigDir();
-  const clear = () => {
-    try {
-      fs.unlinkSync(PENDING_CREDENTIAL_JSON);
-    } catch {}
-    fs.rmSync(stagedDir, { recursive: true, force: true });
-  };
+  const clear = () => clearPendingCredential(stagedDir);
+
+  // Staleness first. A staging that outlived its restart (the restart aborted on
+  // survivors, the lock was held, requestRestart never landed) must not be committed
+  // by some unrelated restart days later: `usable` only means the file carries a
+  // token, so an abandoned sign-in still reads usable long after it stopped working,
+  // and committing it would park a working credential and take the hermit dark.
+  const stagedAge = ageSecs(pending.staged_at ?? '');
+  if (stagedAge === null || stagedAge * 1000 > PENDING_CREDENTIAL_MAX_AGE_MS) {
+    clear();
+    appendEvent('credential-commit-skipped', `stale staging (${stagedAge === null ? 'undated' : `${Math.round(stagedAge / 60)}m old`})`);
+    return;
+  }
 
   // Re-checked here, not trusted from the mint: the mint ran minutes to hours ago.
   const status = inspectStoredLogin(stagedDir).status;
@@ -636,10 +667,15 @@ function commitPendingCredential(): void {
     return;
   }
 
+  const live = credentialsFilePath(configDir);
+  const parked = `${live}.pre-login.bak`;
+  let didPark = false;
   try {
-    const live = credentialsFilePath(configDir);
-    if (fs.existsSync(live)) fs.renameSync(live, `${live}.pre-login.bak`);
     fs.mkdirSync(configDir, { recursive: true });
+    if (fs.existsSync(live)) {
+      fs.renameSync(live, parked);
+      didPark = true;
+    }
     fs.renameSync(credentialsFilePath(stagedDir), live);
     copyOauthAccount(stagedDir, configDir);
     clear();
@@ -650,8 +686,13 @@ function commitPendingCredential(): void {
     });
     appendEvent('credential-committed', 'login');
   } catch (e) {
-    // The live credential is either untouched or already parked beside its
-    // replacement; either way the restart proceeds and the operator is told.
+    // Put the old credential back if it was parked but never replaced, so the
+    // restart proceeds on the credential the hermit already had.
+    if (didPark && !fs.existsSync(live)) {
+      try {
+        fs.renameSync(parked, live);
+      } catch {}
+    }
     appendEvent('credential-commit-skipped', `commit failed: ${e}`);
     clear();
   }
@@ -669,9 +710,18 @@ function copyOauthAccount(stagedDir: string, configDir: string): void {
     if (!staged?.oauthAccount) return;
     const livePath = path.join(configDir, '.claude.json');
     let live: Json = {};
-    try {
-      live = JSON.parse(fs.readFileSync(livePath, 'utf8'));
-    } catch {}
+    if (fs.existsSync(livePath)) {
+      // Parse failure means "don't touch it". `.claude.json` carries the harness's
+      // whole per-user state (installed plugins, trusted folders, onboarding), so
+      // rewriting an unreadable one as `{oauthAccount}` would trade a wrong email
+      // in `claude auth status` for a wiped Claude Code config.
+      try {
+        live = JSON.parse(fs.readFileSync(livePath, 'utf8'));
+      } catch {
+        return;
+      }
+      if (!live || typeof live !== 'object' || Array.isArray(live)) return;
+    }
     live.oauthAccount = staged.oauthAccount;
     writeFileAtomic(livePath, JSON.stringify(live, null, 2) + '\n');
   } catch {}
@@ -761,10 +811,18 @@ function reauthRelayActive(): boolean {
   // A staged sign-in waiting for the next restart IS a renewal in flight — the mint
   // process is already gone, and spawning another would reset the staging dir out
   // from under a credential this watchdog has been told to commit.
+  //
+  // Past that window the staging is abandoned (its restart never happened) and has
+  // to be dropped here, not merely ignored: the mint refuses to start while a
+  // pointer exists, so leaving one behind would make every subsequent relay spawn a
+  // process that exits immediately while this tick still reported 'spawned' — the
+  // hermit would sit expired forever, supervising nothing and never renewing.
   const pending = readJson(PENDING_CREDENTIAL_JSON);
   if (pending) {
     const age = ageSecs(pending.staged_at ?? '');
-    if (age !== null && age * 1000 < REAUTH_SKILL_MARKER_MAX_AGE_MS) return true;
+    if (age !== null && age * 1000 < PENDING_CREDENTIAL_MAX_AGE_MS) return true;
+    clearPendingCredential(typeof pending.staged_dir === 'string' ? pending.staged_dir : undefined);
+    appendEvent('credential-commit-skipped', 'cleared abandoned staging');
   }
   const marker = readJson(REAUTH_MARKER_JSON);
   if (!marker) return false;
@@ -1959,7 +2017,12 @@ async function main(): Promise<void> {
     // The unreachable stamp is a suppression, so it has to be cleared by the same
     // signal that ends the lapse — otherwise a hermit whose channel came back would
     // stay silently suppressed until the 24h age-out.
-    if (loginUsable) {
+    //
+    // Keyed on the reauth verdict rather than on a stored login: 'idle' means the
+    // credential this hermit actually runs on is neither expired nor lapsed, in
+    // whatever mode. storedLoginUsable() alone would never clear it in token mode,
+    // where the login file is parked by construction.
+    if (reauth === 'idle') {
       try {
         fs.unlinkSync(RELAY_UNREACHABLE_JSON);
       } catch {}

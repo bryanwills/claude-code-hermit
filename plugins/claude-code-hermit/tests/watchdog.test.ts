@@ -289,7 +289,7 @@ describe('dead session', () => {
 
 describe('staged credential commit', () => {
   /** A staging dir holding a sign-in, plus the pointer the mint leaves behind. */
-  function stage(h: Hermit, accessToken: string): { configDir: string; stagedDir: string } {
+  function stage(h: Hermit, accessToken: string, stagedAt = new Date().toISOString()): { configDir: string; stagedDir: string } {
     const configDir = path.join(h.dir, 'claude-config');
     const stagedDir = path.join(configDir, '.hermit-login-staging');
     fs.mkdirSync(stagedDir, { recursive: true });
@@ -305,7 +305,7 @@ describe('staged credential commit', () => {
     fs.writeFileSync(path.join(stagedDir, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'new@x' } }));
     fs.writeFileSync(
       state(h, 'pending-credential.json'),
-      JSON.stringify({ staged_dir: stagedDir, staged_at: new Date().toISOString() }),
+      JSON.stringify({ staged_dir: stagedDir, staged_at: stagedAt }),
     );
     return { configDir, stagedDir };
   }
@@ -341,6 +341,28 @@ describe('staged credential commit', () => {
 
     expect(readJson(path.join(configDir, '.credentials.json')).claudeAiOauth.accessToken).toBe('old-one');
     expect(fs.existsSync(path.join(configDir, '.credentials.json.pre-login.bak'))).toBe(false);
+    expect(fs.existsSync(stagedDir)).toBe(false);
+    expect(fs.existsSync(state(h, 'pending-credential.json'))).toBe(false);
+    const events = fs.readFileSync(eventsFile(h), 'utf-8');
+    expect(events).toContain('credential-commit-skipped');
+    expect(events).not.toContain('credential-committed');
+  }));
+
+  // `usable` only says the file carries a token, so an abandoned staging still reads
+  // usable weeks later. Committing one on some unrelated restart would park a working
+  // credential in favour of a sign-in that expired while nobody was looking.
+  test('a staging whose restart never came is dropped, not committed later', withHermit(async (h) => {
+    writeConfig(h);
+    writeFakeTmux(h, 1);
+    writeFakePgrep(h, 1);
+    const stale = new Date(Date.now() - 5 * 3600_000).toISOString();
+    const { configDir, stagedDir } = stage(h, 'sk-ant-oat01-freshfreshfresh', stale);
+    const r = await watchdog(h, 'run', { env: { CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: '' } });
+    expect(r.exitCode).toBe(0);
+
+    expect(readJson(path.join(configDir, '.credentials.json')).claudeAiOauth.accessToken).toBe('old-one');
+    expect(fs.existsSync(path.join(configDir, '.credentials.json.pre-login.bak'))).toBe(false);
+    // Cleared, so the mint's "one staged sign-in at a time" guard stops refusing.
     expect(fs.existsSync(stagedDir)).toBe(false);
     expect(fs.existsSync(state(h, 'pending-credential.json'))).toBe(false);
     const events = fs.readFileSync(eventsFile(h), 'utf-8');
