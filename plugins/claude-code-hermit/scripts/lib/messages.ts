@@ -217,6 +217,8 @@ export interface MintMessages {
   openLink(url: string): string;
   failed(): string;
   signedIn(dueDate: string): string;
+  /** Same confirmation, for a credential that carries no renewal date to quote. */
+  signedInUndated(): string;
 }
 
 export const MINT: Localized<MintMessages> = {
@@ -228,6 +230,8 @@ export const MINT: Localized<MintMessages> = {
     failed: () => "That sign-in didn't complete. Nothing changed — we can try again whenever you're ready.",
     signedIn: (dueDate) =>
       `You're signed back in. Nothing else to do — the next renewal is due ${dueDate}, and I'll ask you then.`,
+    signedInUndated: () =>
+      "You're signed back in. Nothing else to do — I'll ask you again when the next renewal is due.",
   },
   'pt-PT': {
     ackPrompt: () =>
@@ -237,6 +241,8 @@ export const MINT: Localized<MintMessages> = {
     failed: () => 'Esse início de sessão não foi concluído. Nada mudou — podemos tentar de novo quando quiser.',
     signedIn: (dueDate) =>
       `Sessão renovada. Não precisa de fazer mais nada — a próxima renovação será ${dueDate} e eu aviso-o nessa altura.`,
+    signedInUndated: () =>
+      'Sessão renovada. Não precisa de fazer mais nada — eu aviso-o quando a próxima renovação for necessária.',
   },
 };
 
