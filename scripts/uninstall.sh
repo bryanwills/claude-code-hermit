@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+#
+# claude-code-hermit uninstaller.
+#
+#   curl -fsSL https://gtapps.github.io/claude-code-hermit/uninstall.sh | bash
+#
+# Removes this folder's watchdog, running session, and plugin installation.
+# Project state is kept unless an operator confirms deletion on a controlling
+# terminal. Shared files are left for a printed Claude cleanup prompt.
+#
+# Under `curl | bash` stdin contains this script, so every interactive read uses
+# /dev/tty. Kept bash 3.2 compatible for the bash shipped with macOS.
+
+set -uo pipefail
+
+PLUGIN="claude-code-hermit@claude-code-hermit"
+
+FAILURE_COUNT=0
+FAILURE_SUMMARY=""
+INTERACTIVE_GATE=0
+PROJECT_ROOT=""
+
+# ---------------------------------------------------------------- output ----
+
+say()  { printf '  %s\n' "$*"; }
+ok()   { printf '  \033[32m+\033[0m %-12s %s\n' "$1" "$2"; }
+work() { printf '  \033[34m>\033[0m %-12s %s\n' "$1" "$2"; }
+warn() { printf '  \033[33m!\033[0m %-12s %s\n' "$1" "$2"; }
+die()  { printf '\n  \033[31mx\033[0m %s\n\n' "$*" >&2; exit 1; }
+
+rule() { printf '  \033[2m%s\033[0m\n' "─────────────────────────────────────────────────"; }
+
+record_failure() {
+  FAILURE_COUNT=$((FAILURE_COUNT + 1))
+  if [ -n "$FAILURE_SUMMARY" ]; then
+    FAILURE_SUMMARY="${FAILURE_SUMMARY}
+  - $1"
+  else
+    FAILURE_SUMMARY="  - $1"
+  fi
+  warn "$2" "$3"
+}
+
+# State deletion confirmation needs a controlling terminal and visible terminal
+# output. This is the same guard install.sh uses for its interactive launch.
+can_launch() {
+  { : </dev/tty; } 2>/dev/null || return 1
+  [ -t 1 ]
+}
+
+# --------------------------------------------------------------- watchdog ----
+
+remove_watchdog() {
+  local wrapper
+  wrapper=".claude-code-hermit/bin/hermit-watchdog"
+
+  if [ -f "$wrapper" ]; then
+    if [ ! -x "$wrapper" ]; then
+      record_failure "watchdog wrapper is not executable" "watchdog" "could not run $wrapper uninstall"
+    else
+      work "watchdog" "removing the OS timer..."
+      if "$wrapper" uninstall; then
+        ok "watchdog" "timer removed and watchdog disabled"
+      else
+        record_failure "watchdog uninstall failed" "watchdog" "uninstall command failed"
+      fi
+    fi
+  else
+    ok "watchdog" "wrapper already absent"
+  fi
+
+  if command -v crontab >/dev/null 2>&1 \
+    && crontab -l 2>/dev/null \
+      | grep -F 'hermit-watchdog run' \
+      | grep -Fq "$PROJECT_ROOT"; then
+    warn "cron" "a watchdog entry still references $PROJECT_ROOT"
+    say "Remove that line manually with: crontab -e"
+  fi
+}
+
+# ---------------------------------------------------------------- session ----
+
+stop_session() {
+  local docker_wrapper stop_wrapper runtime_file
+  docker_wrapper=".claude-code-hermit/bin/hermit-docker"
+  stop_wrapper=".claude-code-hermit/bin/hermit-stop"
+  runtime_file=".claude-code-hermit/state/runtime.json"
+
+  if [ -f "$runtime_file" ] \
+    && grep -q '"runtime_mode"[[:space:]]*:[[:space:]]*"interactive"' "$runtime_file"; then
+    INTERACTIVE_GATE=1
+    warn "session" "interactive Claude session detected; close it in its terminal first"
+  fi
+
+  if [ -f "docker-compose.hermit.yml" ]; then
+    if [ -x "$docker_wrapper" ]; then
+      work "docker" "stopping the hermit container..."
+      if "$docker_wrapper" down; then
+        ok "docker" "container stopped; the claude-config volume was kept"
+      else
+        record_failure "Docker session stop failed" "docker" "hermit-docker down failed; the claude-config volume was kept"
+      fi
+    else
+      warn "docker" "compose file remains, but the hermit-docker wrapper is absent"
+    fi
+  else
+    ok "docker" "compose file already absent"
+  fi
+
+  if [ -x "$stop_wrapper" ]; then
+    work "session" "stopping the tmux session..."
+    if "$stop_wrapper"; then
+      ok "session" "tmux session stopped"
+    else
+      record_failure "tmux session stop failed" "session" "hermit-stop failed"
+    fi
+  elif [ -f "$stop_wrapper" ]; then
+    record_failure "session stop wrapper is not executable" "session" "could not run $stop_wrapper"
+  else
+    ok "session" "stop wrapper already absent"
+  fi
+}
+
+# ----------------------------------------------------------------- plugin ----
+
+uninstall_plugin() {
+  local local_output project_output combined
+
+  if ! command -v claude >/dev/null 2>&1; then
+    record_failure "Claude Code is not on PATH; plugin uninstall was skipped" "plugin" "claude is not on PATH; uninstall the plugin manually"
+    print_marketplace_note
+    return
+  fi
+
+  work "plugin" "uninstalling at local scope..."
+  if local_output="$(claude plugin uninstall "$PLUGIN" --scope local 2>&1)"; then
+    [ -n "$local_output" ] && printf '%s\n' "$local_output"
+    ok "plugin" "local-scope install removed"
+    print_marketplace_note
+    return
+  fi
+
+  work "plugin" "local scope did not match; trying project scope..."
+  if project_output="$(claude plugin uninstall "$PLUGIN" --scope project 2>&1)"; then
+    [ -n "$project_output" ] && printf '%s\n' "$project_output"
+    ok "plugin" "project-scope install removed"
+    print_marketplace_note
+    return
+  fi
+
+  printf '%s\n' "$local_output"
+  printf '%s\n' "$project_output"
+  combined="${local_output}
+${project_output}"
+
+  if printf '%s\n' "$combined" | grep -qiE 'not installed|no installed plugin'; then
+    ok "plugin" "already uninstalled in this folder"
+  elif printf '%s\n' "$combined" | grep -qiE 'user[ -]scope|scope[^[:alnum:]]+user|installed[^[:cntrl:]]+user'; then
+    warn "plugin" "the user-scope install is shared by every folder and was left alone"
+  else
+    record_failure "plugin uninstall failed at local and project scope" "plugin" "both uninstall attempts failed"
+    say "A user-scope install is shared by every folder and is left alone."
+  fi
+
+  print_marketplace_note
+}
+
+print_marketplace_note() {
+  warn "marketplace" "registration is shared across hermits and was left in place"
+  say "Remove it manually only if this was your last hermit."
+}
+
+# ------------------------------------------------------------------- state ----
+
+maybe_delete_state() {
+  local answer
+
+  if [ "$INTERACTIVE_GATE" = "1" ]; then
+    warn "state" "kept because the interactive session must be closed first; re-run afterwards"
+  elif can_launch; then
+    printf '\n'
+    say "Delete this folder's hermit state and rendered Docker files? [y/N]"
+    answer=""
+    IFS= read -r answer </dev/tty || true
+    case "$answer" in
+      y|Y|yes|YES|Yes)
+        if rm -rf ".claude-code-hermit" \
+          && rm -f "Dockerfile.hermit" "docker-compose.hermit.yml" \
+            "docker-entrypoint.hermit.sh" "docker-compose.security.yml"; then
+          ok "state" "hermit state and rendered Docker files deleted"
+        else
+          record_failure "state deletion failed" "state" "could not delete every selected file"
+        fi
+        ;;
+      *) ok "state" "kept" ;;
+    esac
+  else
+    ok "state" "kept; no interactive terminal was available"
+  fi
+
+  if [ -f "docker-entrypoint.hermit-local.sh" ]; then
+    say "Operator-owned docker-entrypoint.hermit-local.sh survives."
+  fi
+}
+
+# --------------------------------------------------------- cleanup guidance ----
+
+cleanup_prompt() {
+  cat <<'PROMPT'
+Clean up the shared-file leftovers from uninstalling claude-code-hermit in this project. Detect first, then remove only hermit-attributable content. Act on each item only if it is present, show me a diff before every write, and touch nothing else. If an entry could predate hermit or reflect a deliberate operator choice, flag it and ask instead of deleting it. Examples include a generic Artifact grant, a language key, or a permission entry I may use myself.
+
+Check these item classes:
+
+1. In whichever of CLAUDE.md or CLAUDE.local.md contains it, remove the core block from the opening marker:
+<!-- claude-code-hermit: Session Discipline -->
+through the closing marker:
+<!-- /claude-code-hermit: Session Discipline -->
+Include any blank line or standalone separator immediately above the opening marker. If the block predates the closing marker, fall back to the first standalone separator after the opening marker, or end of file. Leave every other plugin's marked block alone.
+
+2. In whichever of .claude/settings.local.json or .claude/settings.json contains them, inspect for hermit-attributable settings. Illustrative examples are permissions.allow or permissions.deny entries referencing hermit scripts or paths; the Artifact grant, which must be flagged rather than auto-deleted; outputStyle when it names hermit-voice; env keys ending in _STATE_DIR; and the boot-written mirror keys language, crossSessionInbound, and isolatePeerMachines. Do not remove sandbox because hermit never writes it. There is no hooks key to clean. Flag any generic permission or setting I may still want.
+
+3. Inspect hermit-rendered or marked files elsewhere. Delete .claude/output-styles/hermit-voice.md if present. Remove only the managed block between the claude-code-hermit markers in .worktreeinclude. Review .gitignore hermit lines one at a time because they have no markers, and flag any line I may still want. Remove the # --- claude-code-hermit --- block from .env and review the related .env entries in .gitignore and .dockerignore. Offer to delete .claude.local/ (channel tokens) and .claude/cost-log.jsonl (hermit-written). Leave .claude/scheduled_tasks.lock because Claude Code owns it.
+
+Exclude auto-memory, the marketplace registration, docker-entrypoint.hermit-local.sh, and everything under ~/ from this cleanup.
+PROMPT
+}
+
+print_cleanup_prompt() {
+  local prompt one_line
+  prompt="$(cleanup_prompt)"
+
+  printf '\n'
+  rule
+  say "Claude cleanup prompt (review every diff before accepting):"
+  printf '\n```text\n%s\n```\n' "$prompt"
+
+  one_line="$(printf '%s' "$prompt" | tr '\n' ' ' | sed 's/[\\$`\"]/\\&/g')"
+  printf '\n  claude "%s"\n' "$one_line"
+  rule
+}
+
+print_auto_memory_notice() {
+  local config_dir project_key
+  config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  project_key="$(printf '%s' "$PROJECT_ROOT" | LC_ALL=C sed 's/[^a-zA-Z0-9]/-/g')"
+
+  warn "auto-memory" "Claude Code keeps this project's auto-memory after removal"
+  say "$config_dir/projects/$project_key/memory/"
+  say "Delete that folder yourself only if you also want the learned memory gone."
+}
+
+# ------------------------------------------------------------------- main ----
+
+main() {
+  printf '\n  \033[1mclaude-code-hermit uninstall\033[0m\n\n'
+
+  if [ ! -f ".claude-code-hermit/config.json" ]; then
+    say "nothing to uninstall here"
+    return 0
+  fi
+
+  PROJECT_ROOT="$(pwd -P)"
+
+  remove_watchdog
+  stop_session
+  uninstall_plugin
+  maybe_delete_state
+  print_cleanup_prompt
+  print_auto_memory_notice
+
+  if [ "$FAILURE_COUNT" -gt 0 ]; then
+    printf '\n'
+    warn "summary" "$FAILURE_COUNT uninstall operation(s) failed:"
+    printf '%s\n' "$FAILURE_SUMMARY"
+    return 1
+  fi
+
+  printf '\n'
+  ok "uninstall" "finished"
+  return 0
+}
+
+# Guarded so CI can source helpers without starting an uninstall. Under
+# `curl | bash`, BASH_SOURCE is unset and both sides resolve to "bash".
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+  main "$@"
+fi
