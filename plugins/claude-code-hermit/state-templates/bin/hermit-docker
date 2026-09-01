@@ -331,9 +331,29 @@ case "$CMD" in
     TOKEN_MODE="${STATUS_PARSED%%$'\n'*}"
     TOKEN_EXPIRY="${STATUS_PARSED##*$'\n'}"
     if [ "$TOKEN_MODE" = "true" ]; then
-      echo "[hermit] This hermit uses a long-lived login token (expires: ${TOKEN_EXPIRY})."
-      echo "[hermit] It renews itself over your channel — you'll be asked when it's due."
-      echo "[hermit] To renew now instead: hermit-docker setup-token"
+      echo "[hermit] This hermit currently uses a long-lived login token (expires: ${TOKEN_EXPIRY})."
+      echo "[hermit] Continuing switches it to a claude.ai sign-in: renewed about every 30 days"
+      echo "[hermit] from chat instead of yearly, and Remote Control works on that credential."
+      echo "[hermit] To keep the token and just renew it: hermit-docker setup-token"
+      echo ""
+    fi
+
+    # A running hermit already has a tmux server, so the sign-in can be driven the
+    # same way a channel-relayed renewal is: into a staged config dir the watchdog
+    # commits on restart. Only a container with no session yet (fresh install, the
+    # entrypoint still waiting for credentials) needs the interactive REPL path.
+    if cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+      echo "[hermit] Signing in with claude.ai."
+      echo "[hermit] → Open the link it prints, sign in, and paste the code back here"
+      echo "[hermit] → The credential is staged and applied when the hermit restarts"
+      echo ""
+      cd "$PROJECT_DIR" && "${DC[@]}" exec -it "$SERVICE" \
+        .claude-code-hermit/bin/hermit-run setup-token-mint terminal --target login
+      echo ""
+      echo "[hermit] Restarting the hermit so it picks up the new sign-in..."
+      cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" .claude-code-hermit/bin/hermit-watchdog restart reauth \
+        || echo "[hermit] Auto-restart failed — run: hermit-docker restart" >&2
+      echo "[hermit] Done. Renewal from here on is handled over your channel — no box access needed."
       exit 0
     fi
     AUTH_STATUS=$(cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" claude auth status --json 2>/dev/null || echo '{}')
@@ -372,6 +392,12 @@ case "$CMD" in
         echo "[hermit] Re-run hermit-docker login to try again." >&2
         exit 1
       fi
+      # Recorded only now: the mode must never be written before the credential it
+      # names exists, or a failed sign-in leaves the hermit configured for one it
+      # does not have.
+      cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" \
+        .claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json set auth_mode login \
+        >/dev/null 2>&1 || true
       echo "[hermit] Credentials saved. The hermit will start shortly."
     fi
     ;;

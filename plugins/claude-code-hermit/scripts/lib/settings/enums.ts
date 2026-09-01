@@ -31,6 +31,9 @@ export const VOICE_STYLE = ['default', 'Concise', 'custom'] as const;
 export const TELEMETRY_DEST = ['webhook'] as const;
 export const BACKUP_MODE = ['workspace', 'mirror'] as const;
 export const BACKUP_INCLUDE = ['transcripts'] as const;
+// `auth_mode`. Only the two an operator can choose: `external` (an env credential
+// outranks both files) is derived by resolveAuthMode, never declared in config.
+export const AUTH_MODE = ['login', 'token'] as const;
 
 // Not validated by validate-config.ts: Claude Code owns the permission-mode set
 // and adds to it independently of this plugin, so the hook stays permissive and

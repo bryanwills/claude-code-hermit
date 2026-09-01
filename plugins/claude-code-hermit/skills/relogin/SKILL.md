@@ -17,9 +17,10 @@ Use this when doctor warns that `setup-token` is expiring, or the operator asks 
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/setup-token-mint.ts status
 ```
 
-- `token_mode: false` → this hermit isn't on token auth. Tell the operator renewal is manual here (`hermit-docker setup-token` converts it), and stop.
+- `auth_mode: external` → an API key or cloud provider owns this hermit's credential. Nothing here can renew that; say so plainly and stop.
+- `pending: true` → a sign-in is already staged and applies at the next restart. Don't start a second one; offer to restart now instead.
 - `in_progress` non-null → a renewal is already running. Don't start a second one.
-- Otherwise report the current `expires_at` in plain language and continue.
+- Otherwise report the current `expires_at` in plain language and continue. Say which cadence this hermit is on when it's relevant: `auth_mode: login` renews about every 30 days, `token` about yearly.
 
 ## Step 1 — Mint and relay the link
 
@@ -68,7 +69,9 @@ It fires the restart detached and returns immediately. Anything you write after 
 
 ## Notes
 
-- The one-time link and the login code cross the channel; the token never does.
-- Installing the token parks any stored `/login` credential (`.credentials.json` → `.credentials.json.pre-token.bak`). Interactive sessions prefer a stored login over the env token, so an unparked file would 401 the hermit once its old access token lapsed. The rename is restorable; nothing is deleted.
-- Expiry is hermit-tracked in `state/setup-token.json` — the CLI exposes no expiry surface for these tokens, so that record is the only source of truth. Doctor's `credential-expiry` check reads it and warns 14 days out.
+- The one-time link and the login code cross the channel; the credential never does.
+- **In `login` mode nothing is installed by this skill.** The sign-in is written to a staging config dir and `await-token-and-install` only records a pointer to it; the watchdog moves it into place inside the restart in Step 3, where no session is refreshing the file underneath the write. So "signed in" and "in effect" are one restart apart, which is why the confirmation says nothing else is needed.
+- Installing a *token* parks any stored `/login` credential (`.credentials.json` → `.credentials.json.pre-token.bak`). Interactive sessions prefer a stored login over the env token, so an unparked file would 401 the hermit once its old access token lapsed. The rename is restorable; nothing is deleted.
+- Where expiry lives differs by mode: a token's is hermit-tracked in `state/setup-token.json` (the CLI exposes no expiry surface for those), a login's is `refreshTokenExpiresAt` inside `.credentials.json` — the one field a silent refresh does not move. Doctor's `credential-expiry` check reads whichever applies and warns 3 days out.
+- Switching modes is an intent, not an action: setting `auth_mode` records which credential the hermit *should* use, and nothing changes until this skill (or `hermit-docker login` / `setup-token`) actually signs in with it.
 - Renewal is container-internal on purpose: the token lives on the persistent config volume, not in `.env`, so nothing on the host has to be recreated.

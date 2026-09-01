@@ -263,6 +263,9 @@ Docker hermits on subscription auth can hold a long-lived `setup-token` (offered
 | `<config-dir>/.hermit-setup-token` | Yes, `0600` | Persistent volume, survives restarts, rotatable in place |
 | `state/setup-token.json` | No — only `{minted_at, expires_at}` | Doctor and the watchdog need expiry, not the secret |
 | `.env` / docker-compose | **No, deliberately** | `env_file` applies at container creation, so a token there could not be rotated without a host-side recreate |
+| `<config-dir>/.hermit-login-staging/` | Yes, transiently, `0700` | Where a relayed claude.ai sign-in lands in `auth_mode: login`. Emptied before each attempt, removed on abort, and consumed by the watchdog's commit during the next restart — so it holds a live credential only between a sign-in and the restart that follows it |
+| `state/pending-credential.json` | No — only `{staged_dir, staged_at}` | The watchdog needs to know a credential is waiting, not what it is |
+| `state/relay-unreachable.json` | No — only `{at}` | A suppression timestamp; carries nothing about the operator or the credential |
 | tmux env-file (`/tmp/.hermit-env-*`) | Transiently, `0600` | Sourced then deleted by the shell that launches claude |
 | Mint pane scrollback + capture file | Transiently, `0600` | Both destroyed on every exit path, including aborts |
 
@@ -321,6 +324,8 @@ Beyond the always-on baseline above, `/claude-code-hermit:docker-security` is an
 ---
 
 ### Known limitations
+
+- **The hermit accepts inbound peer messages from any Claude Code session on the box.** Claude Code holds a cross-session message purely on the sender's permission class, and a held one opens a dialog nobody answers on an unattended hermit — the watchdog's own socket wake included. `hermit-start` therefore writes `crossSessionInbound: "accept"` into the launch overlay (`--settings` is the only scope that can loosen this key; a project or local settings file is consulted only when it *tightens*). Local peers are not authenticated, so any session that can reach the inbox socket can put text into the hermit's next turn. Delivery is not authority: a peer message can neither answer a permission prompt nor carry settings authority, so this widens what the hermit *reads*, not what it may do — the deterministic gates and the tiered settings authority above are unchanged. The socket directory is `0700`, so the sender must already run as the same host UID. To opt out, set `crossSessionInbound` to `"hold"` or `"refuse"` in `~/.claude/settings.json` (boot leaves the key alone whenever your user settings already carry one), or to `"refuse"` in the project's `.claude/settings.json`.
 
 - **Backup is a third opt-in outward egress, and a denylist-shaped one.** With `backup.remote` set, the hermit pushes its whole footprint to that repository on a schedule with no model in the loop. Unlike telemetry's allowlisted bundle, a backup copies everything except what a refusal screen catches (secret-shaped filenames, the channel log, credential-shaped content under 512 KiB, oversized files) — that screen is hygiene, not a boundary, and you cannot restore from an allowlist. Point it only at a private repository you control, and audit `config.env` before enabling: it is free-form and is committed. The token is read from the environment or the project `.env`, never from `config.json`. `Bash(.claude-code-hermit/bin/hermit-run backup run*)` is pre-approved, which makes it a sanctioned push path that the hardened profile's `git push origin main*` and `*--no-verify*` denies do not cover; its blast radius is the nonce-tiered `backup.remote` and nothing else, and `backup setup` stays terminal-only. See [backup.md](backup.md).
 

@@ -106,6 +106,7 @@ Pass the **argument name**, not the dotted path — the script looks the path up
 | `escalation` | `escalation` | enum | `conservative` / `balanced` / `autonomous` | immediately |
 | `sign-off` | `sign_off` | string, nullable | any | immediately |
 | `remote` | `remote` | boolean | yes / no | next `hermit-start` |
+| `auth-mode` | `auth_mode` | enum, nullable | `login` / `token` | run `/claude-code-hermit:relogin` to sign in with the new method |
 | `model` | `model` | string, nullable | passed straight to `--model` | next `hermit-start` |
 | `boot-skill` | `boot_skill` | string, nullable | namespaced skill | next `hermit-start` |
 | `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` (a channel `/permission-mode auto\|acceptEdits\|default` changes the running session without changing this) |
