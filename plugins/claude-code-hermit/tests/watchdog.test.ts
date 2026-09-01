@@ -2513,6 +2513,24 @@ test('doctor checkWatchdog: scheduler_enabled false → ok, opted out, no instal
     expect(w.detail).not.toContain('hermit-watchdog install');
   }));
 
+// scheduler_enabled only gates hermit-start's OS-timer install. Docker's tick comes
+// from the entrypoint loop, which the flag cannot disable — so a stale flag carried
+// over from a host uninstall must not silence a genuinely dead container loop.
+test('doctor checkWatchdog: scheduler_enabled false + docker → still warns on a dead tick',
+  withHermit(async (h) => {
+    fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
+      JSON.stringify({
+        watchdog: { enabled: true, scheduler_enabled: false },
+        ...DOCTOR_BASE,
+      }, null, 2) + '\n');
+    patchRuntime(h, { runtime_mode: 'docker' });
+    setLastRun(h, isoAgo(1));
+    const w = await doctorWatchdogCheck(h);
+    expect(w.status).toBe('warn');
+    expect(w.detail).toContain('not firing');
+    expect(w.detail).toContain('force-recreate');
+  }));
+
 test('doctor checkWatchdog: restart tier disabled + hygiene active + fresh tick → ok, labels the tier split',
   withHermit(async (h) => {
     fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),

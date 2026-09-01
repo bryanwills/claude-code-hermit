@@ -1025,7 +1025,15 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
     const config = readSettledConfig(hermitDir);
     const wCfg = config.watchdog;
 
-    if (wCfg.scheduler_enabled === false) {
+    let runtime: Json = null;
+    try { runtime = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf-8')); } catch {}
+
+    // scheduler_enabled is host-scheduler policy only: it gates hermit-start's
+    // `hermit-watchdog install`. A Docker hermit's tick comes from the container
+    // entrypoint loop, which that flag cannot turn off — so honouring the opt-out
+    // there would report `ok` for a hermit whose loop is genuinely dead (a config
+    // carried over from a host `hermit-watchdog uninstall` before /docker-setup).
+    if (wCfg.scheduler_enabled === false && runtime?.runtime_mode !== 'docker') {
       return { id: 'watchdog', status: 'ok', detail: 'watchdog: scheduler opted out' };
     }
 
@@ -1040,9 +1048,6 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
     if (!wCfg.enabled && !hygieneActive) {
       return { id: 'watchdog', status: 'ok', detail: 'watchdog: disabled (opt-in via config.watchdog.enabled)' };
     }
-
-    let runtime: Json = null;
-    try { runtime = JSON.parse(fs.readFileSync(path.join(stateDir, 'runtime.json'), 'utf-8')); } catch {}
 
     // Ahead of the staleness gate: a unit that fails on every invocation is a
     // more specific diagnosis than "not firing", and waiting out STALE_MS to say

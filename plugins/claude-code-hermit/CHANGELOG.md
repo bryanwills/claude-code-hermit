@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `watchdog.scheduler_enabled: false` or `bin/hermit-watchdog uninstall`.
+- tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed
 - `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment. Docker still applies the hardened deny-pattern profile when chosen.
@@ -20,7 +20,7 @@
 ### Upgrade Instructions
 1. Run `/claude-code-hermit:hermit-evolve` as usual. The missing-key config merge (`newConfigKeys()`: missing leaves under present parents are adopted) adds `watchdog.scheduler_enabled: true` to existing configs. This is default-on. Existing `watchdog.enabled: false` values are never rewritten.
 2. The next tmux always-on boot performs one scheduler registration. That flip of `watchdog.enabled: true` happens only on a genuinely first registration (no timer/unit already present). A hygiene-only install (`enabled: false`, unit already present) stays hygiene-only.
-3. Opt out with `watchdog.scheduler_enabled: false` in `config.json`, or `.claude-code-hermit/bin/hermit-watchdog uninstall`. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
+3. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both `scheduler_enabled` and `enabled` false. Setting `watchdog.scheduler_enabled: false` in `config.json` by hand only stops future boots from re-registering; a timer already installed keeps ticking and keeps restarting. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
 4. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
 
 ## [1.2.53] - 2026-08-31

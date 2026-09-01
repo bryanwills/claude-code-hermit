@@ -41,7 +41,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings brief          — configure morning brief
 /claude-code-hermit:hermit-settings permissions    — configure unattended mode
 /claude-code-hermit:hermit-settings heartbeat      — enable/disable, interval, quiet mode, active hours
-/claude-code-hermit:hermit-settings watchdog       — enable/disable, stale_factor, wedge_floor, escalate_after, operator_grace, context hygiene compaction
+/claude-code-hermit:hermit-settings watchdog       — scheduler_enabled, enable/disable, stale_factor, wedge_floor, escalate_after, operator_grace, context hygiene compaction
 /claude-code-hermit:hermit-settings routines        — manage scheduled routines (add/edit/remove/enable/disable)
 /claude-code-hermit:hermit-settings idle             — set idle behavior (wait or discover)
 /claude-code-hermit:hermit-settings env              — view/edit environment variables
@@ -220,6 +220,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Watchdog (config.json watchdog)
 
+    scheduler_enabled      true
     enabled                false
     stale_factor           2
     wedge_floor            4h
@@ -233,7 +234,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     min_context_tokens     100000
     min_interval           4h
   ```
-- Ask: "Enable watchdog? (yes / no) [current: <value>]"
+- Ask: "Let each always-on boot register the OS scheduler? (yes / no) [current: <scheduler_enabled, absent = yes>]" — then "Enable watchdog restarts? (yes / no) [current: <enabled>]"
 - If yes: show the configurable sub-fields before asking each one:
   ```
   Watchdog sub-fields (press Enter to keep current value):
@@ -246,8 +247,8 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     context_clear_tokens   — emergency /clear when prompt tokens exceed this (e.g. 700000, 0=off) [current]
   ```
   Then ask each field in sequence.
-- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
-  - Note: "Changes take effect on the next watchdog run. To register or remove the OS timer: `bin/hermit-watchdog install` / `bin/hermit-watchdog uninstall` — on systemd/launchd hosts, a first install enables it and uninstall disables it, so you don't need to set `watchdog.enabled` by hand there; a later re-install leaves your setting alone. Docker hermits run the watchdog from the entrypoint loop — no install step needed."
+- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.scheduler_enabled`, `watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
+  - Note: "Changes take effect on the next watchdog run. `scheduler_enabled` (default true) is the OS-timer policy a tmux always-on boot reads: every `hermit-start` registers the timer unless it is false. Setting it false by hand only stops future boots from re-registering — to remove a timer that is already installed run `bin/hermit-watchdog uninstall`, which deletes the unit and sets both `scheduler_enabled` and `enabled` false. `bin/hermit-watchdog install` re-registers it, and a first registration also sets `enabled: true`; a later re-install leaves `enabled` as you set it. Docker hermits run the watchdog from the entrypoint loop — no install step needed, and `scheduler_enabled` does not apply there."
 - **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above, same as `context_clear_tokens`): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```
   Context hygiene compact sub-fields (press Enter to keep current value):
