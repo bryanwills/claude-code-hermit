@@ -29,6 +29,8 @@ export const BUDGET_ACTION = ['alert', 'pause'] as const;
 // persists the lowercase key (read off the shipped binary — the docs never state it).
 export const VOICE_STYLE = ['default', 'Concise', 'custom'] as const;
 export const TELEMETRY_DEST = ['webhook'] as const;
+export const BACKUP_MODE = ['workspace', 'mirror'] as const;
+export const BACKUP_INCLUDE = ['transcripts'] as const;
 
 // Not validated by validate-config.ts: Claude Code owns the permission-mode set
 // and adds to it independently of this plugin, so the hook stays permissive and

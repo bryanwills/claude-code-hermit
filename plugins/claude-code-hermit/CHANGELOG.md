@@ -4,9 +4,12 @@
 
 ### Added
 - MCP stdio control surface (`hermit-run mcp-server --roots …`) exposes `list_hermits`, `get_status`, `get_health`, `get_brief`, `get_version`, and `wake` for external orchestrators.
+- `hermit-run backup <setup|run|status>` commits the hermit's own state, config, and auto-memory on a cron schedule from the watchdog tick, with no model turn, and pushes to `backup.remote` over https using a token from the environment or the project `.env`. `workspace` mode commits the project repo; `mirror` mode copies into a separate repo so a hermit inside a project repo leaves it untouched. Secret-shaped paths, `state/channel-log.sqlite*`, oversized files and nested repos are refused per path. Never pulls, rebases, merges or force-pushes: a diverged remote is reported, not resolved. Ships off; enable with `backup setup` from a terminal.
+- `/hermit-doctor` gains a `backup` check (thirty-one checks): warns when two scheduled windows pass without a success, when a push fails three times running, or when the remote has diverged.
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed
+- Every `backup.*` key joins the nonce tier: changing them needs the settings chat plus a confirmation code, and `backup setup` is terminal-only. A remote set from content the hermit merely read would be a standing exfiltration path.
 - `/hatch` lists `tmux always-on` before `Docker always-on`, making tmux the pre-selected deployment. Docker still applies the hardened deny-pattern profile when chosen.
 - The `/hatch` channel question asks "How do you want to communicate with your agent?" in both branches, and labels the no-channel option `Claude app (for now)` instead of `None`: push notifications + Remote Control, with Discord/Telegram pairable later.
 - The `/hatch` confirm preview renders as a single markdown table — chosen answers echoed verbatim plus template-derived defaults tagged `(default)` — ending with a `/hermit-settings` pointer. The final report is now minimal: agent-name headline, warn-only disk audit (missing artifacts surface as fixable warnings instead of a full file table), next steps, and a config-reference link.
@@ -23,7 +26,8 @@
 1. Run `/claude-code-hermit:hermit-evolve` as usual. The missing-key config merge (`newConfigKeys()`: missing leaves under present parents are adopted) adds `watchdog.scheduler_enabled: true` to existing configs. This is default-on. Existing `watchdog.enabled: false` values are never rewritten.
 2. The next tmux always-on boot performs one scheduler registration. That flip of `watchdog.enabled: true` happens only on a genuinely first registration (no timer/unit already present). A hygiene-only install (`enabled: false`, unit already present) stays hygiene-only.
 3. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both `scheduler_enabled` and `enabled` false. Setting `watchdog.scheduler_enabled: false` in `config.json` by hand only stops future boots from re-registering; a timer already installed keeps ticking and keeps restarting. A pre-upgrade deliberate uninstall may be re-registered once on the next tmux boot: historical intent is not recoverable.
-4. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
+4. The same merge adds the inert `backup` block (`enabled: false`). To turn it on, run `.claude-code-hermit/bin/hermit-run backup setup` from a terminal — never from chat; it asks for a mode, a schedule and a private remote, rewrites `.gitignore` in workspace mode, and takes the first snapshot. Docker installs also need `HERMIT_BACKUP_TOKEN=<token>` in the project-root `.env` followed by `hermit-docker update`; `github.com` is already in the netguard allowlist. Leave the block untouched to keep backups off.
+5. Install runs on every qualifying boot, so two messages can reappear and that is intended, not a regression: a hygiene-only install prints the enable-guidance line each boot, and cron-fallback hosts re-print the crontab instructions each boot.
 
 ## [1.2.53] - 2026-08-31
 

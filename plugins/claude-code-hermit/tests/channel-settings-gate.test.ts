@@ -135,6 +135,19 @@ describe('channelVerdict — policy', () => {
     expect(channelVerdict('set', 'voice')).toBe('nonce');
   });
 
+  test('the whole backup subtree is nonce-tier — a remote is a standing exfil path', () => {
+    // backup.remote is where the hermit's entire footprint gets pushed on a
+    // schedule. The container is gated too, so `set backup '<object>'` cannot
+    // carry a remote past a leaf-only rule.
+    expect(channelVerdict('set', 'backup')).toBe('nonce');
+    expect(channelVerdict('set', 'backup.remote')).toBe('nonce');
+    expect(channelVerdict('set', 'backup.push')).toBe('nonce');
+    // Once a remote exists these decide whether, and what, leaves the machine.
+    expect(channelVerdict('set', 'backup.enabled')).toBe('nonce');
+    expect(channelVerdict('set', 'backup.include')).toBe('nonce');
+    expect(channelVerdict('unset', 'backup.remote')).toBe('nonce');
+  });
+
   test('monitors are nonce-tier — every entry carries a shell command', () => {
     // validate-config.ts requires `monitors[].command`, and the watch skill
     // registers it as a Monitor subprocess at session start. A config-declared

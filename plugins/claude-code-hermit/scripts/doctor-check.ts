@@ -30,6 +30,8 @@ import { promptTokensOf, compactibleTokens } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
 import { readJson } from './lib/cli';
+import { compileCron } from './lib/cron-match';
+import { secondMostRecentMatch } from './lib/backup';
 import { findResident } from './lib/session-registry';
 import { bootMismatch, monitorFreshness } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
@@ -2438,7 +2440,71 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     // than adding both timeouts to every doctor run. Promise.all preserves
     // order, so the pinned check-id sequence is unchanged.
     ...(await Promise.all([checkChannelLiveness(p), checkPeerInbox(p)])),
+    checkBackup(p),
   ];
+}
+
+/**
+ * Is the scheduled state backup keeping up?
+ *
+ * The backup itself is model-free — this check is the only path from a failing
+ * backup back into a model turn, so it has to be the one that notices. Threshold
+ * is two missed scheduled windows rather than one: a single miss is what a reboot
+ * or a busy tick looks like, and waking the operator for that trains them to
+ * ignore the check. Never `fail` — a stale backup is not a liveness problem, and
+ * doctor's fail tier is for things that stop the hermit working.
+ */
+function checkBackup(p: DoctorPaths = PATHS) {
+  const id = 'backup';
+  try {
+    const config = readSettledConfig(p.hermitDir) as any;
+    const backup = config?.backup ?? {};
+    if (backup.enabled !== true) {
+      return { id, status: 'ok', detail: 'backup: not configured (opt-in from a terminal: .claude-code-hermit/bin/hermit-run backup setup)' };
+    }
+
+    const status = readJson(path.join(p.hermitDir, 'state', 'backup-status.json')) as any;
+    const schedule = readJson(path.join(p.hermitDir, 'state', 'backup-schedule.json')) as any;
+    const mode = backup.mode ?? 'workspace';
+
+    const compiled = compileCron(String(backup.schedule ?? ''));
+    const prev2 = compiled
+      ? secondMostRecentMatch(compiled, typeof config?.timezone === 'string' ? config.timezone : null, new Date())
+      : null;
+
+    const successMs = status?.last_success_at ? Date.parse(status.last_success_at) : NaN;
+    const anchorMs = Date.parse(status?.configured_at ?? schedule?.last_consumed_mark ?? '');
+    const pushBroken = backup.remote && backup.push === true
+      && (status?.push === 'diverged' || (status?.consecutive_push_failures ?? 0) >= 3);
+
+    // A schedule that fires less often than the lookback covers can't be judged
+    // on missed windows; report the age and let the push state speak.
+    if (prev2 && !pushBroken) {
+      const missed = Number.isFinite(successMs)
+        ? successMs < prev2.getTime()
+        : !(Number.isFinite(anchorMs) && anchorMs > prev2.getTime());
+      if (missed) {
+        const what = status?.last_result ? `${status.last_result}${status.last_error ? `: ${status.last_error}` : ''}` : 'no run recorded';
+        const since = Number.isFinite(successMs) ? `last success ${Math.round((Date.now() - successMs) / 3600000)}h ago` : 'never succeeded';
+        return { id, status: 'warn', detail: `backup: two scheduled runs missed — ${since} (${what})` };
+      }
+    }
+
+    if (pushBroken) {
+      const detail = status.push === 'diverged'
+        ? 'backup: commits are landing locally but the remote has diverged — reconcile manually (docs/backup.md)'
+        : `backup: push failing (${status.consecutive_push_failures}× in a row) — ${status.last_push_error ?? 'no detail'}`;
+      return { id, status: 'warn', detail };
+    }
+
+    if (!Number.isFinite(successMs)) {
+      return { id, status: 'ok', detail: `backup: configured (${mode} mode), first run pending` };
+    }
+    const ageH = (Date.now() - successMs) / 3600000;
+    return { id, status: 'ok', detail: `backup: last success ${ageH < 1 ? `${Math.round(ageH * 60)}m` : `${ageH.toFixed(1)}h`} ago (${mode} mode, push ${status.push ?? 'disabled'})` };
+  } catch (e: any) {
+    return { id, status: 'fail', detail: `check failed: ${e.message}` };
+  }
 }
 
 // ----------------- Escalation ledger (issue #690) -----------------
@@ -2566,7 +2632,7 @@ export {
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
   checkRoutinePrecheck, checkRawSize,
-  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkClassifierDenials, checkChannelLiveness, checkPeerInbox,
+  checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkClassifierDenials, checkChannelLiveness, checkPeerInbox, checkBackup,
   satisfiesRange, cidrOverlap,
   // Tests build their own paths for a scratch dir; the CLI runs on the argv-derived default.
   resolvePaths,
