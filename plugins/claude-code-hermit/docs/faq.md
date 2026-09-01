@@ -82,7 +82,21 @@ For always-on Docker setups, see [Moving to a new host](always-on.md#moving-to-a
 
 ---
 
+## How do I uninstall a hermit?
+
+From the hermit's folder, run:
+
+```bash
+curl -fsSL https://gtapps.github.io/claude-code-hermit/uninstall.sh | bash
+```
+
+This removes the watchdog, stops the session, and uninstalls the folder-scoped plugin. State is kept by default and deleted only when you confirm on an interactive terminal; the script then prints a Claude prompt for cleaning shared-file leftovers. Only this folder is affected, so the marketplace registration and other hermits remain untouched. To deactivate only the watchdog, run `.claude-code-hermit/bin/hermit-watchdog uninstall`; to stop always-on mode but keep the hermit, run `.claude-code-hermit/bin/hermit-stop` or `.claude-code-hermit/bin/hermit-docker down`.
+
+---
+
 ## How do I reset everything and start over?
+
+For full removal, follow [How do I uninstall a hermit?](#how-do-i-uninstall-a-hermit). To discard the state and hatch again without uninstalling the plugin:
 
 ```bash
 rm -rf .claude-code-hermit/

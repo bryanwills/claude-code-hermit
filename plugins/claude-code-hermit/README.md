@@ -157,6 +157,16 @@ claude plugin update claude-code-hermit@claude-code-hermit --scope local
 
 Or run `.claude-code-hermit/bin/hermit-update` (local/tmux) or `.claude-code-hermit/bin/hermit-docker update` (Docker): one command that moves the pin, reloads the session, and runs `hermit-evolve` for you.
 
+### Uninstalling
+
+From the hermit's folder:
+
+```
+curl -fsSL https://gtapps.github.io/claude-code-hermit/uninstall.sh | bash
+```
+
+This removes the watchdog, stops the session, uninstalls the plugin, keeps state unless you confirm deletion, and prints a Claude prompt for the shared-file cleanup. To deactivate only the watchdog, run `.claude-code-hermit/bin/hermit-watchdog uninstall`; to stop always-on mode but keep the hermit, run `.claude-code-hermit/bin/hermit-stop` or `.claude-code-hermit/bin/hermit-docker down`. Only this folder is affected; the shared marketplace registration and other hermits are left untouched.
+
 ---
 
 ## Configure it

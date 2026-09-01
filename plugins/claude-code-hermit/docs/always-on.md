@@ -221,6 +221,8 @@ When Docker is running, the attach command is printed automatically.
 
 ## Graceful Shutdown
 
+For complete removal rather than a graceful stop, see [How do I uninstall a hermit?](faq.md#how-do-i-uninstall-a-hermit).
+
 The entrypoint traps SIGTERM (sent by `docker compose down`, `docker stop`, or system shutdown). On signal:
 
 1. Checks if the session is already closed (skips if `hermit-docker down` already handled it)
