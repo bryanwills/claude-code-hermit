@@ -78,7 +78,7 @@ Start the heartbeat as a persistent CC Monitor subprocess.
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts start-check .claude-code-hermit
    ```
    - `FRESH|interval=<s>` → the registered monitor matches config and is ticking. **Stop here**: log that line, make no `TaskStop`, `Monitor`, `Cron*` or file write. This is the common case when the daily anchor calls `start`, and it is the whole saving.
-   - `REARM|<reason>` → continue. The lines after it are the plan: `OLD_TASK:<id>`, `FIRST_START:1`, `INTERVAL:<s>`, `CMD:<command>`. The verb has already cleared the previous monitor's liveness record.
+   - `REARM|<reason>` → continue. The lines after it are the plan: `OLD_TASK:<id>`, `FIRST_START:1`, `INTERVAL:<s>`, `CMD:<command>`. The verb has already cleared the previous monitor's liveness record and stamped `armed_at` into `state/heartbeat-monitor.runtime.json` — the provenance `start-commit` uses to tell this arm's first tick from a leftover one.
 2. If `OLD_TASK:<id>` was printed, `TaskStop` it — ignore not-found errors (the monitor may have already exited).
 3. Sweep any pre-existing CronCreate entry for the old recurring-cron approach: `CronList` → if an entry's `prompt` matches `/claude-code-hermit:heartbeat run`, `CronDelete` it. Idempotent.
 4. Register a new Monitor:
@@ -90,7 +90,7 @@ Start the heartbeat as a persistent CC Monitor subprocess.
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts start-commit .claude-code-hermit <task-id>
    ```
-   It waits for the monitor's first liveness tick (≤10s), writes `state/heartbeat-monitor.runtime.json` and appends the SHELL.md Monitoring line.
+   It waits for the monitor's first liveness tick (≤10s), writes `state/heartbeat-monitor.runtime.json` and appends the SHELL.md Monitoring line. `started_at` is that first tick when it lands at or after `armed_at`, so the readers that compare the two see the live monitor as fresh immediately; only an unattributable tick falls back to the commit time.
    - `OK|registered|interval=<s>` → done; log it.
    - `DEAD|liveness-absent` → the subprocess never ticked (seccomp / nested-userns, the same failure that kills `/watch` streams). Report it: the heartbeat will not run this session.
 

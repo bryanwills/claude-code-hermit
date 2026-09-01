@@ -29,7 +29,7 @@ import { appendShellLine } from '../md-write';
 import { waitForFirstTick } from '../monitor-health';
 import { readBootId } from '../routines/registry';
 import { currentHHMMOrUTC, resolveHermitNowMs } from '../time';
-import { heartbeatCommand, heartbeatHealth, heartbeatInterval } from './monitor-cmd';
+import { hasStartedRegistration, heartbeatCommand, heartbeatHealth, heartbeatInterval } from './monitor-cmd';
 
 type Json = any;
 
@@ -73,7 +73,7 @@ function cmdCheck(hermitDir: string, config: Json): void {
   if (typeof runtime?.task_id === 'string' && runtime.task_id) {
     process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
-  if (!runtime || typeof runtime.started_at !== 'string') process.stdout.write('FIRST_START:1\n');
+  if (!hasStartedRegistration(runtime)) process.stdout.write('FIRST_START:1\n');
   process.stdout.write(`INTERVAL:${interval}\n`);
   process.stdout.write(`CMD:${heartbeatCommand(PLUGIN_ROOT, hermitDir, config)}\n`);
 }
@@ -93,7 +93,7 @@ async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promi
   const peekAt = readJson(livenessPath(hermitDir))?.last_peek_at;
   const peekMs = typeof peekAt === 'string' ? Date.parse(peekAt) : NaN;
   const armedMs = typeof armedAt === 'string' ? Date.parse(armedAt) : NaN;
-  const adopt = Number.isFinite(peekMs) && Number.isFinite(armedMs)
+  const adopt = live && Number.isFinite(peekMs) && Number.isFinite(armedMs)
     && peekMs >= Math.floor(armedMs / 1000) * 1000;
 
   writeJson(runtimePath(hermitDir), {

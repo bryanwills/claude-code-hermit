@@ -275,6 +275,17 @@ describe('heartbeat start-check', () => {
     expect(out.some(l => l.startsWith('OLD_TASK:'))).toBe(false);
   });
 
+  // The verb stamps `armed_at` into the runtime file, so an arm abandoned before
+  // start-commit leaves a record with no `started_at`. That is still "never
+  // registered", not a drifted interval.
+  test('an abandoned arm still reads as a FIRST_START re-arm', async () => {
+    const hermit = fixture();
+    await run('start-check', [hermit]);
+    const out = lines(await run('start-check', [hermit]));
+    expect(out[0]).toBe('REARM|runtime-missing');
+    expect(out).toContain('FIRST_START:1');
+  });
+
   // A trusted tick (later than started_at) that has since aged past 3× the interval.
   test('a registered monitor that stopped ticking re-arms', async () => {
     const hermit = fixture();

@@ -21,6 +21,16 @@ export const STARTUP_GRACE_SECS = 120;
 export type LegHealth = { healthy: boolean; reason: string };
 
 /**
+ * Has this registration confirmed a first tick? `stop` clears the runtime file to
+ * `{}` and `start-check` stamps only `armed_at` before the monitor is registered,
+ * so neither state is a registration. `heartbeatHealth` (`runtime-missing`) and
+ * `start-check` (`FIRST_START`) must agree on this.
+ */
+export function hasStartedRegistration(runtime: Json): boolean {
+  return !!runtime && typeof runtime.started_at === 'string';
+}
+
+/**
  * Namespace a freshness reason to its monitor leg. Some of the predicate's own
  * reasons (`liveness-absent`, `liveness-predates-start`) already carry the prefix;
  * adding a second one produced `liveness-liveness-absent`.
@@ -46,7 +56,7 @@ export function heartbeatCommand(pluginRoot: string, hermitDir: string, config: 
 export function heartbeatHealth(hermitDir: string, pluginRoot: string, config: Json, nowMs: number): LegHealth {
   if (config?.heartbeat?.enabled === false) return { healthy: true, reason: 'disabled' };
   const runtime = readJson(path.join(hermitDir, 'state', 'heartbeat-monitor.runtime.json'));
-  if (!runtime) return { healthy: false, reason: 'runtime-missing' };
+  if (!hasStartedRegistration(runtime)) return { healthy: false, reason: 'runtime-missing' };
   if (bootMismatch(runtime.boot_id, readBootId(hermitDir))) {
     return { healthy: false, reason: 'boot-mismatch' };
   }
