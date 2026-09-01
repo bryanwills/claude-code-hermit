@@ -367,10 +367,12 @@ function getPaneHash(sessionName: string, world: World = REAL_WORLD): string | n
 // modal replaces the composer rather than rendering above it, so the footer anchor
 // below keeps the composer out of every match.
 const PENDING_OPTION_RE = /❯\s+\S/;
-// A dialog footer must terminate the visible pane. Both spellings are load-bearing:
-// AskUserQuestion and permission prompts end "· Esc to cancel", while a wizard step
-// that cannot be cancelled offers only "Enter to continue".
-const PENDING_FOOTERS = ['Esc to cancel', 'Enter to continue'];
+// A dialog footer must terminate the visible pane. All three spellings are
+// load-bearing: AskUserQuestion and permission prompts end "· Esc to cancel", a
+// wizard step that cannot be cancelled offers only "Enter to continue", and the
+// held-peer-message dialog (CC 2.1.257, captured live) ends on its own last option
+// with no footer line at all — so that option's text is the anchor.
+const PENDING_FOOTERS = ['Esc to cancel', 'Enter to continue', 'Deliver this message to Claude'];
 
 // Only the pane TAIL counts: a live blocking modal renders at the bottom of the
 // pane, whereas the same tokens appearing in scrollback or quoted tool output
@@ -1064,8 +1066,9 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
   // the harness and read at the next tool boundary, so it reaches a session whose
   // pane is mid-tool, which is exactly the state a wedge probe finds. What it
   // cannot do is report its own outcome: `crossSessionInbound: refuse` drops the
-  // message silently, a bypassPermissions receiver holds it behind a dialog that
-  // expires unseen, and a model may simply decline to act on the text — all three
+  // message silently, a receiver whose inbound controls still hold it (one launched
+  // without the hermit's overlay, or an operator-set `hold`) leaves it behind a
+  // dialog, and a model may simply decline to act on the text — all three
   // look identical to a successful write. So the fallback is keyed on the effect
   // instead: if the NEXT due nudge still finds the heartbeat stale, the post did
   // not work, whatever the wire said, and this one types. One rule covers dead,

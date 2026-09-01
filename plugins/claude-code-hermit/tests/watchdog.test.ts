@@ -594,6 +594,19 @@ describe('dead session with channel configured', () => {
 const PENDING_QUESTION_PANE =
   ' Which color do you prefer?\n\n❯ 1. Red\n  2. Green\n  3. Blue\n\nEnter to select · Esc to cancel';
 
+// CC 2.1.257's held-peer-message dialog, captured verbatim from a live probe: a
+// bypassPermissions guest messaging a prompting session. It carries neither footer
+// spelling — the pane ends on the dialog's own last option.
+const HELD_PEER_MESSAGE_PANE = [
+  ' Held message from another session',
+  '  Another Claude session sent a message: from uds:/run/user/1000/cc-socks/2387465.sock',
+  '  The sending session\'s permission mode class doesn\'t match this session\'s, so it wasn\'t delivered automatically.',
+  '  Message body (this is what will be delivered):',
+  '  «Probe ping X1 from a bypass guest: no action needed, do not reply.»',
+  '  ❯ Deny — drop it and tell the sender it was declined',
+  '    Deliver this message to Claude',
+].join('\n');
+
 // CC 2.1.233's first-run wizard, captured verbatim. The selector is "❯ Continue" — no digit,
 // which is precisely what the old numbered-option regex could not see.
 const AUTO_MODE_WIZARD_PANE = [
@@ -633,6 +646,14 @@ describe('hasPendingQuestion tail-scan (#8 false-positive guard)', () => {
     // terminates the pane there.
     const idle = 'Boot summary\n  - Session: idle\n\n❯ Try "how does <filepath> work?"\n\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents';
     expect(hasPendingQuestion(idle)).toBe(false);
+  });
+
+  test('a held peer message is a pending question', () => {
+    expect(hasPendingQuestion(HELD_PEER_MESSAGE_PANE)).toBe(true);
+  });
+
+  test('a held peer message still matches with blank terminal rows below it', () => {
+    expect(hasPendingQuestion(`${HELD_PEER_MESSAGE_PANE}\n${'\n'.repeat(20)}`)).toBe(true);
   });
 
   test('a genuine modal still matches with blank terminal rows below it', () => {

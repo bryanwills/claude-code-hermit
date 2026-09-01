@@ -2167,6 +2167,20 @@ async function checkChannelLiveness(p: DoctorPaths = PATHS) {
 }
 
 /**
+ * True when the launch overlay this boot rendered carries `crossSessionInbound:
+ * accept`. Absent or unreadable counts as false — the strict reading, since a
+ * missing overlay is one the session was never launched with.
+ */
+function overlayAcceptsInbound(stateDir: string): boolean {
+  try {
+    const raw = fs.readFileSync(path.join(stateDir, 'claude-settings.overlay.json'), 'utf8');
+    return JSON.parse(raw)?.crossSessionInbound === 'accept';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Peer inbox — can the watchdog's socket wake actually reach the resident?
  *
  * The wake is invisible on the wire: `postToSession` reports that bytes were
@@ -2215,11 +2229,14 @@ async function checkPeerInbox(p: DoctorPaths = PATHS) {
     }
 
     // A bypassPermissions receiver HOLDS an unauthenticated post behind an
-    // approval dialog that expires unseen, and repo-scope settings cannot lower
-    // that (they are consulted only when they tighten). So the wake is inert
-    // there regardless of what this hermit wrote at boot.
+    // approval dialog that expires unseen — unless the launch overlay carries
+    // `crossSessionInbound: accept`, the only scope that can loosen the key
+    // (repo-scope settings are consulted only when they tighten). Reading the
+    // overlay is reading the effective answer: boot omits the key there exactly
+    // when the operator's own user settings already set one, and an overlay that
+    // was never written is one the session was never launched with.
     const read = readConfigOrCovered(id, p);
-    if (!('covered' in read) && read.config?.permission_mode === 'bypassPermissions') {
+    if (!('covered' in read) && read.config?.permission_mode === 'bypassPermissions' && !overlayAcceptsInbound(stateDir)) {
       notes.push('bypassPermissions holds peer messages — wedge nudge will type');
     }
 

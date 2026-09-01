@@ -968,36 +968,13 @@ function writeSettingsEnv(
   if (mirroredLanguage) settings.language = mirroredLanguage;
   else delete settings.language;
 
-  // Cross-session inbox, for the watchdog's socket wake.
-  //
-  // Claude Code decides per message when no crossSessionInbound value applies,
-  // and the rule is about permission classes: a session that PROMPTS for
-  // permissions (auto, acceptEdits, dontAsk — the hermit default) is delivered
-  // anything that doesn't claim to bypass, while a session that BYPASSES holds
-  // every message that doesn't claim to bypass too, behind an approval dialog
-  // that expires after dialogExpiry. The watchdog's post claims no class at all,
-  // so on a bypassPermissions hermit the wake would sit in a dialog nobody is
-  // watching and be dropped five minutes later — and the socket write returns
-  // success either way, so nothing downstream can see it happen.
-  //
-  // The `accept` below does NOT fix that, and cannot: Claude Code consults a
-  // project/local settings file for this key only when it TIGHTENS the value
-  // ({accept:0, hold:1, refuse:2}, applied only if the repo value is strictly
-  // greater), so an `accept` written here can never lower strictness and the mode
-  // default (`hold`) stands. Reaching a bypass hermit means user-scope settings, a
-  // `--settings` file, or managed policy — each of which changes sessions this
-  // hermit does not own, so it is the operator's call, not a boot side effect. The
-  // write is kept only so the value is already correct if that scope ever moves;
-  // a bypass hermit's wedge nudge falls back to typing, as it did before.
-  //
-  // Only for that mode: everywhere else the default already delivers, and writing
-  // the key would widen inbound handling for no gain.
-  //
-  // Only ever REMOVE the value this function wrote. A repo-scope settings file may
-  // tighten crossSessionInbound, so an operator's own `hold`/`refuse` there is live
-  // — deleting it on every boot would strip an opt-out the operator set deliberately.
-  if (config.permission_mode === 'bypassPermissions') settings.crossSessionInbound = 'accept';
-  else if (settings.crossSessionInbound === 'accept') delete settings.crossSessionInbound;
+  // Cross-session inbox: the `accept` lives in the launch overlay
+  // (renderClassifierOverlay), the only scope that can loosen this key — a
+  // project/local file may tighten it, never lower strictness, so an `accept`
+  // written here was silently inert. Clean up the one earlier boots wrote, but
+  // leave an operator's own `hold`/`refuse`: that direction tightens, so it is a
+  // live opt-out rather than our own leftover.
+  if (settings.crossSessionInbound === 'accept') delete settings.crossSessionInbound;
 
   // Messages to a session on ANOTHER machine travel through Anthropic's servers;
   // same-machine peers never do. `remote` is this hermit's own switch for leaving
@@ -1097,6 +1074,20 @@ function artifactGrantApplies(config: Json): boolean {
 }
 
 /**
+ * True when the operator has set `crossSessionInbound` in their own user settings.
+ * Unreadable or malformed counts as unset — the same fail-open the rest of boot
+ * takes on a settings file it cannot parse.
+ */
+function userScopeSetsInbound(): boolean {
+  try {
+    const raw = fs.readFileSync(path.join(defaultConfigDir(), 'settings.json'), 'utf-8');
+    return 'crossSessionInbound' in (JSON.parse(raw) ?? {});
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Render the per-session auto-mode classifier overlay and return its absolute
  * path (null when it could not be written — boot continues without it).
  *
@@ -1121,10 +1112,29 @@ function renderClassifierOverlay(config: Json): string | null {
     autoMode.allow = ['$defaults', automodeAllowEntry(path.join(defaultConfigDir(), 'plugins'), PLUGIN_ROOT)];
     autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
   }
+  // Cross-session inbox. Claude Code holds an inbound peer message purely on
+  // permission class: a prompting receiver (auto/acceptEdits/dontAsk — the hermit
+  // default) holds anything from a sender that identifies as bypassPermissions,
+  // and a bypassPermissions receiver holds everything that doesn't. A held message
+  // opens a dialog nobody is watching on an unattended hermit and is dropped when
+  // it expires — including the watchdog's own socket wake. `accept` here is the
+  // only scope that can reach it: project and local settings may only TIGHTEN
+  // crossSessionInbound, while --settings sits directly below managed policy.
+  //
+  // Delivery is not authority — a peer message can't answer a permission prompt or
+  // change configuration, so accepting one widens what the hermit reads, not what
+  // it may do.
+  //
+  // An operator's own value in user settings wins: writing the key here would
+  // silently override the hold or refuse they set for every session on the machine.
+  // A project- or local-scope refuse still opts out, since that direction tightens.
+  const overlay: Json = { autoMode };
+  if (!userScopeSetsInbound()) overlay.crossSessionInbound = 'accept';
+
   const file = path.resolve(STATE_DIR, 'claude-settings.overlay.json');
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    writeFileAtomic(file, JSON.stringify({ autoMode }, null, 2) + '\n');
+    writeFileAtomic(file, JSON.stringify(overlay, null, 2) + '\n');
     return file;
   } catch (e: any) {
     console.log(`[hermit] WARNING: classifier overlay not written (${e?.message ?? e}) — continuing boot without it.`);

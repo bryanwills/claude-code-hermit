@@ -1126,27 +1126,34 @@ describe('writeSettingsEnv', () => {
     expect(readSettings().env ?? {}).not.toContainKey('AGENT_HOOK_PROFILE');
   });
 
-  // The watchdog wakes the resident by posting on its inbox socket. A
-  // bypassPermissions session holds an unauthenticated post behind an approval
-  // dialog and drops it when the dialog expires — invisibly, since the write
-  // still succeeds — so that mode needs the key to be reachable at all.
-  test('bypassPermissions → crossSessionInbound accept', () => {
+  // The `accept` moved to the launch overlay: a project/local file may only
+  // TIGHTEN crossSessionInbound, so an `accept` written here never applied.
+  test('bypassPermissions → key not written here', () => {
     writeConfig({ permission_mode: 'bypassPermissions' });
     captureLog(() => writeSettingsEnv(loadConfig()));
-    expect(readSettings().crossSessionInbound).toBe('accept');
+    expect(readSettings()).not.toContainKey('crossSessionInbound');
   });
 
-  test('prompting modes deliver by default → key not written', () => {
+  test('prompting modes → key not written here', () => {
     writeConfig({ permission_mode: 'auto' });
     captureLog(() => writeSettingsEnv(loadConfig()));
     expect(readSettings()).not.toContainKey('crossSessionInbound');
   });
 
-  test('permission_mode change back → the stale accept is removed', () => {
+  test('an accept an earlier boot wrote is cleaned up', () => {
     writeSettings({ crossSessionInbound: 'accept' });
     writeConfig({ permission_mode: 'auto' });
     captureLog(() => writeSettingsEnv(loadConfig()));
     expect(readSettings()).not.toContainKey('crossSessionInbound');
+  });
+
+  // Tightening is the one direction this scope can take, so a refuse here is the
+  // operator's live opt-out, not our leftover.
+  test("an operator's own refuse survives", () => {
+    writeSettings({ crossSessionInbound: 'refuse' });
+    writeConfig({ permission_mode: 'auto' });
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings().crossSessionInbound).toBe('refuse');
   });
 
   // Cross-MACHINE peer messages leave the box through Anthropic's servers;
@@ -1386,6 +1393,32 @@ describe('renderClassifierOverlay', () => {
     const overlay = readOverlay();
     expect(overlay.autoMode.allow).toBeUndefined();
     expect(overlay.autoMode.environment).toBeUndefined();
+  });
+
+  // --settings is the only scope that can loosen this key: project and local
+  // files may tighten it, never lower strictness, so this is what lets a peer
+  // message from a bypassPermissions session reach the hermit at all.
+  test('accepts inbound peer messages, in every permission mode', () => {
+    for (const permission_mode of ['auto', 'acceptEdits', 'bypassPermissions']) {
+      renderClassifierOverlay({ permission_mode });
+      expect(readOverlay().crossSessionInbound).toBe('accept');
+    }
+  });
+
+  // The operator's user-scope value covers every session on the machine; the
+  // overlay outranks it, so writing ours would silently override their choice.
+  test("defers to the operator's own value in user settings", () => {
+    // The suite points CLAUDE_CONFIG_DIR at a path that does not exist, so the
+    // absent-file case is the default everywhere else in this describe.
+    const userSettings = path.join(process.env.CLAUDE_CONFIG_DIR!, 'settings.json');
+    fs.mkdirSync(path.dirname(userSettings), { recursive: true });
+    fs.writeFileSync(userSettings, JSON.stringify({ crossSessionInbound: 'hold' }));
+    try {
+      renderClassifierOverlay({});
+      expect(readOverlay()).not.toContainKey('crossSessionInbound');
+    } finally {
+      fs.rmSync(path.dirname(userSettings), { recursive: true, force: true });
+    }
   });
 
   test('includes them under the same gating as the artifact grant', () => {
