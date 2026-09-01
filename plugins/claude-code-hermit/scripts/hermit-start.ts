@@ -21,7 +21,7 @@ import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
 import { clearStatusCache } from './lib/context-reset';
-import { defaultConfigDir, readTokenValue, TOKEN_ENV_VAR } from './lib/setup-token';
+import { AuthMode, defaultConfigDir, readTokenValue, resolveAuthMode, TOKEN_ENV_VAR } from './lib/setup-token';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
@@ -136,6 +136,7 @@ const DEFAULT_CONFIG: Json = {
   voice: { style: null, prose: null },
   channels: {},
   remote: true,
+  auth_mode: null,
   model: 'sonnet',
   effort: null,
   permission_mode: 'auto',
@@ -1164,7 +1165,20 @@ function execvp(cmd: string[]): never {
  * renewal work without touching the host: write a new token file, bounce the
  * process, done — no container recreate, no .env edit.
  */
-export function hydrateSetupTokenEnv(): void {
+export function hydrateSetupTokenEnv(mode: AuthMode = 'token'): void {
+  // Login mode: the hermit runs on the stored claude.ai credential, and a
+  // setup-token in the environment would take precedence over it for API calls —
+  // which is exactly the credential the operator chose to stop using. An inherited
+  // one (a stale .env, a parent shell, a leftover compose value) is removed rather
+  // than merely not set, since "don't add it" would not undo an inheritance.
+  if (mode === 'login') {
+    if (process.env[TOKEN_ENV_VAR]) {
+      delete process.env[TOKEN_ENV_VAR];
+      console.log(`[hermit-start] auth_mode: login — ignoring ${TOKEN_ENV_VAR} from the environment`);
+    }
+    return;
+  }
+  if (mode === 'external') return; // an env credential already outranks both files
   if (process.env[TOKEN_ENV_VAR]) return;
   const token = readTokenValue(defaultConfigDir());
   if (token) process.env[TOKEN_ENV_VAR] = token;
@@ -1325,8 +1339,10 @@ export function duplicateSessionRefusal(sessionName: string): string[] | null {
 async function main(): Promise<void> {
   const noTmuxFlag = process.argv.includes('--no-tmux');
 
-  hydrateSetupTokenEnv();
+  // Config first: which credential to hydrate is a config question now, and the
+  // answer decides whether a token file is read at all.
   const config = loadConfig();
+  hydrateSetupTokenEnv(resolveAuthMode(config, defaultConfigDir()));
   acquireLifecycleLock();
   checkForUpgrade(config);
   const tools = checkPrerequisites();

@@ -412,20 +412,27 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
    - **Credentials not written** → `docker compose exec -T hermit ls /home/claude/.claude/.credentials.json` (should exist after login); missing = named volume not mounted — check `docker-compose.hermit.yml` volume entry
    Then **stop** — operator re-runs `/claude-code-hermit:docker-setup` after resolving the issue.
 
-**Post-login decision — mint or keep `/login`:** ask immediately after the login above succeeds. The attended login is still required first — the first-launch wizard demands an interactive login and will not accept the env token (confirmed live), and initial setup is attended anyway.
+**Post-login decision — which credential this hermit runs on:** ask immediately after the login above succeeds. The attended login is still required first — the first-launch wizard demands an interactive login and will not accept the env token (confirmed live), and initial setup is attended anyway.
 
-Ask with `AskUserQuestion` (header: `"Login token"`) — **Mint a long-lived token** (Recommended; a one-year token stored only on the container's config volume, never printed or written to `.env`, renews over the chat channel with no server access) / **Keep /login credentials** (no expiry warning and no channel renewal; when they lapse the hermit goes quiet and you fix it from the box, `hermit-docker setup-token` converts at any time).
+Both options renew from chat with no server access; they differ in cadence and in what the credential can do. Present them neutrally, with no recommendation — background on the two credential types is at `https://code.claude.com/docs/en/authentication`.
 
-**Mint a long-lived token:**
+Ask with `AskUserQuestion` (header: `"Auth method"`) — **Sign in with claude.ai** (the credential you just created; renewed about every 30 days from chat, and Remote Control works on it, so you can reach this hermit from claude.ai/code or your phone) / **Long-lived token** (a one-year token stored only on the container's config volume, never printed or written to `.env`; renewed yearly from chat, and Remote Control does not work on this credential today).
+
+**Sign in with claude.ai:**
+1. Record the choice — the hermit is already running on this credential, so nothing else has to happen:
+   ```
+   .claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json set auth_mode login
+   ```
+2. Note for the summary: renewal is due in about 30 days, the hermit asks over the channel 3 days ahead, and it takes one browser tap with no server access — it stages the new sign-in and applies it on its own restart. Remote Control is available on this credential; converting to a long-lived token any time is `.claude-code-hermit/bin/hermit-docker setup-token`. Continue to first-run acceptance.
+
+**Long-lived token:**
 1. Tell them: "One more step and this hermit never needs server access again. Run:"
    ```
    .claude-code-hermit/bin/hermit-docker setup-token
    ```
    It prints a sign-in link, takes the code back, writes the token to the container's config volume, and restarts the hermit. The token is never printed and never stored in `.env`.
 2. Ask with `AskUserQuestion` (header: `"Token"`) — `"Done"` / `"Failed"`. On `"Failed"`, the hermit still works on the `/login` credentials from the previous step; tell the operator that plainly and that they can retry `hermit-docker setup-token` any time. Do not block setup on it.
-3. On success, note for the summary: renewal is due in a year, the hermit will ask over the channel two weeks ahead, and it takes one browser tap with no server access.
-
-**Keep /login credentials:** no `setup-token` command, no restart. Note for the summary, plainly, because this is the trade they just made: the hermit runs on the `/login` credentials from above, doctor's `credential-expiry` check has nothing to probe in this mode and the watchdog's link-and-code renewal relay only arms for token holders, so renewal always means getting to the box. The watchdog does message the channel once when it sees the login has lapsed (repeating daily until it's fixed), so the hermit won't go quiet without saying why. Re-authenticate with `.claude-code-hermit/bin/hermit-docker login` and restart, or convert to a long-lived token any time with `.claude-code-hermit/bin/hermit-docker setup-token` to get renewal over chat. Continue to first-run acceptance.
+3. On success, note for the summary: renewal is due in a year, the hermit will ask over the channel 3 days ahead, and it takes one browser tap with no server access. Remote Control does not work on this credential today — switching back is `.claude-code-hermit/bin/hermit-docker login`. Continue to first-run acceptance.
 
 **First-run acceptance (workspace trust + bypass mode):** Before asking the operator to attach, verify the tmux session exists inside the container (the entrypoint may still be installing plugins):
 ```

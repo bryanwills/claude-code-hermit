@@ -7,8 +7,12 @@
 // scraping what a human sees yields a broken sign-in link.
 
 import { describe, expect, test } from 'bun:test';
-import { extractToken, extractUrl, findAck, findCode } from '../scripts/setup-token-mint';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { extractToken, extractUrl, findAck, findCode, mintCommand } from '../scripts/setup-token-mint';
 import { MINT, dates } from '../scripts/lib/messages';
+import { runScript } from './helpers/run';
 
 const FULL_URL =
   'https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e' +
@@ -141,5 +145,204 @@ describe('mint code intake pins to the reply route', () => {
 
   test('findCode alone does not gate on chat_id — the upstream pin is what closes the hole', () => {
     expect(findCode([{ text: 'ABC-123-XYZ', chat_id: '999' } as any])).toBe('ABC-123-XYZ');
+  });
+});
+
+describe('mint pane command', () => {
+  test('login mode redirects the CLI at the staging dir, never the live one', () => {
+    const cmd = mintCommand('login', '/home/agent/.claude/.hermit-login-staging');
+    expect(cmd).toBe(
+      "CLAUDE_CONFIG_DIR='/home/agent/.claude/.hermit-login-staging' claude auth login --claudeai; sleep 20",
+    );
+    // The live dir is the parent — a bare `/home/agent/.claude` would mean the mint
+    // is writing the credential the resident session is refreshing underneath it.
+    expect(cmd).not.toMatch(/CLAUDE_CONFIG_DIR='[^']*\.claude'/);
+  });
+
+  test('token mode is unchanged and names no config dir', () => {
+    expect(mintCommand('token', '/ignored')).toBe('claude setup-token; sleep 20');
+  });
+
+  test('a staging path with a quote in it cannot break out of the shell word', () => {
+    expect(mintCommand('login', "/tmp/a'b")).toContain(`'/tmp/a'\\''b'`);
+  });
+});
+
+describe('auth-mode verbs', () => {
+  const VALID = 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123456789';
+
+  function fixture(): { root: string; hermitDir: string; configDir: string } {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-mint-mode-'));
+    const hermitDir = path.join(root, '.claude-code-hermit');
+    const configDir = path.join(root, 'config');
+    fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(hermitDir, 'config.json'), JSON.stringify({ agent_name: 'fix' }, null, 2));
+    return { root, hermitDir, configDir };
+  }
+
+  const run = (hermitDir: string, configDir: string, args: string[], extraEnv: Record<string, string> = {}) =>
+    runScript('setup-token-mint.ts', {
+      args,
+      env: { HERMIT_DIR: hermitDir, CLAUDE_CONFIG_DIR: configDir, ...extraEnv },
+    });
+
+  const readConfig = (hermitDir: string) =>
+    JSON.parse(fs.readFileSync(path.join(hermitDir, 'config.json'), 'utf8'));
+
+  const usableLogin = (configDir: string) =>
+    fs.writeFileSync(
+      path.join(configDir, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'a', refreshToken: 'r' } }),
+    );
+
+  test('stamp-auth-mode writes token when the volume holds a token file', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      fs.writeFileSync(path.join(configDir, '.hermit-setup-token'), `${VALID}\n`, { mode: 0o600 });
+      const out = await run(hermitDir, configDir, ['stamp-auth-mode']);
+      expect(JSON.parse(out.stdout)).toEqual({ ok: true, auth_mode: 'token', source: 'detected' });
+      expect(readConfig(hermitDir).auth_mode).toBe('token');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stamp-auth-mode writes login when a usable sign-in is stored', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      usableLogin(configDir);
+      const out = await run(hermitDir, configDir, ['stamp-auth-mode']);
+      expect(JSON.parse(out.stdout)).toEqual({ ok: true, auth_mode: 'login', source: 'detected' });
+      expect(readConfig(hermitDir).auth_mode).toBe('login');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stamp-auth-mode keeps an explicit choice and never overwrites it', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      fs.writeFileSync(
+        path.join(hermitDir, 'config.json'),
+        JSON.stringify({ auth_mode: 'login' }, null, 2),
+      );
+      fs.writeFileSync(path.join(configDir, '.hermit-setup-token'), `${VALID}\n`, { mode: 0o600 });
+      const out = await run(hermitDir, configDir, ['stamp-auth-mode']);
+      expect(JSON.parse(out.stdout)).toEqual({ ok: true, source: 'kept' });
+      expect(readConfig(hermitDir).auth_mode).toBe('login');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stamp-auth-mode leaves an API-key hermit alone', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      usableLogin(configDir);
+      const out = await run(hermitDir, configDir, ['stamp-auth-mode'], { ANTHROPIC_API_KEY: 'sk-fixture' });
+      expect(JSON.parse(out.stdout)).toEqual({ ok: true, source: 'kept' });
+      expect(readConfig(hermitDir).auth_mode).toBeUndefined();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stamp-auth-mode writes nothing when the volume is inconclusive', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      const out = await run(hermitDir, configDir, ['stamp-auth-mode']);
+      expect(JSON.parse(out.stdout)).toEqual({ ok: true, source: 'unresolved' });
+      expect(readConfig(hermitDir).auth_mode).toBeUndefined();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('stamp-auth-mode prefers the session config dir stamped in runtime.json', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      // The env dir is empty; the credential lives only where runtime.json points.
+      const sessionDir = path.join(root, 'session-config');
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(path.join(sessionDir, '.hermit-setup-token'), `${VALID}\n`, { mode: 0o600 });
+      fs.writeFileSync(
+        path.join(hermitDir, 'state', 'runtime.json'),
+        JSON.stringify({ config_dir: sessionDir }),
+      );
+      const out = await run(hermitDir, configDir, ['stamp-auth-mode']);
+      expect(JSON.parse(out.stdout)).toEqual({ ok: true, auth_mode: 'token', source: 'detected' });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('status reports the resolved mode, and --target overrides it for one run', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      fs.writeFileSync(path.join(configDir, '.hermit-setup-token'), `${VALID}\n`, { mode: 0o600 });
+      const asIs = JSON.parse((await run(hermitDir, configDir, ['status'])).stdout);
+      expect(asIs.auth_mode).toBe('token');
+      expect(asIs.token_mode).toBe(true); // the key hermit-docker parses stays
+      expect(asIs.pending).toBe(false);
+
+      const overridden = JSON.parse(
+        (await run(hermitDir, configDir, ['status', '--target', 'login'])).stdout,
+      );
+      expect(overridden.auth_mode).toBe('login');
+      // An override is for the run only — nothing is written until a credential exists.
+      expect(readConfig(hermitDir).auth_mode).toBeUndefined();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a nonsense --target is refused rather than silently ignored', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      const out = await run(hermitDir, configDir, ['status', '--target', 'oauth']);
+      expect(out.exitCode).toBe(1);
+      expect(JSON.parse(out.stdout).ok).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a relay that cannot reach the operator stamps itself instead of looping', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      // No channels configured, so the ack send fails before anything is minted —
+      // which is the reachability test. Without the stamp the watchdog would spawn
+      // this same doomed relay again on its next tick, forever.
+      const out = await run(hermitDir, configDir, ['relay']);
+      expect(out.exitCode).toBe(1);
+      expect(JSON.parse(out.stdout).error).toContain('operator unreachable');
+      const stamp = JSON.parse(
+        fs.readFileSync(path.join(hermitDir, 'state', 'relay-unreachable.json'), 'utf8'),
+      );
+      expect(typeof stamp.at).toBe('string');
+      expect(Number.isNaN(Date.parse(stamp.at))).toBe(false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test('a staged sign-in awaiting restart blocks a second mint', async () => {
+    const { root, hermitDir, configDir } = fixture();
+    try {
+      fs.writeFileSync(
+        path.join(hermitDir, 'state', 'pending-credential.json'),
+        JSON.stringify({ staged_dir: path.join(configDir, '.hermit-login-staging'), staged_at: 'now' }),
+      );
+      for (const verb of ['start', 'terminal', 'relay']) {
+        const out = await run(hermitDir, configDir, [verb]);
+        expect(out.exitCode).toBe(1);
+        expect(JSON.parse(out.stdout).error).toContain('already waiting');
+      }
+      // status stays readable while one is pending — it is how the skill reports it.
+      expect(JSON.parse((await run(hermitDir, configDir, ['status'])).stdout).pending).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
