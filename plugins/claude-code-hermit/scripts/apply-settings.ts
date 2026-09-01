@@ -163,6 +163,20 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
   'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',
   'Bash(.claude-code-hermit/bin/hermit-run rc-server gc)',
+  // Backup's read-and-snapshot verbs. `setup` is deliberately absent: it writes
+  // backup.remote through a settings-edit subprocess the channel gate never sees
+  // on the model's own command line, so a pre-approved `backup setup --remote …`
+  // would route around that key's nonce tier. It stays terminal-only.
+  //
+  // `run` does commit and push, which the hardened profile's `git push origin
+  // main*` / `*--no-verify*` denies would refuse as typed Bash. The tier holds
+  // anyway: the argv is fixed, the destination is the nonce-tiered backup.remote
+  // and nothing else, the refspec is the current branch, and neither --force nor
+  // --no-verify is reachable. It is a sanctioned push path, not a way around one.
+  'Bash(bun */scripts/backup.ts run*)',
+  'Bash(bun */scripts/backup.ts status*)',
+  'Bash(.claude-code-hermit/bin/hermit-run backup run*)',
+  'Bash(.claude-code-hermit/bin/hermit-run backup status*)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];

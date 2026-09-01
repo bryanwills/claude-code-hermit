@@ -309,6 +309,38 @@ Modify with `/hermit-settings`. Validated by `validate-config.ts`. Manual export
 
 ---
 
+## `backup`
+
+Scheduled git snapshot of the hermit's own state, driven by the watchdog tick with no model turn. Default **off**: it needs a destination and a credential the plugin cannot supply, which is the documented exception to the research-preview default-on rule. Full guide in [`docs/backup.md`](backup.md).
+
+```json
+"backup": {
+  "enabled": false,
+  "mode": "workspace",
+  "schedule": "0 3 * * *",
+  "remote": null,
+  "push": true,
+  "include": []
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `enabled` | Master switch. Off until `backup setup` runs. |
+| `mode` | `workspace` commits the project repo itself (dedicated hermit repos); `mirror` copies the hermit's files into a separate repo under the Claude config dir, leaving a host project repo untouched. |
+| `schedule` | 5-field cron, evaluated in `timezone`. Plain cron semantics: windows missed during downtime are skipped, never caught up, and there is no retry between windows. |
+| `remote` | Push destination. `https://`, `git@host:path`, `ssh://` (converted to https — the Docker image has no ssh client), `file://`, or an absolute path. `null` means commit locally only. |
+| `push` | Whether to push at all. `false` keeps snapshots on the box. |
+| `include` | Optional extras. Only `"transcripts"` is recognized; auto-memory is always included. |
+
+The backup never runs `pull`, `fetch`, `rebase`, `merge`, `reset`, `push --force` or `--no-verify`, and never edits the repository's remote configuration — the push target is passed as an explicit URL each time. A diverged remote is reported for you to reconcile, never resolved automatically.
+
+Secret-shaped paths, the channel log, oversized files and nested repositories are refused per path; see [`docs/backup.md`](backup.md) for the list and its limits. Push credentials come from `HERMIT_BACKUP_TOKEN`, then `GH_TOKEN`, then a `HERMIT_BACKUP_TOKEN=` line in the project-root `.env` — never from `config.json`.
+
+Configure with `.claude-code-hermit/bin/hermit-run backup setup` from a terminal. Every `backup.*` key sits at the highest settings tier, and setup itself is not reachable from chat: a remote set from content the hermit merely read would be a standing exfiltration path.
+
+---
+
 ## `artifacts`
 
 Publishing of hermit-generated pages to Claude Code's [Artifacts](https://code.claude.com/docs/en/artifacts) feature — private `claude.ai/code/artifact/<uuid>` pages, refreshed in place from the main session. Default **on** per the plugin's research-preview feature-defaults rule (publish rides Claude Code's own governed path — org admin toggle, RBAC, retention, audit log — not a hermit-authored egress). See `docs/artifacts.md` for the full refresh protocol; this section covers the config and privacy/entitlement surface.
