@@ -68,6 +68,27 @@ describe('proposal-act accept flow', () => {
   const lineContaining = (needle: string) =>
     skill.split('\n').find((l) => l.includes(needle)) ?? '';
 
+  test('falsification gate invocation includes proposal references', () => {
+    const line = lineContaining('Invoke with the proposal');
+    expect(line).toContain('## References');
+  });
+
+  test('session task always re-verifies the proposal against the current tree', () => {
+    const line = lineContaining('re-verify its ## References');
+    expect(line).toContain('**(always, first step)**');
+    expect(line).toContain('.claude-code-hermit/proposals/PROP-NNN-*.md');
+    expect(line).toContain('current tree');
+    expect(line).toContain('implement nothing');
+  });
+
+  // The re-verify bullet only gates anything if it precedes the derived
+  // implementation steps in the queued plan — as step 4 it would run after the
+  // edits it is supposed to prevent.
+  test('queued plan puts the re-verify bullet at step 1, before the derived steps', () => {
+    expect(skill).toContain('1. [the (always, first step) re-verify bullet from above]');
+    expect(skill).toContain('2. [Step derived from Proposed Solution]');
+  });
+
   test('settings-edit steer is present in step (e)', () => {
     const line = lineContaining('e. Implement the proposal.');
     expect(line).toContain("native ask is the operator's approval");
