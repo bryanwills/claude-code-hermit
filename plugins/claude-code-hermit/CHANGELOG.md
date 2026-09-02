@@ -23,6 +23,7 @@
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
 
 ### Fixed
+- `heartbeat start` and `hermit-routines load` no longer `TaskStop` a monitor id from a previous boot, and now stop a same-process monitor whose record predates the `boot_id` field, so a boot spends no call on a dead id and an in-process upgrade leaves no orphan routine monitor.
 - The watchdog's `/compact` and `/clear` tiers, and `/hermit-doctor`'s context check, now judge the resident's own Claude Code session instead of whichever session in the folder wrote last. Cost rows carry `cc_session_id` and a `guest` flag; the tiers read only matching non-guest rows, dropping the `sessions/.status.json` fallback (#916).
 - The cost-tracker duplicate-turn guard compares `cc_session_id`, so a second session's newer row in the same folder no longer suppresses this session's cost row (#916).
 - The Stop hook re-asserts `runtime.json`'s `cc_session_id` on the resident's own turns, so a hermit that picks up a new plugin version without restarting has its hygiene tiers back after one turn instead of staying inert until its next start/resume/compact/clear. Both writers stand down while a live session registry entry at another pid holds the stamp, so a `claude` the resident launches itself can no longer repoint `cc_session_id`, `session_pid` or `inbox_socket` at a session that is about to exit (#916).

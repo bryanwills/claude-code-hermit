@@ -310,7 +310,20 @@ describe('heartbeat start-check', () => {
     const hermit = fixture();
     seedMonitor(hermit, { bootId: 'boot-old' });
     fs.writeFileSync(path.join(hermit, 'state', '.boot-id'), 'boot-new\n');
-    expect(lines(await run('start-check', [hermit]))[0]).toBe('REARM|boot-mismatch');
+    const out = lines(await run('start-check', [hermit]));
+    expect(out[0]).toBe('REARM|boot-mismatch');
+    // That task died with the process that registered it, so a TaskStop on it is a
+    // guaranteed `No task found` error call — one per boot, on every hermit.
+    expect(out.some(l => l.startsWith('OLD_TASK:'))).toBe(false);
+  });
+
+  test('a re-arm within the same boot still stops the recorded task', async () => {
+    const hermit = fixture({ config: { timezone: 'UTC', heartbeat: { every: '10m', active_hours: ALWAYS_ON } } });
+    seedMonitor(hermit, { bootId: 'boot-a' }); // registered at 1800s, config now says 600s
+    fs.writeFileSync(path.join(hermit, 'state', '.boot-id'), 'boot-a\n');
+    const out = lines(await run('start-check', [hermit]));
+    expect(out[0]).toBe('REARM|interval-drift');
+    expect(out).toContain('OLD_TASK:task-old');
   });
 
   test('a matching boot marker still reads FRESH', async () => {

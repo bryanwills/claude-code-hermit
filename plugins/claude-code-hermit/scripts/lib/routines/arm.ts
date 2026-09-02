@@ -231,7 +231,7 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   const firstTransition = runtime?.mode !== 'monitor';
   const legs = fallback ? 'routines' : 'routines,heartbeat';
   process.stdout.write(`ARM|${legs}|${fallback ? 'fallback' : reset ? 'reset' : 'reconcile'}\n`);
-  if (runtime?.boot_id && runtime.boot_id === ctx.bootId && typeof runtime.task_id === 'string') {
+  if (typeof runtime?.task_id === 'string' && runtime.task_id && !bootMismatch(runtime.boot_id, ctx.bootId)) {
     process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
   // Only ever a transition INTO monitor mode. The line tells the skill to CronDelete
