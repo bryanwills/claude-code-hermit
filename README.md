@@ -23,7 +23,7 @@ cd /path/to/your/project   # any folder, even an empty one — Linux, macOS, WSL
 curl -fsSL https://gtapps.github.io/claude-code-hermit/install.sh | bash
 ```
 
-Installs Claude Code and Bun if they're missing, adds tmux, registers the marketplace, and installs the plugin for this folder — then launches your agent setup wizard.
+Checks prequirements & installs if required (CC, Bun, Tmux), registers this marketplace, and installs the plugin for this folder — then launches your agent setup wizard.
 
 ---
 
