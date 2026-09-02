@@ -131,10 +131,10 @@ function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
   // Monitor emissions in bare form. Deliberately anchored, NOT containment: this
   // is a live input boundary where a false positive silences an AUTO_CLOSE, so an
   // operator prompt that merely quotes a sentinel must still count as activity
-  // (pinned in tests/auto-close.test.ts). lib/trigger-source.ts matches the same
-  // grammar by containment — that is retrospective cost attribution over stored
-  // transcripts, a different boundary with a different failure cost, and is not
-  // precedent here.
+  // (pinned in tests/auto-close.test.ts). lib/trigger-source.ts anchors the same
+  // grammar too, on the sentinel line a wake delivered; it stays a separate boundary
+  // (retrospective cost attribution over stored transcripts, different failure cost),
+  // so keep both in sync deliberately rather than treating either as precedent.
   //   heartbeat-monitor.sh:38-43 → "HEARTBEAT_EVALUATE" (bare) | "HEARTBEAT_ERROR: <detail>"
   //   lib/routines/due.ts        → "ROUTINE_DUE [hermit-routine:<id>] ..."
   //   routine-monitor.sh:36      → "ROUTINE_MONITOR_ERROR: <detail>"

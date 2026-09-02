@@ -3818,20 +3818,39 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
     expect(typeof resolveTurnSource).toBe('function');
   });
 
-  // classifySource: heartbeat marker
-  test('cost-tracker: classifySource(HEARTBEAT_EVALUATE) = heartbeat', () => {
-    expect(classifySource('some prefix HEARTBEAT_EVALUATE rest')).toBe('heartbeat');
+  // Real delivery shapes. A wake reaches the classifier as one of three frames; a sentinel
+  // sitting anywhere else in a prompt is prose an operator (or a compaction summary) wrote,
+  // and must never be billed as a wake. The Monitor envelope below is a verbatim copy of the
+  // live shape (heartbeat-monitor.sh / lib/routines/due.ts emit into it).
+  const envelope = (event: string) =>
+    `<task-notification>\n<task-id>b0u6x5fhf</task-id>\n<summary>Monitor event: "heartbeat-monitor"</summary>\n<event>${event}</event>\nIf this event is something the user would act on now, send a PushNotification.\n</task-notification>`;
+
+  // classifySource: heartbeat marker — only as the delivered sentinel line
+  test('cost-tracker: classifySource(bare HEARTBEAT_EVALUATE) = heartbeat', () => {
+    expect(classifySource('HEARTBEAT_EVALUATE')).toBe('heartbeat');
   });
-  test('cost-tracker: classifySource(heartbeat run) = heartbeat', () => {
-    expect(classifySource('/claude-code-hermit:heartbeat run')).toBe('heartbeat');
+  test('cost-tracker: classifySource(Monitor envelope HEARTBEAT_EVALUATE) = heartbeat', () => {
+    expect(classifySource(envelope('HEARTBEAT_EVALUATE'))).toBe('heartbeat');
+  });
+  test('cost-tracker: classifySource(HEARTBEAT_EVALUATE mid-prose) = other', () => {
+    expect(classifySource('some prefix HEARTBEAT_EVALUATE rest')).toBe('other');
+  });
+  // The manual slash command arrives as a <command-message>/<command-args> frame, never as
+  // this literal, so the old containment rule only ever matched operators discussing it.
+  test('cost-tracker: classifySource(heartbeat run literal) = other', () => {
+    expect(classifySource('/claude-code-hermit:heartbeat run')).toBe('other');
   });
 
-  // classifySource: routine marker
+  // classifySource: routine marker — CronCreate delivers it as the prompt's first line
   test('cost-tracker: classifySource([hermit-routine:daily]) = routine:daily', () => {
     expect(classifySource('[hermit-routine:daily]')).toBe('routine:daily');
   });
-  test('cost-tracker: classifySource([hermit-routine:cortex-refresh]) = routine:cortex-refresh', () => {
-    expect(classifySource('text [hermit-routine:cortex-refresh] more text')).toBe('routine:cortex-refresh');
+  test('cost-tracker: classifySource(CronCreate prompt) = routine:<id>', () => {
+    expect(classifySource('[hermit-routine:heartbeat-restart]\nRun: bun /p/scripts/routines.ts arm anchor'))
+      .toBe('routine:heartbeat-restart');
+  });
+  test('cost-tracker: classifySource([hermit-routine:x] mid-prose) = other', () => {
+    expect(classifySource('text [hermit-routine:cortex-refresh] more text')).toBe('other');
   });
 
   // classifySource: monitor co-fire → routine:multi (ROUTINE_DUE line naming ≥2 distinct ids)
@@ -3841,16 +3860,43 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
   test('cost-tracker: classifySource(ROUTINE_DUE with 1 id) = routine:<id>', () => {
     expect(classifySource('ROUTINE_DUE [hermit-routine:reflect]')).toBe('routine:reflect');
   });
-  // Anchoring guard: a heartbeat turn whose tool output surfaces multiple [hermit-routine:*]
-  // markers (heartbeat-restart's re-arm CronDelete output) but has NO ROUTINE_DUE line must
-  // stay heartbeat — never routine:multi.
-  test('cost-tracker: classifySource(heartbeat + stray routine markers, no ROUTINE_DUE) = heartbeat', () => {
-    expect(classifySource('HEARTBEAT_EVALUATE — CronDelete [hermit-routine:reflect] [hermit-routine:doctor]')).toBe('heartbeat');
+  test('cost-tracker: classifySource(envelope ROUTINE_DUE with 1 id) = routine:<id>', () => {
+    expect(classifySource(envelope('ROUTINE_DUE [hermit-routine:reflect]'))).toBe('routine:reflect');
   });
-  // A turn with stray markers but no ROUTINE_DUE line falls through to the generic first-match
-  // path (not routine:multi) — preserves pre-existing single-fire attribution.
-  test('cost-tracker: classifySource(2 markers, no ROUTINE_DUE line) = first id, not multi', () => {
-    expect(classifySource('load done: CronDelete [hermit-routine:reflect] [hermit-routine:doctor]')).toBe('routine:reflect');
+  test('cost-tracker: classifySource(envelope ROUTINE_DUE with 2 ids) = routine:multi', () => {
+    expect(classifySource(envelope('ROUTINE_DUE [hermit-routine:weekly-review] [hermit-routine:doctor]')))
+      .toBe('routine:multi');
+  });
+  // Trailing prose after the ids is part of the delivered line and must not break the match.
+  test('cost-tracker: classifySource(ROUTINE_DUE with trailing text) = routine:<id>', () => {
+    expect(classifySource('ROUTINE_DUE [hermit-routine:daily-brief] fired')).toBe('routine:daily-brief');
+  });
+  // Anchoring guard: a heartbeat turn whose tool output surfaces multiple [hermit-routine:*]
+  // markers (heartbeat-restart's re-arm CronDelete output) is not a delivered sentinel line
+  // at all — neither heartbeat nor routine:multi.
+  test('cost-tracker: classifySource(heartbeat + stray routine markers, no ROUTINE_DUE) = other', () => {
+    expect(classifySource('HEARTBEAT_EVALUATE — CronDelete [hermit-routine:reflect] [hermit-routine:doctor]')).toBe('other');
+  });
+  test('cost-tracker: classifySource(2 stray markers, no ROUTINE_DUE line) = other', () => {
+    expect(classifySource('load done: CronDelete [hermit-routine:reflect] [hermit-routine:doctor]')).toBe('other');
+  });
+
+  // Negatives drawn from the live transcripts that motivated the anchoring: a long operator
+  // prompt naming the sentinel deep in its text, a subagent completion whose <result> quotes
+  // it (no <event> body), and the retired log-event prose fallback.
+  test('cost-tracker: classifySource(long prompt naming sentinel mid-text) = other', () => {
+    const long = `${'x'.repeat(1200)} HEARTBEAT_EVALUATE ${'y'.repeat(4000)}`;
+    expect(classifySource(long)).toBe('other');
+  });
+  test('cost-tracker: classifySource(subagent completion quoting sentinel) = other', () => {
+    const done = '<task-notification>\n<task-id>a8e283fde</task-id>\n<tool-use-id>toolu_01RH</tool-use-id>\n<status>completed</status>\n<result>ran HEARTBEAT_EVALUATE for [hermit-routine:reflect]</result>\n</task-notification>';
+    expect(classifySource(done)).toBe('other');
+  });
+  test('cost-tracker: classifySource(log-routine-event prose) = other', () => {
+    expect(classifySource('ran log-routine-event.sh has fired')).toBe('other');
+  });
+  test('cost-tracker: classifySource(routines.ts log-event prose) = other', () => {
+    expect(classifySource('then routines.ts log-event which errored')).toBe('other');
   });
 
   // classifySource: no marker → other
@@ -3909,6 +3955,16 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
   // nudge is double-counted as peer traffic.
   test('cost-tracker: classifySource(peer frame carrying HEARTBEAT_EVALUATE) = heartbeat', () => {
     expect(classifySource('Another Claude session sent a message:\nHEARTBEAT_EVALUATE')).toBe('heartbeat');
+  });
+  // The live frame wraps the posted body in <cross-session-message …> and appends a
+  // trailer, so the sentinel is never the whole remainder. Copied from a real transcript.
+  test('cost-tracker: classifySource(live wedge-wake frame) = heartbeat', () => {
+    const frame = 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/4112470.sock" from-name="watchdog" from-mode="prompting">\nHEARTBEAT_EVALUATE\n</cross-session-message>\n\nThis came from another Claude session.';
+    expect(classifySource(frame)).toBe('heartbeat');
+  });
+  test('cost-tracker: classifySource(live peer frame with prose body) = peer', () => {
+    const frame = 'Another Claude session sent a message:\n<cross-session-message from="uds:/run/user/1000/cc-socks/4112470.sock" from-name="scout" from-mode="prompting">\nGUEST_REPORT: ran the tests, all green.\n</cross-session-message>\n\nThis came from another Claude session.';
+    expect(classifySource(frame)).toBe('peer');
   });
   test('cost-tracker: classifySource(peer frame carrying ROUTINE_DUE) = routine:<id>', () => {
     expect(classifySource('Another Claude session sent a message:\nROUTINE_DUE [hermit-routine:daily-brief]'))

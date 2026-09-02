@@ -86,11 +86,11 @@ const RE_TOOL_USE_ID = /<tool-use-id>([A-Za-z0-9_-]+)<\/tool-use-id>/;
 // Classify a turn by its delivered prompt, hopping once through a subagent-completion
 // notification to the turn that dispatched it.
 //
-// The prompt-only rule (turnPromptText) is what stops a turn's own tool output from
-// capturing it: classifySource matches `[hermit-routine:<id>]` anywhere in the text it
-// is handed, so scanning the whole turn billed any turn whose tool output merely named
-// a routine — e.g. heartbeat-restart's re-arm, whose CronDelete/CronList output lists
-// concrete routine ids, was billed to whichever routine it happened to print first.
+// The prompt-only rule (turnPromptText) hands classifySource the entry that opened the
+// turn, never the tool_results inside it, so the classifier can anchor on the sentinel
+// line a wake actually delivered. Scanning the whole turn instead billed any turn whose
+// tool output merely named a routine — e.g. heartbeat-restart's re-arm, whose
+// CronDelete/CronList output lists concrete routine ids.
 //
 // `boundaryFound` is false when the walk ran off the start of a truncated tail window;
 // the caller downgrades to 'other' rather than trust a prompt that may belong to an
