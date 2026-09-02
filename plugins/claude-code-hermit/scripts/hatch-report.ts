@@ -130,8 +130,9 @@ export function renderConfirm(answers: Json): string {
   if (answers.idle_behavior) out.push(row('🧭 Idle', cap(answers.idle_behavior)));
 
   // Default rows — read live from the same template hatch-config.ts overlays,
-  // so they track the shipped defaults instead of prose that drifts.
-  if (t.model) out.push(def('Model / Effort', `${t.model} · effort ${t.effort ?? 'unset'}`));
+  // so they track the shipped defaults instead of prose that drifts. Kept to
+  // the consequential ones (autonomy/permission/spend posture); cosmetic
+  // defaults (model, notifications, artifact pages) are trimmed.
   const permission = answers.permission_mode ?? t.permission_mode;
   if (permission) {
     out.push(permission === t.permission_mode
@@ -139,12 +140,6 @@ export function renderConfirm(answers: Json): string {
       : row('Permission mode', `\`${permission}\``));
   }
   if (t.escalation) out.push(def('Autonomy', `${t.escalation} · remote control ${t.remote ? 'on' : 'off'}`));
-  if (t.heartbeat) {
-    const hours = t.heartbeat.active_hours;
-    out.push(def('Heartbeat', t.heartbeat.enabled
-      ? `every ${t.heartbeat.every}${hours ? `, ${hours.start}–${hours.end}` : ''}, quiet ticks free`
-      : 'off'));
-  }
   // heartbeat-restart and scheduled-checks are plumbing, not something the
   // operator would recognize as "a routine that wakes the agent".
   const infra = (t.routines ?? [])
@@ -152,21 +147,12 @@ export function renderConfirm(answers: Json): string {
     .map((r: Json) => r.id.replace(/-/g, ' '));
   const briefs = answers.routines?.enabled === false ? []
     : [`briefs ${answers.routines?.morning_time ?? '08:30'} + ${answers.routines?.evening_time ?? '22:30'}`];
-  if (briefs.length || infra.length) out.push(row('Routines', [...briefs, ...infra].join(' · ')));
-  if (t.push_notifications !== undefined) {
-    let notifications = 'push off';
-    if (t.push_notifications) {
-      notifications = 'push on';
-      if (answers.channel && answers.channel !== 'none') {
-        notifications += `, dormant once ${cap(answers.channel)} is paired`;
-      }
-    }
-    out.push(def('Notifications', notifications));
-  }
-  const pages = Object.entries(t.artifacts ?? {})
-    .filter(([k, v]) => ['dashboard', 'proposals', 'weekly_review'].includes(k) && v)
-    .map(([k]) => k.replace('_', ' '));
-  if (pages.length) out.push(def('Artifact pages', pages.join(' · ')));
+  const heartbeatLine = t.heartbeat
+    ? [t.heartbeat.enabled
+        ? `heartbeat every ${t.heartbeat.every}${t.heartbeat.active_hours ? `, ${t.heartbeat.active_hours.start}–${t.heartbeat.active_hours.end}` : ''}`
+        : 'heartbeat off']
+    : [];
+  if (briefs.length || infra.length || heartbeatLine.length) out.push(row('Routines', [...briefs, ...infra, ...heartbeatLine].join(' · ')));
   if (t.budget) {
     const caps = ['daily_usd', 'weekly_usd', 'monthly_usd'].filter(k => t.budget[k] != null);
     out.push(def('Budget caps', caps.length ? caps.map(k => `${k.replace('_usd', '')} $${t.budget[k]}`).join(' · ') : `none, ${t.budget.action ?? 'alert'}-only`));
