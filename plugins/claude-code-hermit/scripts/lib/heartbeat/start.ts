@@ -12,7 +12,8 @@
 // start-check <hermit-dir>
 //   FRESH|interval=<s>                      nothing to do; the live monitor matches config
 //   REARM|<reason>                          followed by, as applicable:
-//     OLD_TASK:<id>                         TaskStop this before registering
+//     OLD_TASK:<id>                         TaskStop this before registering; omitted
+//                                           when the record belongs to a previous boot
 //     FIRST_START:1                         no prior registration
 //     INTERVAL:<s>
 //     CMD:bash <abs>/heartbeat-monitor.sh <s> <abs hermit dir>
@@ -26,7 +27,7 @@ import path from 'node:path';
 import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { appendShellLine } from '../md-write';
-import { waitForFirstTick } from '../monitor-health';
+import { bootMismatch, waitForFirstTick } from '../monitor-health';
 import { readBootId } from '../routines/registry';
 import { currentHHMMOrUTC, resolveHermitNowMs } from '../time';
 import { hasStartedRegistration, heartbeatCommand, heartbeatHealth, heartbeatInterval } from './monitor-cmd';
@@ -70,7 +71,7 @@ function cmdCheck(hermitDir: string, config: Json): void {
   // monitor about to be registered. Spread so task_id / interval / command / boot_id
   // survive; a bare { armed_at } would drop them.
   writeJson(runtimePath(hermitDir), { ...runtime, armed_at: new Date(nowMs).toISOString() });
-  if (typeof runtime?.task_id === 'string' && runtime.task_id) {
+  if (typeof runtime?.task_id === 'string' && runtime.task_id && !bootMismatch(runtime.boot_id, readBootId(hermitDir))) {
     process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
   if (!hasStartedRegistration(runtime)) process.stdout.write('FIRST_START:1\n');
