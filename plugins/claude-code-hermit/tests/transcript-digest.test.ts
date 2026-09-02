@@ -8,7 +8,8 @@
 //
 // Fixture entry shapes mirror real CC transcripts (verified live, CC 2.1.214):
 //   - wake trigger: user entry, string content, no isMeta (Monitor task-notification
-//     carries "HEARTBEAT_EVALUATE"; slash form carries "<command-name>/…heartbeat run…")
+//     carries "<event>HEARTBEAT_EVALUATE</event>"; a CronCreate routine prompt opens
+//     with "[hermit-routine:<id>]")
 //   - rejection carrier: user tool_result with is_error:true + top-level toolDenialKind
 //   - compact_boundary: {type:'system', subtype:'compact_boundary'}
 
@@ -306,8 +307,16 @@ describe('digestLines — wake classification (trigger entry only)', () => {
   test('Monitor task-notification HEARTBEAT_EVALUATE is a wake', () => {
     expect(wakesOf([triggerEntry('<task-notification>\n<event>HEARTBEAT_EVALUATE</event>\n</task-notification>')])).toBe(1);
   });
-  test('command-wrapped /…heartbeat run is a wake', () => {
-    expect(wakesOf([triggerEntry('<command-message>heartbeat</command-message>\n<command-name>/claude-code-hermit:heartbeat run</command-name>')])).toBe(1);
+  // A manually typed slash command is operator activity, not a scheduler wake —
+  // isWakeSource is defined as "a non-operator scheduler prompt". It also never had the
+  // shape this fixture used: live transcripts carry `<command-name>/claude-code-hermit:heartbeat`
+  // with the subcommand in a separate `<command-args>`, so the old containment rule matched
+  // this synthetic string and nothing real.
+  test('command-wrapped manual heartbeat run is NOT a wake', () => {
+    expect(wakesOf([triggerEntry('<command-message>claude-code-hermit:heartbeat</command-message>\n<command-name>/claude-code-hermit:heartbeat</command-name>\n<command-args>run</command-args>')])).toBe(0);
+  });
+  test('CronCreate routine prompt is a wake', () => {
+    expect(wakesOf([triggerEntry('[hermit-routine:heartbeat-restart]\nRun: bun /p/scripts/routines.ts arm anchor')])).toBe(1);
   });
   test('ROUTINE_DUE marker is a wake', () => {
     expect(wakesOf([triggerEntry('ROUTINE_DUE [hermit-routine:daily-brief] due now')])).toBe(1);

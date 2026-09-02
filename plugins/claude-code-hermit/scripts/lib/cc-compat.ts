@@ -504,9 +504,9 @@ function isSkillInjection(entry: Json): boolean {
  * and return THAT entry's text alone.
  *
  * Returning only the boundary entry — never the intervening tool_results — is the
- * point: `classifySource` matches its markers anywhere in the text it is given, so
- * concatenating the walked entries lets any tool output that merely *mentions* a
- * routine id capture the whole turn's cost.
+ * point: `classifySource` anchors on the sentinel line the boundary entry delivered, so
+ * concatenating the walked entries would put a tool_result's own text where that line
+ * belongs and let any output that merely *mentions* a routine id capture the turn's cost.
  *
  * `boundaryFound` is false when the walk ran off the start of `lines` without
  * finding a prompt — the caller uses that to detect a truncated tail window that
