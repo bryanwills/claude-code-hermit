@@ -3,9 +3,9 @@
 // Two callers judge whether the live heartbeat monitor is the one the config
 // currently describes: `routines.ts arm anchor` (deciding whether the daily
 // re-arm has anything to do) and `heartbeat.ts start-check` (deciding whether to
-// re-register at all). They must agree byte-for-byte — a second rendering of the
-// command string is a second definition of "healthy", and the two drift the first
-// time an interval or a path changes.
+// re-register at all). The plugin root is module-owned so they agree
+// byte-for-byte: a caller-supplied root is a second definition of "healthy",
+// and the two drift the first time a path is a symlink.
 
 import path from 'node:path';
 import { readJson } from '../cli';
@@ -44,8 +44,10 @@ export function heartbeatInterval(config: Json): number {
   return Math.max(1, Math.round(parseDuration(config?.heartbeat?.every, 30 * 60_000) / 1000));
 }
 
-export function heartbeatCommand(pluginRoot: string, hermitDir: string, config: Json): string {
-  return `bash ${path.join(pluginRoot, 'scripts', 'heartbeat-monitor.sh')} ${heartbeatInterval(config)} ${hermitDir}`;
+const PLUGIN_ROOT = path.resolve(import.meta.dir, '../../..');
+
+export function heartbeatCommand(hermitDir: string, config: Json): string {
+  return `bash ${path.join(PLUGIN_ROOT, 'scripts', 'heartbeat-monitor.sh')} ${heartbeatInterval(config)} ${hermitDir}`;
 }
 
 /**
@@ -53,7 +55,7 @@ export function heartbeatCommand(pluginRoot: string, hermitDir: string, config: 
  * healthy so the daily anchor leaves a deliberately-off heartbeat alone; `start`
  * is an explicit operator act and treats that reason as a re-arm instead.
  */
-export function heartbeatHealth(hermitDir: string, pluginRoot: string, config: Json, nowMs: number): LegHealth {
+export function heartbeatHealth(hermitDir: string, config: Json, nowMs: number): LegHealth {
   if (config?.heartbeat?.enabled === false) return { healthy: true, reason: 'disabled' };
   const runtime = readJson(path.join(hermitDir, 'state', 'heartbeat-monitor.runtime.json'));
   if (!hasStartedRegistration(runtime)) return { healthy: false, reason: 'runtime-missing' };
@@ -62,7 +64,7 @@ export function heartbeatHealth(hermitDir: string, pluginRoot: string, config: J
   }
   const interval = heartbeatInterval(config);
   if (runtime.interval !== interval) return { healthy: false, reason: 'interval-drift' };
-  if (runtime.command !== heartbeatCommand(pluginRoot, hermitDir, config)) {
+  if (runtime.command !== heartbeatCommand(hermitDir, config)) {
     return { healthy: false, reason: 'command-drift' };
   }
   const live = readJson(path.join(hermitDir, 'state', 'heartbeat-liveness.json'));

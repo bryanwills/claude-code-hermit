@@ -32,6 +32,7 @@
 - The weekly review runs its topic-page check and channel-log consolidation in one runner dispatch instead of two; the runner files its own memory and topic-page candidates in its isolated context, and the main session only marks the reviewed rows, prunes, and logs one Findings line naming what was filed.
 
 ### Fixed
+- The heartbeat monitor's registration command is rendered from one place, so a symlinked plugin path no longer makes every boot tear down and re-register the monitor as `command-drift`.
 - The weekly review publishes its artifact page again. The skill named only the config key `weekly_review`, so the render call was guessed and failed on an unknown page id; it now names `artifact.ts render weekly` literally.
 - An always-on session start no longer asks what to work on when no task is known; the session stays idle until the channel, a routine, or a queued task starts the next one.
 - `/hatch` seeds `sessions/SHELL.md` from the template, so a hermit's first boot resumes idle like every later boot instead of opening a task-less `in_progress` session that only the 12h auto-close would clear.

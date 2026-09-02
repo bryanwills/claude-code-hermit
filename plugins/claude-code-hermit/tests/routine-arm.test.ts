@@ -265,6 +265,20 @@ test('commit --heartbeat records the heartbeat monitor after the routine leg', a
   expect(runtime).toMatchObject({ task_id: 'hb-new', interval: 1800 });
 });
 
+test('a symlinked plugin root writes the same heartbeat command as start-commit', async () => {
+  const f = fixture();
+  const pluginLink = path.join(f.root, 'plugin-link');
+  fs.symlinkSync(pluginRoot, pluginLink);
+  staleHeartbeat(f);
+  await runScript('routines.ts', { args: ['arm', 'begin', f.hermit, pluginLink] });
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: iso() }));
+  fs.writeFileSync(path.join(f.state, 'heartbeat-liveness.json'), JSON.stringify({ last_peek_at: iso(Date.now() + 1000) }));
+
+  await runScript('routines.ts', { args: ['arm', 'commit', f.hermit, pluginLink, 'task-new', '--heartbeat', 'hb-new'] });
+  const checked = await runScript('heartbeat.ts', { args: ['start-check', f.hermit] });
+  expect(checked.stdout).toStartWith('FRESH|interval=1800');
+});
+
 // The two legs are independent: a routine subprocess that never ticked says
 // nothing about whether the heartbeat one did.
 test('a routine fallback still commits the heartbeat leg', async () => {
