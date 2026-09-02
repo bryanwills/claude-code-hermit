@@ -29,7 +29,7 @@
 import { safeForLLM } from '../sanitize';
 import { senderLabel } from '../channel-envelope';
 import { isTrustedController, isSettingsController, channelBotIdentity } from '../channel-auth';
-import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal, skillCommandRefusal, isSkillCommand } from '../harness-command';
+import { parseHarnessCommand, writePendingCommand, renderCommand, permissionModeRefusal } from '../harness-command';
 import { resolveSlashCommand } from '../channel-slash-address';
 import type { StageContext, StageResult } from './types';
 
@@ -76,15 +76,8 @@ export function run(ctx: StageContext): StageResult | void {
     }
   }
 
-  const skillRefusal = skillCommandRefusal(parsed);
-  if (skillRefusal) {
-    return {
-      context: `[harness-command] refused "${renderCommand(parsed)}": ${skillRefusal}\n`,
-    };
-  }
-
   const by = safeForLLM(senderLabel(env).slice(0, 64));
-  const isRelayedSkillCommand = isSkillCommand(parsed.command);
+  const isRelayedSkillCommand = parsed.command === '/doctor';
   const ok = writePendingCommand(dir, {
     command: parsed.command,
     arg: parsed.arg,

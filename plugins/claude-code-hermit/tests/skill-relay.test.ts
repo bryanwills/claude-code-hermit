@@ -7,7 +7,7 @@ import { readSkillRelay, SKILL_RELAY_TTL_SECS, writeSkillRelay } from '../script
 import type { StageContext } from '../scripts/lib/prompt-stages/types';
 import { withDir } from './helpers/workdir';
 
-function context(dir: string, prompt = '/code-review low'): StageContext {
+function context(dir: string, prompt = '/doctor'): StageContext {
   return {
     dir,
     prompt,
@@ -20,8 +20,8 @@ function context(dir: string, prompt = '/code-review low'): StageContext {
 
 function writeRelay(dir: string, deliveredAt = new Date().toISOString()): void {
   writeSkillRelay(dir, {
-    command: '/code-review',
-    arg: 'low',
+    command: '/doctor',
+    arg: null,
     by: 'operator',
     reply_to: { source: 'telegram', chat_id: 'chat-123' },
     delivered_at: deliveredAt,
@@ -44,7 +44,7 @@ describe('skill-relay prompt stage', () => {
     const dir = path.join(projectDir, '.claude-code-hermit');
     writeRelay(dir);
 
-    expect(run(context(dir, '/code-review high'))).toBeUndefined();
+    expect(run(context(dir, '/compact'))).toBeUndefined();
     expect(readSkillRelay(dir)).not.toBeNull();
   }));
 
@@ -58,7 +58,7 @@ describe('skill-relay prompt stage', () => {
       chatId: 'chat-123',
       userId: 'operator',
       userName: 'operator',
-      body: '/code-review low',
+      body: '/doctor',
       messageId: null,
       ts: null,
     };

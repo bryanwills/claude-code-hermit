@@ -16,8 +16,6 @@ import {
   SWITCH_VERIFY_TTL_SECS,
   normalizePermissionMode,
   permissionModeRefusal,
-  skillCommandRefusal,
-  isSkillCommand,
   writeSkillRelay,
   readSkillRelay,
   clearSkillRelay,
@@ -116,52 +114,27 @@ describe('parseHarnessCommand grammar', () => {
     expect(parseHarnessCommand('/doctor now')).toBeNull();
   });
 
-  test('accepts code-review aliases and safe arguments', () => {
-    expect(parseHarnessCommand('/code-review')).toEqual({ command: '/code-review', arg: null });
-    expect(parseHarnessCommand('/review low')).toEqual({ command: '/code-review', arg: 'low' });
-    expect(parseHarnessCommand('/code-review high --fix #123')).toEqual({
-      command: '/code-review',
-      arg: 'high --fix #123',
-    });
-  });
-
-  test('rejects unsafe code-review arguments', () => {
-    expect(parseHarnessCommand('/code-review --no-post')).toBeNull();
-    expect(parseHarnessCommand('/code-review low; rm x')).toBeNull();
-    expect(parseHarnessCommand('/code-review low\n/clear')).toBeNull();
+  // /code-review is model-invocable, so it is NOT relayed: it falls through to the model
+  // as an ordinary chat message and runs through the Skill tool. A null here is the
+  // contract, not an oversight — re-adding a branch would silently restore the relay.
+  test('code-review falls through to the model instead of being relayed', () => {
+    expect(parseHarnessCommand('/code-review')).toBeNull();
+    expect(parseHarnessCommand('/code-review low')).toBeNull();
+    expect(parseHarnessCommand('/review low')).toBeNull();
+    expect(parseHarnessCommand('/code-review ultra')).toBeNull();
+    expect(parseHarnessCommand('/code-review low --post')).toBeNull();
   });
 
   // Splitting on a literal ' ' made padding whitespace a parse failure, and a parse
-  // failure is a fallthrough to the model rather than a refusal — so a doubled space
-  // was enough to route an outward-write flag around skillCommandRefusal.
-  test('padding whitespace does not slip a flag past the grammar', () => {
-    expect(parseHarnessCommand('/code-review low  --comment')).toEqual({
-      command: '/code-review',
-      arg: 'low --comment',
-    });
-    expect(parseHarnessCommand('/code-review\tlow\t--post')).toEqual({
-      command: '/code-review',
-      arg: 'low --post',
-    });
+  // failure is a fallthrough to the model rather than a refusal.
+  test('padding whitespace does not slip a token past the grammar', () => {
     expect(parseHarnessCommand('/model  sonnet')).toEqual({ command: '/model', arg: 'sonnet' });
+    expect(parseHarnessCommand('/model\tsonnet')).toEqual({ command: '/model', arg: 'sonnet' });
     // A mobile keyboard's non-breaking space is padding too, not a token.
-    expect(parseHarnessCommand('/code-review\u00a0low')).toEqual({ command: '/code-review', arg: 'low' });
+    expect(parseHarnessCommand('/model\u00a0sonnet')).toEqual({ command: '/model', arg: 'sonnet' });
+    expect(parseHarnessCommand('/doctor  ')).toEqual({ command: '/doctor', arg: null });
     // Still exactly-two-token for /advisor: a bare one must never reach the picker.
     expect(parseHarnessCommand('/advisor   ')).toBeNull();
-  });
-});
-
-describe('skill command policy', () => {
-  test('refuses ultra code reviews and identifies only relayed skill commands', () => {
-    expect(skillCommandRefusal({ command: '/code-review', arg: 'ultra' })).toContain('dialog');
-    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --post' })).toContain('--post');
-    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --comment' })).toContain('--comment');
-    expect(skillCommandRefusal({ command: '/code-review', arg: 'low --fix' })).toBeNull();
-    expect(skillCommandRefusal({ command: '/doctor', arg: null })).toBeNull();
-    expect(isSkillCommand('/doctor')).toBe(true);
-    expect(isSkillCommand('/code-review')).toBe(true);
-    expect(isSkillCommand('/clear')).toBe(false);
-    expect(isSkillCommand('/review')).toBe(false);
   });
 });
 
@@ -210,8 +183,8 @@ describe('pending-command marker', () => {
   test('round-trips a reply target while keeping it optional', () => {
     const root = tmpRoot();
     const entry = {
-      command: '/code-review',
-      arg: 'low',
+      command: '/doctor',
+      arg: null,
       by: 'op',
       reply_to: { source: 'telegram', chat_id: 'chat-123' },
       requested_at: new Date().toISOString(),
@@ -336,8 +309,8 @@ describe('skill-relay marker', () => {
   test('round-trips a delivered skill command', () => {
     const root = tmpRoot();
     const entry = {
-      command: '/code-review',
-      arg: 'low',
+      command: '/doctor',
+      arg: null,
       by: 'op',
       reply_to: { source: 'discord', chat_id: 'chat-456' },
       delivered_at: new Date().toISOString(),

@@ -197,7 +197,9 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
     }
   });
 
-  test('a trusted code review is recorded with its reply target', async () => {
+  // /code-review is model-invocable, so the stage must NOT claim it: no marker, no
+  // refusal, no context line — it reaches the model as an ordinary channel message.
+  test('a code review is not intercepted and records nothing', async () => {
     const stub = startHttpStub();
     try {
       const wd = setupChannelWorkdir();
@@ -206,28 +208,7 @@ describe('user-prompt-pipeline: shutdown is terminal', () => {
       const r = await run(wd, '/code-review low', stub.url);
 
       expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('will run when the current turn ends; its result comes back to this chat');
-      const pending = JSON.parse(fs.readFileSync(hermit(wd.dir, 'state', 'pending-harness-command.json'), 'utf-8'));
-      expect(pending).toMatchObject({
-        command: '/code-review',
-        arg: 'low',
-        reply_to: { source: 'telegram', chat_id: '12345' },
-      });
-    } finally {
-      stub.stop();
-    }
-  });
-
-  test('an ultra code review is refused and records nothing', async () => {
-    const stub = startHttpStub();
-    try {
-      const wd = setupChannelWorkdir();
-      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test', shutdown_requested_at: null, shutdown_completed_at: null });
-
-      const r = await run(wd, '/code-review ultra', stub.url);
-
-      expect(r.exitCode).toBe(0);
-      expect(r.stdout).toContain('refused "/code-review ultra"');
+      expect(r.stdout).not.toContain('[harness-command]');
       expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
     } finally {
       stub.stop();
