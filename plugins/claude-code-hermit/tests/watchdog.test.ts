@@ -4926,6 +4926,19 @@ describe('maybeContextCompact (in-process) — outcome per gate', () => {
     expect(outcome).not.toBe('skip:midnight-adjacent');
   }));
 
+  // One minute past the window the callsite passes. Literal on purpose: the callsite
+  // borrows AUTO_CLOSE_LULL_MS for the size, so a case phrased in that constant would
+  // float with it and never notice the evening compact slot going dark again.
+  const CLOSE_IN_11_MIN = [{ id: 'daily-auto-close', schedule: '11 12 * * *', enabled: true }];
+
+  test('just past the window → the compact tier stays live', withCascade((c) => {
+    writeCostEntry(c);
+    const config = { ...COMPACT_CONFIG, post_close_clear: true, routines: CLOSE_IN_11_MIN };
+    const outcome = maybeContextCompact(config, c.world);
+    expect(outcome).toBeTruthy(); // null would pass the inequality for the wrong reason
+    expect(outcome).not.toBe('skip:midnight-adjacent');
+  }));
+
   test('below-floor: a small compactible conversation is never worth summarising', withCascade((c) => {
     // 100k prompt minus the 50k assumed fixed surface = 50k compactible, under the 60k floor
     writeCostEntry(c, { last_call_prompt_tokens: 100_000, max_prompt_tokens: 100_000 });
