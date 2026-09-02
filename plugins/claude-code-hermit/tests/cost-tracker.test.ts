@@ -268,6 +268,10 @@ describe('cost-tracker subagent with no resolvedModel', () => {
 
 // Regression for #572: a turn whose real triggering prompt falls outside the 512KB
 // tail window must not inherit a stale/echoed marker still inside that window.
+// Since the 8MB re-read landed, this fixture resolves on the retry: the real prompt is
+// found rather than assumed, and it is a plain operator message, so 'other' still holds.
+// The truncated-window path itself is pinned in scripts.test.ts's `cost-tracker
+// scanTurnInTail` block, which reaches it with a small tailBytes.
 describe('cost-tracker: oversized turn with boundary outside the tail window', () => {
   let dir: string;
   let logPath: string;

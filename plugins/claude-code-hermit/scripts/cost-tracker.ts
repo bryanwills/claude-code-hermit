@@ -183,10 +183,10 @@ function collectSubagentUsage(lines: string[], billedIndex: number): Array<{
   return out;
 }
 
-// Limitation: a turn spanning more than TAIL_BYTES is summed from buffer start, not the real
-// boundary — token counts still over-count in this case (deliberately: discarding real token
-// data would be worse than a bounded over-count). Source attribution no longer shares this
-// bleed — see the boundaryFound guard in scanTurnInTail().
+// Limitation: a turn spanning more than the tail window it was handed is summed from buffer
+// start, not the real boundary — token counts still over-count in this case (deliberately:
+// discarding real token data would be worse than a bounded over-count). Source attribution no
+// longer shares this bleed — see the boundaryFound guard in scanTurnInTail().
 function sumTurnUsage(lines: string[], billedIndex: number): {
   inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number;
   outputTokens: number; model: string; apiCalls: number; maxPromptTokens: number;
@@ -301,7 +301,10 @@ function scanTurnInTail(transcriptPath: string, tailBytes: number): Json {
         // A truncated tail (readFrom > 0) whose turn boundary fell outside the window
         // can't be trusted — the prompt found may belong to an earlier, unrelated turn
         // still in the window. Attribute to 'other' rather than risk misattributing a
-        // large turn (e.g. a plugin upgrade run) to an unrelated source.
+        // large turn (e.g. a plugin upgrade run) to an unrelated source. Belt-and-braces
+        // as written: resolveTurnSource already returns 'other'/not-inherited whenever
+        // boundaryFound is false (turnPromptText hands it an empty text), so `trusted`'s
+        // only outcome-changing consumer is the boundaryMissed re-read signal below.
         const trusted = resolved.boundaryFound || readFrom <= 0;
         const source = trusted ? resolved.source : 'other';
         const sourceInherited = trusted && resolved.inherited;
@@ -1029,7 +1032,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, resolveTurnSource, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
+export { run, getCumulativeCost, classifySource, resolveTurnSource, scanTurnInTail, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
 
 if (import.meta.main) {
   // Mark-only entrypoint (synchronous, no stdin): the heartbeat SKILL calls this
