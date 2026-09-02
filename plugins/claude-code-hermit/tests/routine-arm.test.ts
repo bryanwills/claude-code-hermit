@@ -142,6 +142,19 @@ test('begin reports OLD_TASK only for the current boot', async () => {
   expect(result.stdout).not.toContain('OLD_TASK:');
 });
 
+// A record written before the field existed belongs to whatever process is reading
+// it: an in-process upgrade re-arms while the old monitor is still polling, so
+// skipping the stop leaves two monitors firing the same routines.
+test('begin stops a task from a runtime record without boot_id', async () => {
+  const f = fixture();
+  const runtimePath = path.join(f.state, 'routine-monitor.runtime.json');
+  const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+  delete runtime.boot_id;
+  fs.writeFileSync(runtimePath, JSON.stringify(runtime));
+  const result = await arm(f.hermit, ['begin', '--reset']);
+  expect(result.stdout).toContain('OLD_TASK:task-old');
+});
+
 test('commit none writes monitor runtime and commits the anchor mirror', async () => {
   const f = fixture({ scheduled: false, heartbeat: false });
   fs.writeFileSync(path.join(f.state, 'cron-registry.json'), JSON.stringify({ boot_id: null, routines: {} }));

@@ -301,6 +301,10 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
         const cronErr = validateCronSchedule(r.schedule);
         if (cronErr) {
           errors.push(`routines[${i}]: invalid schedule "${r.schedule}" — ${cronErr}`);
+        } else if (r.id === 'heartbeat-restart' && r.schedule.split(/\s+/).slice(2).some((f: string) => f !== '*')) {
+          // The anchor's re-arm keeps the routine CronCreates inside CC's 7-day expiry
+          // and arm.ts's 26h anchor-age window; both assume it fires every day.
+          warnings.push(`routines[${i}]: "heartbeat-restart" schedule "${r.schedule}" is not daily — the re-arm anchor's expiry and age windows assume a daily fire`);
         }
       }
       if (typeof r.enabled !== 'boolean') {

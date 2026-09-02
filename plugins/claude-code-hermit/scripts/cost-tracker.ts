@@ -183,10 +183,10 @@ function collectSubagentUsage(lines: string[], billedIndex: number): Array<{
   return out;
 }
 
-// Limitation: a turn spanning more than TAIL_BYTES is summed from buffer start, not the real
-// boundary — token counts still over-count in this case (deliberately: discarding real token
-// data would be worse than a bounded over-count). Source attribution no longer shares this
-// bleed — see the boundaryFound guard in readLastTurnUsage().
+// Limitation: a turn spanning more than the tail window it was handed is summed from buffer
+// start, not the real boundary — token counts still over-count in this case (deliberately:
+// discarding real token data would be worse than a bounded over-count). Source attribution no
+// longer shares this bleed — see the boundaryFound guard in scanTurnInTail().
 function sumTurnUsage(lines: string[], billedIndex: number): {
   inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number;
   outputTokens: number; model: string; apiCalls: number; maxPromptTokens: number;
@@ -246,10 +246,13 @@ function peakPromptTokensSinceCompaction(lines: string[], billedIndex: number, s
   return peak;
 }
 
-function readLastTurnUsage(transcriptPath: string): Json {
-  const TAIL_BYTES = 524288; // 512KB — covers most multi-step agentic turns
+// One pass over a single tail window: find the last billed entry and resolve the turn it
+// belongs to. `boundaryMissed` reports the one condition worth reading again — the window
+// was truncated AND the turn's own prompt fell outside it — which forces the source to
+// 'other' and starts the token sum mid-turn. Any fs error means "no usable data": null.
+function scanTurnInTail(transcriptPath: string, tailBytes: number): Json {
   try {
-    const { lines, readFrom } = readTailLines(transcriptPath, TAIL_BYTES);
+    const { lines, readFrom } = readTailLines(transcriptPath, tailBytes);
 
     // A half-written trailing record means CC is still flushing this turn. Scanning past
     // it finds an OLDER turn's usage and bills it again under a fresh timestamp — measured
@@ -298,16 +301,44 @@ function readLastTurnUsage(transcriptPath: string): Json {
         // A truncated tail (readFrom > 0) whose turn boundary fell outside the window
         // can't be trusted — the prompt found may belong to an earlier, unrelated turn
         // still in the window. Attribute to 'other' rather than risk misattributing a
-        // large turn (e.g. a plugin upgrade run) to an unrelated source.
+        // large turn (e.g. a plugin upgrade run) to an unrelated source. Belt-and-braces
+        // as written: resolveTurnSource already returns 'other'/not-inherited whenever
+        // boundaryFound is false (turnPromptText hands it an empty text), so `trusted`'s
+        // only outcome-changing consumer is the boundaryMissed re-read signal below.
         const trusted = resolved.boundaryFound || readFrom <= 0;
         const source = trusted ? resolved.source : 'other';
         const sourceInherited = trusted && resolved.inherited;
         const subagents = collectSubagentUsage(lines, i);
-        return { ...summed, hadHumanTurn, source, sourceInherited, subagents, observedAt, lastCallPromptTokens, tailLines: lines };
+        return { ...summed, hadHumanTurn, source, sourceInherited, subagents, observedAt, lastCallPromptTokens, tailLines: lines, boundaryMissed: !trusted };
       } catch {}
     }
   } catch {}
   return null;
+}
+
+function readLastTurnUsage(transcriptPath: string): Json {
+  const TAIL_BYTES = 524288; // 512KB — covers most multi-step agentic turns
+  // A long routine run (evolve, weekly-scan, weekly-review) can write more transcript
+  // than that in one turn. Its prompt then sits outside the window, so the turn bills to
+  // 'other' with a mid-turn token sum — and those runs are exactly the expensive ones the
+  // ledger needs right. Read again at the cap when that happens.
+  //
+  // ONE retry, not a doubling ladder: each Stop bills exactly one turn, so there is never
+  // a second boundary further back to walk to. A single wider read reaches as far as the
+  // cap ever will, and a turn still unbounded at 8MB keeps the 'other' downgrade.
+  const RETRY_TAIL_BYTES = 8 * 1024 * 1024; // 8MB
+  const turn = scanTurnInTail(transcriptPath, TAIL_BYTES);
+  if (turn && turn.boundaryMissed) {
+    const wide = scanTurnInTail(transcriptPath, RETRY_TAIL_BYTES);
+    // Usage and source come from the wider read; `tailLines` stays narrow. Its one
+    // consumer, maybeDeriveSurface, takes the NEWEST compact_boundary in the lines it is
+    // handed, so widening can only reach boundaries OLDER than 512KB would ever see —
+    // the ones its own comment assumes were recorded on an earlier Stop. Since
+    // state/context-surface.json is folder-wide, replaying one rewrites the record (and
+    // its prev chain) backwards to a stale boundary.
+    return wide ? { ...wide, tailLines: turn.tailLines } : turn;
+  }
+  return turn;
 }
 
 // Fixed-surface derivation (state/context-surface.json): when the tail contains a
@@ -1010,7 +1041,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, resolveTurnSource, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
+export { run, getCumulativeCost, classifySource, resolveTurnSource, scanTurnInTail, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
 
 if (import.meta.main) {
   // Mark-only entrypoint (synchronous, no stdin): the heartbeat SKILL calls this
