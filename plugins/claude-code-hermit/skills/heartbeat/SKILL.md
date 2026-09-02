@@ -79,7 +79,7 @@ Start the heartbeat as a persistent CC Monitor subprocess.
    ```
    - `FRESH|interval=<s>` → the registered monitor matches config and is ticking. **Stop here**: log that line, make no `TaskStop`, `Monitor`, `Cron*` or file write. This is the common case when the daily anchor calls `start`, and it is the whole saving.
    - `REARM|<reason>` → continue. The lines after it are the plan: `OLD_TASK:<id>`, `FIRST_START:1`, `INTERVAL:<s>`, `CMD:<command>`. The verb has already cleared the previous monitor's liveness record and stamped `armed_at` into `state/heartbeat-monitor.runtime.json` — the provenance `start-commit` uses to tell this arm's first tick from a leftover one.
-2. If `OLD_TASK:<id>` was printed, `TaskStop` it — ignore not-found errors (the monitor may have already exited).
+2. If `OLD_TASK:<id>` was printed, `TaskStop` it — ignore not-found errors (the monitor may have already exited). It is printed unless the record belongs to a previous boot, whose task died with that process; a record with no `boot_id` at all was written by this one.
 3. Sweep any pre-existing CronCreate entry for the old recurring-cron approach: `CronList` → if an entry's `prompt` matches `/claude-code-hermit:heartbeat run`, `CronDelete` it. Idempotent.
 4. Register a new Monitor:
    - `description`: `heartbeat-monitor` (reserved slot — operators must not reuse this description for ad-hoc `/watch` entries)
