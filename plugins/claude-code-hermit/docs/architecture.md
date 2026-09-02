@@ -197,7 +197,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/micro-proposals.json`   | reflect + channel-bridged skills (queue, schema owned by reflect § Queuing procedure) + channel-responder/brief (resolve) | brief, generate-summary.ts |
 | `state/state-summary.md`       | generate-summary.ts only                            | humans                                                        |
 | `state/monitors.runtime.json`  | watch skill only                                    | session-start (clear on start), session-close (stop all)      |
-| `state/heartbeat-monitor.runtime.json` | heartbeat skill only                        | heartbeat-start (write), heartbeat-stop (clear), heartbeat-restart (rewrite) |
+| `state/heartbeat-monitor.runtime.json` | `lib/heartbeat/start.ts` only — reached by `heartbeat start` and by `hermit-routines load` (`arm commit --heartbeat`) | heartbeat-start (write), heartbeat-stop (clear), heartbeat-restart (rewrite) |
 | `state/heartbeat-liveness.json` | heartbeat-monitor.sh (every poll iteration)         | doctor-check.ts (heartbeat liveness check), heartbeat status  |
 | `state/cc-stop-snapshot.json`  | stop-pipeline.ts only                               | doctor-check.ts (scheduler/background-task health check)      |
 | `state/operator-turn-open.json` | user-prompt-pipeline.ts (opens at hook exit for a kept, non-blocked prompt, via record-operator-action.ts `openTurnMarker`) + record-operator-action.ts `--force`; stop-pipeline.ts (clears at Stop — the only deleter) | routines.ts due + lib/heartbeat/precheck.ts, both via lib/auto-close.ts `operatorTurnOpen` (defer gate, 60-min TTL backstop against a marker orphaned by a failed Stop) |

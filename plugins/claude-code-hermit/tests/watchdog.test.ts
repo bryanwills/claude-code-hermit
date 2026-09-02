@@ -2284,6 +2284,28 @@ test('stale routine-monitor liveness → monitor-rearm, only hermit-routines loa
   expect(calls).not.toContain('heartbeat start');
 }));
 
+// `hermit-routines load` arms both monitors, so a both-stale pass is one injection.
+// Sending `heartbeat start` behind it would load a second skill body only to be told
+// the leg it re-registers is already FRESH.
+test('both monitors stale → one hermit-routines load, no heartbeat start, both dampers stamped', withHermit(async (h) => {
+  writeRoutineMonitorConfig(h);
+  writeState(h, 'routine-monitor.runtime.json', { started_at: isoAgo(25 / 60), interval: 60, mode: 'monitor' });
+  writeState(h, 'routine-monitor-liveness.json', { last_peek_at: isoAgo(20 / 60) });
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(9) });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(8) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  const calls = tmuxCalls(h);
+  expect(calls.split('/claude-code-hermit:hermit-routines load').length - 1).toBe(1);
+  expect(calls).not.toContain('/claude-code-hermit:heartbeat start');
+  // Both legs were re-armed by that one injection, so both dampers close.
+  const stamps = readWatchdogStateFile(h).last_monitor_rearm;
+  expect(typeof stamps?.routines).toBe('string');
+  expect(typeof stamps?.heartbeat).toBe('string');
+}));
+
 test('routine monitor in croncreate-fallback mode → no re-arm', withHermit(async (h) => {
   writeRoutineMonitorConfig(h);
   writeState(h, 'routine-monitor.runtime.json', { started_at: isoAgo(25 / 60), interval: 60, mode: 'croncreate-fallback' });

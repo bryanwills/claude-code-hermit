@@ -7,6 +7,7 @@ import path from 'node:path';
 import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { heartbeatHealth, livenessReason, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
+import { commitHeartbeatArm, prepareHeartbeatArm } from '../heartbeat/start';
 import { bootMismatch, monitorFreshness, waitForFirstTick } from '../monitor-health';
 import { isPaused } from '../pause';
 import { resolveHermitNowMs } from '../time';
@@ -195,42 +196,59 @@ function emitPlan(ctx: Context, result: PlanResult): void {
   } catch {}
 }
 
-function cmdAnchor(ctx: Context): void {
-  if (isPaused(ctx.hermitDir).paused) {
-    stamp(ctx, 'skipped-paused');
-    process.stdout.write('SKIP|paused\n');
-    return;
-  }
+/** The verdict line both `anchor` and `check` report, computed without writing anything. */
+function armVerdict(ctx: Context): { line: string; healthy: boolean; paused: boolean } {
+  if (isPaused(ctx.hermitDir).paused) return { line: 'SKIP|paused', healthy: false, paused: true };
   const routines = monitorHealth(ctx);
   const heartbeat = heartbeatHealth(ctx.hermitDir, ctx.pluginRoot, ctx.config, ctx.nowMs);
   if (routines.healthy && heartbeat.healthy) {
-    stamp(ctx, 'started');
-    stamp(ctx, 'fired');
-    process.stdout.write(`HEALTHY|${summary(ctx, heartbeat)}\n`);
-    return;
+    return { line: `HEALTHY|${summary(ctx, heartbeat)}`, healthy: true, paused: false };
   }
-  stamp(ctx, 'started');
   const legs = [!routines.healthy ? 'routines' : null, !heartbeat.healthy ? 'heartbeat' : null].filter(Boolean);
   const reasons = [!routines.healthy ? `routines:${routines.reason}` : null, !heartbeat.healthy ? `heartbeat:${heartbeat.reason}` : null].filter(Boolean);
-  process.stdout.write(`ARM|${legs.join(',')}|${reasons.join(',')}\n`);
+  return { line: `ARM|${legs.join(',')}|${reasons.join(',')}`, healthy: false, paused: false };
+}
+
+function cmdAnchor(ctx: Context): void {
+  const verdict = armVerdict(ctx);
+  // The anchor's ledger rows are what keep `monitorHealth` from reading a live anchor
+  // as `anchor-old`, so its fire IS the state change — `check` exists for callers that
+  // want the same verdict without claiming a fire happened.
+  if (verdict.paused) stamp(ctx, 'skipped-paused');
+  else if (verdict.healthy) { stamp(ctx, 'started'); stamp(ctx, 'fired'); }
+  else stamp(ctx, 'started');
+  process.stdout.write(`${verdict.line}\n`);
+}
+
+/** Read-only twin of `anchor`: same verdict line, no ledger row, no file touched. */
+function cmdCheck(ctx: Context): void {
+  process.stdout.write(`${armVerdict(ctx).line}\n`);
 }
 
 function cmdBegin(ctx: Context, flags: string[]): void {
   const reset = flags.includes('--reset');
   const fallback = flags.includes('--fallback');
-  if (!reset && !fallback) {
-    const routines = monitorHealth(ctx);
-    const heartbeat = heartbeatHealth(ctx.hermitDir, ctx.pluginRoot, ctx.config, ctx.nowMs);
-    if (routines.healthy && heartbeat.healthy) {
-      process.stdout.write(`HEALTHY|${summary(ctx, heartbeat)}\n`);
-      return;
-    }
+  // Read once for both the HEALTHY short-circuit and the HB_ plan below: heartbeatHealth
+  // re-reads two state files plus `.boot-id`, and both sites see identical inputs. Null
+  // on `--fallback`, the one path that never plans the heartbeat leg.
+  const heartbeat = fallback ? null : heartbeatHealth(ctx.hermitDir, ctx.pluginRoot, ctx.config, ctx.nowMs);
+  if (heartbeat && !reset && heartbeat.healthy && monitorHealth(ctx).healthy) {
+    process.stdout.write(`HEALTHY|${summary(ctx, heartbeat)}\n`);
+    return;
   }
 
   const runtime = readJson(path.join(ctx.hermitDir, 'state', 'routine-monitor.runtime.json'));
   const firstTransition = runtime?.mode !== 'monitor';
   const legs = fallback ? 'routines' : 'routines,heartbeat';
   process.stdout.write(`ARM|${legs}|${fallback ? 'fallback' : reset ? 'reset' : 'reconcile'}\n`);
+  // The heartbeat leg rides along so one `load` arms both monitors. `--fallback` is
+  // the second pass of a load whose first pass already committed the heartbeat, and
+  // a `disabled` verdict is healthy — neither emits a plan.
+  if (heartbeat && !heartbeat.healthy) {
+    for (const line of prepareHeartbeatArm(ctx.hermitDir, ctx.config, ctx.pluginRoot)) {
+      process.stdout.write(`HB_${line}\n`);
+    }
+  }
   if (typeof runtime?.task_id === 'string' && runtime.task_id && !bootMismatch(runtime.boot_id, ctx.bootId)) {
     process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
@@ -264,6 +282,25 @@ function commitMirror(ctx: Context, fallback: boolean, reset: boolean, created: 
   writeJson(ctx.mirrorPath, next);
 }
 
+/**
+ * Starts recording the heartbeat Monitor the skill registered from this run's `HB_`
+ * lines, or returns null when no heartbeat task was passed. Independent of the routine
+ * leg's outcome: `lib/heartbeat/start.ts` owns the write, and a routine fallback says
+ * nothing about whether the heartbeat subprocess ticked.
+ */
+function startHeartbeatLeg(ctx: Context, flags: string[]): Promise<string> | null {
+  const index = flags.indexOf('--heartbeat');
+  const taskId = index === -1 ? '' : (flags[index + 1] ?? '').trim();
+  if (!taskId || taskId === 'none') return null;
+  const pending = commitHeartbeatArm(ctx.hermitDir, ctx.config, ctx.pluginRoot, taskId);
+  // Both monitors are already spawned by the time `commit` runs, so this leg's
+  // first-tick wait overlaps the routine leg's instead of following it — up to 10s off
+  // every boot that arms both. The awaits below still surface any rejection; this
+  // handler only stops it counting as unhandled during the overlap window.
+  pending.catch(() => {});
+  return pending;
+}
+
 async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise<void> {
   const fallback = taskId === 'fallback';
   const reset = flags.includes('--reset');
@@ -272,6 +309,7 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
     (createdIndex === -1 ? '' : flags[createdIndex + 1] ?? '')
       .split(',').map(value => value.trim()).filter(Boolean),
   );
+  const heartbeatLeg = startHeartbeatLeg(ctx, flags);
   commitMirror(ctx, fallback, reset, created);
 
   if (fallback) {
@@ -281,6 +319,7 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
       boot_id: ctx.bootId,
     });
     process.stdout.write(`OK|monitor|${ctx.scheduled.length} scheduled|anchor ${created.has(ANCHOR_ID) ? 'created' : 'kept'}\n`);
+    if (heartbeatLeg) process.stdout.write(`HEARTBEAT:${await heartbeatLeg}\n`);
     return;
   }
 
@@ -297,22 +336,24 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
   if (!noMonitor && taskId) runtime.task_id = taskId;
   if (noMonitor) runtime.routines = 0;
   writeJson(path.join(ctx.hermitDir, 'state', 'routine-monitor.runtime.json'), runtime);
-  if (!live) {
-    process.stdout.write('FALLBACK|liveness-absent\n');
-    return;
-  }
-  process.stdout.write(`OK|monitor|${ctx.scheduled.length} scheduled|anchor ${created.has(ANCHOR_ID) ? 'created' : 'kept'}\n`);
+  process.stdout.write(
+    live
+      ? `OK|monitor|${ctx.scheduled.length} scheduled|anchor ${created.has(ANCHOR_ID) ? 'created' : 'kept'}\n`
+      : 'FALLBACK|liveness-absent\n',
+  );
+  if (heartbeatLeg) process.stdout.write(`HEARTBEAT:${await heartbeatLeg}\n`);
 }
 
 export async function run(args: string[]): Promise<void> {
   const [subverb, hermitDir, pluginRoot, ...rest] = args;
-  if (!subverb || !hermitDir || !pluginRoot || !['anchor', 'begin', 'commit'].includes(subverb)) {
+  if (!subverb || !hermitDir || !pluginRoot || !['anchor', 'check', 'begin', 'commit'].includes(subverb)) {
     process.stdout.write('ARM|routines,heartbeat|check-error:usage\n');
     return;
   }
   try {
     const ctx = context(hermitDir, pluginRoot);
     if (subverb === 'anchor') cmdAnchor(ctx);
+    else if (subverb === 'check') cmdCheck(ctx);
     else if (subverb === 'begin') cmdBegin(ctx, rest);
     else {
       const [taskId, ...flags] = rest;
