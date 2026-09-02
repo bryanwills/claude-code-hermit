@@ -7,13 +7,13 @@
 // no load-time side effects, so direct import is safe and deterministic).
 //
 // Fixture entry shapes mirror real CC transcripts (verified live, CC 2.1.214):
-//   - wake trigger: user entry, string content. Only the Monitor task-notification
-//     frame ("<event>HEARTBEAT_EVALUATE</event>") arrives WITHOUT isMeta. Surveyed over
-//     287 stored transcripts, the other three delivery frames are isMeta:true in every
-//     sample: CronCreate "[hermit-routine:<id>]" 12/12, channel envelopes 74/74, peer
-//     posts 40/40. digestLines gates on isTurnTrigger, whose `isMeta !== true` guard
-//     therefore drops them before they reach classifySource — see #939. The fixtures
-//     below encode that gap rather than papering over it.
+//   - turn boundary: user entry, string content, not a tool_result and not a skill
+//     injection. Monitor HEARTBEAT_EVALUATE arrives without isMeta; CronCreate
+//     "[hermit-routine:<id>]", channel envelopes, and peer posts arrive isMeta:true.
+//     digestLines opens a turn on cc-compat's isTurnBoundary — the same predicate
+//     turnPromptText walks back to (user && !isToolResult && !isSkillInjection) — then
+//     classifySource decides whether that turn is a wake. CronCreate is a wake;
+//     channel and peer are not.
 //   - skill injection: isMeta:true with ARRAY content (592/600 live samples); the bare
 //     string-content form is pre-2.1.202 and no longer emitted.
 //   - rejection carrier: user tool_result with is_error:true + top-level toolDenialKind
@@ -333,20 +333,21 @@ describe('digestLines — wake classification (trigger entry only)', () => {
   test('command-wrapped manual heartbeat run is NOT a wake', () => {
     expect(wakesOf([triggerEntry('<command-message>claude-code-hermit:heartbeat</command-message>\n<command-name>/claude-code-hermit:heartbeat</command-name>\n<command-args>run</command-args>')])).toBe(0);
   });
-  // classifySource does call this a wake, but the digest never asks it: a live CronCreate
-  // routine prompt is isMeta:true (12/12 in stored transcripts) and isTurnTrigger's
-  // `isMeta !== true` guard drops it before classification. Pinned at 0 to record the gap
-  // — #939 fixes the segmentation, and flips this back to 1.
-  test('CronCreate routine prompt is dropped by the isMeta gate (#939)', () => {
-    expect(wakesOf([triggerEntry('[hermit-routine:heartbeat-restart]\nRun: bun /p/scripts/routines.ts arm anchor', { isMeta: true })])).toBe(0);
+  // Live CronCreate routine prompts are isMeta:true. The boundary predicate still
+  // opens a turn; classifySource then counts it as a wake.
+  test('CronCreate routine prompt is a wake (#939)', () => {
+    expect(wakesOf([triggerEntry('[hermit-routine:heartbeat-restart]\nRun: bun /p/scripts/routines.ts arm anchor', { isMeta: true })])).toBe(1);
   });
   test('ROUTINE_DUE marker is a wake', () => {
     expect(wakesOf([triggerEntry('ROUTINE_DUE [hermit-routine:daily-brief] due now')])).toBe(1);
   });
-  // isMeta:true live (74/74), so this is 0 twice over: dropped by the gate, and not a wake
-  // to classifySource either. Stays correct once #939 lands.
+  // isMeta:true live. The envelope now opens a turn; classifySource still does not
+  // count it as a wake.
   test('inbound channel prompt is NOT a wake', () => {
     expect(wakesOf([triggerEntry('<channel source="plugin:discord:discord" user="u">hi</channel>', { isMeta: true })])).toBe(0);
+  });
+  test('inbound peer prompt is NOT a wake', () => {
+    expect(wakesOf([triggerEntry('Another Claude session sent a message:\n<cross-session-message from="x">hi</cross-session-message>', { isMeta: true })])).toBe(0);
   });
   test('plain operator prompt is NOT a wake', () => {
     expect(wakesOf([triggerEntry('please refactor the parser')])).toBe(0);
@@ -366,6 +367,15 @@ describe('digestLines — wake classification (trigger entry only)', () => {
     ], OPEN);
     expect(d.wakes).toBe(1);
     expect(d.productiveWakes).toBe(1);
+  });
+  test('channel envelope after a heartbeat does not credit the Write to the wake', () => {
+    const d = digestLines([
+      triggerEntry('HEARTBEAT_EVALUATE'),
+      triggerEntry('<channel source="plugin:discord:discord" user="u">hi</channel>', { isMeta: true }),
+      assistantToolUse('u1', 'Write'),
+    ], OPEN);
+    expect(d.wakes).toBe(1);
+    expect(d.productiveWakes).toBe(0);
   });
 });
 

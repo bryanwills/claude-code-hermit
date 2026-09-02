@@ -4052,7 +4052,8 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
   });
 
   // An isMeta entry with STRING content IS a real delivered prompt — the live shape of a
-  // routine wake. Skipping it (as isTurnTrigger would) loses the attribution entirely.
+  // routine wake. Skipping it (as a bare `isMeta !== true` guard would) loses the
+  // attribution entirely.
   test('cost-tracker: an isMeta string-content routine prompt still classifies', () => {
     const lines = [
       JSON.stringify({ type: 'user', isMeta: true, message: { content: '[hermit-routine:morning] First run: log-routine-event.sh morning started' } }),
