@@ -377,13 +377,22 @@ function maybeDeriveSurface(lines: string[]): void {
   } catch {}
 }
 
-// Newest main (non-subagent) row already in the cost log — the duplicate check in run()
-// compares against it. Tail-read: the log is append-only and unbounded, so a full parse
-// on every turn is exactly the cost this codebase avoids elsewhere (see updateCostIndex).
-function lastLoggedMainRow(): Json {
+// Newest main (non-subagent) row THIS session already logged — the duplicate check in
+// run() compares against it. Tail-read: the log is append-only and unbounded, so a full
+// parse on every turn is exactly the cost this codebase avoids elsewhere (see
+// updateCostIndex).
+//
+// Matching on cc_session_id here rather than at the comparison: the newest main row in a
+// hatched folder belongs to whichever session wrote last, so a guest row landing between
+// this session's turn and a retry of its Stop hook would leave the newest row unmatchable
+// and skip the guard entirely — double-billing the turn and republishing its context size.
+// Legacy rows carry no cc_session_id and so never match, which fails open exactly as a
+// missing observed_at does.
+function lastLoggedMainRow(ccSessionId: string): Json {
   // Wide enough that the subagent rows a fan-out turn appends AFTER its main row can't
   // push that main row out of the window — a turn dispatching ~25 agents writes ~15KB of
-  // them, which would silently disable the guard on exactly the heaviest turns.
+  // them, which would silently disable the guard on exactly the heaviest turns. Other
+  // sessions' rows consume the same window; overflowing it fails open, never closed.
   const TAIL_BYTES = 131072;
   try {
     const { lines } = readTailLines(COST_LOG, TAIL_BYTES);
@@ -391,7 +400,7 @@ function lastLoggedMainRow(): Json {
       if (!lines[i].trim()) continue;
       try {
         const row = JSON.parse(lines[i]);
-        if (row && row.subagent !== true) return row;
+        if (row && row.subagent !== true && row.cc_session_id === ccSessionId) return row;
       } catch {}
     }
   } catch {}
@@ -860,10 +869,11 @@ async function run(data: Json): Promise<string | null> {
     // "Same session" is cc_session_id, not session_id: the latter is the S-NNN arc label
     // every session in the folder shares while an arc is open, so a guest's newer row
     // would suppress the resident's own turn entirely — unbilled spend, and no fresh row
-    // for the hygiene tiers to read (issue #916). Legacy rows have no cc_session_id and
-    // never block, same fail-open as a missing observed_at.
-    const lastRow = lastLoggedMainRow();
-    if (observedAt && lastRow && lastRow.cc_session_id === sessionId
+    // for the hygiene tiers to read (issue #916). lastLoggedMainRow does the matching, so
+    // an interleaved row from another session can neither suppress this turn nor hide the
+    // row that should dedupe it.
+    const lastRow = lastLoggedMainRow(sessionId);
+    if (observedAt && lastRow
         && typeof lastRow.observed_at === 'string' && observedAt <= lastRow.observed_at) {
       return null;
     }

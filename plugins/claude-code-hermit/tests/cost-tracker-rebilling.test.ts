@@ -32,6 +32,8 @@ type Case = {
   writeTranscript(lines: string[], opts?: { trailingPartial?: boolean }): void;
   /** Seed the cost log with pre-existing rows. */
   seedCostLog(rows: any[]): void;
+  /** Append rows to the cost log, as another session's Stop hook would. */
+  appendCostLog(rows: any[]): void;
   /** Run one Stop-hook invocation of cost-tracker. */
   run(opts?: { env?: Record<string, string>; sessionId?: string }): Promise<void>;
   /** Main (non-subagent) cost-log rows written so far. */
@@ -82,6 +84,9 @@ function withCase(fn: (c: Case) => Promise<void>) {
         },
         seedCostLog(rows) {
           fs.writeFileSync(logPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+        },
+        appendCostLog(rows) {
+          fs.appendFileSync(logPath, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
         },
         async run(opts = {}) {
           const stdin = JSON.stringify({ session_id: opts.sessionId ?? 'test-session', transcript_path: transcriptPath });
@@ -201,6 +206,35 @@ describe('cost-tracker: duplicate-turn guard', () => {
     const rows = c.mainRows();
     expect(rows).toHaveLength(2);
     expect(rows[1].cc_session_id).toBe('test-session');
+  }));
+
+  // The other half of the same interleaving: this session bills a turn, a guest appends a
+  // NEWER row, then this session's Stop hook is retried for the same turn. Matching the
+  // newest row folder-wide would find the guest's and fail the session comparison, taking
+  // the guard out of play and double-billing the turn under a fresh timestamp.
+  test('a guest row appended between a turn and its retry does not defeat the guard', withCase(async c => {
+    c.writeTranscript([
+      triggerPrompt('resident turn'),
+      assistantEntry('2026-08-02T19:00:00.000Z', 103_298),
+    ]);
+    await c.run();
+    expect(c.mainRows()).toHaveLength(1);
+
+    c.appendCostLog([{
+      timestamp: '2026-08-02T20:00:00.000Z',
+      observed_at: '2026-08-02T20:00:00.000Z',
+      session_id: 'test-session',
+      cc_session_id: 'cc-guest-xyz',
+      guest: true,
+      source: 'other', model: 'sonnet',
+      input_tokens: 12, cache_write_tokens: 0, cache_read_tokens: 250_000,
+      output_tokens: 10, total_tokens: 250_022, api_calls: 1,
+      max_prompt_tokens: 250_012, estimated_cost_usd: 0.2,
+    }]);
+
+    await c.run(); // same transcript, same turn — a retried Stop
+
+    expect(c.mainRows().filter(r => r.cc_session_id === 'test-session')).toHaveLength(1);
   }));
 
   test('a legacy last row without observed_at never blocks the next bill', withCase(async c => {
