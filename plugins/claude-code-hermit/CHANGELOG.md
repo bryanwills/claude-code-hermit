@@ -13,6 +13,7 @@
 - `validate-config` warns when `heartbeat-restart` has a non-daily schedule — the anchor's 7-day expiry and 26h age windows assume it fires every day.
 
 ### Changed
+- `/proposal-act` writes hook and permission entries straight into the hatch-resolved `.claude/settings*.json` with an `Edit`/`Write` call, relying on the seeded native ask for approval instead of the bundled `update-config` skill.
 - The watchdog no longer re-arms on the `heartbeat-restart` routine's `fired` age; stale monitor liveness is now the only automated re-arm signal. In CronCreate-fallback mode, an anchor cron that vanishes while the process survives is no longer detected, and its routines expire after 7 days.
 - `/hermit-doctor`'s watchdog `re-arms` counter tallies `monitor-rearm` events, the only re-arm the watchdog still emits.
 - Core declares one dynamic `claude-subscription` credential in place of `setup-token`; doctor's `credential-expiry` probe reads whichever credential the mode resolves to and warns 3 days out in both modes (was 14 for the token).
