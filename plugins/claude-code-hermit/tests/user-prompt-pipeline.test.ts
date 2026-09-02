@@ -18,6 +18,7 @@ import path from 'node:path';
 import { runScript } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
 import { assistantEntry } from './helpers/transcript';
+import { markGuest } from '../scripts/lib/guest-marker';
 import { startHttpStub } from './helpers/http-stub';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
@@ -362,9 +363,13 @@ describe('user-prompt-pipeline: switch verification', () => {
     return file;
   }
 
-  async function runWith(wd: Workdir, transcript: string | null) {
+  async function runWith(wd: Workdir, transcript: string | null, sessionId?: string) {
     return runScript('user-prompt-pipeline.ts', {
-      stdin: JSON.stringify({ prompt: 'which model are you on?', ...(transcript ? { transcript_path: transcript } : {}) }),
+      stdin: JSON.stringify({
+        prompt: 'which model are you on?',
+        ...(transcript ? { transcript_path: transcript } : {}),
+        ...(sessionId ? { session_id: sessionId } : {}),
+      }),
       cwd: wd.dir,
     });
   }
@@ -380,6 +385,21 @@ describe('user-prompt-pipeline: switch verification', () => {
     expect(r.stdout).toContain('"/model fable" delivered');
     expect(r.stdout).toContain('transcript now reports model claude-fable-5');
     expect(fs.existsSync(verifyMarker(wd.dir))).toBe(false);
+  });
+
+  // The marker belongs to the RESIDENT — a guest reporting it would announce a switch
+  // that never touched its own session, and clear the marker before the resident read it.
+  test('a guest session reports nothing and leaves the marker for the resident', async () => {
+    const wd = setupWorkdir();
+    seedDeliveredSwitch(wd);
+    const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: POST_SWITCH_AT }]);
+    markGuest(hermit(wd.dir, 'state'), 'guest-1');
+
+    const r = await runWith(wd, transcript, 'guest-1');
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('delivered');
+    expect(fs.existsSync(verifyMarker(wd.dir))).toBe(true);
   });
 
   // The bug this whole path exists to prevent: answering from the PRE-switch entry.

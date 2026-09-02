@@ -29,10 +29,13 @@ process.stdout.on('error', () => {});
 // block on a failed send, and per-stage errors are isolated — a throwing stage
 // is logged to stderr and the rest still run (the stop-pipeline.ts pattern).
 
-import { hermitDir, transcriptPath as ccTranscriptPath } from './lib/cc-compat';
+import path from 'node:path';
+
+import { hermitDir, transcriptPath as ccTranscriptPath, sessionId as ccSessionId } from './lib/cc-compat';
 import { parseChannelEnvelope } from './lib/channel-envelope';
 import { readConfigRaw } from './lib/config-read';
 import { readRuntimeJson } from './lib/runtime';
+import { isGuest } from './lib/guest-marker';
 import type { StageContext, StageResult } from './lib/prompt-stages/types';
 
 import { openTurnMarker, run as recordOperatorAction } from './record-operator-action';
@@ -70,10 +73,12 @@ async function main(raw: string): Promise<void> {
   // exactly as stop-pipeline.ts does.
   let prompt: string | null = null;
   let transcript: string | null = null;
+  let sessionId: string | null = null;
   try {
     const payload = JSON.parse(raw);
     prompt = payload && typeof payload.prompt === 'string' ? payload.prompt : null;
     transcript = ccTranscriptPath(payload);
+    sessionId = ccSessionId(payload);
   } catch {
     process.stderr.write('[user-prompt-pipeline] malformed stdin — continuing with an empty prompt\n');
     // A parse failure on non-empty stdin means a prompt did arrive and was
@@ -143,7 +148,14 @@ async function main(raw: string): Promise<void> {
   // accumulated context (see emit()). Running it earlier let a blocked `status`
   // turn destroy the marker with the report unread — stage() skips it entirely
   // once a block is settled, so the marker survives for the next real prompt.
-  await stage('harness-verify', harnessVerify, ctx);
+  //
+  // Skipped entirely in a guest session: the marker is the RESIDENT's, written when
+  // its Stop hook delivered the switch. A guest reporting it would announce a switch
+  // that never happened to its own session, and — worse — clear the marker before the
+  // resident's next prompt ever read it.
+  if (!isGuest(path.join(dir, 'state'), sessionId)) {
+    await stage('harness-verify', harnessVerify, ctx);
+  }
 }
 
 function emit(): void {
