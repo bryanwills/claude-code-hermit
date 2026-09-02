@@ -20,6 +20,7 @@ import {
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
   maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
+import { AUTO_CLOSE_LULL_MS } from '../scripts/lib/auto-close';
 import { startHttpStub, type Stub } from './helpers/http-stub';
 import { localIdentity } from './helpers/registry-fixture';
 
@@ -4055,25 +4056,35 @@ describe('pause enforcement', () => {
 });
 
 describe('isNearDailyAutoClose (midnight-adjacency, unit)', () => {
+  // The window the compact tier actually passes — the same lull maybePostCloseClear
+  // waits out before sending /clear.
+  const LULL_SECS = AUTO_CLOSE_LULL_MS / 1000;
   const REF_2359 = new Date('2026-06-11T23:59:00Z'); // 1 min before UTC midnight
+  const REF_2355 = new Date('2026-06-11T23:55:00Z'); // 5 min before — inside the lull
+  const REF_2210 = new Date('2026-06-11T22:10:00Z'); // 110 min before — inside the old 2h window
   const REF_NOON = new Date('2026-06-11T12:00:00Z');
   const routines = [{ id: 'daily-auto-close', schedule: '0 0 * * *', enabled: true }];
 
   test('within window before midnight → suppresses', () => {
-    expect(isNearDailyAutoClose({ routines, timezone: 'UTC' }, 2 * 3600, REF_2359)).toBe(true);
+    expect(isNearDailyAutoClose({ routines, timezone: 'UTC' }, LULL_SECS, REF_2359)).toBe(true);
+    expect(isNearDailyAutoClose({ routines, timezone: 'UTC' }, LULL_SECS, REF_2355)).toBe(true);
+  });
+
+  test('the evening operator slot is outside the lull → does not suppress', () => {
+    expect(isNearDailyAutoClose({ routines, timezone: 'UTC' }, LULL_SECS, REF_2210)).toBe(false);
   });
 
   test('far from the routine → does not suppress', () => {
-    expect(isNearDailyAutoClose({ routines, timezone: 'UTC' }, 2 * 3600, REF_NOON)).toBe(false);
+    expect(isNearDailyAutoClose({ routines, timezone: 'UTC' }, LULL_SECS, REF_NOON)).toBe(false);
   });
 
   test('routine disabled → does not suppress (fail-open)', () => {
     const disabled = [{ id: 'daily-auto-close', schedule: '0 0 * * *', enabled: false }];
-    expect(isNearDailyAutoClose({ routines: disabled, timezone: 'UTC' }, 2 * 3600, REF_2359)).toBe(false);
+    expect(isNearDailyAutoClose({ routines: disabled, timezone: 'UTC' }, LULL_SECS, REF_2359)).toBe(false);
   });
 
   test('no daily-auto-close routine configured → does not suppress', () => {
-    expect(isNearDailyAutoClose({ routines: [], timezone: 'UTC' }, 2 * 3600, REF_2359)).toBe(false);
+    expect(isNearDailyAutoClose({ routines: [], timezone: 'UTC' }, LULL_SECS, REF_2359)).toBe(false);
   });
 });
 
@@ -4895,11 +4906,37 @@ describe('maybeContextCompact (in-process) — outcome per gate', () => {
     expect(maybeContextCompact({ context_hygiene: { compact: { enabled: true, min_context_tokens: 0 } } }, c.world)).toBeNull();
   }));
 
+  // The fixture clock sits at 12:00Z, so a 12:05 close is 5 min out — inside the lull.
+  const CLOSE_IN_5_MIN = [{ id: 'daily-auto-close', schedule: '5 12 * * *', enabled: true }];
+
   test('midnight-adjacent suppression beats the token gates', withCascade((c) => {
     writeCostEntry(c);
-    const config = { ...COMPACT_CONFIG, routines: [{ id: 'daily-auto-close', schedule: '0 13 * * *', enabled: true }] };
+    const config = { ...COMPACT_CONFIG, post_close_clear: true, routines: CLOSE_IN_5_MIN };
     expect(maybeContextCompact(config, c.world)).toBe('skip:midnight-adjacent');
     expect(c.sent).toEqual([]);
+  }));
+
+  test('no post-close /clear coming → the close is not worth waiting for', withCascade((c) => {
+    writeCostEntry(c);
+    const config = { ...COMPACT_CONFIG, post_close_clear: false, routines: CLOSE_IN_5_MIN };
+    const outcome = maybeContextCompact(config, c.world);
+    // Truthy too: a null would mean the tier never ran, which would pass the inequality
+    // for the wrong reason. Which later gate it lands on is not this test's business.
+    expect(outcome).toBeTruthy();
+    expect(outcome).not.toBe('skip:midnight-adjacent');
+  }));
+
+  // One minute past the window the callsite passes. Literal on purpose: the callsite
+  // borrows AUTO_CLOSE_LULL_MS for the size, so a case phrased in that constant would
+  // float with it and never notice the evening compact slot going dark again.
+  const CLOSE_IN_11_MIN = [{ id: 'daily-auto-close', schedule: '11 12 * * *', enabled: true }];
+
+  test('just past the window → the compact tier stays live', withCascade((c) => {
+    writeCostEntry(c);
+    const config = { ...COMPACT_CONFIG, post_close_clear: true, routines: CLOSE_IN_11_MIN };
+    const outcome = maybeContextCompact(config, c.world);
+    expect(outcome).toBeTruthy(); // null would pass the inequality for the wrong reason
+    expect(outcome).not.toBe('skip:midnight-adjacent');
   }));
 
   test('below-floor: a small compactible conversation is never worth summarising', withCascade((c) => {
