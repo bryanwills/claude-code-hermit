@@ -1,13 +1,13 @@
 ---
 name: relogin
-description: "Renew the hermit's long-lived Claude login token over the channel, before it expires. Relays a one-time sign-in link to the operator, takes the code back, installs the new token, and restarts. Activates on messages like 'relogin', 'renew my login', 'reauth', 'the login is expiring', or when doctor's credential-expiry check flags setup-token."
+description: "Renew the hermit's Claude credential (token or claude.ai sign-in, per `auth_mode`) over the channel, before it expires. Relays a one-time sign-in link to the operator, takes the code back, installs the new token, and restarts. Activates on messages like 'relogin', 'renew my login', 'reauth', 'the login is expiring', or when doctor's credential-expiry check flags the Claude credential."
 ---
 
 # Relogin
 
-Renews this hermit's `setup-token` credential without anyone touching the box. The operator opens a link, signs in, sends back a code; you install the token and restart.
+Renews this hermit's Claude credential (token or claude.ai sign-in, per `auth_mode`) without anyone touching the box. The operator opens a link, signs in, sends back a code; you install the token and restart.
 
-Use this when doctor warns that `setup-token` is expiring, or the operator asks to renew. If the hermit is *already* dead from an expired token, this skill is not the path — the watchdog runs the same flow deterministically without a model (`setup-token-mint.ts relay`), because a dead hermit can't run a skill.
+Use this when doctor warns that the credential is expiring, or the operator asks to renew. If the hermit is *already* dead from an expired token, this skill is not the path — the watchdog runs the same flow deterministically without a model (`setup-token-mint.ts relay`), because a dead hermit can't run a skill.
 
 **Never run `/logout`.** Renewal never needs it. Retiring the old `.credentials.json` is fine — the install does it for you (see Notes) — but `/logout` *also* resets first-launch state, after which the interactive wizard demands a login and refuses the env token. That reset is the hazard, not the credential removal.
 

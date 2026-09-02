@@ -23,6 +23,7 @@ import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertStat
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
 import { isProposalScanItem, isCredentialExpiryItem } from '../heartbeat-items';
 import { isPaused } from '../pause';
+import { probeDeclaredCredentials, shadowingCredentialNote } from '../credential-probe';
 import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
@@ -150,18 +151,28 @@ function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evalua
   return 'clean';
 }
 
-// The default HEARTBEAT.md credential-expiry item reads state/doctor-report.json.
-// Resolve it against that report so a healthy check reaches OK without an LLM
-// wake. Fail-open on a missing, unparseable, or incomplete report (parity with
-// today). A lingering alerts[key] on an otherwise-ok check is SKILL.md-owned
-// resolution, so defer. Any other status uses the generic suppressed-entry
-// rule. Read-only, identical under --peek.
-function resolveCredentialExpiryItem(stateDir: string, alerts: Json, key: string): 'clean' | 'evaluate' {
-  const report = readJSON(path.join(stateDir, 'state', 'doctor-report.json'));
-  if (!report || !Array.isArray(report.checks)) return 'evaluate';
-  const check = report.checks.find((c: Json) => c && c.id === 'credential-expiry');
-  if (!check) return 'evaluate';
-  if (check.status === 'ok') return alerts[key] ? 'evaluate' : 'clean';
+// The default HEARTBEAT.md credential-expiry item asks the credential itself.
+// Every declared `expiry_probe` (core plus siblings) is run here, so a healthy
+// credential reaches OK without an LLM wake and a stale state/doctor-report.json
+// can no longer hide an expiry. Anything short of "every probe healthy" — no
+// credential declared, a bad note, a probe failure or timeout — evaluates. A
+// lingering alerts[key] on an otherwise-healthy credential is SKILL.md-owned
+// resolution, so defer. Read-only, identical under --peek.
+//
+// The shadowing note rides along for the same reason doctor's credential-expiry
+// check folds it in: a stored /login next to a token 401s the hermit and no
+// expiry_probe reports it, so probing alone would resolve that item clean and
+// the operator would never hear about it.
+function resolveCredentialExpiryItem(config: Json, alerts: Json, key: string): 'clean' | 'evaluate' {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '../../..');
+  let healthy = false;
+  try {
+    const { okCount, badNotes } = probeDeclaredCredentials(pluginRoot);
+    healthy = okCount > 0 && badNotes.length === 0 && shadowingCredentialNote(config) === null;
+  } catch {
+    healthy = false;
+  }
+  if (healthy) return alerts[key] ? 'evaluate' : 'clean';
   const entry = alerts[key];
   if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) return 'evaluate';
   return 'clean';
@@ -444,8 +455,8 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
 
   // OK fires only when every item in HEARTBEAT.md is satisfied. The default
   // proposals-scan item is resolved against real proposal frontmatter; the
-  // default credential-expiry item against state/doctor-report.json (so a hermit
-  // whose doctor check is healthy reaches OK without an LLM wake); every other
+  // default credential-expiry item against the credential's own expiry_probe (so
+  // a hermit whose credential is healthy reaches OK without an LLM wake); every other
   // item needs a matching entry in alerts{} that is suppressed (count > 5) and not
   // approaching resolution (consecutive_clean === 0).
   for (const item of checklistItems) {
@@ -456,7 +467,7 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
     const key = normalizeItemKey(item);
     if (!key) return 'EVALUATE';
     if (isCredentialExpiryItem(item)) {
-      if (resolveCredentialExpiryItem(stateDir, alerts, key) === 'evaluate') return 'EVALUATE';
+      if (resolveCredentialExpiryItem(config, alerts, key) === 'evaluate') return 'EVALUATE';
       continue;
     }
     const entry = alerts[key];

@@ -188,6 +188,8 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/backup.ts status*)',
   'Bash(.claude-code-hermit/bin/hermit-run backup run*)',
   'Bash(.claude-code-hermit/bin/hermit-run backup status*)',
+  'Bash(bun */scripts/memory-dir.ts*)',
+  'Bash(.claude-code-hermit/bin/hermit-run memory-dir*)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
 ];
