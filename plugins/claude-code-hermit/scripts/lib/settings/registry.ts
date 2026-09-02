@@ -15,7 +15,7 @@
 // because `show` must render it, but the skill keeps its prose too — changing it
 // retranslates `state/artifact-strings.json`, which no table can express.
 
-import { ESCALATION, IDLE_BEHAVIOR, PERMISSION_MODE, QUALITY_GATE_TIER, VOICE_STYLE } from './enums';
+import { AUTH_MODE, ESCALATION, IDLE_BEHAVIOR, PERMISSION_MODE, QUALITY_GATE_TIER, VOICE_STYLE } from './enums';
 
 export type Kind = 'string' | 'boolean' | 'enum' | 'int';
 
@@ -61,6 +61,10 @@ export const SETTINGS: readonly Setting[] = [
   { arg: 'remote', path: 'remote', kind: 'boolean', group: 'Operational',
     label: 'Remote control', hint: 'connect from claude.ai/code or phone',
     applies: 'next hermit-start' },
+  { arg: 'auth-mode', path: 'auth_mode', kind: 'enum', values: AUTH_MODE, nullable: true,
+    group: 'Operational', label: 'Auth method',
+    hint: "login (claude.ai sign-in, renew ~monthly) or token (long-lived, renew yearly)",
+    applies: 'run /relogin to sign in with the new method' },
   { arg: 'model', path: 'model', kind: 'string', nullable: true, group: 'Operational',
     label: 'Model', hint: "model name passed straight to --model, or 'none' for the Claude Code default",
     applies: 'next hermit-start' },

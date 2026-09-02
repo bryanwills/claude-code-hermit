@@ -18,9 +18,11 @@
  * reached the socket, NOT that the model read them: the receiving session
  * applies its own inbound controls afterwards, and both ways it can drop the
  * message are invisible to us — `crossSessionInbound: refuse` drops silently,
- * and a `bypassPermissions` receiver *holds* an unauthenticated post behind an
- * approval dialog that expires in five minutes. A model that declines to act on
- * the text is equally unobservable. So callers must never read 'sent' as
+ * and a receiver whose inbound controls still hold an unauthenticated post (one
+ * launched without the hermit's `accept` overlay, or an operator-set `hold`)
+ * leaves it behind an approval dialog that expires in five minutes. A model
+ * that declines to act on the text is equally unobservable. So callers must
+ * never read 'sent' as
  * "delivered"; confirm the effect instead (the watchdog re-checks staleness on
  * the next tick and falls back to typing).
  */
