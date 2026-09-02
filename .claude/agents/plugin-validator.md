@@ -1,6 +1,6 @@
 ---
 name: plugin-validator
-description: Validates a single plugin's structure in the monorepo — checks plugin.json consistency, skill frontmatter, hook matcher syntax, template variables, and cross-references between components. Takes a plugin slug. Use after structural changes for fast feedback (release-auditor handles release-readiness checks separately).
+description: Validates a single plugin's structure in the monorepo — checks plugin.json consistency, skill frontmatter, hook matcher syntax, template variables, and cross-references between components. Takes a plugin slug, plus `release` as a second argument to add the release-readiness checks (marketplace version parity, changelog section, dependency triad). Use after structural changes for fast feedback and before cutting a release.
 model: sonnet
 effort: medium
 maxTurns: 20
@@ -23,7 +23,7 @@ Check 0 (the native validator) is the authority for schema compliance. Checks 1�
 
 ## Input contract
 
-You receive a plugin slug as the first argument (e.g. `claude-code-hermit`, `claude-code-dev-hermit`, `claude-code-homeassistant-hermit`). Throughout this prompt, `<slug>` refers to that argument.
+You receive a plugin slug as the first argument (e.g. `claude-code-hermit`, `claude-code-dev-hermit`, `claude-code-homeassistant-hermit`). Throughout this prompt, `<slug>` refers to that argument. An optional second argument `release` enables the checks under "Release mode" below.
 
 **If invoked without a slug**:
 1. List candidates: `ls -d plugins/*/.claude-plugin/plugin.json 2>/dev/null | sed 's|plugins/||;s|/.claude-plugin.*||'`
@@ -66,12 +66,11 @@ Report the full output. Any FAIL from the native validator is a FAIL in your rep
   - `matcher` is a valid regex (no syntax errors)
   - `hooks[].command` references scripts that exist (resolve `${CLAUDE_PLUGIN_ROOT}` to `plugins/<slug>/`)
   - `timeout` is a positive number when present
-- Check hook event names are valid: `PreToolUse`, `PostToolUse`, `Stop`, `SessionStart`
 
 ### 4. Script existence
 
 - For every script referenced in `plugins/<slug>/hooks/hooks.json`, verify the file exists under `plugins/<slug>/scripts/` (or wherever the resolved path points).
-- For every `.js` script in `plugins/<slug>/scripts/`, check `require()` paths resolve (especially `./lib/*`).
+- For every `.ts` script in `plugins/<slug>/scripts/`, check relative `import` specifiers resolve (especially `./lib/*`).
 
 ### 5. Template variables
 
@@ -92,6 +91,44 @@ Only when `<slug> == "claude-code-hermit"`. Skip silently for other slugs.
 
 - Compare keys in `plugins/<slug>/state-templates/config.json.template` with the `DEFAULT_CONFIG` in `plugins/<slug>/scripts/hermit-start.ts`
 - Flag any keys present in one but not the other
+
+## Release mode (only when the second argument is `release`)
+
+Skip this whole section otherwise. These checks decide release readiness; any FAIL here means recommend NOT releasing until fixed.
+
+### R1. Version consistency
+
+- Read `plugins/<slug>/.claude-plugin/plugin.json` → `version`
+- Read `.claude-plugin/marketplace.json` (repo root) → look up the entry where `.plugins[].name == "<slug>"` and read its `.version`. Use:
+  ```bash
+  jq -r '.version' plugins/<slug>/.claude-plugin/plugin.json
+  jq -r --arg slug "<slug>" '.plugins[] | select(.name == $slug) | .version' .claude-plugin/marketplace.json
+  ```
+- Both must be identical — the plugin manifest wins silently if they differ, so a mismatch means the marketplace entry is lying to users: FAIL on any mismatch.
+- If the marketplace lookup returns empty (no entry for `<slug>`): FAIL with `marketplace.json has no entry for plugin '<slug>'`.
+- Check `plugins/<slug>/CHANGELOG.md` has a section for this version (e.g., `## [X.Y.Z]`, `## vX.Y.Z`, or `## X.Y.Z`).
+- If no changelog entry: FAIL.
+
+### R2. Dependency version triad
+
+For domain plugins, the three core-version fields (`required_core_version`, `requires["claude-code-hermit"]`, `dependencies[].version` for `claude-code-hermit`) must reference the same base SemVer. Operators may differ (`>=` for the runtime check in `doctor-check.ts`, `^` for the resolver) — but the underlying version number must match. CLAUDE.md requires all three be updated together; this check enforces it.
+
+- **Skip silently** if `<slug> == "claude-code-hermit"` (core has no self-dependency).
+- The three values live in two files: `required_core_version` and `requires` are in `hermit-meta.json`; `dependencies` is in `plugin.json`. Read them with two `jq` calls:
+  ```bash
+  META=plugins/<slug>/.claude-plugin/hermit-meta.json
+  PJ=plugins/<slug>/.claude-plugin/plugin.json
+  read -r REQ_CORE REQUIRES < <(jq -r '[
+    (.required_core_version // ""),
+    (.requires["claude-code-hermit"] // "")
+  ] | @tsv' "$META")
+  DEPS=$(jq -r '.dependencies[]? | select(.name=="claude-code-hermit") | .version' "$PJ")
+  ```
+  If `$META` does not exist, FAIL with `dep triad: hermit-meta.json missing for domain plugin '<slug>'`.
+- If any of the three is empty: FAIL with `dep triad: missing field — required_core_version='<v>', requires.claude-code-hermit='<v>', dependencies.claude-code-hermit='<v>'`.
+- Strip leading operator characters character-by-class from each to get the base version (e.g., `^1.0.18` → `1.0.18`). `sed 's/^[<>=^~!]*//'` covers all SemVer range prefixes including `!=`.
+- If the three base versions are not identical: FAIL printing all three values verbatim (operator + version) so the human can see which field drifted.
+- Otherwise: PASS with the agreed base version.
 
 ## Output format
 

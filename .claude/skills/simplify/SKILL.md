@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: Parallel code review and cleanup of recent changes. Replicates the original bundled /simplify command that was removed in CC v2.1.146.
+description: Parallel code review and cleanup of recent changes. Three reviewers (reuse, quality, efficiency) propose behavior-preserving edits and the main agent applies them without asking. Use when asked to simplify, clean up, or tidy recent changes, or when `/commit` requests its cleanup pass.
 argument-hint: [optional focus, e.g. "memory efficiency"]
 ---
 
@@ -16,7 +16,7 @@ If `$ARGUMENTS` contains a focus hint (e.g. "memory efficiency"), pass it throug
 
 These are cross-cutting — they apply to every finding regardless of reviewer category. The main agent passes them into each reviewer's prompt.
 
-1. **Preserve behavior.** Any change to return values, exceptions, edge-case handling, or observable side effects is a *behavior change*, not a simplification. If a refactor alters output for any input — even malformed or "invalid" input the original happened to accept — it's not a cleanup, it's a redesign. Don't propose those as simplifications; if you spot one and think it's worth doing, label it explicitly so the user can decide.
+1. **Preserve behavior.** Any change to return values, exceptions, edge-case handling, or observable side effects is a *behavior change*, not a simplification. If a refactor alters output for any input — even malformed or "invalid" input the original happened to accept — it's not a cleanup, it's a redesign. Don't propose those as simplifications; if you spot one and think it's worth doing, label it explicitly so the user can decide. Treat the diff's deleted (`-`) lines as the behavior baseline: restoring a deleted line's behavior is not a behavior change.
 
 2. **Clarity over brevity.** Fewer lines is not the goal; a reader understanding the code at a glance is. Avoid nested ternaries when `if/elif/else` reads clearer. Don't wrap trivial operations in named helpers just to "reuse" something — `multiplyTwoNumbers(n, n)` is worse than `n * n`, not better. A short dense one-liner is worse than a two-line form a reader can follow on first pass.
 
@@ -87,7 +87,6 @@ Empty findings → `{"findings": []}`. Don't pad.
 > - Leaky abstractions: exposing internals, breaking existing abstraction boundaries
 > - Stringly-typed code: raw strings where constants, enums, or branded types already exist
 > - Verbose patterns: unnecessary intermediate variables, `== true`/`== false`, redundant else after return, multi-check null guards that collapse to one expression
-> - Unnecessary JSX nesting: wrapper Boxes/elements that add no layout value — check if inner component props (flexShrink, alignItems, etc.) already provide the needed behavior
 > - Nested conditionals: ternary chains (`a ? x : b ? y : ...`), nested if/else, or nested switch 3+ levels deep — flatten with early returns, guard clauses, a lookup table, or an if/else-if cascade
 > - Unnecessary comments: comments explaining WHAT the code does (well-named identifiers already do that), narrating the change, or referencing the task/caller — delete; keep only non-obvious WHY (hidden constraints, subtle invariants, workarounds)
 >
@@ -142,8 +141,6 @@ Parse the JSON blocks. If one reviewer's block fails to parse, log it and contin
 
   If the principles **don't discriminate** — both options preserve behavior identically, both are equally clear, both respect conventions — apply **neither**. Log them under "Noticed but not applied: principles couldn't decide" so the user can pick if they care.
 
-  Never stop to ask. Surfacing a style call to the user mid-run defeats the point of having principles. The user invoked `/simplify` to clean code, not to answer a quiz.
-
 ### 3b. Group by file, sort by file order
 
 For each file, read it once and locate each finding's `old_string`. Sort findings by their offset so edits happen top-to-bottom (helps the user follow the diff in review).
@@ -182,6 +179,4 @@ Noticed but not applied:
 Totals: applied N · deduped M · principle-rejected K · stale-anchor skips L · parse failures P
 ```
 
-The "Noticed but not applied" section is how the user discovers rejected proposals and can opt in. The skill never blocks waiting for an answer.
-
-No essays. Just what changed, what didn't, and why.
+The "Noticed but not applied" section is how the user discovers rejected proposals and can opt in.
