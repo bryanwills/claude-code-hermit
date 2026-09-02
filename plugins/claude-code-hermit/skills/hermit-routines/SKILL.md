@@ -38,7 +38,7 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
    - **`ARM|routines,heartbeat|check-error:<reason>`** — the verb could not read `config.json` or the mirror, so it emitted no plan. Abort `load`: register or delete nothing, and log `Routine load aborted: arm check failed — <reason>. No routines registered.`
 
 3. **Execute the `ARM` plan block.** The lines, in the order they are printed:
-   - `OLD_TASK:<id>` — `TaskStop` it (ignore not-found). Printed only when the recorded task belongs to the current boot; a task id from a previous boot is already dead.
+   - `OLD_TASK:<id>` — `TaskStop` it (ignore not-found). Printed unless the record belongs to a previous boot, whose task died with that process; a record with no `boot_id` at all was written by this one.
    - `FIRST_TRANSITION:1` — this is a first transition into monitor mode (never printed on the `--fallback` leg, where those crons are the routines). Also `CronList` and `CronDelete` every entry whose prompt contains `[hermit-routine:` **except** `[hermit-routine:heartbeat-restart]` — live crons from an in-process upgrade that the mirror no longer tracks (duplicate-fire hazard). Skip this sweep entirely when the line is absent.
    - `MONITOR_CMD:<command>` — register the Monitor: `description: "routine-monitor"` (reserved slot), `command:` **the string verbatim, unedited** (it is already absolute; `$PWD` would trigger Claude Code's `simple_expansion` approval), `timeout_ms: 86400000` (schema-required boilerplate on a persistent monitor — it does not expire on this deadline), `persistent: true`.
    - `MONITOR_SKIP:zero-scheduled` — instead of the above: register no Monitor (only the anchor is enabled), and pass `none` as the task id in step 4.
