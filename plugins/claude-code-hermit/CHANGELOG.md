@@ -38,6 +38,7 @@
 - `hermit-run memory-dir [<project-root>]` prints the project's auto-memory directory, used by the weekly review and the backup restore recipe.
 
 ### Fixed
+- On macOS, re-running `hermit-watchdog install` with an unchanged plist no longer calls `launchctl unload`/`load`. Every surviving tmux boot re-runs install, so a watchdog-ordered restart was unloading the LaunchAgent that ordered it and cutting the tick off before its operator notice.
 - The precheck resolves the default credential-expiry item by running the credential's declared `expiry_probe` itself, so a default-checklist hermit reaches `OK` with no model wake while the credential is healthy and a stale `state/doctor-report.json` cannot hide an expiry (it previously forced an evaluation once per `clean_recheck_cooldown`).
 - The transcript digest now counts CronCreate, channel and peer turns as boundaries, so `wakes` and `productive_wakes` no longer describe only Monitor-delivered ticks.
 - Proposal acceptance in a later session now remains current: the falsification gate receives `## References`, and a proposal queued as a session task re-verifies its citations against the current tree before any edit, preventing already-shipped or stale work from being implemented.

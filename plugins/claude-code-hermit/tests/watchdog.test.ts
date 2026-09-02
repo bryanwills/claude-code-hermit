@@ -134,10 +134,14 @@ const isoAgo = (hours: number) =>
 const isoAgoSeconds = (hours: number) =>
   new Date(Date.now() - hours * 3600_000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-/** Spawn the watchdog. restrictPath limits PATH to the fake bin dir (no systemctl). */
-async function watchdog(h: Hermit, sub: string, opts: { restrictPath?: boolean; env?: Record<string, string> } = {}) {
+/** Spawn the watchdog. restrictPath limits PATH to the fake bin dir (no systemctl).
+ *  preload inserts a `--preload <path>` module ahead of the script, used to force
+ *  process.platform for the darwin-gated launchd install branch on Linux CI. */
+async function watchdog(h: Hermit, sub: string, opts: { restrictPath?: boolean; env?: Record<string, string>; preload?: string } = {}) {
   const proc = Bun.spawn({
-    cmd: [...WATCHDOG_CMD, sub],
+    cmd: opts.preload
+      ? [process.execPath, '--preload', opts.preload, ...WATCHDOG_CMD.slice(1), sub]
+      : [...WATCHDOG_CMD, sub],
     cwd: h.dir,
     env: {
       ...process.env,
@@ -2978,11 +2982,10 @@ test.if(isLinux)('a PATH entry with % survives per-target escaping', withHermit(
   }
 }));
 
-// A source-level assertion, not a behavioral one: cmdInstall's darwin branch is
-// selected by process.platform inside a spawned subprocess, and this suite has no
-// darwin-gated coverage at all — there is no way to reach it from a Linux CI host.
-// The ordering is what matters (load is a no-op on an already-loaded label, so
-// re-running install would silently keep the stale plist).
+// A source-level assertion, not a behavioral one. The launchd tests below drive the
+// real branch through the fake-darwin preload; this one pins the ordering directly
+// (load is a no-op on an already-loaded label, so re-running install would silently
+// keep the stale plist).
 test('cmdInstall unloads the launchd label before loading it', () => {
   const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'hermit-watchdog.ts'), 'utf-8');
   const install = src.slice(src.indexOf('function cmdInstall'), src.indexOf('function cmdUninstall'));
@@ -2992,6 +2995,121 @@ test('cmdInstall unloads the launchd label before loading it', () => {
   expect(loadIdx).toBeGreaterThan(-1);
   expect(unloadIdx).toBeLessThan(loadIdx);
 });
+
+// ---- launchd install (darwin branch, reached on Linux via the platform preload) ----
+
+const FAKE_DARWIN = path.join(import.meta.dir, 'helpers', 'fake-darwin.ts');
+
+/** Record every launchctl invocation and track whether the label is loaded, so
+ *  `list` answers the way the real one does: exit 0 loaded, non-zero not. */
+function writeFakeLaunchctl(h: Hermit): { log: string; loadedMarker: string } {
+  const log = path.join(h.dir, 'launchctl-calls.log');
+  const loadedMarker = path.join(h.dir, 'launchctl-loaded');
+  const stub = path.join(h.fakeBin, 'launchctl');
+  fs.writeFileSync(stub, `#!/usr/bin/env bash
+echo "$@" >> "${log}"
+case "$1" in
+  load) touch "${loadedMarker}" ;;
+  unload) rm -f "${loadedMarker}" ;;
+  list) [[ -e "${loadedMarker}" ]] || exit 113 ;;
+esac
+exit 0
+`);
+  fs.chmodSync(stub, 0o755);
+  return { log, loadedMarker };
+}
+
+/** Run `install` with process.platform forced to darwin and HOME sandboxed. */
+function darwinInstall(h: Hermit, home: string) {
+  return watchdog(h, 'install', { preload: FAKE_DARWIN, env: { HOME: home } });
+}
+
+const readLog = (p: string) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '');
+const plistIn = (home: string) =>
+  fs.readdirSync(path.join(home, 'Library', 'LaunchAgents')).map((f) => path.join(home, 'Library', 'LaunchAgents', f));
+
+test('launchd first install → writes the plist, unloads then loads', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
+  const { log } = writeFakeLaunchctl(h);
+  await withFakeHome(async (home) => {
+    const r = await darwinInstall(h, home);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Installed LaunchAgent');
+    const plists = plistIn(home);
+    expect(plists).toHaveLength(1);
+    expect(fs.readFileSync(plists[0], 'utf-8')).toContain('com.hermit.watchdog.');
+    const calls = readLog(log).trim().split('\n');
+    expect(calls[0]).toContain('unload');
+    expect(calls[1]).toContain('load');
+    const config = readJson(configPath(h));
+    expect(config.watchdog.scheduler_enabled).toBe(true);
+    expect(config.watchdog.enabled).toBe(true);
+  });
+}));
+
+// The restart the watchdog orders spawns a boot that re-runs install seconds later.
+// An unconditional reload there unloads the LaunchAgent running that very tick.
+test('launchd re-install with an unchanged plist → no launchctl call', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
+  const { log } = writeFakeLaunchctl(h);
+  await withFakeHome(async (home) => {
+    await darwinInstall(h, home);
+    const afterFirst = readLog(log).trim().split('\n').length;
+    const before = fs.readFileSync(plistIn(home)[0], 'utf-8');
+
+    const r = await darwinInstall(h, home);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('LaunchAgent unchanged');
+    expect(r.stdout).not.toContain('Installed LaunchAgent');
+    // The liveness probe is allowed; re-registering the running job is not.
+    const probes = readLog(log).trim().split('\n').slice(afterFirst);
+    expect(probes).toHaveLength(1);
+    expect(probes[0]).toStartWith('list ');
+    expect(fs.readFileSync(plistIn(home)[0], 'utf-8')).toBe(before);
+    expect(readJson(configPath(h)).watchdog.scheduler_enabled).toBe(true);
+  });
+}));
+
+// An identical plist does not prove the label is registered: the write lands before
+// the load, so a failed load or an operator's own unload leaves the file intact with
+// nothing running. Re-running install is the documented repair for exactly that.
+test('launchd re-install with the label unloaded → reloads despite the identical plist', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
+  const { log, loadedMarker } = writeFakeLaunchctl(h);
+  await withFakeHome(async (home) => {
+    await darwinInstall(h, home);
+    fs.rmSync(loadedMarker);
+    const afterFirst = readLog(log).trim().split('\n').length;
+
+    const r = await darwinInstall(h, home);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Installed LaunchAgent');
+    expect(r.stdout).not.toContain('LaunchAgent unchanged');
+    const calls = readLog(log).trim().split('\n').slice(afterFirst);
+    expect(calls.some((c) => c.startsWith('load '))).toBe(true);
+    expect(fs.existsSync(loadedMarker)).toBe(true);
+  });
+}));
+
+test('launchd re-install after the plist drifts → rewrites and reloads', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
+  const { log } = writeFakeLaunchctl(h);
+  await withFakeHome(async (home) => {
+    await darwinInstall(h, home);
+    const plistPath = plistIn(home)[0];
+    const rendered = fs.readFileSync(plistPath, 'utf-8');
+    fs.writeFileSync(plistPath, rendered + '<!-- drifted -->\n');
+    const afterFirst = readLog(log).trim().split('\n').length;
+
+    const r = await darwinInstall(h, home);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Installed LaunchAgent');
+    expect(fs.readFileSync(plistPath, 'utf-8')).toBe(rendered);
+    const calls = readLog(log).trim().split('\n').slice(afterFirst);
+    expect(calls[0]).toContain('unload');
+    expect(calls[1]).toContain('load');
+  });
+}));
 
 // -------------------------------------------------------
 // post-close clear tests

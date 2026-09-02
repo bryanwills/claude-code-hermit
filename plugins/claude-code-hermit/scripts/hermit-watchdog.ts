@@ -2394,37 +2394,56 @@ function cmdInstall(): void {
   } else if (process.platform === 'darwin') {
     const launchAgents = path.join(os.homedir(), 'Library', 'LaunchAgents');
     fs.mkdirSync(launchAgents, { recursive: true });
-    const plistName = `com.hermit.watchdog.${name}.plist`;
+    const label = `com.hermit.watchdog.${name}`;
+    const plistName = `${label}.plist`;
     const plistPath = path.join(launchAgents, plistName);
     const firstRegistration = !fs.existsSync(plistPath);
 
+    let plist: string;
     if (templates) {
       const tpl = fs.readFileSync(path.join(templates, 'com.hermit.watchdog.plist'), 'utf-8');
-      fs.writeFileSync(plistPath, render(tpl, escapeXml));
+      plist = render(tpl, escapeXml);
     } else {
       process.stderr.write('[watchdog] plist template not found; using inline fallback\n');
-      fs.writeFileSync(
-        plistPath,
-        render(
-          '<?xml version="1.0" encoding="UTF-8"?>\n' +
-            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ' +
-            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
-            '<plist version="1.0"><dict>' +
-            '<key>Label</key><string>com.hermit.watchdog.{{NAME}}</string>' +
-            '<key>ProgramArguments</key><array>' +
-            '<string>{{ROOT}}/.claude-code-hermit/bin/hermit-watchdog</string>' +
-            '<string>run</string></array>' +
-            '<key>WorkingDirectory</key><string>{{ROOT}}</string>' +
-            '<key>EnvironmentVariables</key><dict>' +
-            '<key>PATH</key><string>{{UNIT_PATH}}</string>' +
-            '</dict>' +
-            '<key>StartInterval</key><integer>300</integer>' +
-            '<key>RunAtLoad</key><false/>' +
-            '</dict></plist>\n',
-          escapeXml
-        )
+      plist = render(
+        '<?xml version="1.0" encoding="UTF-8"?>\n' +
+          '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ' +
+          '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
+          '<plist version="1.0"><dict>' +
+          '<key>Label</key><string>com.hermit.watchdog.{{NAME}}</string>' +
+          '<key>ProgramArguments</key><array>' +
+          '<string>{{ROOT}}/.claude-code-hermit/bin/hermit-watchdog</string>' +
+          '<string>run</string></array>' +
+          '<key>WorkingDirectory</key><string>{{ROOT}}</string>' +
+          '<key>EnvironmentVariables</key><dict>' +
+          '<key>PATH</key><string>{{UNIT_PATH}}</string>' +
+          '</dict>' +
+          '<key>StartInterval</key><integer>300</integer>' +
+          '<key>RunAtLoad</key><false/>' +
+          '</dict></plist>\n',
+        escapeXml
       );
     }
+
+    // Every surviving tmux boot re-runs install, and a watchdog-ordered restart
+    // spawns that boot from inside the tick itself, so an unconditional reload
+    // unloads the LaunchAgent executing the very restart it was told to make,
+    // cutting the tick off mid-notice. A byte-identical render means there is
+    // nothing to re-register, so leave the running job alone.
+    //
+    // Matching content alone is not enough: the write lands before the load, so a
+    // failed load (or an operator's own unload) leaves the file intact with nothing
+    // running, and re-running install is the documented repair for exactly that.
+    // Ask launchctl whether the label is live before skipping, after the cheap
+    // content compare so a drifted plist never pays for the subprocess.
+    const labelLoaded = () => spawnSync('launchctl', ['list', label], { stdio: 'ignore' }).status === 0;
+    if (REAL_WORLD.files.readText(plistPath) === plist && labelLoaded()) {
+      console.log(`[watchdog] LaunchAgent unchanged: ${plistName}`);
+      enableAfterInstall(firstRegistration);
+      return;
+    }
+
+    fs.writeFileSync(plistPath, plist);
     // load is a no-op when the label is already loaded, so re-running install —
     // the documented remedy for a bad unit — would silently keep the old plist.
     // Ignore output: on a first install there is nothing to unload.
