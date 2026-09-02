@@ -21,6 +21,7 @@
 - The `/hatch` channel question asks "How do you want to communicate with your agent?" in both branches, and labels the no-channel option `Claude app (for now)` instead of `None`: push notifications + Remote Control, with Discord/Telegram pairable later.
 - The `/hatch` confirm preview renders as a single markdown table — chosen answers echoed verbatim plus template-derived defaults tagged `(default)` — ending with a `/hermit-settings` pointer. The final report is now minimal: agent-name headline, warn-only disk audit (missing artifacts surface as fixable warnings instead of a full file table), next steps, and a config-reference link.
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
+- The midnight-adjacency guard on hygiene compaction shrinks from 2 hours to the 10-minute auto-close lull, and applies only when `post_close_clear` is on. The compact tier stays live through the evening operator window instead of going dark for 8% of the day.
 
 ### Fixed
 - The watchdog's `/compact` and `/clear` tiers, and `/hermit-doctor`'s context check, now judge the resident's own Claude Code session instead of whichever session in the folder wrote last. Cost rows carry `cc_session_id` and a `guest` flag; the tiers read only matching non-guest rows, dropping the `sessions/.status.json` fallback (#916).

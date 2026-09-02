@@ -1659,7 +1659,14 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
 
   // Midnight-adjacency suppression: the post-close /clear wipes context for free
   // right after daily-auto-close archives — a compact just before it is wasted spend.
-  if (isNearDailyAutoClose(config, 2 * 3600, new Date(world.clock.nowMs()))) return stamped(world, 'compact', 'skip:midnight-adjacent');
+  // Scoped to the auto-close lull (the same window maybePostCloseClear waits out before
+  // sending /clear) and to hermits that actually run that clear: a wider window blanks the
+  // compact tier across the whole evening operator slot, and with post_close_clear off no
+  // free reset is coming at all, so there is nothing to wait for.
+  if (config.post_close_clear === true
+      && isNearDailyAutoClose(config, AUTO_CLOSE_LULL_MS / 1000, new Date(world.clock.nowMs()))) {
+    return stamped(world, 'compact', 'skip:midnight-adjacent');
+  }
 
   // Token check: find the last cost-log entry for this hermit session
   const sessionId = resolveHygieneSessionId(runtime, world);
