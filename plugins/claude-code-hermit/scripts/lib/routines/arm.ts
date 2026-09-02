@@ -200,7 +200,7 @@ function emitPlan(ctx: Context, result: PlanResult): void {
 function armVerdict(ctx: Context): { line: string; healthy: boolean; paused: boolean } {
   if (isPaused(ctx.hermitDir).paused) return { line: 'SKIP|paused', healthy: false, paused: true };
   const routines = monitorHealth(ctx);
-  const heartbeat = heartbeatHealth(ctx.hermitDir, ctx.pluginRoot, ctx.config, ctx.nowMs);
+  const heartbeat = heartbeatHealth(ctx.hermitDir, ctx.config, ctx.nowMs);
   if (routines.healthy && heartbeat.healthy) {
     return { line: `HEALTHY|${summary(ctx, heartbeat)}`, healthy: true, paused: false };
   }
@@ -231,7 +231,7 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   // Read once for both the HEALTHY short-circuit and the HB_ plan below: heartbeatHealth
   // re-reads two state files plus `.boot-id`, and both sites see identical inputs. Null
   // on `--fallback`, the one path that never plans the heartbeat leg.
-  const heartbeat = fallback ? null : heartbeatHealth(ctx.hermitDir, ctx.pluginRoot, ctx.config, ctx.nowMs);
+  const heartbeat = fallback ? null : heartbeatHealth(ctx.hermitDir, ctx.config, ctx.nowMs);
   if (heartbeat && !reset && heartbeat.healthy && monitorHealth(ctx).healthy) {
     process.stdout.write(`HEALTHY|${summary(ctx, heartbeat)}\n`);
     return;
@@ -245,7 +245,7 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   // the second pass of a load whose first pass already committed the heartbeat, and
   // a `disabled` verdict is healthy — neither emits a plan.
   if (heartbeat && !heartbeat.healthy) {
-    for (const line of prepareHeartbeatArm(ctx.hermitDir, ctx.config, ctx.pluginRoot)) {
+    for (const line of prepareHeartbeatArm(ctx.hermitDir, ctx.config)) {
       process.stdout.write(`HB_${line}\n`);
     }
   }
@@ -292,7 +292,7 @@ function startHeartbeatLeg(ctx: Context, flags: string[]): Promise<string> | nul
   const index = flags.indexOf('--heartbeat');
   const taskId = index === -1 ? '' : (flags[index + 1] ?? '').trim();
   if (!taskId || taskId === 'none') return null;
-  const pending = commitHeartbeatArm(ctx.hermitDir, ctx.config, ctx.pluginRoot, taskId);
+  const pending = commitHeartbeatArm(ctx.hermitDir, ctx.config, taskId);
   // Both monitors are already spawned by the time `commit` runs, so this leg's
   // first-tick wait overlaps the routine leg's instead of following it — up to 10s off
   // every boot that arms both. The awaits below still surface any rejection; this

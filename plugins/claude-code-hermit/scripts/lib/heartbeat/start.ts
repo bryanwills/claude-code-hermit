@@ -34,9 +34,6 @@ import { hasStartedRegistration, heartbeatCommand, heartbeatHealth, heartbeatInt
 
 type Json = any;
 
-/** `<pluginRoot>` — this file sits at `<pluginRoot>/scripts/lib/heartbeat/`. */
-const PLUGIN_ROOT = path.resolve(import.meta.dir, '..', '..', '..');
-
 function writeJson(file: string, value: Json): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
@@ -53,10 +50,9 @@ const livenessPath = (hermitDir: string) =>
  * Side effects and plan lines for one heartbeat re-arm, without the leading
  * `REARM|<reason>` line. Shared by `start-check` and by `routines.ts arm begin`,
  * which prefixes each line with `HB_` — so the two callers can never drift into
- * planning different registrations. `pluginRoot` is caller-supplied because the
- * routine leg resolves its own from argv; `start-check` passes PLUGIN_ROOT.
+ * planning different registrations.
  */
-export function prepareHeartbeatArm(hermitDir: string, config: Json, pluginRoot: string): string[] {
+export function prepareHeartbeatArm(hermitDir: string, config: Json): string[] {
   const runtime = readJson(runtimePath(hermitDir));
   // Same reason as the routine leg: the commit waits for a liveness file to
   // appear, so the outgoing monitor's last tick has to go before the new one spawns
@@ -80,7 +76,7 @@ export function prepareHeartbeatArm(hermitDir: string, config: Json, pluginRoot:
   }
   if (!hasStartedRegistration(runtime)) lines.push('FIRST_START:1');
   lines.push(`INTERVAL:${heartbeatInterval(config)}`);
-  lines.push(`CMD:${heartbeatCommand(pluginRoot, hermitDir, config)}`);
+  lines.push(`CMD:${heartbeatCommand(hermitDir, config)}`);
   return lines;
 }
 
@@ -94,7 +90,6 @@ export function prepareHeartbeatArm(hermitDir: string, config: Json, pluginRoot:
 export async function commitHeartbeatArm(
   hermitDir: string,
   config: Json,
-  pluginRoot: string,
   taskId: string,
 ): Promise<string> {
   const interval = heartbeatInterval(config);
@@ -117,7 +112,7 @@ export async function commitHeartbeatArm(
   writeJson(runtimePath(hermitDir), {
     description: 'heartbeat-monitor',
     task_id: taskId,
-    command: heartbeatCommand(pluginRoot, hermitDir, config),
+    command: heartbeatCommand(hermitDir, config),
     interval,
     started_at: adopt ? peekAt : new Date(nowMs).toISOString(),
     boot_id: readBootId(hermitDir),
@@ -134,7 +129,7 @@ export async function commitHeartbeatArm(
 }
 
 function cmdCheck(hermitDir: string, config: Json): void {
-  const health = heartbeatHealth(hermitDir, PLUGIN_ROOT, config, resolveHermitNowMs());
+  const health = heartbeatHealth(hermitDir, config, resolveHermitNowMs());
   // `disabled` is healthy to the daily anchor, which must leave a deliberately-off
   // heartbeat alone. Reaching `start` at all is an explicit act, so re-arm instead.
   if (health.healthy && health.reason !== 'disabled') {
@@ -142,13 +137,13 @@ function cmdCheck(hermitDir: string, config: Json): void {
     return;
   }
   process.stdout.write(`REARM|${health.reason}\n`);
-  for (const line of prepareHeartbeatArm(hermitDir, config, PLUGIN_ROOT)) {
+  for (const line of prepareHeartbeatArm(hermitDir, config)) {
     process.stdout.write(`${line}\n`);
   }
 }
 
 async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promise<void> {
-  process.stdout.write(`${await commitHeartbeatArm(hermitDir, config, PLUGIN_ROOT, taskId)}\n`);
+  process.stdout.write(`${await commitHeartbeatArm(hermitDir, config, taskId)}\n`);
 }
 
 export async function run(verb: string, args: string[]): Promise<void> {
