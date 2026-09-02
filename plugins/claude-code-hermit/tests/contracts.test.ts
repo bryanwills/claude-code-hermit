@@ -3038,8 +3038,9 @@ describe('doctor routine-cost check', () => {
   }), 20000);
 
   test('polluted routine:<artifact> source with no matching routine id is ignored', withTmpdir(async (dir) => {
-    // classifySource's log-routine-event.sh fallback matcher can mint sources like
-    // "routine:fired" — must not be treated as a real routine.
+    // Rows carrying a `routine:<word>` source that matches no configured id — minted by
+    // classifySource's retired log-routine-event.sh prose fallback, and still on disk in
+    // already-written v2 rows — must not be treated as a real routine.
     writeConfig(dir, { ...BASE_CONFIG, routines: [routine('a')] });
     writeCostLog(dir, [
       ...wakes('a', 3, 1.00),
