@@ -164,4 +164,35 @@ describe('cost-tracker surface derivation', () => {
     ]);
     expect(readContextSurface(hermitDir)).toBeNull();
   }), 20000);
+
+  test('the wide re-read for source attribution never rewrites the record backwards',
+    withHermitDir(async (dir, hermitDir) => {
+      // A turn whose own prompt falls outside the 512KB window triggers the 8MB re-read.
+      // That wider window can reach boundaries the narrow one never would — always OLDER
+      // ones, since maybeDeriveSurface takes the newest boundary it is handed. The record
+      // is folder-wide, so replaying one would walk it back to a stale boundary.
+      const current = {
+        surface_upper_bound_tokens: 70_000, post_tokens: 40_000,
+        boundary_at: '2026-08-11T20:00:00Z', observed_at: '2026-08-11T20:01:00Z', prev: null,
+      };
+      writeContextSurface(hermitDir, current);
+
+      const filler = JSON.stringify({
+        type: 'user',
+        message: { content: [{ tool_use_id: 't', type: 'tool_result', content: 'x'.repeat(2000) }] },
+      });
+      const lines = [
+        // Old boundary, reachable only by the wide read.
+        compactBoundary('2026-08-11T10:05:00Z', 30_000),
+        triggerPrompt('old wake'),
+        assistantEntry('2026-08-11T10:06:00Z', 95_000),
+        // The billed turn: its prompt sits >512KB from EOF, so the narrow scan misses it.
+        triggerPrompt('current wake'),
+      ];
+      for (let i = 0; i < 300; i++) lines.push(filler);
+      lines.push(assistantEntry('2026-08-11T21:00:00Z', 50_000));
+
+      await runCostTracker(dir, lines);
+      expect(readContextSurface(hermitDir)).toEqual(current);
+    }), 20000);
 });

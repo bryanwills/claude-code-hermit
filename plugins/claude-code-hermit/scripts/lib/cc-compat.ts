@@ -472,20 +472,30 @@ function isTurnTrigger(entry: Json): boolean {
 
 /**
  * A structured mid-turn injection — CC writes skill bodies and similar scaffolding
- * as `isMeta:true` user entries carrying ARRAY content. `isMeta` alone cannot
- * discriminate these from real prompts: routine wakes (`[hermit-routine:<id>] …`)
- * and inbound channel envelopes (`<channel source="…">`) are ALSO `isMeta:true`,
- * but carry STRING content. The content shape is the discriminator, which is why
- * `isTurnTrigger` (whose `isMeta` guard is correct for *usage* segmentation) must
- * not be used to find the prompt that classifies a turn's cost — it would skip the
- * marker-bearing entries themselves. Measured on live hermit transcripts: skipping
- * only the array-content injections recovers 77 real routine/channel prompts that
- * the injection would otherwise shadow.
+ * as `isMeta:true` user entries. `isMeta` alone cannot discriminate these from real
+ * prompts: routine wakes (`[hermit-routine:<id>] …`) and inbound channel envelopes
+ * (`<channel source="…">`) are ALSO `isMeta:true`. That is why `isTurnTrigger` (whose
+ * `isMeta` guard is correct for *usage* segmentation) must not be used to find the
+ * prompt that classifies a turn's cost — it would skip the marker-bearing entries
+ * themselves. Measured on live hermit transcripts: skipping the injections recovers 77
+ * real routine/channel prompts that they would otherwise shadow.
+ *
+ * TWO shapes, both scaffolding:
+ *   - ARRAY content — the skill body itself, written on first invocation.
+ *   - `turnCompanion:true` — what CC writes instead when the model re-invokes a skill
+ *     already in context ("(Re-invocation of /<skill> …)", "Skill /<skill> is already
+ *     loaded above…"), since 2.1.202 stopped appending a duplicate body. It carries
+ *     STRING content, so the content shape alone missed it and the walk stopped here
+ *     instead of on the wake behind it — measured live, a weekly-review fire and a
+ *     pipeline-digest co-fire both billed to 'other'.
+ * No real prompt carries `turnCompanion` (surveyed across a week of live transcripts),
+ * so it is safe as the second discriminator where content shape is not.
  * @param {object} entry
  * @returns {boolean}
  */
 function isSkillInjection(entry: Json): boolean {
-  return entry.isMeta === true && Array.isArray(entry.message?.content);
+  if (entry.isMeta !== true) return false;
+  return Array.isArray(entry.message?.content) || entry.turnCompanion === true;
 }
 
 /**
