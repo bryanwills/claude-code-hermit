@@ -14,7 +14,7 @@
 - `validate-config` warns when `heartbeat-restart` has a non-daily schedule — the anchor's 7-day expiry and 26h age windows assume it fires every day.
 
 ### Changed
-- `hermit-routines load` now arms the heartbeat monitor alongside the routine one: `arm begin` emits `HB_*` plan lines and `arm commit` takes `--heartbeat <task-id|none>`. The always-on bootstrap and the watchdog no longer send `/heartbeat start` when a `load` covers it, and `hermit-evolve` skips the post-upgrade reload when `arm check` reports healthy. A heartbeat-only staleness still routes to `/heartbeat start`, and `heartbeat.enabled: false` still keeps it off.
+- `hermit-routines load` now arms the heartbeat monitor alongside the routine one: `arm begin` emits `HB_*` plan lines and `arm commit` takes `--heartbeat <task-id|none>`. The always-on bootstrap, the watchdog and the daily anchor prompt no longer send `/heartbeat start` when a `load` covers it, and `hermit-evolve` skips the post-upgrade reload when `arm check` reports healthy. A heartbeat-only staleness still routes to `/heartbeat start`, and `heartbeat.enabled: false` still keeps it off.
 - `list`, `status`, `stop` and the operational notes moved from `skills/hermit-routines/SKILL.md` to a sibling `reference.md`, off the boot path.
 - The watchdog no longer re-arms on the `heartbeat-restart` routine's `fired` age; stale monitor liveness is now the only automated re-arm signal. In CronCreate-fallback mode, an anchor cron that vanishes while the process survives is no longer detected, and its routines expire after 7 days.
 - `/hermit-doctor`'s watchdog `re-arms` counter tallies `monitor-rearm` events, the only re-arm the watchdog still emits.

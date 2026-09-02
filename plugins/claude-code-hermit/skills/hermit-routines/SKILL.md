@@ -54,7 +54,7 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
    ```
    `<task-id>` is the routine Monitor's, or `none` after `MONITOR_SKIP`; the `--heartbeat` one is the heartbeat Monitor's. Append ` --reset` when `begin` got it. The verb waits for the monitor's first liveness tick internally (≤10s) and writes `state/routine-monitor.runtime.json` and the registry mirror. Its output:
    - `OK|monitor|<n> scheduled|anchor <created|kept>` — done. Log it.
-   - `FALLBACK|liveness-absent` — the subprocess never ticked (seccomp/nested-userns). `TaskStop` the task you just registered and go to Step 3-F.
+   - `FALLBACK|liveness-absent` — the routine subprocess never ticked (seccomp/nested-userns). `TaskStop` the **routine** Monitor you registered from `MONITOR_CMD` (never the heartbeat one, whose leg is independent and already committed by the `HEARTBEAT:` line), and go to Step 3-F.
    - `HEARTBEAT:<result>` — the heartbeat leg, independent of the routine line above (absent under `--heartbeat none`). `OK|registered|interval=<s>` → log it. `DEAD|liveness-absent` → report that the heartbeat will not run this session.
 5. **Step 3-F — fallback** (Monitor unavailable, registration failed, or `commit` returned `FALLBACK`): run
    ```

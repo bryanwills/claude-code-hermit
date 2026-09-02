@@ -101,7 +101,7 @@ upgrade (not blocked or already up to date) and the refreshed `config.json` has 
 ask what actually needs re-arming before loading anything:
 
 ```
-bun <pluginRoot>/scripts/routines.ts arm check .claude-code-hermit <pluginRoot>
+bun <plugin_root>/scripts/routines.ts arm check .claude-code-hermit <plugin_root>
 ```
 
 `arm check` is the read-only twin of the daily anchor's verdict — it stamps no fire, so asking
