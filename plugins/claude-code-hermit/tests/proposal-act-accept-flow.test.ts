@@ -60,6 +60,33 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('PROCEED');
   });
 
+  // Settings-edit steer: these now guard that the skill *asks* a direct
+  // settings write (the native ask is the approval) rather than routing through
+  // the bundled update-config skill. Anchored per site, because the in-main step
+  // and the dispatched-subagent prompt each need their own copy — a bare
+  // occurrence count passes when both copies land in the same place.
+  const lineContaining = (needle: string) =>
+    skill.split('\n').find((l) => l.includes(needle)) ?? '';
+
+  test('settings-edit steer is present in step (e)', () => {
+    const line = lineContaining('e. Implement the proposal.');
+    expect(line).toContain("native ask is the operator's approval");
+    expect(line).toContain('update-config');
+  });
+
+  test('settings-edit steer is present in the dispatch prompt', () => {
+    const line = lineContaining('> 2. Do the edits');
+    expect(line).toContain("native ask is the operator's approval");
+    expect(line).toContain('update-config');
+  });
+
+  // The ask only fires on a tool write to the hatch-resolved target: a shell
+  // redirect, or a guessed committed file on a local-scope install, walks past it.
+  test('settings-edit steer resolves the hatch target and requires a tool write', () => {
+    expect(skill).toContain('hatch-options.json');
+    expect(skill).toContain('never a shell redirect');
+  });
+
   // Quality-gate (e.5) delegation + NEXT-TASK template assertions.
   // The rubric used to be prose here and in the dispatched-subagent prompt, and
   // the two copies diverged; these now guard that the skill *asks* the verb
