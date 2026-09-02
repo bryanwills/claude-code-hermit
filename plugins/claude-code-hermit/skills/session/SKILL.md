@@ -21,7 +21,8 @@ Invoke `/claude-code-hermit:session-start` to check session state and load conte
 
 ### 3. If starting a new session
 
-- Ask: "What should I help with?"
+- **Always-on** (`config.always_on` is `true`) with no task known: there is no operator to ask, so do **not** ask. Report readiness; the next task arrives from the channel, a routine, or a queued NEXT-TASK.md.
+- Ask: "What should I help with?" (unless a task is already known, or the always-on branch above applied)
 - The session-start skill handles tags
 
 ### 4. Plan the work

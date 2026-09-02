@@ -28,6 +28,8 @@
 - The midnight-adjacency guard on hygiene compaction shrinks from 2 hours to the 10-minute auto-close lull, and applies only when `post_close_clear` is on. The compact tier stays live through the evening operator window instead of going dark for 8% of the day.
 
 ### Fixed
+- An always-on session start no longer asks what to work on when no task is known; the session stays idle until the channel, a routine, or a queued task starts the next one.
+- `/hatch` seeds `sessions/SHELL.md` from the template, so a hermit's first boot resumes idle like every later boot instead of opening a task-less `in_progress` session that only the 12h auto-close would clear.
 - A turn that re-invokes an already-loaded skill bills to its routine, heartbeat or channel source instead of `other`. Claude Code writes a companion entry rather than a second copy of the skill body, and cost attribution stopped its prompt walk there instead of on the wake behind it.
 - A routine turn larger than 512KB of transcript bills to its routine instead of `other`, and sums every call in the turn rather than the ones inside the tail window: on a missed turn boundary the transcript is re-read once with an 8MB tail. Long runs stay `other` only past that cap. The fixed-surface record keeps deriving from the 512KB window, so the wider read can't walk `state/context-surface.json` back to an older boundary.
 - `heartbeat start` and `hermit-routines load` no longer `TaskStop` a monitor id from a previous boot, and now stop a same-process monitor whose record predates the `boot_id` field, so a boot spends no call on a dead id and an in-process upgrade leaves no orphan routine monitor.
