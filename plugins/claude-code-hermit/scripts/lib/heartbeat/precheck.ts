@@ -21,7 +21,7 @@ import { currentHHMM, todayYMD, parseDuration } from '../time';
 import { readSettledConfig } from '../config-read';
 import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts, MICRO_PREFIX, PROPOSAL_PREFIX } from '../alert-state';
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
-import { isProposalScanItem } from '../heartbeat-items';
+import { isProposalScanItem, isCredentialExpiryItem } from '../heartbeat-items';
 import { isPaused } from '../pause';
 import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
@@ -147,6 +147,23 @@ function resolveMicroPendingScan(dir: string, alertMap: Json): 'clean' | 'evalua
     const entry = alertMap[`${MICRO_PREFIX}${p.id}`];
     if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) return 'evaluate';
   }
+  return 'clean';
+}
+
+// The default HEARTBEAT.md credential-expiry item reads state/doctor-report.json.
+// Resolve it against that report so a healthy check reaches OK without an LLM
+// wake. Fail-open on a missing, unparseable, or incomplete report (parity with
+// today). A lingering alerts[key] on an otherwise-ok check is SKILL.md-owned
+// resolution, so defer. Any other status uses the generic suppressed-entry
+// rule. Read-only, identical under --peek.
+function resolveCredentialExpiryItem(stateDir: string, alerts: Json, key: string): 'clean' | 'evaluate' {
+  const report = readJSON(path.join(stateDir, 'state', 'doctor-report.json'));
+  if (!report || !Array.isArray(report.checks)) return 'evaluate';
+  const check = report.checks.find((c: Json) => c && c.id === 'credential-expiry');
+  if (!check) return 'evaluate';
+  if (check.status === 'ok') return alerts[key] ? 'evaluate' : 'clean';
+  const entry = alerts[key];
+  if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) return 'evaluate';
   return 'clean';
 }
 
@@ -426,8 +443,9 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
   }
 
   // OK fires only when every item in HEARTBEAT.md is satisfied. The default
-  // proposals-scan item is resolved against real proposal frontmatter (so a hermit
-  // with no proposals awaiting review reaches OK without an LLM wake); every other
+  // proposals-scan item is resolved against real proposal frontmatter; the
+  // default credential-expiry item against state/doctor-report.json (so a hermit
+  // whose doctor check is healthy reaches OK without an LLM wake); every other
   // item needs a matching entry in alerts{} that is suppressed (count > 5) and not
   // approaching resolution (consecutive_clean === 0).
   for (const item of checklistItems) {
@@ -437,6 +455,10 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
     }
     const key = normalizeItemKey(item);
     if (!key) return 'EVALUATE';
+    if (isCredentialExpiryItem(item)) {
+      if (resolveCredentialExpiryItem(stateDir, alerts, key) === 'evaluate') return 'EVALUATE';
+      continue;
+    }
     const entry = alerts[key];
     if (!entry || !entry.suppressed || (entry.consecutive_clean ?? 0) > 0) return 'EVALUATE';
   }

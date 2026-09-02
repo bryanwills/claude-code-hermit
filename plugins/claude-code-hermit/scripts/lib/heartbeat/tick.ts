@@ -9,7 +9,8 @@
 // Output (stdout, one JSON line):
 //   {"verdict":"SKIP"|"OK"|"AUTO_CLOSE"|"EVALUATE"|"ALERT",
 //    "reason"?:string, "alert"?:string,
-//    "notifications":[{"text":string,"mark_key"?:string}]}
+//    "notifications":[{"text":string,"mark_key"?:string}],
+//    "model":string|null}
 //
 // Owner contract (write-field split with SKILL.md):
 //   This verb owns: the precheck's own fields (see precheck.ts), runtime.json's
@@ -40,10 +41,11 @@ type TickResult = {
   reason?: string;
   alert?: string;
   notifications: Notification[];
+  model: string | null;
 };
 
 /** Split the precheck's one-line grammar into the JSON fields the skill branches on. */
-function parseVerdict(raw: string): TickResult {
+function parseVerdict(raw: string): Omit<TickResult, 'model'> {
   if (raw.startsWith('SKIP|')) return { verdict: 'SKIP', reason: raw.slice(5), notifications: [] };
   if (raw.startsWith('ALERT|')) return { verdict: 'ALERT', alert: raw.slice(6), notifications: [] };
   return { verdict: raw, notifications: [] };
@@ -105,12 +107,19 @@ async function composeBudgetAlerts(hermitDir: string, config: Json, out: Notific
 
 export async function run(args: string[]): Promise<void> {
   const hermitDir = args[0];
+  // Settled once, shared by the model field and the bookkeeping below. Settling
+  // preserves an explicit `heartbeat.model: null` (the skill reads it as "inherit
+  // the session model") while folding absent/""/wrong-typed to 'haiku'; the
+  // reader never writes and never throws.
+  const config = readSettledConfig(hermitDir);
   // Mutating precheck, exactly once — before anything below can throw, so a tick
   // is never double-counted by a retry.
-  const result = parseVerdict(runPrecheck(hermitDir, false));
+  const result: TickResult = {
+    ...parseVerdict(runPrecheck(hermitDir, false)),
+    model: config.heartbeat.model,
+  };
 
   try {
-    const config = readSettledConfig(hermitDir);
     const nowMs = resolveHermitNowMs();
 
     if (result.verdict === 'AUTO_CLOSE') {
