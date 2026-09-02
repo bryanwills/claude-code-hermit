@@ -10,8 +10,11 @@
 - `hermit-run backup <setup|run|status>` commits the hermit's own state, config, and auto-memory on a cron schedule from the watchdog tick, with no model turn, and pushes to `backup.remote` over https using a token from the environment or the project `.env`. `workspace` mode commits the project repo; `mirror` mode copies into a separate repo so a hermit inside a project repo leaves it untouched. Secret-shaped paths, `state/channel-log.sqlite*`, oversized files and nested repos are refused per path. Never pulls, rebases, merges or force-pushes: a diverged remote is reported, not resolved. Ships off; enable with `backup setup` from a terminal.
 - `/hermit-doctor` gains a `backup` check (thirty-one checks): warns when two scheduled windows pass without a success, when a push fails three times running, or when the remote has diverged.
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
+- `validate-config` warns when `heartbeat-restart` has a non-daily schedule — the anchor's 7-day expiry and 26h age windows assume it fires every day.
 
 ### Changed
+- The watchdog no longer re-arms on the `heartbeat-restart` routine's `fired` age; stale monitor liveness is now the only automated re-arm signal. In CronCreate-fallback mode, an anchor cron that vanishes while the process survives is no longer detected, and its routines expire after 7 days.
+- `/hermit-doctor`'s watchdog `re-arms` counter tallies `monitor-rearm` events, the only re-arm the watchdog still emits.
 - Core declares one dynamic `claude-subscription` credential in place of `setup-token`; doctor's `credential-expiry` probe reads whichever credential the mode resolves to and warns 3 days out in both modes (was 14 for the token).
 - `/docker-setup` asks a neutral two-option auth question (claude.ai sign-in vs long-lived token) with no recommendation, citing Claude Code's authentication docs.
 - `hermit-docker login` switches a running token hermit to a claude.ai sign-in through the staged relay instead of refusing; a container with no session yet keeps the interactive REPL path.
