@@ -15,6 +15,7 @@
 - `validate-config` warns when `heartbeat-restart` has a non-daily schedule — the anchor's 7-day expiry and 26h age windows assume it fires every day.
 
 ### Changed
+- The routine monitor's `started_at` is the first confirmed tick after `arm begin`, not the `arm commit` clock. `arm begin` stamps `armed_at` to fence which ticks belong to the registration it is about to make; a tick predating it is still ignored.
 - `heartbeat.ts tick` returns `model` (`heartbeat.model`, `null` preserved) and the heartbeat `run` step dispatches from it instead of a separate config read.
 - `hermit-routines load` now arms the heartbeat monitor alongside the routine one: `arm begin` emits `HB_*` plan lines and `arm commit` takes `--heartbeat <task-id|none>`. The always-on bootstrap, the watchdog and the daily anchor prompt no longer send `/heartbeat start` when a `load` covers it, and `hermit-evolve` skips the post-upgrade reload when `arm check` reports healthy. A heartbeat-only staleness still routes to `/heartbeat start`, and `heartbeat.enabled: false` still keeps it off. A paused hermit defers its post-upgrade routine migration until resume (plus one anchor day in CronCreate fallback). With the Monitor tool absent the heartbeat leg is dropped from the load without a `DEAD` report, and the watchdog's heartbeat-only re-arm still runs `/heartbeat start`.
 - `list`, `status`, `stop` and the operational notes moved from `skills/hermit-routines/SKILL.md` to a sibling `reference.md`, off the boot path.

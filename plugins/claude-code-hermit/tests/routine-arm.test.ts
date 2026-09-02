@@ -303,6 +303,41 @@ test('commit without --heartbeat leaves the heartbeat runtime untouched', async 
   expect(fs.readFileSync(path.join(f.state, 'heartbeat-monitor.runtime.json'), 'utf8')).toBe(before);
 });
 
+// The monitor is registered between `begin` and `commit` and polls immediately, so its
+// first tick can predate the commit process. Stamping the commit's own clock would put
+// started_at after that tick, and every reader treats a tick older than started_at as a
+// prior registration's. `begin` fences the window with armed_at; `commit` adopts the tick.
+test('commit adopts the first tick after begin as started_at', async () => {
+  const f = fixture();
+  await arm(f.hermit, ['begin', '--reset']);
+  const armedAt = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8')).armed_at;
+  expect(typeof armedAt).toBe('string');
+
+  const tick = iso(Date.now() + 1000);
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: tick }));
+  await arm(f.hermit, ['commit', 'task-new', '--reset']);
+
+  const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8'));
+  expect(runtime.started_at).toBe(tick);
+  expect(runtime.mode).toBe('monitor');
+});
+
+// A tick older than the arm belongs to the outgoing monitor. Adopting it would date the
+// new registration before it existed; the commit's clock is the honest fallback.
+test('commit does not adopt a tick predating the arm', async () => {
+  const f = fixture();
+  await arm(f.hermit, ['begin', '--reset']);
+  const armedAt = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8')).armed_at;
+
+  const stale = iso(now - 60_000);
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: stale }));
+  await arm(f.hermit, ['commit', 'task-new', '--reset']);
+
+  const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8'));
+  expect(runtime.started_at).not.toBe(stale);
+  expect(Date.parse(runtime.started_at)).toBeGreaterThanOrEqual(Date.parse(armedAt));
+});
+
 // --- `arm check`: the anchor's verdict without the anchor's ledger row ---
 
 test('check reports the healthy verdict and writes nothing', async () => {
