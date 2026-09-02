@@ -58,16 +58,18 @@ differ per type (called out in each subsection below):
    gate below and leave the recorded URL pointing at the old host. Only on a backend match,
    compare `hash` to `<key>.hash`: **unchanged → stop here**, no publish (avoids minting a
    no-op artifact version).
-3. Changed, no prior record, or a backend mismatch from step 2 → call `Artifact` with
-   `file_path` set to the rendered path, a stable `<title>` for that type, a stable favicon
-   (pick once, keep it across republishes), and `url` set to `<key>.url` from
-   `state/artifacts.json` when a **backend-matching** entry has one (redeploys to the same
-   address instead of minting a new one), plus `force: true` whenever `url` is passed —
-   these pages are single-writer, regenerated from authoritative state, so Claude Code
-   2.1.x's "hasn't viewed the latest version" redeploy guard (fires after any restart,
-   since the session only read the URL from state) is overridden here, not resolved by
-   re-fetching. A first publish omits both `url` and `force` — and per step 2, a backend
-   mismatch **is** a first publish, however stale-but-present the recorded `url` looks.
+3. Changed, no prior record, or a backend mismatch from step 2 → publish. When a
+   **backend-matching** entry has a `url`, first call `Artifact` with `action: "read"` and
+   that `url`. Claude Code 2.1.x refuses a publish to an artifact this session has neither
+   read nor published (it fires after any restart, since the session only read the URL from
+   state), and `force: true` does **not** bypass that guard: it only overrides a version
+   conflict, and the refused publish is re-refused as identical content on retry. The read
+   result is discarded (the rendered file is authoritative; a large page lands in a local
+   file, not in context). Then call `Artifact` with `file_path` set to the rendered path, a
+   stable `<title>` for that type, a stable favicon (pick once, keep it across republishes),
+   and `url` set to `<key>.url` (redeploys to the same address instead of minting a new one).
+   Never pass `force`. A first publish omits `url` and skips the read, and per step 2, a
+   backend mismatch **is** a first publish, however stale-but-present the recorded `url` looks.
 4. On success, write `.claude-code-hermit/state/artifacts.json`:
    `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>", "backend": "<active backend>"}}`
    (merge — never drop sibling keys belonging to other artifact types).
@@ -282,9 +284,9 @@ backend, the same `Artifact` call shape as the weekly-review page). The URL is r
 under `documents.<basename>` in `state/artifacts.json`, same entry shape as the other
 types including its `backend` field, so a repeated request for the same document
 redeploys to the same URL instead of minting a new one — under the same gate discipline
-as step 2: a backend mismatch is a first publish on the new host (no `url`, no `force`);
+as step 2: a backend mismatch is a first publish on the new host (no `url`);
 otherwise skip the publish call when the file's content hash is unchanged from the last
-recorded one, and pass `force: true` on redeploy (verbatim copy of the local file, which
-is authoritative). No automatic per-document publishing; the
+recorded one, and on redeploy read the recorded `url` first, then publish without `force`
+(step 3; the local file is authoritative). No automatic per-document publishing; the
 dashboard's compiled-docs index is the discovery surface for what's available to ask
 for.
