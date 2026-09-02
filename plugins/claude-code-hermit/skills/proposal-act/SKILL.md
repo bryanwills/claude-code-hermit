@@ -106,8 +106,8 @@ When the operator accepts a proposal:
 
        For any other body, use the native `Plan` agent as the read-only subagent. Read only the returned text; ignore any file it writes under `~/.claude/plans/`. If the agent errors → log a one-line warning to SHELL.md Findings and continue to the session-lifecycle branch. Never block.
 
-       Invoke with the proposal's `## Context` and `## Proposed Solution` sections plus this fixed instruction:
-       > "You are a read-only falsification gate. Verify every cited path and symbol against the current code. Return line 1 as exactly: `REJECT: <already-done | partially-done | stale-paths | nonexistent-symbols | too-vague> — <one-line evidence>` or `PROCEED` (+ complete file list to modify). If REJECT, give file:line evidence. Do not produce a build plan for a rejected proposal. Do not write any files."
+       Invoke with the proposal's `## Context`, `## Proposed Solution`, and `## References` sections plus this fixed instruction:
+       > "You are a read-only falsification gate. Verify every cited path and symbol against the current code. `## References` also carries non-code citations (session reports `S-NNN`, `PROP-NNN`, memory names, URLs, or `n/a — <reason>`) — read those as background context only; never REJECT because one of them is not a file. Return line 1 as exactly: `REJECT: <already-done | partially-done | stale-paths | nonexistent-symbols | too-vague> — <one-line evidence>` or `PROCEED` (+ complete file list to modify). If REJECT, give file:line evidence. Do not produce a build plan for a rejected proposal. Do not write any files."
 
        Append the returned line-1 verdict to the proposal's `## Operator Decision` section as provenance, then branch:
        - `PROCEED` → continue to the session-lifecycle branch below (step (a)). Use the agent's complete file list over any files mentioned in the proposal body.
@@ -192,7 +192,8 @@ When the operator accepts a proposal:
          Unlike the e.5 quality gate (best-effort, never blocks), e.6 **blocks resolution when a defined verification step fails** — that is the correctness check the quality gate does not provide.
      f. **(in-main path)** When verifiably done: run `/proposal-act resolve PROP-NNN`, then notify the operator (or channel in autonomous mode) with the tier-appropriate message from (e.5). (Dispatched implementations resolve + notify in the step (e) post-return handling.)
 
-   - **"Create a session task"** → assemble the full NEXT-TASK.md content (Task/Context/Suggested Plan derived from the proposal), appending any of the following bullets to the end of the Suggested Plan, in order, numbered sequentially from `4.` (quality-gate bullet is last so `/claude-code-hermit:simplify` reviews any authored skill output):
+   - **"Create a session task"** → assemble the full NEXT-TASK.md content (Task/Context/Suggested Plan derived from the proposal). The `(always, first step)` bullet below is step `1.` of the Suggested Plan, ahead of the steps derived from the proposal (it gates them, so it is worthless after them) — the derived steps are numbered from `2.`. The remaining bullets append to the end of the Suggested Plan, in order, numbered sequentially after the derived steps (quality-gate bullet is last so `/claude-code-hermit:simplify` reviews any authored skill output):
+       - **(always, first step)** `Read the proposal file at .claude-code-hermit/proposals/PROP-NNN-*.md and re-verify its ## References and ## Proposed Solution against the current tree with bounded reads of the cited file:line ranges, before any edit; delegate only when the citations span more than a handful of files. If the work is already done, run /claude-code-hermit:proposal-act resolve PROP-NNN and implement nothing. If the cited paths or symbols no longer exist, report the mismatch to the operator or channel and implement nothing. Either way the session did no implementation work, so close it out through the normal work-done flow instead of leaving it in progress.`
        - **(if the proposal contains `## Skill Improvement`)** `Resolve the component name to .claude/skills/<name>/SKILL.md. If it exists, read it before writing and author only the behaviors from the ## Skill Improvement body that are not already present; if all of them are already present, change nothing and say so. If it does not exist, never write into the plugin cache, and create a file at that name only after the operator explicitly confirms the authored SKILL.md, which must be complete rather than the corrected fragment alone. Use the source_artifact brief only when present, and validate the result.`
          The guards travel in the bullet because a later `/session-start` consumes the task as ordinary work, so step (e) never runs again.
        - **(if the proposal contains `## Skill Draft`)** `Author the SKILL.md from the source_artifact (see ## Skill Draft), present the final SKILL.md to the operator for confirmation, then install it to the install_target only on confirmation.`
@@ -211,10 +212,11 @@ When the operator accepts a proposal:
      [Summary of the pattern/problem from the proposal, including Related Sessions]
 
      ## Suggested Plan
-     1. [Step derived from Proposed Solution]
+     1. [the (always, first step) re-verify bullet from above]
      2. [Step derived from Proposed Solution]
-     3. Verify the fix resolves the pattern
-     [any appended bullets from above, numbered from 4.]
+     3. [Step derived from Proposed Solution]
+     4. Verify the fix resolves the pattern
+     [any remaining appended bullets from above, numbered from 5.]
      HERMIT_NEXT_TASK
      ```
      - `OK` — confirm: "Task prepared. The next `/session-start` will offer this as the default task."
