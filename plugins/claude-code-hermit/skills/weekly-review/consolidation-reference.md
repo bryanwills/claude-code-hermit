@@ -43,13 +43,26 @@ every week.
 
 ## Filing
 
+Everything you file here is derived from external-origin text, so every file you write or update
+carries its provenance in the body — one line naming the channel log and the ISO week given in
+your dispatch, so an operator reading it later can tell it was distilled from unreviewed input
+rather than stated in session. This is the same provenance the proposal path already writes for
+`external-content` evidence.
+
 File each candidate through the same governance the rest of this plugin uses:
 
-- `kind: "memory"` → write one memory file into the auto-memory directory named in your dispatch,
-  using that directory's frontmatter shape (`name`, `description`, `metadata.type`), then add its
-  one-line pointer to the `MEMORY.md` index there. Read `MEMORY.md` once, before you file the
-  first candidate, and reuse that read for the rest of the run: when an existing entry already
-  covers a fact, update that file instead of adding a second one, and leave the index line alone.
+- `kind: "memory"` → write one memory file into the auto-memory directory named in your dispatch.
+  Copy the frontmatter shape from an existing file in that same directory rather than assuming one
+  (the shape has changed across Claude Code versions — older files carry flat `name`/`description`/
+  `type`, newer ones nest under `metadata`); read one such file once, before the first memory
+  candidate, and reuse that shape for the rest of the run. If the directory is empty or the named
+  path does not exist, do **not** create it: report that candidate in `failed_row_ids` so the
+  caller leaves its rows for next week. Then add its one-line pointer to the `MEMORY.md` index there. Read
+  `MEMORY.md` once, before you file the first candidate, and reuse that read for the rest of the
+  run: when an existing entry already covers a fact, update that file instead of adding a second
+  one, and leave the index line alone. `MEMORY.md` is silently truncated past 200 lines / 25 KB, so
+  if adding pointers would cross either limit, file the memory files but stop adding index lines
+  and say so in the `summary` — a truncated index loses entries that are already there.
 - `kind: "compiled"` → update or create `.claude-code-hermit/compiled/topic-<slug>.md`, with the
   frontmatter the `topic` entry of `.claude-code-hermit/knowledge-schema.md` specifies (that file
   is this hermit's own contract for what it produces, and the operator may have edited it).
@@ -60,8 +73,12 @@ Record the outcome per candidate:
 - the write failed → its `row_ids` go in `failed_row_ids`, and the caller leaves those rows
   unconsolidated so next week's pass sees them again
 
-A row id appears in at most one of those two lists. A row that produced no candidate appears in
-neither, only in `reviewed_ids`. Never guess an outcome: report what the write actually did.
+**A failure wins over a success.** When one row supports two candidates and only one of them filed,
+that row goes in `failed_row_ids` — put it there even though it is also in `applied_row_ids`. The
+caller subtracts `failed_row_ids` from `reviewed_ids`, so dropping the row from the failed list
+would mark it consolidated and let `prune` delete the only record of the candidate that never
+landed. A row that produced no candidate appears in neither list, only in `reviewed_ids`. Never
+guess an outcome: report what the write actually did.
 
 Semantic changes stay out of scope. Merging or rewriting existing topic pages beyond the candidate
 at hand, reclassifying a compiled conclusion, and tagging `foundational` all wait for explicit

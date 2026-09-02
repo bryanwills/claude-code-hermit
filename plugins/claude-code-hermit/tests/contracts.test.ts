@@ -1921,7 +1921,10 @@ describe('weekly-review delegation contract', () => {
   // One dispatch covers both specs: a second one costs another CLAUDE.md
   // re-seed plus two more main turns at full resident context.
   test('SKILL.md dispatches the runner exactly once', () => {
-    const hits = skill.match(/Dispatch `claude-code-hermit:skill-eval-runner`/g) || [];
+    // Count every phrasing a re-split could use ("Dispatch"/"dispatch"/"invoke"
+    // `claude-code-hermit:skill-eval-runner`), not just the one written today —
+    // sibling skills already use "invoke" (skills/brief/SKILL.md).
+    const hits = skill.match(/`claude-code-hermit:skill-eval-runner`/g) || [];
     expect(hits.length).toBe(1);
     expect(skill).toContain('skills/weekly-review/consolidation-reference.md');
   });
@@ -1953,9 +1956,20 @@ describe('weekly-review consolidation delegation contract', () => {
   });
 
   test('consolidation-reference.md has the runner file its own candidates', () => {
-    expect(refFile).not.toContain('read-only');
+    // Positive assertions, not a bare `not.toContain('read-only')` — that phrase
+    // is common enough to fail on an unrelated future sentence.
+    expect(refFile).toContain('and the writes');
+    expect(refFile).toContain('## Filing');
     expect(refFile).toContain('applied_row_ids');
     expect(refFile).toContain('failed_row_ids');
+  });
+
+  // A failed candidate's row must stay out of the marked set even when another
+  // candidate from the same row filed cleanly: main marks reviewed-minus-failed,
+  // so a row dropped from failed_row_ids gets consolidated and later pruned with
+  // the un-filed candidate never recorded anywhere.
+  test('consolidation-reference.md makes a failure win over a success on a shared row', () => {
+    expect(refFile).toContain('failure wins over a success');
   });
 });
 
