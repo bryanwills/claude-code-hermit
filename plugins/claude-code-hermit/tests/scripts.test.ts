@@ -3970,6 +3970,22 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
     expect(classifySource('Another Claude session sent a message:\nROUTINE_DUE [hermit-routine:daily-brief]'))
       .toBe('routine:daily-brief');
   });
+  // Channel and peer are frame-anchored too, for the same reason the sentinels are.
+  // Both shapes below were counted in this machine's stored transcripts: 2 compaction
+  // summaries quoting a channel envelope, and 5 subagent completions whose <result>
+  // quoted a peer frame. Billing the latter 'peer' also suppresses the dispatch hop,
+  // which only fires on 'other'.
+  test('cost-tracker: classifySource(compaction summary quoting a channel envelope) = other', () => {
+    const summary = 'This session is being continued from a previous conversation that ran out of context.\n\nSummary:\nThe operator replied over <channel source="plugin:discord:discord" chat_id="1">…</channel> and asked for a brief.';
+    expect(classifySource(summary)).toBe('other');
+  });
+  test('cost-tracker: classifySource(subagent completion quoting a peer frame) = other', () => {
+    const done = '<task-notification>\n<task-id>a1637f2a1</task-id>\n<status>completed</status>\n<result>Handled the note that arrived as "Another Claude session sent a message:" earlier today.</result>\n</task-notification>';
+    expect(classifySource(done)).toBe('other');
+  });
+  test('cost-tracker: classifySource(prose naming a peer frame mid-text) = other', () => {
+    expect(classifySource('Earlier a "Message from @scout" showed up; why was it billed as peer?')).toBe('other');
+  });
 
   // classifySource: channel source charset guard — placeholder/glob noise → other
   test('cost-tracker: classifySource rejects <channel source="*">', () => {

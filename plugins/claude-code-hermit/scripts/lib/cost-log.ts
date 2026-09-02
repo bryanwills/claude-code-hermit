@@ -44,6 +44,13 @@ const INDEX_VERSION = 3;
 // per-source numbers (doctor's routine-cost) count only v2 rows — an explicit epoch rather
 // than a date cutoff, which would drift with each hermit's upgrade time. Lives here with the
 // log's other schema versions; the writers import it so the stamp and the filter can't drift.
+//
+// The v2 epoch is the same commit as the prompt-only turnPromptText fix, so a v2 row is by
+// construction classified from a boundary prompt, never a tool_result — which is why the
+// routine:<word> buckets minted by the old prose fallback can only be pre-v2. Anchoring
+// classifySource on the delivered sentinel line did NOT need a v3: its mis-attributions
+// land in the `heartbeat` bucket and in unconfigured routine:<word> keys, and
+// checkRoutineCost reads neither (it keys routine:<id> for configured routines only).
 const SOURCE_ATTRIBUTION_VERSION = 2;
 
 // writeCostSummary reads today + the trailing 7 days; keep one extra day of buffer.

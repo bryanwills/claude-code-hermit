@@ -7,9 +7,15 @@
 // no load-time side effects, so direct import is safe and deterministic).
 //
 // Fixture entry shapes mirror real CC transcripts (verified live, CC 2.1.214):
-//   - wake trigger: user entry, string content, no isMeta (Monitor task-notification
-//     carries "<event>HEARTBEAT_EVALUATE</event>"; a CronCreate routine prompt opens
-//     with "[hermit-routine:<id>]")
+//   - wake trigger: user entry, string content. Only the Monitor task-notification
+//     frame ("<event>HEARTBEAT_EVALUATE</event>") arrives WITHOUT isMeta. Surveyed over
+//     287 stored transcripts, the other three delivery frames are isMeta:true in every
+//     sample: CronCreate "[hermit-routine:<id>]" 12/12, channel envelopes 74/74, peer
+//     posts 40/40. digestLines gates on isTurnTrigger, whose `isMeta !== true` guard
+//     therefore drops them before they reach classifySource — see #939. The fixtures
+//     below encode that gap rather than papering over it.
+//   - skill injection: isMeta:true with ARRAY content (592/600 live samples); the bare
+//     string-content form is pre-2.1.202 and no longer emitted.
 //   - rejection carrier: user tool_result with is_error:true + top-level toolDenialKind
 //   - compact_boundary: {type:'system', subtype:'compact_boundary'}
 
@@ -41,6 +47,18 @@ function triggerEntry(text: string, opts: { isMeta?: boolean; ts?: string } = {}
   const e: any = { type: 'user', message: { role: 'user', content: text }, timestamp: opts.ts ?? RECENT() };
   if (opts.isMeta) e.isMeta = true;
   return JSON.stringify(e);
+}
+
+// A skill injection as CC actually writes it: isMeta:true with array content. That array
+// shape is what isSkillInjection keys on (cc-compat.ts:496-499), so a string-content
+// fixture is only excluded by the coarser isMeta guard and proves nothing about it.
+function injectionEntry(text: string, ts?: string): string {
+  return JSON.stringify({
+    type: 'user',
+    isMeta: true,
+    message: { role: 'user', content: [{ type: 'text', text }] },
+    timestamp: ts ?? RECENT(),
+  });
 }
 
 function assistantToolUse(id: string, name: string, ts?: string): string {
@@ -315,14 +333,20 @@ describe('digestLines — wake classification (trigger entry only)', () => {
   test('command-wrapped manual heartbeat run is NOT a wake', () => {
     expect(wakesOf([triggerEntry('<command-message>claude-code-hermit:heartbeat</command-message>\n<command-name>/claude-code-hermit:heartbeat</command-name>\n<command-args>run</command-args>')])).toBe(0);
   });
-  test('CronCreate routine prompt is a wake', () => {
-    expect(wakesOf([triggerEntry('[hermit-routine:heartbeat-restart]\nRun: bun /p/scripts/routines.ts arm anchor')])).toBe(1);
+  // classifySource does call this a wake, but the digest never asks it: a live CronCreate
+  // routine prompt is isMeta:true (12/12 in stored transcripts) and isTurnTrigger's
+  // `isMeta !== true` guard drops it before classification. Pinned at 0 to record the gap
+  // — #939 fixes the segmentation, and flips this back to 1.
+  test('CronCreate routine prompt is dropped by the isMeta gate (#939)', () => {
+    expect(wakesOf([triggerEntry('[hermit-routine:heartbeat-restart]\nRun: bun /p/scripts/routines.ts arm anchor', { isMeta: true })])).toBe(0);
   });
   test('ROUTINE_DUE marker is a wake', () => {
     expect(wakesOf([triggerEntry('ROUTINE_DUE [hermit-routine:daily-brief] due now')])).toBe(1);
   });
+  // isMeta:true live (74/74), so this is 0 twice over: dropped by the gate, and not a wake
+  // to classifySource either. Stays correct once #939 lands.
   test('inbound channel prompt is NOT a wake', () => {
-    expect(wakesOf([triggerEntry('<channel source="plugin:discord:discord" user="u">hi</channel>')])).toBe(0);
+    expect(wakesOf([triggerEntry('<channel source="plugin:discord:discord" user="u">hi</channel>', { isMeta: true })])).toBe(0);
   });
   test('plain operator prompt is NOT a wake', () => {
     expect(wakesOf([triggerEntry('please refactor the parser')])).toBe(0);
@@ -337,7 +361,7 @@ describe('digestLines — wake classification (trigger entry only)', () => {
   test('isMeta skill-injection before the Write does not split the wake turn', () => {
     const d = digestLines([
       triggerEntry('HEARTBEAT_EVALUATE'),
-      triggerEntry('Base directory for this skill: /x', { isMeta: true }),
+      injectionEntry('Base directory for this skill: /x'),
       assistantToolUse('u1', 'Write'),
     ], OPEN);
     expect(d.wakes).toBe(1);

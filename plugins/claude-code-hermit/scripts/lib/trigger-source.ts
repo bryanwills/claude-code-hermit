@@ -23,7 +23,9 @@ type Json = any;
 // Everything else — an operator prompt, a compaction-continuation summary, a subagent
 // completion quoting its own output — reduces to its own trimmed text, where an
 // anchored match then fails. A subagent completion has no <event> body at all, so it
-// reduces to '' and can never be claimed.
+// reduces to '' and can never be claimed by a sentinel rule; the channel and peer rules
+// below are frame-anchored for the same reason (a completion whose <result> quotes a
+// peer frame, or a compaction summary quoting a <channel> envelope, is not a delivery).
 function sentinelLine(text: string): string {
   const t = text.trim();
   if (t.startsWith('<task-notification')) {
@@ -59,7 +61,8 @@ function sentinelLine(text: string): string {
 // noise ([hermit-routine:*], <id> placeholders).
 function classifySource(triggerText: string): string {
   if (!triggerText) return 'other';
-  const line = sentinelLine(triggerText);
+  const t = triggerText.trim();
+  const line = sentinelLine(t);
   if (line === 'HEARTBEAT_EVALUATE') return 'heartbeat';
   // Monitor co-fire: a ROUTINE_DUE line naming ≥2 distinct routine ids means one wake turn
   // ran multiple routines. Attribute the shared turn to a synthetic `routine:multi` bucket
@@ -83,8 +86,13 @@ function classifySource(triggerText: string): string {
   // shape. Strict charset — like the routine regex above, the value must match the
   // allowed charset to be captured at all (not captured loosely then sanitized), so
   // `<id>`/`*` placeholder noise fails the match entirely rather than surviving as a
-  // truncated false positive.
-  const channelMatch = triggerText.match(/<channel\b[^>]*\bsource="([A-Za-z0-9._:-]+)"/);
+  // truncated false positive. Frame-anchored like the sentinels above: a delivered
+  // channel turn OPENS with the envelope (record-operator-action.ts gates on the same
+  // `startsWith('<channel')`), so a compaction-continuation summary that quotes one
+  // mid-text is prose, not a delivery.
+  const channelMatch = t.startsWith('<channel')
+    ? t.match(/<channel\b[^>]*\bsource="([A-Za-z0-9._:-]+)"/)
+    : null;
   const channelKind = channelMatch ? normalizeChannelSource(channelMatch[1]) : '';
   // Only a source that normalizes to a clean bare server name is a real channel;
   // anything still containing ':' (a malformed or unrecognized 3+-segment shape)
@@ -99,8 +107,12 @@ function classifySource(triggerText: string): string {
   // frame carrying HEARTBEAT_EVALUATE, and it is a heartbeat, not a peer — the
   // matchers above already claimed it, so ordering alone keeps the wake out of
   // this bucket without a second copy of their grammar here.
-  if (triggerText.includes('Another Claude session sent a message') ||
-      triggerText.includes('Message from @')) {
+  //
+  // Anchored, matching sentinelLine's own guard: a subagent completion whose <result>
+  // quotes this frame is not a peer post, and billing it 'peer' would also suppress
+  // cost-tracker's dispatch hop (which only runs on 'other') and lose the turn's cost
+  // for the routine that dispatched it.
+  if (t.startsWith('Another Claude session sent a message') || t.startsWith('Message from @')) {
     return 'peer';
   }
   return 'other';

@@ -23,9 +23,9 @@
 //                    a hermit that never opened a session.
 //   "<path>"       — a project-relative executable the operator owns. Verdict-only:
 //                    the first stdout line must be SKIP or WAKE. Nothing it prints
-//                    reaches the wake prompt — gate output is untrusted text, and
-//                    lib/trigger-source.ts classifies a turn by scanning the whole
-//                    prompt, so a payload there could both inject and misattribute.
+//                    reaches the wake prompt — gate output is untrusted text, and the
+//                    wake prompt is what lib/trigger-source.ts classifies the turn by,
+//                    so a payload there could both inject and misattribute.
 //
 // Trust class: an operator-declared executable run unattended by the monitor is the
 // same class as `monitors[].command`, and carries the same protection (nonce tier
