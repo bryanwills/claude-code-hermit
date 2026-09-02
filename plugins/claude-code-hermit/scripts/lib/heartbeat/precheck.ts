@@ -399,16 +399,18 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
 
   // Clean-recheck damper: suppress re-evaluation for clean_recheck_cooldown after a tick
   // concludes nothing actionable. Sits after all change-detecting gates so stale/micro-
-  // proposal/suppressed-digest still pre-empt it. Active alerts (unsuppressed or resolving)
-  // bypass the damper so a firing alert is never masked. `null` cooldown disables it.
+  // proposal/suppressed-digest still pre-empt it. Resolving alerts bypass the damper so
+  // the hysteresis window is never masked; an unsuppressed entry needs no bypass, since
+  // every apply rewrites last_clean_eval_at and a genuinely new key nulls it.
+  // `null` cooldown disables it.
   if (hbConfig.clean_recheck_cooldown !== null) {
-    const hasActiveFollowup = alertValues.some(
-      (e: Json) => e && (e.suppressed !== true || (e.consecutive_clean ?? 0) > 0));
+    const hasResolvingAlert = alertValues.some(
+      (e: Json) => e && (e.consecutive_clean ?? 0) > 0);
     const lastCleanEvalAt = typeof alertState.last_clean_eval_at === 'string'
       ? new Date(alertState.last_clean_eval_at).getTime()
       : NaN;
     const cooldownMs = parseDuration(hbConfig.clean_recheck_cooldown, 6 * 3600000);
-    if (!hasActiveFollowup && !isNaN(lastCleanEvalAt) && lastCleanEvalAt <= now &&
+    if (!hasResolvingAlert && !isNaN(lastCleanEvalAt) && lastCleanEvalAt <= now &&
         (now - lastCleanEvalAt) < cooldownMs) {
       return 'OK';
     }

@@ -1053,6 +1053,38 @@ describe('update-alert-state', () => {
     expect(state.alerts['proposal-pending:PROP-025']).toMatchObject({ count: 228, suppressed: true, consecutive_clean: 0 });
   }));
 
+  // The ladder notifies on the first observation and again at count===6; ticks 2-5 push a
+  // Monitoring line and nothing else, whatever the text says (it is model-composed per tick
+  // and carries no stability contract). So an already-recorded key is news already delivered:
+  // treating it as un-clean cost five full EVALUATE wakes per alert before the damper armed.
+  test('update-alert-state (already-recorded key repeating with new text is clean — stamps last_clean_eval_at, reports OK)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts: {
+        'checklist:invoice1': {
+          count: 2, consecutive_clean: 0, suppressed: false,
+          first_seen: '2026-07-09', last_seen: '2026-07-09', text: 'An invoice is overdue',
+        },
+      },
+      self_eval: {}, total_ticks: 12, last_clean_eval_at: null,
+    }));
+    const { state, stdout } = await updateAlertState(dir,
+      firingPayload([{ key: 'checklist:invoice1', text: 'An invoice has been overdue since Monday' }]));
+    expect(stdout.heartbeat_result).toBe('OK');
+    expect(state.last_clean_eval_at).toBe(NOW);
+    expect(stdout.notifications).toEqual([]);
+    expect(state.alerts['checklist:invoice1']).toMatchObject({ count: 3, suppressed: false, consecutive_clean: 0 });
+  }));
+
+  test('update-alert-state (a key with no prior entry is not already-recorded — clears last_clean_eval_at, reports ALERT)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'),
+      '{"alerts":{},"self_eval":{},"total_ticks":12,"last_clean_eval_at":"2026-07-10T06:00:00.000Z"}');
+    const { state, stdout } = await updateAlertState(dir,
+      firingPayload([{ key: 'checklist:invoice1', text: 'An invoice is overdue' }]));
+    expect(stdout.heartbeat_result).toBe('ALERT');
+    expect(state.last_clean_eval_at).toBeNull();
+    expect(stdout.notifications).toEqual(['An invoice is overdue']);
+  }));
+
   test('update-alert-state (total_ticks, last_stale_wake_at, last_digest_date preserved absent a digest event)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{},"self_eval":{},"total_ticks":42,"last_stale_wake_at":"2026-06-21T20:00:00.000Z","last_digest_date":"2026-06-21","last_clean_eval_at":null}');
@@ -2490,11 +2522,28 @@ describe('heartbeat-precheck (damper: clean-recheck cooldown)', () => {
     expect(await precheckWithNow(dir, NOW_ISO)).toBe('OK');
   }));
 
-  test('heartbeat-precheck (EVALUATE: active unsuppressed alert overrides damper)', withDir(async (dir) => {
+  // An unsuppressed entry no longer bypasses the damper: the ladder sends nothing on
+  // repeats before count===6, so bypassing bought five paid EVALUATEs per alert and no
+  // extra message. Freshness of last_clean_eval_at is the whole gate now — a genuinely
+  // new key nulls it, which is what re-opens the damper.
+  test('heartbeat-precheck (OK: already-recorded unsuppressed alert does not override damper)', withDir(async (dir) => {
     seedDamper(dir, {
       nowIso: NOW_ISO, cleanAgoMs: 1 * 3600000, cooldown: '6h',
       alerts: { 'checklist:reviewpr': { count: 2, suppressed: false, consecutive_clean: 0 } },
     });
+    expect(await precheckWithNow(dir, NOW_ISO)).toBe('OK');
+  }));
+
+  test('heartbeat-precheck (EVALUATE: already-recorded alert with no clean stamp)', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'),
+      '{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"23:59"},"clean_recheck_cooldown":"6h"}}');
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts: { 'checklist:reviewpr': { count: 2, suppressed: false, consecutive_clean: 0 } },
+      last_digest_date: null, self_eval: {}, total_ticks: 3,
+    }));
+    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
+    write(hermit(dir, 'HEARTBEAT.md'), DEFAULT_CHECKLIST);
     expect(await precheckWithNow(dir, NOW_ISO)).toBe('EVALUATE');
   }));
 
