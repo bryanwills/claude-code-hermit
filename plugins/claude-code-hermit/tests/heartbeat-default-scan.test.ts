@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { isProposalScanItem } from '../scripts/lib/heartbeat-items';
+import { isProposalScanItem, isCredentialExpiryItem } from '../scripts/lib/heartbeat-items';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
@@ -32,6 +32,13 @@ const TODAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(new D
 const HEARTBEAT_DEFAULT =
   '# Heartbeat Checklist\n\n## Standing Checks\n' +
   '- Review `proposals/` for any with `status: proposed` needing operator review.\n';
+
+// Template line 6 verbatim. Tests 1–18 reach OK against HEARTBEAT_DEFAULT (proposal
+// scan only); adding this bullet would force EVALUATE until doctor-report.json is
+// healthy, so the credential matrix uses HEARTBEAT_BOTH instead.
+const CREDENTIAL_BULLET =
+  '- Read `state/doctor-report.json` → the `credential-expiry` check; if its status is warn or fail, tell the operator which credential needs re-auth and name the plugin\'s reauth skill from the report detail.';
+const HEARTBEAT_BOTH = HEARTBEAT_DEFAULT + CREDENTIAL_BULLET + '\n';
 
 // clean_recheck_cooldown: null disables the damper so these tests isolate the
 // item-loop resolution (the damper has its own coverage in auto-close.test.ts).
@@ -48,6 +55,7 @@ interface Fixture {
   noProposalsDir?: boolean;  // don't create proposals/ at all (ENOENT readdir path)
   proposalsAsFile?: boolean; // proposals is a regular file, not a dir (ENOTDIR readdir path)
   microCorrupt?: boolean;    // micro-proposals.json present but unparseable (#764)
+  doctorReport?: object | 'missing' | 'corrupt';
 }
 
 function build(fix: Fixture): string {
@@ -87,7 +95,26 @@ function build(fix: Fixture): string {
       JSON.stringify({ pending: ids.map(id => ({ id, status: 'pending', tier: 1 })) }),
     );
   }
+  if (fix.doctorReport === 'corrupt') {
+    fs.writeFileSync(hermit(dir, 'state', 'doctor-report.json'), '{"ts":');
+  } else if (fix.doctorReport && fix.doctorReport !== 'missing') {
+    const given = fix.doctorReport as { ts?: string; checks?: unknown[] };
+    const report = Array.isArray(given.checks)
+      ? { ts: given.ts ?? NOW, ...given }
+      : { ts: NOW, checks: [{ id: 'credential-expiry', detail: '', ...given }] };
+    fs.writeFileSync(hermit(dir, 'state', 'doctor-report.json'), JSON.stringify(report));
+  }
   return dir;
+}
+
+// Mirrors precheck.ts normalizeItemKey: checklist:<first 8 alphanumerics of the bullet>.
+function checklistKey(itemText: string): string {
+  const text = itemText
+    .replace(/^[-*+]\s*(\[.\]\s*)?/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 8);
+  return `checklist:${text}`;
 }
 
 async function verdict(dir: string, peek = false, now = NOW): Promise<string> {
@@ -254,6 +281,66 @@ describe('default proposal-scan resolution', () => {
   });
 });
 
+describe('default credential-expiry resolution', () => {
+  const both = { heartbeat: HEARTBEAT_BOTH };
+  const credKey = checklistKey(CREDENTIAL_BULLET);
+
+  test('1. status ok, no alerts → OK', async () => {
+    const dir = build({ ...both, doctorReport: { status: 'ok' } });
+    expect(await verdict(dir)).toBe('OK');
+  });
+
+  test('2. status warn, no alerts → EVALUATE', async () => {
+    const dir = build({ ...both, doctorReport: { status: 'warn' } });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('3. status fail, entry suppressed with consecutive_clean: 0 → OK', async () => {
+    const dir = build({
+      ...both,
+      doctorReport: { status: 'fail' },
+      alertState: { alerts: { [credKey]: { suppressed: true, consecutive_clean: 0, count: 6 } } },
+    });
+    expect(await verdict(dir)).toBe('OK');
+  });
+
+  test('4. status ok, lingering checklist key → EVALUATE', async () => {
+    expect(credKey).toBe('checklist:readstat');
+    const dir = build({
+      ...both,
+      doctorReport: { status: 'ok' },
+      alertState: { alerts: { [credKey]: { suppressed: true, consecutive_clean: 0, count: 6 } } },
+    });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('5. report missing → EVALUATE', async () => {
+    const dir = build({ ...both, doctorReport: 'missing' });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('6. report unparseable → EVALUATE', async () => {
+    const dir = build({ ...both, doctorReport: 'corrupt' });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('7. report present but no credential-expiry entry in checks → EVALUATE', async () => {
+    const dir = build({
+      ...both,
+      doctorReport: { checks: [{ id: 'runtime', status: 'ok', detail: 'ok' }] },
+    });
+    expect(await verdict(dir)).toBe('EVALUATE');
+  });
+
+  test('8. --peek variant of case 1 → OK and alert-state.json unchanged', async () => {
+    const dir = build({ ...both, doctorReport: { status: 'ok' } });
+    const p = hermit(dir, 'state', 'alert-state.json');
+    const before = fs.readFileSync(p, 'utf8');
+    expect(await verdict(dir, true)).toBe('OK');
+    expect(fs.readFileSync(p, 'utf8')).toBe(before);
+  });
+});
+
 // Coherence guard: the whole optimization hinges on isProposalScanItem matching
 // the item shipped in HEARTBEAT.md.template. If a future template reword drops the
 // `proposed` keyword (or the `proposals/` reference), the classifier stops matching
@@ -269,5 +356,15 @@ describe('shipped HEARTBEAT.md.template ↔ classifier coherence', () => {
     const proposalItem = bullets.find(l => /proposals/i.test(l));
     expect(proposalItem).toBeDefined();
     expect(isProposalScanItem(proposalItem!)).toBe(true);
+  });
+
+  test('the shipped default credential-expiry item matches isCredentialExpiryItem', () => {
+    const tpl = fs.readFileSync(
+      path.join(PLUGIN_ROOT, 'state-templates', 'HEARTBEAT.md.template'), 'utf8',
+    );
+    const bullets = tpl.split('\n').map(l => l.trim()).filter(l => /^[-*+]\s/.test(l));
+    const credentialItem = bullets.find(l => /doctor-report/i.test(l));
+    expect(credentialItem).toBeDefined();
+    expect(isCredentialExpiryItem(credentialItem!)).toBe(true);
   });
 });

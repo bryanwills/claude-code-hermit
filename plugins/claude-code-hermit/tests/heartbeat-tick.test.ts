@@ -102,7 +102,7 @@ describe('heartbeat tick', () => {
 
   test('JSON shape: verdict always present, reason only on SKIP, alert only on ALERT', async () => {
     const ok = await tick(fixture());
-    expect(ok).toEqual({ verdict: 'OK', notifications: [] });
+    expect(ok).toEqual({ verdict: 'OK', notifications: [], model: 'haiku' });
 
     const skip = await tick(fixture({ checklist: null }));
     expect(skip.verdict).toBe('SKIP');
@@ -222,6 +222,33 @@ describe('heartbeat tick', () => {
     const hermit = fixture();
     await tick(hermit);
     expect(monitoring(hermit)).toEqual([]);
+  });
+
+  test('model: a string heartbeat.model passes through', async () => {
+    const hermit = fixture({
+      config: { timezone: 'UTC', heartbeat: { every: '30m', active_hours: ALWAYS_ON, model: 'sonnet' } },
+    });
+    expect((await tick(hermit)).model).toBe('sonnet');
+  });
+
+  test('model: explicit null stays null', async () => {
+    const hermit = fixture({
+      config: { timezone: 'UTC', heartbeat: { every: '30m', active_hours: ALWAYS_ON, model: null } },
+    });
+    expect((await tick(hermit)).model).toBeNull();
+  });
+
+  test('model: absent key defaults to haiku', async () => {
+    expect((await tick(fixture())).model).toBe('haiku');
+  });
+
+  // "" is not "inherit the session model" — only an explicit null is. Settling folds
+  // it to the default, so the skill never dispatches the Agent tool with model: "".
+  test('model: empty string settles to haiku, not through', async () => {
+    const hermit = fixture({
+      config: { timezone: 'UTC', heartbeat: { every: '30m', active_hours: ALWAYS_ON, model: '' } },
+    });
+    expect((await tick(hermit)).model).toBe('haiku');
   });
 });
 

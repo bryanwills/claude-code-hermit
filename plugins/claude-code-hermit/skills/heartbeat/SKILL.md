@@ -30,7 +30,7 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts tick .claude-code-hermit
    ```
-   It prints one JSON line: `{"verdict", "reason"?, "alert"?, "notifications":[{"text","mark_key"?}]}`. The verdict is the precheck's; the `notifications` array is every deterministic pre-dispatch finding — a waiting-timeout that already fired, and each un-notified budget alert, composed and ready to send. The tick applied the runtime.json transition and wrote any Monitoring line it owed. Sending is yours.
+   It prints one JSON line: `{"verdict", "reason"?, "alert"?, "notifications":[{"text","mark_key"?}], "model"}`. The verdict is the precheck's; the `notifications` array is every deterministic pre-dispatch finding — a waiting-timeout that already fired, and each un-notified budget alert, composed and ready to send. `model` is the settled `heartbeat.model` — `"haiku"` when absent or malformed, an explicit `null` preserved. The tick applied the runtime.json transition and wrote any Monitoring line it owed. Sending is yours.
 2. Branch on `verdict`:
    - `SKIP` → emit `HEARTBEAT_SKIP (<reason>)`. No channel notification. No SHELL.md write. Stop.
    - `OK` → emit `HEARTBEAT_OK`. Stop.
@@ -50,7 +50,7 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-tracker.ts --mark-budget-notified <mark_key>
    ```
    Marking before a confirmed send would silently swallow the alert; that is why the tick leaves `notified` untouched and cost-tracker stays the sole writer of `budget-alerts.json`. An empty array is the common case — continue to step 4 either way.
-4. **Read `heartbeat.model` from `.claude-code-hermit/config.json`** (default `"haiku"` when the key is absent). **Dispatch via the Agent tool** (`subagent_type: "claude-code-hermit:skill-eval-runner"`) to run the report-only evaluation. Pass the `model` param per the resolved value: a concrete string (`"haiku"`/`"sonnet"`/`"opus"`) → `model: "<that value>"`; explicit `null` → **omit the `model` param entirely** so the subagent inherits the session model. This runs the evaluation in a fresh ~40k context instead of the main session's 200k–500k inherited context — the eval reads only files and needs none of that history. Instructions for the subagent:
+4. **Take `model` from the step 1 tick JSON.** **Dispatch via the Agent tool** (`subagent_type: "claude-code-hermit:skill-eval-runner"`) to run the report-only evaluation. Pass the `model` param from that field: a string → `model: "<that value>"`; `null` → **omit the `model` param entirely** so the subagent inherits the session model. This runs the evaluation in a fresh ~40k context instead of the main session's 200k–500k inherited context — the eval reads only files and needs none of that history. Instructions for the subagent:
    > Read `${CLAUDE_PLUGIN_ROOT}/skills/heartbeat/reference.md` for the complete evaluation instructions. Execute the evaluation steps in that file against `.claude-code-hermit/` in the current project directory, using the file paths described there. Return the JSON object exactly as specified in reference.md § Return Schema (no prose). Do NOT write any files or send any notifications — the calling session handles all writes and notifications.
 
    Receive the structured JSON back from the subagent.

@@ -18,3 +18,19 @@
 export function isProposalScanItem(itemText: string): boolean {
   return /proposals?[\/\s]/i.test(itemText) && /\bproposed\b/i.test(itemText);
 }
+
+// Does a HEARTBEAT.md checklist item represent the default credential-expiry item?
+// Matches the shipped default ("Read `state/doctor-report.json` → the
+// `credential-expiry` check …"): it references doctor-report.json AND the
+// credential-expiry check it reads. A custom item that merely mentions one
+// without the other falls through to the generic alert-based rule (unchanged,
+// conservative).
+//
+// Residual (documented, not eliminated): a compound custom item that DOES contain
+// both `doctor-report.json` and `credential-expiry` plus an unrelated clause is
+// classified here and can reach 'clean' on a healthy report, skipping the
+// unrelated clause's LLM eval. Same residual as isProposalScanItem: prose-matching
+// is retained because hermit-evolve does not migrate operator-edited HEARTBEAT.md.
+export function isCredentialExpiryItem(itemText: string): boolean {
+  return /doctor-report\.json/i.test(itemText) && /credential-expiry/i.test(itemText);
+}
