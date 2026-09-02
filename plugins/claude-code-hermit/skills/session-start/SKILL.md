@@ -90,12 +90,12 @@ All state lives under `.claude-code-hermit/` in the project root.
    - Ask the operator if they want to continue the current task or start a new one
 9b. If resuming an idle session (runtime.json `session_state` is `idle`):
    - Show session continuity info: tasks completed, session duration
-   - **Always-on** (`config.always_on` is `true`): there is no operator to ask, so do **not** ask. Leave `session_state` `idle`, report readiness, and let the heartbeat's Idle Agency pick the next task.
-   - Ask: "What should I work on next?" (unless a NEXT-TASK.md was accepted in step 6, or the always-on branch above applied)
+   - **Always-on** (`config.always_on` is `true`) with no task known (no `--task`, no NEXT-TASK.md adopted in step 6, none in the invoking request): there is no operator to ask, so do **not** ask. Leave `session_state` `idle` and report readiness; the next task arrives from the channel, a routine, or a queued NEXT-TASK.md.
+   - Ask: "What should I work on next?" (unless a task is already known, or the always-on branch above applied)
    - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. After confirming the plan, record its ordered steps in the SHELL.md Progress Log.
 10. If starting a new session:
-   - **Always-on** (`config.always_on` is `true`): there is no operator to ask, so do **not** ask. Leave `session_state` `idle`, report readiness, and let the heartbeat's Idle Agency pick the next task.
-   - Ask the operator: "What should I help with?" (unless a NEXT-TASK.md was accepted in step 6, or the always-on branch above applied)
+   - **Always-on** (`config.always_on` is `true`) with no task known (no `--task`, no NEXT-TASK.md adopted in step 6, none in the invoking request): there is no operator to ask, so do **not** ask. Report readiness; the next task arrives from the channel, a routine, or a queued NEXT-TASK.md.
+   - Ask the operator: "What should I help with?" (unless a task is already known, or the always-on branch above applied)
    - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to create the session with the task. After confirming the plan, record its ordered steps in the SHELL.md Progress Log.
 11. Once I know what to work on (new session only):
     - **Tags:** Ask "Any tags for this session? (e.g., refactor, frontend, urgent) Enter to skip." Write the answer to the `Tags:` field in SHELL.md. If skipped, leave blank.

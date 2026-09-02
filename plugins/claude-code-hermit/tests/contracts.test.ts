@@ -3951,7 +3951,7 @@ describe('settings_permissions validation', () => {
 // "What should I work on next?" / "What should I help with?" produce a question
 // nothing can answer: ask-gate.ts denies the AskUserQuestion outright, and the
 // model then re-asks over the channel, waking the operator to answer a question
-// the heartbeat's Idle Agency was already going to settle. The guard is prose in
+// the next channel request or queued task was going to settle. The guard is prose in
 // a skill, so only a contract keeps a later edit from dropping it.
 describe('session-start always-on boot never asks', () => {
   const sessionStart = read(path.join(SKILLS, 'session-start', 'SKILL.md'));
@@ -3983,5 +3983,21 @@ describe('session-start always-on boot never asks', () => {
       expect(step, `step ${name} lost its always_on guard`).toContain('`config.always_on` is `true`');
       expect(step, `step ${name} lost its do-not-ask directive`).toContain('do **not** ask');
     }
+  });
+
+  // The always-on bootstrap invokes the boot skill, which defaults to
+  // `/claude-code-hermit:session` (hermit-start.ts: `config.boot_skill ||
+  // '/claude-code-hermit:session'`). That wrapper calls session-start and then asks its
+  // own "What should I help with?" in §3, so guarding session-start alone still leaves
+  // the default boot path at an unanswerable ask.
+  test('the session boot skill carries the same guard', () => {
+    const step3 = extractBlock(
+      read(path.join(SKILLS, 'session', 'SKILL.md')),
+      '\n### 3. If starting a new session',
+      '\n### 4. Plan the work',
+    );
+    expect(step3).toContain('What should I help with?');
+    expect(step3, 'session §3 lost its always_on guard').toContain('`config.always_on` is `true`');
+    expect(step3, 'session §3 lost its do-not-ask directive').toContain('do **not** ask');
   });
 });
