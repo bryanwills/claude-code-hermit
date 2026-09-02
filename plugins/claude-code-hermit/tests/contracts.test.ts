@@ -1690,8 +1690,12 @@ describe('hermit-routines diff-registration contract', () => {
     expect(skillContent).toContain('ANCHOR_PROMPT_END');
   });
 
-  test('SKILL.md documents the boot-id mirror-invalidation mechanism', () => {
-    expect(skillContent).toContain('.boot-id');
+  // Fallback-mode operational detail lives in reference.md, which `load` does not
+  // read on the boot path — the contract is that the skill documents it somewhere,
+  // not that the boot path carries it.
+  test('the skill documents the boot-id mirror-invalidation mechanism', () => {
+    const reference = read(path.join(SKILLS, 'hermit-routines', 'reference.md'));
+    expect(skillContent + reference).toContain('.boot-id');
   });
 });
 

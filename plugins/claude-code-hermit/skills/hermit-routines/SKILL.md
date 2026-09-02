@@ -18,6 +18,8 @@ Register and manage scheduled routines. Where the Monitor tool is available, all
 /claude-code-hermit:hermit-routines stop --all          stop everything
 ```
 
+`list`, `status`, `stop` and the notes live in `reference.md`, beside this file in the skill's **Base directory** — `Read` it for those. `load` and `run` stay here: every always-on launch pays for them.
+
 ## Plan
 
 ### load
@@ -37,7 +39,8 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
    - **`ARM|<legs>|<reasons>`** — execute the plan block that follows, in order. Every subsequent line is optional and appears only when it applies.
    - **`ARM|routines,heartbeat|check-error:<reason>`** — the verb could not read `config.json` or the mirror, so it emitted no plan. Abort `load`: register or delete nothing, and log `Routine load aborted: arm check failed — <reason>. No routines registered.`
 
-3. **Execute the `ARM` plan block.** The lines, in the order they are printed:
+3. **Execute the `ARM` plan block.** Fetch its five deferred tools in one `ToolSearch` — `select:Monitor,TaskStop,CronCreate,CronList,CronDelete` — not one call each. The lines, in the order they are printed:
+   - `HB_OLD_TASK:<id>` / `HB_FIRST_START:1` / `HB_INTERVAL:<s>` / `HB_CMD:<command>` — the **heartbeat leg**, planned here so one `load` arms both monitors. `TaskStop` the `HB_OLD_TASK` id if present (ignore not-found), register a Monitor exactly as `MONITOR_CMD` below but `description: "heartbeat-monitor"` with the `HB_CMD` string, and pass its task id to step 4 as `--heartbeat`. **No `HB_` line** means that leg is current or disabled: register nothing, pass `none`.
    - `OLD_TASK:<id>` — `TaskStop` it (ignore not-found). Printed unless the record belongs to a previous boot, whose task died with that process; a record with no `boot_id` at all was written by this one.
    - `FIRST_TRANSITION:1` — this is a first transition into monitor mode (never printed on the `--fallback` leg, where those crons are the routines). Also `CronList` and `CronDelete` every entry whose prompt contains `[hermit-routine:` **except** `[hermit-routine:heartbeat-restart]` — live crons from an in-process upgrade that the mirror no longer tracks (duplicate-fire hazard). Skip this sweep entirely when the line is absent.
    - `MONITOR_CMD:<command>` — register the Monitor: `description: "routine-monitor"` (reserved slot), `command:` **the string verbatim, unedited** (it is already absolute; `$PWD` would trigger Claude Code's `simple_expansion` approval), `timeout_ms: 86400000` (schema-required boilerplate on a persistent monitor — it does not expire on this deadline), `persistent: true`.
@@ -47,16 +50,17 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
 
 4. **Commit:**
    ```
-   bun <pluginRoot>/scripts/routines.ts arm commit .claude-code-hermit <pluginRoot> <task-id|none> --created "<succeeded-csv>"
+   bun <pluginRoot>/scripts/routines.ts arm commit .claude-code-hermit <pluginRoot> <task-id|none> --created "<succeeded-csv>" --heartbeat <task-id|none>
    ```
-   `<task-id>` is the Monitor's task id, or `none` after `MONITOR_SKIP`. Append ` --reset` when `begin` got it. The verb waits for the monitor's first liveness tick internally (≤10s) and writes `state/routine-monitor.runtime.json` and the registry mirror. Its output:
+   `<task-id>` is the routine Monitor's, or `none` after `MONITOR_SKIP`; the `--heartbeat` one is the heartbeat Monitor's. Append ` --reset` when `begin` got it. The verb waits for the monitor's first liveness tick internally (≤10s) and writes `state/routine-monitor.runtime.json` and the registry mirror. Its output:
    - `OK|monitor|<n> scheduled|anchor <created|kept>` — done. Log it.
-   - `FALLBACK|liveness-absent` — the subprocess never ticked (seccomp/nested-userns). `TaskStop` the task you just registered and go to Step 3-F.
+   - `FALLBACK|liveness-absent` — the routine subprocess never ticked (seccomp/nested-userns). `TaskStop` the **routine** Monitor you registered from `MONITOR_CMD` (never the heartbeat one, whose leg is independent and already committed by the `HEARTBEAT:` line), and go to Step 3-F.
+   - `HEARTBEAT:<result>` — the heartbeat leg, independent of the routine line above (absent under `--heartbeat none`). `OK|registered|interval=<s>` → log it. `DEAD|liveness-absent` → report that the heartbeat will not run this session.
 5. **Step 3-F — fallback** (Monitor unavailable, registration failed, or `commit` returned `FALLBACK`): run
    ```
    bun <pluginRoot>/scripts/routines.ts arm begin .claude-code-hermit <pluginRoot> --fallback
    ```
-   which re-plans over the full enabled set (scheduled routines + anchor) and prints the same block minus `MONITOR_CMD`. Execute its `DELETE:`/`CREATE:` lines via the **CronCreate flow** below, then commit with `arm commit .claude-code-hermit <pluginRoot> fallback --created "<succeeded-csv>"`, which records `{"mode":"croncreate-fallback", …}`.
+   which re-plans over the full enabled set (scheduled routines + anchor) and prints the same block minus `MONITOR_CMD` and the `HB_` lines (the first pass already committed the heartbeat; re-planning it here would register a second monitor). Execute its `DELETE:`/`CREATE:` lines via the **CronCreate flow** below, then commit with `arm commit .claude-code-hermit <pluginRoot> fallback --created "<succeeded-csv>" --heartbeat none`, which records `{"mode":"croncreate-fallback", …}`.
 
    **CronCreate flow** (executes the `DELETE:`/`CREATE:` lines from any `arm begin` block — monitor-mode anchor, fallback, or `--reset`):
    1. Parse the block's planner lines: `DELETE:<id>`, `CREATE:<id>|<schedule>`, `WARN:<id>|<reason>`, `KEEP:<n>`, optional trailing `WAKESPREAD:<distinct>|<max>|<loneliest>`.
@@ -107,58 +111,3 @@ The `REFLECT` line is present whenever the routine declares `"precheck": "reflec
 
 The `ROUTINE_DUE` notification handler — invoked when the monitor emits `ROUTINE_DUE [hermit-routine:&lt;id&gt;] ...`. Parse the bracketed ids. For each, look up the routine in `config.routines` and execute per **Shared execution semantics** above with `<delivery>` = `monitor`. Ids no longer present in config are skipped silently.
 
-### list
-
-Show configured routines from `config.json` (not the live view — that's `status`).
-
-1. Read `config.routines`. If empty: "No routines configured."
-2. Display table:
-```
-Routines (config.json):
-  #  ID                 Schedule      Skill                                    RDW    RA     Model   Status
-  1. heartbeat-restart  0 4 * * *     claude-code-hermit:hermit-routines load  true   false  -       enabled
-  2. weekly-review      0 23 * * 0    claude-code-hermit:weekly-review         false  false  -       disabled
-```
-`RA` is `true` when `reflect_after: true`. `Model` is the `model` value if set, otherwise `-`.
-
-### status
-
-1. Read `state/routine-monitor.runtime.json`. The scheduled-routine count comes from `config.routines` (enabled, minus the anchor), not from the runtime file — the runtime file records the registration, and config is what it should match.
-   - **Monitor mode:** report `mode`, `started_at`, `interval`, the scheduled count, and `state/routine-monitor-liveness.json`'s `last_peek_at`. Call `CronList` filtered to `[hermit-routine:` — in steady state only `[hermit-routine:heartbeat-restart]` should appear; more means "legacy CronCreates still active — run `load` to clean up."
-   - **Fallback mode:** `CronList` filtered to `[hermit-routine:`, displayed as:
-     ```
-     Active routine CronCreates:
-       ID                 CRON-ID    SCHEDULE
-       heartbeat-restart  4e007cf4   0 4 * * *
-     ```
-     (Extract id from the `[hermit-routine:<id>]` prefix.) If none: "No active routine CronCreates. Run `load` to register."
-   - **Absent runtime file:** "Not yet loaded. Run `/claude-code-hermit:hermit-routines load`."
-
-### stop
-
-**Monitor mode:**
-- `stop` or `stop --all` (no id, or `--all`): `TaskStop` the monitor task, clear `state/routine-monitor.runtime.json`, `CronDelete` the anchor. Log: "Stopped routine monitor and anchor."
-- `stop <id>` (id ≠ `heartbeat-restart`): routines share one subprocess — do not stop it. Reply: "Routines share one monitor subprocess — to stop just `<id>`, set `enabled: false` on that entry in config.json and run `load`."
-- `stop heartbeat-restart`: `CronDelete` the anchor alone (the monitor, if any, keeps running).
-
-**Fallback mode (unchanged):**
-- `stop <id>`: `CronList`, find the `[hermit-routine:<id>]` entry, `CronDelete` it (or "not active").
-- `stop` (no id): `CronList` filtered to `[hermit-routine:*]` — 0 active: report; 1 active: stop without asking; 2+: list and ask (or `--all`).
-- `stop --all`: `CronDelete` every `[hermit-routine:*]` entry.
-
-## Notes
-
-- **Monitor mode defers only while an operator turn is open** (a Stop-cleared marker, 60-min TTL backstop), coarser than CronCreate's turn-level idle gate. A routine wake can still interject mid-conversation (same trade the heartbeat monitor accepts) — CronCreate never fires mid-task. A session left `in_progress` with no open operator turn no longer starves routines.
-- **Routine ids** must match `^[A-Za-z0-9._-]{1,64}$` (enforced by `validate-config.ts`) — ids travel through bracket markers, `--ids` CSVs, and JSONL rows.
-- **Changes take effect immediately.** `hermit-settings routines` invokes `load` after writing config; hand-edited `config.json` needs a manual `load`.
-- **Interactive mode does not auto-register routines.** `hermit-start.ts` calls `load` only on always-on launches.
-- **`model` (optional)** runs a routine's skill in an isolated-context subagent at the named model (`opus`/`sonnet`/`haiku`) — returns only a one-line status, so skip it on routines whose value is the rich chat output. Ignored on `heartbeat-restart` (re-arm must run in the session). Validated by `scripts/validate-config.ts`.
-- **Converting a costly broad-skill routine into a scoped one?** See [Routine Authoring](../../docs/routine-authoring.md).
-
-### CronCreate fallback details
-
-- **Timezone.** CronCreate flow shifts each cron from `config.timezone` to machine-local (CronCreate only knows machine time) at minute granularity — half-hour/45-minute zones (Kolkata, Adelaide, Kathmandu) work. Null `config.timezone` passes through unchanged. Monitor mode needs no shift — `routines.ts due` evaluates directly in `config.timezone`.
-- **DST.** Recomputed every `load`; `heartbeat-restart`'s daily reload self-corrects within 24h. On the transition day, one fallback-mode fire may land at the wrong hour. Inexpressible-after-shift schedules pass through unchanged with a `WARN:` line.
-- **`durable: false`.** CronCreates die with the session; re-registered on every always-on launch.
-- **7-day auto-expiry depends on `heartbeat-restart`.** CC's recurring-task expiry is a hard 7-day cliff, reset only by re-creating. The diff planner re-registers any routine whose age crosses a conservative threshold even with unchanged config; `heartbeat-restart`'s daily `load` is what crosses it. Disable it in fallback mode and routine CronCreates expire after 7 days.
-- **`state/cron-registry.json`** is a derived mirror, never hand-edited — `--reset`, a missing/corrupt mirror, or a `.boot-id` mismatch all fall back to treating every enabled routine as needing registration.

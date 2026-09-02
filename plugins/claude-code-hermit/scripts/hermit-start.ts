@@ -1377,7 +1377,9 @@ async function main(): Promise<void> {
   const bootSkill = config.boot_skill || '/claude-code-hermit:session';
 
   const steps: string[] = [];
-  if (hbEnabled) steps.push('/claude-code-hermit:heartbeat start');
+  // `hermit-routines load` arms both monitors, so the heartbeat skill is a boot
+  // step only where no routine load will run.
+  if (hbEnabled && !hasRoutines) steps.push('/claude-code-hermit:heartbeat start');
   if (hasRoutines) steps.push('/claude-code-hermit:hermit-routines load');
   if (autoSession) steps.push(bootSkill);
 
@@ -1617,11 +1619,15 @@ async function main(): Promise<void> {
     config.watchdog?.scheduler_enabled,
   );
 
-  if (hbEnabled) {
-    const every = 'every' in hb ? hb.every : '30m';
-    console.log(`[hermit] Bootstrap: /claude-code-hermit:heartbeat start queued (every ${every})`);
-  } else {
+  if (!hbEnabled) {
     console.log('[hermit] Heartbeat: disabled');
+  } else {
+    const every = 'every' in hb ? hb.every : '30m';
+    if (!hasRoutines) {
+      console.log(`[hermit] Bootstrap: /claude-code-hermit:heartbeat start queued (every ${every})`);
+    } else {
+      console.log(`[hermit] Heartbeat: armed by the routine load (every ${every})`);
+    }
   }
   if (hasRoutines) {
     console.log('[hermit] Bootstrap: /claude-code-hermit:hermit-routines load queued');

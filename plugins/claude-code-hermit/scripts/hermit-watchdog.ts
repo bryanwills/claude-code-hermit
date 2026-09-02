@@ -1213,12 +1213,12 @@ function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: bool
   const doRoutines = routineStale && rearmDamperOpen(lastRearm.routines);
   if (!doHeartbeat && !doRoutines) return; // stale but still inside the per-monitor damper window
 
-  // Routine reload first, then heartbeat start after a settle gap, when both are due.
-  if (doRoutines) {
-    sendKeys(sessionName, '/claude-code-hermit:hermit-routines load');
-    if (doHeartbeat) Bun.sleepSync(2000);
-  }
-  if (doHeartbeat) sendKeys(sessionName, '/claude-code-hermit:heartbeat start');
+  // `load` arms both monitors, so a both-stale pass is one injection: sending
+  // `heartbeat start` behind it would load a second skill body only to be told the
+  // leg it re-registers is already FRESH. A heartbeat-only staleness still takes the
+  // cheaper single-leg skill.
+  if (doRoutines) sendKeys(sessionName, '/claude-code-hermit:hermit-routines load');
+  else if (doHeartbeat) sendKeys(sessionName, '/claude-code-hermit:heartbeat start');
 
   const stamp = utcStamp();
   if (doHeartbeat) lastRearm.heartbeat = stamp;
