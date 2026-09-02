@@ -20,7 +20,9 @@ Detect which plugin's scope this change belongs to, append a changelog line in t
 
 ### 0. Detect scope
 
-Run `git status --porcelain` and partition the changed paths:
+First, two Bash calls: `git rev-parse --show-toplevel`, then `cd` to the path it printed, typed as a literal. The cwd persists across Bash calls, so a `cd` left by a plugin test run (they end inside `plugins/<slug>/`) makes the path-scoped `git add` in step 5 fail with a pathspec error. Do not fold the two into one command with a `$(git …)` substitution: in a worktree session the checker rejects any command that names git inside a substitution.
+
+Then run `git status --porcelain` and partition the changed paths:
 
 - Paths matching `plugins/<X>/...` → group by `<X>` (the slug).
 - Paths outside `plugins/` (root README, `.github/`, `.claude/`, `.claude-plugin/marketplace.json`, root configs) → "root-scope" paths.
