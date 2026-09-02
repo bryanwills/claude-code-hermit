@@ -71,4 +71,12 @@ describe('session-start --task collision guard', () => {
     expect(skill).toContain('Autonomous drain');
     expect(skill).toContain('Never delete a queued task that was not started');
   });
+
+  // The queued plan's step 1 is the proposal re-verify gate (proposal-act
+  // writes it there); the drain only honors it if it adopts the plan in order.
+  test('autonomous drain adopts the queued plan in order, not just the task line', () => {
+    const autonomousDrain = skill.split('\n').find((line) => line.includes('Autonomous drain')) ?? '';
+    expect(autonomousDrain).toContain('`## Suggested Plan` in order');
+    expect(autonomousDrain).toContain('before any edit');
+  });
 });
