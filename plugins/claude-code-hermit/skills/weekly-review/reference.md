@@ -13,8 +13,8 @@ same call and carries its own filing instructions, which this paragraph does not
   `task`, `lessons`) for the staleness/contradiction cross-check below; open a full body only to confirm
   a specific contradiction that the row can't settle, or for a report whose frontmatter lacks the
   `next_start` key (legacy — read in full). Skip entirely if no topic pages exist.
-- `MEMORY.md` — operator's auto-memory index (at the project root's
-  `.claude/projects/.../memory/MEMORY.md` — read the path that exists) — to resolve wikilink targets.
+- `MEMORY.md` — operator's auto-memory index, in the directory `memory-dir` prints (its path is named in the
+  dispatch) — to resolve wikilink targets.
 
 If no `compiled/topic-*.md` files exist, return `topic_findings: []` and do nothing else.
 

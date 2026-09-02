@@ -12,7 +12,7 @@ import { globDir, readFrontmatter } from './lib/frontmatter';
 import { validate } from './validate-config';
 import { kStr } from './lib/format';
 import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } from './lib/cost-log';
-import { costLogPath, transcriptDirFor } from './lib/cc-compat';
+import { costLogPath, transcriptDirFor, memoryDirFor } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
 import { PRICING } from './lib/pricing';
 import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolvePersistedStyle, outputStyleFor } from './lib/voice';
@@ -20,8 +20,7 @@ import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
 import { readChannelToken } from './lib/channel-token';
 import { CHANNEL_PROBES, extractBotIdentity } from './lib/channel-probe';
-import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta, readCoreName } from './lib/plugin-siblings';
-import { resolveAuthMode, readTokenValue, tokenFilePath, defaultConfigDir, credentialsFilePath, parkedCredentialsFilePath, storedLoginUsable, CREDENTIALS_FILENAME, TOKEN_FILENAME } from './lib/setup-token';
+import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta } from './lib/plugin-siblings';
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
 import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
@@ -35,6 +34,7 @@ import { secondMostRecentMatch } from './lib/backup';
 import { findResident } from './lib/session-registry';
 import { bootMismatch, monitorFreshness } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
+import { probeDeclaredCredentials, shadowingCredentialNote } from './lib/credential-probe';
 
 type Json = any;
 
@@ -714,6 +714,78 @@ function checkPermissions(p: DoctorPaths = PATHS) {
     return { id: 'permissions', status: 'ok', detail: `${targets.length} sensitive path(s) not world-readable` };
   } catch (e: any) {
     return { id: 'permissions', status: 'fail', detail: `check failed: ${e.message}` };
+  }
+}
+
+// Seeded `ask` rules are inert under bypassPermissions: Claude Code consults no
+// permission rule that would prompt, so a hermit that hatched Standard and then
+// moved to bypass is running with no guard at all on the very commands the seed
+// named. `deny hardened` is the fix — the deny array is enforced in every mode.
+// Read-only: this check never rewrites the settings file.
+function checkPermissionRules(p: DoctorPaths = PATHS) {
+  const id = 'permission-rules';
+  try {
+    const read = readConfigOrCovered(id, p);
+    if ('covered' in read) return read.covered;
+    const mode = read.config.permission_mode;
+    if (mode !== 'bypassPermissions') {
+      return { id, status: 'ok', detail: `permission_mode ${mode ? `"${mode}"` : 'unset'} enforces ask rules` };
+    }
+
+    // Both project scopes, not the first that exists: Claude Code unions
+    // permissions.ask/deny across them, and hermit-start rewrites
+    // settings.local.json on every boot. A `hatch_target: committed` install
+    // therefore always has a local file while the seed sits in settings.json —
+    // reading only the first would report ok with every ask rule still inert.
+    const projectRoot = path.dirname(p.hermitDir);
+    const scopes = ['settings.local.json', 'settings.json']
+      .map(f => path.join(projectRoot, '.claude', f))
+      .filter(f => fs.existsSync(f))
+      .map(file => {
+        const settings = readJson(file);
+        const perms = (settings?.permissions ?? {}) as Json;
+        return {
+          file,
+          readable: settings !== null,
+          ask: Array.isArray(perms.ask) ? (perms.ask as string[]) : [],
+          deny: Array.isArray(perms.deny) ? (perms.deny as string[]) : [],
+        };
+      });
+    if (scopes.length === 0) return { id, status: 'ok', detail: 'no settings file to carry permission rules' };
+
+    // An unparseable scope makes the posture unknowable, and no other check reads
+    // these files — so say so rather than reporting the rules it could parse as ok.
+    const unreadable = scopes.filter(s => !s.readable).map(s => path.basename(s.file));
+    if (unreadable.length > 0) {
+      return { id, status: 'warn', detail: `cannot judge permission rules: ${unreadable.join(', ')} unparseable` };
+    }
+
+    const seeded = readJson(path.join(p.pluginRoot, 'state-templates', 'deny-patterns.json'));
+    const seededAsk: string[] = Array.isArray(seeded.ask) ? seeded.ask : [];
+    // A deny in any scope hard-blocks the rule everywhere, so the deny set is
+    // the union; the ask side is tracked per file so the fix names the one that
+    // actually carries the inert entries.
+    const denied = new Set(scopes.flatMap(s => s.deny));
+    const carrying = scopes
+      .map(s => ({ file: s.file, inert: seededAsk.filter(r => s.ask.includes(r) && !denied.has(r)) }))
+      .filter(s => s.inert.length > 0);
+
+    const names = scopes.map(s => path.basename(s.file)).join(' + ');
+    if (carrying.length === 0) {
+      return { id, status: 'ok', detail: `no seeded ask rules left inert in ${names}` };
+    }
+    const count = new Set(carrying.flatMap(s => s.inert)).size;
+    const fixes = carrying
+      .map(s => `bun ${p.pluginRoot}/scripts/apply-settings.ts ${s.file} deny hardened`)
+      .join('; ');
+    return {
+      id, status: 'warn',
+      detail: `${count} seeded ask rules never fire under bypassPermissions; run ${fixes}`,
+    };
+  } catch (e: any) {
+    // Not 'ok': nothing else checks these files for parseability, so a green row
+    // here would hide the very posture gap this check exists to surface.
+    return { id, status: 'warn', detail: `permission rules unreadable (${e?.message ?? 'error'})` };
   }
 }
 
@@ -1682,135 +1754,9 @@ function checkRawSize(p: DoctorPaths = PATHS) {
 // hermit-meta.json — so this check covers core plus every sibling plugin that
 // declares an expiry_probe.
 
-// Probe timeout: 5s default; env override exists solely so tests can exercise
-// the timeout path without waiting 5 real seconds.
-const CRED_PROBE_TIMEOUT_MS_ENV = Number(process.env.HERMIT_CRED_PROBE_TIMEOUT_MS);
-const CRED_PROBE_TIMEOUT_MS = CRED_PROBE_TIMEOUT_MS_ENV > 0 ? CRED_PROBE_TIMEOUT_MS_ENV : 5000;
-const CRED_WARN_WINDOW_MS = 7 * 24 * 3600000; // < 7d → warn
-const CRED_PROBE_CEILING = 8; // defensive cap on total probes run per doctor pass
-
-type ProbeResult =
-  | { kind: 'ok' }
-  | { kind: 'expired' }
-  | { kind: 'expires'; at: number }
-  | { kind: 'probe-failed'; reason: string };
-
-// Runs one hermit-meta.json expiry_probe. Protocol: bash -c <cmd>, one line of
-// stdout, exactly OK | EXPIRED | EXPIRES:<iso8601>. Anything else (multi-word
-// first line, unparseable date, timeout, nonzero exit) degrades to a warn-level
-// "probe failed" — never crashes the doctor check. CLAUDE_PLUGIN_ROOT is set to
-// the declaring plugin's dir (not core's) so a probe like
-// `bun ${CLAUDE_PLUGIN_ROOT}/scripts/check-token.ts` resolves against its own scripts.
-function runExpiryProbe(cmd: string, pluginDir: string): ProbeResult {
-  let out: string;
-  try {
-    out = execFileSync('bash', ['-c', cmd], {
-      encoding: 'utf8',
-      timeout: CRED_PROBE_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginDir },
-    });
-  } catch (e: any) {
-    return { kind: 'probe-failed', reason: e?.code === 'ETIMEDOUT' || e?.signal === 'SIGTERM' ? 'timeout' : 'exit error' };
-  }
-  const line = (out.split('\n')[0] || '').trim();
-  if (line === 'OK') return { kind: 'ok' };
-  if (line === 'EXPIRED') return { kind: 'expired' };
-  if (line.startsWith('EXPIRES:')) {
-    const at = Date.parse(line.slice('EXPIRES:'.length));
-    if (Number.isNaN(at)) return { kind: 'probe-failed', reason: 'malformed date' };
-    return { kind: 'expires', at };
-  }
-  return { kind: 'probe-failed', reason: 'malformed output' };
-}
-
-// Walks core's own and sibling plugins' hermit-meta.json credentials[] and runs
-// each declared expiry_probe, capped at CRED_PROBE_CEILING total probes (defensive
-// ceiling on wall-clock: worst case CRED_PROBE_CEILING × CRED_PROBE_TIMEOUT_MS).
-// Entries missing expiry_probe are skipped silently — declaring a credential
-// without a probe is allowed, there's just nothing to check.
-//
-// Core is probed first and deliberately: siblingPluginDirs() excludes core's own
-// dir in both cache layouts, so core's setup-token credential would otherwise be
-// invisible to the very check that exists to catch expiring credentials.
-function probeDeclaredCredentials(p: DoctorPaths): { okCount: number; badNotes: string[] } {
-  const { pluginRoot } = p;
-  const coreName = readCoreName(pluginRoot);
-
-  let okCount = 0;
-  const badNotes: string[] = [];
-  let probesRun = 0;
-  let skipped = 0;
-
-  for (const dir of [pluginRoot, ...siblingPluginDirs(pluginRoot, coreName)]) {
-    const meta = readHermitMeta(dir);
-    const credentials = Array.isArray(meta.credentials) ? meta.credentials : [];
-    const pluginLabel = (dir === pluginRoot ? coreName : readCoreName(dir)) || path.basename(dir);
-
-    for (const cred of credentials) {
-      if (!cred || typeof cred.expiry_probe !== 'string' || !cred.expiry_probe) continue;
-      // Past the ceiling, count remaining credentials as skipped rather than
-      // silently dropping them — an unchecked credential must not read as ok.
-      if (probesRun >= CRED_PROBE_CEILING) { skipped++; continue; }
-      probesRun++;
-      const who = `${pluginLabel}/${cred.name || 'credential'}`;
-      const fix = cred.reauth_skill ? ` — run ${cred.reauth_skill}` : '';
-      // Per-credential lead time: a credential whose renewal needs the operator
-      // to find a browser deserves its own window rather than the 7d default.
-      // Core's `claude-subscription` asks for 3, matching what Claude Code itself
-      // warns on.
-      const warnDays = Number(cred.warn_days);
-      const warnWindowMs = warnDays > 0 ? warnDays * 24 * 3600000 : CRED_WARN_WINDOW_MS;
-      const result = runExpiryProbe(cred.expiry_probe, dir);
-      if (result.kind === 'ok') {
-        okCount++;
-      } else if (result.kind === 'expired') {
-        badNotes.push(`${who} EXPIRED${fix}`);
-      } else if (result.kind === 'expires') {
-        const msLeft = result.at - Date.now();
-        if (msLeft <= 0) {
-          badNotes.push(`${who} EXPIRED${fix}`);
-        } else if (msLeft < warnWindowMs) {
-          badNotes.push(`${who} expires in ${(msLeft / (24 * 3600000)).toFixed(1)}d${fix}`);
-        } else {
-          okCount++;
-        }
-      } else {
-        badNotes.push(`${who} probe failed (${result.reason})`);
-      }
-    }
-  }
-  if (skipped > 0) badNotes.push(`${skipped} credential(s) not checked (probe ceiling ${CRED_PROBE_CEILING} reached)`);
-  return { okCount, badNotes };
-}
-
-// Two credentials on one volume, and which one is the hazard depends on the mode.
-//
-// In token mode a stored /login sitting next to the token is a live hazard, not an
-// expiry question: interactive Claude Code sessions prefer .credentials.json over
-// CLAUDE_CODE_OAUTH_TOKEN, so the hermit 401s when that stored access token lapses
-// (~8h) even though the year-long token is valid. Only a credential that still
-// carries a token shadows — a parked file or a /logout stub is inert.
-//
-// In login mode the leftover token file is the confusing artifact rather than a
-// hazard: nothing reads it, but its presence is why an operator thinks a renewal
-// "did nothing". External mode has no file this hermit owns, so it says nothing.
-function shadowingCredentialNote(config: Json = {}): string | null {
-  const configDir = defaultConfigDir();
-  const mode = resolveAuthMode(config, configDir);
-  if (mode === 'external') return null;
-  if (mode === 'login') {
-    if (readTokenValue(configDir) === null) return null;
-    return `stray ${TOKEN_FILENAME} is ignored in login mode — remove it (rm ${tokenFilePath(configDir)}) or set auth_mode: token`;
-  }
-  // absent, unreadable, or an inert stub (parked file, /logout) — nothing to shadow
-  if (!storedLoginUsable(configDir)) return null;
-  return `stored ${CREDENTIALS_FILENAME} will shadow the login token in interactive sessions — park it (mv ${credentialsFilePath(configDir)} ${parkedCredentialsFilePath(configDir)}) and restart`;
-}
-
 function checkCredentialExpiry(p: DoctorPaths = PATHS) {
   try {
-    const sib = probeDeclaredCredentials(p);
+    const sib = probeDeclaredCredentials(p.pluginRoot);
     // The mode is a config question, so the note needs the config. An unreadable one
     // resolves from the volume, which is the same answer the probe itself used.
     const shadow = shadowingCredentialNote(readConfigRaw(p.hermitDir) ?? {});
@@ -1943,7 +1889,7 @@ function checkMemorySize(p: DoctorPaths = PATHS) {
     // but keeps auto-memory under the main checkout's key, so MEMORY.md never
     // exists at the worktree key and this leg stays silently "ok". Only affects
     // hermits driven from a worktree; a normally-installed hermit is unaffected.
-    const memoryPath = path.join(transcriptDirFor(projectRoot), 'memory', 'MEMORY.md');
+    const memoryPath = path.join(memoryDirFor(projectRoot), 'MEMORY.md');
     // Auto-memory loads only MEMORY.md's first 200 lines or 25 KB, whichever
     // comes first, and drops the rest with no notice. The thresholds sit at 80%
     // of that cap so there is room to consolidate before entries start vanishing.
@@ -2442,6 +2388,7 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkDependencies(p),
     checkVersionCurrency(p),
     checkPermissions(p),
+    checkPermissionRules(p),
     checkDockerSecurity(p),
     checkArchival(p),
     checkAutoClose(p),
@@ -2653,6 +2600,7 @@ function writeReport(checks: Json[], escalation?: DoctorEscalation, p: DoctorPat
 }
 
 export {
+  checkPermissionRules,
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
   checkCost, checkProposals, checkDependencies, checkVersionCurrency, checkPermissions,
   checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,

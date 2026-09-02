@@ -628,6 +628,17 @@ function transcriptDirFor(projectRoot: string, configDir?: string): string {
   return path.join(configDir ?? defaultConfigDir(), 'projects', transcriptPathKey(projectRoot));
 }
 
+/**
+ * The auto-memory directory for a project root: `memory/` inside the project's
+ * transcript directory. One derivation, so callers never re-key the path by hand.
+ * @param {string} projectRoot absolute project root
+ * @param {string} [configDir] override for the config dir (tests); defaults to defaultConfigDir()
+ * @returns {string} absolute path to <configDir>/projects/<key>/memory
+ */
+function memoryDirFor(projectRoot: string, configDir?: string): string {
+  return path.join(transcriptDirFor(projectRoot, configDir), 'memory');
+}
+
 // ---------------------------------------------------------------------------
 // Cost-log path and record shape
 // ---------------------------------------------------------------------------
@@ -717,6 +728,7 @@ export {
   classifyToolResults,
   transcriptPathKey,
   transcriptDirFor,
+  memoryDirFor,
   // Cost-log
   costLogPath,
   // Capability sniff

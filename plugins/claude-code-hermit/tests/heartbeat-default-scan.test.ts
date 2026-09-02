@@ -34,8 +34,8 @@ const HEARTBEAT_DEFAULT =
   '- Review `proposals/` for any with `status: proposed` needing operator review.\n';
 
 // Template line 6 verbatim. Tests 1–18 reach OK against HEARTBEAT_DEFAULT (proposal
-// scan only); adding this bullet would force EVALUATE until doctor-report.json is
-// healthy, so the credential matrix uses HEARTBEAT_BOTH instead.
+// scan only); adding this bullet would force EVALUATE until every declared credential
+// probe is healthy, so the credential matrix uses HEARTBEAT_BOTH instead.
 const CREDENTIAL_BULLET =
   '- Read `state/doctor-report.json` → the `credential-expiry` check; if its status is warn or fail, tell the operator which credential needs re-auth and name the plugin\'s reauth skill from the report detail.';
 const HEARTBEAT_BOTH = HEARTBEAT_DEFAULT + CREDENTIAL_BULLET + '\n';
@@ -55,7 +55,6 @@ interface Fixture {
   noProposalsDir?: boolean;  // don't create proposals/ at all (ENOENT readdir path)
   proposalsAsFile?: boolean; // proposals is a regular file, not a dir (ENOTDIR readdir path)
   microCorrupt?: boolean;    // micro-proposals.json present but unparseable (#764)
-  doctorReport?: object | 'missing' | 'corrupt';
 }
 
 function build(fix: Fixture): string {
@@ -95,15 +94,6 @@ function build(fix: Fixture): string {
       JSON.stringify({ pending: ids.map(id => ({ id, status: 'pending', tier: 1 })) }),
     );
   }
-  if (fix.doctorReport === 'corrupt') {
-    fs.writeFileSync(hermit(dir, 'state', 'doctor-report.json'), '{"ts":');
-  } else if (fix.doctorReport && fix.doctorReport !== 'missing') {
-    const given = fix.doctorReport as { ts?: string; checks?: unknown[] };
-    const report = Array.isArray(given.checks)
-      ? { ts: given.ts ?? NOW, ...given }
-      : { ts: NOW, checks: [{ id: 'credential-expiry', detail: '', ...given }] };
-    fs.writeFileSync(hermit(dir, 'state', 'doctor-report.json'), JSON.stringify(report));
-  }
   return dir;
 }
 
@@ -117,11 +107,11 @@ function checklistKey(itemText: string): string {
   return `checklist:${text}`;
 }
 
-async function verdict(dir: string, peek = false, now = NOW): Promise<string> {
+async function verdict(dir: string, peek = false, now = NOW, pluginRoot?: string): Promise<string> {
   const r = await runScript('heartbeat.ts', {
     args: ['precheck', ...(peek ? ['--peek'] : []), '.claude-code-hermit'],
     cwd: dir,
-    env: { HERMIT_NOW: now },
+    env: { HERMIT_NOW: now, ...(pluginRoot ? { CLAUDE_PLUGIN_ROOT: pluginRoot } : {}) },
   });
   return r.stdout.trim();
 }
@@ -281,62 +271,77 @@ describe('default proposal-scan resolution', () => {
   });
 });
 
+// Scaffolds a fake plugin root whose hermit-meta.json declares one credential with
+// the given expiry_probe (omit for "no credential declared"). Nested under plugins/
+// so the sibling scan sees only this tree, never another test's tmpdir.
+function fakePluginRoot(probe?: string): string {
+  const root = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-credroot-')), 'plugins', 'claude-code-hermit',
+  );
+  const metaDir = path.join(root, '.claude-plugin');
+  fs.mkdirSync(metaDir, { recursive: true });
+  fs.writeFileSync(path.join(metaDir, 'plugin.json'), '{"name":"claude-code-hermit","version":"1.0.0"}');
+  fs.writeFileSync(path.join(metaDir, 'hermit-meta.json'), JSON.stringify(
+    probe === undefined
+      ? {}
+      : { credentials: [{ name: 'claude-subscription', expiry_probe: probe, warn_days: 3 }] },
+  ));
+  return root;
+}
+
+const inDays = (n: number) => new Date(Date.now() + n * 24 * 3600000).toISOString();
+
 describe('default credential-expiry resolution', () => {
   const both = { heartbeat: HEARTBEAT_BOTH };
   const credKey = checklistKey(CREDENTIAL_BULLET);
 
-  test('1. status ok, no alerts → OK', async () => {
-    const dir = build({ ...both, doctorReport: { status: 'ok' } });
-    expect(await verdict(dir)).toBe('OK');
+  test('1. probe healthy, no alerts → OK', async () => {
+    const dir = build(both);
+    expect(await verdict(dir, false, NOW, fakePluginRoot('echo OK'))).toBe('OK');
   });
 
-  test('2. status warn, no alerts → EVALUATE', async () => {
-    const dir = build({ ...both, doctorReport: { status: 'warn' } });
-    expect(await verdict(dir)).toBe('EVALUATE');
+  test('2. probe reports EXPIRED, no alerts → EVALUATE', async () => {
+    const dir = build(both);
+    expect(await verdict(dir, false, NOW, fakePluginRoot('echo EXPIRED'))).toBe('EVALUATE');
   });
 
-  test('3. status fail, entry suppressed with consecutive_clean: 0 → OK', async () => {
+  test('3. probe reports EXPIRED, entry suppressed with consecutive_clean: 0 → OK', async () => {
     const dir = build({
       ...both,
-      doctorReport: { status: 'fail' },
       alertState: { alerts: { [credKey]: { suppressed: true, consecutive_clean: 0, count: 6 } } },
     });
-    expect(await verdict(dir)).toBe('OK');
+    expect(await verdict(dir, false, NOW, fakePluginRoot('echo EXPIRED'))).toBe('OK');
   });
 
-  test('4. status ok, lingering checklist key → EVALUATE', async () => {
+  test('4. probe healthy, lingering checklist key → EVALUATE', async () => {
     expect(credKey).toBe('checklist:readstat');
     const dir = build({
       ...both,
-      doctorReport: { status: 'ok' },
       alertState: { alerts: { [credKey]: { suppressed: true, consecutive_clean: 0, count: 6 } } },
     });
-    expect(await verdict(dir)).toBe('EVALUATE');
+    expect(await verdict(dir, false, NOW, fakePluginRoot('echo OK'))).toBe('EVALUATE');
   });
 
-  test('5. report missing → EVALUATE', async () => {
-    const dir = build({ ...both, doctorReport: 'missing' });
-    expect(await verdict(dir)).toBe('EVALUATE');
+  test('5. no credential declared → EVALUATE', async () => {
+    const dir = build(both);
+    expect(await verdict(dir, false, NOW, fakePluginRoot())).toBe('EVALUATE');
   });
 
-  test('6. report unparseable → EVALUATE', async () => {
-    const dir = build({ ...both, doctorReport: 'corrupt' });
-    expect(await verdict(dir)).toBe('EVALUATE');
+  test('6. probe fails (nonzero exit) → EVALUATE', async () => {
+    const dir = build(both);
+    expect(await verdict(dir, false, NOW, fakePluginRoot('exit 3'))).toBe('EVALUATE');
   });
 
-  test('7. report present but no credential-expiry entry in checks → EVALUATE', async () => {
-    const dir = build({
-      ...both,
-      doctorReport: { checks: [{ id: 'runtime', status: 'ok', detail: 'ok' }] },
-    });
-    expect(await verdict(dir)).toBe('EVALUATE');
+  test('7. probe reports an expiry inside the warn window → EVALUATE', async () => {
+    const dir = build(both);
+    expect(await verdict(dir, false, NOW, fakePluginRoot(`echo EXPIRES:${inDays(1)}`))).toBe('EVALUATE');
   });
 
   test('8. --peek variant of case 1 → OK and alert-state.json unchanged', async () => {
-    const dir = build({ ...both, doctorReport: { status: 'ok' } });
+    const dir = build(both);
     const p = hermit(dir, 'state', 'alert-state.json');
     const before = fs.readFileSync(p, 'utf8');
-    expect(await verdict(dir, true)).toBe('OK');
+    expect(await verdict(dir, true, NOW, fakePluginRoot('echo OK'))).toBe('OK');
     expect(fs.readFileSync(p, 'utf8')).toBe(before);
   });
 });
