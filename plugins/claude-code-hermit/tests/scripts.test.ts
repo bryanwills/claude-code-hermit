@@ -4102,6 +4102,57 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
 });
 
 // -------------------------------------------------------
+// cost-tracker: scanTurnInTail window contract (in-process)
+// -------------------------------------------------------
+
+// `boundaryMissed` is what asks readLastTurnUsage for the wider re-read, so it needs a
+// window narrow enough to miss the boundary AND one wide enough to find it. Pinned at a
+// small tailBytes rather than end-to-end: any fixture small enough to write in a test is
+// under the 8MB retry cap, so the e2e path only ever exercises the found-it side.
+describe('cost-tracker scanTurnInTail', () => {
+  // Same query-string module instance rationale as the resolveTurnSource block above.
+  let scanTurnInTail: typeof import('../scripts/cost-tracker').scanTurnInTail;
+  let transcript: string;
+  let dir: string;
+
+  beforeAll(async () => {
+    const mod = (await import(
+      '../scripts/cost-tracker' + '?scripts-test-scanTurnInTail'
+    )) as typeof import('../scripts/cost-tracker');
+    ({ scanTurnInTail } = mod);
+
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-scan-turn-'));
+    transcript = path.join(dir, 'transcript.jsonl');
+    // One turn: a routine wake, then enough filler to push that wake outside a 4KB
+    // window while still fitting comfortably inside a 1MB one.
+    const filler = 'x'.repeat(500);
+    const lines = [JSON.stringify({ type: 'user', message: { content: '[hermit-routine:demo] fire' } })];
+    for (let i = 0; i < 40; i++) {
+      lines.push(assistantEntry({ inputTokens: 10, outputTokens: 5 }));
+      lines.push(JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: `t${i}`, type: 'tool_result', content: filler }] } }));
+    }
+    lines.push(assistantEntry({ inputTokens: 100, outputTokens: 50 }));
+    fs.writeFileSync(transcript, lines.join('\n') + '\n');
+  });
+
+  afterAll(() => {
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('cost-tracker: a window missing the turn boundary downgrades to other and flags the miss', () => {
+    const turn = scanTurnInTail(transcript, 4096);
+    expect(turn.source).toBe('other');
+    expect(turn.boundaryMissed).toBe(true);
+  });
+
+  test('cost-tracker: a window reaching the turn boundary keeps the resolved source', () => {
+    const turn = scanTurnInTail(transcript, 1024 * 1024);
+    expect(turn.source).toBe('routine:demo');
+    expect(turn.boundaryMissed).toBe(false);
+  });
+});
+
+// -------------------------------------------------------
 // cost-tracker: sumTurnUsage unit tests (in-process)
 // -------------------------------------------------------
 

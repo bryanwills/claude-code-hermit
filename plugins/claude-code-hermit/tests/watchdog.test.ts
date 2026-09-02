@@ -1391,7 +1391,7 @@ test('stamped env_auth=false beats a key in the watchdog process env', withHermi
 }));
 
 // Regression: a pending pane whose in-session heartbeat has ALSO gone stale must
-// NOT be nudged or restarted. Wedge detection (step 4) and the re-arm fallback
+// NOT be nudged or restarted. Wedge detection (step 4) and the monitor re-arm
 // (step 5) both send keystrokes into the pane; on a focused prompt that would
 // auto-answer the operator's pending decision. The stall detector notifies and
 // stops — never keystrokes.
@@ -1926,9 +1926,9 @@ test('idle arc + DEAD tmux + stale enqueue tail → no wedge event', withHermit(
 
 // The other half of the contract: reaching the alert tiers must NOT hand an idle arc back to
 // the wedge nudge or the pane-frozen restart. "Never resurrect a deliberately-stopped hermit"
-// still holds. The re-arm tiers (steps 5 and 6) DO run at idle — see section 11f — but stay
-// silent here: this fixture writes no monitor liveness, no monitor runtime and no
-// routine-metrics.jsonl, so neither tier has a stale signal to act on.
+// still holds. The re-arm tier (step 5) DOES run at idle — see section 11f — but stays
+// silent here: this fixture writes no monitor liveness and no monitor runtime,
+// so it has no stale signal to act on.
 test('idle arc + stale heartbeat + monitor down → no nudge, no restart, no keystrokes', withHermit(async (h) => {
   writeConfig(h);
   configureChannel(h);
@@ -2158,136 +2158,9 @@ test('escalation takes precedence — the throttle is never consulted', withHerm
 }));
 
 // -------------------------------------------------------
-// 10. Re-arm fallback: heartbeat-restart not fired in > 26h
-// -------------------------------------------------------
-
-test('heartbeat-restart missed > 26h → re-arm-fallback event', withHermit(async (h) => {
-  writeConfig(h);
-  // Recent .heartbeat (30 minutes ago) so wedge detection is skipped
-  touchAgo(state(h, '.heartbeat'), 1800);
-  // routine-metrics.jsonl: heartbeat-restart fired 28h ago
-  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
-    ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
-  }) + '\n');
-  writeFakeTmux(h, 0);
-  writeFakePgrep(h, 0);
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('re-arm-fallback');
-}));
-
-// The re-arm fallback used to send `/heartbeat start` unconditionally — the second
-// ungated heartbeat-start path (the routine anchor was the first). An automated
-// re-arm is not an operator override, so it honours heartbeat.enabled; the routine
-// reload stays unconditional because it is what keeps the scheduler itself alive.
-test('heartbeat-restart missed > 26h + heartbeat disabled → routines reloaded, heartbeat NOT started', withHermit(async (h) => {
-  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
-    watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' },
-    heartbeat: { enabled: false, every: '2h', active_hours: { start: '00:00', end: '23:59' }, stale_threshold: '2h' },
-  }, null, 2) + '\n');
-  touchAgo(state(h, '.heartbeat'), 1800);
-  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
-    ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
-  }) + '\n');
-  writeFakeTmux(h, 0);
-  writeFakePgrep(h, 0);
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  const calls = tmuxCalls(h);
-  expect(calls).toContain('/claude-code-hermit:hermit-routines load');
-  expect(calls).not.toContain('/claude-code-hermit:heartbeat start');
-}));
-
-// -------------------------------------------------------
-// 11. Re-arm suppressed: heartbeat-restart fired < 26h ago
-// -------------------------------------------------------
-
-test('heartbeat-restart fired < 26h → no re-arm', withHermit(async (h) => {
-  writeConfig(h);
-  touchAgo(state(h, '.heartbeat'), 1800);
-  // fired 2h ago — within the 26h window
-  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
-    ts: isoAgoSeconds(2), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
-  }) + '\n');
-  writeFakeTmux(h, 0);
-  writeFakePgrep(h, 0);
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  expect(fs.existsSync(eventsFile(h))).toBe(false);
-}));
-
-// -------------------------------------------------------
-// 11b. started event is not treated as fired by re-arm check
-// -------------------------------------------------------
-
-test('started event does not count as fired for re-arm check', withHermit(async (h) => {
-  writeConfig(h);
-  touchAgo(state(h, '.heartbeat'), 1800);
-  // started 1h ago (recent) + fired 28h ago. If started were counted as fired, re-arm
-  // would be suppressed. With correct behavior (only event==="fired" counts), re-arm fires.
-  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), [
-    JSON.stringify({ ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create' }),
-    JSON.stringify({ ts: isoAgoSeconds(1), routine_id: 'heartbeat-restart', event: 'started', delivery: 'cron-create' }),
-  ].join('\n') + '\n');
-  writeFakeTmux(h, 0);
-  writeFakePgrep(h, 0);
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('re-arm-fallback');
-}));
-
-// -------------------------------------------------------
-// 11d/e. Step-5 re-arm damper: the fired metric only advances at the routine's
-//        next real fire, so an undamped >26h check re-injects every tick. One
-//        attempt per 6h window, mirroring step 6.
-// -------------------------------------------------------
-
-// Shared setup: heartbeat-restart fired 28h ago (> 26h), .heartbeat fresh so wedge
-// detection stays out of the way, live session.
-const armStep5 = (h: Hermit) => {
-  writeConfig(h);
-  touchAgo(state(h, '.heartbeat'), 1800);
-  fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
-    ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
-  }) + '\n');
-  writeFakeTmux(h, 0);
-  writeFakePgrep(h, 0);
-};
-
-test('re-arm fallback within damper window → no second re-arm', withHermit(async (h) => {
-  armStep5(h);
-  // Fallback re-armed 1h ago: inside the 6h damper.
-  writeState(h, 'watchdog-state.json', { last_rearm_fallback: isoAgo(1) });
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  expect(events(h)).not.toContain('re-arm-fallback');
-}));
-
-test('re-arm fallback past damper window → fires and refreshes damper stamp', withHermit(async (h) => {
-  armStep5(h);
-  const stale = isoAgo(7); // last fallback 7h ago, past the 6h damper
-  writeState(h, 'watchdog-state.json', { last_rearm_fallback: stale });
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  expect(events(h)).toContain('re-arm-fallback');
-  const stamp = readWatchdogStateFile(h).last_rearm_fallback;
-  expect(typeof stamp).toBe('string');
-  expect(stamp).not.toBe(stale);
-}));
-
-test('re-arm fallback suppressed while paused', withHermit(async (h) => {
-  armStep5(h);
-  writePauseFlag(h);
-  const r = await watchdog(h, 'run');
-  expect(r.exitCode).toBe(0);
-  expect(events(h)).not.toContain('re-arm-fallback');
-}));
-
-// -------------------------------------------------------
-// 11c. Monitor-liveness re-arm (step 6): recover a Monitor that died mid-session,
-//      detected via its stale liveness file rather than step 5's fired-age heuristic.
-//      No .heartbeat file → wedge (step 4) skipped; no routine-metrics.jsonl →
-//      step-5 fired-age fallback skipped; so only step 6 is under test here.
+// 11c. Monitor-liveness re-arm (step 5): recover a Monitor that died mid-session,
+//      detected via its stale liveness file. No .heartbeat file → wedge (step 4)
+//      skipped, so only step 5 is under test here.
 // -------------------------------------------------------
 
 const tmuxCalls = (h: Hermit) => {
@@ -2486,7 +2359,7 @@ test('croncreate-fallback from a previous boot → re-arm', withHermit(async (h)
 // 11f. The same re-arms on an IDLE session arc.
 //
 // A hermit rests at 'idle' between arcs, so that is where a Monitor that died has to be
-// recovered from. Before this, the supervision-only cut exited above steps 5 and 6, and the
+// recovered from. Before this, the supervision-only cut exited above step 5, and the
 // only recovery left was the daily heartbeat-restart anchor — a CronCreate that dies with the
 // process it was registered in, i.e. in the same event that kills the monitors. A restart
 // catching the hermit at 'idle' therefore silenced heartbeat and routines until an operator
@@ -2524,31 +2397,40 @@ test('idle arc + stale routine-monitor liveness → monitor-rearm, hermit-routin
   expect(calls).not.toContain('heartbeat start');
 }));
 
-test('idle arc + heartbeat-restart missed > 26h → re-arm-fallback', withHermit(async (h) => {
-  writeConfig(h);
-  patchRuntime(h, { session_state: 'idle' });
+// The anchor's `fired` age is no longer a re-arm signal: it only advances at the
+// routine's next real fire, so a non-daily anchor (or a fire whose model turn stopped
+// before `finish`) looked "missed" for most of every cycle and re-injected both
+// bootstrap prompts every damper window. Live monitors are the only signal now.
+test('stale heartbeat-restart fired age + live monitors → no re-arm', withHermit(async (h) => {
+  writeRoutineMonitorConfig(h);
   fs.writeFileSync(state(h, 'routine-metrics.jsonl'), JSON.stringify({
     ts: isoAgoSeconds(28), routine_id: 'heartbeat-restart', event: 'fired', delivery: 'cron-create',
   }) + '\n');
+  touchAgo(state(h, '.heartbeat'), 1800); // fresh — wedge detection stays out of the way
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(9) });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgoSeconds(1 / 60) });
+  writeState(h, 'routine-monitor.runtime.json', { started_at: isoAgo(9), interval: 60, mode: 'monitor' });
+  writeState(h, 'routine-monitor-liveness.json', { last_peek_at: isoAgoSeconds(1 / 60) });
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 0);
   const r = await watchdog(h, 'run');
   expect(r.exitCode).toBe(0);
-  expect(events(h)).toContain('re-arm-fallback');
-  expect(tmuxCalls(h)).toContain('/claude-code-hermit:hermit-routines load');
+  expect(events(h)).toBe('');
+  expect(tmuxCalls(h)).not.toContain('hermit-routines load');
+  expect(tmuxCalls(h)).not.toContain('heartbeat start');
 }));
 
 // 11g. The re-arm tiers must not reuse a pre-restart aliveness verdict.
 //
-// Step 4's pane-frozen escalation falls through to steps 5 and 6 (doRestart returns, it
-// does not exit). Both guard on `sessionAlive`, which step 3c caches — so the verdict has
+// Step 4's pane-frozen escalation falls through to step 5 (doRestart returns, it
+// does not exit). It guards on `sessionAlive`, which step 3c caches — so the verdict has
 // to be refreshed after the restart killed the pane, or the tick injects slash commands
 // into a session that no longer exists and stamps the 6h per-monitor damper on a send
 // that never landed.
 test('pane-frozen restart → no monitor re-arm into the killed session', withHermit(async (h) => {
   writeConfig(h);
   touchAgo(state(h, '.heartbeat'), 6 * 3600);
-  // Stale heartbeat-monitor liveness: step 6 would fire if it trusted the cached verdict.
+  // Stale heartbeat-monitor liveness: step 5 would fire if it trusted the cached verdict.
   writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(9) });
   writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(8) });
 

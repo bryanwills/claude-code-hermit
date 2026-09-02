@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 const HELPER = path.join(import.meta.dir, 'helpers', 'collect-subagent-usage.ts');
@@ -267,6 +268,10 @@ describe('cost-tracker subagent with no resolvedModel', () => {
 
 // Regression for #572: a turn whose real triggering prompt falls outside the 512KB
 // tail window must not inherit a stale/echoed marker still inside that window.
+// Since the 8MB re-read landed, this fixture resolves on the retry: the real prompt is
+// found rather than assumed, and it is a plain operator message, so 'other' still holds.
+// The truncated-window path itself is pinned in scripts.test.ts's `cost-tracker
+// scanTurnInTail` block, which reaches it with a small tailBytes.
 describe('cost-tracker: oversized turn with boundary outside the tail window', () => {
   let dir: string;
   let logPath: string;
@@ -314,6 +319,132 @@ describe('cost-tracker: oversized turn with boundary outside the tail window', (
     const lines = fs.readFileSync(logPath, 'utf-8').trim().split('\n');
     const entry = JSON.parse(lines[0]);
     expect(entry.source).toBe('other');
+  });
+});
+
+// Regression: when the model re-invokes a skill whose instructions are already in
+// context, CC (2.1.202+) writes a companion user entry instead of a second copy of the
+// skill body. That companion carries STRING content, so the array-content discriminator
+// alone let it end the prompt walk and the turn billed to 'other'. Measured on live
+// transcripts: a weekly-review fire and a pipeline-digest co-fire, both mis-attributed
+// while their real ROUTINE_DUE prompt sat a few entries further back.
+describe('cost-tracker: a skill companion entry never ends the prompt walk', () => {
+  const { freshDir, cleanup } = freshDirFactory('hermit-cost-tracker-companion-');
+
+  // Verbatim companion shapes from live CC transcripts. `turnCompanion` is the field
+  // that separates every skill-scaffolding entry from a real prompt; `isMeta` alone does
+  // not, because routine wakes and channel envelopes are isMeta strings too.
+  const reinvocation = JSON.stringify({
+    type: 'user', isMeta: true, turnCompanion: true, sourceToolUseID: 'toolu_companion',
+    message: { content: '(Re-invocation of /claude-code-hermit:hermit-routines \u2014 the skill instructions were previously loaded; the arguments or dynamic output below are new.)' },
+  });
+  const alreadyLoaded = JSON.stringify({
+    type: 'user', isMeta: true, turnCompanion: true, sourceToolUseID: 'toolu_companion',
+    message: { content: 'Skill /claude-code-hermit:heartbeat is already loaded above; instructions unchanged. Arguments: run' },
+  });
+  const skillBody = JSON.stringify({
+    type: 'user', isMeta: true, turnCompanion: true,
+    message: { content: [{ type: 'text', text: 'Base directory for this skill: /plugins/claude-code-hermit/skills/hermit-routines' }] },
+  });
+
+  async function sourceFor(entries: string[]): Promise<string> {
+    const dir = freshDir();
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    const stateDir = path.join(dir, '.claude-code-hermit', 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+
+    const transcriptPath = path.join(dir, 'transcript.jsonl');
+    fs.writeFileSync(transcriptPath, [...entries, assistantEntry('claude-sonnet-4-6', 5000, 2000)].join('\n') + '\n');
+
+    const stdin = JSON.stringify({ session_id: 'test-session', transcript_path: transcriptPath });
+    await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+    const [firstLine] = fs.readFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), 'utf-8').trim().split('\n');
+    return JSON.parse(firstLine).source;
+  }
+
+  afterAll(cleanup);
+
+  test('cost-tracker: a re-invocation companion does not shadow the routine wake behind it', async () => {
+    const source = await sourceFor([
+      triggerPrompt('<task-notification> <summary>Monitor event: "routine-monitor"</summary> <event>ROUTINE_DUE [hermit-routine:demo]</event> </task-notification>'),
+      assistantEntry('claude-sonnet-4-6', 100, 20),
+      reinvocation,
+      skillBody,
+    ]);
+    expect(source).toBe('routine:demo');
+  });
+
+  test('cost-tracker: an already-loaded companion does not shadow the heartbeat wake behind it', async () => {
+    const source = await sourceFor([
+      triggerPrompt('HEARTBEAT_EVALUATE'),
+      assistantEntry('claude-sonnet-4-6', 100, 20),
+      alreadyLoaded,
+    ]);
+    expect(source).toBe('heartbeat');
+  });
+
+  // The other half of the contract: a routine wake IS an isMeta string entry, so the
+  // predicate must key on turnCompanion, never on isMeta alone.
+  test('cost-tracker: an isMeta prompt without a companion marker still classifies', async () => {
+    const source = await sourceFor([
+      JSON.stringify({ type: 'user', isMeta: true, message: { content: '[hermit-routine:demo] Run: bun scripts/routines.ts run demo' } }),
+    ]);
+    expect(source).toBe('routine:demo');
+  });
+});
+
+// A long routine run (evolve, weekly-scan, weekly-review) writes more transcript in one
+// turn than the 512KB tail holds, so its ROUTINE_DUE prompt sits outside the window: the
+// turn billed to 'other' and its token sum started mid-turn. One re-read at the cap
+// recovers both. Observed on fleet hermits, where those runs are the expensive ones.
+describe('cost-tracker: 600KB single-turn transcript (boundary outside the 512KB tail)', () => {
+  let dir: string;
+  let logPath: string;
+  const CALLS = 301; // 300 filler calls + the final billed entry
+
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cost-tracker-600kb-'));
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    logPath = path.join(dir, '.claude', 'cost-log.jsonl');
+    const stateDir = path.join(dir, '.claude-code-hermit', 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+
+    // The turn's only prompt, followed by >512KB of billed calls and their tool_results.
+    // No stale marker anywhere: the ONLY classifiable text is the wake at the very top,
+    // so a source of 'routine:demo' proves the walk reached it.
+    const transcriptLines: string[] = [
+      triggerPrompt('<task-notification> <summary>Monitor event: "routine-monitor"</summary> <event>ROUTINE_DUE [hermit-routine:demo]</event> </task-notification>'),
+    ];
+    const filler = 'x'.repeat(2000);
+    for (let i = 0; i < CALLS - 1; i++) {
+      transcriptLines.push(assistantEntry('claude-sonnet-4-6', 10, 5));
+      transcriptLines.push(JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: `t${i}`, type: 'tool_result', content: filler }] } }));
+    }
+    transcriptLines.push(assistantEntry('claude-sonnet-4-6', 5000, 2000));
+
+    const transcriptPath = path.join(dir, 'transcript.jsonl');
+    const content = transcriptLines.join('\n') + '\n';
+    expect(Buffer.byteLength(content, 'utf-8')).toBeGreaterThan(524288); // sanity: exceeds TAIL_BYTES
+    fs.writeFileSync(transcriptPath, content);
+
+    const stdin = JSON.stringify({ session_id: 'test-session', transcript_path: transcriptPath });
+    await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+  });
+
+  afterAll(() => {
+    if (dir) fs.rmSync(dir, { recursive: true });
+  });
+
+  test('cost-tracker: 600KB turn is attributed to its routine, not "other"', () => {
+    const [firstLine] = fs.readFileSync(logPath, 'utf-8').trim().split('\n');
+    expect(JSON.parse(firstLine).source).toBe('routine:demo');
+  });
+
+  test('cost-tracker: 600KB turn sums every call, not just the ones inside the 512KB tail', () => {
+    const [firstLine] = fs.readFileSync(logPath, 'utf-8').trim().split('\n');
+    expect(JSON.parse(firstLine).api_calls).toBe(CALLS);
   });
 });
 
