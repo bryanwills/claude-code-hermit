@@ -36,7 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   entryText,
-  isTurnTrigger,
+  isTurnBoundary,
   isCompactBoundary,
   toolUseNames,
   classifyToolResults,
@@ -68,8 +68,9 @@ function isProductiveTool(name: string): boolean {
 }
 
 // classifySource returns 'heartbeat' | 'routine:<id>' | 'routine:multi' |
-// 'channel:<kind>' | 'other'. A wake is a non-operator scheduler prompt:
-// heartbeat or routine. channel:* (inbound operator DM) and other are not wakes.
+// 'channel:<kind>' | 'peer' | 'other'. A wake is a non-operator scheduler prompt:
+// heartbeat or routine. channel:* (inbound operator DM), peer (another local
+// session's post) and other are not wakes.
 function isWakeSource(source: string): boolean {
   return source === 'heartbeat' || source.startsWith('routine:');
 }
@@ -173,7 +174,7 @@ function digestLines(lines: string[], cutoffMs: number): FileDigest {
 
     if (isCompactBoundary(entry)) { d.compactions++; continue; }
 
-    if (isTurnTrigger(entry)) {
+    if (isTurnBoundary(entry)) {
       flushTurn();
       turnOpen = true;
       turnIsWake = isWakeSource(classifySource(entryText(entry)));

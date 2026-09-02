@@ -34,6 +34,7 @@
 
 ### Fixed
 - The precheck resolves the default credential-expiry item against `state/doctor-report.json` itself, so a default-checklist hermit reaches `OK` with no model wake while the check is healthy (it previously forced an evaluation once per `clean_recheck_cooldown`).
+- The transcript digest now counts CronCreate, channel and peer turns as boundaries, so `wakes` and `productive_wakes` no longer describe only Monitor-delivered ticks.
 - Proposal acceptance in a later session now remains current: the falsification gate receives `## References`, and a proposal queued as a session task re-verifies its citations against the current tree before any edit, preventing already-shipped or stale work from being implemented.
 - The heartbeat monitor's registration command is rendered from one place, so a symlinked plugin path no longer makes every boot tear down and re-register the monitor as `command-drift`.
 - Cost attribution bills a turn to `heartbeat`, `routine:<id>`, `channel:<kind>` or `peer` only when a wake, envelope or peer post actually delivered that frame, not when a prompt merely mentions one. An operator prompt discussing the heartbeat, a compaction summary quoting a routine id or a `<channel>` envelope, and a subagent completion echoing its own output all bill to `other` now. The prose fallback that minted buckets like `routine:has` from ordinary sentences is gone, as is the `channel:...` bucket that quoted envelopes minted.
