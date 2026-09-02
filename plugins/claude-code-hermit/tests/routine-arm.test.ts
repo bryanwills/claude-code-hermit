@@ -303,39 +303,33 @@ test('commit without --heartbeat leaves the heartbeat runtime untouched', async 
   expect(fs.readFileSync(path.join(f.state, 'heartbeat-monitor.runtime.json'), 'utf8')).toBe(before);
 });
 
-// The monitor is registered between `begin` and `commit` and polls immediately, so its
-// first tick can predate the commit process. Stamping the commit's own clock would put
-// started_at after that tick, and every reader treats a tick older than started_at as a
-// prior registration's. `begin` fences the window with armed_at; `commit` adopts the tick.
-test('commit adopts the first tick after begin as started_at', async () => {
+// The commit's own clock, never a liveness tick. The outgoing monitor is still alive
+// while the arm is planned — `begin` only prints OLD_TASK, the skill stops it afterwards
+// — so a tick sitting in the file at commit time may be the outgoing monitor's, and no
+// timestamp can tell the two apart. The routine leg needs no attribution anyway: its
+// 60s poll fits inside the 120s startup grace, so a first tick that predates started_at
+// is superseded before the grace expires.
+test('commit stamps started_at from its own clock, not the liveness tick', async () => {
   const f = fixture();
   await arm(f.hermit, ['begin', '--reset']);
-  const armedAt = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8')).armed_at;
-  expect(typeof armedAt).toBe('string');
 
-  const tick = iso(Date.now() + 1000);
+  const tick = iso(now - 60_000);
   fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: tick }));
+  const before = Date.now();
   await arm(f.hermit, ['commit', 'task-new', '--reset']);
 
   const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8'));
-  expect(runtime.started_at).toBe(tick);
+  expect(runtime.started_at).not.toBe(tick);
+  expect(Date.parse(runtime.started_at)).toBeGreaterThanOrEqual(before);
   expect(runtime.mode).toBe('monitor');
 });
 
-// A tick older than the arm belongs to the outgoing monitor. Adopting it would date the
-// new registration before it existed; the commit's clock is the honest fallback.
-test('commit does not adopt a tick predating the arm', async () => {
+// `begin` leaves no provenance key behind for `commit` to read.
+test('begin writes no armed_at fence', async () => {
   const f = fixture();
   await arm(f.hermit, ['begin', '--reset']);
-  const armedAt = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8')).armed_at;
-
-  const stale = iso(now - 60_000);
-  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: stale }));
-  await arm(f.hermit, ['commit', 'task-new', '--reset']);
-
   const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8'));
-  expect(runtime.started_at).not.toBe(stale);
-  expect(Date.parse(runtime.started_at)).toBeGreaterThanOrEqual(Date.parse(armedAt));
+  expect(runtime.armed_at).toBeUndefined();
 });
 
 // --- `arm check`: the anchor's verdict without the anchor's ledger row ---

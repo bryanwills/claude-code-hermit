@@ -302,9 +302,8 @@ describe('heartbeat start-check', () => {
     expect(out.some(l => l.startsWith('OLD_TASK:'))).toBe(false);
   });
 
-  // The verb stamps `armed_at` into the runtime file, so an arm abandoned before
-  // start-commit leaves a record with no `started_at`. That is still "never
-  // registered", not a drifted interval.
+  // An arm abandoned before start-commit leaves no `started_at` behind. That is still
+  // "never registered", not a drifted interval.
   test('an abandoned arm still reads as a FIRST_START re-arm', async () => {
     const hermit = fixture();
     await run('start-check', [hermit]);
@@ -397,43 +396,51 @@ describe('heartbeat start-commit', () => {
   }, 20_000);
 
   // The whole point of the record: the two independent staleness readers must
-  // accept what start-commit wrote, or the watchdog re-arms a healthy monitor.
-  // A real monitor stamps whole seconds, so the tick is strictly earlier than a
-  // millisecond nowMs — seed that shape, not last_peek_at === HERMIT_NOW.
+  // accept what start-commit wrote, or the watchdog re-arms a healthy monitor (#909).
+  // The monitor ticks before the commit that records started_at, so a real tick is
+  // always strictly earlier — seed that shape, not last_peek_at === HERMIT_NOW. The
+  // predates-grace, not an adopted timestamp, is what keeps it healthy.
   test('the record it writes reads as healthy to start-check', async () => {
     const hermit = fixture();
-    const tick = '2026-07-10T11:59:55Z';
-    write(hermit, 'state/heartbeat-monitor.runtime.json', { armed_at: '2026-07-10T11:59:50Z' });
-    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: tick });
+    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: '2026-07-10T11:59:55Z' });
     await run('start-commit', [hermit, 'task-new']);
     const runtime = read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json'));
-    expect(runtime.started_at).toBe(tick);
+    expect(Date.parse(runtime.started_at)).toBe(NOW_MS);
     expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:05:00Z' })))
       .toEqual(['FRESH|interval=1800']);
   });
 
-  // heartbeat-monitor.sh stamps `date -u +%Y-%m-%dT%H:%M:%SZ`. Without flooring
-  // armed_at to whole seconds, a tick in the same second as the arm is rejected.
-  test('adopts a tick truncated to the same whole second as armed_at', async () => {
-    const hermit = fixture();
-    const tick = '2026-07-10T12:00:25Z';
-    write(hermit, 'state/heartbeat-monitor.runtime.json', { armed_at: '2026-07-10T12:00:25.409Z' });
-    write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: tick });
-    await run('start-commit', [hermit, 'task-new']);
-    expect(read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json')).started_at).toBe(tick);
-  });
-
-  // No armed_at → no provenance, so a leftover tick must not mark a spawn-blocked
-  // monitor fresh.
-  test('a leftover tick with no armed_at is not adopted', async () => {
+  // A tick predating started_at is tolerated for one interval (1800 + 60 = 1860s here),
+  // because nothing supersedes it until the monitor's next poll — then it is a fault.
+  test('a tick predating started_at expires with the interval grace', async () => {
     const hermit = fixture();
     write(hermit, 'state/heartbeat-liveness.json', { last_peek_at: '2026-07-10T11:50:00Z' });
     await run('start-commit', [hermit, 'task-new']);
     expect(Date.parse(read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json')).started_at))
       .toBe(NOW_MS);
-    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:05:00Z' }))[0])
+    // 12:30:00 — inside the 1860s grace.
+    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:30:00Z' })))
+      .toEqual(['FRESH|interval=1800']);
+    // 12:35:00 — past it.
+    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:35:00Z' }))[0])
       .toBe('REARM|liveness-predates-start');
   });
+
+  // The split that keeps the wider grace honest: no tick at all means the subprocess
+  // never spawned, and nothing will ever supersede it, so that case keeps the 120s
+  // spawn grace rather than riding out a whole interval.
+  test('no tick at all still faults on the 2m spawn grace', async () => {
+    const hermit = fixture();
+    await run('start-commit', [hermit, 'task-dead']);
+    expect(Date.parse(read(path.join(hermit, 'state', 'heartbeat-monitor.runtime.json')).started_at))
+      .toBe(NOW_MS);
+    // 12:01:00 — inside the spawn grace.
+    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:01:00Z' })))
+      .toEqual(['FRESH|interval=1800']);
+    // 12:05:00 — past it, and well short of the 1860s predates-grace.
+    expect(lines(await run('start-check', [hermit], { HERMIT_NOW: '2026-07-10T12:05:00Z' }))[0])
+      .toBe('REARM|liveness-absent');
+  }, 20_000);
 
   test('the record it writes reads as healthy to the routine anchor', async () => {
     const hermit = fixture({

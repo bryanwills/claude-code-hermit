@@ -264,15 +264,6 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   // first: `arm commit` waits for a liveness file to appear, and a leftover one
   // would let a subprocess that never spawned read as alive.
   try { fs.rmSync(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'), { force: true }); } catch {}
-  // Provenance for the commit: any tick at or after this instant belongs to the monitor
-  // about to be registered. Without it the commit stamps its own clock, which postdates
-  // the first tick whenever the subprocess ticks before the commit process starts —
-  // and every reader then treats that live tick as belonging to a prior registration.
-  // Spread so mode / task_id / command / boot_id survive until the commit rewrites them.
-  writeJson(path.join(ctx.hermitDir, 'state', 'routine-monitor.runtime.json'), {
-    ...(runtime ?? {}),
-    armed_at: new Date(ctx.nowMs).toISOString(),
-  });
   if (!fallback) {
     if (ctx.scheduled.length === 0) process.stdout.write('MONITOR_SKIP:zero-scheduled\n');
     else process.stdout.write(`MONITOR_CMD:${routineCommand(ctx)}\n`);
@@ -333,26 +324,12 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
   }
 
   const noMonitor = taskId === 'none';
-  const livenessFile = path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json');
-  // No `arm begin` stamp → no provenance, so a leftover tick is untrusted and the
-  // commit's own clock stands in, as it did before this fence existed.
-  const armedAt = readJson(path.join(ctx.hermitDir, 'state', 'routine-monitor.runtime.json'))?.armed_at;
-  const live = noMonitor || await waitForFirstTick(livenessFile);
-
-  // The monitor can tick before this process starts, so `ctx.nowMs` postdates the very
-  // tick the wait above just confirmed. Adopting the tick makes started_at a provenance
-  // fact. No flooring here (unlike the heartbeat leg): routines.ts due stamps a
-  // millisecond ISO, so there is no whole-second truncation to compensate for.
-  const peekAt = readJson(livenessFile)?.last_peek_at;
-  const peekMs = typeof peekAt === 'string' ? Date.parse(peekAt) : NaN;
-  const armedMs = typeof armedAt === 'string' ? Date.parse(armedAt) : NaN;
-  const adopt = live && !noMonitor && Number.isFinite(peekMs) && Number.isFinite(armedMs) && peekMs >= armedMs;
-
+  const live = noMonitor || await waitForFirstTick(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
   const runtime: Json = {
     description: 'routine-monitor',
     command: routineCommand(ctx),
     interval: MONITOR_INTERVAL_SECS,
-    started_at: adopt ? peekAt : new Date(ctx.nowMs).toISOString(),
+    started_at: new Date(ctx.nowMs).toISOString(),
     mode: live ? 'monitor' : 'croncreate-fallback',
     boot_id: ctx.bootId,
   };

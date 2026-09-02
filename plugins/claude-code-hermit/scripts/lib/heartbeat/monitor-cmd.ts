@@ -9,21 +9,22 @@
 
 import path from 'node:path';
 import { readJson } from '../cli';
-import { bootMismatch, monitorFreshness } from '../monitor-health';
+import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness, STARTUP_GRACE_SECS } from '../monitor-health';
 import { readBootId } from '../routines/registry';
 import { parseDuration } from '../time';
 
 type Json = any;
 
-/** Matches the routine monitor's grace (hermit-watchdog.ts MONITOR_STARTUP_GRACE_SECS). */
-export const STARTUP_GRACE_SECS = 120;
+// Re-exported so `routines.ts arm` keeps importing the grace from the heartbeat leg it
+// judges; the constant lives in monitor-health.ts because the predates-grace helper
+// there needs it, and this module already imports from that one.
+export { STARTUP_GRACE_SECS };
 
 export type LegHealth = { healthy: boolean; reason: string };
 
 /**
  * Has this registration confirmed a first tick? `stop` clears the runtime file to
- * `{}` and `start-check` stamps only `armed_at` before the monitor is registered,
- * so neither state is a registration. `heartbeatHealth` (`runtime-missing`) and
+ * `{}`, which is not a registration. `heartbeatHealth` (`runtime-missing`) and
  * `start-check` (`FIRST_START`) must agree on this.
  */
 export function hasStartedRegistration(runtime: Json): boolean {
@@ -74,6 +75,12 @@ export function heartbeatHealth(hermitDir: string, config: Json, nowMs: number):
     3 * interval,
     STARTUP_GRACE_SECS,
     nowMs,
+    // The live monitor's cadence, not config's: `every` can be edited without re-running
+    // `start`, and judging the running loop against the new value is the drift this
+    // grace exists to ride out.
+    heartbeatPredatesGraceSecs(
+      typeof runtime.interval === 'number' && runtime.interval > 0 ? runtime.interval : interval,
+    ),
   );
   // `unregistered` means no started_at to trust the tick against — fresh by the
   // predicate's lights, but not evidence THIS registration is alive.

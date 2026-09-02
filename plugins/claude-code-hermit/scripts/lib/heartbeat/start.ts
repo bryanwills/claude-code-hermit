@@ -59,13 +59,6 @@ export function prepareHeartbeatArm(hermitDir: string, config: Json): string[] {
   // — otherwise a monitor blocked by seccomp reads as alive, and the doctor flags
   // stale data from the prior session during the startup window.
   try { fs.rmSync(livenessPath(hermitDir), { force: true }); } catch {}
-  // Provenance for the commit: any tick at or after this instant belongs to the
-  // monitor about to be registered. Spread so task_id / interval / command / boot_id
-  // survive; a bare { armed_at } would drop them.
-  writeJson(runtimePath(hermitDir), {
-    ...runtime,
-    armed_at: new Date(resolveHermitNowMs()).toISOString(),
-  });
 
   const lines: string[] = [];
   // A task id from a previous boot is already dead — stopping it would hit a
@@ -94,27 +87,21 @@ export async function commitHeartbeatArm(
 ): Promise<string> {
   const interval = heartbeatInterval(config);
   const nowMs = resolveHermitNowMs();
-  // No prepare stamp → leftover ticks are untrusted.
-  const armedAt = readJson(runtimePath(hermitDir))?.armed_at;
   const live = await waitForFirstTick(livenessPath(hermitDir));
 
-  // heartbeat-monitor.sh stamps whole seconds (`date -u +%Y-%m-%dT%H:%M:%SZ`), so a
-  // tick in the same second as armed_at is strictly earlier than the millisecond
-  // stamp. Flooring armed_at is the compensation for that truncation, not a race
-  // window: without it, the commit writes started_at after its own first tick
-  // and every reader reports the live monitor dead until the next interval.
-  const peekAt = readJson(livenessPath(hermitDir))?.last_peek_at;
-  const peekMs = typeof peekAt === 'string' ? Date.parse(peekAt) : NaN;
-  const armedMs = typeof armedAt === 'string' ? Date.parse(armedAt) : NaN;
-  const adopt = live && Number.isFinite(peekMs) && Number.isFinite(armedMs)
-    && peekMs >= Math.floor(armedMs / 1000) * 1000;
-
+  // The monitor's first tick lands before this commit, so started_at postdates it and
+  // readers see it untrusted. That is what the predates-grace in monitorFreshness rides
+  // out — adopting the tick instead cannot work, because no timestamp proves which
+  // process wrote it, and the outgoing monitor is still alive when the arm is planned.
+  // Written even on the DEAD path below: without a started_at the readers report
+  // `unregistered`, which counts as fresh, and doctor would call a spawn-blocked
+  // monitor "warming up" forever.
   writeJson(runtimePath(hermitDir), {
     description: 'heartbeat-monitor',
     task_id: taskId,
     command: heartbeatCommand(hermitDir, config),
     interval,
-    started_at: adopt ? peekAt : new Date(nowMs).toISOString(),
+    started_at: new Date(nowMs).toISOString(),
     boot_id: readBootId(hermitDir),
   });
 
