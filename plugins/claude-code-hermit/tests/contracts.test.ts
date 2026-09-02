@@ -753,6 +753,18 @@ describe('routine model validation', () => {
     expect(out.errors).toEqual([]);
     expect(out.warnings.some((w: string) => w.includes('ignored'))).toBe(true);
   });
+
+  test('a daily heartbeat-restart schedule produces no warning', () => {
+    const out = runValidate({ routines: [HB_ROUTINE] });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings.some((w: string) => w.includes('not daily'))).toBe(false);
+  });
+
+  test('a non-daily heartbeat-restart schedule warns (not an error)', () => {
+    const out = runValidate({ routines: [{ ...HB_ROUTINE, schedule: '0 4 */3 * *' }] });
+    expect(out.errors).toEqual([]);
+    expect(out.warnings.some((w: string) => w.includes('heartbeat-restart') && w.includes('not daily'))).toBe(true);
+  });
 });
 
 // ============================================================

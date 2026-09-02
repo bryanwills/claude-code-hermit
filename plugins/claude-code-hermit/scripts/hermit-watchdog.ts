@@ -12,9 +12,7 @@
  *   3b. Stall-question detection — notify once when the pane is stuck on an
  *       un-redirectable dialog (native permission prompt, harness prompt)
  *   4. Wedge detection — nudge-then-escalate when heartbeat is stale
- *   5. Re-arm fallback — re-arm when heartbeat-restart routine missed its window
- *                        (damped + pause-gated, like step 6)
- *   6. Monitor re-arm  — re-arm a heartbeat/routine Monitor whose liveness file
+ *   5. Monitor re-arm  — re-arm a heartbeat/routine Monitor whose liveness file
  *                        went stale mid-session (any cause), damped per monitor
  *
  * Step 0e (state backup) sits with the 0a-0d family above the config gate: it is
@@ -56,7 +54,6 @@ import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
-import { lastRoutineFire } from './lib/routines/history';
 import { ensureLedgerFile } from './lib/append-jsonl';
 import { bootMismatch, monitorFreshness } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
@@ -65,7 +62,6 @@ type Json = any;
 
 const CONFIG_PATH = '.claude-code-hermit/config.json';
 const HEARTBEAT_FILE = path.join(STATE_DIR, '.heartbeat');
-const ROUTINE_METRICS_JSONL = path.join(STATE_DIR, 'routine-metrics.jsonl');
 const CLEAR_REQUESTED_JSON = path.join(STATE_DIR, 'clear-requested.json');
 // Paths the decision cascade reaches through World.paths (watchdog-state.json,
 // watchdog-events.jsonl, last-operator-action.json, compact-requested.json) are
@@ -537,15 +533,6 @@ function getOperatorLastActionAgeSecs(world: World = REAL_WORLD): number | null 
   const data = world.files.readJson(path.join(world.paths.stateDir, 'last-operator-action.json'));
   if (!data || !data.at) return null;
   return ageSecs(data.at, world);
-}
-
-/**
- * Seconds since the last 'fired' event for routineId in routine-metrics.jsonl.
- * Returns null when the file is absent or no matching event exists.
- */
-function getLastRoutineFiredAgeSecs(routineId: string): number | null {
-  const lastTs = lastRoutineFire(ROUTINE_METRICS_JSONL, routineId);
-  return lastTs ? ageSecs(lastTs) : null;
 }
 
 function checkProcessRunning(pattern: string): boolean {
@@ -1100,33 +1087,12 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
   if (shouldNotify) pushOperatorMessage(composeWedgeMessage(timezone));
 }
 
-/** Re-arm the routine monitor when the in-session anchor missed its window.
- *  The routine reload is unconditional — it is what keeps the Monitor subprocess
- *  and the anchor CronCreate from expiring. The heartbeat leg honours
- *  heartbeat.enabled: an automated re-arm is not an operator override, and
- *  re-arming a monitor the config switched off is what let a heartbeat-disabled
- *  hermit keep waking every day. An operator can still start it for one session
- *  by typing /claude-code-hermit:heartbeat start themselves. */
-function doRearm(sessionName: string, config: Json): void {
-  sendKeys(sessionName, '/claude-code-hermit:hermit-routines load');
-  // Absent means enabled (config-read's settled default) — skip only on explicit false.
-  const hbEnabled = config?.heartbeat?.enabled !== false;
-  if (hbEnabled) {
-    Bun.sleepSync(2000);
-    sendKeys(sessionName, '/claude-code-hermit:heartbeat start');
-  }
-  appendEvent('re-arm-fallback', `heartbeat-restart routine missed ~26h window${hbEnabled ? '' : ' (heartbeat disabled — routines only)'}`);
-  process.stderr.write(`[watchdog] re-armed "${sessionName}"\n`);
-}
-
-// --- Monitor-liveness re-arm (step 6) ---
+// --- Monitor-liveness re-arm (step 5) ---
 //
-// Step 5 above re-arms only when the heartbeat-restart routine's `fired` age crosses
-// ~26h — a model-issued metric that can be missing entirely, leaving that fallback
-// permanently inert. This step keys off ground truth instead: the per-poll liveness
-// files the monitors themselves stamp. Its staleness logic mirrors doctor's
-// checkHeartbeat/checkRoutineMonitor (trusted-tick vs started_at, startup grace, boot
-// gate) so a doctor 'fail' and a watchdog re-arm trip on the same signal.
+// Keys off ground truth: the per-poll liveness files the monitors themselves stamp.
+// Its staleness logic mirrors doctor's checkHeartbeat/checkRoutineMonitor (trusted-tick
+// vs started_at, startup grace, boot gate) so a doctor 'fail' and a watchdog re-arm
+// trip on the same signal.
 
 // A monitor writes liveness on its first loop iteration, so a real tick lands within
 // seconds of spawn; the grace only needs to cover spawn + first precheck.
@@ -1214,7 +1180,7 @@ function routineMonitorStale(config: Json): boolean {
 }
 
 /** Damper open when the given re-arm timestamp is older than MONITOR_REARM_DAMPER_SECS
- *  (or missing). Shared by the step-6 monitor re-arm and the step-5 routine fallback. */
+ *  (or missing). Used by the step-5 monitor re-arm, once per monitor. */
 export function rearmDamperOpen(lastStamp: unknown, world: World = REAL_WORLD): boolean {
   if (typeof lastStamp !== 'string') return true;
   const age = ageSecs(lastStamp, world);
@@ -1223,13 +1189,11 @@ export function rearmDamperOpen(lastStamp: unknown, world: World = REAL_WORLD): 
 
 /**
  * Re-arm a heartbeat/routine Monitor that died mid-session, detected via its stale
- * liveness file rather than step 5's fired-age heuristic. Injects only the dead
- * monitor's re-arm command (both are in record-operator-action's INJECTED_EXACT, so
- * neither stamps the operator-activity clock). `alreadyRearmed` short-circuits when
- * step 5 already fired doRearm this tick — that re-armed both, nothing left to do.
+ * liveness file. Injects only the dead monitor's re-arm command (both are in
+ * record-operator-action's INJECTED_EXACT, so neither stamps the operator-activity
+ * clock).
  */
-function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number, alreadyRearmed: boolean): void {
-  if (alreadyRearmed) return;
+function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number): void {
   if (isPaused(HERMIT_ROOT).paused) return;               // no injection while paused (mirrors doNudge)
   if (!sessionAlive) return;                              // dead session belongs to the doRestart path
   const opAge = getOperatorLastActionAgeSecs();
@@ -1249,8 +1213,7 @@ function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: bool
   const doRoutines = routineStale && rearmDamperOpen(lastRearm.routines);
   if (!doHeartbeat && !doRoutines) return; // stale but still inside the per-monitor damper window
 
-  // Routine reload first, then heartbeat start after a settle gap — same ordering
-  // doRearm uses when it sends both.
+  // Routine reload first, then heartbeat start after a settle gap, when both are due.
   if (doRoutines) {
     sendKeys(sessionName, '/claude-code-hermit:hermit-routines load');
     if (doHeartbeat) Bun.sleepSync(2000);
@@ -1659,7 +1622,16 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
 
   // Midnight-adjacency suppression: the post-close /clear wipes context for free
   // right after daily-auto-close archives — a compact just before it is wasted spend.
-  if (isNearDailyAutoClose(config, 2 * 3600, new Date(world.clock.nowMs()))) return stamped(world, 'compact', 'skip:midnight-adjacent');
+  // Scoped to hermits that actually run that clear — with post_close_clear off no free
+  // reset is coming at all, so there is nothing to wait for — and to a 10-minute window:
+  // a wider one blanks the compact tier across the whole evening operator slot. The size
+  // is borrowed from AUTO_CLOSE_LULL_MS, but this measures something else than the lull
+  // does there (time until the close, not operator silence after it), so the edge is
+  // pinned by its own callsite test at 11 minutes out, not by the lull constant.
+  if (config.post_close_clear === true
+      && isNearDailyAutoClose(config, AUTO_CLOSE_LULL_MS / 1000, new Date(world.clock.nowMs()))) {
+    return stamped(world, 'compact', 'skip:midnight-adjacent');
+  }
 
   // Token check: find the last cost-log entry for this hermit session
   const sessionId = resolveHygieneSessionId(runtime, world);
@@ -2105,7 +2077,7 @@ async function main(): Promise<void> {
   // Reuses step 3's verdict when it ran; falls back to a fresh check when it didn't —
   // 'idle' (the path this fix enables) and any other unlisted session_state. The fallback
   // is cached back, not discarded: on an idle arc step 3 never ran, so this is the tick's
-  // only has-session call and steps 5 and 6 below reuse it rather than spawning tmux again.
+  // only has-session call and step 5 below reuses it rather than spawning tmux again.
   sessionAlive = sessionAlive ?? tmuxSessionAlive(sessionName);
   if (sessionAlive) {
     // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
@@ -2132,7 +2104,7 @@ async function main(): Promise<void> {
 
   // A pane stalled on a pending prompt is not a wedge — the operator has just been
   // notified above (once per episode). Stop here: never fall through to the wedge
-  // nudge (step 4) or the re-arm fallback (step 5), both of which send keystrokes
+  // nudge (step 4) or the monitor re-arm (step 5), both of which send keystrokes
   // into the pane. On a focused permission / AskUserQuestion modal those keystrokes
   // (a command string then Enter) would confirm the highlighted default option, or
   // the pane-frozen restart path would kill the session outright — either way
@@ -2141,12 +2113,12 @@ async function main(): Promise<void> {
 
   // Supervision-only scope. An idle session arc suppresses step 4 — the wedge nudge and the
   // pane-frozen restart, the two tiers that act on a pane whose intent the watchdog cannot
-  // read. It does NOT suppress the re-arm injections in steps 5 and 6: a hermit rests at
+  // read. It does NOT suppress the re-arm injections in step 5: a hermit rests at
   // 'idle' between arcs, so that is exactly where a dead heartbeat/routine Monitor has to be
   // recovered from, and until this it was not — the only recovery was the daily
   // heartbeat-restart anchor, a CronCreate that dies with the process it was registered in,
-  // i.e. in the same event that kills the monitors. Those steps carry their own guards
-  // (pause, dead tmux, operator-recency, a per-monitor damper) and inject only slash commands
+  // i.e. in the same event that kills the monitors. That step carries its own guards
+  // (pause, dead tmux, operator-recency, a per-monitor damper) and injects only slash commands
   // whose skills are stop-then-start idempotent, so a re-arm cannot stack duplicate Monitors.
   //
   // "Never resurrect a deliberately-stopped hermit" still holds: hermit-stop stamps
@@ -2202,8 +2174,8 @@ async function main(): Promise<void> {
             writeWatchdogState(watchdogState);
             await doRestart(sessionName, 'pane-frozen', runtime, timezone);
             // doRestart kills the tmux session and spawns a detached replacement, so the
-            // verdict cached at step 3c is stale from here on. Steps 5 and 6 below send
-            // keys into this pane and guard on it: reusing the pre-restart `true` would
+            // verdict cached at step 3c is stale from here on. Step 5 below sends
+            // keys into this pane and guards on it: reusing the pre-restart `true` would
             // inject slash commands into a killed (or still-booting) session and burn the
             // per-monitor re-arm damper for 6h on a send that never landed.
             sessionAlive = tmuxSessionAlive(sessionName);
@@ -2228,32 +2200,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // 5. Re-arm fallback: fire if heartbeat-restart routine hasn't fired in ~26h.
-  // Damped like step 6 (one attempt per MONITOR_REARM_DAMPER_SECS): the fired
-  // metric only advances at the routine's next real fire, so an undamped check
-  // re-injects both bootstrap prompts every tick for up to ~24h. Never inject
-  // while paused (PROP-015), mirroring the other send paths.
-  let rearmedThisTick = false;
-  const rearmThresholdSecs = 26 * 3600;
-  const routineAge = getLastRoutineFiredAgeSecs('heartbeat-restart');
-  if (routineAge !== null && routineAge > rearmThresholdSecs && !isPaused(HERMIT_ROOT).paused) {
-    const opAge = getOperatorLastActionAgeSecs();
-    // Only re-arm when operator is silent (not in the middle of a conversation)
-    if (opAge === null || opAge >= operatorGraceSecs) {
-      const watchdogState = readWatchdogState();
-      if (rearmDamperOpen(watchdogState.last_rearm_fallback) && sessionAlive) {
-        doRearm(sessionName, config);
-        watchdogState.last_rearm_fallback = utcStamp();
-        writeWatchdogState(watchdogState);
-        rearmedThisTick = true;
-      }
-    }
-  }
-
-  // 6. Liveness-keyed monitor re-arm: recover a heartbeat/routine Monitor that died
-  // mid-session, detected via its stale liveness file rather than step 5's fired-age
-  // heuristic (which needs a model-issued 'fired' metric that can be missing).
-  maybeMonitorRearm(config, sessionName, sessionAlive, operatorGraceSecs, rearmedThisTick);
+  // 5. Liveness-keyed monitor re-arm: recover a heartbeat/routine Monitor that died
+  // mid-session, detected via its stale liveness file — ground truth the monitors
+  // stamp themselves, never a model-issued routine metric.
+  maybeMonitorRearm(config, sessionName, sessionAlive, operatorGraceSecs);
 }
 
 // --- Install / uninstall ---
