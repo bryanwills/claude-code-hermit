@@ -12,6 +12,7 @@
 - tmux always-on boot (`hermit-start`) registers the watchdog OS scheduler automatically. Opt out with `bin/hermit-watchdog uninstall`, which removes the timer and sets both flags off; `watchdog.scheduler_enabled: false` on its own only stops future boots from re-registering.
 
 ### Changed
+- `/proposal-act` writes hook and permission entries straight into the hatch-resolved `.claude/settings*.json` with an `Edit`/`Write` call, relying on the seeded native ask for approval instead of the bundled `update-config` skill.
 - Core declares one dynamic `claude-subscription` credential in place of `setup-token`; doctor's `credential-expiry` probe reads whichever credential the mode resolves to and warns 3 days out in both modes (was 14 for the token).
 - `/docker-setup` asks a neutral two-option auth question (claude.ai sign-in vs long-lived token) with no recommendation, citing Claude Code's authentication docs.
 - `hermit-docker login` switches a running token hermit to a claude.ai sign-in through the staged relay instead of refusing; a container with no session yet keeps the interactive REPL path.
