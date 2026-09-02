@@ -458,27 +458,13 @@ function extractUsage(entry: Json): { inputTokens: number; cacheWriteTokens: num
 }
 
 /**
- * A turn-opening user entry: a real triggering prompt, not a tool_result
- * carrier and not a mid-turn skill-expansion injection. The `isMeta !== true`
- * guard is load-bearing: CC emits `isMeta:true` user entries mid-turn (e.g.
- * "Base directory for this skill: …") which are NOT turn boundaries — treating
- * them as boundaries splits a turn before its later tool calls land.
- * @param {object} entry
- * @returns {boolean}
- */
-function isTurnTrigger(entry: Json): boolean {
-  return entry.type === 'user' && !isToolResult(entry) && entry.isMeta !== true;
-}
-
-/**
  * A structured mid-turn injection — CC writes skill bodies and similar scaffolding
  * as `isMeta:true` user entries. `isMeta` alone cannot discriminate these from real
  * prompts: routine wakes (`[hermit-routine:<id>] …`) and inbound channel envelopes
- * (`<channel source="…">`) are ALSO `isMeta:true`. That is why `isTurnTrigger` (whose
- * `isMeta` guard is correct for *usage* segmentation) must not be used to find the
- * prompt that classifies a turn's cost — it would skip the marker-bearing entries
- * themselves. Measured on live hermit transcripts: skipping the injections recovers 77
- * real routine/channel prompts that they would otherwise shadow.
+ * (`<channel source="…">`) are ALSO `isMeta:true`. That is why a bare `isMeta !== true`
+ * guard must not be used to find the prompt that opens a turn — it would skip the
+ * marker-bearing entries themselves. Measured on live hermit transcripts: skipping the
+ * injections recovers 77 real routine/channel prompts that they would otherwise shadow.
  *
  * TWO shapes, both scaffolding:
  *   - ARRAY content — the skill body itself, written on first invocation.
@@ -496,6 +482,22 @@ function isTurnTrigger(entry: Json): boolean {
 function isSkillInjection(entry: Json): boolean {
   if (entry.isMeta !== true) return false;
   return Array.isArray(entry.message?.content) || entry.turnCompanion === true;
+}
+
+/**
+ * A turn-opening user entry: the delivered prompt itself, not a tool_result carrier
+ * and not a structured mid-turn injection. This is the boundary both consumers of
+ * turn segmentation share — `turnPromptText` (which prompt classifies the turn) and
+ * transcript-digest's turn counter — so they cannot drift apart on what a turn is.
+ *
+ * NOTE for cost-tracker: its usage walks (`sumTurnUsage`, the agent-usage scan) use a
+ * deliberately looser boundary (`user && !isToolResult`). Tightening those would move
+ * billed amounts, not just labels — don't "align" them without re-measuring totals.
+ * @param {object} entry
+ * @returns {boolean}
+ */
+function isTurnBoundary(entry: Json): boolean {
+  return entry.type === 'user' && !isToolResult(entry) && !isSkillInjection(entry);
 }
 
 /**
@@ -520,7 +522,7 @@ function turnPromptText(lines: string[], billedIndex: number): { text: string; b
   for (let j = billedIndex - 1; j >= 0; j--) {
     try {
       const prev = JSON.parse(lines[j]);
-      if (prev.type === 'user' && !isToolResult(prev) && !isSkillInjection(prev)) {
+      if (isTurnBoundary(prev)) {
         return { text: entryText(prev), boundaryFound: true, index: j };
       }
     } catch {}
@@ -707,7 +709,7 @@ export {
   entryText,
   isToolResult,
   extractUsage,
-  isTurnTrigger,
+  isTurnBoundary,
   isSkillInjection,
   turnPromptText,
   isCompactBoundary,

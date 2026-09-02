@@ -32,6 +32,7 @@
 - The weekly review runs its topic-page check and channel-log consolidation in one runner dispatch instead of two; the runner files its own memory and topic-page candidates in its isolated context, and the main session only marks the reviewed rows, prunes, and logs one Findings line naming what was filed.
 
 ### Fixed
+- The transcript digest now counts CronCreate, channel and peer turns as boundaries, so `wakes` and `productive_wakes` no longer describe only Monitor-delivered ticks.
 - Proposal acceptance in a later session now remains current: the falsification gate receives `## References`, and a proposal queued as a session task re-verifies its citations against the current tree before any edit, preventing already-shipped or stale work from being implemented.
 - The heartbeat monitor's registration command is rendered from one place, so a symlinked plugin path no longer makes every boot tear down and re-register the monitor as `command-drift`.
 - Cost attribution bills a turn to `heartbeat`, `routine:<id>`, `channel:<kind>` or `peer` only when a wake, envelope or peer post actually delivered that frame, not when a prompt merely mentions one. An operator prompt discussing the heartbeat, a compaction summary quoting a routine id or a `<channel>` envelope, and a subagent completion echoing its own output all bill to `other` now. The prose fallback that minted buckets like `routine:has` from ordinary sentences is gone, as is the `channel:...` bucket that quoted envelopes minted.
