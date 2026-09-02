@@ -170,12 +170,25 @@ describe('confirm previews intent, before anything is written', () => {
     expect(out).toContain('Nothing has been written yet');
   });
 
-  test('defaults come from the shipped template, tagged as defaults', () => {
+  test('consequential defaults come from the shipped template, tagged as defaults', () => {
     const out = renderConfirm({ deployment: 'tmux' });
-    // sonnet is the template's model; a template change should change this test's
-    // fixture expectation only via the template itself.
-    expect(out).toMatch(/Model \/ Effort.*sonnet.*\(default\)/);
+    // "auto" is the template's permission_mode; a template change should change
+    // this test's fixture expectation only via the template itself.
     expect(out).toMatch(/Permission mode.*auto.*\(default\)/);
+    expect(out).toMatch(/Autonomy.*\(default\)/);
+    expect(out).toMatch(/Budget caps.*\(default\)/);
+  });
+
+  test('heartbeat is folded into the untagged Routines row', () => {
+    const out = renderConfirm({ deployment: 'tmux' });
+    expect(out).toMatch(/Routines.*heartbeat every 30m, 08:00–23:00/);
+  });
+
+  test('cosmetic defaults are trimmed from the preview', () => {
+    const out = renderConfirm({ deployment: 'tmux' });
+    expect(out).not.toContain('Model / Effort');
+    expect(out).not.toContain('Notifications');
+    expect(out).not.toContain('Artifact pages');
   });
 
   test('a skipped agent name renders no Name row and never "undefined"', () => {

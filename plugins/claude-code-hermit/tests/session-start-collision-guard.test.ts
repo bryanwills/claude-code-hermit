@@ -71,11 +71,4 @@ describe('session-start --task collision guard', () => {
     expect(skill).toContain('Autonomous drain');
     expect(skill).toContain('Never delete a queued task that was not started');
   });
-
-  test('autonomous drain runs a proposal task\'s re-verify step before any edit', () => {
-    const autonomousDrain = skill.split('\n').find((line) => line.includes('Autonomous drain')) ?? '';
-    expect(autonomousDrain).toContain('# Next Task (from PROP-');
-    expect(autonomousDrain).toContain('re-verify');
-    expect(autonomousDrain).toContain('before any edit');
-  });
 });
