@@ -50,7 +50,7 @@ produce a report.
    append must run in-session, and `load` ignores the override there regardless.
 
 3. **Return a verdict line, not transcript prose.** A dispatched routine's subagent "returns only
-   a one-line status" (`skills/hermit-routines/SKILL.md`, "Model-override substitution" and the `model` Notes entry) — design the
+   a one-line status" (`skills/hermit-routines/SKILL.md`, "Model-override substitution", and the `model` Notes entry in the sibling `reference.md`) — design the
    scoped skill's output around that from the start, rather than writing a skill that produces
    rich output and then truncating it.
 
@@ -175,7 +175,7 @@ where it didn't and said otherwise.
 
 - [Config Reference § Idle & Routines](config-reference.md#idle--routines) — the `routines` array
   schema, cron rules, and the `model` field this pattern relies on.
-- `skills/hermit-routines/SKILL.md` — the registration mechanism (`load`/`list`/`status`/`stop`)
+- `skills/hermit-routines/SKILL.md` — the registration mechanism (`load`/`run`; `list`/`status`/`stop` live in the sibling `reference.md`)
   and the model-override dispatch behavior cited above.
 - `scripts/heartbeat.ts precheck`, `scripts/reflect-precheck.ts` — the shipped precheck
   archetypes to copy the shape of, not reinvent.

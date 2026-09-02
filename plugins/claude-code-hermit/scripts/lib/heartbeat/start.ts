@@ -49,47 +49,64 @@ const runtimePath = (hermitDir: string) =>
 const livenessPath = (hermitDir: string) =>
   path.join(hermitDir, 'state', 'heartbeat-liveness.json');
 
-function cmdCheck(hermitDir: string, config: Json): void {
-  const interval = heartbeatInterval(config);
-  const nowMs = resolveHermitNowMs();
-  const health = heartbeatHealth(hermitDir, PLUGIN_ROOT, config, nowMs);
-  // `disabled` is healthy to the daily anchor, which must leave a deliberately-off
-  // heartbeat alone. Reaching `start` at all is an explicit act, so re-arm instead.
-  if (health.healthy && health.reason !== 'disabled') {
-    process.stdout.write(`FRESH|interval=${interval}\n`);
-    return;
-  }
-
+/**
+ * Side effects and plan lines for one heartbeat re-arm, without the leading
+ * `REARM|<reason>` line. Shared by `start-check` and by `routines.ts arm begin`,
+ * which prefixes each line with `HB_` — so the two callers can never drift into
+ * planning different registrations. `pluginRoot` is caller-supplied because the
+ * routine leg resolves its own from argv; `start-check` passes PLUGIN_ROOT.
+ */
+export function prepareHeartbeatArm(hermitDir: string, config: Json, pluginRoot: string): string[] {
   const runtime = readJson(runtimePath(hermitDir));
-  process.stdout.write(`REARM|${health.reason}\n`);
-  // Same reason as the routine leg: `start-commit` waits for a liveness file to
+  // Same reason as the routine leg: the commit waits for a liveness file to
   // appear, so the outgoing monitor's last tick has to go before the new one spawns
   // — otherwise a monitor blocked by seccomp reads as alive, and the doctor flags
   // stale data from the prior session during the startup window.
   try { fs.rmSync(livenessPath(hermitDir), { force: true }); } catch {}
-  // Provenance for start-commit: any tick at or after this instant belongs to the
+  // Provenance for the commit: any tick at or after this instant belongs to the
   // monitor about to be registered. Spread so task_id / interval / command / boot_id
   // survive; a bare { armed_at } would drop them.
-  writeJson(runtimePath(hermitDir), { ...runtime, armed_at: new Date(nowMs).toISOString() });
-  if (typeof runtime?.task_id === 'string' && runtime.task_id && !bootMismatch(runtime.boot_id, readBootId(hermitDir))) {
-    process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
+  writeJson(runtimePath(hermitDir), {
+    ...runtime,
+    armed_at: new Date(resolveHermitNowMs()).toISOString(),
+  });
+
+  const lines: string[] = [];
+  // A task id from a previous boot is already dead — stopping it would hit a
+  // stranger's task. Same boot rule the routine leg applies to its OLD_TASK.
+  if (typeof runtime?.task_id === 'string' && runtime.task_id
+    && !bootMismatch(runtime.boot_id, readBootId(hermitDir))) {
+    lines.push(`OLD_TASK:${runtime.task_id}`);
   }
-  if (!hasStartedRegistration(runtime)) process.stdout.write('FIRST_START:1\n');
-  process.stdout.write(`INTERVAL:${interval}\n`);
-  process.stdout.write(`CMD:${heartbeatCommand(PLUGIN_ROOT, hermitDir, config)}\n`);
+  if (!hasStartedRegistration(runtime)) lines.push('FIRST_START:1');
+  lines.push(`INTERVAL:${heartbeatInterval(config)}`);
+  lines.push(`CMD:${heartbeatCommand(pluginRoot, hermitDir, config)}`);
+  return lines;
 }
 
-async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promise<void> {
+/**
+ * Records a heartbeat Monitor registration: waits for the first liveness tick,
+ * writes `state/heartbeat-monitor.runtime.json`, appends the SHELL.md Monitoring
+ * line, and returns the result line for the caller to print. This module stays the
+ * sole writer of that runtime file — `arm commit --heartbeat` calls in here rather
+ * than writing it itself.
+ */
+export async function commitHeartbeatArm(
+  hermitDir: string,
+  config: Json,
+  pluginRoot: string,
+  taskId: string,
+): Promise<string> {
   const interval = heartbeatInterval(config);
   const nowMs = resolveHermitNowMs();
-  // No start-check stamp → leftover ticks are untrusted.
+  // No prepare stamp → leftover ticks are untrusted.
   const armedAt = readJson(runtimePath(hermitDir))?.armed_at;
   const live = await waitForFirstTick(livenessPath(hermitDir));
 
   // heartbeat-monitor.sh stamps whole seconds (`date -u +%Y-%m-%dT%H:%M:%SZ`), so a
   // tick in the same second as armed_at is strictly earlier than the millisecond
   // stamp. Flooring armed_at is the compensation for that truncation, not a race
-  // window: without it, start-commit writes started_at after its own first tick
+  // window: without it, the commit writes started_at after its own first tick
   // and every reader reports the live monitor dead until the next interval.
   const peekAt = readJson(livenessPath(hermitDir))?.last_peek_at;
   const peekMs = typeof peekAt === 'string' ? Date.parse(peekAt) : NaN;
@@ -100,23 +117,38 @@ async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promi
   writeJson(runtimePath(hermitDir), {
     description: 'heartbeat-monitor',
     task_id: taskId,
-    command: heartbeatCommand(PLUGIN_ROOT, hermitDir, config),
+    command: heartbeatCommand(pluginRoot, hermitDir, config),
     interval,
     started_at: adopt ? peekAt : new Date(nowMs).toISOString(),
     boot_id: readBootId(hermitDir),
   });
 
-  if (!live) {
-    process.stdout.write('DEAD|liveness-absent\n');
-    return;
-  }
+  if (!live) return 'DEAD|liveness-absent';
   const hhmm = currentHHMMOrUTC(config?.timezone ?? 'UTC', new Date(nowMs));
   appendShellLine(
     path.join(hermitDir, 'sessions'),
     'Monitoring',
     `[${hhmm}] Heartbeat: monitor registered (interval: ${config?.heartbeat?.every ?? `${interval}s`}) — liveness confirmed by /hermit-doctor heartbeat check`,
   );
-  process.stdout.write(`OK|registered|interval=${interval}\n`);
+  return `OK|registered|interval=${interval}`;
+}
+
+function cmdCheck(hermitDir: string, config: Json): void {
+  const health = heartbeatHealth(hermitDir, PLUGIN_ROOT, config, resolveHermitNowMs());
+  // `disabled` is healthy to the daily anchor, which must leave a deliberately-off
+  // heartbeat alone. Reaching `start` at all is an explicit act, so re-arm instead.
+  if (health.healthy && health.reason !== 'disabled') {
+    process.stdout.write(`FRESH|interval=${heartbeatInterval(config)}\n`);
+    return;
+  }
+  process.stdout.write(`REARM|${health.reason}\n`);
+  for (const line of prepareHeartbeatArm(hermitDir, config, PLUGIN_ROOT)) {
+    process.stdout.write(`${line}\n`);
+  }
+}
+
+async function cmdCommit(hermitDir: string, config: Json, taskId: string): Promise<void> {
+  process.stdout.write(`${await commitHeartbeatArm(hermitDir, config, PLUGIN_ROOT, taskId)}\n`);
 }
 
 export async function run(verb: string, args: string[]): Promise<void> {

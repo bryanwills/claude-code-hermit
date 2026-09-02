@@ -98,9 +98,26 @@ conversation. Stop.
 
 **Reconcile routines after a successful always-on upgrade.** If the report represents a completed
 upgrade (not blocked or already up to date) and the refreshed `config.json` has `always_on: true`,
-invoke `/claude-code-hermit:hermit-routines load`. This makes exact-match routine migrations active
-immediately in CronCreate fallback mode; Monitor mode is an idempotent re-arm. If reconciliation
-fails, append that failure and the manual `hermit-routines load` next action to the report.
+ask what actually needs re-arming before loading anything:
+
+```
+bun <plugin_root>/scripts/routines.ts arm check .claude-code-hermit <plugin_root>
+```
+
+`arm check` is the read-only twin of the daily anchor's verdict — it stamps no fire, so asking
+costs one Bash call instead of a 23KB skill body. Route on its single line:
+
+- `HEALTHY|…` — both legs are registered and current. Log that line; invoke nothing.
+- `ARM|<legs>|…` including `routines` — invoke `/claude-code-hermit:hermit-routines load`, which
+  makes exact-match routine migrations active immediately in CronCreate fallback mode (a migration
+  that changed routines shows up here as `fallback-drift`) and re-arms the heartbeat leg with it.
+- `ARM|heartbeat|…` alone — invoke `/claude-code-hermit:heartbeat start`.
+- `SKIP|paused` — the hermit is paused and fires nothing until resumed. Log the line; invoke nothing.
+- `ARM|…|check-error:<reason>` — state was unreadable, so nothing is safe to re-arm. Append that
+  line and the manual `hermit-routines load` next action to the report.
+
+If reconciliation fails, append that failure and the manual `hermit-routines load` next action to
+the report.
 
 **Deliver the result.** Compose a condensed one-line message such as `"Hermit upgraded: vOLD → vNEW.
 N settings added, M templates refreshed."` Omit segments where nothing changed. **Append the
