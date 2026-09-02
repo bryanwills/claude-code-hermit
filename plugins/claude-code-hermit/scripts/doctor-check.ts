@@ -32,7 +32,7 @@ import { readJson } from './lib/cli';
 import { compileCron } from './lib/cron-match';
 import { secondMostRecentMatch } from './lib/backup';
 import { findResident } from './lib/session-registry';
-import { bootMismatch, monitorFreshness } from './lib/monitor-health';
+import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness, STARTUP_GRACE_SECS } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
 import { probeDeclaredCredentials, shadowingCredentialNote } from './lib/credential-probe';
 
@@ -1433,14 +1433,11 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     // sleep), so a real tick lands within seconds of spawn. The absent-liveness
     // grace only needs to cover spawn + first precheck — not a full poll interval
     // — otherwise a spawn-blocked monitor reads "warming up" for hours.
-    const STARTUP_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
 
-    // The registration's first confirmed tick (`start-commit` adopts it), or the
-    // commit time when no tick could be attributed to this arm. Used both to reject
-    // a liveness tick left by a prior session's monitor (a tick older than
-    // started_at is stale, not proof the current monitor is alive) and to bound the
-    // startup grace below.
+    // When `start-commit` recorded the registration. Used both to reject a liveness
+    // tick left by a prior session's monitor (a tick older than started_at is stale,
+    // not proof the current monitor is alive) and to bound the graces below.
     let startedAt: number | null = null;
     let monRt: Json = null;
     try {
@@ -1469,12 +1466,23 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
       }
     } catch { /* missing or unparseable */ }
 
+    // A tick that merely predates started_at is a different case from no tick at all:
+    // the monitor did spawn, and nothing supersedes that tick until its next poll. Ride
+    // that out off the registered cadence, not config's — `every` can be edited without
+    // re-running `start`, leaving the live loop on the interval it was started with.
+    const predatesGraceSecs = heartbeatPredatesGraceSecs(
+      typeof monRt?.interval === 'number' && monRt.interval > 0
+        ? monRt.interval
+        : parseDuration(hbCfg.every, 30 * 60000) / 1000,
+    );
+
     const health = monitorFreshness(
       startedAt === null ? null : new Date(startedAt).toISOString(),
       lastPeekAt === null ? null : new Date(lastPeekAt).toISOString(),
       threshold / 1000,
-      STARTUP_GRACE_MS / 1000,
+      STARTUP_GRACE_SECS,
       now,
+      predatesGraceSecs,
     );
 
     if (health.reason === 'fresh' || health.reason === 'stale') {

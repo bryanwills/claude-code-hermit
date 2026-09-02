@@ -2247,12 +2247,41 @@ test('stale liveness but operator active < grace → no re-arm', withHermit(asyn
   expect(events(h)).not.toContain('monitor-rearm');
 }));
 
+// The split that keeps the predates-grace honest: a subprocess that never wrote a tick
+// is not waiting on a poll, so it keeps the 2-min spawn grace rather than riding out a
+// whole interval. 10 min in, well short of the 121-min predates-grace, it re-arms.
+test('no tick at all → re-arm on the 2m spawn grace', withHermit(async (h) => {
+  writeConfig(h);
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(10 / 60) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('monitor-rearm');
+}));
+
+// `every` can be edited without re-running `start`, leaving the live loop on the cadence
+// it was registered with. The grace follows the registration, so a 30m monitor faults at
+// 31 min even while config says 2h — which would otherwise hold it fresh for 121 min.
+test('predates-grace follows runtime.interval, not config.every', withHermit(async (h) => {
+  writeConfig(h); // every: 2h
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(45 / 60), interval: 1800 });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(55 / 60) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const r = await watchdog(h, 'run');
+  expect(r.exitCode).toBe(0);
+  expect(events(h)).toContain('monitor-rearm');
+}));
+
 test('liveness tick predating started_at + past startup grace → re-arm', withHermit(async (h) => {
   writeConfig(h);
-  // Monitor registered 10 min ago (past the 2-min grace); only tick is 20 min ago,
-  // which predates started_at → untrusted → falls to the startup-grace branch.
-  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(10 / 60) });
-  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(20 / 60) });
+  // Monitor registered 130 min ago; only tick is 140 min ago, which predates started_at
+  // → untrusted → falls to the grace branch. A predating tick rides out one poll
+  // interval (writeConfig's default every=2h, so 7260s = 121 min), not the 2-min spawn
+  // grace, so the registration has to be older than that before it counts as stale.
+  writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(130 / 60) });
+  writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(140 / 60) });
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 1);
   const r = await watchdog(h, 'run');

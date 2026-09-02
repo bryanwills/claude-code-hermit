@@ -55,7 +55,7 @@ import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
 import { ensureLedgerFile } from './lib/append-jsonl';
-import { bootMismatch, monitorFreshness } from './lib/monitor-health';
+import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
 
 type Json = any;
@@ -1095,7 +1095,9 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
 // trip on the same signal.
 
 // A monitor writes liveness on its first loop iteration, so a real tick lands within
-// seconds of spawn; the grace only needs to cover spawn + first precheck.
+// seconds of spawn; the grace only needs to cover spawn + first precheck. This is the
+// absent-liveness grace only — a tick that merely predates started_at gets the wider
+// heartbeatPredatesGraceSecs, which has to outlast one poll interval.
 const MONITOR_STARTUP_GRACE_SECS = 120;
 // Grace before a boot mismatch is trusted, measured from the `.boot-id` marker's mtime.
 // hermit-start stamps that marker itself, but the monitors are re-registered by the
@@ -1124,7 +1126,12 @@ export const WEDGE_FLOOR_DEFAULT = '4h';
  * (runtimeData null, so started_at unknown) returns false — re-registering that is
  * session-start's job, not the watchdog's.
  */
-function monitorLivenessStale(livenessFile: string, runtimeData: Json, thresholdSecs: number): boolean {
+function monitorLivenessStale(
+  livenessFile: string,
+  runtimeData: Json,
+  thresholdSecs: number,
+  predatesGraceSecs: number = MONITOR_STARTUP_GRACE_SECS,
+): boolean {
   const startedAt: string | null =
     runtimeData && typeof runtimeData.started_at === 'string' ? runtimeData.started_at : null;
   const liveness = readJson(path.join(STATE_DIR, livenessFile));
@@ -1136,6 +1143,7 @@ function monitorLivenessStale(livenessFile: string, runtimeData: Json, threshold
     thresholdSecs,
     MONITOR_STARTUP_GRACE_SECS,
     Date.now(),
+    predatesGraceSecs,
   ).fresh;
 }
 
@@ -1160,7 +1168,17 @@ function heartbeatMonitorStale(config: Json): boolean {
   const thresholdSecs = 3 * parseDuration(hbCfg.every ?? '30m');
   const monRt = readJson(path.join(STATE_DIR, 'heartbeat-monitor.runtime.json'));
   if (monitorBootStale(monRt)) return true;
-  return monitorLivenessStale('heartbeat-liveness.json', monRt, thresholdSecs);
+  // Grace off the registered cadence, not config's: `every` can be edited without a
+  // re-arm, and the running loop still polls at the interval it was started with.
+  const interval = typeof monRt?.interval === 'number' && monRt.interval > 0
+    ? monRt.interval
+    : parseDuration(hbCfg.every ?? '30m');
+  return monitorLivenessStale(
+    'heartbeat-liveness.json',
+    monRt,
+    thresholdSecs,
+    heartbeatPredatesGraceSecs(interval),
+  );
 }
 
 /** Routine monitor stale? Gated + thresholded exactly as doctor's checkRoutineMonitor. */

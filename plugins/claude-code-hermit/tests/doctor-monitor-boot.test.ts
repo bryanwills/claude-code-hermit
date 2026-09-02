@@ -142,3 +142,54 @@ describe('doctor monitor boot gate', () => {
     expect(current.detail).toContain('croncreate-fallback');
   });
 });
+
+// The heartbeat monitor writes its first tick before `start-commit` records started_at,
+// so that tick reads untrusted until the next poll — a whole interval away. The two
+// untrusted cases get different graces, because they mean different things.
+describe('doctor heartbeat startup graces', () => {
+  const minsAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+  function seed(p: ReturnType<typeof fixture>, startedMinsAgo: number, tickMinsAgo: number | null, interval = 1800) {
+    writeJson(path.join(p.stateDir, 'heartbeat-monitor.runtime.json'), {
+      description: 'heartbeat-monitor', started_at: minsAgo(startedMinsAgo), interval,
+    });
+    const liveness = path.join(p.stateDir, 'heartbeat-liveness.json');
+    if (tickMinsAgo === null) fs.rmSync(liveness, { force: true });
+    else writeJson(liveness, { last_peek_at: minsAgo(tickMinsAgo) });
+  }
+
+  // interval 1800 → predates-grace 1860s (31 min).
+  test('a tick predating started_at is tolerated for one interval', () => {
+    const p = fixture();
+    seed(p, 10, 20);
+    expect(checkHeartbeat(p).status).toBe('ok');
+  });
+
+  test('and faults once that interval is up', () => {
+    const p = fixture();
+    seed(p, 35, 40);
+    const r = checkHeartbeat(p);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('belongs to another registration');
+  });
+
+  // The split: no tick at all is a subprocess that never spawned, and nothing will
+  // supersede it, so it keeps the 2-minute spawn grace instead of the interval.
+  test('no tick at all still faults on the 2m spawn grace', () => {
+    const p = fixture();
+    seed(p, 5, null);
+    const r = checkHeartbeat(p);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('spawn likely blocked');
+  });
+
+  // `every` can be edited without re-running `start`; the live loop keeps the cadence it
+  // was registered with, so the grace has to follow the registration. Config says 30m
+  // here (grace 31 min), the registration says 2h (grace 121 min) — at 60 min the
+  // registration wins and it is still warming up.
+  test('the grace follows runtime.interval, not config.every', () => {
+    const p = fixture();
+    seed(p, 60, 70, 7200);
+    expect(checkHeartbeat(p).status).toBe('ok');
+  });
+});

@@ -13,12 +13,32 @@ export type MonitorFreshness = {
   reason: MonitorFreshnessReason;
 };
 
+/** The spawn grace both monitor legs allow before an absent first tick is a fault. */
+export const STARTUP_GRACE_SECS = 120;
+
+/**
+ * How long a tick that predates `started_at` stays tolerable, for a leg whose poll
+ * interval outruns the spawn grace. A monitor writes its first tick before the commit
+ * that records `started_at`, so that tick reads untrusted until the next one lands —
+ * which for the heartbeat leg is a whole interval away. Waiting it out is what keeps a
+ * healthy monitor from reading dead (#909); the spawn grace is untouched, so a monitor
+ * that never ticked at all is still caught in 2 minutes.
+ */
+export function heartbeatPredatesGraceSecs(intervalSecs: number): number {
+  return Math.max(STARTUP_GRACE_SECS, intervalSecs + 60);
+}
+
 /**
  * Evaluate monitor liveness from caller-supplied values only.
  *
  * A tick is trusted when it belongs to the current registration. A registered
  * monitor without a trusted tick remains fresh only during its startup grace.
  * An unregistered monitor is not stale: registration belongs to the arming flow.
+ *
+ * The two untrusted cases get separate graces because they mean different things: no
+ * tick at all is a subprocess that never spawned, while a tick older than `started_at`
+ * is a monitor that ticked before the commit recorded it. `predatesGraceSecs` defaults
+ * to `graceSecs`, so a caller that does not distinguish them behaves as before.
  */
 export function monitorFreshness(
   startedAt: string | null,
@@ -26,6 +46,7 @@ export function monitorFreshness(
   thresholdSecs: number,
   graceSecs: number,
   nowMs: number,
+  predatesGraceSecs: number = graceSecs,
 ): MonitorFreshness {
   const startedAtMs = startedAt === null ? NaN : Date.parse(startedAt);
   const lastPeekAtMs = lastPeekAt === null ? NaN : Date.parse(lastPeekAt);
@@ -40,7 +61,7 @@ export function monitorFreshness(
   }
 
   if (!hasStart) return { fresh: true, reason: 'unregistered' };
-  if (nowMs - startedAtMs < graceSecs * 1000) {
+  if (nowMs - startedAtMs < (hasPeek ? predatesGraceSecs : graceSecs) * 1000) {
     return { fresh: true, reason: 'warming-up' };
   }
   return {
