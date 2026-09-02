@@ -228,7 +228,7 @@ A trusted channel sender can also pair the main model with an experimental [advi
 
 You usually don't set this. With nothing configured, an always-on launch (tmux or Docker) resolves **strict** and an interactive one **standard**, so a managed hermit gets the safety hooks without being asked. The launch output's `Hook profile:` line tells you what was resolved and where it came from.
 
-To override — for instance to keep a managed hermit at `standard` because it does devops work over `ssh` or `docker` — edit `config.json` directly:
+To override, edit `config.json` directly:
 
 ```json
 "env": { "AGENT_HOOK_PROFILE": "standard" }
