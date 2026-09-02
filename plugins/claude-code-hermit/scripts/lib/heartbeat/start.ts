@@ -12,7 +12,8 @@
 // start-check <hermit-dir>
 //   FRESH|interval=<s>                      nothing to do; the live monitor matches config
 //   REARM|<reason>                          followed by, as applicable:
-//     OLD_TASK:<id>                         TaskStop this before registering
+//     OLD_TASK:<id>                         TaskStop this before registering; omitted
+//                                           when the record belongs to a previous boot
 //     FIRST_START:1                         no prior registration
 //     INTERVAL:<s>
 //     CMD:bash <abs>/heartbeat-monitor.sh <s> <abs hermit dir>
