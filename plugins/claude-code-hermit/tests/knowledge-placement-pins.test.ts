@@ -113,8 +113,8 @@ describe('gate handling of settled-memory candidates', () => {
     expect(triage.includes('apply the normal Step 1.5 test')).toBe(true);
   });
 
-  test('judge 1.5 exempts consolidation candidates from covered-by-memory', () => {
-    expect(judge.includes('the memory is the decision record; the candidate targets the operative home')).toBe(true);
+  test('triage 1.5 exempts consolidation candidates from covered-by-memory', () => {
+    expect(triage.includes('the memory records the decision; the candidate targets where the operative content lives')).toBe(true);
   });
 });
 

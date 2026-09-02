@@ -120,7 +120,7 @@ Pass the **argument name**, not the dotted path — the script looks the path up
 
 The enum values, dotted paths, and "applies" notes come from `scripts/lib/settings/registry.ts` — the same module `show` renders from and `validate-config.ts` shares its enums with. When a setting is added, add the row there; this table mirrors it.
 
-**`model` takes whatever Claude Code takes.** There is deliberately no list of model IDs here: the stored value is passed verbatim to `--model` by `hermit-start.ts`, so a hardcoded mapping in this skill would be decorative and would go stale the moment Anthropic ships a new model (it already had — it offered `claude-opus-4-6` well into the Claude 5 generation). Offer the operator the aliases Claude Code itself accepts (`opus`, `sonnet`, `haiku`) or a full model ID, and pass it through.
+**`model` takes whatever Claude Code takes.** The stored value is passed verbatim to `--model` by `hermit-start.ts`, so no model list lives here. Offer the operator the aliases Claude Code itself accepts (`opus`, `sonnet`, `haiku`) or a full model ID, and pass it through.
 
 **Permission-mode note (surface when the operator picks one):** `auto` is classifier-reviewed autonomy and the default; `acceptEdits` auto-approves file edits but prompts for shell; `default` prompts on first use of each tool; `plan` is read-only; `dontAsk` denies anything not in `permissions.allow`; `bypassPermissions` is for isolated containers only. `auto` may report unavailable depending on plan/model/provider — see [Permission Modes](https://code.claude.com/docs/en/permission-modes).
 
@@ -128,7 +128,7 @@ The remaining arguments each do more than write one leaf, so they keep their own
 
 **If argument is "language":**
 Auto-detect the system locale via Bash as a default suggestion.
-Ask: "Preferred language? (e.g., pt, en, es, fr) [current value or auto-detected]"
+Ask for the preferred language (e.g. pt, en, es, fr), offering the current value or the detected locale as default.
 Run `settings-edit ... set language <value>`.
 Then re-sync the artifact-chrome translation table (the dashboard/proposals pages overlay `.claude-code-hermit/state/artifact-strings.json` per key over the English defaults):
 - New value is **not** `en`: emit `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <value> <current-ISO-timestamp>`, translate every `strings` value into that language (keep keys and `{placeholder}` tokens verbatim), and write `.claude-code-hermit/state/artifact-strings.json`.
@@ -177,7 +177,7 @@ Channels:
   (or "No channels configured")
 ```
 "briefing chat" is `default_chat_id` — where unattended sends go — falling back to the learned `dm_channel_id` when the pin isn't seeded yet (say "not paired yet" when both are empty).
-Ask: "Add, remove, edit, or set primary? (add discord / add telegram / remove <name> / edit <name> / primary <name> / primary clear / done) [done]"
+Ask what to do next, offering: add discord / add telegram / remove <name> / edit <name> / primary <name> / primary clear / done (default done).
 Loop until operator says "done":
 - **add <name>:** Prompt for `allowed_users` (paste user ID or skip) and `state_dir` (relative or absolute path — defaults to `.claude.local/channels/<name>`), then write the whole entry in one call: `set channels.<name> '{"enabled":true,"dm_channel_id":null,"default_chat_id":null,"allowed_users":[...],"state_dir":"...","settings_policy":"allow"}'`. Note: "Configure the channel token next: Docker → `/claude-code-hermit:docker-setup`; tmux or interactive → `/claude-code-hermit:channel-setup`. Type it in a terminal or the Claude app."
 - **remove <name>:** `unset channels.<name>`. If `channels.primary === <name>`, run `unset channels.primary` **first** (a dangling pointer fails validation and the write would be refused) and tell the operator: "Also cleared `channels.primary` (was pointing at the removed channel)."
@@ -201,7 +201,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 
 **If argument is "heartbeat":**
 - Show current heartbeat config (including `stale_threshold`)
-- Ask: "Enable background heartbeat? (yes / no) [current: <value>]"
+- Ask whether the background heartbeat should be enabled (yes / no, default the current value).
 - If yes: show the configurable sub-fields before asking each one:
   ```
   Heartbeat sub-fields (press Enter to keep current value):
@@ -235,7 +235,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     min_context_tokens     100000
     min_interval           4h
   ```
-- Ask: "Let each always-on boot register the OS scheduler? (yes / no) [current: <scheduler_enabled, absent = yes>]" — then "Enable watchdog restarts? (yes / no) [current: <enabled>]"
+- Ask whether each always-on boot should register the OS scheduler (yes / no, default the current `scheduler_enabled`, absent = yes), then whether watchdog restarts should be enabled (yes / no, default the current `enabled`).
 - If yes: show the configurable sub-fields before asking each one:
   ```
   Watchdog sub-fields (press Enter to keep current value):
@@ -281,7 +281,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   numbers from the listing above are stale the moment either lands. Re-run `get routines` and re-show the
   table after every add and every remove, and derive the next index from that fresh listing — a stale index
   is an in-range write that silently replaces or edits the wrong routine, with nothing to refuse it.
-- Ask: "Add / edit / remove / enable / disable? (or 'done')"
+- Ask what to do next: add / edit / remove / enable / disable / done.
 - **Add wizard:** ask for:
   - ID (unique name, e.g., "weekly-deps")
   - Schedule — offer common presets, or accept raw 5-field cron:
@@ -296,9 +296,9 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   - Append it with `set routines.<count> '<entry as JSON>'`, where `<count>` is the number of routines in the
     latest listing (the first free index). A duplicate id is only a warning, so check the id against the
     listed ones before writing; an invalid cron is refused by the script — relay its error rather than
-    retrying. Then re-list before the next write.
+    retrying.
 - **Edit:** select by number, then `set routines.<index>.<field> <value>` (one call per changed field; siblings are preserved).
-- **Remove:** select by number, then `unset routines.<index>` — one call, and the remaining entries close the gap (so re-list before the next write).
+- **Remove:** select by number, then `unset routines.<index>` — one call, and the remaining entries close the gap.
 - **Enable/disable:** select by number, `set routines.<index>.enabled true|false`.
 - Loop until operator says "done".
 - **After all edits are written**, invoke `/claude-code-hermit:hermit-routines load` via the Skill tool to apply the new schedule live (no restart). Surface the result inline:
@@ -318,7 +318,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     AGENT_HOOK_PROFILE              (unset → strict on an always-on launch)
   ```
 - **Protected keys** that cannot be changed via this command: `AGENT_HOOK_PROFILE`. If the operator tries to set one, respond: "The hook profile is resolved at boot — unset means strict for an always-on launch and standard for an interactive one, and an ambient value from Docker compose outranks config. To pin it, edit `config.json` `env` directly; the boot script validates it and floors an always-on launch at standard on the next start."
-- Ask: "Set, change, or remove an env var? (e.g., 'MAX_THINKING_TOKENS 20000', 'remove MAX_THINKING_TOKENS', or 'done') [done]"
+- Ask for an env var to set, change, or remove (forms: `<KEY> <VALUE>`, `remove <KEY>`, or `done`; default done).
 - Loop until operator says "done", "skip", or presses Enter:
   - If input targets a protected key: reject with the message above
   - If input is `remove <KEY>`: `unset env.<KEY>`
@@ -408,14 +408,14 @@ Prompt: *"Quality-gate tier for accepted-proposal auto-implementations. Controls
 
 Options:
 - **Budget** (default; recommended): `/claude-code-hermit:simplify` never runs. Cheapest. No post-implementation cleanup.
-- **Balanced**: make an inline RUN/SKIP decision on each implementation from the proposal category and touched files (no subagent) — RUN triggers `/claude-code-hermit:simplify`, SKIP doesn't. Costs an occasional ~$0.25 `/claude-code-hermit:simplify` run when the decision is RUN.
-- **Quality**: `/claude-code-hermit:simplify` runs on every implementation, no judgment. ~$0.25-$0.35 per implementation in Sonnet pricing.
+- **Balanced**: make an inline RUN/SKIP decision on each implementation from the proposal category and touched files (no subagent) — RUN triggers `/claude-code-hermit:simplify`, SKIP doesn't. Costs one `/claude-code-hermit:simplify` run when the decision is RUN.
+- **Quality**: `/claude-code-hermit:simplify` runs on every implementation, no judgment. One `/claude-code-hermit:simplify` run per implementation.
 
 Run `settings-edit ... set quality_gate.tier <chosen>` (creates the `quality_gate` object if missing; a legacy `enabled` sibling is preserved untouched — skill behavior reads `tier` only).
 
 **Channel-tagged turn:** send the same prompt via the channel reply tool with the three tiers numbered (Budget/Balanced/Quality, same descriptions as above), AND queue a pending micro-proposal entry per `reflect` § Queuing procedure: `options: ["budget", "balanced", "quality"]`, `tier: 1`, `on_resolve: "/claude-code-hermit:hermit-settings quality-gate --answer {answer}"`. If invoked as `quality-gate --answer <tier>` (channel-responder resolving that entry), skip the ask and run `settings-edit ... set quality_gate.tier <tier>` directly, then confirm via channel.
 
-Note: if you commit autonomous-implementation diffs through a skill that already runs `/claude-code-hermit:simplify` before committing, consider **Budget** — any non-Budget tier here would double-fire the cleanup pass (~$0.40-$0.70 of duplicated spend per committed implementation).
+Note: if you commit autonomous-implementation diffs through a skill that already runs `/claude-code-hermit:simplify` before committing, consider **Budget** — any non-Budget tier here would run the cleanup pass twice per committed implementation.
 
 **If argument is "history":**
 Run `settings-edit ... history [dotted.path] [--limit N]` (the operator may name a setting: "history heartbeat"). Relay the rows in the operator's language, naming who made each change — `settings-edit` is an operator edit, `hermit-evolve` a change an upgrade made, `evolve-finalize` an upgrade's version stamp alone, `channel-hook` a channel the hermit learned, `hermit-start`/`hermit-stop` a boot flip. In a channel reply, drop the dotted paths and script names for plain language ("the heartbeat interval went from 2h to 30m on the 18th"). An empty ledger means nothing has changed since the audit trail started, not that the setting is unset.
@@ -429,7 +429,7 @@ Ask: "This hermit publishes status/proposal/weekly-review pages via Claude Code'
 On answer "Authorize" (or "on"/"yes"): run `settings-edit ... set artifacts.publish_authorized true`. Reply: "Recorded: artifact publish authorized. The grant (permissions.allow `Artifact`) is applied automatically at next boot — `.claude-code-hermit/bin/hermit-stop` then `hermit-start` to apply now. No settings files were modified from this session."
 On answer "Bank first publishes" (or "off"/"no"/"decline"): run `settings-edit ... set artifacts.publish_authorized false`. Reply: "Recorded: no standing grant. First publish of each enabled page must happen in an attended session (`docs/artifacts.md` § refresh procedure); refreshes then reuse the same URL without prompting."
 **Channel-tagged turn:** send the same prompt via the channel reply tool with the two options numbered, AND queue a pending micro-proposal entry per `reflect` § Queuing procedure: `options: ["authorize", "bank first publishes"]`, `tier: 1`, `on_resolve: "/claude-code-hermit:hermit-settings artifact-authorization --answer {answer}"`. Note in the message that "Bank first publishes" still needs a terminal session later to do the banking itself — only the decision travels over the channel.
-**Channel re-entry:** if invoked as `artifact-authorization --answer "<label>"` (channel-responder resolving a micro-proposal queued by `hermit-evolve`'s Step 10 deferred-migration relay, per the CHANGELOG's artifact-publish-authorization instruction), skip the Ask above and match `<label>` case-insensitively by prefix against `Authorize` / `Bank first publishes`, then run the matching `settings-edit` command and reply exactly as above. This branch is deliberately channel-reachable — the flag is a decision record, not a permission — so it is exempt from the terminal-only tier the rest of `artifacts.*` policy sits behind.
+**Channel re-entry:** if invoked as `artifact-authorization --answer "<label>"` (channel-responder resolving a micro-proposal queued by `hermit-evolve`'s Step 10 deferred-migration relay), skip the Ask above and match `<label>` case-insensitively by prefix against `Authorize` / `Bank first publishes`, then run the matching `settings-edit` command and reply exactly as above. This branch is deliberately channel-reachable — the flag is a decision record, not a permission — so it is exempt from the terminal-only tier the rest of `artifacts.*` policy sits behind.
 
 ### 3. Write config
 

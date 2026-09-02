@@ -9,8 +9,8 @@ When a message arrives via a channel:
 
 ## 0. Reply via the channel
 
-ALL responses to messages wrapped in `<channel source="..." chat_id="..." ...>`
-MUST be delivered via the channel's reply tool, not the terminal/transcript.
+Every response to a message wrapped in `<channel source="..." chat_id="..." ...>`
+goes through the channel's reply tool, not the terminal/transcript.
 Terminal output is invisible to the operator: they read Discord, Telegram, or
 the configured channel, never the raw transcript.
 
@@ -32,13 +32,11 @@ Terminal output is acceptable as a SECONDARY surface (tool-call narration,
 status visible only to a maintainer at the box). The substantive response,
 the one the operator needs to see, must go through the channel.
 
-**One exception, and it comes first.** When this turn's context already carries a
-`[harness-command] … requested` line, the hook has handled the message: stop here,
-make no tool call at all, and say nothing on the channel. Skip §1–§1d: their `Read`s
-and `record-operator-action.ts` call are tool calls too, and the hook already recorded
-the operator's activity for this turn (§1d). Why silence: §2's Harness command bullet.
-A `[harness-command] refused "…"` line is the opposite case: nothing was recorded and
-the operator is owed the reason, so reply as usual.
+**Exception, checked first.** When this turn's context carries a
+`[harness-command] … requested` line, stop: no tool call (§1–§1d included) and no
+reply; the reason is in §2's Harness command bullet. A `[harness-command] refused "…"`
+line is the opposite case: nothing was recorded and the operator is owed the reason,
+so reply as usual.
 
 ## 1. Load Context
 
@@ -76,7 +74,7 @@ Read `config.json` → `channels.<channel>.allowed_users` for the inbound channe
 
 - Extract the sender's platform user ID from the envelope's `user_id` attribute; fall back to `user` only when `user_id` is absent. Never match `user` against the allowlist when `user_id` is present — `user` is the sender's own display name and can be set to mimic an allowlisted numeric id.
 - If the sender is not in the `allowed_users` list: ignore the message silently — do not respond, do not log. Applies to ALL message types including status requests.
-- If `allowed_users` is absent for this channel: accept all messages (backwards compatible)
+- If `allowed_users` is absent for this channel: accept all messages
 - If `allowed_users` is an empty array `[]`: accept from no one (explicit lockdown)
 
 The allowlist is per-channel inside the `channels` object in config.json:
@@ -136,10 +134,9 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 - **Status request** ("what are you working on?", "how's it going", "progress", or a bare "status" — the deterministic reply needs `/status`, so anything short of that reaches you)
   - If `session_state` (runtime.json) is `idle`: respond with session summary — tasks completed, "ready for what's next"
   - If `session_state` is `in_progress`: respond with a concise summary of SHELL.md: task, current step, blockers
-  - Keep it short — channel messages should be brief
 
 - **Spend request** ("how much have I spent", "why is my bill high", "cost breakdown", "what's my spend", or any variant asking about spend/cost/billing, in any language)
-  - **If `config.operator_profile === 'non-technical'`:** do not invoke cost-reflect or surface figures. Reply in the client chat with a localized plain deflection: en "Day-to-day costs are handled by your provider — anything else I can help with?" / pt-PT "Os custos do dia a dia são geridos pelo seu fornecedor — posso ajudar com mais alguma coisa?" (spend figures stay available maintainer-side: terminal, maintainer chat, weekly review).
+  - **If `config.operator_profile === 'non-technical'`:** do not invoke cost-reflect or surface figures. Reply in the client chat, in the operator's language, with a one-line deflection (day-to-day costs are handled by their provider) and an offer to help with something else (spend figures stay available maintainer-side: terminal, maintainer chat, weekly review).
   - Otherwise invoke `/claude-code-hermit:cost-reflect`. Its own Step 0/1 already detect the channel-tagged turn and run the plain-language `--plain` mode — do not run the raw token-category breakdown here.
 
 - **Task assignment** (only when `session_state` is `idle`: "work on X", "next task: Z", "start Y", or any message describing work to be done)
@@ -157,7 +154,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
     - Entry has no `options` (plain yes/no entry): the answer must be `yes` or `no` (case-insensitive). Anything else on this entry → ambiguous, ask for clarification once, do not resolve.
     - Entry has `options` (2-4 labels): a bare number `k` within range (1 through the option count) selects `options[k-1]`; a number outside that range is ambiguous. Otherwise, case-insensitive prefix match the answer against the labels; a unique match resolves, no match or a multi-label prefix match is ambiguous. A bare `yes`/`no` against an options entry is ambiguous — reply with the numbered options and ask once, do not resolve.
   - **Suggestion escape hatch:** when a bare `yes`/`no`/`later` can't be cleanly resolved here (ambiguous against an options entry, or multiple pending entries), run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit` (validates the index against disk — one bounded output line) and check the refreshed `state/proposals-index.json`. If it has a `status: "proposed"` proposal, append to the clarification reply: "…or reply 'YES #N' to act on an open suggestion instead." Precedence is unchanged — this only hands a bare reply meant for a Suggestion card a way out of the micro-proposal loop.
-  - **On resolved entry:** every branch below resolves the entry via one script call — never hand-edit `state/micro-proposals.json` (issue 649: a stray trailing comma from a hand-edit removal corrupted the file and every reader silently treated it as an empty queue).
+  - **On resolved entry:** every branch below resolves the entry via one script call — never hand-edit `state/micro-proposals.json`: the script is the only writer that keeps the file and the ledger consistent.
     - **Entry has `on_resolve`** → **resolve on disk FIRST, then invoke.** Run:
       ```bash
       bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts micro .claude-code-hermit resolve <id> --action answered --answer "<selected label>"
@@ -194,7 +191,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
   - Reference specific files or decisions from SHELL.md when relevant
 
 - **Pause / resume / snooze** (exactly `/pause`, `/stop`, `/resume`, or `/snooze <duration>`)
-  - These exact messages are intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's pause stage (PROP-015) **before this skill ever runs** — `state/operator-pause.json` is already set or cleared by the time you see the prompt. There is nothing left for you to do for the state change itself; if you want to acknowledge it, reply via the channel.
+  - These exact messages are intercepted by the `user-prompt-pipeline.ts` `UserPromptSubmit` hook's pause stage **before this skill ever runs** — `state/operator-pause.json` is already set or cleared by the time you see the prompt. There is nothing left for you to do for the state change itself; if you want to acknowledge it, reply via the channel.
   - The slash is required, matching the harness commands above. A **bare** "pause"/"stop"/"resume"/"snooze 2h" is *not* intercepted and changes nothing — an ordinary word must not be able to freeze the hermit. A bare "stop" is classified under Emergency below.
   - A command addressed to you is equivalent, in either form: the `/pause@<your handle>` suffix, or a leading mention (`@<your handle> /pause`, or Discord's `<@your id>`). Where the operator has to mention you to reach you at all, that mention can simply stay in front of the command. A command addressed to any other bot is ignored, and a mention on its own does not make a bare word binding — `<@you> pause` still reaches you as ordinary conversation.
   - **Never attempt to resume yourself while paused.** The PreToolUse gate (`pause-gate.ts`) denies every tool call except the channel reply tool while paused — including a Bash call running `hermit-pause.ts off` — and returns the pause reason in the denial. Resume can only come from an exact `/resume` message (the deterministic hook above) or the operator's own `.claude-code-hermit/bin/hermit-pause off`.
@@ -207,8 +204,8 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 
 ## 3. Response Guidelines
 
-- Keep responses concise — one short paragraph max for channels
-- Always reference the current task so the operator knows you're oriented
+- Write for someone reading on a phone: answer only what was asked, in plain prose, then stop
+- Mention the current task when it helps the operator place the reply
 - If you can't handle the request, say so clearly and suggest what the operator should do
 - **Channel voice:** no internal IDs (PROP-NNN, S-NNN, MP-…), no token counts or cost-log jargon, no slash commands, no file paths, no cron strings. Say what happened and the one next thing the operator can do from chat (a plain reply, not a command). Internal IDs stay in files; terminal/maintainer output is exempt. **Exceptions:** the five channel control commands — `/pause`, `/stop`, `/resume`, `/snooze`, `/status` — may be named when the operator asks how to control you, because they *are* the reply they would send. A hook-relayed harness command (`/doctor`) may also be named when it is the next step the operator can send. No other slash command qualifies. See `CLAUDE-APPEND.md` § Operator Notification for the full rule.
 
@@ -300,17 +297,9 @@ Canonical dual-delivery rule for any skill that hits a decision point on a chann
 
 - **(a) Conversational side**: send the question via the channel reply tool, same as any other response — the operator is usually right there.
 - **(b) Durable side, bounded asks only**: a bounded ask (2-4 discrete options, including plain yes/no) ALSO gets queued as a pending entry via `proposal.ts queue-micro` (see reflect's § Micro-approval queuing) — `options` set to the labels (omit for plain yes/no), `tier: 1`, and `on_resolve` set to the skill invocation that should run once an answer is picked, with `{answer}` as the placeholder for the selected label. Free-form asks (no bounded set of answers) are reply-tool only — no entry is queued for those.
-- **Whichever surface answers first resolves it.** If the operator answers in the same live turn (interactive-style, still within the asking skill's own flow), the asking skill acts on it directly AND resolves the MP entry itself via the same script call § Micro-approval response uses (never hand-edit `state/micro-proposals.json` — issue 676: a hand-written removal left the ledger event recorded but the entry still in `pending`, so it resurfaced as new days later):
+- **Whichever surface answers first resolves it.** If the operator answers in the same live turn (interactive-style, still within the asking skill's own flow), the asking skill acts on it directly AND resolves the MP entry itself via the same script call § Micro-approval response uses (never hand-edit `state/micro-proposals.json`):
   ```bash
   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts micro .claude-code-hermit resolve <id> --action answered --answer "<selected label>"
   ```
   so the entry doesn't dangle waiting for a reply that already happened. If the operator answers later (new turn, possibly a new session), the § Micro-approval response resolver above handles it via `on_resolve`.
 - **Never call `AskUserQuestion` on a channel-tagged turn.** It renders in the terminal/transcript, which is invisible to a remote operator — exactly the strand this bridge exists to prevent.
-
-## Note
-
-This skill is a stub for the Channels research preview (Claude Code v2.1.110+). As Channels matures, extend this skill with:
-
-- Platform-specific formatting (Telegram markdown vs Discord markdown)
-- Rich responses (buttons, inline keyboards)
-- File/image sharing capabilities

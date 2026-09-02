@@ -78,7 +78,8 @@ step-9 config write — the `new_config_keys` merge and the `_hermit_versions` b
 ## Return value — the report (your final message, nothing else)
 
 Return only this structured report. It is the single thing that re-enters the main session, so keep it
-tight — do not paste changelog text, diffs, or file bodies.
+tight — do not paste changelog text, diffs, or file bodies. Every field must trace to a command output or
+file write from this run; a step you skipped or deferred is reported as such, never as done.
 
 ```
 Upgrade: vOLD -> vNEW | core current vNEW | blocked: <reason>
@@ -100,6 +101,7 @@ Siblings detected but not activated: <name ... | none>
 Siblings warnings: <one line per siblings_warnings entry | none>
 Permissions added: <entries | none>
 Audit scope: <whole-run | version-only>
+Operator notes: <one line per version-specific operator note collected in steps 2b/7 | none>
 Deferred for operator: <none | one or more verbatim blocks, each:>
   --- deferred-migration ---
   source: <plugin>@<version>

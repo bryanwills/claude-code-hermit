@@ -1,6 +1,6 @@
 ---
 name: docker-security
-description: Opt-in advanced Docker security hardening beyond the v1.0.26 baseline — LAN containment with DNS policy, resource bounds with kernel-hygiene sysctls, and a boot-time plugin install audit log. Applied as a reversible docker-compose overlay (does not touch the base compose file) and verified against the live container. Run after /docker-setup; requires bridge networking.
+description: Opt-in advanced Docker security hardening beyond the docker-setup baseline — LAN containment with DNS policy, resource bounds with kernel-hygiene sysctls, and a boot-time plugin install audit log. Applied as a reversible docker-compose overlay (does not touch the base compose file) and verified against the live container. Run after /docker-setup; requires bridge networking.
 disable-model-invocation: true
 ---
 
@@ -10,7 +10,7 @@ Advanced hardening for already-deployed hermit containers. Each toggle is opt-in
 
 **Tone:** Honest about tradeoffs. Tell operators what each toggle does AND does not protect. Do not oversell.
 
-**Important:** Run all checks and commands sequentially — do not use parallel tool calls.
+Each step's commands depend on the previous step's answer, so run them in order.
 
 Templates live in `${CLAUDE_SKILL_DIR}/../../state-templates/docker/security/`.
 
@@ -18,7 +18,7 @@ Templates live in `${CLAUDE_SKILL_DIR}/../../state-templates/docker/security/`.
 
 > Installing a plugin runs that plugin's hooks and skills with the same authority as hermit. The container hardening here reduces what a *compromised* plugin can do to the host kernel and your local network — it does not vet the plugin's intent, sandbox its file access within the project, or prevent it from acting on your behalf via the agent. A malicious or careless plugin still runs as you.
 >
-> **Honest limitation:** DNS policy below blocks domain-based exfil/C2 but cannot stop direct-IP egress to a hardcoded public address. A future release may add nftset-driven IP allowlisting.
+> **Honest limitation:** DNS policy below blocks domain-based exfil/C2 but cannot stop direct-IP egress to a hardcoded public address.
 
 ## Plan
 
@@ -48,7 +48,7 @@ If the output is `container`, **stop immediately** — do not proceed to step 1.
      Resource bounds: off
      Audit log: off
 
-   Baseline (always on, from v1.0.26):
+   Baseline (always on):
      cap_drop: ALL, no-new-privileges, pids_limit: 2048
 
    Sandbox (bash tool isolation, operator-managed via /sandbox):
@@ -350,7 +350,7 @@ Stop here. Tell the operator: "Overlay and config have been written — just del
 If operator chose to restart now AND container was running before this skill (and the hard gate passed):
 
 1. Run `.claude-code-hermit/bin/hermit-docker down`.
-2. Run `.claude-code-hermit/bin/hermit-docker up` (the wrapper now picks up the overlay automatically). The first up will trigger `docker compose build hermit-netguard` if Prompt 1 was enabled — wait for completion (can be 30-60s on first build).
+2. Run `.claude-code-hermit/bin/hermit-docker up` (the wrapper picks up the overlay automatically). The first up will trigger `docker compose build hermit-netguard` if Prompt 1 was enabled — wait for completion (can be 30-60s on first build).
 3. Poll `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml ps --status running --format '{{.Service}}'` every 2s for up to 30s; expect `hermit` (and `hermit-netguard` if Prompt 1 enabled). If either is missing after 30s: run `docker compose -f docker-compose.hermit.yml -f docker-compose.security.yml logs <missing-service> --tail=30` (substitute `hermit` or `hermit-netguard` per the missing service; omit the service name if both are down), surface output, and suggest:
    - **hermit-netguard won't start** → nftables or dnsmasq config error; read the log for the line number
    - **hermit won't start** → check if the base `ports:` conflict was fully resolved (re-run the hard gate port check above)

@@ -5,7 +5,7 @@
 //    or: bun update-reflection-state.ts <state-file-path> --quick-hash <hash>
 //    or: bun update-reflection-state.ts <state-file-path> --graduation-cursor [<iso>]
 //    or: bun update-reflection-state.ts <state-file-path> --reset-counters
-//    or: bun update-reflection-state.ts <state-file-path> --scheduled-check-run <id>
+//    or: bun update-reflection-state.ts <state-file-path> --scheduled-check-run <id> [--outcome <o>]
 //
 // --quick-hash is a distinct write path for the reflect --quick cursor: it writes ONLY
 // the top-level last_quick_hash key and does not touch last_run_at/last_reflection/counters
@@ -30,11 +30,13 @@
 // stamp the reflect phase ladder (newborn/juvenile/adult) and doctor's run-rate line
 // are measured from, and moving it would make an established install newborn again.
 //
-// --scheduled-check-run is the session skill's step-4b cursor: it writes ONLY
+// --scheduled-check-run is the per-check cursor. Bare, it writes ONLY
 // scheduled_checks.<id>.last_run (today's date), preserving sibling per-check
-// fields and everything else. reflect/branches.md step 7 keeps its own richer
-// inline per-check writer (last_unavailable_at/last_error_at/consecutive_empty)
-// — deliberately separate surfaces; do not unify them onto this flag.
+// fields and everything else (the session skill's step-4b use). With
+// --outcome <unavailable|error|empty|actionable|contextual> it is reflect/branches.md
+// step 7's writer: unavailable -> last_unavailable_at, error -> last_error_at,
+// empty -> last_run + consecutive_empty+1, actionable/contextual -> last_run +
+// consecutive_empty=0. Fails open: a bad write logs to stderr and exits 0.
 
 import fs from 'node:fs';
 import { resolveHermitNowMs } from './lib/time';
@@ -135,7 +137,21 @@ if (arg3 === '--scheduled-check-run') {
   try { state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')); } catch { /* first run before state file exists */ }
   if (!state.scheduled_checks || typeof state.scheduled_checks !== 'object') state.scheduled_checks = {};
   if (!state.scheduled_checks[id] || typeof state.scheduled_checks[id] !== 'object') state.scheduled_checks[id] = {};
-  state.scheduled_checks[id].last_run = new Date(resolveHermitNowMs()).toISOString().slice(0, 10);
+  const check = state.scheduled_checks[id];
+  const nowIso = new Date(resolveHermitNowMs()).toISOString();
+  const outcome = process.argv[5] === '--outcome' ? process.argv[6] : undefined;
+  const OUTCOMES = ['unavailable', 'error', 'empty', 'actionable', 'contextual'];
+  if (process.argv[5] === '--outcome' && !OUTCOMES.includes(outcome ?? '')) {
+    console.error(`Usage: bun update-reflection-state.ts <state-file-path> --scheduled-check-run <id> [--outcome <${OUTCOMES.join('|')}>]`);
+    process.exit(1);
+  }
+  if (outcome === 'unavailable') check.last_unavailable_at = nowIso;
+  else if (outcome === 'error') check.last_error_at = nowIso;
+  else {
+    check.last_run = nowIso.slice(0, 10);
+    if (outcome === 'empty') check.consecutive_empty = (Number.isInteger(check.consecutive_empty) ? check.consecutive_empty : 0) + 1;
+    else if (outcome) check.consecutive_empty = 0;
+  }
   try {
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n', 'utf-8');
   } catch (err: any) {

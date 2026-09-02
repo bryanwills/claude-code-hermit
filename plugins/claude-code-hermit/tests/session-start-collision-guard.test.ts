@@ -59,7 +59,7 @@ describe('session-start --task collision guard', () => {
   });
 
   test('--task path skips step 9 resume prompt (no interactive stall on same-task re-entry)', () => {
-    expect(skill).toContain('resume prompt (step 9');
+    expect(skill).toContain('makes the resume/defer decision in place of step 9');
   });
 
   test('recovery waiting_reason archives-as-partial instead of deferring the fresh task', () => {

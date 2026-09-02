@@ -32,14 +32,14 @@ Routines (config.json):
 - `stop <id>` (id ≠ `heartbeat-restart`): routines share one subprocess — do not stop it. Reply: "Routines share one monitor subprocess — to stop just `<id>`, set `enabled: false` on that entry in config.json and run `load`."
 - `stop heartbeat-restart`: `CronDelete` the anchor alone (the monitor, if any, keeps running).
 
-**Fallback mode (unchanged):**
+**Fallback mode:**
 - `stop <id>`: `CronList`, find the `[hermit-routine:<id>]` entry, `CronDelete` it (or "not active").
 - `stop` (no id): `CronList` filtered to `[hermit-routine:*]` — 0 active: report; 1 active: stop without asking; 2+: list and ask (or `--all`).
 - `stop --all`: `CronDelete` every `[hermit-routine:*]` entry.
 
 ## Notes
 
-- **Monitor mode defers only while an operator turn is open** (a Stop-cleared marker, 60-min TTL backstop), coarser than CronCreate's turn-level idle gate. A routine wake can still interject mid-conversation (same trade the heartbeat monitor accepts) — CronCreate never fires mid-task. A session left `in_progress` with no open operator turn no longer starves routines.
+- **Monitor mode defers only while an operator turn is open** (a Stop-cleared marker, 60-min TTL backstop), coarser than CronCreate's turn-level idle gate. A routine wake can still interject mid-conversation (same trade the heartbeat monitor accepts) — CronCreate never fires mid-task. Routines fire while a session is `in_progress` as long as no operator turn is open.
 - **Routine ids** must match `^[A-Za-z0-9._-]{1,64}$` (enforced by `validate-config.ts`) — ids travel through bracket markers, `--ids` CSVs, and JSONL rows.
 - **Changes take effect immediately.** `hermit-settings routines` invokes `load` after writing config; hand-edited `config.json` needs a manual `load`.
 - **Interactive mode does not auto-register routines.** `hermit-start.ts` calls `load` only on always-on launches.

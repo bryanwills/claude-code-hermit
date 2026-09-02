@@ -60,11 +60,12 @@ describe('session work-done NEXT-TASK drain', () => {
     // The write moved into session-archive.ts (step 6's idle archive), which runs
     // before step 8 branches — the old "unconditional regardless of step 8"
     // invariant now holds structurally. Pin the prose that documents that.
-    expect(skill).toContain('idle archive itself wrote `state/compact-requested.json`');
+    expect(skill).toContain('the idle archive has also written `state/compact-requested.json`');
   });
 
-  test('step 7b names the watchdog as the primary marker reaper (accurate for conservative branch)', () => {
-    expect(skill).toContain('maybeContextCompact');
+  test('step 7b names the watchdog as the marker consumer and session-start as the backstop', () => {
+    expect(skill).toContain("watchdog's routine-hygiene compactor");
+    expect(skill).toContain('`session-start` step 3 deletes any survivor on boot');
   });
 
   test('conservative queued branch omits the misleading "Ready for what\'s next" tail', () => {

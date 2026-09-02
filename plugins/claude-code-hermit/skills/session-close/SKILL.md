@@ -27,7 +27,7 @@ A pre-existing `shutdown_requested_at` is the caller's stamp — `hermit-stop` s
 
 ### Auto-close path (`--auto`)
 
-When invoked with `--auto` by heartbeat, skip steps 1–5 and jump directly to step 6 (shutdown_skill) and step 7 (session-archive.ts archive — the script itself performs the step 8/9 marker bookkeeping on success). Pipe this templated payload on stdin to `session-archive.ts archive --mode=auto`:
+When invoked with `--auto` by heartbeat, skip steps 1–5 and jump directly to step 6 (shutdown_skill) and step 7 (session-archive.ts archive — the script itself performs the marker bookkeeping on success). Pipe this templated payload on stdin to `session-archive.ts archive --mode=auto`:
 
 ```
 Status: completed
@@ -55,7 +55,7 @@ Invoked by the `daily-auto-close` routine at `0 0 * * *` (local) — the midnigh
 2. Branch on the returned `decision`:
    - **`noop`** — stop: do not notify the operator, do not write to `routine-metrics.jsonl`.
    - **`queued`** — stop. The `heartbeat.ts precheck` drain block emits `AUTO_CLOSE` on the next tick where the operator has been idle >10 minutes.
-   - **`close-now`** — close directly by proceeding through the Auto-close path (`--auto`) above (steps 6–8, `Closed Via: auto`). Stop.
+   - **`close-now`** — close directly by proceeding through the Auto-close path (`--auto`) above (steps 6–7, `Closed Via: auto`). Stop.
    - **`ok === false`** — append the returned `reason` to SHELL.md `## Findings` and stop; the routine retries next midnight.
 
 This path is intentionally silent: no operator notification on queue or drain — the `Auto-closed S-NNN` signal from the `--auto` archive is the only operator-facing output. The 10-minute lull threshold lives in `scripts/lib/auto-close.ts`, shared by the decision verb, the heartbeat-precheck drain, and the watchdog post-close-clear backoff.
@@ -79,7 +79,7 @@ This path is intentionally silent: no operator notification on queue or drain �
      HERMIT_OBSERVATION
      ```
      The row is a bare recurrence counter; the Lessons line carries the reason content. Gated to operator-close — `--auto` skips step 1 and writes no correction rows. No `|| true` needed: a *rejected* row answers `ERROR|<reason>` on stdout at exit 0. (A *mis-invocation* — wrong verb, or a missing state dir or source — exits 1 on purpose so a broken call site is loud; read the usage line, fix the call, and carry on. Neither outcome aborts the close.)
-   - `Changed:` list of files modified
+   - `Changed:` list of files modified. Derive `Status:` and `Changed:` from this session's tool results (the diff, the files you wrote), not from what you intended to do.
    - `Artifacts:` if this session produced a durable output, route it by shape:
      - **Evolving subject** the hermit will touch again (a monitored domain, a recurring decision area, accumulated know-how): **update or create** `compiled/topic-<slug>.md`. Merge new findings into the existing sections rather than appending a dated copy; bump `updated`, refresh the one-line `summary`, keep the page under 150 lines (compact older material when merging), and cross-link related pages with `[[wikilinks]]`.
      - **One-off output** (point-in-time research note, decision doc, audit summary): write `compiled/<type>-<slug>-<date>.md` as before.
@@ -87,7 +87,7 @@ This path is intentionally silent: no operator notification on queue or drain �
 2. Ensure the Progress Log reflects each step's final state (done, partial, blocked)
 3. Confirm the "Next Start Point" is clear enough for a fresh session to resume without questions
 4. If any high-leverage improvements were discovered during work, create proposals via the `claude-code-hermit:proposal-create` skill
-5. Invoke the `claude-code-hermit:reflect` skill to reflect on accumulated experience. Reflect no longer requires archived reports — it uses memory. This runs before archiving so any findings are included in the archived report. **Skip on `--auto`** — during auto-close, `session_state` is still `in_progress`, which forces reflect-precheck into compute phase before the `closed_via: auto` filter can run; there is no operator-curated session content to reflect on anyway.
+5. Invoke the `claude-code-hermit:reflect` skill to reflect on accumulated experience. This runs before archiving so any findings are included in the archived report. **Skip on `--auto`** — during auto-close, `session_state` is still `in_progress`, which forces reflect-precheck into compute phase before the `closed_via: auto` filter can run; there is no operator-curated session content to reflect on anyway.
    If reflect returns `reflect: no candidates`, scan this session's `## Findings` and `## Progress Log` for non-obvious discoveries not already in memory and issue the standard "remember it" reflection for any that clear the auto-memory threshold. Apply WHAT_NOT_TO_SAVE as normal.
 6. **Stop always-on services (`shutdown_skill`).** Read `shutdown_skill` from `.claude-code-hermit/config.json`. If non-null, invoke it as a skill command (the value may include arguments, e.g. `/serve stop`) via the Skill tool. **Best-effort:** on error or if the skill does not return, log a Monitoring line and continue to archival — never abort the close. Runs on both operator and `--auto` paths.
 7. Archive the session via `scripts/session-archive.ts archive --mode=close` (full close — finalize SHELL.md and replace with fresh template in one operation). `session-archive.ts` derives cost itself from the cost-log window — no `Cost:` line to compute or pass.
@@ -103,9 +103,7 @@ This path is intentionally silent: no operator notification on queue or drain �
    Next Start Point: <one line>
    HERMIT_PAYLOAD
    ```
-   Parse the single line of JSON printed to stdout. On success, `merged_payload_fields` lists which optional `Blockers` or `Artifacts` fields added report content; `[]` means SHELL.md and the stamped artifact scan already contained everything. **`ok === false`** means the archive did NOT happen: no markers were written. Surface the returned `reason` to the operator and retry once before giving up.
-8. **Pending-close cleanup** *(now automatic)*. `session-archive.ts` deletes `state/pending-close.json` itself on close/auto archive success (reported in its `markers` output field) — any pending midnight-drain flag is invalidated by a successful close, regardless of trigger. Nothing to do here.
-9. **Context-reset marker** *(now automatic, `--auto` only)*. On auto archive success the script writes `state/clear-requested.json` itself. The watchdog reads it on the next tick and sends `/clear` when the session is still alive + idle + unattended, resetting stale conversation context before the next scheduled wake incurs a cold cache-write. `/clear` preserves CronCreate routines and Monitor tasks; no re-arm is needed.
+   Parse the single line of JSON printed to stdout. On success, `merged_payload_fields` lists which optional `Blockers` or `Artifacts` fields added report content; `[]` means SHELL.md and the stamped artifact scan already contained everything. **`ok === false`** means the archive did NOT happen: no markers were written. Surface the returned `reason` to the operator and retry once before giving up. On success the script has also deleted `state/pending-close.json` (a successful close invalidates any pending midnight-drain flag, regardless of trigger) and, on `--auto`, written `state/clear-requested.json`, which the watchdog reads on its next tick to send `/clear` while the session is still alive, idle, and unattended (`/clear` preserves CronCreate routines and Monitor tasks); both are reported in its `markers` output field.
 
 ---
 
@@ -113,11 +111,6 @@ This path is intentionally silent: no operator notification on queue or drain �
 
 Verify these before proceeding with close (applies to both modes):
 
-- [ ] Tags from SHELL.md are copied to the session report's Tags field
-- [ ] Task status is accurate (`completed` | `partial` | `blocked`)
-- [ ] All changed files are listed in the Changed section
-- [ ] Blockers are described with enough context for a cold start
-- [ ] Cost data is recorded (if available from the cost-tracker hook)
 - [ ] If `## Completed` claims a deliverable that a skill persists to `compiled/` (e.g. a deep-dive, briefing, or decision doc), confirm the file exists with `session: S-NNN` frontmatter or is linked from SHELL.md. If it does not exist, the deliverable was dropped, so record that in `## Blockers` rather than leaving `## Completed` asserting success.
 - [ ] If status is `blocked`: have you run `/debug` to check for tool/hook failures? Include diagnosis in blockers if relevant
 

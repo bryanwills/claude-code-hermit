@@ -25,9 +25,12 @@ Title: <title>
 Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request | capability-brainstorm | settled-memory
 Evidence Origin: own-work | external-content
 Evidence: <one-paragraph evidence summary>
+Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 ```
 
 `Evidence Source:` is optional. Default: `archived-session`.
+
+`Artifact:` is optional. A valid artifact is a **machine-written state file** only (`.claude/cost-log.jsonl`, `state/proposal-metrics.jsonl`, `state/observations.jsonl`); `reflection-judge` has already verified it upstream. It decides the Step 1.5 ledger exemption and Step 5 condition 1.
 
 `Evidence Origin:` is optional. Default: `own-work`. External-content candidates are quarantined to Tier 3 upstream by `reflection-judge` and `reflect`; triage is not the primary gate for this control. Emit `origin: external-content` as additive metadata when present, for audit.
 
@@ -66,6 +69,8 @@ Read the operator's `MEMORY.md` (the operator-facing index of `- [title](file) �
 - Emit `memory_ref: <filename>` as metadata so the operator can locate and revise the source if it has gone stale.
 - Stop evaluating this candidate. Continue with any remaining candidates in the batch.
 
+**Ledger exemption:** a candidate whose `Artifact:` cites `state/observations.jsonl` is never suppressed `covered-by-memory`. The ledger is the recurrence store these candidates graduate from, not operator memory: recording there is how graduation works, not evidence the pattern is already handled. Candidates citing `cost-log.jsonl` or `proposal-metrics.jsonl` get the normal check.
+
 **Consolidation exception:** a candidate proposing to *relocate* operator-endpoint content — a settled procedure, format, or quality bar moving from memory or duplicated prose into the skill that owns the task — is not covered by the memory that records it: the memory records the decision; the candidate targets where the operative content lives. Do not suppress it as `covered-by-memory`; continue to Step 2. A candidate whose evidence cites no explicit operator endpoint, or that removes no duplicate or misplaced copy, does not receive this exception — apply the normal Step 1.5 test.
 
 ## Step 2 — Session cross-reference
@@ -84,17 +89,7 @@ Glob `.claude-code-hermit/compiled/*.md`. Read YAML frontmatter (`title`, `type`
 
 Only if no duplicate found and no memory match, check applicable conditions:
 
-1. **Repeated pattern** — is the evidence concrete and observed more than once, across sessions?
-   - **Skip for `scheduled-check/*`, `operator-request`, `current-session`, and `capability-brainstorm`** sources:
-     - `scheduled-check/*`: the check's own interval analysis establishes the pattern; cross-session recurrence is not required.
-     - `operator-request`: human-initiated; recurrence is not required.
-     - `current-session`: recurrence was validated upstream by `reflection-judge`; do not re-check here.
-     - `capability-brainstorm`: the brainstorm pass establishes the candidate; cross-session recurrence is not required.
-     - `settled-memory`: the operator's recorded endpoint declaration is the pattern, quote-verified upstream by `reflection-judge`; recurrence is not required.
-   - **Required for `archived-session`** (or absent field): a single incident does not qualify.
-   - **Artifact-cited `state/observations.jsonl` candidates**: any judge-verified candidate whose `Artifact:` line cites `state/observations.jsonl` satisfies condition 1 — the ledger graduation is the recurrence evidence; `reflection-judge` verified the ledger entries; do not re-check here.
-   - **Artifact-cited efficiency/cost-class candidates**: evidence citing a machine-written state file with the measured values (e.g. `cost-log.jsonl`, `proposal-metrics.jsonl`) counts as concrete recurrence — `reflection-judge` verified the file; do not re-check here.
-   - **Procedure-capture ephemerality exception**: a `current-session` procedure-capture candidate citing ephemeral artifacts and quantified cost qualifies at a single session (already covered by the `current-session` skip above).
+1. **Repeated pattern** — required only when `Evidence Source` is `archived-session` (or absent) and the candidate cites no machine-written `Artifact:`; then a single incident does not qualify. Every other source, and any artifact-cited candidate, had recurrence established upstream (the check's own interval analysis, the operator's request, the brainstorm pass, or `reflection-judge`'s verification of the cited sessions, ledger, or file). Do not re-check it here.
 2. **Meaningful consequence** — does something actually go wrong without fixing this? (Mild inconvenience does not qualify.) Always required.
 3. **Operator-actionable change** — is there something the operator can concretely approve and implement? (Vague improvements do not qualify.) Always required.
 

@@ -43,7 +43,7 @@ Auto-memory handles all learning; `compiled/` is for durable domain outputs, not
 - **`type` in frontmatter is the discriminator — never a folder.** No subdirectories inside `raw/`/`compiled/`, no new top-level dirs inside `.claude-code-hermit/`.
 - Domain inputs → `raw/<type>-<slug>-<date>.md`; one-off outputs → `compiled/<type>-<slug>-<date>.md`; evolving subjects → `compiled/topic-<slug>.md` updated in place. All require frontmatter (`title`, `type`, `created`, `tags`).
 - `.claude-code-hermit/knowledge-schema.md` defines what this hermit produces.
-- **Recall-first:** past-work questions go through `/claude-code-hermit:recall`, never grep/Read of `.claude-code-hermit/` (it also covers channel history). Current status, briefings, cost, and open proposals stay with their own skills.
+- **Recall-first:** past-work questions (sessions, channel history) go through `/claude-code-hermit:recall`, never grep/Read of `sessions/` or the channel log. `compiled/` pages are domain knowledge and may be Read directly. Current status, briefings, cost, and open proposals stay with their own skills.
 
 ## Rules
 

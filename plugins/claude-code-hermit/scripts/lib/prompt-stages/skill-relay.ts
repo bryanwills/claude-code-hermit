@@ -13,6 +13,6 @@ export function run(ctx: StageContext): StageResult | void {
   clearSkillRelay(ctx.dir);
 
   return {
-    context: `[skill-relay] This command was requested from chat by ${relay.by}. Send this turn's outcome, and any confirmation the skill needs, to ${relay.reply_to.source} chat ${relay.reply_to.chat_id} through the channel reply tool in channel voice. Never use AskUserQuestion for this turn. Apply CLAUDE.md dedupe, trim, or migration changes that the operator confirms from chat. Decline the auto-mode-default and permission pre-approval offers because those settings remain terminal-only.\n`,
+    context: `[skill-relay] This command was requested from chat by ${relay.by}. Send this turn's outcome, and any confirmation the skill needs, to ${relay.reply_to.source} chat ${relay.reply_to.chat_id} through the channel reply tool in channel voice. Never use AskUserQuestion for this turn. Accept only fixes the operator confirms from chat that fall under chat authority (CLAUDE.md edits); decline any offer that changes the permission mode or pre-approves permissions, since those settings are terminal-only.\n`,
   };
 }

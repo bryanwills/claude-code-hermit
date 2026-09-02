@@ -2273,16 +2273,15 @@ describe('proposal-act dispatch contract', () => {
     // stale-paths is conditional: a missing file for a name still in the available-skills
     // list is a plugin-skill improvement, not a dead proposal (re-running reflect would
     // regenerate the identical body, so a blanket REJECT is a permanent dead end).
-    expect(skill).toContain('REJECT with code `stale-paths` only when that file is missing **and** `<name>` is not in the harness\'s available-skills list');
+    expect(skill).toContain('`stale-paths` fires only when the target is provably gone: that file is missing **and** `<name>` is not an installed plugin skill');
     expect(skill).toContain('is a plugin-shipped-skill improvement, not a stale path: let it through');
-    expect(skill).toContain('is `unknown`, not absent');
-    expect(skill).toContain('fires only on a list the model can actually read');
+    expect(skill).toContain('If the available-skills list is not in context, proceed');
     // the list namespaces plugin skills as `<plugin>:<name>` and nothing else (probed), so the
     // match must be ON the namespaced form: a literal test of the bare canonical name never
     // hits a plugin skill, and a bare entry is an operator-space or bundled skill, which must
     // not clear the REJECT on behalf of a plugin one
-    expect(skill).toContain('only a **namespaced** entry `<plugin>:<name>` counts as a match');
-    expect(skill).toContain('a bare `<name>` entry is an operator-space or bundled skill, never a plugin one');
+    expect(skill).toContain('a namespaced `<plugin>:<name>` entry in the available-skills list');
+    expect(skill).toContain('a bare `<name>` entry is operator-space or bundled, not a plugin one');
   });
 
   test('queued Skill Improvement task carries the same guards as the in-main path', () => {
@@ -2387,24 +2386,17 @@ describe('doctor report contract (PROP-018 count pin)', () => {
   }), 20000);
 });
 
-describe('hermit-doctor SKILL.md doc-sync (no drift between JSON checks and docs)', () => {
+describe('hermit-doctor reference.md doc-sync (no drift between JSON checks and docs)', () => {
   const skill = read(path.join(SKILLS, 'hermit-doctor', 'SKILL.md'));
+  const reference = read(path.join(SKILLS, 'hermit-doctor', 'reference.md'));
 
-  test('every JSON check id appears as a table row', () => {
-    const missing = DOCTOR_CHECK_IDS.filter(id => !skill.includes(`| \`${id}\` |`));
-    expect(missing).toEqual([]);
+  test('SKILL.md points at reference.md for per-check semantics', () => {
+    expect(skill).toContain('`${CLAUDE_SKILL_DIR}/reference.md`');
   });
 
-  test('step 2 enumerates every JSON check id', () => {
-    const missing = DOCTOR_CHECK_IDS.filter(id => !skill.includes(`\`${id}\``));
+  test('every JSON check id appears as a table row in reference.md', () => {
+    const missing = DOCTOR_CHECK_IDS.filter(id => !reference.includes(`| \`${id}\` |`));
     expect(missing).toEqual([]);
-  });
-
-  test('counts read thirty-two, not thirty or thirty-one', () => {
-    expect(skill.toLowerCase()).not.toContain('twenty-nine');
-    // 'thirty' is a prefix of 'thirty-two', so assert the bare word is gone.
-    expect(skill.toLowerCase()).not.toMatch(/thirty(?!-two)/);
-    expect(skill.toLowerCase()).toContain('thirty-two');
   });
 });
 
@@ -3498,9 +3490,10 @@ describe('voice carrier contract', () => {
     expect(text).not.toContain('PROP-NNN');
   });
 
-  test('OPERATOR.md template points tone at Claude Code output styles instead of owning it, and does not overclaim its own question count', () => {
+  test('OPERATOR.md template points tone at the config.json voice block instead of owning it, and does not overclaim its own question count', () => {
     const operator = read(path.join(TEMPLATES, 'OPERATOR.md'));
-    expect(operator).toContain('.claude/output-styles/hermit-voice.md');
+    expect(operator).toContain("config.json's `voice` block");
+    expect(operator).toContain('/claude-code-hermit:hermit-settings voice');
     expect(operator).not.toContain('Comms style:');
     expect(operator).toContain('three questions');
     expect(operator).not.toContain('four questions');
@@ -3603,15 +3596,15 @@ describe('voice carrier contract', () => {
 // ============================================================
 
 describe('proactive-notify unification contract', () => {
-  test('cost-reflect Step 0 (inbound reply) still uses the channel reply tool', () => {
+  test('cost-reflect channel (inbound reply) still uses the channel reply tool', () => {
     const costReflect = read(path.join(SKILLS, 'cost-reflect', 'SKILL.md'));
-    expect(costReflect).toContain("reply via that channel's reply tool");
+    expect(costReflect).toContain("reply through that channel's reply tool");
   });
 
   test('cost-reflect Step 3 (proactive) routes through --notice', () => {
     const costReflect = read(path.join(SKILLS, 'cost-reflect', 'SKILL.md'));
     const step3 = costReflect.slice(costReflect.indexOf('## Step 3'));
-    expect(costReflect).toContain('Automated (`--maintainer`)');
+    expect(costReflect).toContain('Automated (`--maintainer`');
     expect(costReflect).toContain('claude-code-hermit:cost-reflect --maintainer');
     expect(step3).toContain('channel-send.ts');
     expect(step3).toContain('--notice');
@@ -3637,7 +3630,7 @@ describe('proactive-notify unification contract', () => {
     expect(doctor).not.toContain('"fallback": "primary"');
     expect(doctor).not.toContain('Include this finding only when that destination');
     // The flag survives for routine strings already on disk, but decides nothing.
-    expect(flat).toContain('It no longer changes the route');
+    expect(flat).toContain('`--maintainer` is accepted and ignored');
     // "exactly once" was an overclaim: dedup was persisted before the send, so a
     // failed send was counted as delivered (issue #690). One attempt per episode,
     // retried until confirmed, is the guarantee doctor can actually keep.
@@ -4026,11 +4019,21 @@ describe('session-start always-on boot never asks', () => {
     expect(step10).toContain('What should I help with?');
   });
 
-  test('each ask step carries the always_on guard', () => {
+  // The guard is stated once, between step 8 and step 9, and both ask steps defer to it.
+  test('the always-on never-ask rule sits above the ask steps', () => {
+    const rule = extractBlock(
+      sessionStart,
+      '\n8. If `agent_name` is set',
+      '\n9. If resuming an existing session',
+    );
+    expect(rule, 'the hoisted always_on guard is missing').toContain('`config.always_on` is `true`');
+    expect(rule, 'the hoisted guard lost its never-ask directive').toContain('never ask');
+  });
+
+  test('each ask step defers to the always_on guard', () => {
     const { step9b, step10 } = steps();
     for (const [name, step] of [['9b', step9b], ['10', step10]] as const) {
-      expect(step, `step ${name} lost its always_on guard`).toContain('`config.always_on` is `true`');
-      expect(step, `step ${name} lost its do-not-ask directive`).toContain('do **not** ask');
+      expect(step, `step ${name} lost its always_on deferral`).toContain('the always-on rule above applied');
     }
   });
 

@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: Parallel code review and cleanup of recent changes. Replicates the original bundled /simplify command that was removed in CC v2.1.146.
+description: "Parallel code review and cleanup of recent changes: three reviewers (reuse, quality, efficiency) propose behavior-preserving edits and the main agent applies them without asking. Use when asked to simplify, clean up, or tidy recent changes, or when another skill requests a cleanup pass on a diff."
 argument-hint: [optional focus, e.g. "memory efficiency"]
 ---
 
@@ -141,8 +141,6 @@ Parse the JSON blocks. If one reviewer's block fails to parse, log it and contin
   - Does one variant respect *house conventions* (per CLAUDE.md) while the other doesn't? → pick the conforming one.
 
   If the principles **don't discriminate** — both options preserve behavior identically, both are equally clear, both respect conventions — apply **neither**. Log them under "Noticed but not applied: principles couldn't decide" so the user can pick if they care.
-
-  Never stop to ask. Surfacing a style call to the user mid-run defeats the point of having principles. The user invoked `/simplify` to clean code, not to answer a quiz.
 
 ### 3b. Group by file, sort by file order
 

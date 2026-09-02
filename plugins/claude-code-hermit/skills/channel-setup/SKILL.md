@@ -284,21 +284,12 @@ Skip entirely if no channel selected "Ready to pair" in step 5 this run — an o
 
 Also skip, with a note in the summary ("Welcome message skipped — more than one channel was newly paired this run; let the owner know directly"), if *more than one* channel selected "Ready to pair" this run (the "All" path pairing several channels at once). `channel-send.ts` has no per-channel target — it resolves one generic outbound channel (`primary`, else first eligible in config order) — so with several freshly-paired channels there's no reliable way to know which one it would reach.
 
-Otherwise (exactly one channel newly paired), send one short, plain-language welcome so the owner has something the moment the bot can reach them. Not the full guide — a channel message can't hold it, and this is just an orientation pointer:
+Otherwise (exactly one channel newly paired), compose a short welcome in the operator's configured `language` (`config.json`), in your own voice, so the owner has something the moment the bot can reach them. Not the full guide, just an orientation pointer covering: they can talk to you anytime in plain language; when you have a suggestion or need a decision you will ask, and yes, later, or no is enough; `/pause` stops you until `/resume` (both must start with a slash); you track AI spend and warn when it nears any configured limit; if you go quiet or something is confusing, they should reach whoever set you up (who also has the full written guide). No file paths or internal jargon: it's the owner's first message, and the only slash commands allowed are the five control commands `/pause`, `/stop`, `/resume`, `/snooze`, `/status`. Send it on stdin:
 
 ```bash
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit - <<'HERMIT_WELCOME'
-Hi — I'm connected here now.
-
-A few basics:
-- Talk to me anytime, in plain language.
-- If I have a suggestion or need a decision, I'll ask, and you can just reply yes, later, or no.
-- Send /pause to stop me and /resume to continue — they have to start with a slash, and pausing really stops me until you send /resume.
-- I track what I spend on AI usage and will tell you if it's getting close to any limit that's set.
-- If I ever go quiet, or something's confusing, reach out to whoever set me up for you — they can also give you the full written guide.
+<the composed welcome>
 HERMIT_WELCOME
 ```
-
-No file paths or internal jargon in this text — it's the owner's first message. The only slash commands allowed are the five control commands `/pause`, `/stop`, `/resume`, `/snooze`, `/status`; every other slash command stays out.
 
 Use this send as the post-hatch delivery confirmation and report it explicitly in the summary. On success: "Test message sent — check <channel> and tell me if it didn't arrive." If the send fails, don't block setup: "Channel paired, but the test message didn't arrive (`<error>`) — check the pairing before relying on this channel."

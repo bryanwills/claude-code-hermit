@@ -9,18 +9,12 @@ Runs a structural cost audit over the last 7 days of `cost-log.jsonl` and delive
 ## Invocation mode
 
 - **Manual (no arguments):** reply only to the invoking terminal or channel conversation.
-- **Automated (`--maintainer`):** produce the full technical report and send it as a maintainer-tier
-  notice. Existing routine/proactive invocations without the flag retain this behavior for backward
-  compatibility, but new routine configuration should pass `--maintainer` explicitly.
-
-## Step 0 — Channel reply
-
-On a channel-arrived message without `--maintainer` (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool.
-Otherwise, do not send a channel reply in Step 0; proceed and deliver the result via Step 2 (terminal/manual) or Step 3 (maintainer notice).
+- **Automated (`--maintainer`, or any routine/proactive invocation):** produce the full technical
+  report and send it as a maintainer-tier notice.
 
 ## Step 1 — Run the analyzer
 
-On a channel-tagged turn without `--maintainer` (Step 0 detected a `<channel source="...">` tag), run
+On a channel-tagged turn without `--maintainer` (the inbound prompt contains a `<channel source="...">` tag), run
 the plain-language mode instead of the full breakdown — a channel operator asking "why is my bill
 high" shouldn't get raw token-category jargon:
 
@@ -40,27 +34,25 @@ Capture stdout. If the output starts with "No cost data" or "No spend recorded y
 
 **Terminal:** the script output is already formatted and capped at 1500 characters. Relay it verbatim. Don't summarize, reformat, or add commentary — the output is the report.
 
-**Channel (`--plain` output):** the script output is already plain language and jargon-free — no `cache_read`/`cache_write`/token-type labels, no session IDs, no `PROP-`/`S-NNN`, no slash commands. Relay it **translated into the operator's language** if the inbound message wasn't in English. Translation only — add no commentary and don't reintroduce token-category detail.
+**Channel (`--plain` output):** reply through that channel's reply tool. The script output is already plain language and jargon-free — no `cache_read`/`cache_write`/token-type labels, no session IDs, no `PROP-`/`S-NNN`, no slash commands. Relay it **translated into the operator's language** if the inbound message wasn't in English. Translation only — add no commentary and don't reintroduce token-category detail.
 
 ## Step 3 — Channel delivery
 
-When `$ARGUMENTS` contains `--maintainer`, deliver the report through the operator's channel.
-For backward compatibility, do the same when the invocation is clearly from an existing routine or
-proactive prompt without the flag (i.e., not from a direct operator conversation). Spend detail is
+When `$ARGUMENTS` contains `--maintainer` (or the invocation is a routine/proactive prompt rather than
+a direct operator conversation), deliver the report through the operator's channel. Spend detail is
 maintainer-tier by definition, so send it as the `maintainer` leg only (no `client` leg):
 
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
 ```
-with `{"maintainer": "<report>"}` on stdin. On a technical install with no maintainer chat configured, `sendOperatorNotice`'s default `fallback: "client"` puts it in the primary chat — today's behavior. On a `non-technical` install with no maintainer chat, the report goes to `SHELL.md` Findings and no chat sees it (fail-closed on spend disclosure). If nothing was delivered, follow § Operator Notification's fallback (push if enabled, log to Findings).
+with `{"maintainer": "<report>"}` on stdin. On a technical install with no maintainer chat configured, `sendOperatorNotice`'s default `fallback: "client"` puts it in the primary chat. On a `non-technical` install with no maintainer chat, the report goes to `SHELL.md` Findings and no chat sees it (fail-closed on spend disclosure). If nothing was delivered, follow § Operator Notification's fallback (push if enabled, log to Findings).
 
 To set a preferred channel, add `"primary": "<channel-name>"` inside `channels` in `config.json`.
 
 ## Notes
 
-- **Scheduling:** this skill doesn't self-register a routine. To run it weekly, add
-  `claude-code-hermit:cost-reflect --maintainer` via `/claude-code-hermit:hermit-settings` — a
-  Sunday 22:00 cadence (`0 22 * * 0`) before weekly-review works well.
+- **Scheduling:** this skill doesn't self-register a routine. To run it on a schedule, add
+  `claude-code-hermit:cost-reflect --maintainer` as a routine via `/claude-code-hermit:hermit-settings`.
 - **What it measures:** token-type cost composition (cache_read / cache_write / output / input), per-model breakdown (shown when ≥2 models appear, e.g. Sonnet main + Haiku heartbeat), cold-start turns (context warm-ups with no prior cache hit), and per-session cost attribution. For week-over-week totals and autonomy trends, use `/claude-code-hermit:hermit-evolution` instead.
 - **`--plain` mode** (channel-tagged turns only): today's spend vs. a trailing-7-day typical day, drivers named by work (not token type), spend-cap status, and a one-line notional-dollars caveat. No token categories, session IDs, or internal IDs.
 - **Non-technical installs** (`config.operator_profile === 'non-technical'`): a client-chat spend question never reaches this skill, since `channel-responder` deflects it with a plain "handled by your provider" reply. Spend figures stay maintainer-side (terminal, maintainer chat, weekly review), so a channel-tagged run here is expected only from a maintainer-audience surface.

@@ -22,6 +22,7 @@ const sessionClose = read('skills', 'session-close', 'SKILL.md');
 const reflect = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
 const reflectRef = read('skills', 'reflect', 'reference.md');
 const judge = read('agents', 'reflection-judge.md');
+const triage = read('agents', 'proposal-triage.md');
 const hatch = read('skills', 'hatch', 'SKILL.md');
 const proposalCreate = read('skills', 'proposal-create', 'SKILL.md');
 
@@ -191,8 +192,8 @@ describe('observations ledger phrases', () => {
     expect(judge).toContain('Artifact verification');
   });
 
-  test('judge: covered-by-memory exemption for ledger graduates', () => {
-    expect(judge).toContain('never suppressed `covered-by-memory`');
+  test('triage: covered-by-memory exemption for ledger graduates', () => {
+    expect(triage).toContain('never suppressed `covered-by-memory`');
   });
 
   test('hatch: seeds observations.jsonl', () => {

@@ -41,7 +41,7 @@ Multiple candidates may be passed in one invocation.
 
 ## Your private memory
 
-Your own `MEMORY.md` is auto-injected into your context by the platform. It holds hollow-evidence shapes you have learned across invocations — terse heuristics keyed to suppress codes (`no-evidence`, `no-sessions`, `covered-by-memory`): citation patterns that consistently fail to resolve, classes of candidates whose sessions never describe the claimed pattern. Use them to calibrate your evidence verification in §1.
+Your own `MEMORY.md` is auto-injected into your context by the platform. It holds hollow-evidence shapes you have learned across invocations — terse heuristics keyed to suppress codes (`no-evidence`, `no-sessions`): citation patterns that consistently fail to resolve, classes of candidates whose sessions never describe the claimed pattern. Use them to calibrate your evidence verification in §1.
 
 **Guardrail:** private memory may sharpen judgment but must never be the sole basis for a SUPPRESS or DOWNGRADE. Every verdict must be independently justified by §§ 0–2 — if you cannot point to a concrete failure there, the verdict is ACCEPT regardless of what your private memory holds.
 
@@ -49,25 +49,23 @@ Your private memory is invisible to the operator. Do not quote it in verdict lin
 
 ## For Each Candidate
 
-Reason carefully about each candidate's evidence and tier in your thinking before emitting its verdict — keep that reasoning out of the response. This batch gates what reaches the proposal pipeline.
-
 ### 0. Evidence Source dispatch
 
 Check `Evidence Source:` first — it overrides the session-based flow.
 
 **If `Evidence Source: scheduled-check/*` or `Evidence Source: operator-request`:**
 - Skip §§ 0.5 and 1 entirely (recurrence is not required for this source type).
-- Run § 1.5 (Memory cross-check), then go to § 2 Tier check.
+- Go to § 2 Tier check.
 - Emit the verdict with the appropriate source tag: `(scheduled-check)` or `(operator-request)`.
 
 **If `Evidence Source: settled-memory`** (eval-runner ownership-signal candidate — a settled operator endpoint recorded in memory):
 - Skip §§ 0.5 and 1 (recurrence is not required; the recorded endpoint declaration is the human initiation).
-- **Quote check (required):** the evidence must cite a memory topic filename and the verbatim endpoint line. Grep that file for the quoted line (bounded — never Read the memory dir whole). Found → run § 1.5, then § 2. Missing file or line → `SUPPRESS: <title> — no-evidence: quoted endpoint not found in cited memory file`.
+- **Quote check (required):** the evidence must cite a memory topic filename and the verbatim endpoint line. Grep that file for the quoted line (bounded — never Read the memory dir whole). Found → go to § 2. Missing file or line → `SUPPRESS: <title> — no-evidence: quoted endpoint not found in cited memory file`.
 - Emit the verdict tagged `(settled-memory)`.
 
 **If `Artifact:` cites `state/observations.jsonl`:**
 - Skip §§ 0.5, 1, and 1.6 (the ledger is the evidence; reports do not restate sub-threshold patterns).
-- Run § 1.4, then § 1.5, then go to § 2 Tier check.
+- Run § 1.4, then go to § 2 Tier check.
 
 **Otherwise** (`archived-session` or `current-session`, or field absent): continue to § 0.5.
 
@@ -99,17 +97,11 @@ A session "confirms" the pattern if:
 **Observations ledger.** When an `Artifact:` line cites `state/observations.jsonl` (the path reflect's ledger graduation uses), verify the ledger instead of requiring each session report to restate the pattern — sub-threshold patterns live only in the ledger by design:
 
 - Never `Read` the ledger whole — it grows without bound (the 30-day pruner keeps a pattern's full history while any row is fresh). Use the Grep tool on `.claude-code-hermit/state/observations.jsonl` (content mode, `head_limit: 200`), searching for the **quoted JSON field**: `"pattern":"<label>"`. Two reasons it is spelled that way, both of which otherwise produce a false `no-evidence`: labels are free text and may contain regex metacharacters (`(`, `[`, `+`, `?`) that make a bare search error or miss, so escape them; and a bare substring lets `foo` match a sibling `foo-v2` row. From those matches only, confirm every `session_id` in the candidate's cited `Sessions:` list appears on at least one matching line. (The graduation threshold is operator-configured; the judge stays config-agnostic by verifying the cited evidence exists, not by re-counting the threshold.)
-- **Verified** → this substitutes for the per-report pattern confirmation in §1; proceed to §1.5.
+- **Verified** → this substitutes for the per-report pattern confirmation in §1; proceed to § 2.
 - **Missing file, no matching pattern, or cited session missing from ledger** → `SUPPRESS: <title> — no-evidence: artifact does not confirm citation`.
 - **Output hit `head_limit: 200`** → say so rather than concluding from a truncated view: a hot label can have more rows than the cap, and the cited session may sit past it. Emit `ACCEPT` only for sessions confirmed in what you saw, and append ` (evidence-capped)` to the verdict line so the truncation is visible; if the cited sessions are not all confirmed within the cap, that is `SUPPRESS ... no-evidence` with the same suffix.
 
-**Other machine-written artifacts (the §0.5 efficiency path).** When the `Artifact:` line cites `.claude/cost-log.jsonl` or `state/proposal-metrics.jsonl`, verify the citation with a bounded check — these files grow without bound, so never `Read` them whole. Use the Grep tool on the cited file to confirm it contains the cited value or measurement (the specific entries, amounts, or counts the candidate claims); a count-mode match ≥ 2 satisfies recurrence — the same waste measured ≥2 times in the file. For a claimed aggregate with no literal string to match, Grep for its components in content mode with `head_limit: 200` and confirm from those matches only. Verified → proceed to §1.5/§2 and emit a plain `ACCEPT: <title>` verdict (no source tag — this candidate carries no session evidence; the bare form is the closest grammar fit, not an archived-session claim). Missing file or cited value not found → `SUPPRESS: <title> — no-evidence: artifact does not contain cited value`.
-
-### 1.5 Operator memory cross-check
-
-Read the operator's `MEMORY.md` (the operator-facing index of `- [title](file) — description` entries — distinct from your own private memory, which is auto-injected). Read each topic file whose title or description keyword-matches the candidate. Match against the file's `name`, `description`, body, `Why:`, and `How to apply:` fields. If memory already records the operator decision, preference, or pattern this candidate would surface, suppress with code `covered-by-memory`, quote the matching memory line in the reason, and include the source filename (e.g. `[memory: feedback_simplify_no_bypass.md]`) so the operator can locate and revise it if stale.
-
-**Exemption:** a candidate carrying an `Artifact:` reference to `state/observations.jsonl` is never suppressed `covered-by-memory`. The ledger is the recurrence store these candidates graduate from, not operator memory — recording there is how graduation works, not evidence the pattern is already handled. Likewise a consolidation candidate — one relocating operator-endpoint content from memory or duplicated prose into the skill owning the task (`settled-memory` source, or a `skill-preference:*` ledger graduation) — is not covered by the memory recording that content: the memory is the decision record; the candidate targets the operative home. Candidates on the §0.5 efficiency path (`Artifact:` citing `cost-log.jsonl` or `proposal-metrics.jsonl`) are **not** exempt: the normal `covered-by-memory` check applies and may suppress them when memory already records the operator's decision about the cited costs.
+**Other machine-written artifacts (the §0.5 efficiency path).** When the `Artifact:` line cites `.claude/cost-log.jsonl` or `state/proposal-metrics.jsonl`, verify the citation with a bounded check — these files grow without bound, so never `Read` them whole. Use the Grep tool on the cited file to confirm it contains the cited value or measurement (the specific entries, amounts, or counts the candidate claims); a count-mode match ≥ 2 satisfies recurrence — the same waste measured ≥2 times in the file. For a claimed aggregate with no literal string to match, Grep for its components in content mode with `head_limit: 200` and confirm from those matches only. Verified → proceed to § 2 and emit a plain `ACCEPT: <title>` verdict (no source tag — this candidate carries no session evidence; the bare form is the closest grammar fit, not an archived-session claim). Missing file or cited value not found → `SUPPRESS: <title> — no-evidence: artifact does not contain cited value`.
 
 ### 1.6 Provenance weighting
 
@@ -146,7 +138,6 @@ SUPPRESS (<source>): <title> — <code>: <reason>          # other sources
 **Canonical suppress codes** (use exactly these strings — no others):
 - `no-evidence` — cited sessions don't contain the pattern
 - `no-sessions` — `Sessions: none` with no bypass source
-- `covered-by-memory` — auto-memory already records this decision/preference/pattern
 
 ## Output Format
 
