@@ -26,8 +26,10 @@
 - The `/hatch` confirm preview renders as a single markdown table — chosen answers echoed verbatim plus template-derived defaults tagged `(default)` — ending with a `/hermit-settings` pointer. The final report is now minimal: agent-name headline, warn-only disk audit (missing artifacts surface as fixable warnings instead of a full file table), next steps, and a config-reference link.
 - The `/hatch` OPERATOR.md questionnaire drops the testing question and asks a single follow-up after the four core ones: CI/CD quirks when a CI config was found, team shape otherwise.
 - The midnight-adjacency guard on hygiene compaction shrinks from 2 hours to the 10-minute auto-close lull, and applies only when `post_close_clear` is on. The compact tier stays live through the evening operator window instead of going dark for 8% of the day.
+- The weekly review runs its topic-page check and channel-log consolidation in one runner dispatch instead of two; the runner files its own memory and topic-page candidates in its isolated context, and the main session only marks the reviewed rows, prunes, and logs one Findings line naming what was filed.
 
 ### Fixed
+- The weekly review publishes its artifact page again. The skill named only the config key `weekly_review`, so the render call was guessed and failed on an unknown page id; it now names `artifact.ts render weekly` literally.
 - An always-on session start no longer asks what to work on when no task is known; the session stays idle until the channel, a routine, or a queued task starts the next one.
 - `/hatch` seeds `sessions/SHELL.md` from the template, so a hermit's first boot resumes idle like every later boot instead of opening a task-less `in_progress` session that only the 12h auto-close would clear.
 - A turn that re-invokes an already-loaded skill bills to its routine, heartbeat or channel source instead of `other`. Claude Code writes a companion entry rather than a second copy of the skill body, and cost attribution stopped its prompt walk there instead of on the wake behind it.
