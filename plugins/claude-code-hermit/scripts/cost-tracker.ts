@@ -328,7 +328,16 @@ function readLastTurnUsage(transcriptPath: string): Json {
   // cap ever will, and a turn still unbounded at 8MB keeps the 'other' downgrade.
   const RETRY_TAIL_BYTES = 8 * 1024 * 1024; // 8MB
   const turn = scanTurnInTail(transcriptPath, TAIL_BYTES);
-  if (turn && turn.boundaryMissed) return scanTurnInTail(transcriptPath, RETRY_TAIL_BYTES) ?? turn;
+  if (turn && turn.boundaryMissed) {
+    const wide = scanTurnInTail(transcriptPath, RETRY_TAIL_BYTES);
+    // Usage and source come from the wider read; `tailLines` stays narrow. Its one
+    // consumer, maybeDeriveSurface, takes the NEWEST compact_boundary in the lines it is
+    // handed, so widening can only reach boundaries OLDER than 512KB would ever see —
+    // the ones its own comment assumes were recorded on an earlier Stop. Since
+    // state/context-surface.json is folder-wide, replaying one rewrites the record (and
+    // its prev chain) backwards to a stale boundary.
+    return wide ? { ...wide, tailLines: turn.tailLines } : turn;
+  }
   return turn;
 }
 
