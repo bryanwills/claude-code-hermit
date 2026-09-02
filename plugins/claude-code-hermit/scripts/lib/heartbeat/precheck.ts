@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { currentHHMM, todayYMD, parseDuration } from '../time';
 import { readSettledConfig } from '../config-read';
-import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts, MICRO_PREFIX } from '../alert-state';
+import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts, MICRO_PREFIX, PROPOSAL_PREFIX } from '../alert-state';
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
 import { isProposalScanItem } from '../heartbeat-items';
 import { isPaused } from '../pause';
@@ -399,16 +399,27 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
 
   // Clean-recheck damper: suppress re-evaluation for clean_recheck_cooldown after a tick
   // concludes nothing actionable. Sits after all change-detecting gates so stale/micro-
-  // proposal/suppressed-digest still pre-empt it. Active alerts (unsuppressed or resolving)
-  // bypass the damper so a firing alert is never masked. `null` cooldown disables it.
+  // proposal/suppressed-digest still pre-empt it. Two bypasses, both bounded:
+  //   - a resolving entry (consecutive_clean > 0), so the hysteresis window is never masked;
+  //   - a `proposal-pending:*` entry that has not reached suppression yet. These keys bake a
+  //     PROP-NNN id into their text, so their first observation is silenced by design
+  //     (alert-update's silentOnNewKeys) — the count===6 suppression transition is the
+  //     operator's FIRST notice that a decision is waiting. Damping the five ticks in
+  //     between would push that notice from ~5 ticks out to ~5 cooldown windows. This
+  //     mirrors the micro-proposal gate above, which pre-empts the damper on the same
+  //     terms and self-limits the same way.
+  // An unsuppressed entry of any other kind needs no bypass — it already notified on first
+  // observation, and every apply rewrites last_clean_eval_at while a genuinely new key nulls it.
+  // `null` cooldown disables it.
   if (hbConfig.clean_recheck_cooldown !== null) {
-    const hasActiveFollowup = alertValues.some(
-      (e: Json) => e && (e.suppressed !== true || (e.consecutive_clean ?? 0) > 0));
+    const bypassDamper = Object.entries(alerts).some(([key, e]: [string, Json]) => e
+      && ((e.consecutive_clean ?? 0) > 0
+        || (key.startsWith(PROPOSAL_PREFIX) && e.suppressed !== true)));
     const lastCleanEvalAt = typeof alertState.last_clean_eval_at === 'string'
       ? new Date(alertState.last_clean_eval_at).getTime()
       : NaN;
     const cooldownMs = parseDuration(hbConfig.clean_recheck_cooldown, 6 * 3600000);
-    if (!hasActiveFollowup && !isNaN(lastCleanEvalAt) && lastCleanEvalAt <= now &&
+    if (!bypassDamper && !isNaN(lastCleanEvalAt) && lastCleanEvalAt <= now &&
         (now - lastCleanEvalAt) < cooldownMs) {
       return 'OK';
     }
