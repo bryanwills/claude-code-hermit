@@ -2394,7 +2394,8 @@ function cmdInstall(): void {
   } else if (process.platform === 'darwin') {
     const launchAgents = path.join(os.homedir(), 'Library', 'LaunchAgents');
     fs.mkdirSync(launchAgents, { recursive: true });
-    const plistName = `com.hermit.watchdog.${name}.plist`;
+    const label = `com.hermit.watchdog.${name}`;
+    const plistName = `${label}.plist`;
     const plistPath = path.join(launchAgents, plistName);
     const firstRegistration = !fs.existsSync(plistPath);
 
@@ -2429,7 +2430,14 @@ function cmdInstall(): void {
     // unloads the LaunchAgent executing the very restart it was told to make,
     // cutting the tick off mid-notice. A byte-identical render means there is
     // nothing to re-register, so leave the running job alone.
-    if (REAL_WORLD.files.readText(plistPath) === plist) {
+    //
+    // Matching content alone is not enough: the write lands before the load, so a
+    // failed load (or an operator's own unload) leaves the file intact with nothing
+    // running, and re-running install is the documented repair for exactly that.
+    // Ask launchctl whether the label is live before skipping, after the cheap
+    // content compare so a drifted plist never pays for the subprocess.
+    const labelLoaded = () => spawnSync('launchctl', ['list', label], { stdio: 'ignore' }).status === 0;
+    if (REAL_WORLD.files.readText(plistPath) === plist && labelLoaded()) {
       console.log(`[watchdog] LaunchAgent unchanged: ${plistName}`);
       enableAfterInstall(firstRegistration);
       return;

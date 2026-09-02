@@ -3000,13 +3000,23 @@ test('cmdInstall unloads the launchd label before loading it', () => {
 
 const FAKE_DARWIN = path.join(import.meta.dir, 'helpers', 'fake-darwin.ts');
 
-/** Record every launchctl invocation instead of touching the host's real one. */
-function writeFakeLaunchctl(h: Hermit): string {
+/** Record every launchctl invocation and track whether the label is loaded, so
+ *  `list` answers the way the real one does: exit 0 loaded, non-zero not. */
+function writeFakeLaunchctl(h: Hermit): { log: string; loadedMarker: string } {
   const log = path.join(h.dir, 'launchctl-calls.log');
+  const loadedMarker = path.join(h.dir, 'launchctl-loaded');
   const stub = path.join(h.fakeBin, 'launchctl');
-  fs.writeFileSync(stub, `#!/usr/bin/env bash\necho "$@" >> "${log}"\nexit 0\n`);
+  fs.writeFileSync(stub, `#!/usr/bin/env bash
+echo "$@" >> "${log}"
+case "$1" in
+  load) touch "${loadedMarker}" ;;
+  unload) rm -f "${loadedMarker}" ;;
+  list) [[ -e "${loadedMarker}" ]] || exit 113 ;;
+esac
+exit 0
+`);
   fs.chmodSync(stub, 0o755);
-  return log;
+  return { log, loadedMarker };
 }
 
 /** Run `install` with process.platform forced to darwin and HOME sandboxed. */
@@ -3020,7 +3030,7 @@ const plistIn = (home: string) =>
 
 test('launchd first install → writes the plist, unloads then loads', withHermit(async (h) => {
   writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
-  const log = writeFakeLaunchctl(h);
+  const { log } = writeFakeLaunchctl(h);
   await withFakeHome(async (home) => {
     const r = await darwinInstall(h, home);
     expect(r.exitCode).toBe(0);
@@ -3041,25 +3051,49 @@ test('launchd first install → writes the plist, unloads then loads', withHermi
 // An unconditional reload there unloads the LaunchAgent running that very tick.
 test('launchd re-install with an unchanged plist → no launchctl call', withHermit(async (h) => {
   writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
-  const log = writeFakeLaunchctl(h);
+  const { log } = writeFakeLaunchctl(h);
   await withFakeHome(async (home) => {
     await darwinInstall(h, home);
-    const afterFirst = readLog(log);
+    const afterFirst = readLog(log).trim().split('\n').length;
     const before = fs.readFileSync(plistIn(home)[0], 'utf-8');
 
     const r = await darwinInstall(h, home);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('LaunchAgent unchanged');
     expect(r.stdout).not.toContain('Installed LaunchAgent');
-    expect(readLog(log)).toBe(afterFirst);
+    // The liveness probe is allowed; re-registering the running job is not.
+    const probes = readLog(log).trim().split('\n').slice(afterFirst);
+    expect(probes).toHaveLength(1);
+    expect(probes[0]).toStartWith('list ');
     expect(fs.readFileSync(plistIn(home)[0], 'utf-8')).toBe(before);
     expect(readJson(configPath(h)).watchdog.scheduler_enabled).toBe(true);
   });
 }));
 
+// An identical plist does not prove the label is registered: the write lands before
+// the load, so a failed load or an operator's own unload leaves the file intact with
+// nothing running. Re-running install is the documented repair for exactly that.
+test('launchd re-install with the label unloaded → reloads despite the identical plist', withHermit(async (h) => {
+  writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
+  const { log, loadedMarker } = writeFakeLaunchctl(h);
+  await withFakeHome(async (home) => {
+    await darwinInstall(h, home);
+    fs.rmSync(loadedMarker);
+    const afterFirst = readLog(log).trim().split('\n').length;
+
+    const r = await darwinInstall(h, home);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Installed LaunchAgent');
+    expect(r.stdout).not.toContain('LaunchAgent unchanged');
+    const calls = readLog(log).trim().split('\n').slice(afterFirst);
+    expect(calls.some((c) => c.startsWith('load '))).toBe(true);
+    expect(fs.existsSync(loadedMarker)).toBe(true);
+  });
+}));
+
 test('launchd re-install after the plist drifts → rewrites and reloads', withHermit(async (h) => {
   writeConfig(h, '2h', { enabled: false, scheduler_enabled: false });
-  const log = writeFakeLaunchctl(h);
+  const { log } = writeFakeLaunchctl(h);
   await withFakeHome(async (home) => {
     await darwinInstall(h, home);
     const plistPath = plistIn(home)[0];
