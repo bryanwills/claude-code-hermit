@@ -116,8 +116,8 @@ describe('drainHarnessCommand guards', () => {
   test('an absent tmux session leaves no skill relay file', withDir(async (dir) => {
     fs.writeFileSync(path.join(stateDir(dir), 'runtime.json'), JSON.stringify(LIVE_RUNTIME));
     writePendingCommand(hermitRoot(dir), {
-      command: '/code-review',
-      arg: 'low',
+      command: '/doctor',
+      arg: null,
       by: 'operator',
       reply_to: { source: 'telegram', chat_id: '12345' },
       requested_at: new Date().toISOString(),

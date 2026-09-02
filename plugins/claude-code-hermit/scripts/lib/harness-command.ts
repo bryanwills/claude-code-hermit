@@ -31,13 +31,6 @@ const BARE_COMMANDS = new Set(['/compact', '/clear', '/doctor', '/checkup']);
 /** Commands requiring exactly one argument. */
 const ARG_COMMANDS = new Set(['/model', '/effort', '/permission-mode', '/advisor']);
 
-const SKILL_ARG_RE = /^(--fix|--comment|--post|#?[A-Za-z0-9._/@\[\]-]{1,64})$/;
-const SKILL_FLAGS = new Set(['--fix', '--comment', '--post']);
-const SKILL_ARG_COMMANDS = new Map([
-  ['/code-review', '/code-review'],
-  ['/review', '/code-review'],
-]);
-
 export type ParsedCommand = { command: string; arg: string | null };
 
 /**
@@ -59,12 +52,11 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
   // splitting on whitespace below cannot fold an embedded `\n/clear` into an argument.
   if (/[\r\n]/.test(trimmed)) return null;
 
-  // Split on any whitespace run, not a literal space: `/code-review low  --comment`,
-  // a tab-separated form, and a mobile keyboard's non-breaking space must all reach the
-  // same grammar as the single-spaced one. Splitting on ' ' left an empty (or
-  // whitespace-bearing) token that failed the arg shape, so the whole command parsed as
-  // null — and a null here is not a refusal, it is a fallthrough to the model, which is
-  // exactly what skillCommandRefusal exists to take out of the loop.
+  // Split on any whitespace run, not a literal space: `/model  opus`, a tab-separated
+  // form, and a mobile keyboard's non-breaking space must all reach the same grammar as
+  // the single-spaced one. Splitting on ' ' left an empty (or whitespace-bearing) token
+  // that failed the arg shape, so the whole command parsed as null — and a null here is
+  // not a refusal, it is a fallthrough to the model.
   const parts = trimmed.split(/\s+/);
   const command = parts[0].toLowerCase();
 
@@ -77,32 +69,7 @@ export function parseHarnessCommand(body: string): ParsedCommand | null {
     const arg = parts[1];
     return ARG_RE.test(arg) ? { command, arg } : null;
   }
-  const skillCommand = SKILL_ARG_COMMANDS.get(command);
-  if (skillCommand) {
-    const args = parts.slice(1);
-    // `--post` parses on purpose so skillCommandRefusal can relay a reason; every other
-    // flag stays unparsed (the message falls through as an ordinary channel slash command).
-    if (!args.every((arg) => SKILL_ARG_RE.test(arg) && (!arg.startsWith('--') || SKILL_FLAGS.has(arg)))) return null;
-    return { command: skillCommand, arg: args.length > 0 ? args.join(' ') : null };
-  }
   return null;
-}
-
-/** Why a parsed skill command cannot be delivered, or null when it can. */
-export function skillCommandRefusal(parsed: ParsedCommand): string | null {
-  if (parsed.command !== '/code-review' || !parsed.arg) return null;
-  const tokens = parsed.arg.split(' ').map((token) => token.toLowerCase());
-  const outwardWriteFlag = tokens.find((token) => token === '--post' || token === '--comment');
-  if (outwardWriteFlag) {
-    return `${outwardWriteFlag} writes a comment to the pull request under the operator's GitHub account, which is not a chat-authorizable action; run the review without it.`;
-  }
-  if (!tokens.includes('ultra')) return null;
-  return 'ultra opens an interactive launch dialog that nobody in chat can answer and can start a cloud-billed run; choose low, medium, or high.';
-}
-
-/** Whether this canonical command is a chat-relayed skill command. */
-export function isSkillCommand(command: string): boolean {
-  return command === '/doctor' || command === '/code-review';
 }
 
 // --- Permission-mode targets ----------------------------------------------
