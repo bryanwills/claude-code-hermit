@@ -2068,7 +2068,7 @@ async function main(): Promise<void> {
   // Reuses step 3's verdict when it ran; falls back to a fresh check when it didn't —
   // 'idle' (the path this fix enables) and any other unlisted session_state. The fallback
   // is cached back, not discarded: on an idle arc step 3 never ran, so this is the tick's
-  // only has-session call and steps 5 and 6 below reuse it rather than spawning tmux again.
+  // only has-session call and step 5 below reuses it rather than spawning tmux again.
   sessionAlive = sessionAlive ?? tmuxSessionAlive(sessionName);
   if (sessionAlive) {
     // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
@@ -2104,12 +2104,12 @@ async function main(): Promise<void> {
 
   // Supervision-only scope. An idle session arc suppresses step 4 — the wedge nudge and the
   // pane-frozen restart, the two tiers that act on a pane whose intent the watchdog cannot
-  // read. It does NOT suppress the re-arm injections in steps 5 and 6: a hermit rests at
+  // read. It does NOT suppress the re-arm injections in step 5: a hermit rests at
   // 'idle' between arcs, so that is exactly where a dead heartbeat/routine Monitor has to be
   // recovered from, and until this it was not — the only recovery was the daily
   // heartbeat-restart anchor, a CronCreate that dies with the process it was registered in,
-  // i.e. in the same event that kills the monitors. Those steps carry their own guards
-  // (pause, dead tmux, operator-recency, a per-monitor damper) and inject only slash commands
+  // i.e. in the same event that kills the monitors. That step carries its own guards
+  // (pause, dead tmux, operator-recency, a per-monitor damper) and injects only slash commands
   // whose skills are stop-then-start idempotent, so a re-arm cannot stack duplicate Monitors.
   //
   // "Never resurrect a deliberately-stopped hermit" still holds: hermit-stop stamps
