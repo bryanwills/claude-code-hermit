@@ -9,6 +9,11 @@
  * path and never enters the calling context.
  *
  * Usage: bun collect-evidence.ts [--hermit-dir DIR] [--out FILE]
+ *                                [--from PROP-NNN] [--status proposed,deferred]
+ *
+ * --from narrows the audit to proposals numbered NNN and up; --status to the
+ * listed open statuses. Both scope the bundle itself, so the evidence floor
+ * moves with them and the subagent never sees out-of-scope proposals.
  * Prints: OK|<out-path>|<open-count>|<bullet-count>|<commit-count>|<cutoff>
  *         NONE|no-open-proposals
  */
@@ -26,6 +31,13 @@ function arg(flag: string, fallback: string): string {
   const i = process.argv.indexOf(flag);
   return i > -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
+
+const fromArg = arg("--from", "");
+const minId = fromArg ? Number(fromArg.replace(/\D/g, "")) : 0;
+const statusArg = arg("--status", "");
+const statuses = statusArg
+  ? new Set(statusArg.split(",").map((s) => s.trim()).filter((s) => OPEN_STATUSES.has(s)))
+  : OPEN_STATUSES;
 
 const repoRoot = execSync("git rev-parse --show-toplevel").toString().trim();
 const hermitDir = arg("--hermit-dir", join(repoRoot, ".claude-code-hermit"));
@@ -86,9 +98,11 @@ for (const name of readdirSync(proposalsDir).sort()) {
   if (!name.endsWith(".md")) continue;
   const text = readFileSync(join(proposalsDir, name), "utf8");
   const fm = frontmatter(text);
-  if (!OPEN_STATUSES.has(fm.status)) continue;
+  if (!statuses.has(fm.status)) continue;
+  const id = (fm.id || basename(name, ".md")).replace(/-\d{6}$/, "").slice(0, 8);
+  if (Number(id.replace(/\D/g, "")) < minId) continue;
   open.push({
-    id: (fm.id || basename(name, ".md")).replace(/-\d{6}$/, "").slice(0, 8),
+    id,
     file: name,
     title: fm.title || "(untitled)",
     status: fm.status,

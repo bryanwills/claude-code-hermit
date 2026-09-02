@@ -11,20 +11,24 @@ This skill reconciles the queue against what actually shipped. It is deliberatel
 
 ## Usage
 
-`/stale-proposals [--no-apply]`
+`/stale-proposals [--no-apply] [--from PROP-NNN] [--status proposed,deferred]`
 
 - **No arg** — full audit; auto-resolves unambiguous matches, asks about everything else.
 - **`--no-apply`** — report only, write nothing. Use when you want to see the verdicts before trusting them.
+- **`--from PROP-NNN`** — only proposals numbered NNN and up. Operator phrasings like "just PROP-100+" or "the newer ones" mean this flag.
+- **`--status <list>`** — only the listed open statuses. "Only the proposed ones" means `--status proposed`.
+
+Scope flags go to the collector in Step 1, so the bundle itself is narrowed and the evidence floor moves with it. Never scope by prose in the subagent contract: a hint the subagent may or may not honour is how an in-scope proposal goes unreviewed.
 
 Natural companion to `/release-status` when the queue has drifted, and worth a run before any release where proposals get reviewed.
 
 ## Step 1 — Collect the evidence
 
 ```bash
-bun .claude/skills/stale-proposals/scripts/collect-evidence.ts
+bun .claude/skills/stale-proposals/scripts/collect-evidence.ts [--from PROP-NNN] [--status <list>]
 ```
 
-This writes a bundle containing every open proposal (with an excerpt of its Problem section) alongside every CHANGELOG bullet and first-parent commit dated after the oldest open proposal — nothing can have shipped before the proposal that asked for it existed, so that date is a sound floor.
+This writes a bundle containing every in-scope open proposal (with an excerpt of its Problem section) alongside every CHANGELOG bullet and first-parent commit dated after the oldest open proposal — nothing can have shipped before the proposal that asked for it existed, so that date is a sound floor.
 
 Output is `OK|<bundle-path>|<open>|<bullets>|<commits>|<cutoff>`, or `NONE|no-open-proposals` (report "Queue is clean — no open proposals." and stop).
 
@@ -54,6 +58,20 @@ Give it the bundle path and this contract verbatim:
 > Use `AGED` only when there is no shipping evidence at all AND no commit in the history touches the proposal's subject area since it was created — an untouched subject is what "inert" actually means. Age alone is not staleness; a good idea nobody got to yet is `OPEN`.
 >
 > Be conservative. `OPEN` is the correct answer for most proposals and costs nothing; a wrong `SHIPPED-STRONG` silently closes live work.
+>
+> Emit the lines in the bundle's order, and finish with a final `DONE|<count>` line so a truncated reply is visible as one.
+
+## Step 2b — Check completeness
+
+A subagent enumerating dozens of items can drop one and still look finished — its reply ends in a tidy list and nothing downstream notices. The bundle is the source of truth for what was in scope, so diff against it, never against the subagent's own count.
+
+List the in-scope IDs without reading the bundle (one short line per proposal, so this stays bounded):
+
+```bash
+grep -o '^### PROP-[0-9]*' <bundle-path> | cut -c5-
+```
+
+Compare that set against the IDs in the verdict lines. For any ID with no verdict, re-dispatch the Step 2 contract once, scoped to exactly those IDs ("emit a line for each of these IDs and no others"), and merge the result. Anything still missing after the retry is reported in Step 5 under **No verdict** — it is never treated as `OPEN`, because `OPEN` claims the proposal was reviewed and this one was not.
 
 ## Step 3 — Apply the strong matches
 
@@ -100,6 +118,9 @@ Confirmed with you (<n>)
   PROP-006 — dismissed
 
 Still open (<n>)
+
+No verdict (<n>) — left untouched, re-run to audit
+  PROP-155
 ```
 
-Keep it to what changed. The queue's remaining contents are already one `/proposal-list` away, and re-listing them here is the same noise this skill exists to remove.
+Omit the **No verdict** block when Step 2b came back complete. Keep it to what changed. The queue's remaining contents are already one `/proposal-list` away, and re-listing them here is the same noise this skill exists to remove.
