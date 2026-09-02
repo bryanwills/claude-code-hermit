@@ -3944,3 +3944,44 @@ describe('settings_permissions validation', () => {
     expect(out.errors.some((e: string) => e.includes('settings_permissions.allow[2]') && e.includes('empty string'))).toBe(true);
   });
 });
+
+// ---------- session-start: no interactive ask on an always-on boot ----------
+//
+// An always-on hermit has no operator at the terminal, so steps 9b and 10 asking
+// "What should I work on next?" / "What should I help with?" produce a question
+// nothing can answer: ask-gate.ts denies the AskUserQuestion outright, and the
+// model then re-asks over the channel, waking the operator to answer a question
+// the heartbeat's Idle Agency was already going to settle. The guard is prose in
+// a skill, so only a contract keeps a later edit from dropping it.
+describe('session-start always-on boot never asks', () => {
+  const sessionStart = read(path.join(SKILLS, 'session-start', 'SKILL.md'));
+
+  // indexOf's -1 would slice silently rather than throw, so a renamed heading has to
+  // fail on its own terms: extractBlock guards the outer 9b-to-11 bound, and the inner
+  // split gets the same treatment. Without it a drifted step-10 heading leaves step9b
+  // holding both steps, which passes this contract for the wrong reason.
+  function steps(): { step9b: string; step10: string } {
+    const region = extractBlock(
+      sessionStart,
+      '\n9b. If resuming an idle session',
+      '\n11. Once I know what to work on',
+    );
+    const splitAt = region.indexOf('\n10. If starting a new session');
+    expect(splitAt, "step 10's heading is missing from the 9b-11 region").toBeGreaterThan(-1);
+    return { step9b: region.slice(0, splitAt), step10: region.slice(splitAt) };
+  }
+
+  test('the region and both steps are located', () => {
+    const { step9b, step10 } = steps();
+    expect(step9b).toContain('What should I work on next?');
+    expect(step10).toContain('What should I help with?');
+  });
+
+  test('each ask step carries the always_on guard', () => {
+    const { step9b, step10 } = steps();
+    for (const [name, step] of [['9b', step9b], ['10', step10]] as const) {
+      expect(step, `step ${name} lost its always_on guard`).toContain('`config.always_on` is `true`');
+      expect(step, `step ${name} lost its do-not-ask directive`).toContain('do **not** ask');
+    }
+  });
+});

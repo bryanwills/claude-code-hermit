@@ -24,6 +24,7 @@
 - The midnight-adjacency guard on hygiene compaction shrinks from 2 hours to the 10-minute auto-close lull, and applies only when `post_close_clear` is on. The compact tier stays live through the evening operator window instead of going dark for 8% of the day.
 
 ### Fixed
+- An always-on session start no longer asks what to work on when no task is queued; the session stays idle and the heartbeat's idle agency picks the task instead.
 - The heartbeat's clean-recheck damper now arms as soon as an alert is recorded, not after five fires. An already-recorded alert firing again sends nothing, so each repeat cost a full evaluation for news the operator already had; on a 30m heartbeat with the default 6h cooldown that is one wake per window instead of one per tick. A `proposal-pending:*` alert keeps bypassing the damper until it suppresses, since its suppression message is the operator's first notice that a proposal is waiting.
 - The watchdog's `/compact` and `/clear` tiers, and `/hermit-doctor`'s context check, now judge the resident's own Claude Code session instead of whichever session in the folder wrote last. Cost rows carry `cc_session_id` and a `guest` flag; the tiers read only matching non-guest rows, dropping the `sessions/.status.json` fallback (#916).
 - The cost-tracker duplicate-turn guard compares `cc_session_id`, so a second session's newer row in the same folder no longer suppresses this session's cost row (#916).
