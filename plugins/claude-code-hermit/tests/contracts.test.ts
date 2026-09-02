@@ -1909,15 +1909,32 @@ describe('weekly-review delegation contract', () => {
     const block = (text: string) => extractBlock(text, '<!-- weekly-review-eval-schema:start -->', '<!-- weekly-review-eval-schema:end -->');
     expect(block(refFile)).toBe(block(skill));
   });
+
+  // The renderer's page id is `weekly` (artifact.ts PAGES); `weekly_review` is
+  // only the config/state key. A skill that names the gate but not the verb
+  // leaves the model to guess, and the guess fails closed with no page published.
+  test('SKILL.md names the weekly render verb literally', () => {
+    expect(skill).toContain('scripts/artifact.ts render weekly .claude-code-hermit');
+    expect(skill).not.toMatch(/render (weekly_review|weekly-review)/);
+  });
+
+  // One dispatch covers both specs: a second one costs another CLAUDE.md
+  // re-seed plus two more main turns at full resident context.
+  test('SKILL.md dispatches the runner exactly once', () => {
+    const hits = skill.match(/Dispatch `claude-code-hermit:skill-eval-runner`/g) || [];
+    expect(hits.length).toBe(1);
+    expect(skill).toContain('skills/weekly-review/consolidation-reference.md');
+  });
 });
 
 // ============================================================
 // weekly-review consolidation delegation contract (PROP-010)
 //
-// weekly-review dispatches the channel-log consolidation step (Step 4) to
-// skill-eval-runner, read-only — it must never write memory/compiled/the log
-// itself (agents/skill-eval-runner.md contract). Guards against: losing the
-// fully-qualified agent reference, and producer/consumer schema drift between
+// weekly-review folds channel-log consolidation into its single
+// skill-eval-runner dispatch, and the runner files its own candidates in that
+// isolated context (the main session only marks, prunes, and logs the receipt).
+// Guards against: losing the fully-qualified agent reference, a silent revert to
+// caller-applied writes, and producer/consumer schema drift between
 // consolidation-reference.md and SKILL.md.
 // ============================================================
 
@@ -1935,9 +1952,10 @@ describe('weekly-review consolidation delegation contract', () => {
     expect(block(refFile)).toBe(block(skill));
   });
 
-  test('consolidation-reference.md states the runner never writes (defers to caller)', () => {
-    expect(refFile).toContain('read-only');
-    expect(refFile.toLowerCase()).toContain('never write');
+  test('consolidation-reference.md has the runner file its own candidates', () => {
+    expect(refFile).not.toContain('read-only');
+    expect(refFile).toContain('applied_row_ids');
+    expect(refFile).toContain('failed_row_ids');
   });
 });
 
