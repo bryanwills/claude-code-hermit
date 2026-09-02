@@ -45,6 +45,9 @@ describe('hatch-scaffold.ts', () => {
     for (const f of ['OPERATOR.md', 'HEARTBEAT.md', 'knowledge-schema.md']) {
       expect(fs.existsSync(path.join(hermit, f))).toBe(true);
     }
+    // first boot resumes idle instead of opening a task-less arc
+    expect(fs.readFileSync(path.join(hermit, 'sessions', 'SHELL.md'), 'utf8'))
+      .toBe(fs.readFileSync(path.join(TEMPLATES, 'SHELL.md.template'), 'utf8'));
     for (const f of [
       'alert-state.json', 'micro-proposals.json', 'reflection-state.json',
       'routine-metrics.jsonl', 'proposal-metrics.jsonl', 'observations.jsonl',

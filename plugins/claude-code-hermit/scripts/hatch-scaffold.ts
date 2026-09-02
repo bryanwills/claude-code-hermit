@@ -15,8 +15,8 @@
  *   - REFRESH (hermit-owned pristine, operator never hand-edits): overwritten on
  *     --reinit=true, created on fresh. = templates/* and bin/* .
  *   - PRESERVE (operator-editable or accumulated state): created only if absent,
- *     in BOTH modes. = OPERATOR.md, HEARTBEAT.md, knowledge-schema.md, and every
- *     state/* file (reflection-state, alert-state, micro-proposals, *.jsonl).
+ *     in BOTH modes. = OPERATOR.md, HEARTBEAT.md, knowledge-schema.md,
+ *     sessions/SHELL.md, and every state/* file (reflection-state, alert-state, micro-proposals, *.jsonl).
  *   - NEVER created: state/pending-close.json (lazily created by daily-auto-close).
  * On a FRESH hatch every class is created, so behaviour is identical to today;
  * the classes only diverge on --reinit.
@@ -110,6 +110,11 @@ seedIfAbsent(path.join(hermit, 'HEARTBEAT.md'), () =>
 );
 seedIfAbsent(path.join(hermit, 'knowledge-schema.md'), () =>
   copy(path.join(TEMPLATES, 'knowledge-schema.md.template'), path.join(hermit, 'knowledge-schema.md')),
+);
+// A template SHELL.md is what every session close leaves behind; seeding it puts
+// the first boot on the same idle fast path instead of `open`ing a task-less arc.
+seedIfAbsent(path.join(hermit, 'sessions', 'SHELL.md'), () =>
+  copy(path.join(TEMPLATES, 'SHELL.md.template'), path.join(hermit, 'sessions', 'SHELL.md')),
 );
 
 // --- PRESERVE: state files (accumulated runtime/learning/proposal data) ---
