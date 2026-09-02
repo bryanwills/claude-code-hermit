@@ -19,7 +19,7 @@ end. Implementation, commit, and PR happen outside this skill.
 
 An issue or proposal is a hypothesis, not a spec. Most issues here are filed by AI agents
 (hermit-scribe): intent is usually right, framing often is not (stale paths, first-idea fix,
-oversized scope, premise already fixed, or no bug at all). Try to falsify the premise before
+oversized scope, premise already fixed, or no bug at all). Falsify the premise before
 planning anything. If it survives, judge separately whether the change is worth its cost.
 
 Two failure modes, both disqualifying:

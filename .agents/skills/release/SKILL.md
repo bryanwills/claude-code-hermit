@@ -38,7 +38,7 @@ Run before anything else. Abort the release if any step fails.
    ```bash
    claude plugin validate plugins/<slug> 2>&1
    ```
-   Abort on any error other than `Unrecognized keys` — that one means an incomplete hermit-meta.json migration; fix the migration elsewhere, then resume. Background on the migration lives in each plugin's `CONTRIBUTING.md`.
+   Abort on any error.
 
 2. **Run test suites for the target plugin.** Detect the convention and dispatch:
    - If `plugins/<slug>/tests/run-all.sh` exists (bash entrypoint, used by dev/fitness/scribe/forge):
@@ -54,7 +54,7 @@ Run before anything else. Abort the release if any step fails.
 
    If any test fails, stop and fix before releasing.
 
-3. **Run the release-auditor agent** to cross-reference plugin integrity. Pass it the plugin path explicitly so it knows which plugin to audit:
+3. **Run the plugin-validator agent in `release` mode** (`plugin-validator <slug> release`) to cross-reference plugin integrity. Pass it the plugin slug explicitly so it knows which plugin to audit:
    - Skills in `plugins/<slug>/CLAUDE.md` / `state-templates/CLAUDE-APPEND.md` match actual `plugins/<slug>/skills/` directories
    - Agents in `plugins/<slug>/CLAUDE.md` match actual `plugins/<slug>/agents/` files
    - Hook scripts referenced in `plugins/<slug>/hooks/hooks.json` exist in `plugins/<slug>/scripts/`
@@ -91,7 +91,7 @@ Compare its version to `plugin.json`. If `plugin.json` is already ahead (e.g. ta
 
 **Normal path:** Read `plugins/<slug>/.claude-plugin/plugin.json` for the current version and `plugins/<slug>/CHANGELOG.md` for recent entries.
 
-Review the uncommitted or recently committed changes (`git diff` and/or `git log` since the last `<slug>--v<version>` tag — fall back to `<slug>-v<version>` for pre-migration releases, then `v<version>` for the legacy unprefixed scheme).
+Review the uncommitted or recently committed changes (`git diff` and/or `git log` since the last `<slug>--v<version>` tag).
 
 Decide the bump level:
 - **Patch** (0.0.X) — bug fixes, behavioral changes via updated instructions, small additions
@@ -127,7 +127,7 @@ No `config.json` changes required.
 
 **Template constraints (enforce these):**
 
-1. **Narrative bullets (Added / Changed / Fixed)** — canonical format lives in root `CLAUDE.md` §Commits; enforce it here: a plain sentence-case line under the category header, no `**component:**` prefix and no leading Fixed/Added verb (the header carries the category). Backticks for commands/paths/flags. Target 1–2 lines, ~40 words max. If a bullet wants to grow longer, the surplus belongs in the PR description, not here.
+1. **Narrative bullets (Added / Changed / Fixed)** — canonical format lives in root `CLAUDE.md` §Commits; enforce it here: a plain sentence-case line under the category header, no `**component:**` prefix and no leading Fixed/Added verb (the header carries the category). Backticks for commands/paths/flags. Target 1–2 lines. If a bullet wants to grow longer, the surplus belongs in the PR description, not here.
    - Do NOT list internal refactors, helper extractions, test scaffolding, or renamed variables — those are visible in `git diff`.
    - **Recovery procedures, migration shell snippets, and breaking-change steps belong in `### Upgrade Instructions`, never in the narrative bullet.** Write a tight summary ("changed default X to Y") and let that section carry the imperative steps — `hermit-evolve` reads them step-by-step.
 
@@ -154,7 +154,7 @@ For each new skill, agent, or hook added since the last release of this plugin, 
 - `plugins/<slug>/docs/skills.md` (if the doc exists)
 - Hook descriptions in `plugins/<slug>/CLAUDE.md` if the hook surface area changed
 
-Skip the step entirely if nothing was added. The release-auditor (Step 1.3) covers structural integrity; this step is about narrative references.
+Skip the step entirely if nothing was added. The plugin-validator (Step 1.3) covers structural integrity; this step is about narrative references.
 
 ### 5. Bump version in all locations
 
@@ -245,8 +245,6 @@ awk -v ver="$VERSION" '
 gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
 rm "$NOTES_FILE"
 ```
-
-**Note on legacy tags:** the core plugin (`claude-code-hermit`) historically released under the unprefixed `v<X.Y.Z>` format (e.g. `v1.0.18`) and the prefixed single-dash format (e.g. `claude-code-hermit-v1.0.20`). Those tags remain in place. From this point forward, all plugins use the double-dash format (`<slug>--v<X.Y.Z>`). Existing single-dash release tags were backfilled with double-dash aliases in April 2026.
 
 ### 10. Report
 

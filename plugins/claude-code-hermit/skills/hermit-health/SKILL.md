@@ -31,7 +31,7 @@ Read the following (gracefully skip any file that doesn't exist). The nine sourc
 
 **Proposal queue:** Count proposals with `status: proposed` (pending operator review), `status: accepted` (in flight, not yet resolved), and `status: in_progress`. If all zero: "Queue empty."
 
-**Routine engagement:** From `config.json.routines`, list each routine and its schedule. For the `reflect` routine, use `reflection-state.json → last_reflection` to show when it last ran; also append counter info from `reflection-state.json → counters`: apply the reflect-line rules below, then append the suppress-mix suffix if any `judge_suppress_by_code` code has a non-zero count: `suppress mix — no-evidence:N, covered-by-memory:N, no-sessions:N` (omit codes with count 0; omit the suffix entirely when all counts are 0 or the map is absent). For other routines, report schedule and enabled state — per-routine last-run tracking is not yet available.
+**Routine engagement:** From `config.json.routines`, list each routine and its schedule. For the `reflect` routine, use `reflection-state.json → last_reflection` to show when it last ran; also append counter info from `reflection-state.json → counters`: apply the reflect-line rules below, then append the suppress-mix suffix if any `judge_suppress_by_code` code has a non-zero count: `suppress mix — no-evidence:N, covered-by-memory:N, no-sessions:N` (omit codes with count 0; omit the suffix entirely when all counts are 0 or the map is absent). For every routine, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts health .claude-code-hermit` once and take last run, fire count and skip reason from its rows.
 
 **Reflect-line rules** (applied to the reflect routine bullet):
 - If `counters` is absent: omit the counter clause entirely

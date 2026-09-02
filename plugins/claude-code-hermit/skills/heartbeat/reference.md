@@ -6,9 +6,7 @@ are currently firing, and a human-readable label for each. All bookkeeping (dedu
 resolution, the daily digest, monitoring lines, operator notifications, `last_clean_eval_at`, and
 `heartbeat_result`) is derived deterministically by `heartbeat.ts alert-state` from the returned firing set —
 the subagent never authors any of it. This split exists because a small model (`heartbeat.model`,
-haiku by default) intermittently fabricated that bookkeeping when it was asked to author it directly
-(issue #594): inventing schema fields, garbling keys, and marking a still-pending micro-proposal
-`suppressed:true` (which would have silently hidden a genuine pending operator decision).
+haiku by default) asked to author that bookkeeping fabricates fields and flips pending flags.
 
 This file is read only on the EVALUATE path, once the precheck determines a full LLM tick is warranted.
 
@@ -67,9 +65,7 @@ Both keys are required. `firing` is `[]` when nothing is currently true — this
 case; do not omit the key or return anything else in its place. `self_eval_updates` is `{}` outside the
 every-20-ticks trigger (see below) — never omit it.
 
-**Do NOT implement fixes — only report.**
-
-**Exception:** Auto-close (`AUTO_CLOSE` precheck verdict, SKILL.md step 2) is the one fix heartbeat is authorized to apply. It runs as a terminal branch in the MAIN SESSION before the subagent is dispatched: the session has gone idle past the actionable threshold and archiving it is the correct response, not an alert. The subagent never handles AUTO_CLOSE.
+**Report only; any fix is the main session's.**
 
 ## Self-Evaluation (every 20 ticks)
 

@@ -33,21 +33,21 @@ The calling skill passes the following scalars in the dispatch prompt (do not re
    (highest numbered) and read its YAML frontmatter: `date`, `tags`, `task` (Working-on/Goal), `status`,
    and `next_start` (Next Start Point). Populate `report_summary` from those fields. A report whose
    frontmatter lacks the `next_start` key is legacy — read it in full instead and extract the same
-   fields from `## Summary`/`## Overview`, as before. Set `report_summary: null` if
+   fields from `## Summary`/`## Overview`. Set `report_summary: null` if
    `context_recovery` is `false`.
 5. Set `sessions_today: []`, `findings: []`, `tomorrow: []`.
 
 ### evening
 
 1. Sort `.claude-code-hermit/sessions/S-*-REPORT.md` by filename descending. Collect reports
-   where the `date:` YAML frontmatter field matches `today` (or, for pre-Observatory reports,
-   where `## Summary` contains that date). Read each collected report's YAML frontmatter; a
+   where the `date:` YAML frontmatter field matches `today` (or, for legacy reports with no
+   `date:` frontmatter, where `## Summary` contains that date). Read each collected report's YAML frontmatter; a
    report whose frontmatter lacks the `next_start` key is legacy — read its body in full instead.
 2. For each collected report: produce one entry in `sessions_today` with `session: S-NNN` and
    a one-line `summary` (the `task` field; for a legacy report, the Working-on/Goal line or first
    sentence of `## Summary`).
 3. Aggregate `findings`: for a legacy report, collect bullet points from its `## Findings` section
-   (or `## Key Findings`) as before. For a non-legacy report, Grep the file for `^## (Key )?Findings`
+   (or `## Key Findings`). For a non-legacy report, Grep the file for `^## (Key )?Findings`
    with a bounded `-A` to extract just that section rather than reading the full body. Deduplicate
    across reports. Populate as a list of strings.
 4. Aggregate `tomorrow`: collect the `next_start` field from each collected report; for a legacy
@@ -67,7 +67,7 @@ The calling skill passes the following scalars in the dispatch prompt (do not re
    YAML frontmatter: `date`, `tags`, `task` (Working-on/Goal), `status`, `next_start` (Next Start
    Point). Populate `report_summary` from those fields.
 2. A report whose frontmatter lacks the `next_start` key is legacy — read it in full instead and
-   extract the same fields from `## Summary`/`## Overview`, as before.
+   extract the same fields from `## Summary`/`## Overview`.
 3. Set `sessions_today: []`, `findings: []`, `tomorrow: []`,
    `pending_proposals: []`, `operator_priorities: []`, `queued_work: []`.
 

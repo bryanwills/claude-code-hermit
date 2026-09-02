@@ -75,4 +75,4 @@ Skip the offer entirely when results were thin or the answer restated a single s
 
 ## Scope
 
-Searches `.claude-code-hermit/sessions/`, `.claude-code-hermit/compiled/`, `.claude-code-hermit/proposals/`, and the episodic channel log (`state/channel-log.sqlite`, PROP-010) via `search.ts`, plus the loaded auto-memory index + topic files. The channel log is feature-detected — a hermit with no channel activity yet simply contributes nothing from that source. Read-only except the operator-confirmed Step 3 write-back — never moves or deletes files.
+Searches `.claude-code-hermit/sessions/`, `.claude-code-hermit/compiled/`, `.claude-code-hermit/proposals/`, and the episodic channel log (`state/channel-log.sqlite`) via `search.ts`, plus the loaded auto-memory index + topic files. The channel log is feature-detected — a hermit with no channel activity yet simply contributes nothing from that source. Read-only except the operator-confirmed Step 3 write-back — never moves or deletes files.

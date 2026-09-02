@@ -91,7 +91,7 @@ Use the core `state-templates/SHELL.md.template` as `sessions/SHELL.md`. Initial
 
 ### Workspace trust
 
-Plugin hooks are disabled until Claude trusts the exact project directory. A normal prompt is not proof of trust: Claude 2.1.220 can reach it for a new `/tmp` project while recording `hasTrustDialogAccepted: false` and silently skipping every hook.
+Plugin hooks are disabled until Claude trusts the exact project directory. A normal prompt is not proof of trust: Claude Code can reach it for a new `/tmp` project while recording `hasTrustDialogAccepted: false` and silently skipping every hook (observed on 2.1.220, 2026-07-27; still true on 2.1.258).
 
 Before each formal group launch:
 

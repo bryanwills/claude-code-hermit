@@ -63,7 +63,7 @@ questions: [
 **Quick-mode contract — security non-negotiables.** Quick mode never bulk-accepts third-party plugins, never weakens the safelist, never skips the public-repo pre-flight, and never bypasses the write-time assertion. Those gates exist because that's the line where defaults stop being safe. Quick only auto-defaults the choices that have one obviously-correct answer (auth, networking, build-now) and the SAFE plugin batch (claude-plugins-official + gtapps/* — already vetted by the safelist). Minting the long-lived setup token is never one of those auto-defaulted choices — in both Quick and Advanced it's a post-login question at Step 8.
 
 Branch on the choice for the rest of the skill:
-- **Advanced** → run today's flow unchanged from Step 2.
+- **Advanced** → continue at Step 2, asking every question.
 - **Quick** → apply Quick defaults silently throughout (Step 2 auth+network, Step 7b SAFE mirror, Step 7b.packages safelisted-source auto-accept, Step 8 build-now). The Quick-specific behavior is called out inline at each downstream step.
 
 ### 2. Ask operator and analyze project
@@ -116,7 +116,7 @@ Do NOT set `AGENT_HOOK_PROFILE` in `config.json` `env` — leave it unset. The s
 
 ### 4. Template inputs (rendering deferred to Step 7b.6)
 
-> **Execution moved.** `scripts/render-docker-templates.ts` renders the three base files at Step 7b.6 — AFTER plugin resolution (Step 7b) and apt-package union (Step 7b.packages) have finalized `docker.packages`, and Step 7 has configured channels. Rendering earlier consumed an empty package list. Do NOT read or write template files here; just collect the semantic inputs the render call needs.
+> `scripts/render-docker-templates.ts` renders the three base files at Step 7b.6, after plugin resolution (Step 7b) and the apt-package union (Step 7b.packages) have finalized `docker.packages` and Step 7 has configured channels. Here, only collect the semantic inputs the render call needs; do not read or write template files yet.
 
 The render script derives every `{{PLACEHOLDER}}` internally and fails loud (writes nothing) if any survives. Assemble this input object as choices resolve, to be piped on stdin at Step 7b.6:
 
@@ -182,7 +182,7 @@ For each configured channel:
 
 Mirror host-installed plugins into the container so the container starts with the same plugin set the operator already curated — including any domain hermit (e.g. `claude-code-homeassistant-hermit`) that may have triggered this setup flow.
 
-> **SECURITY-CRITICAL STEP.** Every plugin written here is auto-installed on container boot with whatever `permission_mode` the operator chose — for `bypassPermissions` hermits, this means full unrestricted execution. Do not shortcut the safelist, validation, or deselection rules below. If you find yourself about to skip one, stop and re-read this section.
+> **SECURITY-CRITICAL STEP.** Every plugin written here is auto-installed on container boot with whatever `permission_mode` the operator chose — for `bypassPermissions` hermits, this means full unrestricted execution.
 
 1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-siblings.ts "$(pwd)" --dedupe` to enumerate plugins. It emits a JSON array of the project-or-local + enabled entries (each carrying `plugin`, `id`, `marketplace_name`, `scope`, `installPath`), with user-scope, managed, disabled, and cross-project entries already dropped, and deduped by `(plugin, marketplace_name)` keeping the `local` entry over `project` (local is the override scope in Claude Code's overlay model). Different marketplaces remain distinct entries.
 
@@ -210,13 +210,13 @@ Mirror host-installed plugins into the container so the container starts with th
        )
    ```
 
-   The `marketplace` value passed to `is_safelisted` is always the `org/repo` resolved in step 7b.3 — never the marketplace name and never the slug from the `<plugin>@<name>` id. If you're about to pass `claude-code-homeassistant-hermit` (a slug) to `is_safelisted`, you skipped the lookup — go back to step 3.
+   The `marketplace` value passed to `is_safelisted` is always the `org/repo` resolved in step 7b.3 — never the marketplace name and never the slug from the `<plugin>@<name>` id.
 
    Split into two groups:
    - **SAFE** — `is_safelisted(marketplace)` is `True`. Examples: `anthropics/claude-plugins-official`, `gtapps/claude-code-homeassistant-hermit`.
    - **THIRD-PARTY** — everything else. Examples: `obra/superpowers-marketplace`, any non-`gtapps` `org/repo`, any locally-added marketplace without a GitHub source.
 
-   The SAFE group can be accepted as a batch. The THIRD-PARTY group **must be confirmed one-by-one**. Do not bulk-accept third-party plugins for the operator's convenience — the host list is the **candidate** set, not the trusted set.
+   The SAFE group can be accepted as a batch. The THIRD-PARTY group **must be confirmed one-by-one** — the host list is the **candidate** set, not the trusted set.
 
 6. **Present the choices in plain text first**, so the operator sees the full list before any prompt (`AskUserQuestion` caps options at 4, so we cannot enumerate plugins in a single question):
 
@@ -241,7 +241,7 @@ Mirror host-installed plugins into the container so the container starts with th
    - On `Pick each`: loop through the SAFE plugins; for each, ask a 2-option yes/no (`"Include"` / `"Skip"`). Only include the ones the operator confirms.
    - On `Skip all`: add nothing from this group.
 
-8. **For the THIRD-PARTY group**, loop through each plugin individually. For each, ask a 2-option `AskUserQuestion` (header: `"Third-party"`) — `"Include"` / `"Skip"`. Include only when the operator explicitly confirms. Never batch-accept this group.
+8. **For the THIRD-PARTY group**, loop through each plugin individually. For each, ask a 2-option `AskUserQuestion` (header: `"Third-party"`) — `"Include"` / `"Skip"`. Include only when the operator explicitly confirms.
 
 8b. **Public-repo pre-flight (for every non-`claude-plugins-official` entry that the operator has tentatively confirmed in steps 7 or 8).** From the host, run an unauthenticated check against `https://github.com/<org>/<repo>` (e.g. `curl -fsI -o /dev/null -w '%{http_code}' https://github.com/<org>/<repo>`). If the response is not `200` (i.e. `404`, redirect-to-login, or network error), the repo is private or unreachable. Tell the operator:
 
@@ -252,7 +252,7 @@ Mirror host-installed plugins into the container so the container starts with th
 9. After both groups are processed: any plugin not explicitly confirmed must **not** be written to `docker.recommended_plugins`. Write only confirmed entries with `enabled: true`.
 
 10. **Write-time assertion — run this before handing entries to step 7c.** For each confirmed entry:
-    - Assert `marketplace` matches `^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$` (has a slash; is `org/repo`). Uniform across official and third-party entries — official stores `anthropics/claude-plugins-official`, no more literal-name shortcut.
+    - Assert `marketplace` matches `^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*$` (has a slash; is `org/repo`). Uniform across official and third-party entries — official stores `anthropics/claude-plugins-official`.
     - If any entry fails: **stop, do not write config.** Re-derive the failing entry's `org/repo` from the `claude plugin marketplace list --json` output (look up the marketplace name from the plugin's `id` to get the `repo`). If the lookup cannot produce a valid `org/repo`, prompt the operator (same prompt as step 3). Re-run the assertion. Only proceed to step 7c once every entry passes.
 
 11. If the filtered list is **empty** (no extras installed on the host), skip silently — no prompt, no entries written.
@@ -263,7 +263,7 @@ Record the confirmed selection as `docker.recommended_plugins`. Each entry has:
 ```
 The entrypoint resolves the canonical marketplace name at boot via `claude plugin marketplace list --json` (no need to store it on the entry), adds the marketplace if missing, and installs every enabled entry on first boot. See [Recommended Plugins](../../docs/recommended-plugins.md) for the full policy.
 
-**Legacy config note.** Re-running this skill against a pre-v1.0.34 config rebuilds `docker.recommended_plugins` from scratch from the current host plugin list — legacy entries (e.g. `marketplace == "claude-plugins-official"` literal) are replaced cleanly. The entrypoint warns and skips any legacy entry whose `marketplace` is not an `org/repo` until the operator re-runs this skill once.
+This step always rebuilds `docker.recommended_plugins` from the current host plugin list; existing entries are replaced, not merged. The entrypoint warns and skips any entry whose `marketplace` is not an `org/repo` until this skill is re-run.
 
 **On container-side `claude plugin marketplace add` / `plugin install` failure (either in entrypoint logs or when re-running the command manually after boot):** if the error mentions SSH auth, HTTPS credentials, `gh` not found, or `.gitconfig` read-only, **stop immediately — do not attempt workarounds inside the container.** The container has no SSH client, no `gh` CLI, and `.gitconfig` is bind-mounted read-only by design. Iterating on `GIT_CONFIG_NOSYSTEM`, `git config --global url...insteadOf`, or similar is guaranteed to fail and wastes the operator's time. Surface the error to the operator verbatim and move on — no retry unless the operator changes something host-side (makes the repo public, mirrors it, etc.) and asks to retry.
 
@@ -324,7 +324,7 @@ The `manifestSeed` payload deliberately hashes the **on-disk rendered** entrypoi
 
 ### 7c. Write Docker settings to config.json
 
-**Pre-write gate for `docker.recommended_plugins`:** Re-run the step 7b.10 assertion on every entry. If any fails, do **not** write — return to step 7b.3 to re-resolve. This gate is the final backstop; do not bypass it even "just this once."
+**Pre-write gate for `docker.recommended_plugins`:** Re-run the step 7b.10 assertion on every entry. If any fails, do **not** write — return to step 7b.3 to re-resolve.
 
 Write all collected Docker settings to config.json in a single update:
 - `docker.network_mode` (from Step 2)
@@ -391,7 +391,7 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
 ```
 
 **If "Yes — build now":**
-1. Pre-create all channel state directories on the host so Docker doesn't create them as root on first mount — if a bind-mount source doesn't exist, `docker compose up` creates it owned by root, making it unwritable by the `claude` user inside the container. For each configured channel run `mkdir -p .claude.local/channels/<plugin>`. Then run `mkdir -p .claude-code-hermit/state && touch .claude-code-hermit/state/.setup-mode` to put the container in setup mode (suppresses the bootstrap prompt so channel pairing commands land on an idle REPL, not a busy session turn), and `rm -f .claude-code-hermit/state/.boot-conflict` — the entrypoint only clears that marker at its own §4b guard, minutes into the boot, so a marker left by an earlier inert container would otherwise read as this boot's verdict. Then run `docker compose -f docker-compose.hermit.yml up -d --build` — builds and starts. Help fix errors (daemon not running, network, disk). Do **not** use `.claude-code-hermit/bin/hermit-docker up` here — its trailing echo prints attach/detach instructions that look like imperative commands and can mislead the LLM running this skill into executing them mid-setup. The final hand-off at step 9 provides the canonical attach guidance.
+1. Pre-create all channel state directories on the host so Docker doesn't create them as root on first mount — if a bind-mount source doesn't exist, `docker compose up` creates it owned by root, making it unwritable by the `claude` user inside the container. For each configured channel run `mkdir -p .claude.local/channels/<plugin>`. Then run `mkdir -p .claude-code-hermit/state && touch .claude-code-hermit/state/.setup-mode` to put the container in setup mode (suppresses the bootstrap prompt so channel pairing commands land on an idle REPL, not a busy session turn), and `rm -f .claude-code-hermit/state/.boot-conflict` — the entrypoint only clears that marker at its own §4b guard, minutes into the boot, so a marker left by an earlier inert container would otherwise read as this boot's verdict. Then run `docker compose -f docker-compose.hermit.yml up -d --build` — builds and starts. Help fix errors (daemon not running, network, disk). Use `docker compose` directly here rather than `.claude-code-hermit/bin/hermit-docker up`: its trailing attach/detach echo is operator hand-off text, which step 9 delivers at the right moment.
 2. **Verify the container stayed running:** Poll `docker compose -f docker-compose.hermit.yml ps --status running --format '{{.Service}}'` every 2s for up to 10s, checking `.claude-code-hermit/state/.boot-conflict` on each tick. If the marker exists, the container is up but **inert**: the entrypoint found a live non-Docker instance owning this project's state and is holding PID 1 without starting claude, so `ps --status running` reports it healthy and every later step (login, trust, pairing) would run against a container with no tmux session. Show the marker's contents, then stop with: "Container is up but inert. Stop the other instance (`.claude-code-hermit/bin/hermit-stop`), then `.claude-code-hermit/bin/hermit-docker restart`." (Step 1's `liveOwner` gate catches this before the build; this poll covers a host hermit restarted mid-wizard.) An absent marker at this point is **not** an all-clear: the entrypoint writes it at §4b, after the credential wait and the first-run plugin install, so on a first boot it cannot exist yet — the first-run acceptance poll below re-checks it once the container has had time to get there. If the service appears and no marker exists — continue to the next sub-section. If it never appears after 10s, run `docker compose -f docker-compose.hermit.yml logs --tail=30 hermit` and show the output. Suggest a targeted fix based on the log:
    - **Daemon not running** → `docker info` errors → start Docker Desktop or `sudo systemctl start docker`, then re-run this skill
    - **Build failure** → read the build error line in the log above; fix the Dockerfile or missing dependency
@@ -438,7 +438,7 @@ Ask with `AskUserQuestion` (header: `"Auth method"`) — **Sign in with claude.a
 ```
 docker compose -f docker-compose.hermit.yml exec -T hermit tmux has-session -t <TMUX_SESSION_NAME>
 ```
-If the session is not ready, keep retrying every 5s until one of two **outcomes** lands, not until a clock runs out: the tmux session appears (continue), or `.claude-code-hermit/state/.boot-conflict` appears (stop). This is where an inert container actually surfaces, since the entrypoint reaches its §4b guard only after the credential wait and the first-run plugin install, well past step 8.2's poll. On the marker, show its contents and stop with the same message step 8.2 uses ("Container is up but inert. Stop the other instance (`.claude-code-hermit/bin/hermit-stop`), then `.claude-code-hermit/bin/hermit-docker restart`."); do not continue to workspace trust or channel pairing. A first run installs plugins over the network, so a slow boot here is normal and a fixed 30s cutoff would misread it as a crash: only give up after 10 minutes with neither outcome, then show the last 30 lines of entrypoint logs (`docker compose logs --tail=30 hermit`) and stop.
+If the session is not ready, retry every 5s until one of two **outcomes** lands: the tmux session appears (continue), or `.claude-code-hermit/state/.boot-conflict` appears (stop). This is where an inert container actually surfaces, since the entrypoint reaches its §4b guard only after the credential wait and the first-run plugin install, well past step 8.2's poll. On the marker, show its contents and stop with the same message step 8.2 uses ("Container is up but inert. Stop the other instance (`.claude-code-hermit/bin/hermit-stop`), then `.claude-code-hermit/bin/hermit-docker restart`."); do not continue to workspace trust or channel pairing. A first run installs plugins over the network, so a slow boot here is normal: give up only after 10 minutes with neither outcome, then show the last 30 lines of entrypoint logs (`docker compose logs --tail=30 hermit`) and stop.
 
 Note: a running tmux session does **not** mean claude has finished booting — it may still be sitting on an acceptance screen waiting for input.
 
@@ -493,7 +493,7 @@ If the token is present, ask if already paired. If not:
    ```
 6. **Default delivery settings** (skip if `"Already paired"` was chosen or pairing was skipped this run):
    1. Use the `Read` tool on `<project_path>/.claude.local/channels/<plugin>/access.json` (host file). If `ackReaction` is already non-empty, skip — preserve operator customization.
-   2. Otherwise use the `Edit` tool to set the `ackReaction` value to `"👀"` while preserving every other key in the file unchanged (read-modify-write a single field — do NOT overwrite the file with a fresh object). The bind-mount makes the change visible inside the container immediately — no tmux round-trip, no LLM turn, no race with the Step 8b shutdown.
+   2. Otherwise use the `Edit` tool to set the `ackReaction` value to `"👀"` while preserving every other key in the file unchanged (read-modify-write a single field — do NOT overwrite the file with a fresh object). The bind-mount makes the change visible inside the container immediately.
    3. Idempotent: re-running docker-setup leaves customized values alone (sub-step 1 short-circuits when `ackReaction` is non-empty).
 7. **Server channel / group chat (optional)** (run even if `"Already paired"` was chosen; skip only if `imessage`, if `"Skip this channel"` was chosen, or if pairing returned `"No response"`):
    1. Ask with `AskUserQuestion` — label and prompt vary by channel:
@@ -538,13 +538,13 @@ Then run, in sequence:
 
 1. `.claude-code-hermit/bin/hermit-docker down` — sends `/session-close --shutdown` via tmux and polls for graceful close up to 60s before removing the container. If it prints "Timed out waiting for graceful close; forcing stop", flag it in the final summary (session that witnessed setup didn't close cleanly — not blocking but worth noting).
 
-2. `docker compose -f docker-compose.hermit.yml up -d` — recreates the container. Do **not** use `hermit-docker up` here for the same LLM-misleading-echo reason as step 8. Docker's named volume preserves credentials, plugins, workspace trust. Bind-mounts preserve `.claude.local/channels/<plugin>/access.json` and `.claude-code-hermit/`.
+2. `docker compose -f docker-compose.hermit.yml up -d` — recreates the container. Use `docker compose` directly, as in step 8, not `hermit-docker up`. Docker's named volume preserves credentials, plugins, workspace trust. Bind-mounts preserve `.claude.local/channels/<plugin>/access.json` and `.claude-code-hermit/`.
 
 3. Re-verify the container stayed running (same poll as step 8.2). If it failed to come back up, run `docker compose -f docker-compose.hermit.yml logs --tail=30 hermit`, show the output, and apply the same targeted hints as step 8.2 (daemon down, build failure, port conflict). Stop — don't proceed to step 9.
 
 Why this step exists: mid-setup, claude REPL starts before plugins are fully enabled and channel pairing completes. The session it was running is a "bootstrap session" full of setup chatter. A clean restart gives the operator a first *real* session with correctly-loaded plugins, fresh tmux state, and no config-time noise.
 
-Why not `hermit-docker restart`: Docker's default stop_grace_period is 10s, which is shorter than the entrypoint's 30-iteration session-close poll — SIGKILL can land mid-close. (We raised `stop_grace_period` to 60s in the compose template, so `restart` is now also safe in principle, but `down+up` gives a recreated container which is stronger: clears ephemeral container-layer state and re-runs the entrypoint from a clean slate.)
+Why `down` + `up` rather than `hermit-docker restart`: a recreated container clears ephemeral container-layer state and re-runs the entrypoint from a clean slate.
 
 ### 8c. Seed permission rules
 
@@ -591,8 +591,6 @@ If something looks wrong, help diagnose — suggest concrete next steps.
 
 ## Notes
 
-**Operator-side invocation block.** Keep this skill model-invocable because the Quick hatch Docker chain calls it. An operator who wants a hard manual-only boundary can set `skillOverrides: "user-invocable-only"` in their Claude Code configuration.
-
 **Why `.hermit` suffix?** The project may already have its own `Dockerfile` / `docker-compose.yml`. Hermit-namespaced files avoid conflicts.
 
 **Customizing the boot: `docker-entrypoint.hermit-local.sh`.** `docker-entrypoint.hermit.sh` is hermit-managed — `hermit-evolve` replaces it whenever upstream changes, so edits there are lost on upgrade (parked as a `.bak`, and re-homed into the sidecar automatically when a baseline is available). The supported place is `<project-root>/docker-entrypoint.hermit-local.sh`, which upgrades never touch. It is **sourced** at two points, with `HERMIT_ENTRY_PHASE` naming which: `pre-boot` (channel dirs exist, env resolved, before plugins install — extra packages, env, mounts) and `pre-launch` (immediately before `hermit-start` — side services, last-second overrides). It inherits `set -euo pipefail`, so a failing command aborts the boot exactly as an in-file edit would: guard anything optional with `|| true`. It lives on the project bind mount, so edits apply on `.claude-code-hermit/bin/hermit-docker restart` with no rebuild.
@@ -607,4 +605,4 @@ If something looks wrong, help diagnose — suggest concrete next steps.
 
 **Why the three hardening stanzas (`no-new-privileges`, `cap_drop`, `pids_limit`)?** Full per-stanza weighting is in [Security — Container Hardening](../../docs/security.md#container-hardening). The only operational consequence while running this skill: an operator extending the container with services on privileged ports (<1024), setuid helpers, or high-PID workloads has to relax the relevant stanza explicitly.
 
-**Want stronger isolation?** v1.0.26 ships an opt-in advanced wizard, `/claude-code-hermit:docker-security`, that adds LAN containment with DNS policy (firewall + DNS sidecar with port-53 redirect for actual enforcement), read-only root filesystem with smoke test, resource bounds with kernel hygiene sysctls, and a boot-time plugin-install audit log. Each toggle is opt-in with honest cost/benefit framing, runs verification against the live container, and is fully reversible. **Note:** the LAN containment toggle is hard-skipped when `docker.network_mode: "host"` is in use — bridge networking required. See [Docker Security](../../docs/docker-security.md).
+**Want stronger isolation?** `/claude-code-hermit:docker-security` is an opt-in wizard that adds LAN containment with DNS policy (firewall + DNS sidecar with port-53 redirect for actual enforcement), a read-only root filesystem with smoke test, resource bounds with kernel hygiene sysctls, and a boot-time plugin-install audit log. Each toggle is verified against the live container and is fully reversible. **Note:** the LAN containment toggle is hard-skipped when `docker.network_mode: "host"` is in use — bridge networking required. See [Docker Security](../../docs/docker-security.md).

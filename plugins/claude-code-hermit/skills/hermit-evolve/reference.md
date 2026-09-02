@@ -68,7 +68,7 @@ Parse stdout as JSON (the "plan"). The plan's `errors` array is the **sole error
 
 **Stale-runtime check (before everything else):** if the plan's `loaded_core_older_than_applied` is `true`, this session loaded an older plugin copy (v`to`) than the version this hermit has already applied (v`from`) — a stale install, not a pending upgrade. Report: "This session is running plugin v<to>, older than this hermit's applied state v<from> — a stale plugin install. hermit-evolve cannot fix it: update the install that resolves to this plugin root, then re-run." **Stop there.** Do not run any other step: Step 7's sibling migrations would apply while Step 9 refuses to stamp, leaving siblings migrated but unstamped and replaying on the next run. Sibling work waits until the install is fixed — sibling stamps stay where they are and re-plan cleanly.
 
-**Version check:** the plan reports `from`, `to`, `up_to_date`, and `work_pending`. If `work_pending` is `false` (core current AND no sibling gap, drift, path-unresolved, or warnings), report "You're up to date (v<to>). Nothing to upgrade." and stop. If `up_to_date` is `true` but `work_pending` is `true` (sibling-only work), announce: "Core is current (v<to>); processing sibling hermits." and run only Steps 7, 8, 9, and 10 — the core-content steps (2 through 6) have no pending work when core is current. (Sibling migrations and CLAUDE-APPEND sync happen inside Step 7.) Otherwise (core has a gap) announce: "Upgrading from v<from> to v<to>." and run all steps.
+**Version check:** the plan reports `from`, `to`, `up_to_date`, and `work_pending`. If `work_pending` is `false` (core current AND no sibling gap, drift, path-unresolved, or warnings), report "You're up to date (v<to>). Nothing to upgrade." and stop. If `up_to_date` is `true` but `work_pending` is `true` (sibling-only work), run only Steps 7, 8, 9, and 10 — the core-content steps (2 through 6) have no pending work when core is current. (Sibling migrations and CLAUDE-APPEND sync happen inside Step 7.) Otherwise (core has a gap) run all steps.
 
 Before entering either the full or sibling-only path, initialize `context_reload_targets` as an empty ordered list. Add a plugin name only after its CLAUDE-APPEND write succeeds; Step 10 uses this list to distinguish instructions that changed on disk from drift or refresh work that was only reported.
 
@@ -80,9 +80,9 @@ bun <plugin_root>/scripts/evolve-finalize.ts .claude-code-hermit snapshot --core
 
 Step 2b migrations write `config.json` (through settings-edit) before the finalizer runs; without this snapshot, the finalizer's audit `before` is taken after those writes and the ledger could only ever show the version stamp and its own defaults merge. It always exits 0 — if it prints `SKIP|…`, continue the upgrade anyway. The finalizer reports which happened as `audit_scope` in Step 9.
 
-### 2. Present the changelog
+### 2. Read the changelog
 
-Present the plan's `changelog_slice` to the operator: "Here's what changed:" followed by the slice. It already contains only the entries in `(from, to]`, oldest-first — no full-file read.
+Read the plan's `changelog_slice`. It already contains only the entries in `(from, to]`, oldest-first — no full-file read. It is input for Step 2b, not output: the report contract has no changelog field.
 
 ### 2b. Execute version migrations
 
@@ -94,6 +94,8 @@ Within `changelog_slice` (already ordered oldest-first), each version entry may 
 4. **Delegated mode:** if a step is interactive (poses an either/or), do not ask. Apply the non-destructive default (e.g. a delete/cleanup offer → keep the file; a single command such as `deny ask-only`) and note the outcome for step 10. If the step has **no safe default**, **defer** — skip it and record a verbatim deferred-migration block per the Delegated mode rules.
 
 The CHANGELOG.md `### Upgrade Instructions` sections are the single source of truth for migrations — do not skip or merely display them. The same pattern applies to sibling-hermit upgrades in Step 7.
+
+Treat `${CLAUDE_PLUGIN_ROOT}` in a CHANGELOG step as `<plugin_root>`.
 
 **Any instruction that changes `.claude-code-hermit/config.json` is applied with settings-edit verbs — never the Edit or Write tool**, whatever wording the instruction uses ("read config.json and set…", "edit config.json", "add the key"). Read with `get`, then write one key per call:
 
@@ -131,7 +133,7 @@ If an active SHELL.md has a `## Plan` section (legacy plan table), note it for t
 
 ### 5. Update templates
 
-`templates_changed` is now a list of classified file objects `{ name, class }` (not bare strings). Each entry represents a file that differs from upstream or is absent. Resolve by class:
+`templates_changed` is a list of classified file objects `{ name, class }`. Each entry represents a file that differs from upstream or is absent. Resolve by class:
 
 - **`missing`**: `templates/<name>` was absent. Copy `<plugin_root>/state-templates/<name>` → `.claude-code-hermit/templates/<name>`. Report: "Restored missing template: `<name>`."
 - **`unmodified`**: operator never customized it (baseline == on-disk, or no manifest entry). Copy upstream over it silently.
@@ -230,8 +232,7 @@ After all validation succeeds, record the new baseline through `manifest-seed.ts
 - **Which files:** every file that was copied, replaced, or restored in Steps 5/5b/5c. Build one `{ "key": "<prefix>/<name>", "file": "<on-disk path of the new content>" }` entry per such file. Prefixes: `templates/` (file `.claude-code-hermit/templates/<name>`), `bin/` (file `.claude-code-hermit/bin/<name>`), and for the entrypoint the literal key `docker/docker-entrypoint.hermit.sh` (file: the project-root `docker-entrypoint.hermit.sh`).
 - **`customized-kept` files:** do NOT include them — the script preserves their existing manifest entry unchanged via foreign-key preservation.
 - **If `manifest_bootstrap` was true:** include the full managed set — every `templates/` and `bin/` file (and the entrypoint, if deployed), hashing whatever is now on-disk after any overwrites. This is the one-time baseline seeding.
-- **Run** `bun <plugin_root>/scripts/manifest-seed.ts .claude-code-hermit` with `{ "pluginVersion": "<plan.to>", "entries": [ ... ] }` on stdin. The script hashes each on-disk file, merges into the existing `files` map — preserving untouched prefixes, sibling-hermit keys, and the `docker/docker-compose.hermit.yml.template` / `docker/Dockerfile.hermit.template` baselines `/docker-setup` records (Step 10 reads them) — and writes `{ "version": 1, "files": { ... } }`. It refuses to overwrite a present-but-corrupt manifest. This replaces the manual "merge into the existing `files` map, never replace wholesale" handling.
-- **Ordering:** run this *after* Step 8 has ensured the plugin permissions, so `bun */scripts/manifest-seed.ts*` is allowed. The files resolved in Steps 5/5b/5c are stable on disk, so deferring the manifest write to after Step 8 does not change the recorded hashes.
+- **Run** `bun <plugin_root>/scripts/manifest-seed.ts .claude-code-hermit` with `{ "pluginVersion": "<plan.to>", "entries": [ ... ] }` on stdin. The script hashes each on-disk file, merges into the existing `files` map — preserving untouched prefixes, sibling-hermit keys, and the `docker/docker-compose.hermit.yml.template` / `docker/Dockerfile.hermit.template` baselines `/docker-setup` records (Step 10 reads them) — and writes `{ "version": 1, "files": { ... } }`. It refuses to overwrite a present-but-corrupt manifest. - **Ordering:** run this *after* Step 8 has ensured the plugin permissions, so `bun */scripts/manifest-seed.ts*` is allowed. The files resolved in Steps 5/5b/5c are stable on disk, so deferring the manifest write to after Step 8 does not change the recorded hashes.
 
 ### 6. Update CLAUDE-APPEND block
 
@@ -254,7 +255,7 @@ The plan's `siblings[]` array is the authoritative list (registry-driven from `_
 For each entry in `plan.siblings`:
 
 - **Version gap (`up_to_date == false`):**
-  - Present: "{name}: upgrading from v{from} to v{to}. Here's what changed:" followed by `changelog_slice` (already bounded to the gap range, oldest-first).
+  - Read the sibling's `changelog_slice` (already bounded to the gap range, oldest-first).
   - **Execute migrations** — within `changelog_slice`, find each version's `### Upgrade Instructions` section and execute every instruction in version order. Same rules as Step 2b: non-interactive default on ambiguous steps; defer if no safe default.
   - **Sync CLAUDE-APPEND block** — apply the Edit **only here, on a version gap**, branching on the sibling's flags first:
     - `sibling.claude_append_needs_render` → report `<name> block refresh deferred to /<name>:hatch (template requires rendering)`; apply no Edit. Core cannot render a template carrying `mode:` markers — that is the owning plugin's own hatch's job.

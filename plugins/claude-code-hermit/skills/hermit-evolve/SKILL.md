@@ -59,6 +59,7 @@ Siblings detected but not activated: <name ... | none>
 Siblings warnings: <one line per siblings_warnings entry | none>
 Permissions added: <entries | none>
 Audit scope: <whole-run | version-only>
+Operator notes: <one line per version-specific operator note collected in steps 2b/7 | none>
 Deferred for operator: <none | one or more verbatim blocks, each:>
   --- deferred-migration ---
   source: <plugin>@<version>
@@ -70,6 +71,8 @@ Deferred for operator: <none | one or more verbatim blocks, each:>
 ```
 
 **Audit scope.** `whole-run` needs no mention — say nothing. On `version-only`, tell the operator once that this upgrade's config changes were not recorded in the settings history (the upgrade itself succeeded; only the attribution is missing), so a later "why did this setting change?" gets an honest answer instead of a confident wrong one.
+
+**Operator notes.** If `Operator notes` is non-empty, relay each line verbatim in the summary (and in the channel notice, in every delivery mode); these are the CHANGELOG's version-specific notes for the operator and the report is their only route out of the subagent. Omit the section when `none`.
 
 **Sibling report integrity:** parse the finalizer JSON `siblings_confirmed` and `siblings_skipped`. Only names in `siblings_confirmed` may be reported as `vOLD->vNEW`. Any name in `siblings_skipped` must be reported as `SKIPPED-by-finalizer` — never as upgraded, even if Step 7 said it ran.
 
@@ -85,7 +88,7 @@ conversation. Stop.
 
 **Resolve deferrals by execution and delivery mode.** If "Deferred for operator" is non-empty:
 - **Interactive execution:** for each deferred-migration block, present its `instruction` + `options` to the operator via `AskUserQuestion`, then apply the chosen branch inline (this is the only place changelog/migration text re-enters the main loop, and only for the rare deferred step). **A branch that changes `.claude-code-hermit/config.json` is applied with settings-edit verbs, never the Edit or Write tool** — `bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json get|set|unset <dotted.path> [value]`, using the plugin root baked in routing step 2. That keeps the change validated and in the settings ledger, and under the strict profile a tool write to `config.json` is hook-blocked outright. If a verb refuses, treat the branch as not applied and fall through to the version-bump caveat below.
-- **Unattended execution:** relay each deferred block verbatim ("migration deferred for operator review: <source> — <instruction>") through the selected delivery route: direct reply for direct-channel delivery, maintainer-only notice for automated-maintainer delivery. **Do not apply — never run the migration's settings writes from this session.** If the deferred `instruction` text contains an explicit channel resolution stanza (a fenced `options: [...]` array and an `on_resolve: "..."` skill invocation with an `{answer}` placeholder — the CHANGELOG's artifact-publish-authorization migration is the current example), additionally queue a micro-proposal entry per `reflect` § Queuing procedure using that exact `options` and `on_resolve` (`tier: 1`, `"kind":"ask"` on the `micro-queued` event) and render the numbered options in the relay, so the operator's reply resolves it through `channel-responder` § Micro-approval response — the same bridge any other skill's bounded ask uses. An `on_resolve` reached this way may only alter hermit config/state, never `.claude/settings*.json` — a boot-time wrapper (e.g. `hermit-start`) applies any resulting permission grant out-of-session, never this session.
+- **Unattended execution:** relay each deferred block verbatim ("migration deferred for operator review: <source> — <instruction>") through the selected delivery route: direct reply for direct-channel delivery, maintainer-only notice for automated-maintainer delivery. **Do not apply — never run the migration's settings writes from this session.** If the deferred `instruction` text contains an explicit channel resolution stanza (a fenced `options: [...]` array and an `on_resolve: "..."` skill invocation with an `{answer}` placeholder), additionally queue a micro-proposal entry per `reflect` § Queuing procedure using that exact `options` and `on_resolve` (`tier: 1`, `"kind":"ask"` on the `micro-queued` event) and render the numbered options in the relay, so the operator's reply resolves it through `channel-responder` § Micro-approval response — the same bridge any other skill's bounded ask uses. An `on_resolve` reached this way may only alter hermit config/state, never `.claude/settings*.json` — a boot-time wrapper (e.g. `hermit-start`) applies any resulting permission grant out-of-session, never this session.
 - **Version-bump caveat (all delivery modes):** the subagent already bumped `_hermit_versions` to `<to>` in step 9, having *skipped* the deferred migration. We keep that bump — withholding it would replay the whole oldest-first slice next evolve and double-apply non-idempotent migrations. So if an interactive apply **fails or the operator declines**, report loudly through the selected delivery route: "version already bumped to v`<to>`; migration `<source>` was NOT applied; apply manually: `<instruction>`" — otherwise a rerun-says-up-to-date would silently hide it. On success, report it applied.
 
 **Docker rebuild notice.** From the report's `Docker entrypoint` / `Docker rebuild` fields, append a `Docker:` section when a rebuild is needed:
@@ -105,7 +108,7 @@ bun <plugin_root>/scripts/routines.ts arm check .claude-code-hermit <plugin_root
 ```
 
 `arm check` is the read-only twin of the daily anchor's verdict — it stamps no fire, so asking
-costs one Bash call instead of a 23KB skill body. Route on its single line:
+costs one Bash call instead of loading the routines skill. Route on its single line:
 
 - `HEALTHY|…` — both legs are registered and current. Log that line; invoke nothing.
 - `ARM|<legs>|…` including `routines` — invoke `/claude-code-hermit:hermit-routines load`, which

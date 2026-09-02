@@ -151,8 +151,8 @@ describe('artifact-cited evidence: vocabulary coverage', () => {
     });
   }
 
-  test('[agents/reflection-judge.md]: covered-by-memory exemption for ledger-graduated candidates', () => {
-    expect(judge).toContain('never suppressed `covered-by-memory`');
+  test('[agents/proposal-triage.md]: covered-by-memory exemption for ledger-graduated candidates', () => {
+    expect(triage).toContain('never suppressed `covered-by-memory`');
   });
 
   test('[agents/reflection-judge.md]: skips §1 when Artifact cites observations.jsonl', () => {
@@ -172,13 +172,17 @@ describe('artifact-cited evidence: vocabulary coverage', () => {
   }
 
   // procedure-capture ephemerality exception: defined in reflect, mirrored in
-  // triage + proposal-create (judge needs no change — current-session handling
-  // already covers it)
+  // proposal-create. Triage and the judge need no clause of their own: such
+  // candidates carry `Evidence Source: current-session`, and triage's condition 1
+  // re-checks recurrence only for `archived-session`.
   const EPHEMERALITY_FILES = [
     { label: 'skills/reflect/SKILL.md', content: reflect },
-    { label: 'agents/proposal-triage.md', content: triage },
     { label: 'proposal-create/SKILL.md', content: proposalCreate },
   ];
+
+  test('[agents/proposal-triage.md]: condition 1 re-checks recurrence only for archived-session', () => {
+    expect(triage).toContain('required only when `Evidence Source` is `archived-session`');
+  });
 
   for (const { label, content } of EPHEMERALITY_FILES) {
     test(`[${label}]: 'ephemerality exception' procedure-capture vocabulary present`, () => {

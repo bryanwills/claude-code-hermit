@@ -15,6 +15,9 @@
 - `validate-config` warns when `heartbeat-restart` has a non-daily schedule — the anchor's 7-day expiry and 26h age windows assume it fires every day.
 
 ### Changed
+- Skill and agent prose was audited against the Claude 5 generation: version pins, issue and proposal IDs, migration-relative history, repeated rules, and numeric output caps are gone from the shipped skills and agents; `hermit-doctor`'s per-check table moved to `skills/hermit-doctor/reference.md`, read on demand.
+- `proposal-triage` owns the memory cross-check (`covered-by-memory`, with the observations-ledger exemption) and `reflection-judge` no longer repeats it; `skill-eval-runner` cannot spawn sub-agents.
+- Past `### Upgrade Instructions` blocks use `<plugin_root>` and record a deferred block instead of asking the operator mid-run; the evolve-runner report carries an `Operator notes:` line that Step 10 relays.
 - `/code-review` sent from a chat is now invoked directly through the `Skill` tool instead of being typed into the hermit's pane. Claude Code no longer reserves it for explicit user invocation, so the relay is gone: the command is gated by the channel's `allowed_users` rather than the trusted-controller check, the hermit-side refusal of `ultra`, `--post` and `--comment` is removed, and it is denied while the hermit is paused. `/doctor` is still relayed.
 - Minimum Claude Code version is `2.1.258`, the version whose `/code-review` the model can invoke.
 - `heartbeat.ts tick` returns `model` (`heartbeat.model`, `null` preserved) and the heartbeat `run` step dispatches from it instead of a separate config read.
@@ -40,6 +43,8 @@
 - `hermit-run memory-dir [<project-root>]` prints the project's auto-memory directory, used by the weekly review and the backup restore recipe.
 
 ### Fixed
+- `hermit-health` reads per-routine last-run data from `routines.ts health` instead of reporting it unavailable.
+- `reflect-precheck` emits the install `phase`, and `update-reflection-state.ts --scheduled-check-run` takes `--outcome`, so reflect no longer hand-computes the phase or writes scheduled-check state through inline JS.
 - On macOS, re-running `hermit-watchdog install` with an unchanged plist no longer calls `launchctl unload`/`load`. Every surviving tmux boot re-runs install, so a watchdog-ordered restart was unloading the LaunchAgent that ordered it and cutting the tick off before its operator notice.
 - The precheck resolves the default credential-expiry item by running the credential's declared `expiry_probe` itself, so a default-checklist hermit reaches `OK` with no model wake while the credential is healthy and a stale `state/doctor-report.json` cannot hide an expiry (it previously forced an evaluation once per `clean_recheck_cooldown`).
 - The transcript digest now counts CronCreate, channel and peer turns as boundaries, so `wakes` and `productive_wakes` no longer describe only Monitor-delivered ticks.
@@ -106,7 +111,7 @@
 
 ### Upgrade Instructions
 1. Run `hermit-docker update` normally. If hermit-evolve reports that it merged a compose, Dockerfile, or entrypoint change, run `hermit-docker update` a second time. The first update launches evolve after its build, and the second update is what applies the merged docker file to the image and container.
-2. Optional: run `/claude-code-hermit:hermit-routines load --reset` once to pick up the anchor's new short-circuit prompt immediately. Any restart already does this on its next `load`, because the boot-id mismatch forces a re-create, so it only matters for a hermit that never restarts.
+2. Nothing to run for the anchor prompt: Step 10 re-arms routines after this upgrade, and the next `hermit-routines load` re-creates the anchor with the new short-circuit prompt (a restart forces it through the boot-id mismatch). Operator note: `/claude-code-hermit:hermit-routines load --reset` picks it up immediately on a hermit that never restarts.
 3. No heartbeat action is needed. `/claude-code-hermit:heartbeat start` now returns `FRESH` against a healthy monitor registered by the current boot, and leaves it alone.
 4. Delete `.claude-code-hermit/state/hatch-resume.json` if present. It is a stale continuation marker and is no longer consumed.
 
@@ -157,7 +162,7 @@
 
 ### Upgrade Instructions
 
-1. **Docker hermits only — refresh the on-disk entrypoint BEFORE rebuilding.** `hermit-docker update` rebuilds with the operator's on-disk `docker-entrypoint.hermit.sh`, not the plugin template, so bumping the plugin and running `update` alone rebuilds with the old boot gate still in place. Re-run `/claude-code-hermit:docker-setup` (or patch the on-disk copy from `state-templates/docker/docker-entrypoint.hermit.sh.template`) first, then run `hermit-docker update`. This carries the removal of the expired-login boot block.
+1. **Docker hermits.** hermit-evolve refreshes `docker-entrypoint.hermit.sh` from the template in Step 5c of this run. Operator note: run `.claude-code-hermit/bin/hermit-docker update` once more after evolve so the refreshed entrypoint is baked into the image; `update` rebuilds with the on-disk copy, so the update that launched evolve still carries the old boot gate. This carries the removal of the expired-login boot block.
 2. **Docker hermits with a hand-edited entrypoint.** If you edited `docker-entrypoint.hermit.sh` directly, move those changes to `<project-root>/docker-entrypoint.hermit-local.sh` — see the sidecar note in `/claude-code-hermit:docker-setup`. This upgrade migrates them for you when a baseline was recorded; if none was, your copy is parked as `state/docker-entrypoint.hermit.sh.<ts>.bak` and the move is manual this once. After that, upgrades leave the sidecar alone.
 3. Non-Docker (tmux/local) hermits: nothing to do — that removal lives only in the Docker entrypoint template. Lapsed-login detection ships in the watchdog and applies to both deployments with no config change.
 4. **Restart the hermit so it records its inbox socket.** The socket path is only visible from inside the session, so the resident stamps it into `state/runtime.json` at its next start. Until then the watchdog keeps typing its wedge nudge, exactly as before — nothing breaks, the socket path just isn't used yet. `bin/hermit-stop && bin/hermit-start` (or `hermit-docker restart`).
@@ -194,7 +199,7 @@
 
 ### Upgrade Instructions
 
-1. **Docker hermits only — refresh the on-disk entrypoint BEFORE rebuilding.** `hermit-docker update` rebuilds with the operator's on-disk `docker-entrypoint.hermit.sh`, not the plugin template, so bumping the plugin and running `update` alone rebuilds with the still-dead boot guard. Re-run `/claude-code-hermit:docker-setup` (or patch the on-disk copy from `state-templates/docker/docker-entrypoint.hermit.sh.template`) first, then run `hermit-docker update`. This carries the split-brain boot-guard path fix.
+1. **Docker hermits.** hermit-evolve refreshes `docker-entrypoint.hermit.sh` from the template in Step 5c of this run. Operator note: run `.claude-code-hermit/bin/hermit-docker update` once more after evolve so the refreshed entrypoint is baked into the image; `update` rebuilds with the on-disk copy, so the update that launched evolve still carries the dead boot guard. This carries the split-brain boot-guard path fix.
 2. Non-Docker (tmux/local) hermits: nothing to do — the fix lives only in the Docker entrypoint template.
 
 Everything else in this release is self-migrating on next run: the denial ledger's alert-state file re-keys itself on first read, and the reflection judge's legacy window folds into the ring automatically. No `config.json` changes required.
@@ -220,7 +225,7 @@ Everything else in this release is self-migrating on next run: the denial ledger
 - `/claude-code-hermit:heartbeat stop` now deletes `state/heartbeat-liveness.json` alongside clearing the runtime file, so a stopped heartbeat is no longer re-armed by the watchdog once the leftover liveness timestamp ages out.
 
 ### Upgrade Instructions
-- **Decide whether to keep the plugins hatch used to recommend.** Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator` or `feature-dev`; Claude Code covers them natively (see `${CLAUDE_PLUGIN_ROOT}/docs/recommended-plugins.md`). Nothing is removed for you. First, unconditionally delete `.claude-code-hermit/.baseline-pending` if it exists. Then inventory: `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get scheduled_checks` for entries whose `plugin` is `claude-code-setup` or `claude-md-management`; `… get docker.recommended_plugins` for entries naming any of the four; `claude plugin list` for any of the four installed. If all three are empty, skip silently. Otherwise this is the operator's decision with no default: **defer per SKILL.md Step 10** with `options: ["Keep", "Remove"]` and no `on_resolve`; the choice is applied in attended Step 10 only.
+- **Decide whether to keep the plugins hatch used to recommend.** Hatch no longer offers `claude-code-setup`, `claude-md-management`, `skill-creator` or `feature-dev`; Claude Code covers them natively (see `<plugin_root>/docs/recommended-plugins.md`). Nothing is removed for you. First, unconditionally delete `.claude-code-hermit/.baseline-pending` if it exists. Then inventory: `bun "<plugin_root>/scripts/settings-edit.ts" .claude-code-hermit/config.json get scheduled_checks` for entries whose `plugin` is `claude-code-setup` or `claude-md-management`; `… get docker.recommended_plugins` for entries naming any of the four; `claude plugin list` for any of the four installed. If all three are empty, skip silently. Otherwise this is the operator's decision with no default: **defer per SKILL.md Step 10** with `options: ["Keep", "Remove"]` and no `on_resolve`; the choice is applied in attended Step 10 only.
   **Keep:** change nothing; tell the operator once that the listed checks keep running and that `/claude-code-hermit:hermit-settings scheduled-checks` disables or removes them later.
   **Remove (attended only, never unattended):** (1) `… set scheduled_checks '<the array without those entries>'` (whole array, other entries preserved), then remove each dropped id from `state/reflection-state.json → scheduled_checks`, as `/hermit-settings scheduled-checks remove <id>` does; (2) `… set docker.recommended_plugins '<the array without those entries>'`; (3) for each installed plugin run `claude plugin uninstall <plugin>@claude-plugins-official --scope <scope shown by claude plugin list>`; if a call is refused, print the exact command for the operator instead; (4) report what was removed and that a Docker hermit needs `.claude-code-hermit/bin/hermit-docker update` to drop them from the image. Re-runnable: a second run finds nothing and skips.
   **Unattended relay** must add: from chat, "disable <id>" through `/claude-code-hermit:hermit-settings scheduled-checks` is accepted (the `enabled` flag is channel-writable); full removal and plugin uninstall need a terminal session.
@@ -259,7 +264,7 @@ Everything else in this release is self-migrating on next run: the denial ledger
 
 ### Upgrade Instructions
 
-**Migrate `settings_from_chat` to per-channel `settings_policy`.** `settings_policy` is terminal-only, so **this block runs only on a terminal-typed turn** — on a channel-arrived or unattended turn the gate denies step 2. Relay it to the operator as a step for them to run themselves instead, and skip steps 2 and 3; the retired key keeps applying as `deny` until they do, so nothing is reopened by waiting. Read the current value with `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get settings_from_chat`, and the channels with `… get channels`.
+**Migrate `settings_from_chat` to per-channel `settings_policy`.** `settings_policy` is terminal-only: run step 2, and if the settings-edit write is refused (the gate denies it on a channel-arrived or unattended turn), record this block as a deferred migration, skip step 3, and leave `settings_from_chat` in place; while it is present it keeps applying as `deny`, so nothing is reopened by waiting. Read the current value with `bun "<plugin_root>/scripts/settings-edit.ts" .claude-code-hermit/config.json get settings_from_chat`, and the channels with `… get channels`.
 
 1. For each key under `channels` except `primary` that has no `settings_policy` yet, decide its value: `deny` if `settings_from_chat` was `false`; else `ask` if that entry names a `maintainer_channel_id` or its `allowed_users` is an array naming two or more ids; else `allow`.
 2. Write each one: `.claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json set channels.<name>.settings_policy <value>`.
@@ -269,7 +274,7 @@ Everything else in this release is self-migrating on next run: the denial ledger
 
 **The three credential-word deny lines are retired for you.** Nothing to do: `permissions-sync` (an unconditional evolve step) removes `"Bash(*API_KEY*)"`, `"Bash(*SECRET*)"` and `"Bash(*TOKEN*)"` from `permissions.deny` in the settings file this plugin wrote them to, and prints what it removed. Tell the operator once which lines went, and that re-adding one by hand is how to keep it if it was a deliberate choice.
 
-**Reset the judge verdict counters, once.** Run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts" .claude-code-hermit/state/reflection-state.json --reset-counters`. The `reflection-judge` suppress-ratio check compares tallies that have accumulated since the install was hatched, so the suppressions caused by the self-adjudication bug fixed in this release would keep the Component Health flag lit on every future reflect run. This zeroes the judge tallies (`judge_accept`, `judge_downgrade`, `judge_suppress`, `judge_suppress_by_code`) and restarts their window at `counters.judge_since`; it touches nothing else — in particular `counters.since`, the hatch stamp the reflect phase ladder and doctor's run-rate line are measured from, is left alone. Run it once — a second run only shortens the window.
+**Reset the judge verdict counters, once.** Run `bun "<plugin_root>/scripts/update-reflection-state.ts" .claude-code-hermit/state/reflection-state.json --reset-counters`. The `reflection-judge` suppress-ratio check compares tallies that have accumulated since the install was hatched, so the suppressions caused by the self-adjudication bug fixed in this release would keep the Component Health flag lit on every future reflect run. This zeroes the judge tallies (`judge_accept`, `judge_downgrade`, `judge_suppress`, `judge_suppress_by_code`) and restarts their window at `counters.judge_since`; it touches nothing else — in particular `counters.since`, the hatch stamp the reflect phase ladder and doctor's run-rate line are measured from, is left alone. Run it once — a second run only shortens the window.
 
 **Adopt the existing voice into `config.json`.** The `voice` block is seeded empty by the template merge, which means an unset voice — and an unset voice renders nothing, so an install whose style is already set keeps working exactly as before. Point it at what the hermit already has, once, so the next boot renders instead of drifting:
 
@@ -307,7 +312,7 @@ Everything else in this release is self-migrating on next run: the denial ledger
 **Decide the hook profile for this hermit.** An always-on launch now defaults to the `strict` profile on tmux as well as Docker, which is what makes the `config.json` / `OPERATOR.md` / settings-file guards enforce. Look at `env.AGENT_HOOK_PROFILE` in `.claude-code-hermit/config.json`:
 - **Key absent** — nothing to do. The hermit picks up the new default on its next restart.
 - **Set to anything other than `"standard"`** — leave it. It is a deliberate choice and is still honored.
-- **Set to `"standard"`** — this is ambiguous and must not be changed automatically: the old template shipped that exact value, so it cannot be distinguished from an operator who chose it. Ask the operator which they want, presenting both plainly:
+- **Set to `"standard"`** — this is ambiguous and must not be changed automatically: the old template shipped that exact value, so it cannot be distinguished from an operator who chose it. **Defer per SKILL.md Step 10** with `options: ["Adopt the new default (unset env.AGENT_HOOK_PROFILE)", "Keep standard"]`, no `on_resolve`, and `skipped: skipped pending operator`; the chosen branch is applied in attended Step 10 only:
   - *Adopt the new default* — run `.claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json unset env.AGENT_HOOK_PROFILE`. On the next restart the hermit will refuse to hand-edit its own `config.json`, `OPERATOR.md` and Claude settings files, and will refuse `ssh`, `docker`, `kubectl`, `git push origin main` and `git reset --hard` from the managed session. A Docker hermit already behaves this way.
   - *Keep today's behavior* — leave the key in place. It now reads as an explicit choice rather than a leftover default.
 
@@ -315,8 +320,8 @@ Everything else in this release is self-migrating on next run: the denial ledger
 
 **Suggest wake gates for routines that still wake the session on every fire.** Run this after the previous step.
 
-1. Run `bun "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts" health .claude-code-hermit --days 14` and read the JSON it prints. If its `source` is not `ok`, the routine ledger could not be read — record nothing, stop, and note in the evolve report that this audit could not run. Otherwise read its `routines[]` array.
-2. Read the configured routines with `bun "${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts" .claude-code-hermit/config.json get routines`.
+1. Run `bun "<plugin_root>/scripts/routines.ts" health .claude-code-hermit --days 14` and read the JSON it prints. If its `source` is not `ok`, the routine ledger could not be read — record nothing, stop, and note in the evolve report that this audit could not run. Otherwise read its `routines[]` array.
+2. Read the configured routines with `bun "<plugin_root>/scripts/settings-edit.ts" .claude-code-hermit/config.json get routines`.
 3. Build the candidate list. An entry qualifies when all four hold: `enabled` is `true`; it has no `precheck` key; its `id` is none of `heartbeat-restart`, `reflect`, `scheduled-checks`, `weekly-review`, `daily-auto-close`, `doctor`, `morning`, `evening`; and its `fires` in the health report is 7 or more.
 4. If the list is empty, record nothing and stop: do not run steps 5-7.
 5. Change nothing in `config.json` in this pass — this step only surfaces candidates. A gate is added later, and only for the branch the operator picks, with `settings-edit.ts .claude-code-hermit/config.json set routines.<n>.precheck <value>`.
@@ -359,7 +364,7 @@ Everything else in this release is self-migrating on next run: the denial ledger
 **Clear questions left behind by already-settled decisions.** Run once from the project root:
 
 ```bash
-bun "${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts" micro .claude-code-hermit sweep
+bun "<plugin_root>/scripts/proposal.ts" micro .claude-code-hermit sweep
 ```
 
 `SWEPT|<ids>` lists the questions retired (their proposals were already resolved, dismissed, or deferred); `NONE|no-moot` means there were none. Safe to re-run — it only ever removes questions whose proposal has reached one of those three states, and every removal is recorded in `state/proposal-metrics.jsonl` as a `moot` event.
@@ -378,7 +383,7 @@ bun "${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts" micro .claude-code-hermit sweep
 **Step 1 — Pin.** From the project root, run:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/docker-bun-pin.ts .claude-code-hermit 1.4.0 <to>
+bun <plugin_root>/scripts/docker-bun-pin.ts .claude-code-hermit 1.4.0 <to>
 ```
 
 (`<to>` is the plan's `to` version string, available from the pre-pass result.) The script classifies `Dockerfile.hermit`, applies the right patch, and re-records the template baseline so the drift detector clears. It is idempotent — a hermit already patched by hand is reported, not re-patched. A converged pre-1.2.0 scaffold keeps its old baseline on purpose: only its bun block is current, so the Dockerfile drift nudge on future evolves is a true signal, not a leftover.
@@ -405,32 +410,7 @@ No `config.json` changes required.
 
 ### Upgrade Instructions
 
-**Docker runtime bump to Bun 1.4.0.** Existing hermits with a deployed `Dockerfile.hermit` need a surgical `ARG BUN_VERSION` patch and a rebuild. Non-Docker hermits: nothing to do — their bun comes from the host, and `required_bun_version` is unchanged at `>=1.3.0`, so no host upgrade is forced.
-
-**Step 1 — Existence / idempotency.** Check for `Dockerfile.hermit` at the project root. If it does not exist, skip to Step 4 (Docker not set up). If it already contains `ARG BUN_VERSION=1.4.0`, skip to Step 3 (already patched; still re-record the baseline so the drift detector clears).
-
-**Step 2 — Surgical patch.** Replace the single line matching `^ARG BUN_VERSION=` in `Dockerfile.hermit` with `ARG BUN_VERSION=1.4.0`. Match on the key, not on the old value — deploys exist on several past pins. If no such line is present, skip this patch **without** recording a deferred-migration block and continue: scaffolds generated before 1.2.0 install bun a different way, and the `docker-bun-pin.ts` step in a later entry classifies and converges them (deferring only a genuinely unrecognized shape).
-
-**Step 3 — Re-record the template baseline** so `classifyDockerTemplates` clears the drift and won't nag on future evolves. Run:
-
-```
-bun -e '
-  const fs=require("node:fs"), c=require("node:crypto");
-  const [tmpl, ver]=process.argv.slice(2);
-  const mp=".claude-code-hermit/state/template-manifest.json";
-  if(!fs.existsSync(mp)) process.exit(0);
-  const m=JSON.parse(fs.readFileSync(mp,"utf8")); m.files ??= {};
-  const h=c.createHash("sha256").update(fs.readFileSync(tmpl)).digest("hex");
-  m.files["docker/Dockerfile.hermit.template"]={sha256:h, plugin_version:ver};
-  fs.writeFileSync(mp, JSON.stringify(m,null,2)+"\n");
-' "${CLAUDE_PLUGIN_ROOT}/state-templates/docker/Dockerfile.hermit.template" "<to>"
-```
-
-(`<to>` is the plan's `to` version string, available from the pre-pass result.)
-
-If `.claude-code-hermit/state/template-manifest.json` does not exist, skip this step — drift was `unknown` and the patch alone is sufficient (docker-setup was never run, so there is no baseline to update).
-
-**Step 4 — Report.** Set the report's `Docker rebuild` field to `base-patched`. Step 10 will emit a rebuild-only notice and suppress the generic "re-run /docker-setup" drift bullet for `Dockerfile.hermit`.
+**Docker runtime bump to Bun 1.4.0.** Superseded by the 1.2.46 step: `docker-bun-pin.ts` classifies `Dockerfile.hermit`, applies the pin and re-records the template baseline, and reports `SKIP|absent` on a non-Docker hermit. Nothing to run here.
 
 No `config.json` changes required.
 
@@ -469,13 +449,13 @@ No `config.json` changes required.
 ### Upgrade Instructions
 1. **No settings writes in this session.** The next `hermit-start` boot renders the classifier overlay and launches with `--settings` on its own. Do not run `apply-settings.ts automode-seed` — it is retired and will exit 1.
 2. **Leave existing `autoMode` entries alone.** A hermit hatched before this version has sealed entries in `.claude/settings.local.json` that Claude Code no longer reads. They are inert, not harmful; removing them is a later attended cleanup, not part of this upgrade.
-3. **No manual step for `settings_from_chat`** — the template-defaults merge inside `evolve-finalize` seeds it as `true`, which is the on-by-default behavior described above. Do not write it by hand; confirm it landed by naming it in your `settings_added` report.
-4. Tell the operator in one line: settings can now be changed from their own chat with the hermit — including permission mode, `env` and monitors, which additionally ask for a confirmation code — while the settings that decide **who may reach the hermit** (channel allowlists, the briefing and DM chats, `maintainer_channel_id`, `operator_profile`, `settings_from_chat`) still need a terminal session. If they run this hermit for someone else, say that a `non-technical` install keeps the whole security tier terminal-only until they configure a `maintainer_channel_id`, and that `settings_from_chat: false` switches chat-driven settings off entirely.
-5. If this hermit's briefing chat is a group or server channel and the channel has no `allowed_users`, tell the operator once that every member of that chat can now change security-tier settings, and that setting `allowed_users` from a terminal restricts it to named operators. Do this from what you know of the install — `/claude-code-hermit:hermit-doctor` raises the same thing as a `config` warning only when the pinned briefing chat differs from the last chat the operator wrote from, so a hermit that only ever hears from that one group is never flagged. Skip silently when the briefing chat is a 1:1 DM, an allowlist is already set, or a `maintainer_channel_id` is configured.
+3. **Nothing to write for chat-driven settings.** They are governed by per-channel `settings_policy`, which the 1.2.49 step below migrates; `settings_from_chat` is no longer seeded, so do not expect it in `settings_added`.
+4. Tell the operator in one line: settings can now be changed from their own chat with the hermit, and permission mode, `env` and monitors additionally ask for a confirmation code unless that channel's `settings_policy` is `allow`, while the settings that decide **who may reach the hermit** (channel allowlists, the briefing and DM chats, `maintainer_channel_id`, `operator_profile`, `settings_policy`) still need a terminal session. If they run this hermit for someone else, say that a `non-technical` install keeps the whole security tier terminal-only until they configure a `maintainer_channel_id`, and that `settings_policy: deny` on a channel switches chat-driven settings off for it.
+5. If this hermit's briefing chat is a group or server channel and the channel has no `allowed_users`, tell the operator once that every member of that chat can now change security-tier settings, and that setting `allowed_users` from a terminal restricts it to named operators. Decide it from `channels` (settings-edit `get channels`): the briefing chat is the entry's `default_chat_id` or `dm_channel_id`, and the note applies when it is a group or server channel with neither `allowed_users` nor `maintainer_channel_id`. `/claude-code-hermit:hermit-doctor` raises the same thing as a `config` warning only when the pinned briefing chat differs from the last chat the operator wrote from, so a hermit that only ever hears from that one group is never flagged. Skip silently when the briefing chat is a 1:1 DM, an allowlist is already set, or a `maintainer_channel_id` is configured.
 6. **Do this before step 7 — it must read `heartbeat.every` as it is now, not after the rewrite.** Read `.claude-code-hermit/config.json`. If `watchdog.wedge_floor` is already present, skip this step. Otherwise compute `old_threshold = (watchdog.stale_factor ?? 2) × heartbeat.every` (treat a missing `heartbeat.every` as `"2h"`) and write it to `watchdog.wedge_floor` as a duration string (`stale_factor: 2` with `every: "15m"` ⇒ `"30m"`; `stale_factor: 6` with `every: "2h"` ⇒ `"12h"`), leaving every other field untouched, and name the value in your report — that is the threshold the install had before this upgrade, and writing it preserves it. Write it even when it comes out at exactly `4h`: the key's presence is what makes this step re-runnable, since step 7 rewrites the `heartbeat.every` this derivation reads. Re-runnable.
 7. Read `.claude-code-hermit/config.json`. If `heartbeat.every` is exactly `"2h"`, set it to `"30m"`, leaving every other field untouched. If it holds any other value the operator chose it — leave it and say so in the report. Re-runnable: a config already on `"30m"` or a custom value is skipped.
 8. Only if step 7 actually rewrote the value: tell the operator to run `/claude-code-hermit:heartbeat start` once, so the live Monitor re-registers at the new interval — its poll interval is fixed at registration. Until it is re-registered the monitor still polls at the old `2h` cadence while `/hermit-doctor` judges it against `3 × 30m`, so a transient `heartbeat not ticking` failure and one watchdog re-arm are expected; the re-arm itself re-runs `heartbeat start`, and the next session start or the daily `heartbeat-restart` anchor resyncs it otherwise.
-9. Read `.claude-code-hermit/config.json`. If `knowledge.usage_stale_days` and `knowledge.usage_auto_archive` are both already present, skip this step. Otherwise add whichever is missing to the `knowledge` object — `"usage_stale_days": 30` and `"usage_auto_archive": true` — leaving every other field untouched. The keys must exist on disk for `/claude-code-hermit:hermit-settings` to surface the opt-out. Re-runnable.
+9. Nothing to write: the finalizer adds `knowledge.usage_stale_days` (30) and `knowledge.usage_auto_archive` (true) from the template defaults when they are missing, and names them in `settings_added`. That is what lets `/claude-code-hermit:hermit-settings` surface the opt-out.
 10. Tell the operator in one line: from the next weekly review, compiled docs with no recorded read in 30 days are moved into `compiled/.archive/` (never deleted, at most 10 a week, named in the weekly summary) — moving one back keeps it for good, and `knowledge.usage_auto_archive: false` turns it off entirely.
 
 ## [1.2.43] - 2026-08-21
@@ -515,6 +495,8 @@ No `config.json` changes required.
    - `.gitignore`: if the file has a `# >>> claude-code-hermit` marker block, and that block has no `.claude/output-styles/hermit-voice.md` line, insert one immediately after `.claude-code-hermit/cost-summary.md`. No marker block ⇒ skip (the operator declined it at hatch).
    - `.worktreeinclude`: same rule — inside the marker block, insert `.claude/output-styles/hermit-voice.md` after `.claude-code-hermit/compiled/` if absent. No file or no marker block ⇒ skip.
    - Both are re-runnable: a line already present is left alone, and every other line in either block stays untouched.
+
+### Added
 - `/permission-mode <mode>` from a trusted channel switches the running session's permission mode, joining `/model`, `/effort`, `/compact` and `/clear`. Accepts `default`, `acceptEdits` and `auto`; `plan`, `bypassPermissions` and `dontAsk` are refused with a reason. Applied by driving Claude Code's Shift+Tab cycle and reading the status bar back, so the next prompt reports the mode the session actually landed in. Session-scoped — a restart re-asserts `config.permission_mode`.
 
 ### Fixed
@@ -529,21 +511,14 @@ No `config.json` changes required.
 
 ### Upgrade Instructions
 
-1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <settings-file> permissions-sync` against this hermit's resolved settings file to add the three new `hermit-run` grants. This is the only thing that adds them — `hermit-start`'s boot-time grant covers `artifact-allow`/`automode-seed` only, so a restart will not pick these up. Do not skip this step.
+1. Nothing extra to run: the unconditional `permissions-sync` step (evolve Step 8) adds the three new `hermit-run` grants. `hermit-start`'s boot-time grant covers `artifact-allow`/`automode-seed` only, so a restart alone would not pick them up.
 2. The two rewritten commands live in the plugin-owned CLAUDE-APPEND block, which Step 7 already replaces wholesale, so no manual edit is needed. If this operator hand-edited either of those two lines inside the block, their edit is overwritten — tell them once, and note the new form is `.claude-code-hermit/bin/hermit-run <name> …` run from the project root.
 3. Nothing to do for the `channel-send.ts` pin: every shipped caller already passes this project's own state dir.
-4. **Add `bin/hermit-run` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/bin/hermit-run` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/config.json`, leaving every other line in the block untouched. The block should end up as:
-
-   ```
-   # >>> claude-code-hermit (managed block — do not edit between markers) >>>
-   .claude-code-hermit/OPERATOR.md
-   .claude-code-hermit/config.json
-   .claude-code-hermit/bin/hermit-run
-   .claude-code-hermit/compiled/
-   # <<< claude-code-hermit <<<
-   ```
+4. **Add `bin/hermit-run` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/bin/hermit-run` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/config.json`, leaving every other line in the block untouched.
 
    Then check the project's `.gitignore` for a `.claude-code-hermit/bin/` line and append it if absent — Claude Code only copies gitignored paths into a worktree, so without it the new line is inert.
+
+### Fixed
 - Creating several proposals in one run now appends at most one bare proposals-page link to the announcement message, instead of a separate `#prop-nnn` deep link per proposal that the claude.ai artifact viewer couldn't resolve anyway.
 
 ## [1.2.42] - 2026-08-19
@@ -577,6 +552,8 @@ No `config.json` changes required.
 1. Read `.claude-code-hermit/config.json`. If `language` is unset or `en`, or `.claude-code-hermit/state/artifact-strings.json` does not exist, this hermit renders the dashboard in English by default — no change needed, stop here.
 2. Otherwise read `.claude-code-hermit/state/artifact-strings.json`. If it already has a `strings.session_on_watch` key, leave it alone.
 3. If it does not, translate the English phrase "On watch" into the configured `language`, keeping the meaning "alive and monitoring, no active work session" (the same tone as the file's existing `session_idle`/`session_waiting` translations), and add it as `strings.session_on_watch` in that file. Leave every other key and the file's shape untouched.
+
+### Fixed
 - Stalled-dialog and session-wedged alerts reach you when the session is blocked. Both tiers sat behind a `session_state: 'idle'` exit, and `idle` is where a hermit rests between session arcs — so on most hermits neither detector ever ran, and a session blocked on any prompt stayed blocked indefinitely with no notification. `idle` now demotes the tick to supervision-only: the alert tiers run, while every tier that sends keystrokes or restarts stays suppressed, so a deliberately-stopped hermit is still never resurrected.
 - Queue-liveness wedge detection checks that tmux is alive, the condition it always documented. It previously relied on the idle exit above to never reach a stopped session, whose last transcript record is often an undrained `enqueue` that classifies as wedged forever.
 - The Docker healthcheck resolves `tmux_session_name` from `config.json` at check time instead of baking a copy at render time. The baked name was a second source of truth: renaming a project re-renders the compose file but leaves the name already written in `config.json`, so the check hunted a session that was never created and the container reported `unhealthy` indefinitely.
@@ -612,11 +589,11 @@ Docker-mode hermits only — skip entirely if `docker-compose.hermit.yml` does n
 
 1. Read `.claude-code-hermit/config.json`. For every entry under `channels` that has an `allowed_users` array, check each value.
 2. If a value is not the sender's platform user ID (on Discord: the 17-19 digit numeric id; on Telegram: the numeric account id) — for example a display name or `@handle` — that entry no longer matches. Before this release the allowlist was compared against the envelope's `user` (display name) attribute, so a display name could have been working.
-3. Tell the operator which entries look like display names, ask them for the matching platform IDs, and replace the values. Do not guess an ID. If no entry looks like a display name, say so and change nothing.
+3. If any value looks like a display name, change nothing and record a deferred-migration block naming those entries (`options`: the platform ids the operator supplies, one per entry). Never guess an ID. If no entry looks like a display name, say so and change nothing.
 4. Leaving a stale display name in `allowed_users` silently blocks that sender: inbound messages stop being captured and `pause`/`stop`/`resume`/`snooze`/`status` become no-ops with no error.
 5. Backfill the bot identity for every already-paired channel. Read `.claude-code-hermit/config.json`; for each key under `channels` whose value is an object (skip the `primary` string pointer), run:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-bot-id.ts .claude-code-hermit <name> --write
+   bun <plugin_root>/scripts/channel-bot-id.ts .claude-code-hermit <name> --write
    ```
    A `SKIP …` line means the identity could not be captured (no token, unknown platform, probe unreachable) — report it and continue to the next channel; never fail the upgrade on it. Operators who don't want the identity stored can delete `bot_user_id`/`bot_username` from the channel entry; the reminder then behaves as it did before.
 
@@ -660,10 +637,9 @@ The placement rule needs no migration step: the Knowledge Discipline addition ri
 
 ### Upgrade Instructions
 
-Existing hermits keep whatever unit was written at install time — the generated units live outside `.claude-code-hermit/` and no upgrade path refreshes them. For a hermit running in tmux mode on a host with systemd or launchd, re-bake the unit:
+Nothing to run: an always-on tmux boot re-bakes the scheduler unit with the current PATH on every qualifying start (see the `watchdog.scheduler_enabled` step in a later entry), and the generated units live outside `.claude-code-hermit/`, so evolve does not touch them.
 
-1. Run `.claude-code-hermit/bin/hermit-watchdog install` from the project root. This rewrites the unit with the current PATH and reloads it.
-2. Confirm with `/claude-code-hermit:hermit-doctor` — the watchdog check now reports a failing unit directly, including its exit status.
+1. Operator note: `/claude-code-hermit:hermit-doctor` now reports a failing unit directly, including its exit status.
 
 Docker-mode hermits need nothing: the container entrypoint runs the watchdog loop directly and never used a generated unit.
 
@@ -704,14 +680,7 @@ Docker-mode hermits need nothing: the container entrypoint runs the watchdog loo
 
 ### Upgrade Instructions
 
-1. **Add `config.json` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/config.json` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/OPERATOR.md`, leaving every other line in the block untouched. The block should end up as:
-   ```
-   # >>> claude-code-hermit (managed block — do not edit between markers) >>>
-   .claude-code-hermit/OPERATOR.md
-   .claude-code-hermit/config.json
-   .claude-code-hermit/compiled/
-   # <<< claude-code-hermit <<<
-   ```
+1. **Add `config.json` to the `.worktreeinclude` managed block.** Read the project root's `.worktreeinclude`. If the file does not exist, or exists without the `# >>> claude-code-hermit` marker, skip this step — the operator declined the block at hatch, and it is not re-added here. Otherwise, look inside the marker block for a `.claude-code-hermit/config.json` line: if it is already present, make no change; if it is absent, insert it on its own line immediately after `.claude-code-hermit/OPERATOR.md`, leaving every other line in the block untouched.
    This is what lets a `claude --worktree` session read config keys such as `commands.*` at the relative path; without it those reads fail inside the worktree. No `.gitignore` change is needed: `config.json` is already in the hermit's gitignore block, which is what makes it eligible to be copied. _(Opt-out: delete the line again; the rest of the block is unaffected.)_
 
 ## [1.2.38] - 2026-08-12
@@ -745,7 +714,7 @@ Docker-mode hermits need nothing: the container entrypoint runs the watchdog loo
 ### Upgrade Instructions
 
 1. Both artifact pages change shape, so the next publish re-mints each one once. Steady state returns to hash-gated no-op republishes; nothing to do.
-2. **Only if `.claude-code-hermit/state/artifact-strings.json` exists** (a hermit with a translation overlay): regenerate the scaffold with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts scaffold-strings <language>`, carry the existing translated values across, and translate the eight new keys — `status_tokens`, `session_in_progress`, `session_idle`, `session_waiting`, `session_dead_process`, `session_suspect_process`, `proposals_pill_open`, `proposals_pill_decided`. Untranslated keys fall back to English per key, so the page renders correctly either way. Two more need a second look: `dashboard_title` and `proposals_page_title` now take a `{name}` placeholder (`{name} — Dashboard`), and `status_today`/`status_alerts` changed to "Spent today"/"Needs you". The scaffold drops `dashboard_header`, `dashboard_dek`, `footer`, `weekly_heading`, `weekly_none`, `alert_group_proposals`, `common_show_all`, `session_paused` and `session_closed` — those strings no longer render anywhere; stale entries are ignored, so nothing breaks if they are left behind.
+2. **Only if `.claude-code-hermit/state/artifact-strings.json` exists** (a hermit with a translation overlay): regenerate the scaffold with `bun <plugin_root>/scripts/artifact.ts scaffold-strings <language>`, carry the existing translated values across, and translate the eight new keys — `status_tokens`, `session_in_progress`, `session_idle`, `session_waiting`, `session_dead_process`, `session_suspect_process`, `proposals_pill_open`, `proposals_pill_decided`. Untranslated keys fall back to English per key, so the page renders correctly either way. Two more need a second look: `dashboard_title` and `proposals_page_title` now take a `{name}` placeholder (`{name} — Dashboard`), and `status_today`/`status_alerts` changed to "Spent today"/"Needs you". The scaffold drops `dashboard_header`, `dashboard_dek`, `footer`, `weekly_heading`, `weekly_none`, `alert_group_proposals`, `common_show_all`, `session_paused` and `session_closed` — those strings no longer render anywhere; stale entries are ignored, so nothing breaks if they are left behind.
 3. Hermits with no `artifact-strings.json` need no action.
 4. Read `config.json` `context_hygiene.compact.min_context_tokens`:
    - If it equals `150000` (the old default), set it to `100000`. The threshold now denominates estimated compactible conversation (total prompt minus the hermit's recorded fixed surface, or minus an assumed 50k before the first measurement), so `100000` preserves the old firing cadence.
@@ -947,7 +916,7 @@ Docker-mode hermits need nothing: the container entrypoint runs the watchdog loo
 - Dropped the pre-frontmatter bullet-metadata reader in proposals. `**Status:**`-style metadata is no longer parsed. Frontmatter has been the canonical proposal format since 1.0.0 and no write path has been able to patch a bullet-metadata file for some time, so a legacy file listed as actionable but could not be accepted, deferred, dismissed, or resolved. Such a file now surfaces in `proposal-list` as status `unknown` rather than showing recovered metadata it can't act on; it is still listed, never silently dropped. The `proposals-index.json` row flag is renamed `legacy` → `unparseable` to match what it now means; nothing reads the value, and the index is fully regenerated on the next proposal write.
 
 ### Upgrade Instructions
-1. Re-run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <hatch-target settings file> allow` to seed the permission for `scripts/proposal.ts`. Without this, proposal lifecycle actions (create/accept/defer/dismiss/resolve) prompt for permission — functionally denied in headless/channel/background sessions.
+1. Re-run `bun <plugin_root>/scripts/apply-settings.ts <hatch-target settings file> allow` to seed the permission for `scripts/proposal.ts`. Without this, proposal lifecycle actions (create/accept/defer/dismiss/resolve) prompt for permission — functionally denied in headless/channel/background sessions.
 2. Re-running the same `apply-settings.ts ... allow` command above also seeds the permission for `scripts/setup-token-mint.ts`. Without it, `/relogin` prompts — which is a denial in the channel session it is designed to run in.
 3. **Docker hermits only — refresh the on-disk entrypoint BEFORE rebuilding.** `hermit-docker update` rebuilds with the operator's on-disk `docker-entrypoint.hermit.sh`, not the plugin template, so bumping the plugin and running `update` alone rebuilds with the old entrypoint. Re-run `/claude-code-hermit:docker-setup` (or patch the on-disk copy from `state-templates/docker/docker-entrypoint.hermit.sh.template`) first, then `hermit-docker update`. This carries the boot-gate fix for token auth.
 4. **Optional — convert an existing Docker hermit to token auth:** run `.claude-code-hermit/bin/hermit-docker setup-token`, complete the browser step, done. Nothing will nag you to convert. Until you do, the hermit keeps using its `/login` credentials and still goes dark when they expire; after converting, renewal is a once-a-year prompt on your channel with no server access.
@@ -980,7 +949,7 @@ Docker-mode hermits need nothing: the container entrypoint runs the watchdog loo
 
 ### Upgrade Instructions
 
-1. Re-run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <hatch_target settings file> allow` to add the two new script permissions. Without it, scheduled reflect is asked for permission (functionally denied in headless/channel sessions) and never applies its resolution actions or reads its behavior digest.
+1. Re-run `bun <plugin_root>/scripts/apply-settings.ts <hatch_target settings file> allow` to add the two new script permissions. Without it, scheduled reflect is asked for permission (functionally denied in headless/channel sessions) and never applies its resolution actions or reads its behavior digest.
 2. Run `/claude-code-hermit:hermit-routines load` to re-arm the routine monitor with the fixed gate **before** any session-restart step. Two bounded mixed-version windows exist until this runs: an old monitor with the new hooks still starves on `in_progress` until re-arm (this ordering closes that gap); a new monitor with old in-session hooks (marker never written) falls back to pure emit — CronCreate parity, no starvation, only a mild loss of politeness — until the session next restarts.
 
 ## [1.2.28] - 2026-07-17
@@ -1143,13 +1112,13 @@ No config.json changes required.
 
 Run `/claude-code-hermit:hermit-evolve`.
 
-1. **Add the four new proposal-mechanics permission entries.** Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <hatch_target file> allow` to add `Bash(bun */scripts/*.ts*)` entries required for the new CLI wrappers to run unattended.
+1. **Add the four new proposal-mechanics permission entries.** Run `bun <plugin_root>/scripts/apply-settings.ts <hatch_target file> allow` to add `Bash(bun */scripts/*.ts*)` entries required for the new CLI wrappers to run unattended.
 2. **Localize the artifact chrome for a non-`en` hermit.** Read `language` from `.claude-code-hermit/config.json`. If it is set and is **not** `en`, generate the translated UI-chrome table so the dashboard/proposals pages stop rendering half-English:
-   - Emit the English scaffold: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact-strings-scaffold.ts <language> <current-ISO-timestamp>`.
+   - Emit the English scaffold: `bun <plugin_root>/scripts/artifact-strings-scaffold.ts <language> <current-ISO-timestamp>`.
    - Translate every value inside the `strings` object into that language, leaving the keys and any `{placeholder}` tokens verbatim (word order may move around a token; the token text must not change).
    - Write the result to `.claude-code-hermit/state/artifact-strings.json`.
    The next dashboard/proposals refresh republishes once (the string file is ordinary render input, so it trips the hash gate a single time) with fully-localized chrome; steady state stays no-op-gated. If `language` is `en` or unset, do nothing — English is the default and today's output is unchanged. To opt out of localization on a non-`en` hermit, delete `.claude-code-hermit/state/artifact-strings.json`.
-3. **Harden `rm` deny patterns.** Resolve `hatch_target` (`.claude-code-hermit/state/hatch-options.json` → `target`, per the same resolution hermit-evolve already does in its own Step 1) to the settings file (`.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Read that file's `permissions.deny`. If it does **not** already contain `"Bash(rm -rf *)"`, the operator chose Skip (or has no deny rules) at hatch time — do nothing, preserve that choice. Otherwise run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> deny minimal` to merge the eight new `rm` flag-order/path-prefixed patterns — additive and idempotent (`mergeDeny` dedups), safe to re-run. The runtime hook itself needs no migration; it reads `state-templates/deny-patterns.json` from the plugin install directly on the next session.
+3. **Harden `rm` deny patterns.** Resolve `hatch_target` (`.claude-code-hermit/state/hatch-options.json` → `target`, per the same resolution hermit-evolve already does in its own Step 1) to the settings file (`.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Read that file's `permissions.deny`. If it does **not** already contain `"Bash(rm -rf *)"`, the operator chose Skip (or has no deny rules) at hatch time — do nothing, preserve that choice. Otherwise run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny minimal` to merge the eight new `rm` flag-order/path-prefixed patterns — additive and idempotent (`mergeDeny` dedups), safe to re-run. The runtime hook itself needs no migration; it reads `state-templates/deny-patterns.json` from the plugin install directly on the next session.
 
 ## [1.2.20] - 2026-07-10
 
@@ -1193,7 +1162,7 @@ Run `/claude-code-hermit:hermit-evolve`.
 
 2. **Restart the hermit after the first `load`.** The first `load` after upgrading finds no `state/cron-registry.json` mirror and treats every enabled routine as needing (re-)registration, then self-seeds the mirror. In an always-on hermit that upgrades in-process (no restart), the pre-upgrade `CronCreate`s are still live while the new planner emits an all-`CREATE` plan with no deletes, so routines fire twice until the process restarts or the old crons hit CC's 7-day expiry. Restart the hermit (or run `/claude-code-hermit:hermit-routines load --reset`) once after upgrading to clear the duplicates. A fresh boot needs no action.
 
-3. **Session-lifecycle & routine permission migration.** Re-run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <hatch_target file> allow` (the same settings file `hatch` originally wrote to — `.claude/settings.json` or `.claude/settings.local.json`, per this hermit's `hatch_target`) to add the new `Bash(bun */scripts/session-archive.ts*)`, `Bash(bun */scripts/routine-precheck.ts*)`, and `Bash(bun */scripts/cron-registry.ts*)` entries to the sealed allow-list. This is additive and idempotent (`mergeAllow` dedups by exact string) — safe to run even if the entries are already present. Without them, the hermit is asked for permission (functionally denied in headless/channel sessions) on its first post-upgrade idle transition and on every routine fire / `load`.
+3. **Session-lifecycle & routine permission migration.** Re-run `bun <plugin_root>/scripts/apply-settings.ts <hatch_target file> allow` (the same settings file `hatch` originally wrote to — `.claude/settings.json` or `.claude/settings.local.json`, per this hermit's `hatch_target`) to add the new `Bash(bun */scripts/session-archive.ts*)`, `Bash(bun */scripts/routine-precheck.ts*)`, and `Bash(bun */scripts/cron-registry.ts*)` entries to the sealed allow-list. This is additive and idempotent (`mergeAllow` dedups by exact string) — safe to run even if the entries are already present. Without them, the hermit is asked for permission (functionally denied in headless/channel sessions) on its first post-upgrade idle transition and on every routine fire / `load`.
 
 ## [1.2.19] - 2026-07-06
 
@@ -1232,7 +1201,7 @@ Run `/claude-code-hermit:hermit-evolve`. No new config keys this release; the ev
 
 ### Upgrade Instructions
 - The `artifacts.publish_authorized` key is added by the generic `new_config_keys` template sync (Step 3/9) — no bespoke migration step.
-- **Auto-mode self-maintenance seed.** Attended: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json automode-seed` and tell the operator in one line what was recorded (mirrors hatch Step 8). **Unattended: skip this step entirely — do not run it and do not defer it.** `hermit-start`'s boot-time grant seeds it once `artifacts.publish_authorized` is `true`; running the sealed op unattended is exactly the self-modification the classifier blocks.
+- **Auto-mode self-maintenance seed.** Superseded: `apply-settings.ts automode-seed` is retired and exits 1 (see 1.2.44). Nothing to run, attended or unattended; `hermit-start`'s boot-time overlay carries the classifier posture.
 - The `PermissionDenied` hook ships in `hooks/hooks.json`, loaded straight from the installed plugin package — a normal `/plugin update` picks it up with no per-project migration step and no new config key.
 
 ## [1.2.17] - 2026-07-05
@@ -1271,7 +1240,7 @@ Run `/claude-code-hermit:hermit-evolve`. No new config keys this release; the ev
 - Existing hermits are missing `ask_gate` entirely (pre-1.2.17 template). The same generic `new_config_keys` template sync adds `"ask_gate": true` verbatim on a normal `/claude-code-hermit:hermit-evolve` — the gate and watchdog check are then live immediately (no restart needed for the watchdog check; the hook loads from the installed plugin package on next `/plugin update`). Set `ask_gate: false` to opt out.
 - Existing hermits are missing the `artifacts` config block entirely, or have only `dashboard` set (pre-1.2.17 template). No bespoke migration needed for the config itself: the generic `new_config_keys` template sync (`evolve-plan.ts`, which recurses into nested leaves for a present-but-partial parent, not just fully-absent blocks) adds whichever of `dashboard`/`proposals`/`weekly_review` are missing, verbatim from the template — all default `true`. A pre-existing operator-set `dashboard: false` is left untouched (operator values are never overwritten). The `## Artifact Pages` pointer in `CLAUDE-APPEND.md` ships as part of the existing Step 6 whole-block sync; no separate step needed. Disable a page via `/claude-code-hermit:hermit-settings artifact-dashboard|artifact-proposals|artifact-weekly-review`.
 - **Artifact publish authorization.** If any `artifacts.*` flag ends up `true` after the sync above, this is an operator decision with **no default in unattended mode — never run `apply-settings.ts` for this step unattended, even after relaying the deferral.**
-  **Attended:** ask the operator: "This hermit publishes status/proposal/weekly-review pages via Claude Code's Artifact tool. Unattended sessions can't answer a permission prompt. Authorize publishes now, or bank the first publish of each page yourself instead?" On authorize: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <hatch_target settings file> artifact-allow`, then `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts .claude/settings.local.json automode-seed`, then set `artifacts.publish_authorized` to `true` via `settings-edit`. On bank: publish the first version of each enabled page inline per `docs/artifacts.md`'s refresh procedure, record each URL in `state/artifacts.json`, and set `artifacts.publish_authorized` to `false`.
+  **Attended:** ask the operator: "This hermit publishes status/proposal/weekly-review pages via Claude Code's Artifact tool. Unattended sessions can't answer a permission prompt. Authorize publishes now, or bank the first publish of each page yourself instead?" On authorize: run `bun <plugin_root>/scripts/apply-settings.ts <hatch_target settings file> artifact-allow`, then `bun <plugin_root>/scripts/apply-settings.ts .claude/settings.local.json automode-seed`, then set `artifacts.publish_authorized` to `true` via `settings-edit`. On bank: publish the first version of each enabled page inline per `docs/artifacts.md`'s refresh procedure, record each URL in `state/artifacts.json`, and set `artifacts.publish_authorized` to `false`.
   **Unattended:** defer per SKILL.md Step 10 — record the deferred-migration block with this channel resolution stanza: `options: ["Authorize", "Bank first publishes"]`, `on_resolve: "/claude-code-hermit:hermit-settings artifact-authorization --answer {answer}"`. The reply flips `config.artifacts.publish_authorized` only; `hermit-start` applies the grant (`artifact-allow` + `automode-seed`) idempotently at next boot, outside the classifier.
 - `cron-tz-shift.ts` is invoked fresh from the installed plugin script on every `hermit-routines load` — no per-project state to migrate, the fix applies on next `/plugin update`.
 - The channel-safe approvals change needs no state migration — `options`/`on_resolve` are optional fields and `state-templates/micro-proposals.json.template` is unchanged. The HA plugin's `ha-morning-brief` (step 9a) shares the MP-lifecycle sync comment with core `brief/SKILL.md` and should pick up the same `options` reply-hint wording in a follow-up change. `session`/`session-start` still have unbridged interactive asks (session-start already has its own `--task` non-interactive bypass) — out of scope here, allowlisted in the new contract test, tracked as a follow-up.
@@ -1348,7 +1317,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 2. **Scrub the stale permission.** Remove `Bash(bun */scripts/run-with-profile.ts*)` from the target settings file's `permissions.allow` if present (Step 8 already lists this removal). No new permissions are required.
 3. **No config-key additions** this release.
 4. **CLAUDE-APPEND block (token efficiency).** The hermit-managed block in `CLAUDE.md`/`CLAUDE.local.md` is replaced automatically by Step 6; if you customized text inside it, re-apply it afterward (the replaced block is shown in the evolve report). `HEARTBEAT.md` is not touched, and no new config keys are added.
-5. **Build the proposals index (token efficiency).** Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposals-index.ts .claude-code-hermit` once to create `state/proposals-index.json` (derived state — safe to delete and rebuild anytime; the `generate-summary` hook refreshes it on every subsequent proposal write). Step 8 already adds the `Bash(bun */scripts/proposals-index.ts*)` permission.
+5. **Build the proposals index (token efficiency).** Run `bun <plugin_root>/scripts/proposals-index.ts .claude-code-hermit` once to create `state/proposals-index.json` (derived state — safe to delete and rebuild anytime; the `generate-summary` hook refreshes it on every subsequent proposal write). Step 8 already adds the `Bash(bun */scripts/proposals-index.ts*)` permission.
 
 Operators who don't want the merged behavior can keep using the old natural-language triggers — `status`/`progress` reach `brief`; `what's stuck`/`recent learnings` reach `hermit-health`; `check knowledge` reaches `hermit-health`.
 
@@ -1393,7 +1362,7 @@ No other file refresh required — skills and scripts load live from the install
 
 Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
-1. **Refresh PROPOSAL.md template** — copy `${CLAUDE_PLUGIN_ROOT}/state-templates/PROPOSAL.md.template` to `.claude-code-hermit/templates/PROPOSAL.md.template` so the new `## References` section reaches the next generated proposal. Past PROP-NNN files are not retroactively rewritten.
+1. **Refresh PROPOSAL.md template** — copy `<plugin_root>/state-templates/PROPOSAL.md.template` to `.claude-code-hermit/templates/PROPOSAL.md.template` so the new `## References` section reaches the next generated proposal. Past PROP-NNN files are not retroactively rewritten.
 2. **Refresh bin wrappers** — `bin/hermit-update` and `bin/hermit-docker` in `.claude-code-hermit/bin/` ship new sibling-gap detection logic. The evolve skill replaces them automatically via the standard bin-wrapper refresh (Step 5b).
 
 ## [1.2.12] - 2026-06-26
@@ -1415,7 +1384,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
 Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
-1. **Refresh SESSION-REPORT.md template** — copy `${CLAUDE_PLUGIN_ROOT}/state-templates/SESSION-REPORT.md.template` to `.claude-code-hermit/templates/SESSION-REPORT.md.template`.
+1. **Refresh SESSION-REPORT.md template** — copy `<plugin_root>/state-templates/SESSION-REPORT.md.template` to `.claude-code-hermit/templates/SESSION-REPORT.md.template`.
 
 No `config.json` changes required. (`storage_drift.ignore` is additive and fail-open; domain plugins register their own dirs via their hatch steps.)
 
@@ -1471,16 +1440,16 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
 **Step 1 — Add apply-settings.ts allow entry.** Read `.claude-code-hermit/state/hatch-options.json` (key `"target"`: `"local"` → `.claude/settings.local.json`, else `.claude/settings.json`). Edit that file: merge `"Bash(bun */scripts/apply-settings.ts*)"` into `permissions.allow` (additive; skip if already present). `hermit-evolve` Step 8 adds `manifest-seed.ts` automatically.
 
-**Step 2 — Re-seed template-manifest.json (after Step 8).** If `.claude-code-hermit/state/template-manifest.json` does not exist, skip. Otherwise run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts .claude-code-hermit` with this JSON on stdin:
+**Step 2 — Re-seed template-manifest.json (after Step 8).** If `.claude-code-hermit/state/template-manifest.json` does not exist, skip. Otherwise run `bun <plugin_root>/scripts/manifest-seed.ts .claude-code-hermit` with this JSON on stdin:
 
 ```json
 {
   "pluginVersion": "1.2.10",
   "entries": [
-    { "key": "templates/SHELL.md.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/SHELL.md.template" },
-    { "key": "templates/SESSION-REPORT.md.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/SESSION-REPORT.md.template" },
-    { "key": "templates/PROPOSAL.md.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/PROPOSAL.md.template" },
-    { "keyPrefix": "bin", "dir": "${CLAUDE_PLUGIN_ROOT}/state-templates/bin" }
+    { "key": "templates/SHELL.md.template", "file": "<plugin_root>/state-templates/SHELL.md.template" },
+    { "key": "templates/SESSION-REPORT.md.template", "file": "<plugin_root>/state-templates/SESSION-REPORT.md.template" },
+    { "key": "templates/PROPOSAL.md.template", "file": "<plugin_root>/state-templates/PROPOSAL.md.template" },
+    { "keyPrefix": "bin", "dir": "<plugin_root>/state-templates/bin" }
   ]
 }
 ```
@@ -1489,7 +1458,7 @@ Preserves existing entries for add-on hermit files; re-hashes only the core set.
 
 **Step 3 — Docker entrypoint (Docker hermits only).** Check for `docker-entrypoint.hermit.sh` at the project root. Skip if absent. Skip if it already contains `marketplace_registered()`.
 
-Refresh: copy `${CLAUDE_PLUGIN_ROOT}/state-templates/docker/docker-entrypoint.hermit.sh.template` → `docker-entrypoint.hermit.sh`.
+Refresh: copy `<plugin_root>/state-templates/docker/docker-entrypoint.hermit.sh.template` → `docker-entrypoint.hermit.sh`.
 
 Re-record the entrypoint baseline:
 
@@ -1503,7 +1472,7 @@ bun -e '
   const h=c.createHash("sha256").update(fs.readFileSync(tmpl)).digest("hex");
   m.files["docker/docker-entrypoint.hermit.sh"]={sha256:h, plugin_version:ver};
   fs.writeFileSync(mp, JSON.stringify(m,null,2)+"\n");
-' "${CLAUDE_PLUGIN_ROOT}/state-templates/docker/docker-entrypoint.hermit.sh.template" "1.2.10"
+' "<plugin_root>/state-templates/docker/docker-entrypoint.hermit.sh.template" "1.2.10"
 ```
 
 Rebuild (if Docker hermit is running): `.claude-code-hermit/bin/hermit-docker update`.
@@ -1545,7 +1514,7 @@ bun -e '
   const h=c.createHash("sha256").update(fs.readFileSync(tmpl)).digest("hex");
   m.files["docker/Dockerfile.hermit.template"]={sha256:h, plugin_version:ver};
   fs.writeFileSync(mp, JSON.stringify(m,null,2)+"\n");
-' "${CLAUDE_PLUGIN_ROOT}/state-templates/docker/Dockerfile.hermit.template" "<to>"
+' "<plugin_root>/state-templates/docker/Dockerfile.hermit.template" "<to>"
 ```
 
 (`<to>` is the plan's `to` version string, available from the pre-pass result.)
@@ -2968,7 +2937,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
    - On **(1)**: drop the `scope` field from `config.json` and proceed. Write a `compiled/` artifact `compiled/decision-scope-removal-<YYYY-MM-DD>.md` recording the operator's acknowledged decision to skip migration for now (frontmatter: `title`, `type: decision`, `created`, `tags: [scope, security]`).
 2. If `config.json` contains `"scope": "local"` or no `scope` key: silently remove the `scope` key from `config.json` and continue.
 3. Add missing precheck script permissions to `.claude/settings.json`. Check if `permissions.allow` contains `"Bash(node */scripts/heartbeat-precheck.js*)"` and `"Bash(node */scripts/reflect-precheck.js*)"`. If either is missing, show the operator the entries to add and ask with `AskUserQuestion` (header: "Precheck permissions") — options: **Yes — add** (default) / **No — skip**. If confirmed, merge the missing entries into `permissions.allow`.
-4. Apply extended `.gitignore` coverage to existing projects. Read the project `.gitignore`. Check if it contains `.claude-code-hermit/bin/`. If not, show the operator the lines that will be appended (from `${CLAUDE_PLUGIN_ROOT}/state-templates/GITIGNORE-APPEND.txt`, filtered to entries not already present) and ask with `AskUserQuestion` (header: "Update .gitignore") — options: **Yes — append** (default) / **No — skip**. Append only if confirmed.
+4. Apply extended `.gitignore` coverage to existing projects. Read the project `.gitignore`. Check if it contains `.claude-code-hermit/bin/`. If not, show the operator the lines that will be appended (from `<plugin_root>/state-templates/GITIGNORE-APPEND.txt`, filtered to entries not already present) and ask with `AskUserQuestion` (header: "Update .gitignore") — options: **Yes — append** (default) / **No — skip**. Append only if confirmed.
 
 ## [1.0.23] - 2026-04-28
 
@@ -3071,7 +3040,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
 1. **Always-on operators only: stop the running hermit cleanly before continuing.** If a hermit is currently running for this project (`bin/hermit-status` reports it active), tear it down manually first — `bin/hermit-stop` is broken in this version because it shares the broken `bin/hermit-run` dispatcher with `bin/hermit-start`. For tmux operators: `tmux kill-session -t <session-name>` (find it via `tmux ls`). For Docker operators: `.claude-code-hermit/bin/hermit-docker down`. Then continue with step 2 below; restart with `bin/hermit-start` (or `bin/hermit-docker up`) after `hermit-evolve` finishes. If no hermit is currently running for this project, this step is a no-op.
 
-2. **Replace `.claude-code-hermit/bin/hermit-run` with the new template.** Read `${CLAUDE_PLUGIN_ROOT}/state-templates/bin/hermit-run` and overwrite the target project's `.claude-code-hermit/bin/hermit-run`. Preserve executable bit (`chmod +x`). Without this step, `bin/hermit-start` will continue to fail with `[hermit] Plugin root not found or invalid:` because the old scan glob doesn't match the monorepo cache layout.
+2. **Replace `.claude-code-hermit/bin/hermit-run` with the new template.** Read `<plugin_root>/state-templates/bin/hermit-run` and overwrite the target project's `.claude-code-hermit/bin/hermit-run`. Preserve executable bit (`chmod +x`). Without this step, `bin/hermit-start` will continue to fail with `[hermit] Plugin root not found or invalid:` because the old scan glob doesn't match the monorepo cache layout.
 
 3. **For Docker-deployed hermits: rebuild the container.** The `docker-entrypoint.hermit.sh.template` baked into the image carries a stale `find` invocation that won't locate the plugin under the monorepo cache. Run `.claude-code-hermit/bin/hermit-docker update --cc-only` (or a full `update`) so the next boot picks up the new entrypoint. Non-Docker (tmux/local) operators can skip this step.
 
@@ -3262,7 +3231,7 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 1. **Replace** `state-templates/bin/hermit-docker` with the updated version from the plugin.
 2. **Replace** `state-templates/docker/docker-entrypoint.hermit.sh.template` with the updated version from the plugin.
 3. **Sync `boot_skill` from any activated domain hermit.** For each hermit recorded in `_hermit_versions` (excluding `claude-code-hermit`):
-   - Locate the hermit's `plugin.json` via the same sibling-plugin scan used at init (`${CLAUDE_PLUGIN_ROOT}/../*/.claude-plugin/plugin.json`).
+   - Locate the hermit's `plugin.json` via the same sibling-plugin scan used at init (`<plugin_root>/../*/.claude-plugin/plugin.json`).
    - If its manifest declares `hermit.boot_skill` (e.g. `"/claude-code-homeassistant-hermit:ha-boot"`):
      - If the project's `config.boot_skill` is `null` or missing: set it to the declared value.
      - If `config.boot_skill` is already set and matches the declared value: no-op.

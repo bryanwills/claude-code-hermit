@@ -9,7 +9,7 @@ Invoked from SKILL.md § Scheduled-checks mode. Run at most one due check, then 
 1. **Load.** Read `config.json → scheduled_checks` (filter to `enabled: true`, `trigger: "interval"`). Read `state/reflection-state.json → scheduled_checks` (per-check `last_run`, `last_unavailable_at`, `last_error_at`, `consecutive_empty`).
 2. **Filter due.** Keep enabled interval entries where: `last_run` is null or older than `interval_days` days, AND `last_unavailable_at` is null or older than **4 hours** (transient cooldown), AND `last_error_at` is null or older than `interval_days` days (persistent back-off for true errors).
 3. **Pick one.** Select the entry with the oldest `last_run` (null sorts first). If none are due → skip to the Progress Log (step 8) with outcome `skipped`.
-4. **Invoke.** Invoke the `skill` command string as-is via the `Skill` tool. Do not "verify installation" first — the harness's loaded-skills list (system-reminders) is authoritative. **Never grep `~/.claude/plugins/cache/` or any plugin directory** — the cache layout is `cache/<marketplace>/<plugin>/`, not `cache/<plugin>/`, and assumption-based path checks produce false-negative `unavailable` outcomes. Classify: skill absent from the available-skills list or rejected as unknown → `unavailable`; runs but errors/times out → `error`; runs to completion → evaluate (step 5).
+4. **Invoke.** Invoke the `skill` command string as-is via the `Skill` tool. Availability is decided only by the harness's available-skills list (system-reminders); do not probe the filesystem for it. Classify: skill absent from the available-skills list or rejected as unknown → `unavailable`; runs but errors/times out → `error`; runs to completion → evaluate (step 5).
 5. **Evaluate.** Actionable improvement found → `actionable` (summarize finding); context improvement (e.g. a CLAUDE.md fix) → `contextual` (summarize; apply directly if trivial); nothing found → `empty`.
 6. **Act on outcome.**
    - **`actionable` / `contextual`:** build one candidate and route it through reflect's standard gates:
@@ -27,21 +27,9 @@ Invoked from SKILL.md § Scheduled-checks mode. Run at most one due check, then 
    - **`skipped`:** no action beyond the Progress Log.
 
    **Interval adjustment.** `empty` → `consecutive_empty += 1`; `actionable`/`contextual` → reset to 0; an interval-increase proposal accepted or dismissed → reset to 0. On **3+ consecutive empty runs**, create a standard Three-Condition proposal (not tagged `scheduled-check`) to increase `interval_days` (e.g. 7 → 14), gated through `claude-code-hermit:proposal-triage` first. This mode never auto-adjusts — adjustments always go through PROP-NNN.
-7. **Persist per-check state.** Write the delta directly to `state/reflection-state.json → scheduled_checks.<id>` (fail-open — a failed write logs to stderr only, never aborts). Set only the fields the current outcome changes: `unavailable` → `last_unavailable_at` (leave `last_run`); `error` → `last_error_at` (leave `last_run`); `empty` → `last_run` + `consecutive_empty = prior+1`; `actionable`/`contextual` → `last_run` + `consecutive_empty = 0`.
+7. **Persist per-check state.** One call; the script owns which fields the outcome changes (`unavailable` → `last_unavailable_at`; `error` → `last_error_at`; `empty` → `last_run` + `consecutive_empty = prior+1`; `actionable`/`contextual` → `last_run` + `consecutive_empty = 0`) and fails open (a failed write logs to stderr only, never aborts):
    ```bash
-   bun -e "
-   const fs=require('fs');
-   const f='.claude-code-hermit/state/reflection-state.json';
-   try {
-     const s=JSON.parse(fs.readFileSync(f,'utf-8'));
-     if(!s.scheduled_checks) s.scheduled_checks={};
-     const id='<check-id>';
-     if(!s.scheduled_checks[id]) s.scheduled_checks[id]={};
-     const c=s.scheduled_checks[id];
-     // Set fields per outcome (see above); substitute id, ISO timestamp, assignments before running.
-     fs.writeFileSync(f, JSON.stringify(s,null,2)+'\n','utf-8');
-   } catch(e){ process.stderr.write('scheduled-checks state: '+e.message+'\n'); }
-   "
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts .claude-code-hermit/state/reflection-state.json --scheduled-check-run <check-id> --outcome <unavailable|error|empty|actionable|contextual>
    ```
 8. **Progress Log (always).** Append one line to SHELL.md `## Progress Log`: `[HH:MM] scheduled-checks — <id>: <outcome>; verdicts: accept=A downgrade=D suppress=S; outcome: <none|micro-queued|proposal-created|interval-proposal>`. Use `skipped` for both the id and outcome fields when no check was due.
 
@@ -56,7 +44,7 @@ Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-co
 
 Invoked from SKILL.md step 3b when a graduated pattern's label matches `skill-preference:<name>`, and from § Candidate processing for a runner `procedure_candidates` entry carrying `evidence_source: "settled-memory"`. On the ledger path only rows with source `skill-preference` reach this section — they are **pending placements**: operator settlements ("from now on, always X") recorded when no editable owning skill existed or the in-conversation edit failed. (`skill-preference-applied` rows are telemetry of settlements already applied and are excluded at step 3b.) `<name>` is the owning skill's canonical bare name when one exists, otherwise the settled output's slug.
 
-**Resolution check (ledger path only, before anything else):** if the pattern also carries a `skill-preference-applied` row whose `ts` is newer than the newest remaining `skill-preference` row, the settlement has since been placed — drop the candidate and stop. Nothing retracts a pending row, and `prune-observations` keeps a pattern's whole history alive as long as any row in it is fresh, so without this check a resolved placement re-proposes on every reflect run (the § 1.5 consolidation exemption means the judge will not suppress it either).
+**Resolution check (ledger path only, before anything else):** if the pattern also carries a `skill-preference-applied` row whose `ts` is newer than the newest remaining `skill-preference` row, the settlement has since been placed — drop the candidate and stop. Nothing retracts a pending row, and `prune-observations` keeps a pattern's whole history alive as long as any row in it is fresh, so without this check a resolved placement re-proposes on every reflect run (triage's consolidation exception means the gate will not suppress it either).
 
 Recover the settled content from the pointer memory: read the operator's MEMORY.md index and the topic file whose title or body matches `<name>`. Derive the candidate title from that memory topic filename — a pending row and a sweep-emitted candidate for the same settlement then dedup by title-slug in § Candidate processing. Branch:
 
@@ -124,7 +112,7 @@ Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 
 `Evidence Origin:` defaults to `own-work` if omitted. Set to `external-content` when the evidence derives from web fetches, `raw/` third-party captures, or a channel finding with an `[origin: external]` marker. The two fields are orthogonal: a candidate can be `archived-session` + `external-content`.
 
-`scheduled-check/<id>` and `operator-request` share the same bypass policy at every gate (skip recurrence, enforce consequence + actionability). They are **kept distinct on purpose**: `scheduled-check/<id>` carries the check identifier for telemetry and debugging; `operator-request` marks human-initiated flows (a proposal the operator asked for directly). Future routing will read them as different provenance classes. Do not collapse them into one value.
+`scheduled-check/<id>` and `operator-request` share the same bypass policy at every gate (skip recurrence, enforce consequence + actionability). They are **kept distinct on purpose**: `scheduled-check/<id>` carries the check identifier for telemetry and debugging; `operator-request` marks human-initiated flows (a proposal the operator asked for directly).
 
 The judge returns one verdict line per candidate, matched by `<title>`. For each candidate, record its line:
 ```bash
@@ -159,12 +147,13 @@ Classify every candidate into a tier before creating a proposal or acting:
 
 ### Proposal triage gate
 
-Before queuing micro-approvals or calling `proposal-create`, gate **all** candidates reaching this step with `claude-code-hermit:proposal-triage` in a **single batched call** (a single candidate is still passed as a batch of one). Pass `Evidence Source:` and `Evidence Origin:` when known, as a sequence of blocks separated by a blank line:
+Before queuing micro-approvals or calling `proposal-create`, gate **all** candidates reaching this step with `claude-code-hermit:proposal-triage` in a **single batched call** (a single candidate is still passed as a batch of one). Pass `Evidence Source:`, `Evidence Origin:` and `Artifact:` when known, as a sequence of blocks separated by a blank line:
 ```
 Title: <title>
 Evidence Source: <value from the candidate, or omit to default to archived-session>
 Evidence Origin: <own-work | external-content, or omit to default to own-work>
 Evidence: <one-paragraph evidence summary>
+Artifact: <the candidate's Artifact: line, verbatim, when it has one>
 ```
 
 The gate returns one verdict block per candidate, matched by `<title>`. Line 1 of each block is that candidate's verdict; lines 2+ are additive metadata (`closest_prop`, `aligned`, `operator_excerpt`, `overlap_compiled`, `prior_discussion`, `failed_condition`) — read for context if useful, but do not treat as part of the verdict for branching. For each candidate, record its verdict line (use `"caller":"reflect"` on a normal reflect run, or `"caller":"scheduled-checks"` when invoked via § Scheduled checks):
@@ -184,7 +173,7 @@ HERMIT_GATE
 After validating with `claude-code-hermit:reflection-judge`, choose exactly one outcome per observation:
 
 1. **No action** — pattern not strong enough, already handled, or already addressed by the Resolution Check.
-2. **Memory update** — for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked (subject to the placement rule — settled task-scoped or multi-step content belongs to the skill owning the task, with memory as the pointer). Issue the standard "remember it" reflection — the trained auto-memory flow handles the write, with its own discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE). Save nothing if nothing rises above noise. Sub-threshold *patterns* do NOT go to memory — they go to the observations ledger; keeping the recurrence store separate from operator memory is what prevents the judge's `covered-by-memory` check from suppressing a pattern at the moment it graduates.
+2. **Memory update** — for **durable lessons** worth remembering for future sessions: operator-stated rules, preferences that recurred, decision rationales that may apply later, workflow patterns that worked (subject to the placement rule — settled task-scoped or multi-step content belongs to the skill owning the task, with memory as the pointer). Issue the standard "remember it" reflection — the trained auto-memory flow handles the write, with its own discipline (concise, MEMORY.md ≤ 200 lines / 25KB, topic files for detail, respect WHAT_NOT_TO_SAVE). Save nothing if nothing rises above noise. Sub-threshold *patterns* do NOT go to memory — they go to the observations ledger; keeping the recurrence store separate from operator memory is what prevents triage's `covered-by-memory` check from suppressing a pattern at the moment it graduates.
 3. **Proposal candidate** — classify tier (§ Proposal Tier Classification) for every candidate reaching this outcome, batch them all through the Proposal triage gate together, then per candidate on its own token: Tier 1/2 `PROCEED|CREATE` → queue micro-approval in `state/micro-proposals.json`; Tier 3 `PROCEED|CREATE` → call `/claude-code-hermit:proposal-create` (exception: procedure-capture candidates skip the separate pre-gate — see § Procedure capture).
 
 Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label — the label goes on stdin, so apostrophes in it are safe:
@@ -199,8 +188,6 @@ They graduate via SKILL.md step 3b. Pass `--origin=external-content` instead of 
 - `newborn`: also log each sub-threshold observation inline to SHELL.md Findings as `Noticed: <pattern>` (single line, no ceremony).
 - `juvenile`: emit a weekly digest instead of per-observation lines. Read `last_digest_at` from `state/reflection-state.json` (top-level, may be absent). If absent or older than 7 days, write a single `Noticed (digest): <N> observations — <top 3 pattern labels>` line to SHELL.md Findings, and include `"last_digest_at": "<now ISO>"` in the State Update payload so it persists.
 - `adult`: silent (baseline).
-
-Review past dismissed and deferred proposals. Avoid re-suggesting recently dismissed ideas. If significantly more evidence has accumulated since a dismissal, it may be worth revisiting.
 
 ### Micro-approval queuing
 

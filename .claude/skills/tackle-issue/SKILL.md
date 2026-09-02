@@ -19,7 +19,7 @@ end. Implementation, commit, and PR happen outside this skill.
 
 An issue or proposal is a hypothesis, not a spec. Most issues here are filed by AI agents
 (hermit-scribe): intent is usually right, framing often is not (stale paths, first-idea fix,
-oversized scope, premise already fixed, or no bug at all). Try to falsify the premise before
+oversized scope, premise already fixed, or no bug at all). Falsify the premise before
 planning anything. If it survives, judge separately whether the change is worth its cost.
 
 Two failure modes, both disqualifying:
@@ -153,7 +153,7 @@ risk). If you can't name one, don't pad the section.
 Print the matching line first, before fetching anything, so the operator can paste it. For a
 proposal or a PROP-linked issue:
 
-    /goal PROP-<N> is closed on disk: step 0 "already handled?" ran first (gh pr list --search, git log on referenced files, proposal status shown); a Verdict block (Confirmed / Refined / Corrected / Nothing to do) with file:line evidence is appended to the proposal file; proposal-act accept/defer/dismiss was executed and its output shown; the GUEST_REPORT was delivered or written to the hermit inbox file (path shown); a Loose ends line exists even if it says none. Or stop after 12 turns.
+    /goal PROP-<N> is triaged: the already-handled check ran first (gh pr list --search, git log on referenced files, proposal status shown); a Verdict block (Confirmed / Refined / Corrected / Nothing to do) with file:line evidence and a Recommendation are printed; on SHIP the approach, files and verification plan follow; no file edited, no gh mutation, no ExitPlanMode. Or stop after 12 turns.
 
 For a plain issue number:
 

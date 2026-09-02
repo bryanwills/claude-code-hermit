@@ -193,8 +193,8 @@ describe('reflect: skill-correction:* graduation routing', () => {
   });
 
   test('reflect: Component Health subject reflection-judge is not a candidate', () => {
-    expect(reflect).toContain('this flag is **not a candidate**');
-    expect(reflect).toContain('not sent through the judge');
+    expect(reflect).toContain('This flag is audit-only');
+    expect(reflect).toContain('to the Progress Log line and nothing else');
   });
 });
 

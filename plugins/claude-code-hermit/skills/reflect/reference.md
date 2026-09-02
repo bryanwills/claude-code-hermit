@@ -63,7 +63,7 @@ Run this step only if `resolution_check` is listed in `phases_json`.
    Read the YAML frontmatter of the 3 most recent `sessions/S-*-REPORT.md` files (sort descending by
    filename, take the top 3): `task`, `tags`, `lessons`, `blockers`, `artifacts`, `next_start`, `status`,
    `date`. Test pattern presence against those fields first. A report whose frontmatter lacks the
-   `next_start` key is **legacy** — read it in full as before (do NOT truncate its body). For non-legacy
+   `next_start` key is **legacy** — read it in full (do not truncate its body). For non-legacy
    reports, open the full body only when the pattern concerns prose the frontmatter row cannot witness
    (e.g. Progress Log detail, section wording) — and then only that one report, not all 3. If a body you
    do open exceeds your read window, note the truncation explicitly rather than silently trimming.
@@ -173,11 +173,10 @@ nothing:
 
 Run this step only if `compute` is listed in `phases_json`.
 
-Read two sources directly (no Explore nesting):
+Read two sources directly:
 
-1. The operator's `MEMORY.md` index (`.claude-code-hermit/sessions/` is the hermit state dir; MEMORY.md
-   is at the project root's `.claude/projects/.../memory/MEMORY.md` — read the path that exists). Look
-   for workflow-pattern entries (topic files flagged as workflow patterns, lines with `workflow` in the
+1. The operator's `MEMORY.md` index, in the auto-memory directory named in your dispatch (`memory-dir`).
+   Look for workflow-pattern entries (topic files flagged as workflow patterns, lines with `workflow` in the
    description).
 
 2. The `lessons` frontmatter array of the 3 most recent `sessions/S-*-REPORT.md` files (reuse the rows

@@ -172,14 +172,13 @@ describe('relocation targets received the moved content', () => {
     expect(append.includes('channel-responder')).toBe(true);
   });
 
-  test('the two proposal gates own the covered-by-memory protocol', () => {
+  test('proposal-triage owns the covered-by-memory protocol', () => {
     // The APPEND states the memory-first rule in one sentence and defers the
-    // protocol (paths, exemptions, quote-the-match) to the components that
-    // execute it. If either gate loses the code, the rule has no enforcer.
-    for (const agent of ['proposal-triage.md', 'reflection-judge.md']) {
-      const body = fs.readFileSync(path.join(AGENTS_DIR, agent), 'utf8');
-      expect(body.includes('covered-by-memory')).toBe(true);
-    }
+    // protocol (paths, exemptions, quote-the-match) to the one gate that
+    // executes it. If triage loses the code, the rule has no enforcer.
+    const body = fs.readFileSync(path.join(AGENTS_DIR, 'proposal-triage.md'), 'utf8');
+    expect(body.includes('covered-by-memory')).toBe(true);
+    expect(body.includes('## Step 1.5 — Operator memory cross-reference')).toBe(true);
   });
 });
 

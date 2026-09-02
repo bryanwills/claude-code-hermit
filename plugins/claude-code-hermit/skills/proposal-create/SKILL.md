@@ -13,7 +13,7 @@ Create a proposal only when you discover something with real leverage:
 ## Three-Condition Rule
 
 Only create a proposal if all three are true:
-1. **Repeated pattern** — observed more than once, across sessions. **Skip for `scheduled-check/*`, `operator-request`, `current-session`, and `capability-brainstorm` evidence sources** — recurrence is either established by the check's own analysis, validated upstream by `reflection-judge`, or established by the brainstorm pass. For candidates whose `Artifact:` line cites `state/observations.jsonl`, the ledger graduation is the recurrence evidence — the judge verified the ledger; do not re-check here. For efficiency/cost-class candidates, evidence citing a machine-written state file with the measured values also counts — the judge verifies the file. Procedure-capture candidates meeting the ephemerality exception (ephemeral artifacts + quantified cost, single current session) also count — see reflect § Procedure capture.
+1. **Repeated pattern** — observed more than once, across sessions. Recurrence is already verified upstream for every evidence source except `archived-session` (by the scheduled check's own analysis, the `reflection-judge`, the brainstorm pass, a cited `state/observations.jsonl` graduation, or a cited machine-written state file with the measured values), so re-establish it here only for `archived-session` candidates. Procedure-capture candidates meeting the ephemerality exception (ephemeral artifacts + quantified cost, single current session) also count (see reflect § Procedure capture).
 2. **Meaningful consequence** — something goes wrong without fixing it
 3. **Operator-actionable change** — something the operator can concretely approve
 
@@ -134,11 +134,11 @@ If the proposal affects security boundaries — permissions, network access, cre
 
 When your operational scope changes (new API, new local service, new publishing channel), create a PROP recommending permission-rule additions or networking changes. Never modify `deny-patterns.json` or Docker config directly. The operator implements security changes.
 
-When the proposed solution involves creating a new agent, skill, heartbeat item, or OPERATOR.md change, think hard and make the Suggested Plan self-contained:
+When the proposed solution involves creating a new agent, skill, heartbeat item, or OPERATOR.md change, make the Suggested Plan self-contained:
 
 **For a new sub-agent:**
 1. Create `.claude/agents/<name>.md` with:
-   - Frontmatter: name, description, model (match to complexity — haiku for scanning, sonnet for reasoning), maxTurns, tools, disallowedTools, memory (project for shared team knowledge, user for personal cross-project knowledge)
+   - Frontmatter: name, description, model (the cheapest tier that handles the task), maxTurns, tools, disallowedTools, memory (project for shared team knowledge, user for personal cross-project knowledge)
    - System prompt: role, constraints from OPERATOR.md, output format
 2. Test by delegating a representative task to the agent
 3. Verify it produces correct output and respects constraints
@@ -146,7 +146,7 @@ When the proposed solution involves creating a new agent, skill, heartbeat item,
 **For a new skill:**
 1. Create `.claude/skills/<name>/SKILL.md` with:
    - Frontmatter: name, description
-   - Numbered steps covering the full workflow
+   - Goal, constraints, and how to verify; numbered steps only where order is load-bearing
 2. Test by invoking the skill with a representative input
 3. Verify it completes correctly
 

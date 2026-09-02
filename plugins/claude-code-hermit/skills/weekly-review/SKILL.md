@@ -17,7 +17,7 @@ Generates the weekly review for the current ISO week.
 
 3. **Dispatch the week's file-heavy analysis** to the isolated-context runner in one call, so full topic-page bodies and the week's channel rows never land in this session's context. Dispatch `claude-code-hermit:skill-eval-runner` once, passing no `model` parameter so it inherits the session model. Point it at both specs.
    - `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/reference.md` — the topic-page semantic check: reads every `compiled/topic-*.md` for contradictions, stale claims, and broken `[[wikilinks]]` (capped at 3 findings).
-   - `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/consolidation-reference.md` — distills the week's episodic channel log (PROP-010) into the curated tiers and **files each candidate itself**, in its own context, treating the rows as untrusted external input.
+   - `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/consolidation-reference.md` — distills the week's episodic channel log into the curated tiers and **files each candidate itself**, in its own context, treating the rows as untrusted external input.
 
    Name the absolute path of this session's auto-memory directory in the dispatch — the consolidation spec writes memory files there and has no way to derive that path on its own. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/memory-dir.ts <project-root>` and pass the `dir` it prints; if `exists` is false, say so in the dispatch and tell the runner to return every `kind:"memory"` candidate's rows in `failed_row_ids` rather than creating one. Name the current ISO week in the dispatch too, the value step 1 already produced in the review filename: the consolidation spec's provenance line needs it and has no other way to derive one that matches the review file.
 
@@ -67,7 +67,7 @@ Generates the weekly review for the current ISO week.
    - If no prior week file exists: omit the "vs prior week" comparison and show this week's spend only.
    - If the current-week file is missing (script failed): skip step 6 entirely and fall back to a plain note ("Weekly review didn't generate this week — nothing to send.").
 
-6. **Channel voice rule** (generalizes `claude-code-hermit:hermit-doctor`'s channel rule, `skills/hermit-doctor/SKILL.md` step 5, the paragraph barring a tiered row from a channel reply): the message below is for the person who owns this hermit, not a developer. Never emit `PROP-NNN`/`S-NNN`, `operator_turns`, raw token counts, cron strings, or file paths. Speak in plain outcomes and counts.
+6. **Channel voice rule:** the message below is for the person who owns this hermit, not a developer. Never emit `PROP-NNN`/`S-NNN`, `operator_turns`, raw token counts, cron strings, or file paths. Speak in plain outcomes and counts.
 
    Channel-send the combined weekly summary:
    - Refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md`; if it returns a URL, note it for the message below.
@@ -82,7 +82,6 @@ Generates the weekly review for the current ISO week.
      Spend: $<total_cost_usd> this week (vs $<prior week's total_cost_usd>, if a prior file exists) — an estimate, not a bill
      ```
      Followed by the `Topic pages:` findings from step 3 when present, plus a final line listing whichever of the dashboard/weekly-review URLs were returned (e.g. `📎 <dashboard url> · 📎 <weekly-review url>` — omit either half that wasn't returned).
-   - The written review file (`compiled/review-weekly-<week>.md`) keeps its existing dev-facing sections (`### Operator Dependence`, `### Proposals` by id, `### Reflect` vitals, `### Delivered`) untouched — this rewrite changes only what's spoken to the channel, not what's written to disk.
    - Deliver via `channel-send.ts --notice` (see CLAUDE-APPEND.md § Operator Notification), with two
      audience versions of the same composed message:
      - `client` = the composed message **with the Spend line omitted**
@@ -90,12 +89,6 @@ Generates the weekly review for the current ISO week.
        the same notice, not a spend-only fragment, because the client leg is dropped in favor of the
        maintainer's dedup partner only when both resolve to the same chat, in which case the
        maintainer text (the complete one) is what's sent.
-
-     Routing outcomes this produces: technical install with no maintainer chat → the full summary
-     (including Spend) lands in the primary chat, same as today; a maintainer chat configured →
-     summary-minus-spend goes to the client, the full summary goes to the maintainer chat;
-     non-technical with no maintainer chat → summary-minus-spend to the client, full summary to
-     SHELL.md Findings.
    - If a leg didn't land (exit 1 — exit 2 means the payload was rejected, so fix it and re-run
      instead), follow § Operator Notification's fallback (push if
      enabled, log to Findings) rather than a bespoke branch here — weekly-review is a recurring
@@ -117,7 +110,6 @@ Generates the weekly review for the current ISO week.
 ## Notes
 
 - Safe to run manually at any time — re-runs overwrite the current week's review.
-- The routine is enabled by default for new installs. Existing operators who haven't opted in can enable it via `/claude-code-hermit:hermit-settings`.
 - `archive-raw.ts` only moves files — it never deletes. Archived files land in `raw/.archive/` and can be restored manually.
 - `archive-compiled.ts` only moves files — it never deletes. Keeps the newest 2 artifacts per type; `foundational`-tagged artifacts and `topic` pages are always retained (living pages compact by merging, not archival). Archived files land in `compiled/.archive/` and can be restored manually.
 - Usage tracking (`state/usage-metrics.jsonl`, fed by hooks) sees skill-tool calls, operator slash commands, and compiled/ Reads — including subagent reads, since PostToolUse fires for sidechain tool calls (probed on CC 2.1.239). Startup injection isn't tracked, which is why `foundational` and `topic` artifacts are exempt.

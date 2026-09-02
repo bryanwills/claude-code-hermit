@@ -468,13 +468,13 @@ describe('triage + proposal-create: observations.jsonl artifact exception', () =
   test('proposal-triage: observations.jsonl artifact satisfies condition 1', () => {
     expect(triage).toContain('state/observations.jsonl');
     // Should not require efficiency/cost-class only
-    expect(triage).toContain('any judge-verified candidate');
+    expect(triage).toContain('any artifact-cited candidate, had recurrence established upstream');
   });
 
   test('proposal-create: observations.jsonl artifact satisfies condition 1', () => {
     expect(proposalCreate).toContain('state/observations.jsonl');
     // The judge verifies the ledger; do not re-check here
-    expect(proposalCreate).toContain('do not re-check here');
+    expect(proposalCreate).toContain('re-establish it here only for `archived-session` candidates');
   });
 });
 

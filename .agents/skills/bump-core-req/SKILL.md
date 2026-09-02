@@ -97,7 +97,7 @@ Then run plugin validation:
 ```bash
 claude plugin validate plugins/<slug> 2>&1
 ```
-Accept any `Unrecognized keys` warnings (these appear repo-wide due to an ongoing hermit-meta.json migration). Abort on any other error.
+Abort on any error.
 
 ### Step 6: Report
 

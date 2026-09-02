@@ -17,6 +17,8 @@ Before composing any brief, determine the dispatch mode:
 1. Read `session_state` from `.claude-code-hermit/state/runtime.json` (live state — always in main).
 2. Resolve the active flag (`--morning`, `--evening`, "brief today"/"daily summary", or no flag).
 
+Live files (SHELL.md, `alert-state.json`, `proposals/`) are read fresh on this turn; a value held in context from before a compaction is stale.
+
 **Dispatch decision:**
 - `--morning` → dispatch (mode: `morning`)
 - `--evening` → dispatch (mode: `evening`)
@@ -67,7 +69,7 @@ After composing the morning brief, age the micro-proposal queue in one pass: run
 - Each `new` entry (first display): append as a final line. Without `options`: `MP-YYYYMMDD-N (tier N): [question]` — Reply `"MP-YYYYMMDD-N yes"` or `"MP-YYYYMMDD-N no"`. (Bare `yes`/`no` accepted when only one pending.) With `options`: render them numbered under the question and reply hint `Reply "MP-YYYYMMDD-N <number or label>"` (bare accepted when only one pending).
 - Each `renudged` entry: append with softer framing: "Still waiting on MP-YYYYMMDD-N: [question] — ignore again to drop it" (if it carries `options`, re-render them numbered beneath it so the choices aren't lost on the re-nudge).
 - `expired` entries were dropped this cycle — do not surface them, and do not resurrect unless fresh evidence accumulates from scratch.
-- `dropped` entries were already resolved elsewhere (issue 676) — never surface them, never count them.
+- `dropped` entries were resolved elsewhere: never surface them, never count them.
 - If `new` and `renudged` are both empty: brief ends without a decision prompt.
 
 ### --evening (routine mode)
@@ -75,7 +77,7 @@ After composing the morning brief, age the micro-proposal queue in one pass: run
 **Delivery:** Write the full composed brief text (before any push-fallback single-line condensing) to `.claude-code-hermit/state/last-brief.json` as `{"kind":"evening","text":"<brief text>","generated_at":"<now, ISO>"}`, so the dashboard's "latest brief" section can pick it up. Then refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md`; if it returns a URL, append a final line `📎 <url>`. Then deliver the brief to the operator (see Always-On Delivery Rule above).
 
 Emphasize backward-looking content. Compose from runner JSON (see Dispatch above) and live main-session data:
-- **Sessions today:** use `runner.sessions_today`; also note any progress in the current SHELL.md progress log (read SHELL.md in main **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**).
+- **Sessions today:** use `runner.sessions_today`; also note any progress in the current SHELL.md progress log (read SHELL.md in main).
 - **Key findings:** use `runner.findings`
 - **Tomorrow:** use `runner.tomorrow`
 - After generating summary: if `runtime.json session_state` is `in_progress` or SHELL.md has progress entries since last report, note it in the brief (e.g., "Session still open — run /session-close to archive.") and let the operator close explicitly. Exception: if `config.always_on` is `true` AND `config.routines` contains an enabled entry with `id` `daily-auto-close` (the midnight routine, which invokes `/claude-code-hermit:session-close --scheduled`), suppress the note — the auto-close routine archives it at midnight. Idle transitions are owned by the `session` skill and `scripts/session-archive.ts`; brief does not trigger them.
@@ -87,8 +89,8 @@ Current behavior — general purpose summary as described below.
 ## Plan
 
 1. Use `session_state` already read in the Dispatch step:
-   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md` **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Summarize the active task using its Progress Log for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; count the entries in its `alerts` object whose `suppressed` is not `true` (suppressed ones are digest-only — not "active"). If that count is above zero, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
-   - **1b. `idle` (no dispatch):** read SHELL.md **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction)**. Format as:
+   - **1a. `in_progress` (no dispatch):** read `.claude-code-hermit/sessions/SHELL.md`. Summarize the active task using its Progress Log for Done/Next lines; produce the standard 5-line output. Then read `.claude-code-hermit/state/alert-state.json`; count the entries in its `alerts` object whose `suppressed` is not `true` (suppressed ones are digest-only — not "active"). If that count is above zero, append one line: `⚠ N alert(s) active — run /claude-code-hermit:hermit-health`.
+   - **1b. `idle` (no dispatch):** read SHELL.md. Format as:
      ```
      [Brief] YYYY-MM-DD | idle | N tasks completed
      Session: since [start date]
@@ -101,7 +103,7 @@ Current behavior — general purpose summary as described below.
 
 ## Output Format
 
-Keep the output to 5 lines, plus an optional 6th line for pending proposals (see Rules below):
+One line per field below, plus an optional line for pending proposals (see Rules below):
 
 ```
 [Brief] YYYY-MM-DD | [tags if present]
@@ -113,13 +115,14 @@ Next: description of next action (or "Session complete" if all done)
 
 ## Rules
 
-- Never exceed 6 lines total (5 content lines + optional proposal line) — this is designed for phone/channel consumption
+- One line per field; a reader on a phone should get the whole brief without scrolling. Extra lines only for the alert count and the proposal count
+- When delivered over a channel, replace every slash-command pointer in the template with the plain reply the operator can send (e.g. 'reply "start" to begin', 'ask me for a health check'); command names stay in terminal output
 - Use the session's date, not today's date
 - Include tags in the header only if they exist
 - For the "Done" line: list the completed steps from the SHELL.md Progress Log, comma-separated. If too many, show first 3 and "+ N more"
 - For the "Next" line: show the step in flight, or the next one the plan implies if none is. If blocked, show "Blocked: reason — run /debug to diagnose, or /claude-code-hermit:session for a fresh session" (keeps the actionable pointers on the existing line, no extra line)
 - If summarizing a completed report: "Next" becomes the report's "Next Start Point" content
-- After composing the 5-line output: scan `.claude-code-hermit/proposals/` for files with `source: auto-detected` and `status: proposed` (read `status:` and `source:` from the **leading `---` YAML frontmatter block only** — do not count files where those phrases appear in the proposal body text; skip files with no frontmatter block). **(fresh read — re-read the file(s) now; do not reuse a value cached in context from before compaction).** If any exist, append a 6th line: `Proposals: N auto-detected proposal(s) pending review`
+- After composing the 5-line output: scan `.claude-code-hermit/proposals/` for files with `source: auto-detected` and `status: proposed` (read `status:` and `source:` from the **leading `---` YAML frontmatter block only** — do not count files where those phrases appear in the proposal body text; skip files with no frontmatter block). If any exist, append a 6th line: `Proposals: N auto-detected proposal(s) pending review`
 
 ## Daily Summary Format
 

@@ -80,7 +80,7 @@ Do NOT invoke `proposal-triage` directly in this skill — `/claude-code-hermit:
 
 ## 4. Emit batch message
 
-Send one message following the Operator Notification protocol in CLAUDE.md (empty channels → optional `PushNotification` + conversation; configured channel → resolve + reply, with `PushNotification` last-resort and `channel-send-unavailable` dedup on miss):
+Send one message per `CLAUDE-APPEND.md` § Operator Notification (`channel-send.ts --notice`; it asks for decisions, so it needs a `client` leg):
 
 ```
 🧠 Capability brainstorm (<N> idea(s))
@@ -121,7 +121,7 @@ proposals_created: [PROP-NNN, ...]
 ---
 ```
 
-Body (150-line cap):
+Body (cover the substance, no filler sections):
 - Ideas that passed generation and triage — one paragraph each.
 - Discarded ideas — one line each (no grounding, no concrete friction).
 - Triage verdicts for each emitted idea (CREATE / SUPPRESS — code / DUPLICATE:ID).

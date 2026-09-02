@@ -1,6 +1,8 @@
 // reflect-precheck.ts — determines which reflect phases are due before invoking LLM.
 // Usage: bun reflect-precheck.ts <hermit-state-dir> <plugin-root> [--quick [--force]]
 // Output (stdout, one line): EMPTY  |  RUN|<phases-json>  |  RUN|<sha256-hash> (--quick)
+// <phases-json> carries one boolean per due phase plus `phase`: the install's age bucket
+// (newborn/juvenile/adult) that the skill binds to $PHASE.
 //
 // On EMPTY: this script owns the audit trail — it calls update-reflection-state.ts
 // and appends the mandatory Progress Log line to SHELL.md before exiting.
@@ -451,7 +453,7 @@ if (wroteNewRows) {
   if (hasFresh) phases.observations_fresh = true;
 }
 
-if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify(phases));
+if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify({ ...phases, phase }));
 
 // EMPTY path: update reflection-state.json and append Progress Log line.
 if (pluginRoot) {
