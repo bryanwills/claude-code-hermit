@@ -24,12 +24,12 @@ type Json = any;
 /**
  * Delete the cached status file after a context reset.
  *
- * The status cache is the fallback source for "which session id am I?". Once /clear
- * destroys a context its last cost entry is stale, and leaving the cache in place lets
- * that DEFUNCT entry resolve again — firing a spurious /compact or /clear into the
- * fresh, near-empty context. Removing it makes the fallback cleanly return "no session
- * id" until a real turn repopulates it. cost-tracker treats a missing file as first-run
- * and rebuilds cumulative totals from the index, so nothing is lost.
+ * The status cache holds the running cumulative cost/token totals for the context that
+ * was just destroyed, keyed to its harness session id. Leaving it in place makes the
+ * next turn continue totals for a context that no longer exists. cost-tracker treats a
+ * missing file as first-run and rebuilds cumulative totals from the index, so nothing is
+ * lost. It is no part of the hygiene tiers' session resolution — that reads runtime.json's
+ * cc_session_id only (hermit-watchdog.ts:resolveHygieneSessionId, issue #916).
  *
  * Moved here from hermit-start.ts (was clearStatusCacheOnBoot) so both the boot path
  * and every mid-run reset path share one implementation.

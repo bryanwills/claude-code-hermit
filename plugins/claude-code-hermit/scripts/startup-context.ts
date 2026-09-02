@@ -23,7 +23,7 @@ import { isResetBreadcrumb } from './lib/progress-log';
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
-import { findResident } from './lib/session-registry';
+import { findResident, ownsResidentIdentity } from './lib/session-registry';
 import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
 import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
@@ -315,14 +315,25 @@ function emitGuestBanner(agentDir: string): void {
 // never overwrites the resident's record. No secret is written — a path and a
 // boolean.
 //
+// HERMIT_MANAGED alone is not enough, though: it is an exported shell variable,
+// so any `claude` the resident itself launches from its own pane inherits it and
+// would stamp itself as the resident — repointing all five fields, including the
+// wake socket and the session id the watchdog's hygiene tiers judge context by.
+// The incumbency check below is the discriminator: a live registry entry at a pid
+// that is not this hook's parent means someone else already holds the stamp.
+//
 // hermit-start rewrites runtime.json moments after spawning tmux, seconds before
 // Claude Code boots and fires this hook; both sides read-modify-write, so the
 // later write preserves the earlier one's fields.
-function stampSessionEnv(stateDir: string): void {
+function stampSessionEnv(stateDir: string, sessionId: string | null): void {
   if (process.env.HERMIT_MANAGED !== '1') return;
   try {
     const runtime = readRuntimeJson(stateDir);
     if (runtime === null) return; // no lifecycle record yet — hermit-start owns creating it
+    // A live claude already holds the stamp and it isn't me → a session the resident
+    // launched, not the resident. A restarted resident's dead predecessor is dropped by
+    // the registry, so a reboot stamps freely (see ownsResidentIdentity).
+    if (!ownsResidentIdentity(runtime)) return;
     const configDir = defaultConfigDir();
     const envAuth = envAuthPresent();
     // The session's own inbox socket, exported by Claude Code before any hook
@@ -336,8 +347,15 @@ function stampSessionEnv(stateDir: string): void {
     // so ppid is the claude process.
     const inboxSocket = process.env.CLAUDE_CODE_MESSAGING_SOCKET || null;
     const sessionPid = process.ppid;
-    // All four describe the launch, so every later SessionStart (resume, clear,
-    // compact) recomputes the same values. Skip the write when nothing moved:
+    // The resident's own Claude Code session id. `session_id` holds the S-NNN work-arc
+    // label (session-archive.ts) and is null between arcs, so it can't identify which
+    // harness session the resident is — and the hygiene tiers were falling back to
+    // sessions/.status.json, which every session in the folder overwrites on Stop.
+    // Under HERMIT_MANAGED this hook IS the resident, so the payload id is exact.
+    const ccSessionId = sessionId || null;
+    // All five describe the launch, so every later SessionStart (resume, compact)
+    // recomputes the same values; /clear mints a new session id, which is a real
+    // change and must be written. Skip the write when nothing moved:
     // writeRuntimeJson stamps updated_at, and refreshing that on the strength of a
     // compaction alone would hide a wedged session from doctor's stale-session
     // check. stampContextReset in lib/context-reset.ts avoids the same hazard by
@@ -346,7 +364,8 @@ function stampSessionEnv(stateDir: string): void {
       runtime.config_dir === configDir &&
       runtime.env_auth === envAuth &&
       runtime.inbox_socket === inboxSocket &&
-      runtime.session_pid === sessionPid
+      runtime.session_pid === sessionPid &&
+      runtime.cc_session_id === ccSessionId
     ) {
       return;
     }
@@ -354,6 +373,7 @@ function stampSessionEnv(stateDir: string): void {
     runtime.env_auth = envAuth;
     runtime.inbox_socket = inboxSocket;
     runtime.session_pid = sessionPid;
+    runtime.cc_session_id = ccSessionId;
     writeRuntimeJson(runtime, stateDir);
   } catch {
     // fail-open — the watchdog falls back to its own env, and to typing, when the
@@ -363,7 +383,7 @@ function stampSessionEnv(stateDir: string): void {
 
 function main(source: string | null, sessionId: string | null) {
   const stateDir = path.resolve(AGENT_DIR, 'state');
-  stampSessionEnv(stateDir);
+  stampSessionEnv(stateDir, sessionId);
   pruneGuestMarkers(stateDir);
   if (residentSessionActive(AGENT_DIR)) {
     // The banner only reaches the model; the marker is what the state-writing

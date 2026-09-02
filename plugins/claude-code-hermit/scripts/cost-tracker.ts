@@ -23,6 +23,8 @@ import { classifySource } from './lib/trigger-source';
 import { runtimeTmpPath } from './lib/runtime';
 import { readContextSurface, writeContextSurface } from './lib/context-surface';
 import { MAX_PLAUSIBLE_PROMPT_TOKENS } from './lib/context-signal';
+import { isGuest } from './lib/guest-marker';
+import { ownsResidentIdentity } from './lib/session-registry';
 
 type Json = any;
 
@@ -313,7 +315,11 @@ function readLastTurnUsage(transcriptPath: string): Json {
 // boundary's compactMetadata.postTokens (the summarized conversation alone) is an
 // upper bound on this hermit's fixed surface — the input the watchdog's compact
 // gate subtracts. Runs on the tail readLastTurnUsage already read; a boundary
-// outside that window was recorded on an earlier Stop. peakPromptTokensSinceCompaction
+// outside that window was recorded on an earlier Stop. The record is folder-wide, not
+// resident-owned: any session in the folder that hits a boundary refreshes it, and that is
+// deliberate — the surface is near-identical across sessions in one project, and gating the
+// write would starve a resident that rarely compacts back to ASSUMED_SURFACE_TOKENS.
+// peakPromptTokensSinceCompaction
 // cannot be reused here: it breaks at the turn's user-entry boundary before ever
 // reaching the compact_boundary record. postTokens is an uncontracted harness field
 // (probe-verified, not documented), so every branch validates and skips rather than
@@ -371,13 +377,22 @@ function maybeDeriveSurface(lines: string[]): void {
   } catch {}
 }
 
-// Newest main (non-subagent) row already in the cost log — the duplicate check in run()
-// compares against it. Tail-read: the log is append-only and unbounded, so a full parse
-// on every turn is exactly the cost this codebase avoids elsewhere (see updateCostIndex).
-function lastLoggedMainRow(): Json {
+// Newest main (non-subagent) row THIS session already logged — the duplicate check in
+// run() compares against it. Tail-read: the log is append-only and unbounded, so a full
+// parse on every turn is exactly the cost this codebase avoids elsewhere (see
+// updateCostIndex).
+//
+// Matching on cc_session_id here rather than at the comparison: the newest main row in a
+// hatched folder belongs to whichever session wrote last, so a guest row landing between
+// this session's turn and a retry of its Stop hook would leave the newest row unmatchable
+// and skip the guard entirely — double-billing the turn and republishing its context size.
+// Legacy rows carry no cc_session_id and so never match, which fails open exactly as a
+// missing observed_at does.
+function lastLoggedMainRow(ccSessionId: string): Json {
   // Wide enough that the subagent rows a fan-out turn appends AFTER its main row can't
   // push that main row out of the window — a turn dispatching ~25 agents writes ~15KB of
-  // them, which would silently disable the guard on exactly the heaviest turns.
+  // them, which would silently disable the guard on exactly the heaviest turns. Other
+  // sessions' rows consume the same window; overflowing it fails open, never closed.
   const TAIL_BYTES = 131072;
   try {
     const { lines } = readTailLines(COST_LOG, TAIL_BYTES);
@@ -385,7 +400,7 @@ function lastLoggedMainRow(): Json {
       if (!lines[i].trim()) continue;
       try {
         const row = JSON.parse(lines[i]);
-        if (row && row.subagent !== true) return row;
+        if (row && row.subagent !== true && row.cc_session_id === ccSessionId) return row;
       } catch {}
     }
   } catch {}
@@ -850,13 +865,44 @@ async function run(data: Json): Promise<string | null> {
     // double-bill the spend and republish a dead context size. Same session only — a fresh
     // session legitimately starts from older transcript entries — and legacy rows without
     // observed_at never block, so the first post-upgrade turn always bills.
-    const lastRow = lastLoggedMainRow();
-    if (observedAt && lastRow && lastRow.session_id === (runtimeSessionId || sessionId)
+    //
+    // "Same session" is cc_session_id, not session_id: the latter is the S-NNN arc label
+    // every session in the folder shares while an arc is open, so a guest's newer row
+    // would suppress the resident's own turn entirely — unbilled spend, and no fresh row
+    // for the hygiene tiers to read (issue #916). lastLoggedMainRow does the matching, so
+    // an interleaved row from another session can neither suppress this turn nor hide the
+    // row that should dedupe it.
+    const lastRow = lastLoggedMainRow(sessionId);
+    if (observedAt && lastRow
         && typeof lastRow.observed_at === 'string' && observedAt <= lastRow.observed_at) {
       return null;
     }
 
     maintainOpenedAt(new Date().toISOString(), sessionId);
+
+    const guest = isGuest(path.join(HERMIT_DIR, 'state'), sessionId);
+    // Keep runtime.cc_session_id pointing at the resident's own harness session. The
+    // SessionStart hook is the primary writer, but it only fires on start/resume/compact/
+    // clear: a resident already running when this version lands stays unstamped — and the
+    // watchdog's hygiene tiers skip entirely without it — until one of those happens. This
+    // is the resident's own turn, so its session id is authoritative; restamping (rather
+    // than filling only when absent) also heals a record left pointing at a session the
+    // resident launched before the SessionStart gate existed.
+    //
+    // Same incumbency rule as stampSessionEnv, or this becomes the hijack path it closes:
+    // a nested claude inherits HERMIT_MANAGED and would otherwise repoint the record on
+    // every one of its own turns. writeRuntimeFields (not lib/runtime's updateRuntimeField)
+    // because this is not a lifecycle event — refreshing updated_at here would hide a
+    // wedged session from doctor's stale-session check.
+    if (!guest && process.env.HERMIT_MANAGED === '1') {
+      const runtime = readRuntimeJsonCached();
+      // Id comparison first: ownsResidentIdentity scans the session registry (a readdir
+      // plus a /proc read per entry) and this runs on every turn, where the steady state
+      // is "already stamped, nothing to do".
+      if (runtime.cc_session_id !== sessionId && ownsResidentIdentity(runtime)) {
+        writeRuntimeFields({ cc_session_id: sessionId });
+      }
+    }
 
     // Read config once per turn — timezone drives by_date/by_week/by_month bucketing and
     // budget-window boundaries (PROP-016); budgetConfig drives the breach check below.
@@ -879,6 +925,12 @@ async function run(data: Json): Promise<string | null> {
     // do not apply.
     const logEntry = buildMainCostRow({
       sessionId: runtimeSessionId || sessionId,
+      // The harness id of the session that actually ran this turn — never the runtime
+      // override above, which is the shared S-NNN arc label. Paired with `guest`, this is
+      // what lets a reader tell the resident's rows from every other session's in the
+      // same project folder (issue #916).
+      ccSessionId: sessionId,
+      guest,
       source,
       model,
       inputTokens,

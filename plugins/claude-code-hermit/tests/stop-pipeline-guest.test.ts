@@ -71,3 +71,41 @@ describe('stop-pipeline — guest liveness gate', () => {
     expect(fs.statSync(file).mtimeMs).toBeGreaterThan(mtimeMs);
   }));
 });
+
+// Issue #916 — cost rows have to say WHICH session produced them.
+//
+// session_id carries runtime.json's S-NNN arc label, which every session in the folder
+// shares while an arc is open, so it cannot answer that question. cc_session_id is the
+// writing session's own harness id, and `guest` marks a row the resident must never read
+// as its own context.
+describe('stop-pipeline — cost row session attribution', () => {
+  const mainRows = (dir: string): any[] =>
+    fs.readFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), 'utf-8')
+      .split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.subagent !== true);
+
+  test('a row records the writing session id, independent of the S-NNN arc label', withDir(async (dir) => {
+    fs.writeFileSync(
+      hermit(dir, 'state', 'runtime.json'),
+      JSON.stringify({ version: 1, session_state: 'in_progress', session_id: 'S-008' }),
+    );
+
+    const r = await runStop(dir);
+
+    expect(r.exitCode).toBe(0);
+    const row = mainRows(dir).at(-1);
+    expect(row.session_id).toBe('S-008');
+    expect(row.cc_session_id).toBe(SESSION_ID);
+    expect('guest' in row).toBe(false);
+  }));
+
+  test('a guest turn writes a row flagged guest', withDir(async (dir) => {
+    markGuest(hermit(dir, 'state'), SESSION_ID);
+
+    const r = await runStop(dir);
+
+    expect(r.exitCode).toBe(0);
+    const row = mainRows(dir).at(-1);
+    expect(row.cc_session_id).toBe(SESSION_ID);
+    expect(row.guest).toBe(true);
+  }));
+});

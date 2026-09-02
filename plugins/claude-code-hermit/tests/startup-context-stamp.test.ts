@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { setupWorkdir } from './helpers/workdir';
+import { writeRegistryEntry } from './helpers/registry-fixture';
 
 const API_KEY = 'sk-ant-api03-fixture-value';
 
@@ -22,12 +23,13 @@ function runtimePath(dir: string): string {
   return path.join(dir, '.claude-code-hermit', 'state', 'runtime.json');
 }
 
-function seedRuntime(dir: string): void {
+function seedRuntime(dir: string, patch: Record<string, unknown> = {}): void {
   fs.writeFileSync(
     runtimePath(dir),
-    JSON.stringify({ version: 1, session_state: 'idle', tmux_session: null }),
+    JSON.stringify({ version: 1, session_state: 'idle', tmux_session: null, ...patch }),
   );
 }
+
 
 const readRuntime = (dir: string) => JSON.parse(fs.readFileSync(runtimePath(dir), 'utf-8'));
 
@@ -46,9 +48,9 @@ const BLANK_ENV = {
   CLAUDE_CODE_USE_FOUNDRY: '',
 };
 
-async function run(dir: string, env: Record<string, string>) {
+async function run(dir: string, env: Record<string, string>, sessionId?: string) {
   return runScript('startup-context.ts', {
-    stdin: JSON.stringify({ source: 'startup' }),
+    stdin: JSON.stringify({ source: 'startup', ...(sessionId ? { session_id: sessionId } : {}) }),
     env: { AGENT_DIR: path.join(dir, '.claude-code-hermit'), ...BLANK_ENV, ...env },
   });
 }
@@ -194,6 +196,112 @@ describe('startup-context.ts — session launch stamp', () => {
       const runtime = readRuntime(wd.dir);
       expect(runtime.config_dir).toBeUndefined();
       expect(runtime.env_auth).toBeUndefined();
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // Issue #916: the hygiene tiers had no way to tell the resident's own context from any
+  // other session's in the folder. runtime.session_id is the S-NNN arc label (null between
+  // arcs, shared while one is open) and sessions/.status.json follows whoever wrote last.
+  // Under HERMIT_MANAGED this hook IS the resident, so its payload id is the exact answer.
+  it('managed session records its own Claude Code session id', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-resident-abc');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-resident-abc');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // /clear mints a new session id. The stamp's no-op guard must not treat that as
+  // "nothing moved", or the tiers keep reading the dead session's rows forever.
+  it('a new session id replaces the previous one', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-old');
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-new');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-new');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // A guest carries no HERMIT_MANAGED, so it must never claim the resident's identity.
+  it('unmanaged session never stamps a session id over the resident\'s', async () => {
+    const wd = setupWorkdir();
+    try {
+      seedRuntime(wd.dir);
+      await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-resident-abc');
+      const res = await run(wd.dir, {}, 'cc-guest-xyz');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-resident-abc');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // HERMIT_MANAGED is an exported shell variable, so a `claude` the resident launches from
+  // its own pane inherits it and would otherwise repoint every stamped field at itself —
+  // leaving the hygiene tiers reading a dead child's frozen row. The discriminator is pid
+  // identity, which env inheritance cannot fake. runScript spawns the hook directly, so the
+  // hook's ppid is this test process (process.pid); process.ppid is therefore a live pid
+  // that is NOT the hook's parent, i.e. exactly the nested-session shape.
+  it('a live incumbent at another pid blocks the stamp', async () => {
+    const wd = setupWorkdir();
+    try {
+      const configDir = path.join(wd.dir, 'cc-config');
+      writeRegistryEntry(configDir, process.ppid);
+      seedRuntime(wd.dir, {
+        config_dir: configDir,
+        session_pid: process.ppid,
+        cc_session_id: 'cc-resident-abc',
+        inbox_socket: '/run/resident.sock',
+      });
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1', CLAUDE_CODE_MESSAGING_SOCKET: '/run/nested.sock' }, 'cc-nested');
+      expect(res.exitCode).toBe(0);
+      const runtime = readRuntime(wd.dir);
+      expect(runtime.cc_session_id).toBe('cc-resident-abc');
+      expect(runtime.session_pid).toBe(process.ppid);
+      expect(runtime.inbox_socket).toBe('/run/resident.sock');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // The incumbent restamping itself is the resume/compact/clear path, which must keep
+  // working — the gate is about who, not about freezing the record.
+  it('the incumbent itself still restamps', async () => {
+    const wd = setupWorkdir();
+    try {
+      const configDir = path.join(wd.dir, 'cc-config');
+      writeRegistryEntry(configDir, process.pid);
+      seedRuntime(wd.dir, { config_dir: configDir, session_pid: process.pid, cc_session_id: 'cc-old' });
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-new');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-new');
+    } finally {
+      wd.cleanup();
+    }
+  });
+
+  // A restarted resident finds its predecessor's pid recorded but dead. The registry drops
+  // it, so the new session stamps freely — otherwise a reboot would leave the hermit
+  // permanently unidentified to the hygiene tiers.
+  it('a dead incumbent does not pin the stamp', async () => {
+    const wd = setupWorkdir();
+    try {
+      const configDir = path.join(wd.dir, 'cc-config');
+      fs.mkdirSync(path.join(configDir, 'sessions'), { recursive: true });
+      seedRuntime(wd.dir, { config_dir: configDir, session_pid: 4_194_304, cc_session_id: 'cc-predecessor' });
+      const res = await run(wd.dir, { HERMIT_MANAGED: '1' }, 'cc-fresh');
+      expect(res.exitCode).toBe(0);
+      expect(readRuntime(wd.dir).cc_session_id).toBe('cc-fresh');
     } finally {
       wd.cleanup();
     }

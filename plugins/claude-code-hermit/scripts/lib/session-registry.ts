@@ -152,3 +152,23 @@ export function findResident(runtime: any, configDir?: string): SessionEntry | n
   if (typeof pid !== 'number') return null;
   return readRegistry(configDir).find((e) => e.pid === pid) ?? null;
 }
+
+/**
+ * Whether this process may write the resident identity fields on runtime.json
+ * (`cc_session_id`, `session_pid`, `inbox_socket`, …). True when no live entry holds
+ * the stamp, or when the live entry IS this process's parent — the incumbent
+ * restamping itself on resume/compact/clear, or refreshing it from a Stop hook.
+ *
+ * False for a `claude` the resident launched from its own pane: it inherits
+ * HERMIT_MANAGED through the environment, so that marker cannot tell the two apart,
+ * but it runs under a different pid. Callers are hooks, whose parent is the claude
+ * process itself (argv form in hooks.json, no shell between).
+ *
+ * Unreadable registry resolves to null and returns true — fail-open, matching the
+ * behavior every consumer here had before the check existed.
+ */
+export function ownsResidentIdentity(runtime: any): boolean {
+  const configDir = typeof runtime?.config_dir === 'string' ? runtime.config_dir : undefined;
+  const incumbent = findResident(runtime, configDir);
+  return !incumbent || incumbent.pid === process.ppid;
+}

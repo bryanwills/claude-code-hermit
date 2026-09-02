@@ -12,6 +12,7 @@
 // it as a (empty) test file.
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 /** Field 22 of /proc/<pid>/stat, or null where /proc isn't published (macOS) —
  *  which is also where session-registry skips the check entirely, so tests use
@@ -45,4 +46,23 @@ export function localIdentity(): { pid: number; procStart: string; pidDomain: st
     procStart: procStartOf(process.pid) ?? '1',
     pidDomain: localPidDomain(),
   };
+}
+
+/** Writes a `<config dir>/sessions/<pid>.json` entry that survives the lib's validation.
+ *  Not localIdentity(): callers build entries for pids other than this process (a live
+ *  parent, a dead one), so the identity is per-pid. `patch` overrides any field. */
+export function writeRegistryEntry(configDir: string, pid: number, patch: Record<string, unknown> = {}): void {
+  fs.mkdirSync(path.join(configDir, 'sessions'), { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'sessions', `${pid}.json`), JSON.stringify({
+    pid,
+    procStart: procStartOf(pid) ?? '1',
+    pidDomain: localPidDomain(),
+    sessionId: `sess-${pid}`,
+    kind: 'interactive',
+    status: 'idle',
+    statusUpdatedAt: Date.now(),
+    cwd: '/tmp/project',
+    name: `session-${pid}`,
+    ...patch,
+  }));
 }

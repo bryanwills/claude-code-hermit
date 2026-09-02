@@ -26,7 +26,7 @@ import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } fr
 import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
 import { isCloseableSessionState } from './lib/auto-close';
-import { promptTokensOf, compactibleTokens } from './lib/context-signal';
+import { promptTokensOf, compactibleTokens, isOwnTurn } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
 import { readJson } from './lib/cli';
@@ -1222,20 +1222,15 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
 // doctor-check.ts is deliberately invocable with an explicit hermit dir
 // different from CWD (see the costLog comment above).
 
-/** Session id whose context size to judge: runtime.json's session_id, falling back to the
- *  harness id in sessions/.status.json for idle-phase wakes (heartbeat/routines/channel
- *  messages) — the same fallback hermit-watchdog.ts's hygiene tiers use, so this check
- *  can't be blind to exactly the accumulation they exist to catch. */
-function resolveContextSessionId(runtime: Json, p: DoctorPaths): string {
-  const { hermitDir } = p;
-  const sid = runtime?.session_id;
-  if (typeof sid === 'string' && sid) return sid;
-  try {
-    const status = JSON.parse(fs.readFileSync(path.join(hermitDir, 'sessions', '.status.json'), 'utf8'));
-    return typeof status?.session_id === 'string' ? status.session_id : '';
-  } catch {
-    return '';
-  }
+/** Session id whose context size to judge: the resident's own Claude Code session id,
+ *  stamped by startup-context.ts. Deliberately the same resolution hermit-watchdog.ts's
+ *  hygiene tiers use (resolveHygieneSessionId) — this is a tripwire for those tiers, so
+ *  judging a different session's context would make it report on something they never
+ *  act on. The old runtime.session_id / sessions/.status.json pair identified whichever
+ *  session in the folder wrote last, not the resident (issue #916). */
+function resolveContextSessionId(runtime: Json): string {
+  const sid = runtime?.cc_session_id;
+  return typeof sid === 'string' ? sid : '';
 }
 
 const CONTEXT_AGE_STALE_HOURS = 24;
@@ -1260,19 +1255,20 @@ function checkContextAge(p: DoctorPaths = PATHS) {
       return { id: 'context-age', status: 'ok', detail: 'no active session' };
     }
 
-    const sessionId = resolveContextSessionId(runtime, p);
+    const sessionId = resolveContextSessionId(runtime);
     if (!sessionId) {
       return { id: 'context-age', status: 'ok', detail: 'active session but no session id resolvable — skipping' };
     }
 
-    // Last non-subagent cost-log entry for this session — mirrors getLastCostLogEntry.
+    // Last non-subagent cost-log entry for this session — mirrors getLastCostLogEntry,
+    // sharing its isOwnTurn match rule (lib/context-signal.ts) so the two cannot drift.
     let lastEntry: Json = null;
     if (fs.existsSync(costLog)) {
       for (const line of fs.readFileSync(costLog, 'utf-8').split('\n')) {
         if (!line.trim()) continue;
         try {
           const e = JSON.parse(line);
-          if (e && e.session_id === sessionId && e.subagent !== true) lastEntry = e;
+          if (isOwnTurn(e, sessionId)) lastEntry = e;
         } catch {}
       }
     }

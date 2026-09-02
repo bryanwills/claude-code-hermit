@@ -250,7 +250,7 @@ describe('scanRoutineLedger — single-population cost and runs', () => {
 
 describe('cost row builders', () => {
   const mainBase = {
-    sessionId: 's-1', source: 'other', model: 'sonnet',
+    sessionId: 's-1', ccSessionId: 'cc-1', source: 'other', model: 'sonnet',
     inputTokens: 10, cacheWriteTokens: 20, cacheReadTokens: 30, outputTokens: 40,
     totalTokens: 100, apiCalls: 3, maxPromptTokens: 5000,
     lastCallPromptTokens: 4000, contextUsage: null,
@@ -271,6 +271,7 @@ describe('cost row builders', () => {
     const row = buildMainCostRow(mainBase);
     expect('observed_at' in row).toBe(false);
     expect('source_inherited' in row).toBe(false);
+    expect('guest' in row).toBe(false);
   });
 
   test('optional keys are present when they do apply', () => {
@@ -293,7 +294,7 @@ describe('cost row builders', () => {
 
   test('main row key set is stable', () => {
     expect(Object.keys(buildMainCostRow(mainBase)).sort()).toEqual([
-      'api_calls', 'cache_read_tokens', 'cache_write_tokens', 'context_usage',
+      'api_calls', 'cache_read_tokens', 'cache_write_tokens', 'cc_session_id', 'context_usage',
       'estimated_cost_usd', 'input_tokens', 'last_call_prompt_tokens', 'max_prompt_tokens',
       'model', 'model_unpriced', 'output_tokens', 'session_id', 'source',
       'source_attribution_version', 'timestamp', 'total_tokens',

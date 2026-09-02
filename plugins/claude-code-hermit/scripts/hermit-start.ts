@@ -509,21 +509,18 @@ function clearShutdownStampsOnBoot(existing: Json): void {
 }
 
 /**
- * Removes the sessions/.status.json cost cache on an always-on boot. cost-tracker
- * writes the current harness session id there each turn, and the watchdog's idle-phase
- * hygiene fallback (resolveHygieneSessionId) reads it when no S-NNN arc is open. Across
- * a restart the harness session id changes, but the old file survives until the first
- * post-boot turn rewrites it — a stale pointer that would make the watchdog resolve the
- * DEFUNCT prior session's last (possibly bloated) cost entry and fire a spurious /compact
- * or /clear into the fresh, near-empty context. Removing it here makes the fallback
- * return "no session id" (a clean skip) until a real turn re-populates it. cost-tracker
- * treats a missing file as first-run and rebuilds cumulative totals from the index, so
- * nothing is lost.
+ * Removes the sessions/.status.json cost cache on an always-on boot. The file carries
+ * the running cumulative cost/token totals for a session that is now over, plus that
+ * session's harness id; leaving it in place makes the first post-boot turn continue a
+ * dead session's totals. cost-tracker treats a missing file as first-run and rebuilds
+ * cumulative totals from the index, so nothing is lost.
  *
  * The watchdog also imports this and calls it mid-run at context-reset time (post-close
  * and emergency /clear in hermit-watchdog.ts) for the same reason: once /clear destroys a
- * context, its last cost entry is stale, and the same fallback must not resolve it into a
- * spurious /compact against the fresh context.
+ * context, the totals cached against it describe a context that no longer exists.
+ *
+ * This file is no longer any part of the hygiene tiers' session resolution — that reads
+ * runtime.json's cc_session_id only (resolveHygieneSessionId, issue #916).
  */
 function clearStatusCacheOnBoot(): void {
   clearStatusCache(path.join(STATE_DIR, '..'));
@@ -1545,8 +1542,8 @@ async function main(): Promise<void> {
   // Detect runtime mode
   const runtimeMode = isContainer() ? 'docker' : 'tmux';
 
-  // The prior process's harness session is over — drop its stale cost cache so the
-  // watchdog's idle-phase hygiene fallback can't resolve a defunct session (see helper).
+  // The prior process's harness session is over — drop its stale cost cache so the first
+  // post-boot turn doesn't continue a dead session's cumulative totals (see helper).
   clearStatusCacheOnBoot();
   // Fresh boot marker for hermit-routines' cron-registry diff (see helper).
   writeBootId();
