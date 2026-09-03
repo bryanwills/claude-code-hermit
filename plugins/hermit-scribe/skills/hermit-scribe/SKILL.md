@@ -38,11 +38,7 @@ If the operator named a proposal (`PROP-NNN`):
 
    It emits JSON `{type, scope, labels, title_line}` — `title_line` is `<type>(<scope>): <title>` (scope omitted when unresolved). Review it, then use `title_line` as the draft title and hold `labels` for Step 6. (Scope resolution reads `_hermit_versions` from `.claude-code-hermit/config.json`; `hermit-filed` is added by the script — it is not in `labels`.)
 
-5. Construct draft body with the four body sections, then append:
-   ```
-   ---
-   *Filed via hermit-scribe · proposal={id} · session={session}*
-   ```
+5. Construct draft body with the four body sections. The provenance footer (see Step 3) is NOT part of the draft — appending it here would expose `proposal={id}` to the sanitizer, which would redact it as operator-project detail and break dedup.
 
 For ad-hoc issues (no proposal): use the title and body the operator provides verbatim — no CC type/scope construction.
 
@@ -81,6 +77,12 @@ DRAFT_BODY:
 ```
 
 Parse the response: split on the `<<<HERMIT_SCRIBE_BODY>>>` line. Everything before it (after stripping `TITLE: `) is the cleaned title; everything after is the cleaned body.
+
+For proposal-backed issues, append the footer to the cleaned body now — after sanitization, never before it, since the footer is skill-generated protocol that `--check` matches on, not operator content:
+```
+---
+*Filed via hermit-scribe · proposal={id} · session={session}*
+```
 
 **Step 4: operator preview.**
 

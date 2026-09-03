@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The `issue-sanitizer` subagent redacted the `proposal={id}` dedup anchor as operator-project detail before it ever reached GitHub, so `--check` could never match a filed issue back to its proposal. The footer is now appended after sanitization instead of before it.
+- `issue-sanitizer` now refuses (`TITLE: (refused)`) instead of fabricating an issue when handed a file reference instead of an inline draft.
+
 ## [0.1.2] - 2026-08-31
 
 ### Changed
