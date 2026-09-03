@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readHookInput, OVERSIZE } from './lib/hook-input';
 import { hermitDir } from './lib/cc-compat';
-import { acquireLock, releaseLock } from './lib/lockfile';
+import { acquireLockWithWait, releaseLock } from './lib/lockfile';
 import { readJson } from './lib/cli';
 
 /**
@@ -18,10 +18,10 @@ import { readJson } from './lib/cli';
  * via `$GIT_COMMON_DIR/info/exclude` — never `.gitignore`, which is itself
  * tracked and would leak the private skill's name to every clone.
  *
- * Safety invariant: a path that is ALREADY tracked by git is never touched.
- * This is what protects an operator's own hand-authored skills even if
- * HERMIT_MANAGED leaks into a session by inheritance — only a brand-new
- * untracked path can ever be privatized.
+ * Safety invariant: a component git ALREADY tracks anything under is never
+ * touched. This is what protects an operator's own hand-authored skills even if
+ * HERMIT_MANAGED leaks into a session by inheritance — only a component with no
+ * tracked file in it can ever be privatized.
  *
  * Scoped to the managed always-on session only (HERMIT_MANAGED=1); an
  * operator's own terminal session in the same project never privatizes.
@@ -30,21 +30,35 @@ import { readJson } from './lib/cli';
  */
 
 const COMPONENT_RE = /^\.claude\/(skills\/[^/]+\/.+|agents\/[^/]+\.md)$/;
+const LOCK_WAIT_MS = 1000;
+const LOCK_STALE_MS = 10_000;
 
-function gitCommonDir(cwd: string): string | null {
+/** Both refs in one spawn: `git rev-parse` prints one line per flag, in argument order. */
+function gitRefs(cwd: string): { commonDir: string; topLevel: string } | null {
   try {
-    return execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd, encoding: 'utf-8' }).trim() || null;
+    const [commonDir, topLevel] = execFileSync(
+      'git', ['rev-parse', '--git-common-dir', '--show-toplevel'], { cwd, encoding: 'utf-8' },
+    ).trim().split('\n');
+    return commonDir && topLevel ? { commonDir, topLevel } : null;
   } catch {
     return null;
   }
 }
 
-function isTracked(cwd: string, relPath: string): boolean {
+/**
+ * Does git already track anything under this pathspec?
+ *
+ * Asked about the path that will be EXCLUDED, not the path that was written: a
+ * skill excludes its whole directory, so a hermit adding `reference.md` to the
+ * operator's own tracked `.claude/skills/commit/` would otherwise privatize the
+ * operator's skill wholesale — and git then refuses their next `git add` inside
+ * it. An unreadable index counts as tracked; never privatize on a guess.
+ */
+function hasTrackedFiles(cwd: string, pathspec: string): boolean {
   try {
-    execFileSync('git', ['ls-files', '--error-unmatch', relPath], { cwd, stdio: 'pipe' });
-    return true;
+    return execFileSync('git', ['ls-files', '-z', '--', pathspec], { cwd, encoding: 'utf-8' }).length > 0;
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -62,14 +76,18 @@ function componentPath(rel: string): string {
 function appendExcludeLine(commonDir: string, line: string): void {
   const excludePath = path.join(commonDir, 'info', 'exclude');
   const lockPath = `${excludePath}.lock`;
-  let held = false;
+  // Before acquireLock, which creates its own file inside info/ — a repo built
+  // from a stripped init template has no info/ at all, and the lock would then
+  // throw ENOENT before any mkdir further down could help.
+  fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+  // Hooks run concurrently, and a skill is usually written exactly once, so a
+  // contended lock must not drop the only chance to privatize it: wait, then
+  // append anyway (an O_APPEND of one line, at worst a duplicate rule).
+  const held = acquireLockWithWait(lockPath, LOCK_WAIT_MS, LOCK_STALE_MS);
   try {
-    held = acquireLock(lockPath);
-    if (!held) return; // contended — a concurrent writer owns this; the next Edit/Write retries
     const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, 'utf-8') : '';
     const lines = existing.split('\n').map(l => l.trim());
     if (lines.includes(line)) return; // already present — idempotent
-    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
     const sep = existing && !existing.endsWith('\n') ? '\n' : '';
     fs.appendFileSync(excludePath, `${sep}${line}\n`);
   } finally {
@@ -103,13 +121,21 @@ async function main() {
   const hatchOptions = readJson(path.join(hermit, 'state', 'hatch-options.json'));
   if (hatchOptions?.target !== 'local') process.exit(0);
 
-  const commonDir = gitCommonDir(projectRoot);
-  if (!commonDir) process.exit(0);
-  const absCommonDir = path.isAbsolute(commonDir) ? commonDir : path.resolve(projectRoot, commonDir);
+  const refs = gitRefs(projectRoot);
+  if (!refs) process.exit(0);
+  const absCommonDir = path.isAbsolute(refs.commonDir) ? refs.commonDir : path.resolve(projectRoot, refs.commonDir);
 
-  if (isTracked(projectRoot, rel)) process.exit(0); // safety invariant
+  const component = componentPath(rel);
+  if (hasTrackedFiles(projectRoot, component)) process.exit(0); // safety invariant
 
-  appendExcludeLine(absCommonDir, componentPath(rel));
+  // An info/exclude pattern carrying a slash is anchored at the REPO root, not
+  // at the hermit's project root. A hermit hatched into a subdirectory of a
+  // larger repo therefore needs the subdirectory prefix, or the rule silently
+  // matches nothing and the component is committed anyway.
+  const prefix = path.relative(refs.topLevel, projectRoot).split(path.sep).join('/');
+  if (prefix.startsWith('..')) process.exit(0); // project root outside the repo — nothing sound to write
+
+  appendExcludeLine(absCommonDir, prefix ? `${prefix}/${component}` : component);
   process.exit(0);
 }
 

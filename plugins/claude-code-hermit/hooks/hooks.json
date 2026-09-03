@@ -108,7 +108,7 @@
             "type": "command",
             "command": "bun",
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/component-privacy.ts"],
-            "timeout": 3
+            "timeout": 5
           }
         ],
         "description": "Keep a hermit-created skill/agent private to this install (git-common-dir info/exclude) when hatch_target is local and the write came from the managed always-on session"
