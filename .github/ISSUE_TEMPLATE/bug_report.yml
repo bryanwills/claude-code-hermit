@@ -1,0 +1,46 @@
+name: 🐛 Bug Report
+description: Report a bug in a claude-code-hermit plugin
+labels:
+  - bug
+body:
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Paste the output of `claude --version` and `claude plugin list`
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What Happened?
+      description: Describe what went wrong
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What Should Happen?
+      description: Describe the expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Numbered steps someone else can follow
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Messages/Logs
+      description: Any relevant error output, stack traces, or logs (optional)
+      render: shell
+    validations:
+      required: false
