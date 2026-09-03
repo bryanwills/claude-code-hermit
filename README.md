@@ -282,7 +282,7 @@ Many operators run several hermits in parallel — one per domain. Each one is a
 
 ## Community
 
-Join the [`claude-code-hermit` Discord community](https://discord.gg/54sJqAxhUh) for install help, always-on ops, plugin authoring, bug triage, and proposal/design discussion. Confirmed bugs and roadmap decisions should still move back to GitHub so they remain searchable and reviewable.
+Join the [`claude-code-hermit` Discord community](https://discord.gg/54sJqAxhUh) for install help, always-on ops, plugin authoring, bug triage, and proposal/design discussion. Confirmed bugs and roadmap decisions should still move back to GitHub so they remain searchable and reviewable. See [CONTRIBUTING.md](CONTRIBUTING.md) for filing an issue or opening a PR.
 
 ---
 
