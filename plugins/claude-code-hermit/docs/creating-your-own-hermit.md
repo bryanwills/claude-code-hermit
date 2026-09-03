@@ -72,7 +72,7 @@ Once the file exists, your hermit can delegate to it by name. For more on [sub-a
 
 ## Adding Skills
 
-Skills are multi-step workflows invoked with a slash command. Create a directory in `.claude/skills/` with a `SKILL.md` file — the directory name becomes the command.
+Skills are multi-step workflows invoked with a slash command. Create a directory in `.claude/skills/` with a `SKILL.md` file — the directory name becomes the command. A skill you write yourself is tracked like any project file; one you ask your hermit to create for you follows the project's hatch visibility choice instead, private to this install by default.
 
 `.claude/skills/deploy/SKILL.md` -> `/deploy`:
 
