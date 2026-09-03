@@ -544,7 +544,7 @@ Modify with `/hermit-settings scheduled-checks`.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `packages` | array | `[]` | System packages (`apt-get`) to install in the Docker image. |
+| `packages` | array | `[]` | Apt packages recorded at `/docker-setup`. Read only when the templates are rendered, so setting it later installs nothing. Add a package to a running container through the operator block of `Dockerfile.hermit` (`/docker-customize`) and rebuild. |
 | `recommended_plugins` | array | `[]` | Plugins to install on container boot. Empty by default — entries are only added when the operator explicitly opts in during `/docker-setup` or `/hermit-settings docker`. |
 | `fleet_mesh` | boolean | `false` | Opt-in, same-box Docker peer discovery and messaging. Requires the two external volumes and the pid namespace holder documented in [Always-On Mode](always-on.md#fleet-mesh-opt-in). Set it in `config.json`, then re-run `/docker-setup`. |
 
@@ -559,7 +559,7 @@ Modify with `/hermit-settings scheduled-checks`.
 
 **Security model:** The entrypoint installs every `enabled` entry regardless of marketplace. The safety gate is at configuration time — entries are only written here when the operator explicitly confirms the list during `/docker-setup` or `/hermit-settings docker`. See [Recommended Plugins](recommended-plugins.md) for details.
 
-Modify with `/hermit-settings docker`.
+View `packages` (read-only) and modify `recommended_plugins` with `/hermit-settings docker`.
 
 ---
 
