@@ -474,8 +474,19 @@ export function classifyQueueTail(tailText: string, nowMs: number, staleSecs = W
 // Auth failures (`Login expired`, `401 Invalid API key`) are deliberately excluded:
 // `hasLapsedLogin`/`envAuthFailure` above already notify for those, and matching them
 // here too would double-notify the operator for one event.
-const USAGE_LIMIT_RE = /session limit/i;
-const USAGE_LIMIT_RESET_RE = /resets\s+([^\n(]+)/i;
+// CC composes the limit line as `You've hit your ${label}…`, where the label is one
+// of a fixed set — `session limit`, `weekly limit`, `Opus limit`, `Sonnet limit`,
+// `Fable limit`, `individual usage limit`, `individual spend limit`, `usage credit
+// limit`, `monthly spend limit` — so matching one label would leave the multi-day
+// weekly lockout silent, which is the case an operator most needs told. Match the
+// frame instead of the label. `reached` covers the second phrasing CC uses for a
+// per-model limit. Loose text matching is safe inside the structural gate above:
+// only a harness-emitted failure record ever reaches it.
+const USAGE_LIMIT_RE = /\b(?:hit|reached) your [^\n]{0,40}\blimit\b/i;
+// Bounded on purpose: CC appends a subline to the same line (`, or switch models to
+// keep working.`, ` try /model sonnet for more runway`), and an unbounded capture
+// would paste that whole tail into "It will resume on its own at …".
+const USAGE_LIMIT_RESET_RE = /resets\s+([^\n(·,.]{1,30})/i;
 const API_UNAVAILABLE_RE = /API Error:.*(529 Overloaded|500 Internal server error|Server error mid-response)/i;
 
 export type ApiFailureVerdict = { kind: 'usage-limit'; resetAt: string | null } | { kind: 'api-unavailable' };
@@ -2192,9 +2203,12 @@ async function main(): Promise<void> {
         watchdogState.api_failure_notified_at = worldStamp(REAL_WORLD);
         writeWatchdogState(watchdogState);
       }
-    } else if (watchdogState.api_failure_notified_at) {
-      // Re-arm once a newer, healthy assistant record supersedes the failure — mirrors
-      // the session-wedged re-arm above, so a later episode can notify again.
+    } else if (tail !== null && watchdogState.api_failure_notified_at) {
+      // Re-arm once a newer, healthy assistant record supersedes the failure, so a later
+      // episode can notify again. Unlike the session-wedged re-arm above, an unreadable
+      // tail must NOT re-arm: a restart mid-episode leaves `opened_transcript` pointing at
+      // a file that doesn't exist yet, and clearing the stamp there would push a second
+      // notice for the same still-active outage on the very next tick.
       delete watchdogState.api_failure_notified_at;
       writeWatchdogState(watchdogState);
     }

@@ -790,6 +790,23 @@ describe('classifyApiFailureTail', () => {
   test('no assistant records at all → null', () => {
     expect(classifyApiFailureTail('{"type":"mode","mode":"normal"}')).toBeNull();
   });
+
+  // CC's limit line is `You've hit your ${label}…` over a fixed label vocabulary
+  // (session / weekly / Opus / Sonnet / Fable / individual usage / individual spend /
+  // usage credit / monthly spend). A label-specific match left the weekly lockout —
+  // the multi-day one — silent.
+  test.each([
+    'weekly limit', 'Opus limit', 'Sonnet limit', 'Fable limit',
+    'individual usage limit', 'usage credit limit', 'monthly spend limit',
+  ])('non-session limit label (%s) → usage-limit', (label) => {
+    const tail = apiErrorRec(`You've hit your ${label} · resets 2:30am (Europe/Lisbon)`);
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'usage-limit', resetAt: '2:30am' });
+  });
+
+  test('reset capture stops at the subline instead of swallowing it', () => {
+    const tail = apiErrorRec("You've hit your session limit · resets 2:30am, or switch models to keep working.");
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'usage-limit', resetAt: '2:30am' });
+  });
 });
 
 /** Seed a transcript for CC transcript id `transcriptId` under a sandboxed HOME, and point
