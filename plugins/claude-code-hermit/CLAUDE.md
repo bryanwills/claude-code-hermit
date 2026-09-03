@@ -15,12 +15,7 @@ After install, run `/claude-code-hermit:hatch` in the target project to create t
 
 ## Plugin Structure
 
-- `agents/` — subagent definitions (proposal-triage, reflection-judge, evolve-runner, skill-eval-runner; hermit plugins add more subagents)
-- `skills/` — skill definitions (namespaced as `/claude-code-hermit:*`): session, session-start, session-close, brief, watch, heartbeat, hermit-routines, hermit-settings, proposal-create, proposal-list, proposal-act, reflect, capability-brainstorm, channel-responder, channel-setup, hatch, hermit-evolve, docker-setup, docker-security, simplify, hermit-evolution, cost-reflect, hermit-health, weekly-review, hermit-doctor, recall, relogin, hermit-dashboard-design, rc-gate
-- `hooks/hooks.json` — hook registrations
-- `scripts/` — hook implementation scripts + boot scripts (hermit-start.ts, hermit-stop.ts)
-- `state-templates/` — templates copied into target projects by the `hatch` skill
-- `.claude-plugin/plugin.json` — plugin manifest
+Standard Claude Code plugin layout (`agents/`, `skills/`, `hooks/hooks.json`, `scripts/`, `.claude-plugin/plugin.json`). The non-obvious dir is `state-templates/`: what `hatch` copies into a target project and `hermit-evolve` refreshes. Skills are namespaced `/claude-code-hermit:*`.
 
 ## Constraints
 
@@ -96,6 +91,8 @@ An installed hermit belongs to its operator — they rewrite it, and the plugin'
 
 When authoring above the contract line, give skills data + goal + voice and let the model compose — don't hardcode content, edge-case copy, checklists, or opinions about how the operator should work. Loose ≠ vague: a skill still states its goal and verdict shape precisely.
 
+**Skill text describes the present, in a colleague's runbook voice.** The model reading a skill never saw its earlier versions, so anything phrased as a diff against them is noise it must reconcile: no version pins, issue or proposal IDs, or migration history ("no longer", "now automatic", "used to", "backwards compatible") inside instruction text. That context belongs in the commit message, the CHANGELOG, or a code comment. State each rule once, in the file that owns it, with other files pointing at it rather than restating it, in plain declarative sentences: no shouting caps, no "think hard", no rationale attached to every rule (one clause of why, only where the model would otherwise be tempted). Name the audience instead of a length cap ("someone reading on a phone", not "one paragraph max"). When a step's inputs already determine its answer, move it into a script and delete the step instead of asking the model to judge it.
+
 **The upgrade rule.** Anything operator-editable must survive `hermit-evolve`. Adding a new operator-owned surface means saying in `### Upgrade Instructions` how existing edits are preserved, not just how the template changes.
 
 ## Development
@@ -132,7 +129,7 @@ bun test
 - Agent references in skill instructions must always use the full namespaced form `claude-code-hermit:<agent-name>` (e.g., `claude-code-hermit:proposal-triage`). Bare names are auto-namespaced by the harness on load, so bare-name invocations from skill text will fail with "Agent type not found".
 - **Hermit `state-templates/CLAUDE-APPEND.md` blocks must not restate `config.json` contents** (routine schedules, Discord/Telegram user IDs, morning-brief times, `permission_mode`, `agent_name`, `sign_off`, `escalation`, `idle_behavior`). Those are loaded structurally from `config.json` on every session start. CLAUDE-APPEND describes behaviors, conventions, and workflow shape — not the wiring. Restating config values leaks them into `CLAUDE.md`, which the hatch's OPERATOR.md scan reads, tempting the model to mirror them again into OPERATOR.md prose. Naming routines by `id` and referencing `enabled` state is fine — those are stable; schedules and flags drift.
 - **Default `config.json` source of truth is `state-templates/config.json.template`.** Skills (especially `hatch`) must overlay operator choices onto the template — never re-declare a parallel inline default object in SKILL.md text. The `tests/template-skill-sync.test.ts` contract test catches drift between the template's top-level keys and `hatch/SKILL.md` references; if you add a field to the template, also reference it by name in hatch.
-- **SKILL.md size: trim before splitting.** Sibling files (e.g., `skills/<name>/EXTRA.md`) are not auto-loaded — only `SKILL.md` is. The model must explicitly `Read` siblings, which is unreliable for branch-conditional flow. When a SKILL.md grows large, prefer trimming verbose prose, collapsing redundant tables, and removing duplicated sections over splitting into multiple files.
+- **SKILL.md is what every invocation pays for; siblings are progressive disclosure.** Only `SKILL.md` auto-loads. Keep in it the path every run takes; move what a branch or subcommand needs only sometimes into a sibling (`reference.md`, `branches.md`) and have that branch `Read` it, naming the section. Trim before either: cut prose, collapse tables, delete duplicates.
 - **Token discipline: keep the script-mediation boundary.** State costs tokens only where
   it crosses into context — hook stdout, skill-driven `Read`s, and helper-script output.
   Hooks and helper scripts print verdict-sized digests, never raw logs or full state dumps
