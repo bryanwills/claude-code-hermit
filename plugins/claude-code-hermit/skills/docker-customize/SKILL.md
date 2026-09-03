@@ -5,7 +5,7 @@ description: Route a request to install a tool, binary, package, env var, persis
 
 # Docker Customize
 
-Land a container change in the first channel that can carry it, in the order below. Files sit on the project bind mount, so this skill runs from inside the container or on the host. Rebuild and restart are host-only: name the command for the operator, do not run it from inside the container.
+Land a container change in the first channel that can carry it, in the order below. Files sit on the project bind mount, so this skill runs from inside the container or on the host. Rebuild, restart, and compose validation are host-only (the image has no Docker CLI): name the command for the operator, do not run it from inside the container.
 
 ## 1. Apt package
 
@@ -20,9 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 ```
 
-When that layer is absent, add it between the `gh` install layer and the `# Match host UID` comment. Then rebuild on the host: `.claude-code-hermit/bin/hermit-docker update`.
+When that layer is absent, add it between the `gh` install layer and the `# Match host UID` comment. Then rebuild on the host: `.claude-code-hermit/bin/hermit-docker up --build`.
 
-Two things to tell the operator. Editing `Dockerfile.hermit` marks it customized, so `hermit-evolve` keeps their version and stops applying upstream changes to that file: re-check it after an upgrade. And `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own.
+Three things to tell the operator. The package layer sits above the Claude Code install, so the rebuild also reinstalls Claude Code at the latest version. Editing `Dockerfile.hermit` means a later upstream change to that file arrives as a 3-way merge, with their edit re-applied and the previous copy parked under `.claude-code-hermit/state/`, rather than as a straight overwrite. Re-check the file after an upgrade. And `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own.
 
 ## 2. Boot-time shell
 
@@ -43,14 +43,14 @@ Shape of an appended block:
 # --- operator: <what> ---
 if [ "$HERMIT_ENTRY_PHASE" = pre-boot ]; then
   mkdir -p "${PROJECT_DIR}/.claude.local/<name>"
-  curl -fsSL <url> -o "${PROJECT_DIR}/.claude.local/<name>/<bin>" || true
-  chmod +x "${PROJECT_DIR}/.claude.local/<name>/<bin>" || true
+  curl -fsSL <url> -o "${PROJECT_DIR}/.claude.local/<name>/<bin>"
+  chmod +x "${PROJECT_DIR}/.claude.local/<name>/<bin>"
   export PATH="${PROJECT_DIR}/.claude.local/<name>:${PATH}"
 fi
 ```
 
 ## 3. Compose or Dockerfile only
 
-If only `docker-compose.hermit.yml` or `Dockerfile.hermit` can carry it (volumes, ports, capabilities, base image), edit as one contiguous block with a leading comment. Validate a compose edit with `docker compose -f docker-compose.hermit.yml config -q` before handing it back: the host wrapper refuses every `up` and `build` on a file that does not parse.
+If only `docker-compose.hermit.yml` or `Dockerfile.hermit` can carry it (volumes, ports, capabilities, base image), edit as one contiguous block with a leading comment. Validate a compose edit on the host with `docker compose -f docker-compose.hermit.yml config -q`, adding `-f docker-compose.security.yml` when that file exists so the check covers what the wrapper actually builds: the host wrapper refuses every `up` and `build` on a file that does not parse.
 
 `hermit-evolve` reconciles the file against the baseline `docker-setup` recorded: with a baseline and an upstream move it merges 3-way and parks your previous copy at `.claude-code-hermit/state/<name>.<timestamp>.bak`; with no baseline, or with no upstream move, it leaves the file alone and writes no backup. Re-check the block after every evolve.
