@@ -71,7 +71,8 @@ function packagesBlock(packages: string[]): string {
   if (packages.length === 0) return '';
   return [
     '# Project-specific packages (from config.json docker.packages)',
-    '# To modify: /hermit-settings docker, then rebuild',
+    '# Rendered at /docker-setup time. To add a package now, put it in the operator',
+    '# block below (or run /docker-customize), then rebuild.',
     'RUN apt-get update && apt-get install -y --no-install-recommends \\',
     `      ${packages.join(' ')} && \\`,
     '    rm -rf /var/lib/apt/lists/*',

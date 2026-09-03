@@ -46,7 +46,7 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings idle             — set idle behavior (wait or discover)
 /claude-code-hermit:hermit-settings env              — view/edit environment variables
 /claude-code-hermit:hermit-settings compact          — configure SHELL.md compaction thresholds
-/claude-code-hermit:hermit-settings docker           — view/edit Docker packages
+/claude-code-hermit:hermit-settings docker           — view Docker packages (read-only); edit recommended plugins
 /claude-code-hermit:hermit-settings scheduled-checks    — manage scheduled plugin skill checks
 /claude-code-hermit:hermit-settings boot-skill       — view/clear/change the always-on boot skill
 /claude-code-hermit:hermit-settings quality-gate     — set post-implementation /claude-code-hermit:simplify gate tier (budget|balanced|quality)
@@ -343,7 +343,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 - Note: "Compaction runs at each idle transition (task completion). No restart needed."
 
 **If argument is "docker":**
-- Show current `docker.packages` list:
+- Show current `docker.packages` list (read-only):
   ```
   Docker Packages (config.json docker.packages → Dockerfile.hermit)
 
@@ -352,13 +352,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 
   (or "No packages configured" if empty)
   ```
-- Ask: "Add or remove packages? (e.g., 'add ffmpeg imagemagick', 'remove ffmpeg', or 'done') [done]"
-- Loop until operator says "done", "skip", or presses Enter:
-  - Compute the new list, then write it whole: `set docker.packages '["pkg", ...]'`
-  - `remove <PKG> [<PKG>...]`: drop those packages from the list
-  - `add <PKG> [<PKG>...]`: append (deduplicate)
-  - Bare package names without add/remove prefix: treat as add
-- After changes, note: "Rebuild your container to apply: `docker compose -f docker-compose.hermit.yml build`"
+- Note: this list is read only when `/docker-setup` renders the templates. To install something now, add it inside the operator block of `Dockerfile.hermit` (or run `/docker-customize`) and rebuild with `.claude-code-hermit/bin/hermit-docker restart --build`. Do not prompt to add or remove packages and do not `set docker.packages`.
 
 - Then show current `docker.recommended_plugins`:
   ```

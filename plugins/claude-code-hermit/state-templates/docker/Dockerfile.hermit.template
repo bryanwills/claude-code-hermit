@@ -18,6 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 {{PACKAGES_BLOCK}}
 
+# --- operator: root-context installs go here; upgrades merge around this block ---
+#
+# --- end operator ---
+
 # Match host UID for volume permissions. Ubuntu 26.04 ships a default
 # 'ubuntu' user at UID 1000 — remove it first.
 ARG HOST_UID=1000

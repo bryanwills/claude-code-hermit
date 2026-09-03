@@ -665,6 +665,9 @@ test('evolve reference places the base_path and bootstrap merge branches in sect
   expect(section5d).toBeGreaterThan(section5c);
   expect(body).toContain('base_path');
   expect(body).toContain('bootstrap: true');
+  expect(body).toContain('git merge-file');
+  expect(body).toContain('kept(bootstrap');
+  expect(body).not.toContain('Apply every operator hunk');
 });
 
 test('docker entrypoint per-file bootstrap: manifest present but NO docker key + customized entrypoint -> unmodified + bootstrap (forces .bak)', withProj(async (proj) => {
