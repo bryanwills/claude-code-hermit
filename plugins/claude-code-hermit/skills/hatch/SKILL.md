@@ -200,7 +200,7 @@ questions: [
   },
   {
     header: "Visibility",
-    question: "Where should hermit-personal hatch outputs live? (CLAUDE.md block, hook permissions, deny patterns)",
+    question: "Where should hermit-personal hatch outputs live? (CLAUDE.md block, hook permissions, deny patterns, hermit-created skills/agents)",
     // Build options with recommended at index 0 based on hatch_target:
     // When hatch_target == "local":
     //   options: [
