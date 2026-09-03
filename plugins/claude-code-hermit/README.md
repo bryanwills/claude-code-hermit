@@ -1,7 +1,7 @@
 <p align="center">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.0-green.svg" alt="Version 1.3.0" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.1-green.svg" alt="Version 1.3.1" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -282,7 +282,7 @@ Many operators run several hermits in parallel — one per domain. Each one is a
 
 ## Community
 
-Join the [`claude-code-hermit` Discord community](https://discord.gg/54sJqAxhUh) for install help, always-on ops, plugin authoring, bug triage, and proposal/design discussion. Confirmed bugs and roadmap decisions should still move back to GitHub so they remain searchable and reviewable.
+Join the [`claude-code-hermit` Discord community](https://discord.gg/54sJqAxhUh) for install help, always-on ops, plugin authoring, bug triage, and proposal/design discussion. Confirmed bugs and roadmap decisions should still move back to GitHub so they remain searchable and reviewable. See [CONTRIBUTING.md](CONTRIBUTING.md) for filing an issue or opening a PR.
 
 ---
 

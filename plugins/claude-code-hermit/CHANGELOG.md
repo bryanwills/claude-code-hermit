@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.1] - 2026-09-03
 
 ### Changed
 - The session-discipline block now names `.claude-code-hermit/sessions/SHELL.md`, because a post-compaction model had only "SHELL.md" and guessed the hermit root.
@@ -19,7 +19,6 @@
 - The watchdog notices a turn that failed on Claude's own service — a usage limit or a 529/500 overload — and sends one push per episode; the agent already recovers on its own once the outage clears, so this is visibility only, nothing is restarted or suppressed.
 
 ### Fixed
-- The apt-package path is documented as it behaves: a package enters through a `RUN apt-get` layer in the `Dockerfile.hermit` operator block, and `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own. `docs/troubleshooting.md` said a rebuild after a config change was enough.
 - Evolve no longer overwrites a customised docker file without a baseline; with one, the merge runs through `git merge-file` and the hermit resolves only conflict regions.
 
 ## [1.3.0] - 2026-09-02
