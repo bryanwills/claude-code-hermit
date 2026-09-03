@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 When the list was empty at setup that layer is absent: add it between the `gh` install layer and the `# Match host UID` comment.
 
-Then rebuild on the host, from the project root: `docker compose -f docker-compose.hermit.yml build`. Name `.claude-code-hermit/bin/hermit-docker update` only when the operator also wants Claude Code and every installed plugin bumped.
+Then rebuild on the host: `.claude-code-hermit/bin/hermit-docker update`.
 
 ## 2. Boot-time shell
 
