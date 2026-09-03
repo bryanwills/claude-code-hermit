@@ -56,6 +56,18 @@ Translate prose, headings, and bullet text. Keep the structure (Context / Proble
 
 The proposal file under `.claude-code-hermit/proposals/` is NOT modified — translation applies only to what is sent to GitHub.
 
+**Step 1c: issue-template detection.** (both proposal-backed and ad-hoc issues)
+
+Run:
+```bash
+bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --templates
+```
+
+- Exit 0 + filenames printed → hold the filenames for Step 4's preview. This checks the target repo (`HERMIT_GH_REPO`) directly via the GitHub API, not the local checkout, and only the modern `.github/ISSUE_TEMPLATE/` directory form — the legacy single-file `.github/ISSUE_TEMPLATE.md` is intentionally out of scope.
+- Exit 2 → hold nothing; Step 4's preview gets no template note.
+
+These filenames are never passed to the Step 3 sanitizer and are never part of the draft or cleaned body — they reach the operator only through Step 4's preview.
+
 **Step 2: dedup check.** (proposal-backed only — skip for ad-hoc issues)
 
 Run:
@@ -90,7 +102,8 @@ Present the post-translation, post-sanitization content to the operator as a **s
 1. Proposed title
 2. Complete issue body — everything that will be written to the issue, including the `---\n*Filed via hermit-scribe...*` footer
 3. Labels that will be applied (informational — no operator editing): `Labels: hermit-filed (always); plus bug/enhancement/chore and optional homeassistant-hermit/hermit-scribe for proposal-backed issues`
-4. Confirmation prompt: `File this issue? (yes / edit / cancel)`
+4. If Step 1c found templates (informational — no operator editing): `Note: this repo defines issue templates under .github/ISSUE_TEMPLATE/ ({filenames}); this body does not follow them.` Omit this item entirely when Step 1c found nothing.
+5. Confirmation prompt: `File this issue? (yes / edit / cancel)`
 
 If the content exceeds the channel's message-size limit (Discord: 2000 chars), split into multiple messages. The confirmation prompt MUST appear in the FINAL message only — never in the first. Do NOT replace the body with placeholders like "(see below)" — inline the full body.
 

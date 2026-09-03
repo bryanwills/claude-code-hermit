@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- The operator preview now notes when the target repo defines issue templates under `.github/ISSUE_TEMPLATE/`, via a new `file-issue.ts --templates` mode. Informational only — the body still follows hermit-scribe's fixed shape.
+
 ### Fixed
 - The `issue-sanitizer` subagent redacted the `proposal={id}` dedup anchor as operator-project detail before it ever reached GitHub, so `--check` could never match a filed issue back to its proposal. The footer is now appended after sanitization instead of before it.
 - `issue-sanitizer` now refuses (`TITLE: (refused)`) instead of fabricating an issue when handed a file reference instead of an inline draft.

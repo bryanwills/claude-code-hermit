@@ -78,7 +78,7 @@ The operator can un-redact specific items during the preview step if a particula
 
 ### Operator preview
 
-The cleaned title and body are shown to the operator before filing as a single message (body fully inlined, confirmation prompt last). The operator can confirm, edit (iterative — re-previews until satisfied), or cancel.
+The cleaned title and body are shown to the operator before filing as a single message (body fully inlined, confirmation prompt last). The operator can confirm, edit (iterative — re-previews until satisfied), or cancel. If the target repo defines issue templates under `.github/ISSUE_TEMPLATE/`, the preview adds an informational note naming them — the body doesn't conform to them automatically; use `edit` if that matters for the target repo.
 
 ## Errors
 
