@@ -144,7 +144,7 @@ Common causes:
 - **Network issues during build:** `apt-get` or `npm install` fails. Check your network, proxy settings, and Docker DNS config.
 - **npm permission errors:** Claude Code installs globally. The Dockerfile sets `NPM_CONFIG_PREFIX` for the `claude` user — if you modified the Dockerfile, ensure this is preserved.
 - **Ubuntu 26.04 default user conflict:** UID 1000 is taken by the default `ubuntu` user. The generated Dockerfile runs `userdel -r ubuntu` first — don't remove this line.
-- **Rebuild after config changes:** If you changed `docker.packages` in config.json, rebuild: `docker compose -f docker-compose.hermit.yml build --no-cache`
+- **Rebuild after config changes:** `docker.packages` is read when the templates are rendered, not at build time, so changing it in config.json and rebuilding gives you the old package list. The new list lands on the next `hermit-evolve`, which re-renders from config; then rebuild: `docker compose -f docker-compose.hermit.yml build --no-cache`. See [Customizing the container](always-on.md#customizing-the-container).
 
 ## Upgrade Says Nothing to Update
 
