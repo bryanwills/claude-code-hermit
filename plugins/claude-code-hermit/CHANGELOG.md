@@ -6,7 +6,7 @@
 - `docker-customize` routes a container change (tool, binary, apt package, env var, persistent directory, side service) to the first channel that can carry it: `docker.packages`, then `docker-entrypoint.hermit-local.sh`, then compose or `Dockerfile.hermit`. `docs/always-on.md` § Customizing the container carries the same map for humans.
 
 ### Fixed
-- `docker.packages` is described by its real timing: the list is baked into `Dockerfile.hermit` when the templates are rendered, so it lands at `/docker-setup` or the next `hermit-evolve`, not on a bare `hermit-docker update`. `docs/troubleshooting.md` said a rebuild was enough.
+- `docker.packages` is documented end to end: the list is baked into `Dockerfile.hermit` when the templates are rendered, so it has to be written into the project-package layer before a rebuild picks it up. `docs/troubleshooting.md` said a rebuild alone was enough.
 
 ## [1.3.0] - 2026-09-02
 

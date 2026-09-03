@@ -5,15 +5,27 @@ description: Route a request to install a tool, binary, package, env var, persis
 
 # Docker Customize
 
-Land a container change in the first channel that can carry it, in the order below. Files sit on the project bind mount, so this skill runs from inside the container or on the host. Rebuild and restart are host-only: name `.claude-code-hermit/bin/hermit-docker update` (rebuild) or `.claude-code-hermit/bin/hermit-docker restart` (restart) for the operator; do not run either from inside the container.
+Land a container change in the first channel that can carry it, in the order below. Files sit on the project bind mount, so this skill runs from inside the container or on the host. Rebuild and restart are host-only: name the command for the operator, do not run it from inside the container.
 
 ## 1. Apt package
 
-If the need is an Ubuntu apt package, invoke `/claude-code-hermit:hermit-settings docker` via the Skill tool. It owns `docker.packages`, and that list is the durable home: it survives every upgrade because it lives in `config.json`.
+The container runs as `USER claude`, so a package can only enter through the image. Do both halves.
 
-`docker.packages` reaches `Dockerfile.hermit` when the templates are rendered — at `/docker-setup`, and again at each `hermit-evolve`, which re-renders from the current config and merges the result. A rebuild on its own does not re-render, so `.claude-code-hermit/bin/hermit-docker update` right after the config edit builds the old package list.
+**Record it:** invoke `/claude-code-hermit:hermit-settings docker` via the Skill tool. It owns `docker.packages`, which lives in `config.json` and survives every upgrade.
 
-If the operator needs the tool before the next evolve, do not hand-edit `Dockerfile.hermit` for it: record it in `docker.packages` and install it for this session through channel 2, which applies on a restart.
+**Apply it:** `docker.packages` is baked into `Dockerfile.hermit` when the templates are rendered, so the config edit alone changes nothing that gets built. Write the same list into the project-package layer of `Dockerfile.hermit`, in the exact shape the renderer emits, so the next render agrees with the file instead of conflicting with it:
+
+```dockerfile
+# Project-specific packages (from config.json docker.packages)
+# To modify: /hermit-settings docker, then rebuild
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      <pkg> <pkg> && \
+    rm -rf /var/lib/apt/lists/*
+```
+
+When the list was empty at setup that layer is absent: add it between the `gh` install layer and the `# Match host UID` comment.
+
+Then rebuild on the host, from the project root: `docker compose -f docker-compose.hermit.yml build`. Name `.claude-code-hermit/bin/hermit-docker update` only when the operator also wants Claude Code and every installed plugin bumped.
 
 ## 2. Boot-time shell
 
