@@ -49,3 +49,37 @@ Commit **only when the digest reached the operator, or when there was nobody to 
 | exit 2 (payload rejected) | do not commit; the payload is malformed — fix and retry |
 
 A plain contributor checkout with no hermit state directory is fine: the digest prints, `no_channel` short-circuits the send, and `commit` is a silent no-op.
+
+### 4. Reconcile the proposal queue
+
+Independent of steps 1–3: runs whether the pipeline digest itself was `CHANGED` or `NOCHANGE`, since a merge can close a proposal without moving any pipeline fact.
+
+```bash
+LAST=$(cat .claude-code-hermit/state/proposal-reconcile-sha.txt 2>/dev/null || echo "")
+NOW=$(git rev-parse HEAD)
+[ "$LAST" = "$NOW" ] && echo "SKIP|unchanged" || echo "RECONCILE|$NOW"
+```
+
+On `SKIP`, stop here.
+
+On `RECONCILE|<sha>`, run the collector:
+
+```bash
+bun .claude/skills/stale-proposals/scripts/collect-evidence.ts --status proposed,deferred,accepted
+```
+
+`NONE|no-open-proposals` — write `<sha>` to `.claude-code-hermit/state/proposal-reconcile-sha.txt` and stop.
+
+Otherwise, dispatch a `general-purpose` subagent at **`model: "sonnet"`** — the matching step needs real judgment (partial-delivery detection, same-day evidence ordering, substance matching across a renamed thing), not a checklist, and a wrong strong match silently closes live work. Give it `stale-proposals/SKILL.md`'s Step 2 contract verbatim with the bundle path from the collector above, then follow that skill's Step 2b (completeness check) and Step 3 (auto-apply `SHIPPED-STRONG` matches) exactly as written there.
+
+For any `SHIPPED-WEAK` / `AGED` verdict: never use `AskUserQuestion` here — this routine fires unattended, with nobody watching to answer it. Instead, for each one, queue a plain yes/no bounded ask:
+
+```bash
+bun plugins/claude-code-hermit/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
+{"tier":1,"question":"<summarize the verdict's evidence and gap in one sentence>. Close it as resolved anyway?","proposal_id":"<PROP-ID>"}
+HERMIT_MP
+```
+
+so the operator can answer later from any channel-reachable turn — resolving one of these later patches the proposal to `status=resolved` (mirroring `stale-proposals/SKILL.md` Step 3) if the answer is yes, and leaves it untouched if no.
+
+Send one channel notice summarizing what changed (auto-resolved count, queued-question count) — fold it into the same notice as the pipeline digest itself when both fired this run, or send it alone when the digest was `NOCHANGE`. Then write `<sha>` to `.claude-code-hermit/state/proposal-reconcile-sha.txt`.

@@ -79,6 +79,12 @@ fi
 
 AST-only, no API cost. Each update is guarded by its graph.json existing, so it skips silently on checkouts where graphify isn't set up. Both graph dirs are gitignored, so this never affects release staging or the Step 6 `git status` check. If an update errors, warn and continue: a stale graph must not block a release.
 
+### 1.6. Reconcile the proposal queue
+
+Skip this step entirely if `.claude/skills/stale-proposals/` doesn't exist (monorepo-internal; not present in every checkout).
+
+Run `/stale-proposals` before deciding what's shipping in this release — closing anything this release already delivers keeps the release notes and the proposal queue honest at the same time. Dispatch a `general-purpose` subagent at **`model: "sonnet"`** to run `stale-proposals/SKILL.md`'s Steps 1–2b (collect the evidence bundle and match), then apply `SHIPPED-STRONG` verdicts per that skill's Step 3. This is an interactive release flow, so — unlike the unattended routine — `SHIPPED-WEAK` and `AGED` verdicts go through `AskUserQuestion` exactly as `stale-proposals/SKILL.md` Step 4 describes, not a queued channel ask.
+
 ### 2. Determine version bump
 
 **Already-bumped fast-path (two-phase release flow):** Find the most recent tag for this plugin:
