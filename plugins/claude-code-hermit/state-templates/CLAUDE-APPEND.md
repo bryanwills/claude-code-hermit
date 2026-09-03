@@ -56,7 +56,7 @@ Auto-memory handles all learning; `compiled/` is for durable domain outputs, not
 - Secrets: never log API keys, tokens, passwords, or credentials to SHELL.md, reports, or proposals.
 - OPERATOR.md: operator-curated (tone lives in config's `voice` block); never edit autonomously. Stale or contradictory context: draft the minimal diff and apply only after the operator confirms; in always-on mode flag it via channel instead.
 - Proposals: every improvement goes through `/proposal-create` → operator accepts → implement. Trivial fixes (typos, one-liners) exempt. **Never hand-write `proposals/PROP-*.md` files**: always invoke the skill.
-- Tasks: multi-step work is ordered steps in the SHELL.md Progress Log, one timestamped entry per step.
+- Tasks: multi-step work is ordered steps in the `.claude-code-hermit/sessions/SHELL.md` Progress Log, one timestamped entry per step.
 - Artifact frontmatter: any `.md` file you create outside `.claude-code-hermit/` must include YAML frontmatter with at least `title` (string) and `created` (ISO 8601 with timezone). If inside a hermit session, add `session: S-NNN`.
 - Tag discipline: tag every session report, proposal, and artifact you create; reuse the existing lowercase-hyphenated vocabulary rather than inventing new tags.
 <!-- /claude-code-hermit: Session Discipline -->

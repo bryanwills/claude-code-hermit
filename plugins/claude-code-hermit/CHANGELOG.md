@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- The session-discipline block now names `.claude-code-hermit/sessions/SHELL.md`, because a post-compaction model had only "SHELL.md" and guessed the hermit root.
+
+### Upgrade Instructions
+1. The Tasks line lives in the plugin-owned CLAUDE-APPEND block, which Step 6 already replaces wholesale, so no manual edit is needed. If this operator hand-edited the Tasks line inside the block, their edit is overwritten; tell them once. Reload project context afterwards as the skill already instructs.
+
 ## [1.3.0] - 2026-09-02
 
 ### Added
