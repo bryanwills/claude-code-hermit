@@ -147,6 +147,18 @@ test("--check with missing key file shows labeled error", () => {
   );
 });
 
+test("--templates with missing env var reports the var name", () => {
+  assertFails({}, ["--templates"], /Missing env var: HERMIT_GH_APP_ID/);
+});
+
+test("--templates with missing key file shows labeled error", () => {
+  assertFails(
+    { ...fullEnv, HERMIT_GH_APP_KEY_FILE: "/nonexistent/key.pem" },
+    ["--templates"],
+    /HERMIT_GH_APP_KEY_FILE=.*does not exist/
+  );
+});
+
 // Requires real GitHub App credentials. Set HERMIT_GH_CHECK_LIVE=1 to run.
 if (process.env.HERMIT_GH_CHECK_LIVE) {
   test("--check with unknown proposal id exits 2 with no match message", () => {

@@ -60,7 +60,7 @@ Trigger phrases:
 - `report this to the tracker`
 - `file a GH issue for [description]`
 
-For proposal-backed issues: the skill globs `.claude-code-hermit/proposals/PROP-NNN-*.md`, reads frontmatter (`id`, `title`, `category`, `session`) and the `## Context` / `## Problem` / `## Proposed Solution` / `## Impact` body sections, then builds a Conventional Commits title (`<type>(<scope>): <title>`, e.g. `feat(homeassistant-hermit): integrate HA History API`). Type is derived from `category` (`bug` → `fix`, `infrastructure`/`investigation` → `chore`, otherwise → `feat`); the recognized scope vocabulary is derived from the keys of `_hermit_versions` in `.claude-code-hermit/config.json`, scanned against explicit mentions in the proposal text first (`plugins/<slug>/` paths or whole-word slug occurrences), falling back to the lone activated fleet hermit when no explicit target appears, with the `claude-code-` prefix stripped. Scope is omitted when signals are absent or ambiguous. The body is translated to English at the GitHub boundary (technical identifiers, code, and frontmatter are preserved verbatim) and a `Filed via hermit-scribe · proposal={id} · session={session}` footer is appended.
+For proposal-backed issues: the skill globs `.claude-code-hermit/proposals/PROP-NNN-*.md`, reads frontmatter (`id`, `title`, `category`, `session`) and the `## Context` / `## Problem` / `## Proposed Solution` / `## Impact` body sections, then builds a Conventional Commits title (`<type>(<scope>): <title>`, e.g. `feat(homeassistant-hermit): integrate HA History API`). Type is derived from `category` (`bug` → `fix`, `infrastructure`/`investigation` → `chore`, otherwise → `feat`); the recognized scope vocabulary is derived from the keys of `_hermit_versions` in `.claude-code-hermit/config.json`, scanned against explicit mentions in the proposal text first (`plugins/<slug>/` paths or whole-word slug occurrences), falling back to the lone activated fleet hermit when no explicit target appears, with the `claude-code-` prefix stripped. Scope is omitted when signals are absent or ambiguous. The body is translated to English at the GitHub boundary (technical identifiers, code, and frontmatter are preserved verbatim); a `Filed via hermit-scribe · proposal={id} · session={session}` footer is appended after sanitization.
 
 For ad-hoc issues: supply title and body directly. The operator's title is passed through verbatim (no CC enforcement); translation and sanitization still apply.
 
@@ -68,7 +68,7 @@ All issues get the `hermit-filed` label. Proposal-backed issues also receive a t
 
 ### Dedup
 
-Before filing, the skill runs `--check {id}` automatically. If a matching issue already exists (matched by `proposal={id}` in the footer), the skill shows the existing URL and asks whether to skip or proceed. Re-filing after overriding writes the new URL into the proposal's `gh_issue:` field (latest wins).
+Before filing, the skill runs `--check {id}` automatically. If a matching issue already exists (matched by `proposal={id}` in the footer), the skill shows the existing URL and asks whether to skip or proceed. Re-filing after overriding writes the new URL into the proposal's `gh_issue:` field (latest wins). The footer is appended once sanitization is done, since the sanitizer would otherwise redact the proposal id as operator-project detail and break this match.
 
 ### Privacy sanitization
 
@@ -78,7 +78,7 @@ The operator can un-redact specific items during the preview step if a particula
 
 ### Operator preview
 
-The cleaned title and body are shown to the operator before filing as a single message (body fully inlined, confirmation prompt last). The operator can confirm, edit (iterative — re-previews until satisfied), or cancel.
+The cleaned title and body are shown to the operator before filing as a single message (body fully inlined, confirmation prompt last). The operator can confirm, edit (iterative — re-previews until satisfied), or cancel. If the target repo defines issue templates under `.github/ISSUE_TEMPLATE/`, the preview adds an informational note naming them — the body doesn't conform to them automatically; use `edit` if that matters for the target repo.
 
 ## Errors
 

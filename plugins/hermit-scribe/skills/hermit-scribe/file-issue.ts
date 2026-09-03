@@ -134,6 +134,35 @@ async function checkMode() {
   process.exit(2);
 }
 
+async function templatesMode() {
+  const env = loadEnv();
+  const token = await getInstallToken(env);
+  const { owner, repo } = env;
+
+  const noTemplates = () => {
+    process.stderr.write(`no templates for ${owner}/${repo}\n`);
+    process.exit(2);
+  };
+
+  let entries: Json;
+  try {
+    entries = await ghRequest("GET", `/repos/${owner}/${repo}/contents/.github/ISSUE_TEMPLATE`, `Bearer ${token}`);
+  } catch (err: any) {
+    if (/^GH 404/.test(err.message)) noTemplates();
+    throw err;
+  }
+
+  const names = Array.isArray(entries)
+    ? entries
+        .filter((e) => e.type === "file" && /\.(md|ya?ml)$/.test(e.name) && e.name !== "config.yml")
+        .map((e) => e.name)
+    : [];
+
+  if (names.length === 0) noTemplates();
+
+  process.stdout.write(names.join("\n") + "\n");
+}
+
 async function commentMode() {
   const issueNumber = parseInt(process.argv[3], 10);
   const bodyFile = process.argv[4];
@@ -271,6 +300,11 @@ async function main() {
 
   if (process.argv[2] === "--comment") {
     await commentMode();
+    return;
+  }
+
+  if (process.argv[2] === "--templates") {
+    await templatesMode();
     return;
   }
 
