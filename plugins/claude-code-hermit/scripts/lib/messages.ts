@@ -224,7 +224,7 @@ export interface MintMessages {
 export const MINT: Localized<MintMessages> = {
   en: {
     ackPrompt: () =>
-      "Your hermit's Claude login has expired, so it can't work until it's renewed. " +
+      "Your agent's Claude login has expired, so it can't work until it's renewed. " +
       "Reply 'reauth' in the chat where you normally talk to me and I'll send you a one-time sign-in link.",
     openLink: (url) => `Open this link to sign in, then send me the code it gives you:\n${url}`,
     failed: () => "That sign-in didn't complete. Nothing changed — we can try again whenever you're ready.",
@@ -235,7 +235,7 @@ export const MINT: Localized<MintMessages> = {
   },
   'pt-PT': {
     ackPrompt: () =>
-      "O início de sessão Claude do seu hermit expirou e ele não pode trabalhar até ser renovado. " +
+      "O início de sessão Claude do seu agente expirou e ele não pode trabalhar até ser renovado. " +
       "Responda 'reauth' na conversa onde normalmente fala comigo e envio-lhe um link de início de sessão de utilização única.",
     openLink: (url) => `Abra este link para iniciar sessão e envie-me o código que ele lhe der:\n${url}`,
     failed: () => 'Esse início de sessão não foi concluído. Nada mudou — podemos tentar de novo quando quiser.',
@@ -262,52 +262,67 @@ export interface WatchdogMessages {
   lapsedLoginFixDocker(): string;
   lapsedLoginFixHost(): string;
   envAuthFailure(hhmm: string): string;
+  usageLimit(hhmm: string, resetAt: string): string;
+  usageLimitNoReset(hhmm: string): string;
+  apiUnavailable(hhmm: string): string;
 }
 
 export const WATCHDOG: Localized<WatchdogMessages> = {
   en: {
-    restart: (hhmm, cause) => `I restarted your hermit at ${hhmm} — ${cause}.`,
+    restart: (hhmm, cause) => `I restarted your agent at ${hhmm} — ${cause}.`,
     restartCauseNotRunning: () => "it wasn't running",
     restartCauseFrozen: () => 'it had frozen',
-    wedge: (hhmm) => `Your hermit hasn't responded in a while — checking on it now (${hhmm}).`,
-    pauseUntilResume: (label) => `Your hermit is paused (${label}) until you resume it.`,
-    pauseUntilDate: (label, boundary) => `Your hermit is paused (${label}) until ${boundary}.`,
+    wedge: (hhmm) => `Your agent hasn't responded in a while — checking on it now (${hhmm}).`,
+    pauseUntilResume: (label) => `Your agent is paused (${label}) until you resume it.`,
+    pauseUntilDate: (label, boundary) => `Your agent is paused (${label}) until ${boundary}.`,
     stallQuestion: (hhmm) =>
-      `Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer (${hhmm}).`,
+      `Your agent is waiting on a question it can't ask over chat — open the terminal or Claude app to answer (${hhmm}).`,
     sessionWedged: (hhmm) =>
-      `Your hermit has stopped picking up its scheduled work — something on screen is holding it. Open the terminal or Claude app and clear whatever is waiting there (${hhmm}).`,
+      `Your agent has stopped picking up its scheduled work — something on screen is holding it. Open the terminal or Claude app and clear whatever is waiting there (${hhmm}).`,
     orphan: (hhmm) =>
-      `Your hermit's session ended but a process may still be running (${hhmm}). If it keeps replying, stop it from the terminal: run \`pgrep -af "claude --channels"\` and kill that PID.`,
+      `Your agent's session ended but a process may still be running (${hhmm}). If it keeps replying, stop it from the terminal: run \`pgrep -af "claude --channels"\` and kill that PID.`,
     lapsedLogin: (hhmm, howToFix) =>
-      `Your Claude login has expired, so your hermit can't do any work until you sign in again (${hhmm}). ${howToFix}`,
+      `Your Claude login has expired, so your agent can't do any work until you sign in again (${hhmm}). ${howToFix}`,
     lapsedLoginFixDocker: () =>
       'This one needs the machine it runs on: `.claude-code-hermit/bin/hermit-docker login`, then `hermit-docker restart`.',
     lapsedLoginFixHost: () =>
       'This one needs the machine it runs on: run `claude` in its project folder, type `/login`, then restart it with `.claude-code-hermit/bin/hermit-stop` and `hermit-start`.',
     envAuthFailure: (hhmm) =>
-      `Your hermit's API credential is being rejected, so it can't do any work until that key is valid again (${hhmm}). This isn't a sign-in you can renew from chat — check the key where you set it: it may have been revoked or rotated, or the account may be out of credit. I've left the session alone rather than restarting it, because a restart would lose the key entirely.`,
+      `Your agent's API credential is being rejected, so it can't do any work until that key is valid again (${hhmm}). This isn't a sign-in you can renew from chat — check the key where you set it: it may have been revoked or rotated, or the account may be out of credit. I've left the session alone rather than restarting it, because a restart would lose the key entirely.`,
+    usageLimit: (hhmm, resetAt) =>
+      `Your agent has reached Claude's usage limit for now (${hhmm}). It will resume on its own at ${resetAt}.`,
+    usageLimitNoReset: (hhmm) =>
+      `Your agent has reached Claude's usage limit for now (${hhmm}). It will resume on its own once the limit resets.`,
+    apiUnavailable: (hhmm) =>
+      `Your agent is affected by a temporary Claude service outage (${hhmm}). It will resume on its own. https://status.claude.com`,
   },
   'pt-PT': {
-    restart: (hhmm, cause) => `Reiniciei o seu hermit às ${hhmm} — ${cause}.`,
+    restart: (hhmm, cause) => `Reiniciei o seu agente às ${hhmm} — ${cause}.`,
     restartCauseNotRunning: () => 'não estava a correr',
     restartCauseFrozen: () => 'tinha bloqueado',
-    wedge: (hhmm) => `O seu hermit não responde há algum tempo — estou a verificá-lo agora (${hhmm}).`,
-    pauseUntilResume: (label) => `O seu hermit está em pausa (${label}) até que a retome.`,
-    pauseUntilDate: (label, boundary) => `O seu hermit está em pausa (${label}) até ${boundary}.`,
+    wedge: (hhmm) => `O seu agente não responde há algum tempo — estou a verificá-lo agora (${hhmm}).`,
+    pauseUntilResume: (label) => `O seu agente está em pausa (${label}) até que a retome.`,
+    pauseUntilDate: (label, boundary) => `O seu agente está em pausa (${label}) até ${boundary}.`,
     stallQuestion: (hhmm) =>
-      `O seu hermit está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder (${hhmm}).`,
+      `O seu agente está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder (${hhmm}).`,
     sessionWedged: (hhmm) =>
-      `O seu hermit deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo. Abra o terminal ou a app Claude e resolva o que está à espera (${hhmm}).`,
+      `O seu agente deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo. Abra o terminal ou a app Claude e resolva o que está à espera (${hhmm}).`,
     orphan: (hhmm) =>
-      `A sessão do seu hermit terminou mas pode haver um processo ainda a correr (${hhmm}). Se continuar a responder, pare-o no terminal: corra \`pgrep -af "claude --channels"\` e faça kill desse PID.`,
+      `A sessão do seu agente terminou mas pode haver um processo ainda a correr (${hhmm}). Se continuar a responder, pare-o no terminal: corra \`pgrep -af "claude --channels"\` e faça kill desse PID.`,
     lapsedLogin: (hhmm, howToFix) =>
-      `A sua sessão Claude expirou, por isso o seu hermit não consegue trabalhar até voltar a autenticar-se (${hhmm}). ${howToFix}`,
+      `A sua sessão Claude expirou, por isso o seu agente não consegue trabalhar até voltar a autenticar-se (${hhmm}). ${howToFix}`,
     lapsedLoginFixDocker: () =>
       'Isto tem de ser feito na máquina onde ele corre: `.claude-code-hermit/bin/hermit-docker login` e depois `hermit-docker restart`.',
     lapsedLoginFixHost: () =>
       'Isto tem de ser feito na máquina onde ele corre: corra `claude` na pasta do projeto, escreva `/login` e reinicie-o com `.claude-code-hermit/bin/hermit-stop` e `hermit-start`.',
     envAuthFailure: (hhmm) =>
-      `A credencial de API do seu hermit está a ser rejeitada, por isso não consegue trabalhar até essa chave voltar a ser válida (${hhmm}). Não é uma autenticação que possa renovar pelo chat — verifique a chave onde a definiu: pode ter sido revogada ou rodada, ou a conta pode estar sem crédito. Deixei a sessão como está em vez de a reiniciar, porque um reinício perderia a chave por completo.`,
+      `A credencial de API do seu agente está a ser rejeitada, por isso não consegue trabalhar até essa chave voltar a ser válida (${hhmm}). Não é uma autenticação que possa renovar pelo chat — verifique a chave onde a definiu: pode ter sido revogada ou rodada, ou a conta pode estar sem crédito. Deixei a sessão como está em vez de a reiniciar, porque um reinício perderia a chave por completo.`,
+    usageLimit: (hhmm, resetAt) =>
+      `O seu agente atingiu o limite de utilização da Claude por agora (${hhmm}). Vai retomar sozinho às ${resetAt}.`,
+    usageLimitNoReset: (hhmm) =>
+      `O seu agente atingiu o limite de utilização da Claude por agora (${hhmm}). Vai retomar sozinho quando o limite renovar.`,
+    apiUnavailable: (hhmm) =>
+      `O seu agente está afetado por uma interrupção temporária do serviço da Claude (${hhmm}). Vai retomar sozinho. https://status.claude.com`,
   },
 };
 

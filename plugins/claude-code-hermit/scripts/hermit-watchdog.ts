@@ -242,6 +242,16 @@ export function composeOrphanMessage(timezone: string, locale: Locale = OPERATOR
   return WATCHDOG[locale].orphan(nowHHMM(timezone));
 }
 
+/** Operator-language message for an upstream API failure — see ApiFailureVerdict. */
+export function composeApiFailureMessage(
+  verdict: ApiFailureVerdict, timezone: string, locale: Locale = OPERATOR_LOCALE,
+): string {
+  if (verdict.kind === 'api-unavailable') return WATCHDOG[locale].apiUnavailable(nowHHMM(timezone));
+  return verdict.resetAt
+    ? WATCHDOG[locale].usageLimit(nowHHMM(timezone), verdict.resetAt)
+    : WATCHDOG[locale].usageLimitNoReset(nowHHMM(timezone));
+}
+
 /**
  * Operator-language message for a login nobody can renew from chat. Unlike every other
  * message here it has to name a command, because there is no chat-side fix: the sign-in
@@ -449,6 +459,55 @@ export function classifyQueueTail(tailText: string, nowMs: number, staleSecs = W
   if (last === null) return 'unknown';
   if (last.op !== 'enqueue') return 'draining';
   return nowMs - last.ts > staleSecs * 1000 ? 'wedged' : 'draining';
+}
+
+// A harness-side API failure (usage limit, 529/500 overload, mid-response server
+// error) renders as an ordinary assistant response, exactly like the lapsed-login
+// case above — no modal, no terminal anchor. But unlike a pane scan, CC records
+// these structurally in the transcript: the failing turn's assistant record carries
+// `isApiErrorMessage: true` and `message.model: "<synthetic>"`. Verified against 48
+// real records across live sessions: 48/48 carry both fields, and prose that merely
+// quotes an error string (a docstring, a test fixture, this very file's comments)
+// lands in a normal assistant record with a real model id, so it cannot match. That
+// immunity is why this reads the structural flag instead of pane text.
+//
+// Auth failures (`Login expired`, `401 Invalid API key`) are deliberately excluded:
+// `hasLapsedLogin`/`envAuthFailure` above already notify for those, and matching them
+// here too would double-notify the operator for one event.
+const USAGE_LIMIT_RE = /session limit/i;
+const USAGE_LIMIT_RESET_RE = /resets\s+([^\n(]+)/i;
+const API_UNAVAILABLE_RE = /API Error:.*(529 Overloaded|500 Internal server error|Server error mid-response)/i;
+
+export type ApiFailureVerdict = { kind: 'usage-limit'; resetAt: string | null } | { kind: 'api-unavailable' };
+
+/** Verdict on the newest assistant record in a transcript tail, or null when it isn't
+ *  a recognised upstream API failure (including: no failure, an auth failure, or a
+ *  healthy record newer than any failure). Mirrors classifyQueueTail's tolerant JSONL
+ *  scan — a truncated first line from the byte-bounded tail read is expected. */
+export function classifyApiFailureTail(tailText: string): ApiFailureVerdict | null {
+  let newest: { rec: Json; ts: number } | null = null;
+  for (const line of tailText.split('\n')) {
+    if (!line.includes('"role":"assistant"')) continue;
+    let rec: Json;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (rec?.type !== 'assistant' || rec.message?.role !== 'assistant') continue;
+    const ts = Date.parse(String(rec.timestamp ?? ''));
+    if (Number.isNaN(ts)) continue;
+    if (newest === null || ts >= newest.ts) newest = { rec, ts };
+  }
+  if (newest === null) return null;
+  const rec = newest.rec;
+  if (rec.isApiErrorMessage !== true || rec.message?.model !== '<synthetic>') return null;
+
+  const content = rec.message?.content;
+  const text = Array.isArray(content) && content[0]?.type === 'text' ? String(content[0].text ?? '') : '';
+
+  if (USAGE_LIMIT_RE.test(text)) {
+    const reset = text.match(USAGE_LIMIT_RESET_RE);
+    return { kind: 'usage-limit', resetAt: reset?.[1]?.trim() || null };
+  }
+  if (API_UNAVAILABLE_RE.test(text)) return { kind: 'api-unavailable' };
+  return null; // auth failure or an unrecognised synthetic record — not this tier's job
 }
 
 /** Tail of the active session's transcript, or null when it can't be located/read.
@@ -2116,6 +2175,27 @@ async function main(): Promise<void> {
       // transcript with no queue records yet, and holding the flag through that would
       // suppress the NEXT genuine wedge — the silent stall this check exists to prevent.
       watchdogState.session_wedged_notified = false;
+      writeWatchdogState(watchdogState);
+    }
+
+    // 3d. Upstream API failure — visibility only, nothing suppressed or restarted.
+    // The agent already recovers on its own (heartbeat-monitor.sh's `--peek` poll is
+    // read-only, so a failed turn leaves the next wake due), so this exists purely so
+    // an operator watching from Discord can tell "Claude is down" from "my agent is
+    // broken". Reuses the same tail read above; auth failures return null here and
+    // are left to the lapsed-login/env-auth tiers so one event isn't notified twice.
+    const apiFailure = tail === null ? null : classifyApiFailureTail(tail);
+    if (apiFailure) {
+      if (!watchdogState.api_failure_notified_at) {
+        pushOperatorMessage(composeApiFailureMessage(apiFailure, timezone));
+        appendEvent('api-failure', apiFailure.kind);
+        watchdogState.api_failure_notified_at = worldStamp(REAL_WORLD);
+        writeWatchdogState(watchdogState);
+      }
+    } else if (watchdogState.api_failure_notified_at) {
+      // Re-arm once a newer, healthy assistant record supersedes the failure — mirrors
+      // the session-wedged re-arm above, so a later episode can notify again.
+      delete watchdogState.api_failure_notified_at;
       writeWatchdogState(watchdogState);
     }
   }

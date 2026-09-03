@@ -61,17 +61,17 @@ describe('en catalog byte-identity (pre-refactor literals)', () => {
   });
 
   test('WATCHDOG lifecycle messages', () => {
-    expect(WATCHDOG.en.restart('08:30', 'it had frozen')).toBe('I restarted your hermit at 08:30 — it had frozen.');
+    expect(WATCHDOG.en.restart('08:30', 'it had frozen')).toBe('I restarted your agent at 08:30 — it had frozen.');
     expect(WATCHDOG.en.restartCauseNotRunning()).toBe("it wasn't running");
     expect(WATCHDOG.en.restartCauseFrozen()).toBe('it had frozen');
-    expect(WATCHDOG.en.wedge('08:30')).toBe("Your hermit hasn't responded in a while — checking on it now (08:30).");
-    expect(WATCHDOG.en.pauseUntilResume('X')).toBe('Your hermit is paused (X) until you resume it.');
-    expect(WATCHDOG.en.pauseUntilDate('X', 'B')).toBe('Your hermit is paused (X) until B.');
+    expect(WATCHDOG.en.wedge('08:30')).toBe("Your agent hasn't responded in a while — checking on it now (08:30).");
+    expect(WATCHDOG.en.pauseUntilResume('X')).toBe('Your agent is paused (X) until you resume it.');
+    expect(WATCHDOG.en.pauseUntilDate('X', 'B')).toBe('Your agent is paused (X) until B.');
     expect(WATCHDOG.en.stallQuestion('08:30')).toBe(
-      "Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer (08:30).",
+      "Your agent is waiting on a question it can't ask over chat — open the terminal or Claude app to answer (08:30).",
     );
     expect(WATCHDOG.en.lapsedLogin('08:30', 'FIX')).toBe(
-      "Your Claude login has expired, so your hermit can't do any work until you sign in again (08:30). FIX",
+      "Your Claude login has expired, so your agent can't do any work until you sign in again (08:30). FIX",
     );
   });
 

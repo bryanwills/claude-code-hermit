@@ -5,6 +5,7 @@
 ### Changed
 - The session-discipline block now names `.claude-code-hermit/sessions/SHELL.md`, because a post-compaction model had only "SHELL.md" and guessed the hermit root.
 - `/hermit-settings docker` shows `docker.packages` read-only.
+- Operator-facing channel messages (watchdog pushes, the token-mint re-auth prompt) say "your agent" instead of "your hermit".
 
 ### Upgrade Instructions
 1. The Tasks line lives in the plugin-owned CLAUDE-APPEND block, which Step 6 already replaces wholesale, so no manual edit is needed. If this operator hand-edited the Tasks line inside the block, their edit is overwritten; tell them once. Reload project context afterwards as the skill already instructs.
@@ -15,6 +16,7 @@
 - A marked operator block in `Dockerfile.hermit` for root-context installs; upgrades merge around it.
 - `docker-customize` routes a container change (tool, binary, apt package, env var, persistent directory, side service) to the first channel that can carry it: the Dockerfile project-package layer, then `docker-entrypoint.hermit-local.sh`, then compose or `Dockerfile.hermit`. `docs/always-on.md` § Customizing the container carries the same map for humans.
 - A skill or agent the always-on hermit creates in a `hatch_target: local` project is excluded from git via `.git/info/exclude`, leaving the operator's own tracked skills and agents untouched.
+- The watchdog notices a turn that failed on Claude's own service — a usage limit or a 529/500 overload — and sends one push per episode; the agent already recovers on its own once the outage clears, so this is visibility only, nothing is restarted or suppressed.
 
 ### Fixed
 - The apt-package path is documented as it behaves: a package enters through a `RUN apt-get` layer in the `Dockerfile.hermit` operator block, and `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own. `docs/troubleshooting.md` said a rebuild after a config change was enough.
