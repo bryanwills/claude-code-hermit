@@ -90,6 +90,7 @@ These aren't upgrades — just how your project evolves:
 - **Custom agents** — Add/modify/remove files in `.claude/agents/`. Live immediately.
 - **Custom skills** — Add/modify in `.claude/skills/`. Live immediately.
 - **Config** — `/claude-code-hermit:hermit-settings` or edit `config.json` directly.
+- **Container** — [Customizing the container](always-on.md#customizing-the-container).
 
 ---
 
