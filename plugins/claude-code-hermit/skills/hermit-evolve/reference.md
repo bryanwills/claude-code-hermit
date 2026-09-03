@@ -218,7 +218,7 @@ Use one UTC timestamp for every path created while handling an entry. First copy
 
 **Verified 3-way branch (`base_path` present).** `cp <the .bak> <tmp>` then `git merge-file <tmp> <base_path> <theirs_path>`. The bun-pin migration runs before this step, so a bun install-block change is not an operator hunk and must not be re-applied.
 
-`git merge-file` returns the conflict count on a merge (capped at 127) and 128 or higher on its own failure, so read the status against those bands — a status of 128+ is an error, never a conflict count. The checks below run on `<tmp>` before anything is installed, in every branch.
+`git merge-file` returns the conflict count on a merge (capped at 127) and 128 or higher on its own failure, so read the status against those bands — a status of 128+ is an error, never a conflict count. The checks below run on `<tmp>` before anything is installed, in each of the three status branches that follow.
 
 - Exit 0: run the checks. Green → install `<tmp>` over the project file, report `<name> merged(3-way)`. Red → unsettled.
 - Exit 1-127: edit `<tmp>` only between `<<<<<<<` and `>>>>>>>` markers, in interactive and unattended runs alike. Every region settled and the checks green → install `<tmp>` over the project file, report `<name> merged(3-way; <n> conflicts resolved)`. Any region unsettled or a check red → unsettled.
