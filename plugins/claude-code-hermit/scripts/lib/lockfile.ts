@@ -145,6 +145,25 @@ function acquireLock(lockPath: string, staleMs: number = DEFAULT_STALE_MS): bool
   }
 }
 
+/**
+ * Poll acquireLock until it succeeds or waitMs elapses. Returns whether the
+ * lock is held, so a caller that wants to proceed unlocked rather than lose its
+ * write can decide for itself. An unwritable lock path gives up immediately.
+ */
+function acquireLockWithWait(lockPath: string, waitMs: number, staleMs: number = DEFAULT_STALE_MS): boolean {
+  const deadline = Date.now() + waitMs;
+  let held = false;
+  while (!held && Date.now() < deadline) {
+    try {
+      held = acquireLock(lockPath, staleMs);
+    } catch {
+      break;
+    }
+    if (!held) Bun.sleepSync(20);
+  }
+  return held;
+}
+
 /** Release the lock if this process holds it. */
 function releaseLock(lockPath: string): void {
   try {
@@ -153,4 +172,4 @@ function releaseLock(lockPath: string): void {
   } catch {}
 }
 
-export { acquireLock, releaseLock, pidAlive, claimPathFor, DEFAULT_STALE_MS };
+export { acquireLock, acquireLockWithWait, releaseLock, pidAlive, claimPathFor, DEFAULT_STALE_MS };
