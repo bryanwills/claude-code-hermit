@@ -1,6 +1,6 @@
 ---
 name: docker-customize
-description: Route a request to install a tool, binary, package, env var, persistent directory, or side service in the hermit Docker container to the first channel that can carry it. Apt packages go through docker.packages; boot-time shell work goes in docker-entrypoint.hermit-local.sh; compose and Dockerfile only when nothing else fits. Activates on messages like "install gog in the container", "add an apt package", "download a binary into the container", "set a container env var", "add a volume or port to compose".
+description: Route a request to install a tool, binary, package, env var, persistent directory, or side service in the hermit Docker container to the first channel that can carry it. Apt packages go in the Dockerfile's project-package layer; boot-time shell work goes in docker-entrypoint.hermit-local.sh; compose and Dockerfile only when nothing else fits. Activates on messages like "install gog in the container", "add an apt package", "download a binary into the container", "set a container env var", "add a volume or port to compose".
 ---
 
 # Docker Customize
@@ -9,23 +9,20 @@ Land a container change in the first channel that can carry it, in the order bel
 
 ## 1. Apt package
 
-The container runs as `USER claude`, so a package can only enter through the image. Do both halves.
+The container runs as `USER claude` with `cap_drop: ALL` and `no-new-privileges`, so nothing installs a package at runtime. It has to be in the image.
 
-**Record it:** invoke `/claude-code-hermit:hermit-settings docker` via the Skill tool. It owns `docker.packages`, which lives in `config.json` and survives every upgrade.
-
-**Apply it:** `docker.packages` is baked into `Dockerfile.hermit` when the templates are rendered, so the config edit alone changes nothing that gets built. Write the same list into the project-package layer of `Dockerfile.hermit`, in the exact shape the renderer emits, so the next render agrees with the file instead of conflicting with it:
+Add it to the project-package layer of `Dockerfile.hermit`:
 
 ```dockerfile
-# Project-specific packages (from config.json docker.packages)
-# To modify: /hermit-settings docker, then rebuild
+# Project-specific packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
       <pkg> <pkg> && \
     rm -rf /var/lib/apt/lists/*
 ```
 
-When the list was empty at setup that layer is absent: add it between the `gh` install layer and the `# Match host UID` comment.
+When that layer is absent, add it between the `gh` install layer and the `# Match host UID` comment. Then rebuild on the host: `.claude-code-hermit/bin/hermit-docker update`.
 
-Then rebuild on the host: `.claude-code-hermit/bin/hermit-docker update`.
+Two things to tell the operator. Editing `Dockerfile.hermit` marks it customized, so `hermit-evolve` keeps their version and stops applying upstream changes to that file: re-check it after an upgrade. And `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own.
 
 ## 2. Boot-time shell
 
