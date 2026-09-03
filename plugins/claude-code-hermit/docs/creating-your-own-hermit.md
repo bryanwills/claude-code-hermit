@@ -234,7 +234,7 @@ During `/docker-setup`, the wizard reads this section for every mirrored plugin,
 
 **Why not write to `docker.packages` from your hatch?** The plugin directory lives in Docker's `claude-config` named volume, which is wiped on `docker compose down -v`, plugin updates, and fresh installs. Anything written there (venvs, caches, stamps) is ephemeral. Using the declaration convention bakes deps into the image at build time, making them permanent and removing the need for runtime installation.
 
-Operators can review and adjust the approved package list via `/hermit-settings docker`.
+Operators can review the approved package list via `/hermit-settings docker`. It is read only when `/docker-setup` renders the templates, so adjusting it there installs nothing on its own — an already-built container takes a package through the operator block of `Dockerfile.hermit` (`/docker-customize`) plus a rebuild.
 
 ### Docker network requirements
 

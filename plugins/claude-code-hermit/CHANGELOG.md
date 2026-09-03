@@ -4,15 +4,21 @@
 
 ### Changed
 - The session-discipline block now names `.claude-code-hermit/sessions/SHELL.md`, because a post-compaction model had only "SHELL.md" and guessed the hermit root.
+- `/hermit-settings docker` shows `docker.packages` read-only.
 
 ### Upgrade Instructions
 1. The Tasks line lives in the plugin-owned CLAUDE-APPEND block, which Step 6 already replaces wholesale, so no manual edit is needed. If this operator hand-edited the Tasks line inside the block, their edit is overwritten; tell them once. Reload project context afterwards as the skill already instructs.
+2. The Dockerfile template gained an operator block. A hermit with lines already in that gap sees one conflict in § 5d, resolved in place or kept with a notice; no rebuild needed for the block itself.
 ### Added
+- `docker-customize` routes a container change (tool, binary, apt package, env var, persistent directory, side service) to the first channel that can carry it: the `Dockerfile.hermit` operator block, then `docker-entrypoint.hermit-local.sh`, then compose. `docs/always-on.md` § Customizing the container carries the same map for humans.
+- `hermit-docker restart --build` rebuilds the image pinned to the running Claude Code version.
+- A marked operator block in `Dockerfile.hermit` for root-context installs; upgrades merge around it.
 - `docker-customize` routes a container change (tool, binary, apt package, env var, persistent directory, side service) to the first channel that can carry it: the Dockerfile project-package layer, then `docker-entrypoint.hermit-local.sh`, then compose or `Dockerfile.hermit`. `docs/always-on.md` § Customizing the container carries the same map for humans.
 - A skill or agent the always-on hermit creates in a `hatch_target: local` project is excluded from git via `.git/info/exclude`, leaving the operator's own tracked skills and agents untouched.
 
 ### Fixed
-- The apt-package path is documented as it behaves: a package enters through a `RUN apt-get` layer in `Dockerfile.hermit`, and `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own. `docs/troubleshooting.md` said a rebuild after a config change was enough.
+- The apt-package path is documented as it behaves: a package enters through a `RUN apt-get` layer in the `Dockerfile.hermit` operator block, and `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own. `docs/troubleshooting.md` said a rebuild after a config change was enough.
+- Evolve no longer overwrites a customised docker file without a baseline; with one, the merge runs through `git merge-file` and the hermit resolves only conflict regions.
 
 ## [1.3.0] - 2026-09-02
 

@@ -94,6 +94,35 @@ describe('render-docker-templates.ts', () => {
     expect(dockerfile(dir)).not.toContain('# Project-specific packages');
   });
 
+  // The operator block is a durable merge contract: hermit-evolve's section 5d
+  // merges operator edits around it, and docker-customize tells operators to put
+  // root-context installs inside it. A later template edit that drops or moves it
+  // would silently remove that surface, so pin both markers and their position.
+  test('operator block survives rendering, once, above the host-UID layer', async () => {
+    const dir = freshDir();
+    await render(dir, { packages: ['ffmpeg'] });
+    const df = dockerfile(dir);
+    expect(df.match(/^# --- operator:/gm) ?? []).toHaveLength(1);
+    expect(df.match(/^# --- end operator ---$/gm) ?? []).toHaveLength(1);
+    expect(df.indexOf('# --- operator:')).toBeLessThan(df.indexOf('# --- end operator ---'));
+    expect(df.indexOf('# --- end operator ---')).toBeLessThan(df.indexOf('# Match host UID'));
+  });
+
+  test('operator block sits between the packages token and the host-UID layer in the template', () => {
+    const tpl = fs.readFileSync(
+      path.join(PLUGIN_ROOT, 'state-templates', 'docker', 'Dockerfile.hermit.template'), 'utf8');
+    expect(tpl.match(/^# --- operator:/gm) ?? []).toHaveLength(1);
+    expect(tpl.match(/^# --- end operator ---$/gm) ?? []).toHaveLength(1);
+    const order = ['{{PACKAGES_BLOCK}}', '# --- operator:', '# --- end operator ---', '# Match host UID']
+      .map((needle) => tpl.indexOf(needle));
+    expect(order).not.toContain(-1);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // No template token inside the block, or rendering would substitute into
+    // operator-owned lines and the merge would fight the renderer.
+    const block = tpl.slice(order[1], order[2]);
+    expect(block).not.toMatch(/\{\{[A-Z][A-Z0-9_]*\}\}/);
+  });
+
   test('network_mode: host is present only for host networking', async () => {
     const bridgeDir = freshDir();
     await render(bridgeDir, { networkMode: 'bridge' });

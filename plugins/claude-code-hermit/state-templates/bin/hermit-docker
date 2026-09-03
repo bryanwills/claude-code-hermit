@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Docker management CLI for hermit containers.
 # Usage: hermit-docker <command> [args...]
-# Commands: up, down, attach, bash, login, setup-token, logs, restart
+# Commands: up, down, attach, bash, login, setup-token, logs, restart [--build]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG="$SCRIPT_DIR/../config.json"
-CMD="${1:?Usage: hermit-docker <up|down|attach|bash|login|setup-token|logs|restart|update> [args...]}"
+CMD="${1:?Usage: hermit-docker <up|down|attach|bash|login|setup-token|logs|restart [--build]|update> [args...]}"
 shift
 
 if [ ! -f "$CONFIG" ]; then
@@ -63,6 +63,11 @@ _require_running() {
     echo "  .claude-code-hermit/bin/hermit-docker up" >&2
     exit 1
   fi
+}
+
+_running_cc_version() {
+  cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" claude --version 2>/dev/null \
+    | grep -oP '[\d.]+' | head -1 || echo "unknown"
 }
 
 _validate_compose() {
@@ -408,11 +413,22 @@ case "$CMD" in
 
   restart)
     _require_running
-    if [ $# -gt 0 ]; then
+    if [ $# -gt 0 ] && { [ $# -ne 1 ] || [ "$1" != "--build" ]; }; then
       echo "[hermit] ERROR: 'restart' no longer accepts service args. Use 'hermit-docker restart' to restart everything." >&2
       exit 2
     fi
     _validate_compose
+    if [ "${1:-}" = "--build" ]; then
+      CC_PIN=$(_running_cc_version)
+      if [ -z "$CC_PIN" ] || [ "$CC_PIN" = "unknown" ]; then
+        CC_PIN="latest"
+      fi
+      echo "[hermit] Rebuilding image pinned to Claude Code ${CC_PIN}..."
+      if ! (cd "$PROJECT_DIR" && "${DC[@]}" build --build-arg "CLAUDE_CODE_VERSION=${CC_PIN}"); then
+        echo "[hermit] Image build failed: old container still running, no changes applied." >&2
+        exit 1
+      fi
+    fi
     echo "[hermit] Restarting container..."
     cd "$PROJECT_DIR" && "${DC[@]}" down && "${DC[@]}" up -d
     _warn_if_entrypoint_stale
@@ -441,8 +457,7 @@ case "$CMD" in
     # In rebuild modes the build below refreshes it, so no warning is needed there.
     [ "$PLUGINS_ONLY" = true ] && _warn_if_entrypoint_stale
 
-    CC_BEFORE=$(cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" claude --version 2>/dev/null \
-      | grep -oP '[\d.]+' | head -1 || echo "unknown")
+    CC_BEFORE=$(_running_cc_version)
     CC_LATEST="(skipped)"
     [ "$PLUGINS_ONLY" = false ] && CC_LATEST=$(cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" \
       npm view @anthropic-ai/claude-code version 2>/dev/null || echo "unknown") || true
@@ -632,8 +647,7 @@ case "$CMD" in
     if [ -n "$CC_BUILD_VERSION" ] && [ "$CC_BUILD_VERSION" != "latest" ]; then
       CC_AFTER="$CC_BUILD_VERSION"
     else
-      CC_AFTER=$(cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" claude --version 2>/dev/null \
-        | grep -oP '[\d.]+' | head -1 || echo "unknown")
+      CC_AFTER=$(_running_cc_version)
     fi
     PLUGINS_COUNT_AFTER=0
     [ "$CC_ONLY" = false ] && PLUGINS_COUNT_AFTER=$(_get_plugin_count) || true
@@ -739,7 +753,7 @@ JSEOF
     ;;
 
   *)
-    echo "Usage: hermit-docker <up|down|attach|bash|login|setup-token|logs|restart|update> [args...]" >&2
+    echo "Usage: hermit-docker <up|down|attach|bash|login|setup-token|logs|restart [--build]|update> [args...]" >&2
     exit 1
     ;;
 esac
