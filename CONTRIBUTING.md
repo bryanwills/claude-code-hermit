@@ -1,5 +1,11 @@
 # Contributing to claude-code-hermit
 
+## Filing an Issue
+
+Bugs and ideas go through the [issue forms](https://github.com/gtapps/claude-code-hermit/issues/new/choose). Questions and install help are faster in [Discord](https://discord.gg/54sJqAxhUh).
+
+The rest of this guide is for code changes.
+
 ## Design Constraints
 
 These are non-negotiable. Read them before making any changes.

@@ -7,6 +7,11 @@
 
 ### Upgrade Instructions
 1. The Tasks line lives in the plugin-owned CLAUDE-APPEND block, which Step 6 already replaces wholesale, so no manual edit is needed. If this operator hand-edited the Tasks line inside the block, their edit is overwritten; tell them once. Reload project context afterwards as the skill already instructs.
+### Added
+- `docker-customize` routes a container change (tool, binary, apt package, env var, persistent directory, side service) to the first channel that can carry it: the Dockerfile project-package layer, then `docker-entrypoint.hermit-local.sh`, then compose or `Dockerfile.hermit`. `docs/always-on.md` § Customizing the container carries the same map for humans.
+
+### Fixed
+- The apt-package path is documented as it behaves: a package enters through a `RUN apt-get` layer in `Dockerfile.hermit`, and `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own. `docs/troubleshooting.md` said a rebuild after a config change was enough.
 
 ## [1.3.0] - 2026-09-02
 
