@@ -16,7 +16,7 @@ import path from 'node:path';
 import { runScript, SCRIPTS_DIR } from './helpers/run';
 import { transcriptDirFor } from '../scripts/lib/cc-compat';
 import {
-  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, hasLapsedLogin, classifyQueueTail, composeCompactSteeringMessage,
+  inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, hasLapsedLogin, classifyQueueTail, classifyApiFailureTail, composeCompactSteeringMessage,
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
   maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
@@ -722,6 +722,90 @@ describe('classifyQueueTail', () => {
   test('a truncated leading line (byte-offset tail read) is skipped, not fatal', () => {
     const tail = `p":"2026-08-17T06:00:00Z"}\n${queueRec('enqueue', '2026-08-17T08:00:00Z')}`;
     expect(classifyQueueTail(tail, NOW)).toBe('wedged');
+  });
+});
+
+// Fixture texts are the six real shapes CC emits, captured from live isApiErrorMessage
+// records under ~/.claude/projects. Structural fields (isApiErrorMessage, message.model)
+// match the real record shape verbatim.
+const apiErrorRec = (text: string, ts = '2026-08-17T13:59:00Z') => JSON.stringify({
+  type: 'assistant', timestamp: ts, isApiErrorMessage: true,
+  message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text }] },
+});
+const healthyRec = (text: string, ts = '2026-08-17T13:59:30Z') => JSON.stringify({
+  type: 'assistant', timestamp: ts,
+  message: { role: 'assistant', model: 'claude-opus-5', content: [{ type: 'text', text }] },
+});
+
+describe('classifyApiFailureTail', () => {
+  test('usage limit, real text → usage-limit with parsed reset time', () => {
+    const tail = apiErrorRec("You've hit your session limit · resets 2:30am (Europe/Lisbon)");
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'usage-limit', resetAt: '2:30am' });
+  });
+
+  test('login expired, real text → null (owned by the lapsed-login tier)', () => {
+    const tail = apiErrorRec('Login expired · Please run /login');
+    expect(classifyApiFailureTail(tail)).toBeNull();
+  });
+
+  test('529 overload, real text → api-unavailable', () => {
+    const tail = apiErrorRec('API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.');
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'api-unavailable' });
+  });
+
+  test('500 internal, real text → api-unavailable', () => {
+    const tail = apiErrorRec('API Error: 500 Internal server error. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com.');
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'api-unavailable' });
+  });
+
+  test('401 invalid key, real text → null (owned by the env-auth tier)', () => {
+    const tail = apiErrorRec('Please run /login · API Error: 401 Invalid API key.');
+    expect(classifyApiFailureTail(tail)).toBeNull();
+  });
+
+  test('mid-response server error, real text → api-unavailable', () => {
+    const tail = apiErrorRec('API Error: Server error mid-response. The response above may be incomplete.');
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'api-unavailable' });
+  });
+
+  test('a normal assistant message quoting the full 529 sentence verbatim → null', () => {
+    // The case a pane regex could not have passed: real model id, isApiErrorMessage absent.
+    const tail = healthyRec('The proposal quotes: "API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com."');
+    expect(classifyApiFailureTail(tail)).toBeNull();
+  });
+
+  test('a healthy record newer than the failure → null', () => {
+    const tail = [
+      apiErrorRec('API Error: 529 Overloaded.', '2026-08-17T13:58:00Z'),
+      healthyRec('Back to normal work.', '2026-08-17T13:59:00Z'),
+    ].join('\n');
+    expect(classifyApiFailureTail(tail)).toBeNull();
+  });
+
+  test('usage limit whose text carries no parseable reset clause → resetAt null', () => {
+    const tail = apiErrorRec("You've hit your session limit for now.");
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'usage-limit', resetAt: null });
+  });
+
+  test('no assistant records at all → null', () => {
+    expect(classifyApiFailureTail('{"type":"mode","mode":"normal"}')).toBeNull();
+  });
+
+  // CC's limit line is `You've hit your ${label}…` over a fixed label vocabulary
+  // (session / weekly / Opus / Sonnet / Fable / individual usage / individual spend /
+  // usage credit / monthly spend). A label-specific match left the weekly lockout —
+  // the multi-day one — silent.
+  test.each([
+    'weekly limit', 'Opus limit', 'Sonnet limit', 'Fable limit',
+    'individual usage limit', 'usage credit limit', 'monthly spend limit',
+  ])('non-session limit label (%s) → usage-limit', (label) => {
+    const tail = apiErrorRec(`You've hit your ${label} · resets 2:30am (Europe/Lisbon)`);
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'usage-limit', resetAt: '2:30am' });
+  });
+
+  test('reset capture stops at the subline instead of swallowing it', () => {
+    const tail = apiErrorRec("You've hit your session limit · resets 2:30am, or switch models to keep working.");
+    expect(classifyApiFailureTail(tail)).toEqual({ kind: 'usage-limit', resetAt: '2:30am' });
   });
 });
 
@@ -4173,7 +4257,7 @@ describe('composeRestartMessage / composeWedgeMessage / composePauseMessage', ()
   });
 
   test('pause message: indefinite pause has no boundary time', () => {
-    expect(composePauseMessage('operator', null, 'UTC')).toBe('Your hermit is paused (your request) until you resume it.');
+    expect(composePauseMessage('operator', null, 'UTC')).toBe('Your agent is paused (your request) until you resume it.');
   });
 
   test('pause message: budget/watchdog reasons render in operator language', () => {
@@ -4358,54 +4442,54 @@ describe('state backup (step 0e)', () => {
 describe('watchdog message localization', () => {
   test('composeRestartMessage en byte-identity (both causes)', () => {
     expect(composeRestartMessage('dead-process', 'UTC', 'en')).toMatch(
-      /^I restarted your hermit at \d{2}:\d{2} — it wasn't running\.$/);
+      /^I restarted your agent at \d{2}:\d{2} — it wasn't running\.$/);
     expect(composeRestartMessage('pane-frozen', 'UTC', 'en')).toMatch(
-      /^I restarted your hermit at \d{2}:\d{2} — it had frozen\.$/);
+      /^I restarted your agent at \d{2}:\d{2} — it had frozen\.$/);
   });
 
   test('composeRestartMessage pt-PT', () => {
     expect(composeRestartMessage('dead-process', 'UTC', 'pt-PT')).toMatch(
-      /^Reiniciei o seu hermit às \d{2}:\d{2} — não estava a correr\.$/);
+      /^Reiniciei o seu agente às \d{2}:\d{2} — não estava a correr\.$/);
     expect(composeRestartMessage('pane-frozen', 'UTC', 'pt-PT')).toMatch(
-      /^Reiniciei o seu hermit às \d{2}:\d{2} — tinha bloqueado\.$/);
+      /^Reiniciei o seu agente às \d{2}:\d{2} — tinha bloqueado\.$/);
   });
 
   test('composeWedgeMessage en / pt-PT', () => {
     expect(composeWedgeMessage('UTC', 'en')).toMatch(
-      /^Your hermit hasn't responded in a while — checking on it now \(\d{2}:\d{2}\)\.$/);
+      /^Your agent hasn't responded in a while — checking on it now \(\d{2}:\d{2}\)\.$/);
     expect(composeWedgeMessage('UTC', 'pt-PT')).toMatch(
-      /^O seu hermit não responde há algum tempo — estou a verificá-lo agora \(\d{2}:\d{2}\)\.$/);
+      /^O seu agente não responde há algum tempo — estou a verificá-lo agora \(\d{2}:\d{2}\)\.$/);
   });
 
   test('composeStallQuestionMessage en / pt-PT', () => {
     expect(composeStallQuestionMessage('UTC', 'en')).toMatch(
-      /^Your hermit is waiting on a question it can't ask over chat — open the terminal or Claude app to answer \(\d{2}:\d{2}\)\.$/);
+      /^Your agent is waiting on a question it can't ask over chat — open the terminal or Claude app to answer \(\d{2}:\d{2}\)\.$/);
     expect(composeStallQuestionMessage('UTC', 'pt-PT')).toMatch(
-      /^O seu hermit está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder \(\d{2}:\d{2}\)\.$/);
+      /^O seu agente está à espera de uma pergunta que não pode fazer pelo chat — abra o terminal ou a app Claude para responder \(\d{2}:\d{2}\)\.$/);
   });
 
   test('composeSessionWedgedMessage en / pt-PT', () => {
     expect(composeSessionWedgedMessage('UTC', 'en')).toMatch(
-      /^Your hermit has stopped picking up its scheduled work — something on screen is holding it\. Open the terminal or Claude app and clear whatever is waiting there \(\d{2}:\d{2}\)\.$/);
+      /^Your agent has stopped picking up its scheduled work — something on screen is holding it\. Open the terminal or Claude app and clear whatever is waiting there \(\d{2}:\d{2}\)\.$/);
     expect(composeSessionWedgedMessage('UTC', 'pt-PT')).toMatch(
-      /^O seu hermit deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo\. Abra o terminal ou a app Claude e resolva o que está à espera \(\d{2}:\d{2}\)\.$/);
+      /^O seu agente deixou de executar o trabalho agendado — algo no ecrã está a bloqueá-lo\. Abra o terminal ou a app Claude e resolva o que está à espera \(\d{2}:\d{2}\)\.$/);
   });
 
   test('composePauseMessage indefinite form is deterministic and localized', () => {
     expect(composePauseMessage('operator', null, 'UTC', 'en')).toBe(
-      'Your hermit is paused (your request) until you resume it.');
+      'Your agent is paused (your request) until you resume it.');
     expect(composePauseMessage('operator', null, 'UTC', 'pt-PT')).toBe(
-      'O seu hermit está em pausa (o seu pedido) até que a retome.');
+      'O seu agente está em pausa (o seu pedido) até que a retome.');
     expect(composePauseMessage('budget', null, 'UTC', 'pt-PT')).toBe(
-      'O seu hermit está em pausa (um limite de orçamento) até que a retome.');
+      'O seu agente está em pausa (um limite de orçamento) até que a retome.');
   });
 
   test('composePauseMessage dated form carries the localized frame and reason label', () => {
     const until = '2026-07-05T12:00:00Z';
     const en = composePauseMessage('budget', until, 'UTC', 'en');
-    expect(en).toContain('Your hermit is paused (a budget cap) until ');
+    expect(en).toContain('Your agent is paused (a budget cap) until ');
     const pt = composePauseMessage('watchdog', until, 'UTC', 'pt-PT');
-    expect(pt).toContain('O seu hermit está em pausa (o watchdog) até ');
+    expect(pt).toContain('O seu agente está em pausa (o watchdog) até ');
   });
 });
 

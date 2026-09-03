@@ -207,13 +207,23 @@ async function waitForMode(modeFile: string, want: string, timeoutMs = POLL_DEAD
   throw new Error(`pane never reached ${want} (stuck at ${fs.readFileSync(modeFile, 'utf-8')})`);
 }
 
-async function drain(dir: string, bin: string) {
+// The detached verifier sleeps 100ms per poll, so its whole budget has to cover
+// however many captures a case needs. 250ms leaves room for one — enough for the
+// cases whose dialog is already on the pane, and short enough that the cases with
+// no dialog to find give up instead of idling out the script's 5s ceiling.
+const CONFIRM_TIMEOUT_ONE_CAPTURE_MS = '250';
+// A case that only reveals the dialog on a later capture needs several polls, and
+// on a contended runner a single spawn can eat the whole 250ms window. Give those
+// the ceiling: the assertion is about which keys get sent, never about speed.
+const CONFIRM_TIMEOUT_MULTI_CAPTURE_MS = '5000';
+
+async function drain(dir: string, bin: string, confirmTimeoutMs = CONFIRM_TIMEOUT_ONE_CAPTURE_MS) {
   return runScript('stop-pipeline.ts', {
     stdin: '{}',
     cwd: dir,
     env: {
       AGENT_HOOK_PROFILE: 'minimal',
-      HERMIT_HARNESS_CONFIRM_TIMEOUT_MS: '250',
+      HERMIT_HARNESS_CONFIRM_TIMEOUT_MS: confirmTimeoutMs,
       PATH: `${bin}:${process.env.PATH}`,
     },
   });
@@ -288,7 +298,7 @@ describe('Stop hook harness-switch delivery', () => {
       // first detached capture miss so a one-shot synchronous implementation fails.
       const { bin, log, helperPid } = installFakeTmux(dir, pane, { revealAfterCapture: 2 });
 
-      const result = await drain(dir, bin);
+      const result = await drain(dir, bin, CONFIRM_TIMEOUT_MULTI_CAPTURE_MS);
       await waitForVerifierExit(helperPid);
 
       expect(result.exitCode).toBe(0);
