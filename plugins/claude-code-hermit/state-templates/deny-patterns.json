@@ -28,8 +28,7 @@
     "Bash(*${HERMIT_TELEMETRY_TOKEN*)",
     "Bash(*> *.claude-code-hermit/OPERATOR.md*)",
     "Bash(*>.claude-code-hermit/OPERATOR.md*)",
-    "Edit(//**/.claude/plugins/marketplaces/**)",
-    "Edit(//**/plugins/cache/**)"
+    "Edit(//**/.claude/plugins/**)"
   ],
   "ask": [
     "Bash(ssh *)",

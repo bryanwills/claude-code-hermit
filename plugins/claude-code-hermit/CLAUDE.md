@@ -64,7 +64,7 @@ When a change needs to be applied to existing hermits (not just the template for
 
 Example: removing a line from an operator-editable file (like `HEARTBEAT.md`) that `hermit-evolve` would otherwise skip.
 
-Upgrade Instructions write only to `.claude-code-hermit/`, never into the plugin tree; the seeded `Edit(//**/plugins/cache/**)` deny enforces it. Plugin-side changes ship in the release, not the upgrade step.
+Upgrade Instructions write only to `.claude-code-hermit/`, never into the plugin tree; the seeded `Edit(//**/.claude/plugins/**)` deny enforces it. Plugin-side changes ship in the release, not the upgrade step.
 
 ## Feature defaults (research preview)
 

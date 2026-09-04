@@ -56,14 +56,31 @@ Two classes (canonical source: `state-templates/deny-patterns.json`):
       "Bash(*${HERMIT_TELEMETRY_TOKEN*)",
       "Bash(*> *.claude-code-hermit/OPERATOR.md*)",
       "Bash(*>.claude-code-hermit/OPERATOR.md*)",
-      "Edit(//**/.claude/plugins/marketplaces/**)",
-      "Edit(//**/plugins/cache/**)"
+      "Edit(//**/.claude/plugins/**)"
     ]
   }
 }
 ```
 
-The two `Edit` entries keep the hermit out of plugin source: its own marketplace clone, and the versioned plugin cache of every installed plugin. Their `//` prefix is load-bearing. Claude Code anchors an unanchored path pattern at the directory the settings file lives in, so the earlier single-slash spelling (`Edit(*/…/*)`) resolved under the project and matched nothing; `//` anchors at the filesystem root. A contract test (`tests/apply-settings-permissions.test.ts`, `describe('sealed registries')`) now fails on any sealed path rule whose first segment is a bare `*` or `**` without a `//` or `~/` anchor. Reads of this plugin's own cache tree go the other way and are granted (`Read(//**/plugins/cache/claude-code-hermit/**)`), because unattended paths like `hermit-evolve` read `reference.md` out of it.
+The `Edit` entry keeps the hermit out of plugin source. Claude Code installs a plugin into two trees under `~/.claude/plugins/`: the marketplace clone (`marketplaces/<marketplace>/plugins/<plugin>/`) and the versioned cache (`cache/<marketplace>/<plugin>/<version>/`). The rule covers both, for every installed plugin, along with Claude Code's own `installed_plugins.json` bookkeeping.
+
+Every part of the spelling carries weight:
+
+- **`//`** anchors at the filesystem root. Claude Code anchors an unanchored pattern at the directory the settings file lives in, so the earlier single-slash spelling (`Edit(*/…/*)`) resolved under the project and matched nothing. `//**/` is also the portable form: paths are normalized to POSIX before matching, so it reaches every drive on Windows and WSL (`C:\Users\alice\…` presents as `/c/Users/alice/…`) as well as macOS and Linux. A `~/`-anchored spelling would not.
+- **`.claude`** scopes the rule to a Claude Code config directory. Without it, `plugins/**` matches any project that happens to contain a `plugins/` directory (a CMS tree, a vendored build cache), and a `deny` can only be lifted from a terminal.
+
+A contract test (`tests/apply-settings-permissions.test.ts`, `describe('sealed registries')`) fails on any sealed path rule that reads as filesystem-wide but is not: a bare `*` or `**` first segment, or a single leading `/`, without a `//` or `~/` anchor.
+
+Reads of this plugin's own tree go the other way and are granted (`Read(//**/.claude/plugins/**/claude-code-hermit/**)`), because unattended paths like `hermit-evolve` read `reference.md` out of it. The mid-pattern `**` matches zero or more segments, so one rule covers both install trees, and `claude-code-hermit` names the plugin slot rather than the marketplace slot. A fork whose marketplace declares another name keeps the grant, and sibling plugins do not inherit it.
+
+**If your config directory is not `~/.claude`.** Claude Code honors `CLAUDE_CONFIG_DIR`, and some operators run profile-separated installs (`~/.claude-work`, `~/.claude-personal`). These rules name `.claude` literally, so they do not cover such an install. Copy them into your own settings file with your directory substituted, keeping the `//` prefix:
+
+```json
+"deny": ["Edit(//**/.claude-work/plugins/**)"],
+"allow": ["Read(//**/.claude-work/plugins/**/claude-code-hermit/**)"]
+```
+
+On Linux, Claude Code may print `Glob patterns in sandbox permission rules are not fully supported on Linux`. That warning is scoped to the sandbox filesystem boundary and does not apply to these rules, which are enforced normally.
 
 The `rm` entries cover four flag orders (`-rf`, `-fr`, `-r -f`, `-f -r`) in both bare and path-prefixed (`/bin/rm`, `./rm`) spellings. See [Known Limitations](#known-limitations) for what the native engine does not fold.
 
