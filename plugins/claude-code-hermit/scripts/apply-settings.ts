@@ -192,6 +192,15 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run memory-dir*)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
+  // The hermit reading its own installed plugin tree (docs/, skills/, reference.md,
+  // state-templates/), which unattended paths like hermit-evolve depend on. `//` anchors
+  // at the filesystem root (a bare or single-slash pattern anchors at the settings file's
+  // own directory instead and matches nothing); the mid-pattern `**` covers both install
+  // trees, the marketplace clone and the version cache; `claude-code-hermit` sits in the
+  // plugin slot so a fork's differently-named marketplace does not orphan the grant.
+  // Full rationale, including Windows/WSL portability and non-default config dirs:
+  // docs/security.md.
+  'Read(//**/.claude/plugins/**/claude-code-hermit/**)',
 ];
 
 // Entries this plugin itself shipped in an earlier version and has since retired.
@@ -243,6 +252,16 @@ const HERMIT_OBSOLETE_DENY = [
   'Bash(*API_KEY*)',
   'Bash(*SECRET*)',
   'Bash(*TOKEN*)',
+  // Respelled, not dropped: the single-slash form anchored at the settings file's own
+  // directory and so matched nothing outside the project. The `//`-anchored replacement
+  // lives in state-templates/deny-patterns.json; this entry is what strips the dead one
+  // from already-hatched hermits on the next permissions-sync.
+  'Edit(*/.claude/plugins/marketplaces/*)',
+  // Its `Write` twin, seeded alongside it before Edit rules were known to cover every
+  // file-editing tool. Older installs still carry it, CC warns at boot on `Write(path)`
+  // rules, and retiring the `Edit` spelling above leaves nothing else that would clear
+  // it, so it goes in the same pass.
+  'Write(*/.claude/plugins/marketplaces/*)',
 ];
 
 type Json = any;

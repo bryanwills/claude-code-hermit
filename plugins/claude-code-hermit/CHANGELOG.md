@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `Read(//**/.claude/plugins/**/claude-code-hermit/**)` in the sealed allow-list, so a hermit reading its own installed docs, skills and templates no longer raises a permission prompt on unattended paths like `hermit-evolve`. One rule covers both trees a plugin runs from, the marketplace clone and the versioned cache, and names `claude-code-hermit` in the plugin slot so the grant survives a fork whose marketplace declares another name.
+- Contract test over every sealed path rule: a `Read`/`Edit` pattern that reads as filesystem-wide but is not (a bare `*` or `**` first segment, or a single leading `/`) now fails CI unless it carries a `//` or `~/` anchor.
+- `docs/security.md` notes what to copy when the config directory is not `~/.claude`, such as a profile install at `~/.claude-work`, and records that `//**/` is the spelling that works on Windows, WSL, macOS and Linux alike.
+
+### Fixed
+- The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/**)`, which covers both install trees for every plugin. The dead spelling, and the `Write` twin older installs still carry beside it, are retired via `HERMIT_OBSOLETE_DENY`.
+- `docs/security.md` said auto mode suspends path rules. It drops execution rules only, and `Read` never reaches the classifier.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`.
+
+1. **Re-seed the plugin-source deny rules.** Resolve `hatch_target` (`.claude-code-hermit/state/hatch-options.json` → `target`, per the same resolution hermit-evolve already does in its own Step 1) to the settings file (`.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Read that file's `permissions.deny`. If it does **not** contain `"Bash(rm -rf *)"`, the operator chose Skip (or has no deny rules) at hatch time: do nothing, report `skip-preserved`, and preserve that choice. Otherwise run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny standard` to pick up the `//`-anchored `Edit(//**/.claude/plugins/**)` pattern. `permissions-sync` does not re-seed `deny`, so this call is what puts the new rule in place. The merge is additive and idempotent (`mergeDeny` dedups), safe to re-run; it re-seeds the whole standard deny and ask template, so any seeded rule the operator removed by hand comes back, and a Hardened install (which carries the ask rules in `deny`) also gains them in `permissions.ask`, where the deny still wins. The inert single-slash spellings are removed by `permissions-sync`, which hermit-evolve already runs.
+2. **If your config directory is not `~/.claude`** (`CLAUDE_CONFIG_DIR` points elsewhere, such as a `~/.claude-work` profile install), the seeded rules name `.claude` literally and will not match it. Add your own copies with the directory substituted, per `docs/security.md`.
+
 ## [1.3.1] - 2026-09-03
 
 ### Changed
