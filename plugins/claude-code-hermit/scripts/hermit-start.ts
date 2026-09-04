@@ -28,7 +28,7 @@ import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateD
 import { cmpSemver } from './lib/semver';
 import { sanitizeLanguage } from './lib/operator-language';
 import { outputStyleFor } from './lib/voice';
-import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY } from './lib/settings/automode-entries';
+import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY, SEALED_SETTINGS_OPS } from './lib/settings/automode-entries';
 import { writeFileAtomic } from './lib/md-write';
 
 type Json = any;
@@ -1131,7 +1131,16 @@ function renderClassifierOverlay(config: Json): string | null {
   // hermits with an empty environment list, which is both what draws classifier
   // denials on their own channel sends and the condition Claude Code offers
   // /auto-mode-setup on.
-  autoMode.allow = ['$defaults', automodeAllowEntry(path.join(defaultConfigDir(), 'plugins'), PLUGIN_ROOT)];
+  //
+  // One op is still gated: `artifact-allow` writes the native Artifact permission,
+  // exactly the write applyArtifactGrant refuses on an unauthorized or non-claude
+  // backend. Enumerating it unconditionally would pre-clear, prompt-free, the publish
+  // an operator configured a backend (or a withheld publish_authorized) to prevent, so
+  // it leaves the list where the grant does not apply and stays Self-Modification.
+  const ops = artifactGrantApplies(config)
+    ? SEALED_SETTINGS_OPS
+    : SEALED_SETTINGS_OPS.filter((op) => op !== 'artifact-allow');
+  autoMode.allow = ['$defaults', automodeAllowEntry(path.join(defaultConfigDir(), 'plugins'), PLUGIN_ROOT, ops)];
   autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
   // Cross-session inbox. Claude Code holds an inbound peer message purely on
   // permission class: a prompting receiver (auto/acceptEdits/dontAsk — the hermit

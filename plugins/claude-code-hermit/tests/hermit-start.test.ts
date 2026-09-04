@@ -1417,6 +1417,9 @@ describe('renderClassifierOverlay', () => {
     expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
     expect(overlay.autoMode.environment[0]).toBe('$defaults');
     expect(overlay.autoMode.environment.length).toBe(3);
+    // artifact-allow is the one op that stays gated: it writes the native Artifact
+    // permission applyArtifactGrant withholds here, so it is not enumerated.
+    expect(overlay.autoMode.allow[1]).not.toContain('artifact-allow');
   });
 
   // --settings is the only scope that can loosen this key: project and local
@@ -1452,6 +1455,9 @@ describe('renderClassifierOverlay', () => {
     expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
     expect(overlay.autoMode.environment[0]).toBe('$defaults');
     expect(overlay.autoMode.environment.length).toBe(3);
+    // Only here is artifact-allow enumerated — this is the install whose boot grant
+    // writes the same permission.
+    expect(overlay.autoMode.allow[1]).toContain('artifact-allow');
   });
 
   // The grant is only as narrow as its anchor: a bare glob would match a
@@ -1508,13 +1514,17 @@ describe('renderClassifierOverlay', () => {
     expect(entry).toContain('/home/probe/.claude/plugins or /src/monorepo/plugins/claude-code-hermit,');
   });
 
-  // artifacts.backend still gates applyArtifactGrant's permissions.allow write; it
-  // never gated the classifier entries, which are not about publishing.
-  test('a non-claude backend keeps the guard and the grant entries', () => {
+  // artifacts.backend gates applyArtifactGrant's permissions.allow write; it never
+  // gated the rest of the classifier entries, which are not about publishing. The one
+  // op that is about publishing follows the grant, so pre-clearing it can never stand
+  // in for the publish the backend choice exists to prevent.
+  test('a non-claude backend keeps the guard and the grant, minus artifact-allow', () => {
     renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true, backend: 'my-artifact-host' } });
     const overlay = readOverlay();
     expect(overlay.autoMode.soft_deny.length).toBe(2);
     expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
+    expect(overlay.autoMode.allow[1]).not.toContain('artifact-allow');
+    expect(overlay.autoMode.allow[1]).toContain('permissions-sync');
   });
 
   test('re-rendering is byte-identical and leaves no tmp file', () => {

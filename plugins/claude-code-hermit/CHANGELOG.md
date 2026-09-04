@@ -17,7 +17,7 @@
 - `proposal-create` documents the `## Config` routine block.
 - `/auto-mode-setup` is off in hermit sessions, seeded as `skillOverrides` in `.claude/settings.local.json`. Claude Code offers it in an end-of-turn dialog once auto mode has blocked a few actions with no `autoMode.environment` entries set, and a modal on an unattended hermit blocks every inbound prompt until the watchdog restarts it. Boot writes the key only when absent, so an operator's own value is the opt-out.
 - `autoMode.environment` reaches the classifier on every install, not only one publishing artifact pages. The entries name the hermit's own notification domains and state directory, so a hermit with artifacts off was declaring nothing and drawing denials on its own channel sends.
-- The sealed `apply-settings` grant is likewise unconditional. `hermit-evolve`, `hatch`, `channel-setup` and `docker-setup` all run the ops it covers on installs that publish nothing.
+- The sealed `apply-settings` grant is likewise unconditional. `hermit-evolve`, `hatch`, `channel-setup` and `docker-setup` all run the ops it covers on installs that publish nothing. `artifact-allow` is the exception: it writes the native Artifact permission, so it is enumerated only where the boot grant applies and stays Self-Modification elsewhere.
 - Triage dedups against `state/proposals-index.json`.
 
 ### Fixed
