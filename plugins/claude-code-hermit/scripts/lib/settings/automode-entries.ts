@@ -50,8 +50,17 @@ export const TERMINAL_ONLY_SETTINGS_OPS = ['voice-render'] as const;
  *
  * `pluginRoot` is listed as a second root only when it falls outside `pluginsDir` — a
  * hermit booted from a checkout via HERMIT_PLUGIN_ROOT or `--plugin-dir`.
+ *
+ * `ops` is the enumerated op list. It defaults to every sealed op, but the caller
+ * narrows it where an op's own precondition is unmet — `artifact-allow` writes the
+ * native Artifact permission, so it is only enumerated where the artifact grant
+ * applies. An op absent from the list stays Self-Modification.
  */
-export function automodeAllowEntry(pluginsDir: string, pluginRoot: string): string {
+export function automodeAllowEntry(
+  pluginsDir: string,
+  pluginRoot: string,
+  ops: readonly string[] = SEALED_SETTINGS_OPS,
+): string {
   const roots = [pluginsDir];
   if (!pluginRoot.startsWith(pluginsDir + path.sep)) roots.push(pluginRoot);
   const rootList = roots.join(' or ');
@@ -63,7 +72,7 @@ export function automodeAllowEntry(pluginsDir: string, pluginRoot: string): stri
     'install root (the directory holding that scripts/ directory) is either named ' +
     'claude-code-hermit or is a single version directory directly inside one. This plugin runs ' +
     'from two install trees, a marketplace clone and a versioned cache, and both match; a ' +
-    `sibling plugin's same-named script does not. <op> is one of ${SEALED_SETTINGS_OPS.join(', ')}, ` +
+    `sibling plugin's same-named script does not. <op> is one of ${ops.join(', ')}, ` +
     "and <settings-file> is the session working directory's .claude/settings.json or " +
     '.claude/settings.local.json, never one under $HOME/.claude/. Both paths must be written out ' +
     'literally, with no ".." segment and no unexpanded shell or template variable such as ' +
