@@ -158,13 +158,29 @@ When the proposed solution involves creating a new agent, skill, heartbeat item,
 3. Verify it completes correctly
 
 **For a captured procedure (procedure-capture — called from reflect):**
-When `reflect` detects a recurring multi-step procedure (≥2 sessions, no existing skill covers it), it calls `proposal-create` with a `## Skill Draft` body block carrying the audit artifact path. Include this block verbatim in the PROP body as the dispatch signal for `proposal-act`. Set `category: capability`, `tags: [procedure-capture]`, `source: auto-detected`. Do not write the SKILL.md here — the accept flow authors it in-main so the operator can review the final skill before install.
+When `reflect` detects a recurring multi-step procedure (≥2 sessions, no existing skill covers it), it calls `proposal-create` with a `## Skill Draft` body block carrying the audit artifact path. Include this block verbatim in the PROP body as the dispatch signal for `proposal-act`. Set `category: capability` (Lane A) or `category: routine` (Lane B, when the brief carries `proposed_routine`), `tags: [procedure-capture]`, `source: auto-detected`. Do not write the SKILL.md here — the accept flow authors it in-main so the operator can review the final skill before install.
 ```markdown
 ## Skill Draft
 - name: <skill-name>
 - source_artifact: .claude-code-hermit/compiled/procedure-brief-<slug>-YYYY-MM-DD.md
 - install_target: .claude/skills/<name>/SKILL.md
 - triggers: <comma-separated proposed trigger phrases>
+```
+
+When the brief carries `proposed_agent_name`, also include this block verbatim. Do not write the agent file here — the accept flow authors it in-main.
+```markdown
+## Agent Draft
+- name: <agent-name>
+- source_artifact: .claude-code-hermit/compiled/procedure-brief-<slug>-YYYY-MM-DD.md
+- install_target: .claude/agents/<name>.md
+- model: <cheapest tier that handles the task>
+- tools: <tool list>
+```
+
+When the brief carries `proposed_routine` (Lane B), include a `## Config` block holding the routine JSON — this is what `proposal-act` 3a consumes:
+```markdown
+## Config
+{"id":"<slug>","schedule":"<cron>","skill":"<invocation>","enabled":true}
 ```
 
 **For a heartbeat check:**

@@ -222,14 +222,22 @@ export function composeRestartMessage(reason: string, timezone: string, locale: 
   return WATCHDOG[locale].restart(hhmm, cause);
 }
 
-/** Operator-language message for the first tick of a wedge episode. */
-export function composeWedgeMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
-  return WATCHDOG[locale].wedge(nowHHMM(timezone));
+/** Operator-language message for a wedge episode: waking on the first notice, unresponsive after a failed wake. */
+export function composeWedgeMessage(timezone: string, locale: Locale = OPERATOR_LOCALE, escalated = false): string {
+  const hhmm = nowHHMM(timezone);
+  return escalated ? WATCHDOG[locale].wedge(hhmm) : WATCHDOG[locale].wedgeWaking(hhmm);
+}
+
+/** Operator-language all-clear after a wedge episode that reached the notice stage. */
+export function composeWedgeRecoveredMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
+  return WATCHDOG[locale].wedgeRecovered(nowHHMM(timezone));
 }
 
 /** Operator-language message for an un-redirectable stalled question (PROP-024's fail-loud half). */
-export function composeStallQuestionMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
-  return WATCHDOG[locale].stallQuestion(nowHHMM(timezone));
+export function composeStallQuestionMessage(timezone: string, locale: Locale = OPERATOR_LOCALE, paneTail?: string): string {
+  const sentence = WATCHDOG[locale].stallQuestion(nowHHMM(timezone));
+  if (!paneTail) return sentence;
+  return `${sentence}\n\n${paneTail}`;
 }
 
 /** Operator-language message for a session that stopped consuming its queued notifications. */
@@ -369,9 +377,10 @@ function getPaneHash(sessionName: string, world: World = REAL_WORLD): string | n
 //
 // The option label is deliberately NOT constrained to a number: the wizard's selector
 // reads "❯ Continue", and requiring `\d+\.` is exactly why the live wedge went
-// undetected. The pointer glyph also starts the composer prompt ("❯ Try ..."), but a
-// modal replaces the composer rather than rendering above it, so the footer anchor
-// below keeps the composer out of every match.
+// undetected. The pointer glyph also starts the composer prompt ("❯ Try ..."). A
+// modal replaces the composer on a clean pane, but a queued channel message keeps
+// the composer rendered below it (probed CC 2.1.260), so the footer anchor misses
+// that case; the registry leg covers it.
 const PENDING_OPTION_RE = /❯\s+\S/;
 // A dialog footer must terminate the visible pane. All three spellings are
 // load-bearing: AskUserQuestion and permission prompts end "· Esc to cancel", a
@@ -1143,18 +1152,29 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
     watchdogState.last_nudge_transport = 'typed';
     sendKeys(sessionName, '/claude-code-hermit:heartbeat run');
   }
-  // One push per wedge episode. Keying on `consecutive === 1` alone re-fires when
-  // the operator-recency guard resets consecutive_stale to 0 mid-episode (an
-  // operator poke isn't a heartbeat recovery); a sticky flag, cleared only when the
-  // heartbeat actually recovers (the fresh-heartbeat branch in main), fixes that.
-  const shouldNotify = !watchdogState.wedge_notified;
-  if (shouldNotify) watchdogState.wedge_notified = true;
+  // First notice of an episode is the waking wording. The stronger "isn't
+  // responding" string fires at most once, and only after the wake has failed
+  // (socket undelivered, or a second stale cycle). Keying on `consecutive === 1`
+  // alone re-fires when the operator-recency guard resets consecutive_stale to 0
+  // mid-episode (an operator poke isn't a heartbeat recovery); sticky flags,
+  // cleared only when the heartbeat actually recovers (the fresh-heartbeat
+  // branch in main), fix that.
+  const wakeFailed = socketUndelivered || consecutive >= 2;
+  let notify: 'waking' | 'escalated' | null = null;
+  if (!watchdogState.wedge_notified) {
+    watchdogState.wedge_notified = true;
+    notify = 'waking';
+  } else if (wakeFailed && !watchdogState.wedge_escalated) {
+    watchdogState.wedge_escalated = true;
+    notify = 'escalated';
+  }
   watchdogState.last_nudge_at = utcStamp();
   writeWatchdogState(watchdogState);
   const via = watchdogState.last_nudge_transport === 'socket' ? 'nudge-socket' : 'nudge';
   appendEvent(via, socketUndelivered ? `stale cycle ${consecutive} — socket undelivered` : `stale cycle ${consecutive}`);
   process.stderr.write(`[watchdog] nudged "${sessionName}" via ${watchdogState.last_nudge_transport} (stale cycle ${consecutive})\n`);
-  if (shouldNotify) pushOperatorMessage(composeWedgeMessage(timezone));
+  if (notify === 'waking') pushOperatorMessage(composeWedgeMessage(timezone));
+  else if (notify === 'escalated') pushOperatorMessage(composeWedgeMessage(timezone, OPERATOR_LOCALE, true));
 }
 
 // --- Monitor-liveness re-arm (step 5) ---
@@ -2139,7 +2159,8 @@ async function main(): Promise<void> {
     const watchdogState = readWatchdogState();
     if (pendingQuestion) {
       if (!watchdogState.stall_question_notified) {
-        pushOperatorMessage(composeStallQuestionMessage(timezone));
+        const paneTail = paneContent !== null ? nonBlankTail(paneContent, 8) : undefined;
+        pushOperatorMessage(composeStallQuestionMessage(timezone, OPERATOR_LOCALE, paneTail));
         appendEvent('stall-question-detected', registryWaiting ? 'pending dialog, session alive — via registry' : 'pending dialog on pane, session alive');
         watchdogState.stall_question_notified = true;
         writeWatchdogState(watchdogState);
@@ -2299,14 +2320,23 @@ async function main(): Promise<void> {
           // genuinely new wedge later can notify again. Clearing last_nudge_at re-arms
           // the nudge throttle for the same reason: a new episode's first probe should
           // fire immediately, not wait out the previous episode's window.
+          const recovered = watchdogState.wedge_notified === true;
           watchdogState.consecutive_stale = 0;
           watchdogState.wedge_notified = false;
+          watchdogState.wedge_escalated = false;
           watchdogState.last_nudge_at = null;
           // Same re-arm, for the transport alternation: the next episode's first
           // probe should try the socket again, not inherit this one's fallback.
           watchdogState.last_nudge_transport = null;
           watchdogState.last_pane_hash = currentPaneHash;
           writeWatchdogState(watchdogState);
+          // Flag cleared before the send, as doNudge does: pushOperatorMessage blocks
+          // for up to 12s, and a tick killed inside that window would otherwise leave
+          // wedge_notified set and repeat the all-clear on the next tick.
+          if (recovered) {
+            pushOperatorMessage(composeWedgeRecoveredMessage(timezone));
+            appendEvent('wedge-recovered', 'heartbeat fresh');
+          }
         }
       }
     }

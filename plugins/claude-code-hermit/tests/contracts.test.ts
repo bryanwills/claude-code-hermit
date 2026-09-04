@@ -641,6 +641,17 @@ describe('routine precheck validation', () => {
     expect(byId('doctor').precheck).toBe('doctor');
     expect(runValidate({ routines: template.routines }).errors).toEqual([]);
   });
+
+  test('the shipped template includes the monthly capability-brainstorm routine', () => {
+    const template = readJson(path.join(TEMPLATES, 'config.json.template'));
+    const entry = template.routines.find((r: any) => r.id === 'capability-brainstorm');
+    expect(entry).toBeTruthy();
+    expect(entry.schedule).toBe('0 10 1 * *');
+    expect(entry.skill).toBe('claude-code-hermit:capability-brainstorm');
+    expect(entry.enabled).toBe(true);
+    expect(entry.model).toBeUndefined();
+    expect(runValidate({ routines: template.routines }).errors).toEqual([]);
+  });
 });
 
 // expect_artifact declares the exact file a routine must produce. Globs are
@@ -1290,6 +1301,10 @@ describe('kill metrics contract', () => {
     expect(parts.length).toBeGreaterThan(1); // Kill criteria section missing
     const killSection = parts[1].split('## ')[0];
     expect(killSection).toContain('proposal.ts metrics');
+  });
+
+  test('capability-brainstorm no longer describes itself as never running autonomously', () => {
+    expect(capabilityBrainstorm).not.toContain('Never runs autonomously');
   });
 
   test('proposal.ts metrics segment registry must discriminate capability-brainstorm', () => {

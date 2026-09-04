@@ -263,17 +263,28 @@ source: session
 session: S-NNN
 related_sessions: [S-AAA, S-BBB]
 proposed_skill_name: <name>
+proposed_routine:                    # optional
+  id: <slug>
+  schedule: "<cron>"
+  skill: "<invocation string>"
+proposed_agent_name: <name>          # optional
 ---
 ```
+
+A skill alone by default. Add `proposed_routine` when the procedure is schedulable (object: `id`, `schedule` cron, `skill` invocation string). Add `proposed_agent_name` when a sub-step's intermediate context dwarfs its conclusion — a thin skill plus a `.claude/agents/<name>.md` worker (the Delegation rule in CLAUDE-APPEND.md). No numeric thresholds; the shape is a judgment.
 
 Body (concise — fits the `compiled/` char-budget/lint contract; do NOT write a full SKILL.md here):
 - The recurring steps in order
 - Evidence sessions (which sessions and what Lessons/memory entries show the recurrence)
 - Proposed skill name and trigger phrases
 
-**Naming (applies to both `proposed_skill_name` above and the `## Skill Draft` `name` below).** Name the skill for the recurring *capability* it provides, never for the incident that surfaced it — no issue/PR numbers, error strings, dates, or `fix-<X>` phrasings in the name or slug (`fix-issue-44`, `handle-enoent`, `stop-verbose-brief` are all wrong). A skill named after its triggering event never routes on the capability it actually delivers, and the operator gate may rubber-stamp a bad name.
+**Naming (applies to `proposed_skill_name` above, `proposed_agent_name`, and the `## Skill Draft` `name` below).** Name the skill (and the agent, when set) for the recurring *capability* it provides, never for the incident that surfaced it — no issue/PR numbers, error strings, dates, or `fix-<X>` phrasings in the name or slug (`fix-issue-44`, `handle-enoent`, `stop-verbose-brief` are all wrong). A skill named after its triggering event never routes on the capability it actually delivers, and the operator gate may rubber-stamp a bad name.
 
-**Routing:** classify **Tier 3** (a new skill auto-loads into every future session, its triggers can fire autonomously, and writing under `.claude/` is operator-space — effectively irreversible/cross-cutting). This matches the Tier-3 definition and the convention that all `category: capability` writers go straight to `proposal-create`.
+**Routing:** two lanes.
+
+A procedure is **chat-triggered** when its evidence is an operator request from a live conversation (channel or terminal), not a close-debrief `procedure-noticed` row, archived-report `## Completed`/`## Lessons`, or MEMORY.md workflow pattern.
+
+**Lane A (Tier 3 — no proposed routine, chat-triggered, or `Evidence Origin: external-content`).** Classify **Tier 3** (a new skill auto-loads into every future session, its triggers can fire autonomously, and writing under `.claude/` is operator-space — plus chat-triggered and external-origin procedures need full artifact review). This matches the Tier-3 definition and the convention that all `category: capability` writers go straight to `proposal-create`.
 
 Queue as a Tier-3 candidate by calling `/claude-code-hermit:proposal-create` — it runs `proposal-triage` internally and emits the `tags`-carrying triage-verdict. Do **not** pre-gate with `proposal-triage` separately: a separate pre-gate emits an untagged `caller: reflect` verdict, so its SUPPRESSes escape the triage-survival count above and inflate the rate. Call with:
 - `category: capability`
@@ -288,4 +299,20 @@ Queue as a Tier-3 candidate by calling `/claude-code-hermit:proposal-create` —
   - triggers: <comma-separated proposed trigger phrases>
   ```
 
-Never queue procedure-capture candidates to the micro-approval queue. External-origin procedures (where the procedure was derived from external content) should carry `Evidence Origin: external-content` through to proposal-create, which will write the operator-visible provenance line.
+**Lane B (Tier 2 — routine-bound).** Brief has `proposed_routine`, the procedure is not chat-triggered, and origin is own-work. Classify **Tier 2**. Still call `/claude-code-hermit:proposal-create` (single triage gate, `tags: [procedure-capture]`, audit record) with:
+- `category: routine`
+- `tags: [procedure-capture]`
+- `source: auto-detected`
+- A `## Config` block holding the routine JSON (`id`, `schedule`, `skill`, `enabled`) from `proposed_routine`
+- The `## Skill Draft` body block (same format as Lane A)
+- `## Agent Draft` when `proposed_agent_name` is set (see `proposal-create` for format)
+
+Then exactly one bridged ask via `proposal.ts queue-micro`:
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
+{"tier":2,"question":"<pattern + duration> + <consequence> + save it and run <skill name> on <schedule>?","options":["accept","dismiss"],"on_resolve":"/claude-code-hermit:proposal-act {answer} PROP-NNN","proposal_id":"PROP-NNN"}
+HERMIT_MP
+```
+(the script forces `tier: 1` for bridged entries; that is expected). The channel message renders `1. accept / 2. dismiss` with the reply hint format already normative above (`Reply "MP-YYYYMMDD-N <number or label>"`), because a bare yes/no is ambiguous against an options entry.
+
+Chat-triggered and external-origin candidates never go to the micro-approval queue. External-origin procedures (where the procedure was derived from external content) should carry `Evidence Origin: external-content` through to proposal-create, which will write the operator-visible provenance line.

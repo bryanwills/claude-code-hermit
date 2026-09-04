@@ -74,21 +74,26 @@ describe('reflect: procedure capture', () => {
     expect(reflect).toContain('type: procedure-brief');
   });
 
-  test('reflect: Tier-3 routing (never micro-approval queue)', () => {
-    expect(reflect).toContain('Tier 3');
-    expect(reflect.toLowerCase()).toContain('never queue procedure-capture');
+  test('reflect: Lane A still Tier 3 and routes to proposal-create', () => {
+    expect(reflect).toContain('Lane A (Tier 3');
+    expect(reflect).toContain('category: capability');
+    expect(reflect).toContain('/claude-code-hermit:proposal-create');
   });
 
-  test('reflect: routes to proposal-create (not micro-approval)', () => {
-    expect(reflect).toContain('/claude-code-hermit:proposal-create');
+  test('reflect: Lane B is Tier 2 routine-bound with a bridged accept/dismiss ask', () => {
+    expect(reflect).toContain('Lane B (Tier 2 — routine-bound)');
+    expect(reflect).toContain('category: routine');
+    expect(reflect).toContain('queue-micro');
+    expect(reflect).toContain('"options":["accept","dismiss"]');
+    expect(reflect).toContain('on_resolve":"/claude-code-hermit:proposal-act {answer} PROP-NNN');
+  });
+
+  test('reflect: chat-triggered and external-origin never go to the micro queue', () => {
+    expect(reflect).toContain('Chat-triggered and external-origin candidates never go to the micro-approval queue');
   });
 
   test('reflect: tags candidate with procedure-capture', () => {
     expect(reflect).toContain('procedure-capture');
-  });
-
-  test('reflect: sets category: capability', () => {
-    expect(reflect).toContain('category: capability');
   });
 
   test('reflect: ## Skill Draft block format present', () => {
@@ -147,6 +152,16 @@ describe('proposal-create: ## Skill Draft variant', () => {
     expect(proposalCreate).toContain('category: capability');
   });
 
+  test('proposal-create: Lane B documents category: routine and ## Config', () => {
+    expect(proposalCreate).toContain('category: routine');
+    expect(proposalCreate).toMatch(/^## Config$/m);
+  });
+
+  test('proposal-create: ## Agent Draft block present', () => {
+    expect(proposalCreate).toMatch(/^## Agent Draft$/m);
+    expect(proposalCreate).toContain('.claude/agents/<name>.md');
+  });
+
   test('proposal-create: Skill Draft sets tags: [procedure-capture]', () => {
     expect(proposalCreate).toContain('procedure-capture');
   });
@@ -196,6 +211,16 @@ describe('proposal-act: ## Skill Draft install branch', () => {
 
   test('proposal-act: second confirmation gate present (operator approves artifact)', () => {
     expect(proposalAct).toContain('Second confirmation gate');
+    expect((proposalAct.match(/Second confirmation gate/g) ?? []).length).toBe(1);
+  });
+
+  test('proposal-act: second confirmation skipped only on the routine-bound branch', () => {
+    expect(proposalAct).toContain('Skip step 4\'s second full-artifact confirmation for this routine-bound branch only');
+  });
+
+  test('proposal-act: ## Agent Draft install branch present', () => {
+    expect(proposalAct).toContain('## Agent Draft');
+    expect(proposalAct).toContain('.claude/agents/<name>.md');
   });
 
   test('proposal-act: collision guard — never overwrite, default cancel', () => {

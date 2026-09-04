@@ -8,7 +8,6 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { anchoredPaneTail } from './tmux';
 import { PERMISSION_MODE } from './settings/enums';
 
 type PermissionMode = (typeof PERMISSION_MODE)[number];
@@ -152,7 +151,7 @@ export const COMMAND_MARKER_TTL_SECS = 3600;
  */
 export const SWITCH_VERIFY_TTL_SECS = 86_400;
 export const SKILL_RELAY_TTL_SECS = 600;
-const HARNESS_CONFIRM_TAIL_LINES = 20;
+export const HARNESS_CONFIRM_TIMEOUT_MS = 5_000;
 
 // /advisor has NO entry here on purpose. Upstream: "Enabling or disabling the advisor
 // mid-session does not invalidate your main model's prompt cache" — and live-probed
@@ -177,19 +176,22 @@ const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
  * Whitespace is collapsed because the warning wraps according to pane width. The
  * target label is deliberately not matched: a stable model alias such as `opus`
  * renders as a release display name such as "Opus 5", and effort levels may expand.
+ *
+ * Geometry is unnecessary: `capturePane` returns only visible rows, and an
+ * answered dialog is erased from the pane within 1.5s (CC 2.1.260, both
+ * renderers). Chrome under the modal (queued channel banner, composer,
+ * statusLine, mode row, IDE row) therefore cannot be a stale leftover.
  */
 export function isHarnessSwitchConfirmation(command: string, paneContent: string): boolean {
   const commandAnchors = SWITCH_CONFIRMATION_ANCHORS[command];
   if (!commandAnchors) return false;
 
-  const activeTail = anchoredPaneTail(paneContent, HARNESS_CONFIRM_TAIL_LINES, 'No, go back');
-  if (activeTail === null) return false;
-  const tail = activeTail.replace(/\s+/g, ' ');
+  const collapsed = paneContent.replace(/\s+/g, ' ');
 
-  return commandAnchors.every((anchor) => tail.includes(anchor))
-    && tail.includes('Your next response will be slower and use more tokens')
-    && tail.includes('Yes, switch to')
-    && tail.includes('No, go back');
+  return commandAnchors.every((anchor) => collapsed.includes(anchor))
+    && collapsed.includes('Your next response will be slower and use more tokens')
+    && collapsed.includes('Yes, switch to')
+    && collapsed.includes('No, go back');
 }
 
 function markerPath(hermitRoot: string): string {
