@@ -64,6 +64,7 @@
 //   queue-micro <stateDir>                       QUEUED|<MP-id> / DUPLICATE|<id>
 //   micro <stateDir> resolve|nudge|brief-cycle|sweep  RESOLVED|… NUDGED|… SWEPT|… NONE|… / JSON
 //   index <stateDir>                             OK|<n> proposals / SKIP|…
+//   anchor <stateDir>                            Anchor: root=… memory_dir=…
 //   metrics [<stateDir>] [--source=<key>]        markdown table / one-line verdict
 //   success-signal --validate "<predicate>"      OK (exit 0) / reason (exit 1)
 //   success-signal <stateDir> <date> <sess> <p>  one JSON verdict line
@@ -78,7 +79,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { emit, readStdin, readJson, flagValue } from './lib/cli';
-import { pinStateDirOrExit } from './lib/cc-compat';
+import { pinStateDirOrExit, memoryDirFor } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { auditConfigChange } from './lib/config-audit';
 import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, escapeRegExp, PATCH_KEY_RE } from './lib/md-write';
@@ -435,7 +436,7 @@ export function verbRoutine(stateDir: string, stdin: string): string {
 
 // ------------------------------------------------------------------- main --
 
-const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|metrics|event|success-signal|quality-gate';
+const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|anchor|metrics|event|success-signal|quality-gate';
 
 // The state dir is not caller-chosen. Every production call passes the literal
 // `.claude-code-hermit` from the project root; accepting an arbitrary root let
@@ -446,8 +447,20 @@ const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue
 // branch on (`gate` -> PROCEED|/DROP|/GATE_FAILED, `resolve-id` -> MATCH|/NONE|,
 // `micro` -> RESOLVED|). This also turns a drifted cwd into a loud failure
 // instead of a write against the wrong tree.
-function requirePinnedStateDir(dir: string): void {
-  pinStateDirOrExit(dir, 'proposal.ts');
+function requirePinnedStateDir(dir: string): string {
+  return pinStateDirOrExit(dir, 'proposal.ts');
+}
+
+// `root` is the PINNED dir, not the raw argv: from a `claude --worktree` session
+// the shipped relative spelling resolves to the worktree projection, which the pin
+// normalizes back to main's root. The projection carries config.json, so an anchor
+// naming it would pass the agents' blindness check while every real source
+// (state/proposals-index.json, sessions/, proposals/) sits in main — a silent
+// dedup-blind gate, the exact failure the anchor exists to close.
+// rebuildIndex is a no-op write when proposals/ is absent; the line still prints.
+function runAnchor(root: string): never {
+  rebuildIndex(root);
+  emit(`Anchor: root=${root} memory_dir=${memoryDirFor(path.dirname(root))}`);
 }
 
 async function main(): Promise<void> {
@@ -487,7 +500,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  requirePinnedStateDir(stateDir);
+  const pinnedDir = requirePinnedStateDir(stateDir);
 
   const rest = process.argv.slice(4);
   switch (verb) {
@@ -507,6 +520,7 @@ async function main(): Promise<void> {
     case 'queue-micro': return runQueueMicro(stateDir);
     case 'micro': return runMicro(stateDir, rest);
     case 'index': return runIndex(stateDir);
+    case 'anchor': return runAnchor(pinnedDir);
     // `event` is the writer; `metrics` above is the reader. Deliberately not named
     // `metric` — one character from `metrics` in a dispatcher whose default branch
     // exits 0 would make a typo a silent no-op in either direction.

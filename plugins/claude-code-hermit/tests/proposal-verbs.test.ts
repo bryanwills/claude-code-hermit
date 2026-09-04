@@ -15,7 +15,8 @@ import {
   verbCreate, verbPatch, verbShellAppend, verbNextTask, verbRoutine,
   grabHeader, parseStringArray, sectionEndsWithLine,
 } from '../scripts/proposal';
-import { PLUGIN_ROOT } from './helpers/run';
+import { memoryDirFor } from '../scripts/lib/cc-compat';
+import { PLUGIN_ROOT, runProposal, runScript } from './helpers/run';
 import { withDir } from './helpers/workdir';
 
 function stateDirOf(dir: string): string {
@@ -231,6 +232,61 @@ describe('the remaining write verbs', () => {
   ])('routine rejects %s', (_name, stdin, expected) => withDir(async (dir) => {
     expect(verbRoutine(seed(dir), stdin as string)).toBe(expected);
   })());
+});
+
+describe('proposal.ts anchor', () => {
+  test('prints the Anchor line when proposals/ is present', withDir(async (dir) => {
+    const base = seed(dir);
+    const r = await runProposal(base, ['anchor']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe(
+      `Anchor: root=${path.resolve(base)} memory_dir=${memoryDirFor(path.dirname(base))}\n`,
+    );
+  }));
+
+  test('prints the Anchor line and writes no index when proposals/ is absent', withDir(async (dir) => {
+    const base = seed(dir);
+    fs.rmSync(path.join(base, 'proposals'), { recursive: true });
+    const r = await runProposal(base, ['anchor']);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe(
+      `Anchor: root=${path.resolve(base)} memory_dir=${memoryDirFor(path.dirname(base))}\n`,
+    );
+    expect(fs.existsSync(path.join(base, 'state', 'proposals-index.json'))).toBe(false);
+  }));
+
+  // A worktree session passes the shipped relative spelling, which resolves to the
+  // worktree's projected `.claude-code-hermit` (config.json, no state/). The pin
+  // normalizes it back to main; the anchor line must name main, not the projection —
+  // the projection would pass the agents' config.json blindness check while every
+  // real source sits in main.
+  test('names the main root when argv is a worktree projection', withDir(async (dir) => {
+    const base = seed(dir);
+    const projection = path.join(dir, 'wt', '.claude-code-hermit');
+    fs.mkdirSync(projection, { recursive: true });
+    fs.writeFileSync(path.join(projection, 'config.json'), '{}');
+    const r = await runScript('proposal.ts', {
+      args: ['anchor', projection],
+      env: { AGENT_DIR: base },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe(
+      `Anchor: root=${path.resolve(base)} memory_dir=${memoryDirFor(path.dirname(base))}\n`,
+    );
+  }));
+
+  test('exit 1 and empty stdout on a drifted argv', withDir(async (dir) => {
+    const base = seed(dir);
+    const foreign = path.join(dir, 'elsewhere', '.claude-code-hermit');
+    fs.mkdirSync(foreign, { recursive: true });
+    const r = await runScript('proposal.ts', {
+      args: ['anchor', foreign],
+      env: { AGENT_DIR: base },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('state dir must be this project');
+  }));
 });
 
 describe('header and section helpers', () => {

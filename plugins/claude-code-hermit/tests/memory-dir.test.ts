@@ -20,7 +20,11 @@ afterAll(cleanup);
 // CLAUDE_CONFIG_DIR is pinned to a scratch dir: runScript merges process.env, so a
 // maintainer whose own config dir is set would otherwise resolve somewhere else.
 async function run(args: string[], configDir: string, cwd?: string) {
-  const r = await runScript('memory-dir.ts', { args, cwd, env: { CLAUDE_CONFIG_DIR: configDir } });
+  const r = await runScript('memory-dir.ts', {
+    args,
+    cwd,
+    env: { CLAUDE_CONFIG_DIR: configDir, AGENT_DIR: '', CLAUDE_PROJECT_DIR: '' },
+  });
   expect(r.exitCode).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -54,5 +58,18 @@ describe('memory-dir.ts', () => {
 
     const out = await run([], configDir, root);
     expect(out.dir).toBe(path.join(configDir, 'projects', transcriptPathKey(fs.realpathSync(root)), 'memory'));
+  });
+
+  test('no argument keys on the hermit root above cwd', async () => {
+    const configDir = freshDir();
+    const fixture = freshDir();
+    const hermit = path.join(fixture, '.claude-code-hermit');
+    fs.mkdirSync(path.join(hermit, 'state'), { recursive: true });
+    fs.writeFileSync(path.join(hermit, 'config.json'), '{}');
+    const sub = path.join(fixture, 'sub');
+    fs.mkdirSync(sub);
+
+    const out = await run([], configDir, sub);
+    expect(out.dir).toBe(path.join(configDir, 'projects', transcriptPathKey(fs.realpathSync(fixture)), 'memory'));
   });
 });
