@@ -1705,6 +1705,99 @@ test('no inbox socket in runtime.json → wedge nudge types, exactly as before',
   expect(readJson(state(h, 'watchdog-state.json')).last_nudge_transport).toBe('typed');
 }));
 
+test('5h-stale heartbeat first run pushes waking, not unresponsive', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0].body.text).toContain('waking it');
+    expect(stub.requests[0].body.text).not.toContain("hasn't responded");
+  } finally { stub.stop(); }
+}));
+
+test('second stale run with consecutive_stale 1 due pushes unresponsive once', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 1,
+    wedge_notified: true,
+    last_nudge_at: isoAgo(5),
+  }) + '\n');
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0].body.text).toContain("hasn't responded");
+    expect(readJson(state(h, 'watchdog-state.json')).wedge_escalated).toBe(true);
+  } finally { stub.stop(); }
+}));
+
+test('stale then fresh heartbeat pushes all-clear', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+  const stub = startHttpStub();
+  try {
+    const r1 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r1.exitCode).toBe(0);
+    expect(stub.requests[0].body.text).toContain('waking it');
+
+    touchAgo(state(h, '.heartbeat'), 60);
+    const r2 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r2.exitCode).toBe(0);
+    expect(stub.requests.some((req) => String(req.body?.text ?? '').includes('responding again'))).toBe(true);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('wedge-recovered');
+  } finally { stub.stop(); }
+}));
+
+test('fresh heartbeat with wedge_notified unset pushes nothing', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 60);
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests).toHaveLength(0);
+    const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
+    expect(events).not.toContain('wedge-recovered');
+  } finally { stub.stop(); }
+}));
+
+test('third stale run after escalation pushes nothing', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+  fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+    consecutive_stale: 2,
+    wedge_notified: true,
+    wedge_escalated: true,
+    last_nudge_at: isoAgo(5),
+  }) + '\n');
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(stub.requests).toHaveLength(0);
+  } finally { stub.stop(); }
+}));
+
 // A stamped path whose session died takes the socket file with it. Reading the
 // stale value as usable would post into nothing and skip the typed recovery.
 test('stamped socket path no longer exists → falls through to typing', withHermit(async (h) => {
@@ -1755,6 +1848,31 @@ function writeRegistryEntry(h: Hermit, patch: Record<string, unknown> = {}): str
   );
   return configDir;
 }
+
+const MCP_AUTH_PANE = [
+  'Plugin:cloudflare:cloudflare-api MCP Server',
+  'Authentication timeout',
+  '❯ 1. Authenticate',
+  '  2. Disable',
+  '↑/↓ to navigate · Enter to select · Esc to back',
+].join('\n');
+
+test('registry waiting stall notice quotes the pane tail', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0, MCP_AUTH_PANE);
+  writeFakePgrep(h, 1);
+  const configDir = writeRegistryEntry(h, { status: 'waiting' });
+  patchRuntime(h, { config_dir: configDir, session_pid: process.pid });
+  const stub = startHttpStub();
+  try {
+    const r = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('stall-question-detected');
+    expect(stub.requests).toHaveLength(1);
+    expect(stub.requests[0].body.text).toContain('Authentication timeout');
+  } finally { stub.stop(); }
+}));
 
 test('registry says the resident is waiting on a dialog → alert, no nudge', withHermit(async (h) => {
   writeConfig(h, '30m');
@@ -4253,7 +4371,8 @@ describe('composeRestartMessage / composeWedgeMessage / composePauseMessage', ()
   });
 
   test('wedge message names the check-in time', () => {
-    expect(composeWedgeMessage('UTC')).toContain('checking on it now');
+    expect(composeWedgeMessage('UTC')).toContain('waking it');
+    expect(composeWedgeMessage('UTC', 'en', true)).toContain('checking on it now');
   });
 
   test('pause message: indefinite pause has no boundary time', () => {
@@ -4455,10 +4574,14 @@ describe('watchdog message localization', () => {
   });
 
   test('composeWedgeMessage en / pt-PT', () => {
-    expect(composeWedgeMessage('UTC', 'en')).toMatch(
+    expect(composeWedgeMessage('UTC', 'en', true)).toMatch(
       /^Your agent hasn't responded in a while — checking on it now \(\d{2}:\d{2}\)\.$/);
-    expect(composeWedgeMessage('UTC', 'pt-PT')).toMatch(
+    expect(composeWedgeMessage('UTC', 'pt-PT', true)).toMatch(
       /^O seu agente não responde há algum tempo — estou a verificá-lo agora \(\d{2}:\d{2}\)\.$/);
+    expect(composeWedgeMessage('UTC', 'en')).toMatch(
+      /^Your agent's heartbeat hasn't checked in, waking it \(\d{2}:\d{2}\)\.$/);
+    expect(composeWedgeMessage('UTC', 'pt-PT')).toMatch(
+      /^O heartbeat do seu agente não fez check-in, estou a acordá-lo \(\d{2}:\d{2}\)\.$/);
   });
 
   test('composeStallQuestionMessage en / pt-PT', () => {
