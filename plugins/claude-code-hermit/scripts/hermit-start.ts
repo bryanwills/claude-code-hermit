@@ -981,6 +981,26 @@ function writeSettingsEnv(
   if (!pyTruthy('remote' in config ? config.remote : true)) settings.isolatePeerMachines = true;
   else delete settings.isolatePeerMachines;
 
+  // Turn off `/auto-mode-setup`. Once auto mode has blocked a few actions and the
+  // session still has no autoMode.environment entries, Claude Code offers to run it
+  // in a dialog at the end of a turn — a modal on a session nobody is watching, which
+  // blocks every inbound prompt until the watchdog restarts the hermit. Turning the
+  // command off turns the offer off with it.
+  //
+  // Here rather than the launch overlay: only autoMode is barred from project scope,
+  // so skillOverrides can live in the file boot already owns — and this file also
+  // covers the sessions the overlay misses (a manual resume, a docker exec attach,
+  // a guest session in the same directory), which meet the same dialog.
+  //
+  // Written only when absent. Nothing else writes this key (Claude Code sets it from
+  // the /skills menu or an operator's own edit), so a value here is a deliberate one,
+  // and since no settings scope outranks this file it is the operator's only way back
+  // to the command.
+  let skillOverrides = settings.skillOverrides || {};
+  if (!isDict(skillOverrides)) skillOverrides = {};
+  if (!('auto-mode-setup' in skillOverrides)) skillOverrides['auto-mode-setup'] = 'off';
+  settings.skillOverrides = skillOverrides;
+
   // Malformed file — warned above, left byte-for-byte intact. The profile is
   // still resolved and exported, so a bad settings file cannot silently drop the
   // session to a weaker set of deny patterns.
@@ -1058,9 +1078,7 @@ function applyVoiceRender(config: Json): void {
  * Does the artifact publish grant apply — a page enabled, explicit
  * authorization, and the default/claude backend?
  *
- * Shared by applyArtifactGrant (which performs the boot-time permission
- * write) and renderClassifierOverlay (whose sealed self-maintenance entries
- * exist to clear exactly that write, so they ship only where it is live).
+ * Gates applyArtifactGrant's boot-time permission write, and nothing else.
  */
 function artifactGrantApplies(config: Json): boolean {
   const artifacts = isDict(config.artifacts) ? config.artifacts : {};
@@ -1105,10 +1123,16 @@ function renderClassifierOverlay(config: Json): string | null {
   const autoMode: Record<string, string[]> = {
     soft_deny: ['$defaults', AUTOMODE_SOFT_DENY_ENTRY],
   };
-  if (artifactGrantApplies(config)) {
-    autoMode.allow = ['$defaults', automodeAllowEntry(path.join(defaultConfigDir(), 'plugins'), PLUGIN_ROOT)];
-    autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
-  }
+  // Unconditional, like the soft_deny above. Neither entry is about artifacts: the
+  // environment list names the hermit's own notification domains and state directory,
+  // and the allow entry covers apply-settings ops (permissions-plan, permissions-sync,
+  // deny, channel-env) that hermit-evolve, hatch, channel-setup and docker-setup all
+  // run on hermits that publish nothing. Gating them on the artifact grant left those
+  // hermits with an empty environment list, which is both what draws classifier
+  // denials on their own channel sends and the condition Claude Code offers
+  // /auto-mode-setup on.
+  autoMode.allow = ['$defaults', automodeAllowEntry(path.join(defaultConfigDir(), 'plugins'), PLUGIN_ROOT)];
+  autoMode.environment = ['$defaults', ...AUTOMODE_ENV_ENTRIES];
   // Cross-session inbox. Claude Code holds an inbound peer message purely on
   // permission class: a prompting receiver (auto/acceptEdits/dontAsk — the hermit
   // default) holds anything from a sender that identifies as bypassPermissions,

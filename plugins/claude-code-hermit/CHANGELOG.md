@@ -15,8 +15,9 @@
 - `capability-brainstorm` no longer describes itself as never running autonomously.
 - Reflect's runner also reads `## Completed` of recent reports.
 - `proposal-create` documents the `## Config` routine block.
-
-### Changed
+- `/auto-mode-setup` is off in hermit sessions, seeded as `skillOverrides` in `.claude/settings.local.json`. Claude Code offers it in an end-of-turn dialog once auto mode has blocked a few actions with no `autoMode.environment` entries set, and a modal on an unattended hermit blocks every inbound prompt until the watchdog restarts it. Boot writes the key only when absent, so an operator's own value is the opt-out.
+- `autoMode.environment` reaches the classifier on every install, not only one publishing artifact pages. The entries name the hermit's own notification domains and state directory, so a hermit with artifacts off was declaring nothing and drawing denials on its own channel sends.
+- The sealed `apply-settings` grant is likewise unconditional. `hermit-evolve`, `hatch`, `channel-setup` and `docker-setup` all run the ops it covers on installs that publish nothing.
 - Triage dedups against `state/proposals-index.json`.
 
 ### Fixed
@@ -34,6 +35,10 @@ Run `/claude-code-hermit:hermit-evolve`.
 1. **Re-seed the plugin-source deny rules.** Resolve `hatch_target` (`.claude-code-hermit/state/hatch-options.json` → `target`, per the same resolution hermit-evolve already does in its own Step 1) to the settings file (`.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Read that file's `permissions.deny`. If it does **not** contain `"Bash(rm -rf *)"`, the operator chose Skip (or has no deny rules) at hatch time: do nothing, report `skip-preserved`, and preserve that choice. Otherwise run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny standard` to pick up the `//`-anchored `Edit(//**/.claude/plugins/**)` pattern. `permissions-sync` does not re-seed `deny`, so this call is what puts the new rule in place. The merge is additive and idempotent (`mergeDeny` dedups), safe to re-run; it re-seeds the whole standard deny and ask template, so any seeded rule the operator removed by hand comes back, and a Hardened install (which carries the ask rules in `deny`) also gains them in `permissions.ask`, where the deny still wins. The inert single-slash spellings are removed by `permissions-sync`, which hermit-evolve already runs.
 2. **If your config directory is not `~/.claude`** (`CLAUDE_CONFIG_DIR` points elsewhere, such as a `~/.claude-work` profile install), the seeded rules name `.claude` literally and will not match it. Add your own copies with the directory substituted, per `docs/security.md`.
 3. **Add the monthly `capability-brainstorm` routine** if missing. Read routines with `bun "<plugin_root>/scripts/settings-edit.ts" .claude-code-hermit/config.json get routines`. If an entry with id `capability-brainstorm` exists, report `already-present`. Otherwise pipe `{"id":"capability-brainstorm","schedule":"0 10 1 * *","skill":"claude-code-hermit:capability-brainstorm","run_during_waiting":true,"enabled":true}` to `bun "<plugin_root>/scripts/proposal.ts" routine .claude-code-hermit` and expect `OK|added`. Safe non-destructive default: take it silently. Step 10 re-arms routines.
+4. **Nothing to do for the `/auto-mode-setup` kill-switch.** Boot writes it to the settings file on the next restart. Tell the operator the command is gone from this hermit's own sessions, and that adding classifier context is now done by editing `autoMode.environment` in `~/.claude/settings.json` from a terminal. _(Opt-out: set `skillOverrides["auto-mode-setup"]` to `"on"` in the hermit's `.claude/settings.local.json`; boot leaves any value already present untouched.)_
+5. **Optional: delete the `autoMode` block from the hermit's `.claude/settings.local.json`** if one is present. Leaving it is the default and is safe. The key has been inert since Claude Code 2.1.207 stopped reading `autoMode` from project settings files, and the hermit now ships that policy per session through its launch overlay, so it is a leftover of the retired `automode-seed` op rather than live configuration. Do not delete it here: report to the operator that it was found, and let them remove it if they want.
+
+No config.json changes required for steps 4 and 5.
 
 ## [1.3.1] - 2026-09-03
 

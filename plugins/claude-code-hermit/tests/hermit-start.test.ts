@@ -1170,6 +1170,25 @@ describe('writeSettingsEnv', () => {
     expect(readSettings()).not.toContainKey('isolatePeerMachines');
   });
 
+  // The end-of-turn offer to run /auto-mode-setup is a modal, and a modal on an
+  // unattended hermit blocks every inbound prompt until the watchdog restarts it.
+  test('/auto-mode-setup is turned off', () => {
+    writeConfig({});
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    expect(readSettings().skillOverrides['auto-mode-setup']).toBe('off');
+  });
+
+  // No settings scope outranks this file, so leaving an operator's own value alone
+  // is the only way back to the command.
+  test("an operator's own re-enable survives", () => {
+    writeSettings({ skillOverrides: { 'auto-mode-setup': 'on', 'deploy': 'off' } });
+    writeConfig({});
+    captureLog(() => writeSettingsEnv(loadConfig()));
+    const overrides = readSettings().skillOverrides;
+    expect(overrides['auto-mode-setup']).toBe('on');
+    expect(overrides['deploy']).toBe('off');
+  });
+
   test('pre-existing keys in settings.local.json survive write', () => {
     writeSettings({ env: { CUSTOM_VAR: 'keep-me' }, other_key: 'also-keep' });
     writeConfig({});
@@ -1388,11 +1407,16 @@ describe('renderClassifierOverlay', () => {
     expect(overlay.autoMode.soft_deny.some((e: string) => e.includes('terminal-only settings'))).toBe(true);
   });
 
-  test('omits the self-maintenance entries when the artifact grant does not apply', () => {
+  // A hermit that publishes nothing still sends on its channels and still runs the
+  // apply-settings ops during an upgrade, and an empty environment list is what
+  // Claude Code offers /auto-mode-setup on.
+  test('carries the self-maintenance entries on an install with no artifacts', () => {
     renderClassifierOverlay({});
     const overlay = readOverlay();
-    expect(overlay.autoMode.allow).toBeUndefined();
-    expect(overlay.autoMode.environment).toBeUndefined();
+    expect(overlay.autoMode.allow[0]).toBe('$defaults');
+    expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
+    expect(overlay.autoMode.environment[0]).toBe('$defaults');
+    expect(overlay.autoMode.environment.length).toBe(3);
   });
 
   // --settings is the only scope that can loosen this key: project and local
@@ -1421,7 +1445,7 @@ describe('renderClassifierOverlay', () => {
     }
   });
 
-  test('includes them under the same gating as the artifact grant', () => {
+  test('carries them on an artifact-publishing install too', () => {
     renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true } });
     const overlay = readOverlay();
     expect(overlay.autoMode.allow[0]).toBe('$defaults');
@@ -1484,11 +1508,13 @@ describe('renderClassifierOverlay', () => {
     expect(entry).toContain('/home/probe/.claude/plugins or /src/monorepo/plugins/claude-code-hermit,');
   });
 
-  test('a non-claude backend keeps the guard but drops the grant entries', () => {
+  // artifacts.backend still gates applyArtifactGrant's permissions.allow write; it
+  // never gated the classifier entries, which are not about publishing.
+  test('a non-claude backend keeps the guard and the grant entries', () => {
     renderClassifierOverlay({ artifacts: { dashboard: true, publish_authorized: true, backend: 'my-artifact-host' } });
     const overlay = readOverlay();
     expect(overlay.autoMode.soft_deny.length).toBe(2);
-    expect(overlay.autoMode.allow).toBeUndefined();
+    expect(overlay.autoMode.allow.some((e: string) => e.includes('User policy:'))).toBe(true);
   });
 
   test('re-rendering is byte-identical and leaves no tmp file', () => {
