@@ -173,7 +173,7 @@ nothing:
 
 Run this step only if `compute` is listed in `phases_json`.
 
-Read two sources directly:
+Read three sources directly:
 
 1. The operator's `MEMORY.md` index, in the auto-memory directory named in your dispatch (`memory-dir`).
    Look for workflow-pattern entries (topic files flagged as workflow patterns, lines with `workflow` in the
@@ -183,7 +183,13 @@ Read two sources directly:
    from Step 1 if available). For a legacy report (no `next_start` frontmatter key), read its `## Lessons`
    section instead.
 
-**Recurrence signal:** the same multi-step procedure appears as a Lesson or memory workflow-pattern in
+3. The `## Completed` section of the same 3 most recent `sessions/S-*-REPORT.md` files (written in every
+   close mode, so auto-closed sessions count). It is the session's Progress Log verbatim, so it mixes
+   real work with bookkeeping: timestamped lifecycle lines (task switches, heartbeat and auto-close
+   notices, guest reports, routine fires) are not procedures — read only entries describing work the
+   hermit carried out by hand. Recurrence signal and output schema are unchanged.
+
+**Recurrence signal:** the same multi-step procedure appears as a Lesson, a `## Completed` item, or memory workflow-pattern in
 **≥ `graduation_min_sessions` distinct archived sessions** (read from `.claude-code-hermit/config.json`
 at `reflection.graduation_min_sessions`; default 1 if absent) and no existing skill covers it (the
 "existing skill" check runs in the main session — do not Glob `.claude/skills/` here; the main session

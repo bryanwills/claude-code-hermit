@@ -80,16 +80,19 @@ When the operator accepts a proposal:
    ```
    Do NOT set `resolved_date` — resolution happens when reflect confirms the pattern is gone. `OK|<id>` confirms the write; `ERROR|<reason>` means nothing was patched — report it to the caller/operator and stop.
 
-3a. **Routine proposals.** If the proposal metadata contains `Type: routine` and a `## Config` section with a JSON block, upsert it into `config.json`:
+3a. **Routine proposals.** If the proposal's frontmatter `category: routine` (or a `Type: routine` line) **and** a `## Config` section with a JSON block: upsert into `config.json` after any skill/agent install below.
+
+   **When the body also carries `## Skill Draft` and/or `## Agent Draft`:** run the install flow first (Procedure-capture install flow and the `## Agent Draft` install branch), then e.5 and e.6, then the upsert below; do not enter step 4's implementation ask. Before authoring, confirm each draft's `source_artifact` exists and is readable (search `compiled/`, then `compiled/.archive/`) — a missing or unreadable brief is the `stale-paths` rejection the step-4 gate would have raised: stop, leave `status: accepted`, write no routine, and tell the operator to re-run reflect for a fresh brief. Skip step 4's second full-artifact confirmation for this routine-bound branch only: intent was already approved through the bridged accept/dismiss ask; the skill is routine-bound, not chat-fired; the operator reverts by disabling the routine. Keep the collision guard, e.5 quality gate, and e.6 verification. A collision guard answered **Cancel** installs nothing — stop before the upsert too, so no routine is left scheduled against a skill that was never written. A standalone `## Skill Draft` with no `## Config` (Lane A) is not this branch — it keeps step 4's second confirmation.
+
+   Then upsert:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts routine .claude-code-hermit <<'HERMIT_ROUTINE'
    <the ## Config JSON block, verbatim>
    HERMIT_ROUTINE
    ```
    The script validates `id`/`schedule`/`skill`/`enabled` are present and upserts by `id` — `OK|added` / `OK|updated`, or `ERROR|<reason>` (nothing written; report it and stop).
-   - Respond: "Routine '{id}' added to config. Run `/claude-code-hermit:hermit-routines load` to register it immediately."
-   - Notify the operator.
-   - Skip step 4 — no further implementation needed.
+   - Notify the operator with one plain notice: saved (skill, and agent if any), first run time from the cron, how to stop (disable the routine).
+   - Do not enter step 4 — the routine branch is complete.
 
 4. Ask: **"How should this be implemented?"**
 
@@ -164,6 +167,14 @@ When the operator accepts a proposal:
         - Declined: stop. Notify the operator that they can re-run `/proposal-act accept PROP-NNN` after revising the procedure brief.
      5. Create `.claude/skills/<name>/` and write the authored SKILL.md there. The procedure brief in `compiled/` stays as the permanent audit trail — do not move or delete it.
      6. **Do not auto-stage or commit** the new skill file. Notify the operator: "Skill `<name>` installed at `<install_target>`. Commit it if you want it tracked in version control."
+
+     **`## Agent Draft` install branch (when body contains `## Agent Draft`):**
+     1. Parse `name`, `source_artifact`, `install_target`, `model`, and `tools` from the `## Agent Draft` block.
+     2. **Collision guard:** if `.claude/agents/<name>.md` already exists, do **not** overwrite. Ask the operator: "Agent `<name>` already exists at `<install_target>`. Overwrite / Rename / Cancel?" Default = **Cancel**.
+     3. Read `source_artifact` (the procedure brief) and author the agent file: frontmatter (`name`, `description`, `model`, `tools`) plus a body distilled from the brief's worker sub-step. Same privacy handling as a new skill (`component-privacy` already covers `.claude/agents/<name>.md`).
+     4. Outside step 3a's routine-bound branch, present the authored agent file in the same confirmation as the skill and require the same explicit yes/no — an installed agent is dispatchable from every future session, so the operator approves the artifact, not just the intent. Declined: write nothing.
+     5. Write `.claude/agents/<name>.md`. The procedure brief in `compiled/` stays as the permanent audit trail — do not move or delete it.
+     6. **Do not auto-stage or commit** the new agent file.
 
      **Verification for procedure-capture proposals (e.6 note):** the `## Verification` section of a procedure-capture PROP should instruct reading the installed file's frontmatter (`name`/`description` parse) rather than checking the live available-skills list — a skill written in this turn is unknown to the `Skill` tool and absent from the live list until the next user turn, so the live list is unreliable in the turn that installed it. A missing or malformed installed file blocks resolution per the normal e.6 contract.
      e.5. **Quality gate.** Applies to **in-main** implementations only (the `## Skill Improvement` and `## Skill Draft` in-main authoring branches). Dispatched implementations ran the same gate inside the subagent (step (e)) and are resolved there.
