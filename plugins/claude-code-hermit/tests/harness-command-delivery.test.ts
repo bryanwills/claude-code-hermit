@@ -22,6 +22,19 @@ re-read on your next message.
   2. No, go back
 `;
 
+// Built from the row inventory in memory cc-switch-modal-pane-geometry: the
+// verbatim 2026-09-04 capture was unavailable. Modal, then queued-channel
+// banner, three composer rows, statusLine, auto-mode row, IDE row.
+const MODEL_SWITCH_PANE_WITH_CHROME = `${MODEL_SWITCH_PANE}
+← discord · alice: follow-up after the switch
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+● sonnet · 42%
+  ⏵⏵ auto mode on (shift+tab to cycle)
+  ⧉  claude-code-hermit
+`;
+
 const EFFORT_SWITCH_PANE = `
 Change effort level?
 Your next response will be slower and use more tokens
@@ -255,13 +268,6 @@ describe('harness-switch confirmation matcher', () => {
     }
   });
 
-  test('rejects stale cached-context prompts above newer pane content and blank rows', () => {
-    const progress = Array.from({ length: 6 }, (_, i) => `running step ${i}...`).join('\n');
-    for (const { command, pane } of SWITCH_CASES) {
-      expect(isHarnessSwitchConfirmation(command, `${pane}\n${progress}${'\n'.repeat(20)}`)).toBe(false);
-    }
-  });
-
   test('rejects unrelated or incomplete dialogs', () => {
     expect(isHarnessSwitchConfirmation('/model', `
 Permission required
@@ -281,14 +287,49 @@ Switch model?
     expect(isHarnessSwitchConfirmation('/clear', MODEL_SWITCH_PANE)).toBe(false);
   });
 
-  test('looks only at the pane tail', () => {
-    for (const { command, pane } of SWITCH_CASES) {
-      expect(isHarnessSwitchConfirmation(command, `${pane}\n${'\n'.repeat(20)}ready`)).toBe(false);
-    }
+  test('accepts a model switch with chrome below the dialog', () => {
+    expect(isHarnessSwitchConfirmation('/model', MODEL_SWITCH_PANE_WITH_CHROME)).toBe(true);
+    expect(isHarnessSwitchConfirmation('/effort', MODEL_SWITCH_PANE_WITH_CHROME)).toBe(false);
+  });
+
+  // The matcher has no geometry condition, so anything visible carrying all five
+  // anchors matches. These two pin where that line actually falls: prose or source
+  // quoting the dialog's headings is rejected because the option rows are missing,
+  // while a verbatim echo of a whole dialog is accepted. The second is a known,
+  // accepted cost of dropping the tail window, not an oversight. Narrow the
+  // anchors rather than restoring geometry if it ever needs closing.
+  test('rejects source or prose quoting only the dialog headings', () => {
+    expect(isHarnessSwitchConfirmation('/model', `
+const SWITCH_CONFIRMATION_ANCHORS: Record<string, readonly string[]> = {
+  '/model': [
+    'Switch model?',
+    'This conversation is cached for the current model.',
+  ],
+`)).toBe(false);
+  });
+
+  test('accepts a verbatim echo of the dialog, geometry being deliberately absent', () => {
+    expect(isHarnessSwitchConfirmation('/model', `
+$ cat pane-capture.txt
+${MODEL_SWITCH_PANE}
+`)).toBe(true);
   });
 });
 
 describe('Stop hook harness-switch delivery', () => {
+  test('model: confirmation with chrome below the dialog still receives Enter', withDir(async (dir) => {
+    seedPendingSwitch(dir, '/model', 'opus');
+    const { bin, log, helperPid } = installFakeTmux(dir, MODEL_SWITCH_PANE_WITH_CHROME, { revealAfterCapture: 2 });
+
+    const result = await drain(dir, bin, CONFIRM_TIMEOUT_MULTI_CAPTURE_MS);
+    await waitForVerifierExit(helperPid);
+
+    expect(result.exitCode).toBe(0);
+    const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
+    expect(calls.filter((line) => line.includes('-l -- /model opus'))).toHaveLength(1);
+    expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(2);
+  }));
+
   for (const { label, command, arg, pane } of SWITCH_CASES) {
     const text = `${command} ${arg}`;
 
@@ -320,20 +361,6 @@ describe('Stop hook harness-switch delivery', () => {
       const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
       expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(1);
       expect(fs.existsSync(hermit(dir, 'state', 'pending-harness-command.json'))).toBe(false);
-    }));
-
-    test(`${label}: stale matching confirmation does not receive an extra Enter`, withDir(async (dir) => {
-      seedPendingSwitch(dir, command, arg);
-      const stalePane = `${pane}\nClaude ready${'\n'.repeat(20)}`;
-      const { bin, log, helperPid } = installFakeTmux(dir, stalePane);
-
-      const result = await drain(dir, bin);
-      await waitForVerifierExit(helperPid);
-
-      expect(result.exitCode).toBe(0);
-      const calls = fs.readFileSync(log, 'utf-8').trim().split('\n');
-      expect(calls.filter((line) => line.includes(`-l -- ${text}`))).toHaveLength(1);
-      expect(calls.filter((line) => line.endsWith(' Enter'))).toHaveLength(1);
     }));
 
     test(`${label}: unrelated dialog is never answered`, withDir(async (dir) => {

@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { memoryDirFor } from './lib/cc-compat';
+import { hermitDir, memoryDirFor } from './lib/cc-compat';
 
 export function memoryDirInfo(projectRoot: string): { dir: string; exists: boolean } {
   const dir = memoryDirFor(path.resolve(projectRoot));
@@ -17,6 +17,7 @@ export function memoryDirInfo(projectRoot: string): { dir: string; exists: boole
 }
 
 if (import.meta.main) {
-  console.log(JSON.stringify(memoryDirInfo(process.argv[2] || process.cwd())));
+  const projectRoot = process.argv[2] || path.dirname(hermitDir());
+  console.log(JSON.stringify(memoryDirInfo(projectRoot)));
   process.exit(0);
 }

@@ -1629,6 +1629,16 @@ describe('observations.ts observe', () => {
     expect(lines.every((l) => l.pattern === 'skill-preference:email-draft')).toBe(true);
   }));
 
+  test('observations (procedure-noticed source accepted with origin)', withDir(async (dir) => {
+    const r = await observe(hermit(dir), 'procedure-noticed', 'procedure-noticed:weekly-deps', '--origin=own-work');
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('OK');
+    const row = JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim());
+    expect(row.source).toBe('procedure-noticed');
+    expect(row.origin).toBe('own-work');
+    expect(row.pattern).toBe('procedure-noticed:weekly-deps');
+  }));
+
   test('observations (invalid origin value rejected)', withDir(async (dir) => {
     const r = await observe(hermit(dir), 'skill-correction', 'skill-correction:reflect', '--origin=elsewhere');
     expect(r.stdout.trim()).toBe('ERROR|invalid-origin:elsewhere');

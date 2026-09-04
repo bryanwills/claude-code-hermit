@@ -20,8 +20,9 @@ You validate proposal candidates produced by `reflect` before they enter the pro
 
 ## Input
 
-The caller passes a list of candidates:
+The caller passes an `Anchor:` line, then a list of candidates:
 ```
+Anchor: root=<absolute hermit root> memory_dir=<absolute auto-memory dir>
 Candidate: <title>
 Tier: <1|2|3>
 Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request
@@ -30,6 +31,8 @@ Evidence: <summary>
 Sessions: <S-001, S-002, ...> (or "none" if no sessions cited)
 Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 ```
+
+**Blindness (before any candidate):** if the first line does not match `^Anchor: root=/`, or a Glob of `<root>/config.json` matches nothing, emit `GATE_BLIND: <title> — <reason>` for every candidate and stop. Missing reports, an empty ledger, or a missing SHELL.md are real absences handled by the existing verdict rules, not blindness.
 
 `Evidence Source:` is optional. Default: `archived-session`.
 
@@ -60,7 +63,7 @@ Check `Evidence Source:` first — it overrides the session-based flow.
 
 **If `Evidence Source: settled-memory`** (eval-runner ownership-signal candidate — a settled operator endpoint recorded in memory):
 - Skip §§ 0.5 and 1 (recurrence is not required; the recorded endpoint declaration is the human initiation).
-- **Quote check (required):** the evidence must cite a memory topic filename and the verbatim endpoint line. Grep that file for the quoted line (bounded — never Read the memory dir whole). Found → go to § 2. Missing file or line → `SUPPRESS: <title> — no-evidence: quoted endpoint not found in cited memory file`.
+- **Quote check (required):** the evidence must cite a memory topic filename and the verbatim endpoint line. Grep `<memory_dir>/<cited-filename>` for the quoted line (bounded — never Read the memory dir whole). Found → go to § 2. Missing file or line → `SUPPRESS: <title> — no-evidence: quoted endpoint not found in cited memory file`.
 - Emit the verdict tagged `(settled-memory)`.
 
 **If `Artifact:` cites `state/observations.jsonl`:**
@@ -83,9 +86,9 @@ and do not proceed to evidence verification or tier check.
 ### 1. Evidence verification (when sessions are cited)
 
 For each cited session ID:
-- Glob `.claude-code-hermit/sessions/<session-id>-REPORT.md`.
+- Glob `<session-id>-REPORT.md` with `path: <root>/sessions`.
 - **If a report file is found:** read it. Focus on `## Findings`, `## Blockers`, `## Overview`.
-- **If no report file is found** (the cited session is the current, unarchived one — the ID may be literally `current`, the in-progress session's assigned ID, or any ID that matches the Session Info block in `.claude-code-hermit/sessions/SHELL.md`): read `SHELL.md` instead. Focus on `## Findings` and `## Blockers`. Proceed with the same "confirms the pattern" check below, and treat the source as `current-session` for verdict tagging.
+- **If no report file is found** (the cited session is the current, unarchived one — the ID may be literally `current`, the in-progress session's assigned ID, or any ID that matches the Session Info block in `<root>/sessions/SHELL.md`): read `<root>/sessions/SHELL.md` instead. Focus on `## Findings` and `## Blockers`. Proceed with the same "confirms the pattern" check below, and treat the source as `current-session` for verdict tagging.
 - Determine: does this session actually describe the claimed pattern?
 
 A session "confirms" the pattern if:
@@ -96,12 +99,12 @@ A session "confirms" the pattern if:
 
 **Observations ledger.** When an `Artifact:` line cites `state/observations.jsonl` (the path reflect's ledger graduation uses), verify the ledger instead of requiring each session report to restate the pattern — sub-threshold patterns live only in the ledger by design:
 
-- Never `Read` the ledger whole — it grows without bound (the 30-day pruner keeps a pattern's full history while any row is fresh). Use the Grep tool on `.claude-code-hermit/state/observations.jsonl` (content mode, `head_limit: 200`), searching for the **quoted JSON field**: `"pattern":"<label>"`. Two reasons it is spelled that way, both of which otherwise produce a false `no-evidence`: labels are free text and may contain regex metacharacters (`(`, `[`, `+`, `?`) that make a bare search error or miss, so escape them; and a bare substring lets `foo` match a sibling `foo-v2` row. From those matches only, confirm every `session_id` in the candidate's cited `Sessions:` list appears on at least one matching line. (The graduation threshold is operator-configured; the judge stays config-agnostic by verifying the cited evidence exists, not by re-counting the threshold.)
+- Never `Read` the ledger whole — it grows without bound (the 30-day pruner keeps a pattern's full history while any row is fresh). Use the Grep tool on `<root>/state/observations.jsonl` (content mode, `head_limit: 200`), searching for the **quoted JSON field**: `"pattern":"<label>"`. Two reasons it is spelled that way, both of which otherwise produce a false `no-evidence`: labels are free text and may contain regex metacharacters (`(`, `[`, `+`, `?`) that make a bare search error or miss, so escape them; and a bare substring lets `foo` match a sibling `foo-v2` row. From those matches only, confirm every `session_id` in the candidate's cited `Sessions:` list appears on at least one matching line. (The graduation threshold is operator-configured; the judge stays config-agnostic by verifying the cited evidence exists, not by re-counting the threshold.)
 - **Verified** → this substitutes for the per-report pattern confirmation in §1; proceed to § 2.
 - **Missing file, no matching pattern, or cited session missing from ledger** → `SUPPRESS: <title> — no-evidence: artifact does not confirm citation`.
 - **Output hit `head_limit: 200`** → say so rather than concluding from a truncated view: a hot label can have more rows than the cap, and the cited session may sit past it. Emit `ACCEPT` only for sessions confirmed in what you saw, and append ` (evidence-capped)` to the verdict line so the truncation is visible; if the cited sessions are not all confirmed within the cap, that is `SUPPRESS ... no-evidence` with the same suffix.
 
-**Other machine-written artifacts (the §0.5 efficiency path).** When the `Artifact:` line cites `.claude/cost-log.jsonl` or `state/proposal-metrics.jsonl`, verify the citation with a bounded check — these files grow without bound, so never `Read` them whole. Use the Grep tool on the cited file to confirm it contains the cited value or measurement (the specific entries, amounts, or counts the candidate claims); a count-mode match ≥ 2 satisfies recurrence — the same waste measured ≥2 times in the file. For a claimed aggregate with no literal string to match, Grep for its components in content mode with `head_limit: 200` and confirm from those matches only. Verified → proceed to § 2 and emit a plain `ACCEPT: <title>` verdict (no source tag — this candidate carries no session evidence; the bare form is the closest grammar fit, not an archived-session claim). Missing file or cited value not found → `SUPPRESS: <title> — no-evidence: artifact does not contain cited value`.
+**Other machine-written artifacts (the §0.5 efficiency path).** When the `Artifact:` line cites `.claude/cost-log.jsonl` (at the project root, parent of `<root>`) or `<root>/state/proposal-metrics.jsonl`, verify the citation with a bounded check — these files grow without bound, so never `Read` them whole. Use the Grep tool on the cited file to confirm it contains the cited value or measurement (the specific entries, amounts, or counts the candidate claims); a count-mode match ≥ 2 satisfies recurrence — the same waste measured ≥2 times in the file. For a claimed aggregate with no literal string to match, Grep for its components in content mode with `head_limit: 200` and confirm from those matches only. Verified → proceed to § 2 and emit a plain `ACCEPT: <title>` verdict (no source tag — this candidate carries no session evidence; the bare form is the closest grammar fit, not an archived-session claim). Missing file or cited value not found → `SUPPRESS: <title> — no-evidence: artifact does not contain cited value`.
 
 ### 1.6 Provenance weighting
 
@@ -131,6 +134,7 @@ DOWNGRADE:<N>: <title> — <reason>                        # archived-session
 DOWNGRADE:<N> (<source>): <title> — <reason>             # other sources
 SUPPRESS: <title> — <code>: <reason>                     # archived-session
 SUPPRESS (<source>): <title> — <code>: <reason>          # other sources
+GATE_BLIND: <title> — <reason>                           # fail-closed: missing Anchor: line or <root>/config.json
 ```
 
 `<source>` tag in parentheses: use `current-session`, `scheduled-check`, or `operator-request` (omit the `/<id>` suffix for brevity). `external-content` is **not** a source tag — it is an `Evidence Origin:` value; origin rides the reason text when relevant.

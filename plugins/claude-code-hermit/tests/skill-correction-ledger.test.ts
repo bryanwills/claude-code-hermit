@@ -63,6 +63,24 @@ describe('session-close: skill-correction capture', () => {
   });
 });
 
+describe('session-close: procedure-noticed capture', () => {
+  test('session-close: question 1 asks about repeated manual procedures', () => {
+    expect(sessionClose).toContain('repeated manual procedures');
+  });
+
+  test('session-close: appends through observations.ts with the procedure-noticed source', () => {
+    expect(sessionClose).toContain('observe .claude-code-hermit procedure-noticed');
+  });
+
+  test('session-close: label is procedure-noticed:<slug> on its own heredoc line', () => {
+    expect(sessionClose).toMatch(/^\s*procedure-noticed:<slug>$/m);
+  });
+
+  test('session-close: procedure-noticed append carries the own-work origin flag', () => {
+    expect(sessionClose).toContain('procedure-noticed --origin=own-work');
+  });
+});
+
 // ── 2. observations ledger: observations.ts behavioral test ─────────────────
 
 // Empirically confirmed (bun 1.3.14 & 1.4.0): describe.serial does not reliably force
@@ -143,6 +161,11 @@ describe('observations.ts: skill-correction row round-trip', () => {
 describe('reflect: skill-correction:* graduation routing', () => {
   test('reflect: skill-correction routing block present in step 3b', () => {
     expect(reflect).toContain('skill-correction:*` routing');
+  });
+
+  test('reflect: procedure-noticed:<slug> graduation routes to Procedure capture at the dedup guard', () => {
+    expect(reflect).toContain('procedure-noticed:<slug>');
+    expect(reflect).toContain('Dedup guard');
   });
 
   test('reflect: brief search covers compiled/ and compiled/.archive/', () => {

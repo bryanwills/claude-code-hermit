@@ -22,8 +22,15 @@ Respond: "Not enough evidence yet. Note it in SHELL.md Findings and revisit afte
 
 ## Pre-Creation Gate
 
+Pin the hermit root before dispatching:
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit
+```
+Its stdout is one whole `Anchor: root=… memory_dir=…` line, already carrying the `Anchor:` prefix — paste it verbatim as the first line of the agent prompt, do not re-prefix it. On a non-zero exit there is no line to paste: do not dispatch, rerun with the absolute state dir the error names in place of `.claude-code-hermit`.
+
 Before creating the proposal, call `claude-code-hermit:proposal-triage`. Pass `Evidence Source:` and `Evidence Origin:` when known:
 ```
+Anchor: root=<absolute hermit root> memory_dir=<absolute auto-memory dir>
 Title: <proposal title>
 Evidence Source: <archived-session | current-session | scheduled-check/<id> | operator-request | capability-brainstorm>
 Evidence Origin: <own-work | external-content>
@@ -48,7 +55,7 @@ HERMIT_GATE
 - `GATE_FAILED` (unrecognized/empty line 1 — agent errored, returned malformed output, or was terminated before emitting a verdict): fail closed — do not create the proposal. Note it in the SHELL.md Progress Log:
   ```bash
   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section progress <<'HERMIT_LINE'
-  gate-failed: proposal-triage — <title>
+  gate-failed: proposal-triage — <title> — <the agent's line 1, verbatim>
   HERMIT_LINE
   ```
   The candidate re-surfaces on the next reflect cycle.
@@ -151,13 +158,29 @@ When the proposed solution involves creating a new agent, skill, heartbeat item,
 3. Verify it completes correctly
 
 **For a captured procedure (procedure-capture — called from reflect):**
-When `reflect` detects a recurring multi-step procedure (≥2 sessions, no existing skill covers it), it calls `proposal-create` with a `## Skill Draft` body block carrying the audit artifact path. Include this block verbatim in the PROP body as the dispatch signal for `proposal-act`. Set `category: capability`, `tags: [procedure-capture]`, `source: auto-detected`. Do not write the SKILL.md here — the accept flow authors it in-main so the operator can review the final skill before install.
+When `reflect` detects a recurring multi-step procedure (≥2 sessions, no existing skill covers it), it calls `proposal-create` with a `## Skill Draft` body block carrying the audit artifact path. Include this block verbatim in the PROP body as the dispatch signal for `proposal-act`. Set `category: capability` (Lane A) or `category: routine` (Lane B, when the brief carries `proposed_routine`), `tags: [procedure-capture]`, `source: auto-detected`. Do not write the SKILL.md here — the accept flow authors it in-main so the operator can review the final skill before install.
 ```markdown
 ## Skill Draft
 - name: <skill-name>
 - source_artifact: .claude-code-hermit/compiled/procedure-brief-<slug>-YYYY-MM-DD.md
 - install_target: .claude/skills/<name>/SKILL.md
 - triggers: <comma-separated proposed trigger phrases>
+```
+
+When the brief carries `proposed_agent_name`, also include this block verbatim. Do not write the agent file here — the accept flow authors it in-main.
+```markdown
+## Agent Draft
+- name: <agent-name>
+- source_artifact: .claude-code-hermit/compiled/procedure-brief-<slug>-YYYY-MM-DD.md
+- install_target: .claude/agents/<name>.md
+- model: <cheapest tier that handles the task>
+- tools: <tool list>
+```
+
+When the brief carries `proposed_routine` (Lane B), include a `## Config` block holding the routine JSON — this is what `proposal-act` 3a consumes:
+```markdown
+## Config
+{"id":"<slug>","schedule":"<cron>","skill":"<invocation>","enabled":true}
 ```
 
 **For a heartbeat check:**

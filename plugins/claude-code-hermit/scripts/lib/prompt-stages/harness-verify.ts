@@ -18,7 +18,7 @@
 // the delivery exists, the marker is held and the session is told only that its
 // self-perception may be stale.
 
-import { readSwitchVerify, clearSwitchVerify, renderCommand } from '../harness-command';
+import { readSwitchVerify, clearSwitchVerify, renderCommand, HARNESS_CONFIRM_TIMEOUT_MS } from '../harness-command';
 import { lastAssistantModel } from '../cc-compat';
 import { capturePane, paneModeLine } from '../tmux';
 import type { StageContext, StageResult } from './types';
@@ -30,14 +30,8 @@ import type { StageContext, StageResult } from './types';
  * model, so treating "newer than delivered_at" as "post-switch" would report the old
  * model as authoritative and burn the marker. Holding for the helper's full deadline
  * closes that window at the cost of one extra held prompt at worst.
- *
- * NOTE: this hardcodes the same 5s ceiling confirm-harness-switch.ts caps its own
- * poll at (scripts/confirm-harness-switch.ts:15-16). The two are not wired together —
- * if that cap changes, this grace window silently stops covering it and the stale-
- * answer bug this file exists to fix comes back. Consider exporting the ceiling from
- * lib/harness-command.ts and importing it in both places instead of copying the literal.
  */
-const SWITCH_APPLY_GRACE_MS = 5_000;
+const SWITCH_APPLY_GRACE_MS = HARNESS_CONFIRM_TIMEOUT_MS;
 
 const SESSION_SCOPED = 'This lasts for the current session only — a restart, including one the watchdog performs, puts the session back on the configured permission mode.';
 
