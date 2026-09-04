@@ -10,6 +10,9 @@
 ### Fixed
 - The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/**)`, which covers both install trees for every plugin. The dead spelling, and the `Write` twin older installs still carry beside it, are retired via `HERMIT_OBSOLETE_DENY`.
 - `docs/security.md` said auto mode suspends path rules. It drops execution rules only, and `Read` never reaches the classifier.
+- Cached-context `/model` and `/effort` confirmation matches with chrome below the dialog, so a channel-delivered switch is no longer left unanswered.
+- Wedge notices say the heartbeat is being woken first, that the agent isn't responding only after a failed wake, and send an all-clear on recovery.
+- Stall notices quote the pane's last 8 non-blank rows.
 
 ### Upgrade Instructions
 
