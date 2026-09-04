@@ -29,6 +29,13 @@ const HERMIT_ALLOW = sealedArray('HERMIT_ALLOW');
 const HERMIT_OBSOLETE = sealedArray('HERMIT_OBSOLETE');
 const HERMIT_OBSOLETE_DENY = sealedArray('HERMIT_OBSOLETE_DENY');
 
+const DENY_TEMPLATE = JSON.parse(
+  fs.readFileSync(
+    path.join(import.meta.dir, '..', 'state-templates', 'deny-patterns.json'),
+    'utf-8',
+  ),
+) as { deny: string[]; ask: string[] };
+
 function withTarget(fn: (target: string) => Promise<void>) {
   return async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apply-settings-'));
@@ -168,6 +175,56 @@ describe('sealed registries', () => {
   test('no entry is both canonical and retired', () => {
     const canonical = new Set(HERMIT_ALLOW);
     for (const stale of HERMIT_OBSOLETE) expect(canonical.has(stale)).toBe(false);
+  });
+
+  test('no deny entry is both canonical and retired', () => {
+    const canonical = new Set([...DENY_TEMPLATE.deny, ...DENY_TEMPLATE.ask]);
+    for (const stale of HERMIT_OBSOLETE_DENY) expect(canonical.has(stale)).toBe(false);
+  });
+
+  // The bug class this guards: a path rule whose first segment is a bare `*` or `**`
+  // reads as "any directory, anywhere", but Claude Code anchors an unanchored pattern
+  // at the directory the settings file lives in, so it matches almost nothing and the
+  // rule ships silently dead. `Edit(*/.claude/plugins/marketplaces/*)` shipped that way.
+  // Reaching outside the project needs `//` (filesystem root) or `~/` (home); a rule
+  // meant to stay inside the project names its first segment (`.claude/...`,
+  // `*.claude-code-hermit/...`) and is fine unanchored.
+  const pathRuleOffenders = (rules: string[]) =>
+    rules.filter((rule) => {
+      const m = rule.match(/^(?:Read|Edit|Write)\((.*)\)$/);
+      if (!m) return false;
+      const pattern = m[1];
+      if (pattern.startsWith('//') || pattern.startsWith('~/')) return false;
+      const firstSegment = pattern.split('/')[0];
+      return firstSegment === '*' || firstSegment === '**';
+    });
+
+  test('every sealed path rule is anchored or project-scoped', () => {
+    expect(pathRuleOffenders(HERMIT_ALLOW)).toEqual([]);
+    expect(pathRuleOffenders(DENY_TEMPLATE.deny)).toEqual([]);
+    expect(pathRuleOffenders(DENY_TEMPLATE.ask)).toEqual([]);
+  });
+
+  test('the anchoring check flags the spelling that shipped dead', () => {
+    expect(pathRuleOffenders(['Edit(*/.claude/plugins/marketplaces/*)'])).toEqual([
+      'Edit(*/.claude/plugins/marketplaces/*)',
+    ]);
+  });
+
+  // The hermit reads its own installed plugin tree on unattended paths (hermit-evolve
+  // reaching skills/hermit-evolve/reference.md); without the grant that read prompts.
+  test('the plugin-cache read grant is present and filesystem-anchored', () => {
+    expect(HERMIT_ALLOW).toContain('Read(//**/plugins/cache/claude-code-hermit/**)');
+  });
+
+  // Nothing hatched by this plugin edits plugin source: not our own marketplace clone,
+  // not any third-party plugin's cache. The retired single-slash spelling has to leave
+  // already-hatched hermits, so it is retired rather than merely respelled.
+  test('plugin source is deny-listed for Edit on both trees, old spelling retired', () => {
+    expect(DENY_TEMPLATE.deny).toContain('Edit(//**/.claude/plugins/marketplaces/**)');
+    expect(DENY_TEMPLATE.deny).toContain('Edit(//**/plugins/cache/**)');
+    expect(DENY_TEMPLATE.deny).not.toContain('Edit(*/.claude/plugins/marketplaces/*)');
+    expect(HERMIT_OBSOLETE_DENY).toContain('Edit(*/.claude/plugins/marketplaces/*)');
   });
 
   // The narrowed metrics-writer grant. The old entry allowed writing arbitrary

@@ -192,6 +192,13 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run memory-dir*)',
   "Bash(bash -c 'AGENT_DIR=\".claude-code-hermit\"*)",
   'Edit(.claude-code-hermit/**)',
+  // The hermit reading its own installed plugin tree (docs/, skills/, reference.md,
+  // state-templates/), which unattended paths like hermit-evolve depend on. The `//`
+  // prefix is load-bearing: a bare or single-slash path pattern anchors at the
+  // settings file's own directory, so `**/plugins/cache/...` would silently match
+  // nothing and leave the read prompting. `//` anchors at the filesystem root, which
+  // also survives a relocated CLAUDE_CONFIG_DIR (`~/` would not).
+  'Read(//**/plugins/cache/claude-code-hermit/**)',
 ];
 
 // Entries this plugin itself shipped in an earlier version and has since retired.
@@ -243,6 +250,11 @@ const HERMIT_OBSOLETE_DENY = [
   'Bash(*API_KEY*)',
   'Bash(*SECRET*)',
   'Bash(*TOKEN*)',
+  // Respelled, not dropped: the single-slash form anchored at the settings file's own
+  // directory and so matched nothing outside the project. The `//`-anchored replacement
+  // lives in state-templates/deny-patterns.json; this entry is what strips the dead one
+  // from already-hatched hermits on the next permissions-sync.
+  'Edit(*/.claude/plugins/marketplaces/*)',
 ];
 
 type Json = any;

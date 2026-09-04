@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `Read(//**/plugins/cache/claude-code-hermit/**)` in the sealed allow-list, so a hermit reading its own installed docs, skills and templates no longer raises a permission prompt on unattended paths like `hermit-evolve`.
+- Contract test over every sealed path rule: a `Read`/`Edit` pattern whose first segment is a bare `*` or `**` without a `//` or `~/` anchor now fails CI.
+
+### Fixed
+- The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/marketplaces/**)`, and extended with `Edit(//**/plugins/cache/**)` so no hermit edits any plugin's cached source. The dead spelling is retired via `HERMIT_OBSOLETE_DENY`.
+- `docs/security.md` said auto mode suspends path rules. It drops execution rules only, and `Read` never reaches the classifier.
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`.
+
+1. **Re-seed the plugin-source deny rules.** Resolve `hatch_target` (`.claude-code-hermit/state/hatch-options.json` → `target`, per the same resolution hermit-evolve already does in its own Step 1) to the settings file (`.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Read that file's `permissions.deny`. If it does **not** contain `"Bash(rm -rf *)"`, the operator chose Skip (or has no deny rules) at hatch time: do nothing, report `skip-preserved`, and preserve that choice. Otherwise run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny standard` to merge the two `//`-anchored `Edit` patterns. The merge is additive and idempotent (`mergeDeny` dedups), safe to re-run. The inert single-slash spelling is removed by `permissions-sync`, which hermit-evolve already runs.
+
 ## [1.3.1] - 2026-09-03
 
 ### Changed
