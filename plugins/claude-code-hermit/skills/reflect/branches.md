@@ -20,7 +20,7 @@ Invoked from SKILL.md § Scheduled-checks mode. Run at most one due check, then 
      Evidence: <one-paragraph summary>
      Sessions: none
      ```
-     Pass it to § Candidate processing → Evidence Validation (`claude-code-hermit:reflection-judge`). On a `PROCEED` token, gate with the Proposal triage gate (`claude-code-hermit:proposal-triage`, a batch of one here — single candidate; pass `--caller scheduled-checks` to the `gate` verb). On triage `PROCEED|CREATE`: Tier 1/2 → Micro-approval queuing; Tier 3 → `/claude-code-hermit:proposal-create`. A `DROP|...` token from either gate → drop silently (note in the Progress Log). `GATE_FAILED` from either gate → fail closed per § Gate failure handling; the candidate re-surfaces on the next scheduled-checks run.
+     Pass it to § Candidate processing → Evidence Validation (`claude-code-hermit:reflection-judge`). Paste this run's `Anchor:` line as the first line of the judge and triage dispatches (run `proposal.ts anchor` per § Candidate processing if you do not yet have it). On a `PROCEED` token, gate with the Proposal triage gate (`claude-code-hermit:proposal-triage`, a batch of one here — single candidate; pass `--caller scheduled-checks` to the `gate` verb). On triage `PROCEED|CREATE`: Tier 1/2 → Micro-approval queuing; Tier 3 → `/claude-code-hermit:proposal-create`. A `DROP|...` token from either gate → drop silently (note in the Progress Log). `GATE_FAILED` from either gate → fail closed per § Gate failure handling; the candidate re-surfaces on the next scheduled-checks run.
    - **`empty`:** no candidate. `consecutive_empty += 1` (persisted in step 7). Check the interval-adjustment rule below.
    - **`unavailable`:** note in SHELL.md `## Findings`: `Scheduled check skipped: <id> — skill unavailable (cooldown 4h)`. No candidate.
    - **`error`:** note in SHELL.md `## Findings`: `Scheduled check error: <id> — retrying after interval_days`. No candidate.
@@ -57,6 +57,12 @@ All branches proceed via § Candidate processing.
 ## Candidate processing
 
 Invoked from SKILL.md (quick mode and scheduled reflect) whenever ≥1 candidate exists. The Three-Condition Rule, evidence integrity rule, gate sequence, tier routing, and queuing procedures below are normative.
+
+**Pin the root.** Once per reflect run, before any judge, triage, or eval-runner dispatch. If this run already has the `Anchor:` line, reuse it. Otherwise:
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit
+```
+Its stdout is one whole `Anchor: root=… memory_dir=…` line, already carrying the `Anchor:` prefix — paste it verbatim as the first line of every subsequent judge, triage, scheduled-checks gate, and eval-runner dispatch this run, and do not re-prefix it. On a non-zero exit there is no line to paste: do not dispatch, rerun with the absolute state dir the error names in place of `.claude-code-hermit`.
 
 ### Three-Condition Rule
 
@@ -97,6 +103,7 @@ Before acting on any proposal candidate, delegate to `claude-code-hermit:reflect
 
 Pass candidates as a sequence of blocks separated by a blank line:
 ```
+Anchor: root=<absolute hermit root> memory_dir=<absolute auto-memory dir>
 Candidate: <title>
 Tier: <1|2|3>
 Evidence Source: archived-session | current-session | scheduled-check/<id> | operator-request
@@ -149,6 +156,7 @@ Classify every candidate into a tier before creating a proposal or acting:
 
 Before queuing micro-approvals or calling `proposal-create`, gate **all** candidates reaching this step with `claude-code-hermit:proposal-triage` in a **single batched call** (a single candidate is still passed as a batch of one). Pass `Evidence Source:`, `Evidence Origin:` and `Artifact:` when known, as a sequence of blocks separated by a blank line:
 ```
+Anchor: root=<absolute hermit root> memory_dir=<absolute auto-memory dir>
 Title: <title>
 Evidence Source: <value from the candidate, or omit to default to archived-session>
 Evidence Origin: <own-work | external-content, or omit to default to own-work>

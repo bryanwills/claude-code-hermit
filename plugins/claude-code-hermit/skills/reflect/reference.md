@@ -8,6 +8,12 @@ populate the corresponding field in the return JSON instead — the main session
 
 ## Inputs (read fresh — do not reuse cached values)
 
+The dispatch prompt's first line is `Anchor: root=<absolute hermit root> memory_dir=<absolute auto-memory dir>`.
+Every `.claude-code-hermit/…` path below is relative to that `root` — read and glob it as
+`<root>/…`, and pass `<root>` where a command below spells `.claude-code-hermit`. Your working
+directory is inherited from the caller and may sit anywhere, so a relative path reads an empty tree
+without erroring. `memory_dir` is the auto-memory directory this file calls `memory-dir`.
+
 - `.claude-code-hermit/state/reflection-state.json` — for `last_resolution_check`, `last_sparse_nudge`
 - `.claude-code-hermit/proposals/PROP-*.md` — for accepted proposals (Resolution Check)
 - `.claude-code-hermit/sessions/S-*-REPORT.md` — 3 most recent (frontmatter first; open a full body only per the Step 1 rule below)

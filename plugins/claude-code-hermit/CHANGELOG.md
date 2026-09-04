@@ -7,9 +7,13 @@
 - Contract test over every sealed path rule: a `Read`/`Edit` pattern that reads as filesystem-wide but is not (a bare `*` or `**` first segment, or a single leading `/`) now fails CI unless it carries a `//` or `~/` anchor.
 - `docs/security.md` notes what to copy when the config directory is not `~/.claude`, such as a profile install at `~/.claude-work`, and records that `//**/` is the spelling that works on Windows, WSL, macOS and Linux alike.
 
+### Changed
+- Triage dedups against `state/proposals-index.json`.
+
 ### Fixed
 - The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/**)`, which covers both install trees for every plugin. The dead spelling, and the `Write` twin older installs still carry beside it, are retired via `HERMIT_OBSOLETE_DENY`.
 - `docs/security.md` said auto mode suspends path rules. It drops execution rules only, and `Read` never reaches the classifier.
+- Proposal gates read every source from an absolute root passed by the caller and return a blind verdict, which fails closed, when that root is missing or not a hermit. `memory-dir.ts` keys on the hermit root instead of the shell's cwd.
 
 ### Upgrade Instructions
 
