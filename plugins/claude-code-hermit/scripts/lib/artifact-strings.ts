@@ -75,12 +75,10 @@ export const DEFAULT_STRINGS = {
   // review, rather than spending a section on saying so.
   weekly_week: 'Week {week}',
   weekly_cost: 'Cost: {amount}{delta}',
-  weekly_autonomy: 'Autonomy: {pct} self-directed{delta}',
   weekly_proposals: 'Proposals: +{created} created, {resolved} resolved',
   weekly_full_review: 'Full review',
   weekly_delta_cost: ' (vs {prior} prior, {sign}{pct}%)',
   weekly_delta_cost_no_pct: ' (vs {prior} prior)',
-  weekly_delta_pp: ' (vs {prior}% prior, {sign}{diff}pp)',
 
   // Compiled-docs card
   compiled_heading: 'Compiled docs',

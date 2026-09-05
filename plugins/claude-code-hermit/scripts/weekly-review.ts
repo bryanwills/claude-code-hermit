@@ -6,7 +6,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { readFrontmatter, readFileWithFrontmatter, parseFrontmatter, isEmptyAutoArchive, newestByType, globDir } from './lib/frontmatter';
+import { readFrontmatter, readFileWithFrontmatter, parseFrontmatter, newestByType, globDir } from './lib/frontmatter';
 import { costLogPath, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { formatTokens } from './lib/format';
@@ -48,13 +48,6 @@ function weekDateRange(year: number, week: number) {
     'July', 'August', 'September', 'October', 'November', 'December'];
   const fmt = (d: Date) => `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
   return `${fmt(monday)}–${fmt(sunday)}, ${year}`;
-}
-
-function isSelfDirected(s: Json) {
-  if (s.fm.operator_turns !== undefined && s.fm.operator_turns !== null) {
-    return parseInt(s.fm.operator_turns, 10) === 0;
-  }
-  return s.fm.escalation === 'autonomous';
 }
 
 // --- Determine current week ---
@@ -155,27 +148,6 @@ if (allHaveTokens) {
   } catch {}
 }
 const avgTokens = sessionsCount > 0 ? Math.round(totalTokens / sessionsCount) : 0;
-
-// Exclude empty auto-archives from the autonomy calc: they have no content to
-// attribute either way and would inflate the self-directed numerator via the
-// operator_turns === 0 branch of isSelfDirected. See isEmptyAutoArchive in
-// lib/frontmatter.ts for the shared predicate (also used by reflect-precheck).
-const contentfulSessions = weekSessions.filter(s => !isEmptyAutoArchive(s.fm));
-const selfDirectedCount = contentfulSessions.filter(isSelfDirected).length;
-const assistedSessions = contentfulSessions.filter(s => !isSelfDirected(s));
-const autonomousRate = contentfulSessions.length > 0 ? selfDirectedCount / contentfulSessions.length : 0;
-
-// --- Operator dependence ---
-const assistedTags: Record<string, number> = {};
-for (const s of assistedSessions) {
-  for (const tag of (s.fm.tags || [])) {
-    assistedTags[tag] = (assistedTags[tag] || 0) + 1;
-  }
-}
-const topAssistedTags = Object.entries(assistedTags)
-  .sort(([, a], [, b]) => b - a)
-  .slice(0, 3)
-  .map(([tag, count]) => `${tag} (${count})`);
 
 // --- Honesty rule: pre-build tag counts for O(1) lookup ---
 const totalSessionCount = allSessions.length;
@@ -476,7 +448,6 @@ const frontmatter = [
   `total_tokens: ${totalTokens}`,
   `avg_session_cost_usd: ${avgCost.toFixed(2)}`,
   `avg_session_tokens: ${avgTokens}`,
-  `self_directed_rate: ${autonomousRate.toFixed(2)}`,
   `reflect_runs: ${reflectRuns}`,
   `reflect_candidates: ${reflectCandidates}`,
   `reflect_surfaced: ${reflectSurfaced}`,
@@ -495,8 +466,7 @@ let body = `## Week of ${dateRange}\n\n`;
 // Sessions
 if (sessionsCount > 0) {
   body += `### Sessions\n`;
-  body += `${sessionsCount} session${sessionsCount !== 1 ? 's' : ''}, $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}) total ($${avgCost.toFixed(2)} avg).\n`;
-  body += `${selfDirectedCount} self-directed (operator_turns = 0), ${assistedSessions.length} operator-assisted.\n\n`;
+  body += `${sessionsCount} session${sessionsCount !== 1 ? 's' : ''}, $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}) total ($${avgCost.toFixed(2)} avg).\n\n`;
 } else {
   body += `### Sessions\nNo sessions this week.\n\n`;
 }
@@ -535,16 +505,6 @@ if (resolvedWithImpact.length > 0) {
     } else {
       body += `- ${p.fm.id}: ${title} — observed trend.\n`;
     }
-  }
-  body += '\n';
-}
-
-// Operator dependence
-if (assistedSessions.length > 0) {
-  body += `### Operator Dependence\n`;
-  body += `operator_turns > 0: ${assistedSessions.length} of ${sessionsCount} sessions (${Math.round((1 - autonomousRate) * 100)}%).\n`;
-  if (topAssistedTags.length > 0) {
-    body += `Tags on assisted sessions: ${topAssistedTags.join(', ')}.\n`;
   }
   body += '\n';
 }

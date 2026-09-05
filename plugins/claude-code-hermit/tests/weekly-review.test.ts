@@ -28,11 +28,10 @@ function withHermitDir(fn: (hermitDir: string) => Promise<void>) {
 }
 
 function writeSessionReport(hermitDir: string, id: string, opts: {
-  status?: string; operatorTurns?: number; artifacts?: string[];
+  status?: string; artifacts?: string[];
 }): void {
   const now = new Date().toISOString();
   const status = opts.status ?? 'completed';
-  const operatorTurns = opts.operatorTurns ?? 0;
   const artifactsBody = (opts.artifacts ?? []).join('\n');
   const content = `---
 id: ${id}
@@ -45,7 +44,6 @@ tags: []
 proposals_created: []
 task: "Test task"
 escalation: balanced
-operator_turns: ${operatorTurns}
 closed_via: operator
 ---
 # Session Report: ${id}

@@ -29,7 +29,7 @@
 // outside the index until the next Stop turn. Both writes are offset-based folds promoted
 // via a pid-suffixed tmp + rename, so a race between them is last-writer-wins over a
 // self-consistent {byte_offset, totals} pair, never a torn file or a double count.
-// Readers: cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts.
+// Readers: cost-tracker.ts (getCumulativeCost fallback), doctor-check.ts.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -53,7 +53,7 @@ const INDEX_VERSION = 3;
 // checkRoutineCost reads neither (it keys routine:<id> for configured routines only).
 const SOURCE_ATTRIBUTION_VERSION = 2;
 
-// writeCostSummary reads today + the trailing 7 days; keep one extra day of buffer.
+// Doctor's last-7-day scans read today + the trailing 7 days; keep one extra day of buffer.
 const BY_DATE_RETENTION_DAYS = 8;
 const BY_WEEK_RETENTION_WEEKS = 14;
 const BY_MONTH_RETENTION_MONTHS = 13;
@@ -288,7 +288,7 @@ function updateCostIndex(logPath: string, indexPath: string, timezone: string = 
 }
 
 // Warn-only: surfaces tier-drift cost without a hard block. `timezone` (default 'UTC')
-// must match whatever produced `sinceDateInclusive` (writeCostSummary's tz-aware "N days
+// must match whatever produced `sinceDateInclusive` (the doctor's tz-aware "N days
 // ago"), or the cutoff comparison silently drifts against UTC-bucketed dates.
 function scanAutomatedOpus(costLogFile: string, sinceDateInclusive: string, timezone: string = 'UTC'): { count: number; cost: number } {
   let count = 0;
@@ -302,7 +302,7 @@ function scanAutomatedOpus(costLogFile: string, sinceDateInclusive: string, time
       const date = ts && !isNaN(ts.getTime()) ? todayYMD(timezone, ts) : '';
       const src = e.source || 'other';
       const automated = src === 'heartbeat' || src.startsWith('routine:');
-      if (date >= sinceDateInclusive && e.model === 'opus' && automated) {
+      if (date >= sinceDateInclusive && isOpusModel(e.model) && automated) {
         count += 1;
         cost += e.estimated_cost_usd || 0;
       }
@@ -392,6 +392,8 @@ type MainCostObservation = {
   modelUnpriced: boolean;
   /** Only stamped when the source came from a dispatch hop, never as `false`. */
   sourceInherited?: boolean;
+  /** Write-time breakdown; absent on rows built without it. */
+  costByType?: { input: number; cache_write: number; cache_read: number; output: number };
 };
 
 type SubagentCostObservation = {
@@ -408,6 +410,8 @@ type SubagentCostObservation = {
   /** false → the transcript carried no model; `model` is a sonnet-default guess. */
   modelResolved: boolean;
   estimatedCostUsd: number;
+  /** Write-time breakdown; absent on rows built without it. */
+  costByType?: { input: number; cache_write: number; cache_read: number; output: number };
 };
 
 function buildMainCostRow(o: MainCostObservation): Json {
@@ -432,6 +436,7 @@ function buildMainCostRow(o: MainCostObservation): Json {
     model_unpriced: o.modelUnpriced,
     source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
     ...(o.sourceInherited ? { source_inherited: true } : {}),
+    ...(o.costByType ? { cost_by_type: o.costByType } : {}),
   };
 }
 
@@ -453,6 +458,7 @@ function buildSubagentCostRow(o: SubagentCostObservation): Json {
     context_usage: null,
     estimated_cost_usd: o.estimatedCostUsd,
     source_attribution_version: SOURCE_ATTRIBUTION_VERSION,
+    ...(o.costByType ? { cost_by_type: o.costByType } : {}),
   };
 }
 
@@ -523,10 +529,13 @@ function scanRoutineCostWindow(costLogFile: string, sinceMs: number, asOfMs: num
   return { perRoutine, multi };
 }
 
+function isOpusModel(model: unknown): boolean {
+  return typeof model === 'string' && model.toLowerCase().includes('opus');
+}
+
 // Counts JSONL lines flagged model_unpriced:true (cost-tracker.ts marks a turn this way
-// when the raw model string didn't match any known haiku/sonnet/opus substring — still
-// priced at sonnet rates, but flagged so the drift is auditable). Mirrors scanAutomatedOpus's
-// date-filtered scan shape.
+// when resolvePricing(raw).exact is false — still priced at sonnet-5 rates, but flagged
+// so the drift is auditable). Mirrors scanAutomatedOpus's date-filtered scan shape.
 function scanUnpricedModels(costLogFile: string, sinceDateInclusive: string, timezone: string = 'UTC'): { count: number; cost: number } {
   let count = 0;
   let cost = 0;
@@ -547,39 +556,5 @@ function scanUnpricedModels(costLogFile: string, sinceDateInclusive: string, tim
   return { count, cost };
 }
 
-// writeCostSummary needs both scanAutomatedOpus and scanUnpricedModels every regeneration
-// (once/day, gated by writeCostSummary's own mtime freshness check). Calling them separately
-// means two full reads+parses of cost-log.jsonl, which — unlike cost-index.json — is never
-// pruned or rotated and only grows over the hermit's life. This does both scans in one pass;
-// scanAutomatedOpus/scanUnpricedModels stay exported standalone for doctor-check.ts (opus-only)
-// and their own unit tests.
-function scanCostLogWarnings(costLogFile: string, sinceDateInclusive: string, timezone: string = 'UTC'): {
-  opusWake: { count: number; cost: number };
-  unpriced: { count: number; cost: number };
-} {
-  const opusWake = { count: 0, cost: 0 };
-  const unpriced = { count: 0, cost: 0 };
-  if (!fs.existsSync(costLogFile)) return { opusWake, unpriced };
-  for (const line of fs.readFileSync(costLogFile, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const e = JSON.parse(line);
-      const ts = e.timestamp ? new Date(e.timestamp) : null;
-      const date = ts && !isNaN(ts.getTime()) ? todayYMD(timezone, ts) : '';
-      if (date < sinceDateInclusive) continue;
-      const src = e.source || 'other';
-      if (e.model === 'opus' && (src === 'heartbeat' || src.startsWith('routine:'))) {
-        opusWake.count += 1;
-        opusWake.cost += e.estimated_cost_usd || 0;
-      }
-      if (e.model_unpriced) {
-        unpriced.count += 1;
-        unpriced.cost += e.estimated_cost_usd || 0;
-      }
-    } catch { /* skip corrupt lines — checkCost already surfaces corruption */ }
-  }
-  return { opusWake, unpriced };
-}
-
-export { costIndexPath, readCostIndex, computeIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanCostLogWarnings, scanRoutineLedger, scanRoutineCostWindow, buildMainCostRow, buildSubagentCostRow, appendCostRows, SOURCE_ATTRIBUTION_VERSION };
+export { costIndexPath, readCostIndex, computeIndex, updateCostIndex, rebuildCostIndex, scanAutomatedOpus, scanUnpricedModels, scanRoutineLedger, scanRoutineCostWindow, buildMainCostRow, buildSubagentCostRow, appendCostRows, SOURCE_ATTRIBUTION_VERSION };
 export type { MainCostObservation, SubagentCostObservation };

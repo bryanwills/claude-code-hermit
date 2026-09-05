@@ -258,7 +258,6 @@ You run on your own Claude subscription — no per-runtime-hour billing — and 
 
 - **Per-call** token usage logged to `.claude/cost-log.jsonl` (model, input/output/cache split, USD estimate, and what triggered the turn: `heartbeat`, `routine:<id>`, `routine:multi`, `channel:<name>`, `peer` for another local session, or interactive/unattributed `other`).
 - **Per-session** running total in `.status.json`; carried into archived session reports as frontmatter `cost_usd`.
-- **Per-day** rollup in `cost-summary.md`, regenerated on every cost-tracker tick.
 - **On demand** through `/cost-reflect`, `/hermit-doctor`, and the dashboard, plus a one-line spend summary in the weekly review. Routine briefs and status replies stay outcome-only; spend interrupts them only when a cap is approached or breached.
 
 Quiet polling usually stays outside the model, so one Claude subscription can run several agents. Actual usage depends on their routines and work.

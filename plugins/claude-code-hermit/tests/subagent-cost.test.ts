@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
+import { triggerPrompt, assistantEntry as assistantEntryFull, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 // ---------------------------------------------------------------------------
 // Helpers — synthetic transcript builders
@@ -141,7 +141,7 @@ describe('subagent-cost: happy path — async heartbeat dispatch', () => {
 
   test('emits exactly one row', () => expect(rows).toHaveLength(1));
   test('row has subagent:true', () => expect(rows[0].subagent).toBe(true));
-  test('row model is haiku', () => expect(rows[0].model).toBe('haiku'));
+  test('row model is haiku', () => expect(rows[0].model).toBe('claude-haiku-4-5-20251001'));
   test('row model_resolved is true', () => expect(rows[0].model_resolved).toBe(true));
   test('row source is heartbeat', () => expect(rows[0].source).toBe('heartbeat'));
   test('row token counts are summed across both calls', () => {
@@ -184,7 +184,7 @@ describe('subagent-cost: reads the subagent transcript, not the parent', () => {
     expect(rows[0].input_tokens).toBe(7);
     expect(rows[0].output_tokens).toBe(3);
   });
-  test('row model is the subagent model (haiku, not opus)', () => expect(rows[0].model).toBe('haiku'));
+  test('row model is the subagent model (haiku, not opus)', () => expect(rows[0].model).toBe('claude-haiku-4-5-20251001'));
 });
 
 describe('subagent-cost: sync dispatch — skip (no async marker, cost-tracker owns it)', () => {
@@ -256,7 +256,7 @@ describe('subagent-cost: async launch with unrecognized trigger — source falls
 
   test('emits one row', () => expect(rows).toHaveLength(1));
   test('source falls back to other', () => expect(rows[0].source).toBe('other'));
-  test('model still haiku', () => expect(rows[0].model).toBe('haiku'));
+  test('model still haiku', () => expect(rows[0].model).toBe('claude-haiku-4-5-20251001'));
 });
 
 describe('subagent-cost: unreadable subagent transcript — fail open, no row', () => {
@@ -359,5 +359,36 @@ describe('subagent-cost: the appended row reaches cost-index.json', () => {
 
   test('the index byte_offset has caught up with the log', () => {
     expect(index.byte_offset).toBe(fs.statSync(layout.logPath).size);
+  });
+});
+
+// Streamed chunks of one request share a requestId; they must bill once, at the max
+// of each token field, not once per transcript entry.
+describe('subagent-cost: same requestId billed once', () => {
+  let layout: Layout;
+  let rows: any[];
+
+  beforeAll(async () => {
+    layout = buildLayout();
+    fs.writeFileSync(layout.subagentTranscriptPath, [
+      assistantEntryFull({ model: 'claude-haiku-4-5-20251001', requestId: 'req_same', inputTokens: 100, outputTokens: 10 }),
+      assistantEntryFull({ model: 'claude-haiku-4-5-20251001', requestId: 'req_same', inputTokens: 100, outputTokens: 20 }),
+      assistantEntryFull({ model: 'claude-haiku-4-5-20251001', requestId: 'req_same', inputTokens: 100, outputTokens: 30 }),
+    ].join('\n') + '\n');
+    fs.writeFileSync(layout.parentTranscriptPath, [
+      triggerPrompt('HEARTBEAT_EVALUATE'),
+      assistantEntry('claude-sonnet-4-6', 500, 100),
+      asyncLaunchEntry(layout.agentId, 'claude-haiku-4-5-20251001'),
+      assistantEntry('claude-sonnet-4-6', 10, 5),
+    ].join('\n') + '\n');
+    rows = await runHookAndReadLog(layout);
+  });
+
+  afterAll(() => fs.rmSync(layout.root, { recursive: true }));
+
+  test('three streamed entries of one requestId bill once at the max', () => {
+    expect(rows).toHaveLength(1);
+    expect(rows[0].output_tokens).toBe(30);
+    expect(rows[0].input_tokens).toBe(100);
   });
 });

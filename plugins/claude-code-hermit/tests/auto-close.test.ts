@@ -178,12 +178,12 @@ describe('heartbeat-precheck AUTO_CLOSE verdict', () => {
 // (the prior closed_via: auto skip was removed so daily-midnight archives reach reflect)
 // -------------------------------------------------------
 
-test('reflect-precheck: auto-archived report newer than last_reflection → triggers compute phase (skip removed)',
+test('reflect-precheck: operator-closed report newer than last_reflection → triggers compute phase',
   withTmp(async (dir) => {
     seedReflect(dir, report({
       id: 'S-001', date: '2026-01-15T10:00:00+00:00', duration: '1h', cost: '0.00',
-      tokens: 0, task: 'test', turns: 3, closedVia: 'auto',
-      overview: 'Auto-closed by heartbeat.',
+      tokens: 0, task: 'test', turns: 0, closedVia: 'operator',
+      overview: 'Operator-closed session.',
     }));
     expect(await reflectPrecheck(dir)).not.toBe('EMPTY');
   }));
@@ -227,12 +227,6 @@ describe('weekly-review partition of auto-archived sessions', () => {
 
   test('weekly-review: auto-archived excluded note GONE (filter removed)', () => {
     expect(content).not.toContain('auto-archived excluded');
-  });
-
-  // Both sessions have operator_turns > 0 → neither self-directed.
-  // Denominator is now all sessions (no auto exclusion). autonomousRate = 0/2 = 0.00.
-  test('weekly-review: self_directed_rate: 0.00 (both in denominator, neither self-directed)', () => {
-    expect(content).toContain('self_directed_rate: 0.00');
   });
 });
 
@@ -1044,21 +1038,10 @@ describe('empty-12h-archive exclusion in weekly-review / reflect-precheck', () =
     test('weekly-review: sessions_count: 2 (raw count includes empty 12h archive)', () => {
       expect(content).toContain('sessions_count: 2');
     });
-
-    // S-002 (empty 12h auto) excluded from autonomy calc. Denominator = 1 (S-001 only).
-    // S-001 has operator_turns=5 → not self-directed → numerator=0. autonomousRate = 0/1 = 0.00.
-    test('weekly-review: self_directed_rate: 0.00 (S-001 in denominator, S-002 empty-12h excluded)', () => {
-      expect(content).toContain('self_directed_rate: 0.00');
-    });
-
-    // Header text: 1 operator-assisted (S-001 with operator_turns=5), 0 self-directed.
-    test("weekly-review: '0 self-directed' (empty 12h archive NOT counted as self-directed)", () => {
-      expect(content).toContain('0 self-directed');
-    });
   });
 
-  // exclude.2. reflect-precheck: closed_via:auto + operator_turns:0 does NOT trigger compute phase
-  test('reflect-precheck: only empty 12h archive (operator_turns:0, closed_via:auto) → EMPTY (skipped)',
+  // exclude.2. reflect-precheck: closed_via:auto does NOT trigger compute phase
+  test('reflect-precheck: only empty 12h archive (closed_via:auto) → EMPTY (skipped)',
     withTmp(async (dir) => {
       seedReflect(dir, report({
         id: 'S-001', date: '2026-01-15T10:00:00+00:00', duration: '12h', cost: '0.00',

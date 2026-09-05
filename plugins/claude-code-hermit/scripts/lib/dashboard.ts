@@ -60,11 +60,9 @@ export interface OldestAccepted {
 export interface WeeklyState {
   week: string;
   costUsd: number | null;
-  autonomyPct: number | null;
   createdCount: number | null;
   resolvedCount: number | null;
   priorCostUsd: number | null;
-  priorAutonomyPct: number | null;
   hasPrior: boolean;
   bodyHtml: string;
 }
@@ -202,17 +200,12 @@ function loadWeekly(hermitDir: string): WeeklyState | null {
     return Number.isFinite(n) ? n : null;
   };
 
-  const autonomy = num(latest.fm.self_directed_rate);
-  const priorAutonomy = prior?.fm ? num(prior.fm.self_directed_rate) : null;
-
   return {
     week: typeof latest.fm.week === 'string' ? latest.fm.week : 'unknown',
     costUsd: num(latest.fm.total_cost_usd),
-    autonomyPct: autonomy != null ? autonomy * 100 : null,
     createdCount: num(latest.fm.proposals_created),
     resolvedCount: num(latest.fm.proposals_resolved),
     priorCostUsd: prior?.fm ? num(prior.fm.total_cost_usd) : null,
-    priorAutonomyPct: priorAutonomy != null ? priorAutonomy * 100 : null,
     hasPrior: !!prior?.fm,
     bodyHtml: mdToHtml(latest.body),
   };
@@ -448,22 +441,15 @@ function ageMeta(days: number | null, s: ArtifactStrings): string[] {
   return label ? [label] : [];
 }
 
-function pct(n: number | null): string {
-  return n == null ? '—' : `${Math.round(n)}%`;
-}
-
-function delta(current: number | null, prior: number | null, unit: 'pp' | '$', s: ArtifactStrings): string {
+function delta(current: number | null, prior: number | null, s: ArtifactStrings): string {
   if (current == null || prior == null) return '';
   const diff = current - prior;
   const sign = diff >= 0 ? '+' : '';
-  if (unit === '$') {
-    const relBase = Math.abs(prior) > 0.0001 ? prior : null;
-    const relPct = relBase != null ? Math.round((diff / relBase) * 100) : null;
-    return relPct != null
-      ? fmt(s.weekly_delta_cost, { prior: `$${prior.toFixed(2)}`, sign, pct: relPct })
-      : fmt(s.weekly_delta_cost_no_pct, { prior: `$${prior.toFixed(2)}` });
-  }
-  return fmt(s.weekly_delta_pp, { prior: Math.round(prior), sign, diff: Math.round(diff) });
+  const relBase = Math.abs(prior) > 0.0001 ? prior : null;
+  const relPct = relBase != null ? Math.round((diff / relBase) * 100) : null;
+  return relPct != null
+    ? fmt(s.weekly_delta_cost, { prior: `$${prior.toFixed(2)}`, sign, pct: relPct })
+    : fmt(s.weekly_delta_cost_no_pct, { prior: `$${prior.toFixed(2)}` });
 }
 
 // The proposals card below is the canonical surface for pending proposals — it
@@ -569,16 +555,13 @@ function renderWeekly(state: DashboardState): string {
   if (!w) return '';
 
   const costLine = w.costUsd != null
-    ? fmt(s.weekly_cost, { amount: `$${w.costUsd.toFixed(2)}`, delta: w.hasPrior ? delta(w.costUsd, w.priorCostUsd, '$', s) : '' })
-    : null;
-  const autonomyLine = w.autonomyPct != null
-    ? fmt(s.weekly_autonomy, { pct: pct(w.autonomyPct), delta: w.hasPrior ? delta(w.autonomyPct, w.priorAutonomyPct, 'pp', s) : '' })
+    ? fmt(s.weekly_cost, { amount: `$${w.costUsd.toFixed(2)}`, delta: w.hasPrior ? delta(w.costUsd, w.priorCostUsd, s) : '' })
     : null;
   const proposalsLine = (w.createdCount != null || w.resolvedCount != null)
     ? fmt(s.weekly_proposals, { created: w.createdCount ?? 0, resolved: w.resolvedCount ?? 0 })
     : null;
 
-  const summary = [costLine, autonomyLine, proposalsLine].filter(Boolean) as string[];
+  const summary = [costLine, proposalsLine].filter(Boolean) as string[];
 
   return card(fmt(s.weekly_week, { week: escapeHtml(w.week) }), `
       <ul class="evolution">${summary.map(l => `<li>${l}</li>`).join('')}</ul>

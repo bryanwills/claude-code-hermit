@@ -165,14 +165,14 @@ describe('renderers honor the overlay', () => {
     // Weekly card summary line (renderWeekly) + budget-alert line (renderStatus).
     fs.writeFileSync(
       path.join(hermitDir, 'compiled', 'review-weekly-2026-W27.md'),
-      '---\nweek: 2026-W27\ntotal_cost_usd: 12.34\nself_directed_rate: 0.8\nproposals_created: 1\nproposals_resolved: 2\n---\nbody',
+      '---\nweek: 2026-W27\ntotal_cost_usd: 12.34\nproposals_created: 1\nproposals_resolved: 2\n---\nbody',
     );
     fs.writeFileSync(
       path.join(hermitDir, 'state', 'budget-alerts.json'),
       JSON.stringify({ alerts: { 'budget:daily': { kind: 'budget', period: 'daily', level: 'breach', spend: 5, cap: 4, timestamp: '2026-07-05T00:00:00Z' } } }),
     );
     writeStrings(hermitDir, {
-      weekly_autonomy: "Autonomie : {pct} d'auto-dirige & co{delta}",
+      weekly_cost: "Coût : {amount} d'auto-dirige & co{delta}",
       budget_state_breached: "d'epasse",
     });
     const { html } = renderDashboard(loadDashboardState(hermitDir), { now: '2026-07-05T09:00:00Z' });

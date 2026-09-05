@@ -174,19 +174,18 @@ describe('cost-tracker getCumulativeCost (in-process)', () => {
 
   test.serial('getCumulativeCost (same session → accumulates)', () => {
     write(hermit(wd.dir, 'sessions', '.status.json'),
-      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000,"operator_turns":0}');
-    const r = getCumulativeCost(0.10, 1000, false, 'S-001', undefined);
+      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000}');
+    const r = getCumulativeCost(0.10, 1000, 'S-001', undefined);
     expect(r.cost).toBeCloseTo(698.88, 3);
     expect(r.tokens).toBe(300001000);
   });
 
   test.serial('getCumulativeCost (session change → resets)', () => {
     write(hermit(wd.dir, 'sessions', '.status.json'),
-      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000,"operator_turns":5}');
-    const r = getCumulativeCost(0.10, 1000, false, 'S-002', undefined);
+      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000}');
+    const r = getCumulativeCost(0.10, 1000, 'S-002', undefined);
     expect(r.cost).toBeCloseTo(0.10, 3);
     expect(r.tokens).toBe(1000);
-    expect(r.operatorTurns).toBe(0);
   });
 
   // Chat voice contract: composeBudgetMessage is the one deterministic
@@ -1253,7 +1252,7 @@ Rota body.
   // dashboard) or exception-driven (budget alerts).
   test('startup-context (live .status.json → no Session Cost section, any source)', withDir(async (dir) => {
     write(hermit(dir, 'sessions', '.status.json'),
-      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000,"operator_turns":3}');
+      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000}');
     for (const source of ['startup', 'resume']) {
       const r = await runScript('startup-context.ts', {
         cwd: dir, env: ENV, stdin: JSON.stringify({ source, session_id: 'x' }),

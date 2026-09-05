@@ -100,22 +100,15 @@ function readFileWithFrontmatter(filePath: string): { fm: Json | null; body: str
 
 /**
  * Returns true when a session-report frontmatter represents an empty auto-archive:
- * `closed_via: auto` AND `operator_turns: 0`. These reports come from the
- * 12h-inactivity AUTO_CLOSE path on quiet sessions and carry no operator content;
- * the daily-lull AUTO_CLOSE path carries operator_turns > 0 and is NOT empty.
+ * `closed_via: auto`. The operator-turn counter this used to pair with was always
+ * 0 (Claude Code never writes type:"human"), so the extra conjunct was inert.
  *
- * Used by reflect-precheck (excluded from compute-phase mtime trigger) and
- * weekly-review (excluded from the autonomy-rate denominator). Null frontmatter
- * returns false (an unreadable report is never excluded from evidence); a missing
- * or non-numeric operator_turns is read as 0, matching the inline behavior both
- * call sites had before extraction. Post-KAIROS the predicate becomes moot —
- * reflect and weekly-review will read KAIROS daily logs instead of S-NNN-REPORT.md
- * archives.
+ * Used by reflect-precheck (excluded from compute-phase mtime trigger). Null
+ * frontmatter returns false (an unreadable report is never excluded from evidence).
  */
 function isEmptyAutoArchive(fm: Json): boolean {
   if (!fm) return false;
-  const ops = parseInt(fm.operator_turns, 10) || 0;
-  return fm.closed_via === 'auto' && ops === 0;
+  return fm.closed_via === 'auto';
 }
 
 /**

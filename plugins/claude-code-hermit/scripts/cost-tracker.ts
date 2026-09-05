@@ -7,10 +7,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { calculateCost, PRICING } from './lib/pricing';
-import { kStr, formatTokens } from './lib/format';
-import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, readTailLines, entryText, isToolResult, extractUsage, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
-import { costIndexPath, updateCostIndex, readCostIndex, scanCostLogWarnings, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
+import { calculateCost, resolvePricing, type CostByType } from './lib/pricing';
+import { kStr } from './lib/format';
+import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, readTailLines, entryText, isToolResult, extractUsage, foldUsageByRequest, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
+import { costIndexPath, updateCostIndex, readCostIndex, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
 import { extractSection, isResolvedBlockerLine, stripPlaceholders } from './lib/md-write';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
@@ -38,7 +38,6 @@ const STATUS_JSON_TMP = path.join(HERMIT_DIR, 'sessions', '.status.json.tmp');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
 const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
-const COST_SUMMARY = path.join(HERMIT_DIR, 'cost-summary.md');
 const BUDGET_ALERTS = budgetAlertsPath(HERMIT_DIR);
 
 let _runtimeCache: Json;
@@ -65,12 +64,36 @@ function touchHeartbeat(): void {
   }
 }
 
-function detectModel(modelStr: string | undefined): string {
-  if (!modelStr) return 'sonnet';
-  const lower = modelStr.toLowerCase();
-  if (lower.includes('haiku')) return 'haiku';
-  if (lower.includes('opus')) return 'opus';
-  return 'sonnet';
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+function costByTypeField(byType: CostByType): { input: number; cache_write: number; cache_read: number; output: number } {
+  return {
+    input: round4(byType.input),
+    cache_write: round4(byType.cacheWrite),
+    cache_read: round4(byType.cacheRead),
+    output: round4(byType.output),
+  };
+}
+
+function priceUsage(model: string, tokens: {
+  inputTokens: number; cacheWriteTokens: number; cacheWrite1hTokens?: number;
+  cacheReadTokens: number; outputTokens: number; fast?: boolean;
+}): { total: number; costByType: { input: number; cache_write: number; cache_read: number; output: number } } {
+  // Clamped: the 1h split and the cache-write total are folded per request as
+  // independent maxima, so a disagreeing pair could otherwise yield a negative 5m
+  // component and a cost below the real figure.
+  const cacheWrite1h = Math.min(tokens.cacheWrite1hTokens || 0, tokens.cacheWriteTokens);
+  const priced = calculateCost(model, {
+    input: tokens.inputTokens,
+    cacheWrite5m: tokens.cacheWriteTokens - cacheWrite1h,
+    cacheWrite1h,
+    cacheRead: tokens.cacheReadTokens,
+    output: tokens.outputTokens,
+    fast: tokens.fast,
+  });
+  return { total: round4(priced.total), costByType: costByTypeField(priced.byType) };
 }
 
 // A subagent-completion notification: CC opens a turn with this when a dispatched
@@ -142,10 +165,12 @@ function resolveTurnSource(lines: string[], billedIndex: number): { source: stri
 // (whose load-time HERMIT_DIR init would pollute in-process test cwd resolution).
 
 // Collect Agent tool_results from the current turn window.
-// Subagent assistant entries live in separate transcript files and never appear here;
-// only the Agent tool_result (type:'user' with toolUseResult.usage) does. extractUsage
-// skips these because they aren't type:'assistant', so collect them explicitly or their
-// tokens vanish from the ledger.
+// Inert on current CC (431 async launches, 0 sync results with `usage`, verified
+// 2026-09-05); every subagent row comes from subagent-cost.ts. Left as-is for the
+// sync path. Subagent assistant entries live in separate transcript files and never
+// appear here; only the Agent tool_result (type:'user' with toolUseResult.usage) does.
+// extractUsage skips these because they aren't type:'assistant', so collect them
+// explicitly or their tokens vanish from the ledger.
 // Limitation: shares sumTurnUsage's TAIL_BYTES window — a turn larger than the 512KB tail
 // is scanned from buffer start, so a prior turn's dispatch can bleed in. Same rare
 // over-count as the main-turn sum, accepted for the same reason.
@@ -188,40 +213,46 @@ function collectSubagentUsage(lines: string[], billedIndex: number): Array<{
 // discarding real token data would be worse than a bounded over-count). Source attribution no
 // longer shares this bleed — see the boundaryFound guard in scanTurnInTail().
 function sumTurnUsage(lines: string[], billedIndex: number): {
-  inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number;
-  outputTokens: number; model: string; apiCalls: number; maxPromptTokens: number;
+  inputTokens: number; cacheWriteTokens: number; cacheWrite1hTokens: number;
+  cacheReadTokens: number; outputTokens: number; model: string;
+  apiCalls: number; maxPromptTokens: number; fast: boolean;
 } {
-  let inputTokens = 0, cacheWriteTokens = 0, cacheReadTokens = 0, outputTokens = 0;
-  let model = 'sonnet';
-  let apiCalls = 0;
-  // The per-turn sum below bills every API call the turn made, so a multi-tool-call
-  // turn logs a multiple of its actual context size. Consumers that care about context
-  // size (watchdog's context-hygiene thresholds) need the single largest call instead —
-  // that's the real prompt the model was holding at its fullest point in the turn.
-  let maxPromptTokens = 0;
-
+  const collected: ReturnType<typeof extractUsage>[] = [];
   for (let j = billedIndex; j >= 0; j--) {
     try {
       const entry = JSON.parse(lines[j]);
       const usage = extractUsage(entry);
-      if (usage) {
-        inputTokens += usage.inputTokens;
-        cacheWriteTokens += usage.cacheWriteTokens;
-        cacheReadTokens += usage.cacheReadTokens;
-        outputTokens += usage.outputTokens;
-        apiCalls++;
-        // Model is constant within a turn; capture it once from the outermost call.
-        if (apiCalls === 1) model = usage.model;
-        const callPrompt = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
-        if (callPrompt > maxPromptTokens) maxPromptTokens = callPrompt;
-      }
+      if (usage) collected.push(usage);
       // Turn boundary: the first non-tool_result user entry. Intentionally looser than
       // resolveTurnSource's — see the note in collectSubagentUsage above.
       if (entry.type === 'user' && !isToolResult(entry)) break;
     } catch {}
   }
 
-  return { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model, apiCalls, maxPromptTokens };
+  // The per-turn sum below bills every API request the turn made (streamed chunks of
+  // one requestId fold to one), so a multi-tool-call turn logs a multiple of its
+  // actual context size. Consumers that care about context size (watchdog's
+  // context-hygiene thresholds) need the single largest call instead — that's the
+  // real prompt the model was holding at its fullest point in the turn.
+  const folded = foldUsageByRequest(collected.filter((u): u is NonNullable<typeof u> => u !== null));
+  let inputTokens = 0, cacheWriteTokens = 0, cacheWrite1hTokens = 0, cacheReadTokens = 0, outputTokens = 0;
+  let maxPromptTokens = 0;
+  let fast = false;
+  for (const usage of folded) {
+    inputTokens += usage.inputTokens;
+    cacheWriteTokens += usage.cacheWriteTokens;
+    cacheWrite1hTokens += usage.cacheWrite1hTokens;
+    cacheReadTokens += usage.cacheReadTokens;
+    outputTokens += usage.outputTokens;
+    if (usage.fast) fast = true;
+    const callPrompt = usage.inputTokens + usage.cacheWriteTokens + usage.cacheReadTokens;
+    if (callPrompt > maxPromptTokens) maxPromptTokens = callPrompt;
+  }
+  // Model is constant within a turn; capture it once from the outermost call
+  // (collected newest-first, so folded[0] is the billedIndex entry's request).
+  const model = folded.length > 0 ? folded[0].model : 'sonnet';
+
+  return { inputTokens, cacheWriteTokens, cacheWrite1hTokens, cacheReadTokens, outputTokens, model, apiCalls: folded.length, maxPromptTokens, fast };
 }
 
 // Peak prompt size (input + cache) over the calls made since the turn's last compaction,
@@ -285,18 +316,6 @@ function scanTurnInTail(transcriptPath: string, tailBytes: number): Json {
         );
         const observedAt = typeof entry.timestamp === 'string' ? entry.timestamp : '';
 
-        // Detect operator interaction for operator_turns tracking.
-        // Note: real transcripts use type:'user', not type:'human', so this is
-        // effectively always false in production — left intact for future correctness.
-        let hadHumanTurn = false;
-        for (let j = i - 1; j >= 0; j--) {
-          try {
-            const prev = JSON.parse(lines[j]);
-            hadHumanTurn = prev.type === 'human';
-            break;
-          } catch {}
-        }
-
         const resolved = resolveTurnSource(lines, i);
         // A truncated tail (readFrom > 0) whose turn boundary fell outside the window
         // can't be trusted — the prompt found may belong to an earlier, unrelated turn
@@ -309,7 +328,7 @@ function scanTurnInTail(transcriptPath: string, tailBytes: number): Json {
         const source = trusted ? resolved.source : 'other';
         const sourceInherited = trusted && resolved.inherited;
         const subagents = collectSubagentUsage(lines, i);
-        return { ...summed, hadHumanTurn, source, sourceInherited, subagents, observedAt, lastCallPromptTokens, tailLines: lines, boundaryMissed: !trusted };
+        return { ...summed, source, sourceInherited, subagents, observedAt, lastCallPromptTokens, tailLines: lines, boundaryMissed: !trusted };
       } catch {}
     }
   } catch {}
@@ -451,18 +470,17 @@ function parseLogEntries(): Json[] {
   }
 }
 
-function getCumulativeCost(newCost: number, newTokens: number, hadHumanTurn: boolean, currentSessionId: string, index: Json): { cost: number; tokens: number; operatorTurns: number } {
+function getCumulativeCost(newCost: number, newTokens: number, currentSessionId: string, index: Json): { cost: number; tokens: number } {
   // O(1) path: read running totals from .status.json
   try {
     const status = JSON.parse(fs.readFileSync(STATUS_JSON, 'utf-8'));
     // Reset when the hermit session changes — prevents cumulative carryover across sessions.
     if (currentSessionId && status.session_id && status.session_id !== currentSessionId) {
-      return { cost: newCost, tokens: newTokens, operatorTurns: hadHumanTurn ? 1 : 0 };
+      return { cost: newCost, tokens: newTokens };
     }
     return {
       cost: (status.cost_usd || 0) + newCost,
       tokens: (status.tokens || 0) + newTokens,
-      operatorTurns: (status.operator_turns || 0) + (hadHumanTurn ? 1 : 0),
     };
   } catch {
     // First run or missing .status.json — fall back to index (O(1); index already updated)
@@ -472,15 +490,14 @@ function getCumulativeCost(newCost: number, newTokens: number, hadHumanTurn: boo
     return {
       cost: index.total_cost_usd,
       tokens: index.total_tokens,
-      operatorTurns: hadHumanTurn ? 1 : 0,
     };
   }
 
   const idx = readCostIndex(COST_INDEX);
   if (idx) {
-    return { cost: idx.total_cost_usd, tokens: idx.total_tokens, operatorTurns: hadHumanTurn ? 1 : 0 };
+    return { cost: idx.total_cost_usd, tokens: idx.total_tokens };
   }
-  return { cost: newCost, tokens: newTokens, operatorTurns: hadHumanTurn ? 1 : 0 };
+  return { cost: newCost, tokens: newTokens };
 }
 
 const MAX_SUMMARY_LEN = 120;
@@ -538,8 +555,8 @@ function maintainOpenedAt(nowIso: string, transcriptId: string): void {
   }
 }
 
-function writeStatusJson(shellContent: string, cumulative: { cost: number; tokens: number; operatorTurns: number }, sessionId: string): void {
-  const { cost: cumulativeCost, tokens: cumulativeTokens, operatorTurns: cumulativeOperatorTurns } = cumulative;
+function writeStatusJson(shellContent: string, cumulative: { cost: number; tokens: number }, sessionId: string): void {
+  const { cost: cumulativeCost, tokens: cumulativeTokens } = cumulative;
   const taskSection = extractSection(shellContent, 'Task');
   const blockersSection = extractSection(shellContent, 'Blockers');
   const tasksMatch = shellContent.match(/\*\*Tasks Completed:\*\*\s*(\d+)/);
@@ -565,114 +582,12 @@ function writeStatusJson(shellContent: string, cumulative: { cost: number; token
     tasks_completed: tasksMatch ? parseInt(tasksMatch[1], 10) : 0,
     cost_usd: Math.round(cumulativeCost * 10000) / 10000,
     tokens: cumulativeTokens,
-    operator_turns: cumulativeOperatorTurns,
     blockers: hasBlockers ? blockersText.split('\n')[0].substring(0, MAX_SUMMARY_LEN) : null,
   };
 
   // Atomic write: write to tmp, then rename
   fs.writeFileSync(STATUS_JSON_TMP, JSON.stringify(statusData, null, 2) + '\n', 'utf-8');
   fs.renameSync(STATUS_JSON_TMP, STATUS_JSON);
-}
-
-function writeCostSummary(index: Json, timezone: string = 'UTC'): void {
-  if (!index) return;
-
-  const today = todayYMD(timezone);
-  try {
-    const stat = fs.statSync(COST_SUMMARY);
-    if (todayYMD(timezone, stat.mtime) === today) {
-      const existing = fs.readFileSync(COST_SUMMARY, 'utf-8');
-      if (/^total_tokens:/m.test(existing)) return;
-    }
-  } catch {
-    // File missing — regenerate
-  }
-
-  if (index.total_tokens === 0 && index.total_cost_usd === 0) return;
-
-  const weekAgo = todayYMD(timezone, new Date(Date.now() - 7 * 86400000));
-  const byDate: Record<string, Json> = index.by_date || {};
-
-  const totalCost = index.total_cost_usd || 0;
-  const totalTokens = index.total_tokens || 0;
-  const totalSessions = index.total_sessions || 0;
-  const avgCost = totalSessions > 0 ? totalCost / totalSessions : 0;
-  const avgSessionTokens = totalSessions > 0 ? totalTokens / totalSessions : 0;
-
-  const todayEntry = byDate[today] || { cost: 0, tokens: 0, session_ids: [] };
-  const todayCost = todayEntry.cost;
-  const todayTokens = todayEntry.tokens;
-  const todaySessions = (todayEntry.session_ids || []).length;
-
-  let weekCost = 0;
-  let weekTokens = 0;
-  const weekSessionIds = new Set();
-  for (const [date, entry] of Object.entries(byDate)) {
-    if (date >= weekAgo) {
-      weekCost += entry.cost || 0;
-      weekTokens += entry.tokens || 0;
-      for (const s of (entry.session_ids || [])) weekSessionIds.add(s);
-    }
-  }
-  const weekSessionCount = weekSessionIds.size;
-  const weekAvg = weekSessionCount > 0 ? weekCost / weekSessionCount : 0;
-
-  const { opusWake, unpriced } = scanCostLogWarnings(COST_LOG, weekAgo, timezone);
-  const opusWakeLine = opusWake.count > 0
-    ? `\n- ⚠ ${opusWake.count} automated wake(s) on Opus this week ($${opusWake.cost.toFixed(2)}) — consider a lower session model`
-    : '';
-
-  const unpricedLine = unpriced.count > 0
-    ? `\n- ⚠ ${unpriced.count} turn(s) this week priced at the sonnet fallback for an unrecognized model string ($${unpriced.cost.toFixed(2)}) — pricing.ts may need a new model entry`
-    : '';
-
-  let trendTable = '| Date | Sessions | Cost | Tokens |\n|------|----------|------|--------|\n';
-  for (let i = 0; i < 7; i++) {
-    const d = todayYMD(timezone, new Date(Date.now() - i * 86400000));
-    const entry = byDate[d] || { cost: 0, tokens: 0, session_ids: [] };
-    const dCost = entry.cost || 0;
-    const dTok = entry.tokens || 0;
-    const dSessions = (entry.session_ids || []).length;
-    if (dCost > 0 || dSessions > 0) {
-      trendTable += `| ${d} | ${dSessions} | $${dCost.toFixed(2)} | ${formatTokens(dTok)} |\n`;
-    }
-  }
-
-  const content = `---
-updated: ${new Date().toISOString()}
-total_cost_usd: ${Math.round(totalCost * 10000) / 10000}
-total_tokens: ${totalTokens}
-total_sessions: ${totalSessions}
-avg_session_cost_usd: ${Math.round(avgCost * 10000) / 10000}
-avg_session_tokens: ${Math.round(avgSessionTokens)}
----
-# Cost Summary
-
-## Today
-- Sessions: ${todaySessions}
-- Cost: $${todayCost.toFixed(2)}
-- Tokens: ${kStr(todayTokens)}
-
-## This Week
-- Sessions: ${weekSessionCount}
-- Cost: $${weekCost.toFixed(2)}
-- Tokens: ${kStr(weekTokens)}
-- Avg per session: $${weekAvg.toFixed(2)}${opusWakeLine}${unpricedLine}
-
-## All Time
-- Sessions: ${totalSessions}
-- Cost: $${totalCost.toFixed(2)}
-- Tokens: ${kStr(totalTokens)}
-- Avg per session: $${avgCost.toFixed(2)}
-
-## Cost Trend (Last 7 Days)
-${trendTable}`;
-
-  try {
-    fs.writeFileSync(COST_SUMMARY, content, 'utf-8');
-  } catch {
-    // Non-fatal
-  }
 }
 
 function updateShellSession(content: string, costStr: string, tokenStr: string): string {
@@ -875,16 +790,16 @@ async function run(data: Json): Promise<string | null> {
     // billing dedupe below — run it before any early return can skip it.
     maybeDeriveSurface(turn.tailLines);
 
-    const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens, model: rawModel, hadHumanTurn, source, sourceInherited, apiCalls, maxPromptTokens, subagents, observedAt, lastCallPromptTokens } = turn;
-    const model = detectModel(rawModel);
+    const { inputTokens, cacheWriteTokens, cacheWrite1hTokens, cacheReadTokens, outputTokens, model: rawModel, source, sourceInherited, apiCalls, maxPromptTokens, subagents, observedAt, lastCallPromptTokens, fast } = turn;
+    const model = rawModel || '';
 
     const totalTokens = inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens;
     if (totalTokens === 0) {
       return null;
     }
 
-    const cost = calculateCost(model, inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens);
-    const roundedCost = Math.round(cost * 10000) / 10000;
+    const priced = priceUsage(model, { inputTokens, cacheWriteTokens, cacheWrite1hTokens, cacheReadTokens, outputTokens, fast });
+    const roundedCost = priced.total;
 
     // Read session_id from runtime.json once per turn (used for log entry + writeStatusJson)
     const runtimeSessionId = readRuntimeSessionId();
@@ -940,13 +855,11 @@ async function run(data: Json): Promise<string | null> {
     const config: Json = readSettledConfig(HERMIT_DIR);
     const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
 
-    // Unknown model string → still priced at sonnet rates (refusing would zero the log),
-    // but flagged so the drift is auditable instead of a silent mis-bill. A falsy/absent
-    // rawModel is a different, unflagged case (no model info at all, not an unrecognized one).
-    // Derived from PRICING's own keys (not a hand-copied literal list) so a new tier can't
-    // silently drift out of sync with this check.
-    const rawModelLower = rawModel ? rawModel.toLowerCase() : '';
-    const modelUnpriced = !!rawModel && !Object.keys(PRICING).some(tier => rawModelLower.includes(tier));
+    // Unknown model string → still priced at the sonnet-5 rate (refusing would zero the
+    // log), but flagged so the drift is auditable instead of a silent mis-bill. A
+    // falsy/absent rawModel is a different, unflagged case (no model info at all, not
+    // an unrecognized one).
+    const modelUnpriced = !!rawModel && !resolvePricing(rawModel).exact;
 
     // Log to JSONL. The row shape lives in lib/cost-log.ts — `observed_at` is the
     // context size and WHEN it was observed, both from the turn's newest call (the
@@ -977,6 +890,7 @@ async function run(data: Json): Promise<string | null> {
       estimatedCostUsd: roundedCost,
       modelUnpriced,
       sourceInherited,
+      costByType: priced.costByType,
     });
 
     // Emit one log line per dispatched subagent at its resolved model.
@@ -988,9 +902,9 @@ async function run(data: Json): Promise<string | null> {
     for (const sa of (subagents || [])) {
       const saTotal = sa.inputTokens + sa.cacheWriteTokens + sa.cacheReadTokens + sa.outputTokens;
       if (saTotal === 0) continue;
-      const saModel = detectModel(sa.model);
-      const saCostRaw = calculateCost(saModel, sa.inputTokens, sa.cacheWriteTokens, sa.cacheReadTokens, sa.outputTokens);
-      const saCost = Math.round(saCostRaw * 10000) / 10000;
+      const saModel = sa.model || '';
+      const saPriced = priceUsage(saModel, sa);
+      const saCost = saPriced.total;
       subagentRows.push(buildSubagentCostRow({
         sessionId: runtimeSessionId || sessionId,
         source,
@@ -1003,6 +917,7 @@ async function run(data: Json): Promise<string | null> {
         agentType: sa.agentType,
         modelResolved: !!sa.model,
         estimatedCostUsd: saCost,
+        costByType: saPriced.costByType,
       }));
       subTokens += saTotal;
       subCost += saCost;
@@ -1019,7 +934,7 @@ async function run(data: Json): Promise<string | null> {
 
     // Running total from .status.json (O(1)), falls back to index (O(1)) on first run.
     // Include subagent spend so .status.json stays consistent with the index.
-    const cumulative = getCumulativeCost(roundedCost + subCost, totalTokens + subTokens, hadHumanTurn, runtimeSessionId || sessionId, costIdx);
+    const cumulative = getCumulativeCost(roundedCost + subCost, totalTokens + subTokens, runtimeSessionId || sessionId, costIdx);
     const costStr = `$${cumulative.cost.toFixed(4)}`;
 
     // Read SHELL.md for task/blockers — do NOT write back (avoids race condition with Claude's edits)
@@ -1030,10 +945,8 @@ async function run(data: Json): Promise<string | null> {
       // Non-fatal — session file may not exist yet
     }
 
-    writeCostSummary(costIdx, timezone);
-
     // Return brief summary (pipeline writes this to stderr)
-    return `[cost-tracker] ${model}: ${kStr(totalTokens)} tokens (${kStr(cacheReadTokens)} cached), $${cost.toFixed(4)} (cumulative: ${costStr})`;
+    return `[cost-tracker] ${model}: ${kStr(totalTokens)} tokens (${kStr(cacheReadTokens)} cached), $${roundedCost.toFixed(4)} (cumulative: ${costStr})`;
   } catch (err: any) {
     // Non-fatal — never block on cost tracking failure
     console.error(`[cost-tracker] Error: ${err.message}`);
@@ -1041,7 +954,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, resolveTurnSource, scanTurnInTail, sumTurnUsage, collectSubagentUsage, detectModel, composeBudgetMessage, maintainOpenedAt };
+export { run, getCumulativeCost, classifySource, resolveTurnSource, scanTurnInTail, sumTurnUsage, collectSubagentUsage, composeBudgetMessage, maintainOpenedAt };
 
 if (import.meta.main) {
   // Mark-only entrypoint (synchronous, no stdin): the heartbeat SKILL calls this

@@ -52,7 +52,7 @@ describe('cost-tracker: model_unpriced marker', () => {
 
   test('unrecognized model string is flagged model_unpriced:true, priced at sonnet', () => {
     const line = JSON.parse(fs.readFileSync(s.logPath, 'utf-8').trim().split('\n')[0]);
-    expect(line.model).toBe('sonnet');
+    expect(line.model).toBe('claude-quasar-9-unknown');
     expect(line.model_unpriced).toBe(true);
   });
 });

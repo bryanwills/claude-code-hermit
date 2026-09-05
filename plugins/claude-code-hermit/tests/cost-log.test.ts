@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  updateCostIndex, readCostIndex, computeIndex, scanUnpricedModels, scanRoutineLedger,
+  updateCostIndex, readCostIndex, computeIndex, scanUnpricedModels, scanAutomatedOpus, scanRoutineLedger,
   scanRoutineCostWindow, buildMainCostRow, buildSubagentCostRow, appendCostRows,
 } from '../scripts/lib/cost-log';
 
@@ -170,7 +170,29 @@ describe('week/month pruning', () => {
   }));
 });
 
+describe('scanAutomatedOpus', () => {
+  test('counts a claude-opus-5 automated row as an opus wake', withTmpdir((dir) => {
+    const logPath = writeLog(dir, [
+      { timestamp: '2026-07-04T12:00:00Z', source: 'heartbeat', model: 'claude-opus-5', estimated_cost_usd: 1.5 },
+      { timestamp: '2026-07-04T13:00:00Z', source: 'routine:demo', model: 'claude-opus-4-8', estimated_cost_usd: 0.5 },
+      { timestamp: '2026-07-04T14:00:00Z', source: 'heartbeat', model: 'claude-sonnet-5', estimated_cost_usd: 9 },
+    ]);
+    const result = scanAutomatedOpus(logPath, '2026-07-01', 'UTC');
+    expect(result.count).toBe(2);
+    expect(result.cost).toBeCloseTo(2.0, 9);
+  }));
+});
+
 describe('scanUnpricedModels', () => {
+  test('counts a model_unpriced row with a full unknown id', withTmpdir((dir) => {
+    const logPath = writeLog(dir, [
+      { timestamp: '2026-07-04T12:00:00Z', model: 'claude-nova-9', source: 'other', estimated_cost_usd: 1.25, model_unpriced: true },
+    ]);
+    const result = scanUnpricedModels(logPath, '2026-07-01', 'UTC');
+    expect(result.count).toBe(1);
+    expect(result.cost).toBe(1.25);
+  }));
+
   test('counts only lines flagged model_unpriced:true within the date window', withTmpdir((dir) => {
     const logPath = writeLog(dir, [
       { timestamp: '2026-07-04T12:00:00Z', model: 'sonnet', source: 'other', estimated_cost_usd: 1.0, model_unpriced: true },
@@ -272,12 +294,15 @@ describe('cost row builders', () => {
     expect('observed_at' in row).toBe(false);
     expect('source_inherited' in row).toBe(false);
     expect('guest' in row).toBe(false);
+    expect('cost_by_type' in row).toBe(false);
   });
 
   test('optional keys are present when they do apply', () => {
-    const row = buildMainCostRow({ ...mainBase, observedAt: '2026-08-01T00:00:00.000Z', sourceInherited: true });
+    const costByType = { input: 0.1, cache_write: 0.2, cache_read: 0.3, output: 0.4 };
+    const row = buildMainCostRow({ ...mainBase, observedAt: '2026-08-01T00:00:00.000Z', sourceInherited: true, costByType });
     expect(row.observed_at).toBe('2026-08-01T00:00:00.000Z');
     expect(row.source_inherited).toBe(true);
+    expect(row.cost_by_type).toEqual(costByType);
   });
 
   test('a null observedAt stays absent rather than serializing null', () => {

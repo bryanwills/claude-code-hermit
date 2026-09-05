@@ -25,6 +25,9 @@ describe('transcript fixtures round-trip through cc-compat', () => {
       cacheReadTokens: 222,
       outputTokens: 444,
       model: 'claude-opus-4-8',
+      cacheWrite1hTokens: 0,
+      requestId: '',
+      fast: false,
     });
   });
 
@@ -35,6 +38,9 @@ describe('transcript fixtures round-trip through cc-compat', () => {
       cacheReadTokens: 0,
       outputTokens: 50,
       model: 'claude-sonnet-4-6',
+      cacheWrite1hTokens: 0,
+      requestId: '',
+      fast: false,
     });
   });
 
@@ -45,6 +51,9 @@ describe('transcript fixtures round-trip through cc-compat', () => {
       cacheReadTokens: 0,
       outputTokens: 50,
       model: 'claude-opus-4-8',
+      cacheWrite1hTokens: 0,
+      requestId: '',
+      fast: false,
     });
   });
 

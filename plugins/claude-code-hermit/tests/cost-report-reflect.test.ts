@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runScript } from './helpers/run';
 import { writeConfig } from './helpers/workdir';
-import { costByType } from '../scripts/lib/pricing';
+import { calculateCost } from '../scripts/lib/pricing';
 
 const dirs: string[] = [];
 
@@ -31,11 +31,25 @@ interface LogEntry {
   cacheWrite?: number;
   cacheRead?: number;
   output?: number;
+  model?: string;
+  estimatedCostUsd?: number;
+  /** `null` omits the field so mixed-window tests can include legacy rows. */
+  costByType?: { input: number; cache_write: number; cache_read: number; output: number } | null;
+}
+
+function priced(e: LogEntry) {
+  return calculateCost(e.model || 'sonnet', {
+    input: e.input ?? 500,
+    cacheWrite5m: e.cacheWrite ?? 1000,
+    cacheWrite1h: 0,
+    cacheRead: e.cacheRead ?? 10000,
+    output: e.output ?? 500,
+  });
 }
 
 function cost(e: LogEntry): number {
-  const t = costByType('sonnet', e.input ?? 500, e.cacheWrite ?? 1000, e.cacheRead ?? 10000, e.output ?? 500);
-  return t.input + t.cacheWrite + t.cacheRead + t.output;
+  if (e.estimatedCostUsd !== undefined) return e.estimatedCostUsd;
+  return priced(e).total;
 }
 
 function setup(budget: object | null, entries: LogEntry[]): { dir: string; cchDir: string } {
@@ -48,11 +62,15 @@ function setup(budget: object | null, entries: LogEntry[]): { dir: string; cchDi
 
   const lines = entries.map((e, i) => {
     const ts = new Date(Date.now() - e.daysAgo * 86400000).toISOString();
+    const byType = e.costByType === null ? null : e.costByType ?? (() => {
+      const t = priced(e).byType;
+      return { input: t.input, cache_write: t.cacheWrite, cache_read: t.cacheRead, output: t.output };
+    })();
     return JSON.stringify({
       timestamp: ts,
       session_id: `sess-${i}`,
       source: e.source,
-      model: 'sonnet',
+      model: e.model || 'sonnet',
       input_tokens: e.input ?? 500,
       cache_write_tokens: e.cacheWrite ?? 1000,
       cache_read_tokens: e.cacheRead ?? 10000,
@@ -60,6 +78,7 @@ function setup(budget: object | null, entries: LogEntry[]): { dir: string; cchDi
       total_tokens: (e.input ?? 500) + (e.cacheWrite ?? 1000) + (e.cacheRead ?? 10000) + (e.output ?? 500),
       api_calls: 1,
       estimated_cost_usd: cost(e),
+      ...(byType ? { cost_by_type: byType } : {}),
     });
   });
   fs.writeFileSync(path.join(dir, '.claude', 'cost-log.jsonl'), lines.join('\n') + '\n');
@@ -94,9 +113,7 @@ describe('cost-reflect --plain: composition', () => {
     );
     const out = await runPlain(cchDir);
 
-    // Today's total is the sum of today's entries, recomputed via the same
-    // costByType math cost-reflect.ts itself uses (not the stored, possibly
-    // stale, estimated_cost_usd).
+    // Today's total is the sum of today's stored estimated_cost_usd.
     const todayTotal = cost({ daysAgo: 0, source: 'other', input: 1000, cacheWrite: 2000, cacheRead: 50000, output: 3000 })
       + cost({ daysAgo: 0, source: 'heartbeat' });
     expect(out).toContain(`Today: $${todayTotal.toFixed(2)}`);
@@ -112,7 +129,7 @@ describe('cost-reflect --plain: composition', () => {
     expect((out.match(/scheduled routines/g) ?? []).length).toBe(1);
 
     // Cap status, reusing the same phrasing as the deterministic status hook.
-    expect(out).toContain('Today: $0.09 of $10.00 cap.');
+    expect(out).toContain(`Today: $${todayTotal.toFixed(2)} of $10.00 cap.`);
 
     // Notional-dollars caveat, one line.
     expect(out).toContain('These dollar figures are an estimate');
@@ -177,5 +194,35 @@ describe('cost-reflect table mode: unaffected by --plain', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('### Cost by token type');
     expect(result.stdout).toContain('cache_read');
+  });
+});
+
+describe('cost-reflect table mode: stored dollars, never re-priced', () => {
+  test('alias rows sum their stored dollars unchanged', async () => {
+    const { cchDir } = setup(null, [
+      { daysAgo: 0, source: 'other', model: 'sonnet', estimatedCostUsd: 12.34, costByType: null },
+      { daysAgo: 0, source: 'heartbeat', model: 'opus', estimatedCostUsd: 7.66, costByType: null },
+    ]);
+    const result = await runScript('cost-report.ts', { args: ['reflect', cchDir, '7'] });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('$20.00');
+    expect(result.stdout).not.toContain('cache_read');
+  });
+
+  test('a mixed window shows the split from cost_by_type rows only', async () => {
+    const { cchDir } = setup(null, [
+      {
+        daysAgo: 0, source: 'other', model: 'claude-sonnet-5', estimatedCostUsd: 5,
+        costByType: { input: 1, cache_write: 0.5, cache_read: 2, output: 1.5 },
+      },
+      { daysAgo: 0, source: 'heartbeat', model: 'claude-sonnet-5', estimatedCostUsd: 3, costByType: null },
+    ]);
+    const result = await runScript('cost-report.ts', { args: ['reflect', cchDir, '7'] });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('$8.00');
+    expect(result.stdout).toContain('cache_read $2.00');
+    expect(result.stdout).toContain('cache_write $0.50');
+    expect(result.stdout).toContain('output $1.50');
+    expect(result.stdout).toContain('input $1.00');
   });
 });

@@ -254,7 +254,6 @@ function buildBundle(hermitDir: string, config: Json, opts: BuildOpts = {}): Jso
         cost_usd: numOrNull(fm.cost_usd),
         tokens: intOrNull(fm.tokens),
         escalation: fm.escalation ?? null,
-        operator_turns: intOrNull(fm.operator_turns),
         closed_via: fm.closed_via ?? null,
         proposals_created_count: proposalsCreated.length,
       };
