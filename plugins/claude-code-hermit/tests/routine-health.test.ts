@@ -197,6 +197,61 @@ describe('foldRoutineHistory — attempt lifecycle', () => {
   });
 });
 
+describe('foldRoutineHistory — dispatched / unhandled', () => {
+  test('dispatched → started → fired is handled, nothing else flagged', () => {
+    const e = only([
+      row('brief', 'dispatched', daysAgo(2)),
+      row('brief', 'started', daysAgo(2)),
+      row('brief', 'fired', daysAgo(2)),
+    ]);
+    expect(e).toMatchObject({
+      unhandled: 0, unhandled_open: false, fires: 1,
+      incomplete: 0, orphan_terminals: 0, open_attempt: false,
+    });
+  });
+
+  test('two consecutive dispatched rows yield unhandled: 1', () => {
+    const e = only([
+      row('brief', 'dispatched', daysAgo(3)),
+      row('brief', 'dispatched', daysAgo(2)),
+    ]);
+    expect(e).toMatchObject({ unhandled: 1, unhandled_open: true });
+  });
+
+  test.each([
+    ['started'],
+    ['fired'],
+    ['failed-artifact-missing'],
+    ['skipped-waiting'],
+    ['skipped-paused'],
+  ])('dispatched closed by %s yields unhandled: 0', (closer) => {
+    const e = only([row('brief', 'dispatched', daysAgo(2)), row('brief', closer, daysAgo(2))]);
+    expect(e).toMatchObject({ unhandled: 0, unhandled_open: false });
+  });
+
+  test.each([
+    ['skipped-precheck'],
+    ['precheck-error'],
+  ])('dispatched followed by %s is not closed', (nonCloser) => {
+    const e = only([row('brief', 'dispatched', daysAgo(2)), row('brief', nonCloser, daysAgo(2))]);
+    expect(e).toMatchObject({ unhandled: 0, unhandled_open: true });
+  });
+
+  test('a dispatched still open at the window edge is flagged, not counted', () => {
+    const e = only([row('brief', 'dispatched', daysAgo(0.01))]);
+    expect(e).toMatchObject({ unhandled: 0, unhandled_open: true });
+  });
+
+  test('a dispatched left dangling before the window is not reported', () => {
+    expect(fold([row('brief', 'dispatched', daysAgo(200))]).routines).toHaveLength(0);
+  });
+
+  test('a dangling pre-window dispatched still marks the next dispatch unhandled', () => {
+    const e = only([row('brief', 'dispatched', daysAgo(20)), row('brief', 'dispatched', daysAgo(1))]);
+    expect(e).toMatchObject({ unhandled: 1, unhandled_open: true });
+  });
+});
+
 describe('readRoutineHistory / lastRoutineFire — source states', () => {
   test('missing ledger reports source: missing, not an empty-but-healthy report', withDir((dir) => {
     const h = readRoutineHistory(path.join(hermitOf(dir), 'state', 'nope.jsonl'), 14, new Date(NOW));

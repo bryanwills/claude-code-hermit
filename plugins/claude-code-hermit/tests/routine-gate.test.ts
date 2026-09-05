@@ -86,7 +86,9 @@ describe('routine gate — verdicts', () => {
 
     const r = await runDue(dir);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:gated]');
-    expect(readRows(dir)).toEqual([]);
+    const rows = readRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ routine_id: 'gated', event: 'dispatched', delivery: 'monitor' });
     expect(readSchedule(dir).gated.last_consumed_mark).toBe(MARK);
   }));
 
@@ -99,7 +101,7 @@ describe('routine gate — verdicts', () => {
     // A failing CLI that happens to print SKIP must never be read as a skip.
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:gated]');
     const rows = readRows(dir);
-    expect(rows.map((x) => x.event)).toEqual(['precheck-error']);
+    expect(rows.map((x) => x.event)).toEqual(['precheck-error', 'dispatched']);
     expect(rows[0].detail).toBe('exit:3');
   }));
 
@@ -277,7 +279,7 @@ describe('routine gate — ordering against the other gates', () => {
 
     const r = await runDue(dir);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:noisy]');
-    expect(readRows(dir).map((x) => `${x.routine_id}:${x.event}`)).toEqual(['quiet:skipped-precheck']);
+    expect(readRows(dir).map((x) => `${x.routine_id}:${x.event}`)).toEqual(['quiet:skipped-precheck', 'noisy:dispatched']);
   }));
 
   test('an ungated routine never spawns anything and behaves exactly as before', withDir(async (dir) => {
@@ -286,7 +288,9 @@ describe('routine gate — ordering against the other gates', () => {
 
     const r = await runDue(dir);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:gated]');
-    expect(readRows(dir)).toEqual([]);
+    const rows = readRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ routine_id: 'gated', event: 'dispatched', delivery: 'monitor' });
   }));
 });
 
@@ -300,7 +304,7 @@ describe('routine gate — reflect provider', () => {
 
     const r = await runDue(dir);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:reflect]');
-    expect(readRows(dir).map((x) => x.event)).toEqual([]);
+    expect(readRows(dir).map((x) => x.event)).toEqual(['dispatched']);
 
     const parked = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'reflect-gate.json'), 'utf-8')).reflect;
     expect(parked.mark).toBe(MARK);
@@ -372,7 +376,9 @@ describe('routine gate — doctor builtin', () => {
 
     const r = await runDue(dir);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:doctor]');
-    expect(readRows(dir)).toEqual([]);
+    const rows = readRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ routine_id: 'doctor', event: 'dispatched', delivery: 'monitor' });
   }), 30000);
 
   test('everything owed already confirmed delivered → SKIP', withDir(async (dir) => {
@@ -457,7 +463,9 @@ describe('routine gate — auto-close builtin', () => {
 
     const r = await runDue(dir, AUTO_CLOSE_NOW);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:daily-auto-close]');
-    expect(readRows(dir)).toEqual([]);
+    const rows = readRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ routine_id: 'daily-auto-close', event: 'dispatched', delivery: 'monitor' });
   }));
 });
 

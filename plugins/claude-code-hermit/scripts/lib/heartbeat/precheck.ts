@@ -21,7 +21,7 @@ import { currentHHMM, todayYMD, parseDuration } from '../time';
 import { readSettledConfig } from '../config-read';
 import { readAlertState, defaultAlertState, quarantineAlertState, writeAlertState, readMergedAlerts, MICRO_PREFIX, PROPOSAL_PREFIX } from '../alert-state';
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
-import { isProposalScanItem, isCredentialExpiryItem } from '../heartbeat-items';
+import { isProposalScanItem, isCredentialExpiryItem, normalizeItemKey, parseChecklistItems } from '../heartbeat-items';
 import { isPaused } from '../pause';
 import { probeDeclaredCredentials, shadowingCredentialNote } from '../credential-probe';
 import { readMicroProposals } from '../micro-proposals-io';
@@ -60,17 +60,6 @@ function staleAutoCloseDue(dir: string, nowMs: number): boolean {
     const mtime = fs.statSync(path.join(dir, 'sessions', 'SHELL.md')).mtime.getTime();
     return (nowMs - mtime) / 3600000 > 12;
   } catch { return false; }
-}
-
-// Normalises a HEARTBEAT.md checklist item to its dedup key.
-// Key format mirrors SKILL.md: 'checklist:<first-8-chars-normalized>'.
-function normalizeItemKey(itemText: string): string | null {
-  const text = itemText
-    .replace(/^[-*+]\s*(\[.\]\s*)?/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 8);
-  return text ? `checklist:${text}` : null;
 }
 
 // The default HEARTBEAT.md checklist item scans `proposals/` for review-worthy
@@ -268,10 +257,7 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
   try { heartbeatContent = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8'); }
   catch { return 'SKIP|HEARTBEAT.md missing'; }
 
-  const checklistItems = heartbeatContent
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => /^[-*+]\s/.test(l));
+  const checklistItems = parseChecklistItems(heartbeatContent);
 
   if (checklistItems.length === 0) return 'SKIP|HEARTBEAT.md has no checklist items';
 

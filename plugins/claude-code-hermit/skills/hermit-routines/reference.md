@@ -39,6 +39,7 @@ Routines (config.json):
 
 ## Notes
 
+- **Ledger.** The monitor stamps `dispatched` at emit. The session still owns `started` and `fired`.
 - **Monitor mode defers only while an operator turn is open** (a Stop-cleared marker, 60-min TTL backstop), coarser than CronCreate's turn-level idle gate. A routine wake can still interject mid-conversation (same trade the heartbeat monitor accepts) — CronCreate never fires mid-task. Routines fire while a session is `in_progress` as long as no operator turn is open.
 - **Routine ids** must match `^[A-Za-z0-9._-]{1,64}$` (enforced by `validate-config.ts`) — ids travel through bracket markers, `--ids` CSVs, and JSONL rows.
 - **Changes take effect immediately.** `hermit-settings routines` invokes `load` after writing config; hand-edited `config.json` needs a manual `load`.

@@ -21,9 +21,9 @@ This file is read only on the EVALUATE path, once the precheck determines a full
   `heartbeat.ts alert-state` derives its live state directly from `proposals/` frontmatter every tick,
   independent of anything returned here — there is nothing for you to evaluate or report.
 - **Custom items** (disk thresholds, SQL checks, file patterns, etc.): apply LLM judgment using
-  available project files and context needed to evaluate the condition. Produce a semantic key per
+  available project files and context needed to evaluate the condition. Return `item` or `key` per
   the taxonomy table below.
-- Collect all firing items with their keys and a short human-readable `text` label for each — see
+- Collect all firing items with a short human-readable `text` label for each — see
   § Firing Item Text below for the required style. Items with no matching condition produce nothing.
 
 **3. Self-evaluation:** follow § Self-Evaluation below (only on the every-20-ticks trigger).
@@ -32,15 +32,15 @@ This file is read only on the EVALUATE path, once the precheck determines a full
 
 ## Semantic Key Taxonomy
 
-Produce one semantic key per firing item:
+Produce one firing entry per true item:
 
-| Situation | Key format |
-|-----------|-----------|
-| Checklist item | `checklist:<first-8-chars-of-item-normalized>` |
-| Waiting timeout | `waiting-timeout` |
-| Custom / freeform | `custom:<first-100-chars-normalized>` — fallback only |
+| Situation | Return |
+|-----------|--------|
+| Checklist item | `item`: the HEARTBEAT.md line, verbatim. `checklist:<…>` is owned by the writer, not the model. |
+| Waiting timeout | `key`: `waiting-timeout` |
+| Custom / freeform | `key`: `custom:<first-100-chars-normalized>` — fallback only; also receives an unresolvable checklist entry |
 
-Normalise: lowercase, remove non-alphanumeric characters, truncate at the listed limit.
+Normalise: strip the list marker and any checkbox first, then lowercase, remove non-alphanumeric characters, truncate at the listed limit.
 
 **Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key, or the `stale-session` key.
 Those are derived and owned entirely by `heartbeat.ts alert-state` — the two prefixes from
@@ -59,7 +59,7 @@ operator notification — write it for that audience, not as a debug note to you
 
 Return exactly this JSON object — no prose, no markdown fences:
 
-`{"firing": [{"key": "<semantic key>", "text": "<channel-voice one-liner>"}, ...], "self_eval_updates": {...}}`
+`{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...], "self_eval_updates": {...}}`
 
 Both keys are required. `firing` is `[]` when nothing is currently true — this is the normal "clean tick"
 case; do not omit the key or return anything else in its place. `self_eval_updates` is `{}` outside the
@@ -89,5 +89,5 @@ Triggered when `total_ticks % 20 === 0` (read from `state/alert-state.json` afte
    - `noise_ticks >= 20` AND `sessions_seen >= 3` → same, noisy-alert pattern.
    - Checklist weight violation: same threshold.
 
-5. **No channel message. No SHELL.md append.** Output flows through `self_eval_updates` in the return JSON only.
+5. **No channel message. No SHELL.md append.** Output flows through `self_eval_updates` in the return JSON only. Keys stay `checklist:<8>` and are snapped by the writer.
 6. Include updated `self_eval{}` entries in `self_eval_updates` in the return JSON.
