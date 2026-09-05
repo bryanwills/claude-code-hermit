@@ -3,7 +3,7 @@
 // script, rejecting traversal). Spawning bash is intentional — these run at boot,
 // before any TypeScript is loaded, and the process boundary is what we assert on.
 
-import { test, expect, describe } from 'bun:test';
+import { afterAll, test, expect, describe } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,9 +49,17 @@ function mkProject(root: string, withConfig = true): string {
   return path.join(bin, 'hermit-run');
 }
 
+const tmpdirs: string[] = [];
 function tmp(prefix: string): string {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const d = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  tmpdirs.push(d);
+  return d;
 }
+afterAll(() => {
+  for (const d of tmpdirs.splice(0)) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
+  }
+});
 
 describe('hermit-run resolver', () => {
   test('missing config.json → exit 1, points at hatch', async () => {

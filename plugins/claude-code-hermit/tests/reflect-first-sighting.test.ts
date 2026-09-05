@@ -10,11 +10,15 @@
 //
 // Usage: bun test tests/reflect-first-sighting.test.ts   (from the plugin root)
 
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { PLUGIN_ROOT, SCRIPTS_DIR, runScript, runPinnedScript } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
+
+const { freshDir, cleanup } = freshDirFactory('hermit-fst-');
+const { freshDir: freshSpike, cleanup: cleanupSpike } = freshDirFactory('hermit-spike-');
+afterAll(() => { cleanup(); cleanupSpike(); });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,7 +27,7 @@ function makeTmpHermit(overrides: {
   lastRunAt?: string | null;
   observations?: string[];
 } = {}): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-fst-'));
+  const dir = freshDir();
 
   // Minimal state directory
   const stateDir = path.join(dir, 'state');
@@ -584,7 +588,7 @@ describe('reflect-precheck: cost-spike observation', () => {
   // exactly on the floor would make every threshold case read as a floor case.
   // `dayTotal` is yesterday's bucket, the figure under test.
   function makeSpikeProject(dayTotal: number, priorDayCosts: number[] = [2, 2, 2]): string {
-    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-spike-'));
+    const project = freshSpike();
     const hermitDir = path.join(project, '.claude-code-hermit');
     const stateDir = path.join(hermitDir, 'state');
     fs.mkdirSync(stateDir, { recursive: true });

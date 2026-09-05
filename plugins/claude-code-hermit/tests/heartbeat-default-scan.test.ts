@@ -11,13 +11,17 @@
 //
 // Usage: bun test tests/heartbeat-default-scan.test.ts   (from the plugin root)
 
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { isProposalScanItem, isCredentialExpiryItem, normalizeItemKey, parseChecklistItems, canonicalChecklistKeys } from '../scripts/lib/heartbeat-items';
+
+const { freshDir, cleanup } = freshDirFactory('hermit-hbscan-');
+const { freshDir: freshCredRoot, cleanup: cleanupCredRoot } = freshDirFactory('hermit-credroot-');
+afterAll(() => { cleanup(); cleanupCredRoot(); });
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
@@ -58,7 +62,7 @@ interface Fixture {
 }
 
 function build(fix: Fixture): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-hbscan-'));
+  const dir = freshDir();
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
   if (fix.proposalsAsFile) {
     fs.writeFileSync(hermit(dir, 'proposals'), 'not a directory\n');
@@ -266,7 +270,7 @@ describe('default proposal-scan resolution', () => {
 // so the sibling scan sees only this tree, never another test's tmpdir.
 function fakePluginRoot(probe?: string): string {
   const root = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-credroot-')), 'plugins', 'claude-code-hermit',
+    freshCredRoot(), 'plugins', 'claude-code-hermit',
   );
   const metaDir = path.join(root, '.claude-plugin');
   fs.mkdirSync(metaDir, { recursive: true });

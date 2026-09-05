@@ -8,7 +8,7 @@
 // carries the earlier stages' context (`[Now: …]`, the reply reminder), so
 // "pass through" is asserted as the absence of the `[shutdown]` marker.
 
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
@@ -17,12 +17,18 @@ import { startHttpStub } from './helpers/http-stub';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
+const workdirs: Workdir[] = [];
+afterAll(() => {
+  for (const wd of workdirs.splice(0)) wd.cleanup();
+});
+
 function envelope(body: string, user = 'u1', chatId = '12345'): string {
   return `<channel source="telegram" chat_id="${chatId}" user="${user}">${body}</channel>`;
 }
 
 function setupChannelWorkdir(): Workdir {
   const wd = setupWorkdir();
+  workdirs.push(wd);
   const stateDir = path.join(wd.dir, '.claude.local', 'channels', 'telegram');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_TOKEN=test-token\n');

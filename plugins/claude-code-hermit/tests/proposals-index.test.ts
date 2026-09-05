@@ -4,18 +4,22 @@
 //
 // Usage: bun test tests/proposals-index.test.ts   (from the plugin root)
 
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { rebuildIndex } from '../scripts/lib/proposals/index-rebuild';
 import { runScript } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
+
+const { freshDir, cleanup } = freshDirFactory('hermit-propidx-');
+const { freshDir: freshNoProp, cleanup: cleanupNoProp } = freshDirFactory('hermit-noprop-');
+afterAll(() => { cleanup(); cleanupNoProp(); });
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
 function makeDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-propidx-'));
+  const dir = freshDir();
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
   fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
   return dir;
@@ -83,7 +87,7 @@ describe('rebuildIndex', () => {
   });
 
   test('returns null when there is no proposals dir', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-noprop-'));
+    const dir = freshNoProp();
     fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
     expect(rebuildIndex(hermit(dir))).toBe(null);
   });
@@ -98,7 +102,7 @@ describe('CLI verdict', () => {
   });
 
   test('SKIP|no proposals dir when absent', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-noprop-'));
+    const dir = freshNoProp();
     fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
     const r = await runScript('proposal.ts', { args: ['index', '.claude-code-hermit'], cwd: dir });
     expect(r.stdout.trim()).toBe('SKIP|no proposals dir');

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { transcriptDirFor } from '../scripts/lib/cc-compat';
 import {
   inActiveHours, isNearDailyAutoClose, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, hasLapsedLogin, classifyQueueTail, classifyApiFailureTail, composeCompactSteeringMessage,
@@ -42,9 +43,12 @@ const state = (h: Hermit, ...p: string[]) => path.join(h.dir, '.claude-code-herm
 const eventsFile = (h: Hermit) => state(h, 'watchdog-events.jsonl');
 const readJson = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8'));
 
+const { freshDir, cleanup } = freshDirFactory('hermit-watchdog-');
+afterAll(cleanup);
+
 /** Standard hermit project fixture: in_progress always-on tmux session. */
 function setupHermit(): Hermit {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-watchdog-')));
+  const dir = freshDir();
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'state'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'bin'), { recursive: true });
 

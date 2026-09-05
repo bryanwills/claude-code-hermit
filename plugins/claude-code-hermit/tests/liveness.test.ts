@@ -1,11 +1,14 @@
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from '../scripts/lib/liveness';
+import { freshDirFactory } from './helpers/workdir';
+
+const { freshDir, cleanup } = freshDirFactory('liveness-');
+afterAll(cleanup);
 
 function makeRoot(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'liveness-'));
+  const dir = freshDir();
   fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'sessions'), { recursive: true });
   return dir;
