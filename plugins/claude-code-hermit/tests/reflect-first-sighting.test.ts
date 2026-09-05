@@ -438,24 +438,19 @@ describe('graduation_min_sessions: config wiring', () => {
 
 // ── Section 5: step 3b origin aggregation ───────────────────────────────────
 
+// The aggregation itself is `observations.ts graduate`'s, pinned in
+// tests/observations-graduate.test.ts. What SKILL.md still owes is carrying the
+// verb's answer into the candidate rather than re-deriving one.
 describe('reflect SKILL.md: step 3b origin aggregation', () => {
   const reflectSkill = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'reflect', 'SKILL.md'), 'utf-8');
 
-  test('SKILL.md documents external-content wins aggregation rule', () => {
-    expect(reflectSkill).toContain('external-content');
-    // Origin aggregation phrase — raw Markdown bold wraps "any"
-    expect(reflectSkill).toContain('Origin aggregation');
+  test('SKILL.md takes the graduation set from the verb', () => {
+    expect(reflectSkill).toContain('observations.ts graduate');
+    expect(reflectSkill).toContain('"origin": "own-work"|"external-content"');
   });
 
   test('SKILL.md carries origin into Evidence Origin on graduation', () => {
-    expect(reflectSkill).toContain('Evidence Origin');
-    expect(reflectSkill).toContain('external-content');
-  });
-
-  test('SKILL.md treats missing origin as own-work (back-compat)', () => {
-    expect(reflectSkill).toContain('own-work');
-    // Old rows lacking the origin field should default to own-work
-    expect(reflectSkill).toContain('old rows lacking the field');
+    expect(reflectSkill).toContain('Evidence Origin: <origin>');
   });
 });
 

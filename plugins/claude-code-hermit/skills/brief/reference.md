@@ -7,12 +7,13 @@ below; the calling main session composes and delivers the brief.
 ## Inputs (read fresh — do not reuse cached values)
 
 - `.claude-code-hermit/sessions/S-*-REPORT.md` — archived session reports (today's or latest, depending on mode)
-- `.claude-code-hermit/proposals/PROP-*.md` — frontmatter only (leading `---` YAML block); for pending-review scan
+- `.claude-code-hermit/state/proposals-index.json` — the proposal metadata index; for pending-review scan
 - `.claude-code-hermit/OPERATOR.md` — operator priorities (morning only; skip silently if absent)
 - `.claude-code-hermit/NEXT-TASK.md` — queued work (morning only; skip silently if absent)
 
 The calling skill passes the following scalars in the dispatch prompt (do not re-read from files):
 
+- `plugin_root` — resolved absolute path to the plugin (`${CLAUDE_PLUGIN_ROOT}` is not substituted here)
 - `mode` — one of: `morning`, `evening`, `daily`, `default-no-session`
 - `today` — ISO date string (e.g. `2026-06-14`)
 - `context_recovery` — `true` or `false` (morning only: main judged auto-memory sparse)
@@ -21,9 +22,11 @@ The calling skill passes the following scalars in the dispatch prompt (do not re
 
 ### morning
 
-1. Scan `.claude-code-hermit/proposals/PROP-*.md` — read the leading `---` YAML block only for
-   each file. Collect files where `status: proposed` AND `source: auto-detected`. Populate
-   `pending_proposals` as `["PROP-NNN: <title>", ...]`. Empty list if none.
+1. Run `bun <plugin_root>/scripts/proposal.ts index .claude-code-hermit` (one bounded output
+   line — it validates the index against disk), then read
+   `.claude-code-hermit/state/proposals-index.json`. Collect entries where `status: proposed`
+   AND `source: auto-detected`. Populate `pending_proposals` as `["PROP-NNN: <title>", ...]`.
+   Empty list if none, or if the index is unreadable.
 2. Read `.claude-code-hermit/OPERATOR.md` if it exists. Extract actionable priority items
    (bullet points, numbered items, any section labelled "Priorities", "TODO", or "Current Focus").
    Populate `operator_priorities` as a list of strings. Empty list if absent or no priorities found.

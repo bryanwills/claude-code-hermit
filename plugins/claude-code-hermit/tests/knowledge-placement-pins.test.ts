@@ -45,15 +45,16 @@ describe('CLAUDE-APPEND placement trigger', () => {
 });
 
 describe('reflect routing (step 3b + branches)', () => {
-  test('step 3b dispatches skill-preference labels and excludes applied telemetry', () => {
+  test('step 3b dispatches skill-preference labels', () => {
     expect(reflectSkill.includes('skill-preference:<name>')).toBe(true);
-    expect(reflectSkill.includes('exclude rows with source `skill-preference-applied`')).toBe(true);
   });
 
-  test('step 3b skips unknown session_id and promotes only on a row newer than last_graduation_at', () => {
-    expect(reflectSkill.includes('session_id === "unknown"')).toBe(true);
-    expect(reflectSkill.includes('remaining ids')).toBe(true);
-    expect(reflectSkill.includes('last_graduation_at')).toBe(true);
+  // The promotion rules — the unknown-session sentinel, the session threshold, the
+  // graduation cursor, and dropping applied-preference telemetry — are
+  // `observations.ts graduate`'s, pinned in tests/observations-graduate.test.ts.
+  // The skill's remaining share is calling it and stamping the cursor afterwards.
+  test('step 3b promotes through the observations verb and still stamps the cursor', () => {
+    expect(reflectSkill.includes('observations.ts graduate .claude-code-hermit')).toBe(true);
     expect(reflectSkill.includes('--graduation-cursor')).toBe(true);
   });
 

@@ -162,12 +162,14 @@ describe('update-alert-state durability', () => {
       alerts: {}, last_digest_date: null, self_eval: { a: 1 }, total_ticks: 686, last_stale_wake_at: '2026-05-19T00:00:00Z',
     }));
 
+    // 686 is off the every-20-ticks boundary, and self_eval is script-owned — a
+    // subagent that still emits self_eval_updates has no effect on it.
     await updateAlertState(dir, { firing: [{ key: 'checklist:checksys', text: 'k fired' }], self_eval_updates: { b: 2 } });
 
     const written = JSON.parse(fs.readFileSync(alertPath(dir), 'utf-8'));
     expect(written.total_ticks).toBe(686);
     expect(written.last_stale_wake_at).toBe('2026-05-19T00:00:00Z');
-    expect(written.self_eval).toEqual({ a: 1, b: 2 });
+    expect(written.self_eval).toEqual({ a: 1 });
     expect(written.alerts['checklist:checksys']).toMatchObject({ count: 1, suppressed: false, text: 'k fired' });
     expect(stateFiles(dir).some(f => f.endsWith('.tmp'))).toBe(false);
   }));

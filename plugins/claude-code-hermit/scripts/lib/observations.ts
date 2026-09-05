@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { appendJsonlLine } from './append-jsonl';
 import { readJson } from './cli';
+import { readSettledConfig } from './config-read';
 import { globDir } from './frontmatter';
 import { utcISOStamp } from './time';
 
@@ -128,6 +129,63 @@ function appendObservation(stateDir: string, input: RowInput): string | null {
   return appendJsonlLine(observationsPath(stateDir), JSON.stringify(built.row));
 }
 
+interface GraduationCandidate {
+  pattern: string;
+  sessions: string[];
+  origin: Origin;
+  rows: number;
+}
+
+/**
+ * The recurring patterns reflect promotes to candidates this run.
+ *
+ * Three rules, all mechanical: a pattern needs at least `graduation_min_sessions`
+ * distinct sessions behind it (the `"unknown"` sentinel is a shared placeholder,
+ * not a session, and never counts), at least one row newer than the graduation
+ * cursor (so a pattern already promoted stays quiet until something new arrives),
+ * and it inherits `external-content` from any single row that carries it.
+ *
+ * `skill-preference-applied` rows are telemetry of a settlement already folded into
+ * a skill — they neither promote their pattern nor count toward its sessions, so
+ * they are dropped before any of the above.
+ *
+ * A missing, empty or unreadable ledger yields no candidates; an unparseable line
+ * is skipped. Ordered by pattern so two runs over the same ledger agree.
+ */
+function graduateObservations(stateDir: string, cursorArg?: string): GraduationCandidate[] {
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const row of readLedgerRows(observationsPath(stateDir))) {
+    const pattern = row.pattern;
+    if (typeof pattern !== 'string' || !pattern) continue;
+    if (pattern.startsWith('skill-preference:') && row.source === 'skill-preference-applied') continue;
+    const group = groups.get(pattern);
+    if (group) group.push(row); else groups.set(pattern, [row]);
+  }
+  if (groups.size === 0) return [];
+
+  const minSessions = readSettledConfig(stateDir).reflection.graduation_min_sessions;
+  const cursor = cursorArg
+    ?? readJson(path.join(stateDir, 'state', 'reflection-state.json'))?.counters?.last_graduation_at;
+  const cursorMs = typeof cursor === 'string' ? Date.parse(cursor) : NaN;
+
+  const out: GraduationCandidate[] = [];
+  for (const [pattern, rows] of [...groups.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+    const sessions = [...new Set(rows
+      .map(r => r.session_id)
+      .filter((id): id is string => typeof id === 'string' && id !== 'unknown'))];
+    if (sessions.length === 0 || sessions.length < minSessions) continue;
+    const fresh = !Number.isFinite(cursorMs) || rows.some(r => Date.parse(String(r.ts)) > cursorMs);
+    if (!fresh) continue;
+    out.push({
+      pattern,
+      sessions,
+      origin: rows.some(r => r.origin === 'external-content') ? 'external-content' : 'own-work',
+      rows: rows.length,
+    });
+  }
+  return out;
+}
+
 export {
   CLI_SOURCES,
   DETERMINISTIC_SOURCES,
@@ -138,5 +196,6 @@ export {
   observationRow,
   observationLine,
   appendObservation,
+  graduateObservations,
 };
-export type { Origin, Source, CliSource, RowInput };
+export type { Origin, Source, CliSource, RowInput, GraduationCandidate };

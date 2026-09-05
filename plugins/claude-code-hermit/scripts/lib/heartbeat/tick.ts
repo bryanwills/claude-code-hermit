@@ -10,11 +10,13 @@
 //   {"verdict":"SKIP"|"OK"|"AUTO_CLOSE"|"EVALUATE"|"ALERT",
 //    "reason"?:string, "alert"?:string,
 //    "notifications":[{"text":string,"mark_key"?:string}],
+//    "next_task"?:{"action":"waiting"|"start"},
 //    "model":string|null}
 //
 // Owner contract (write-field split with SKILL.md):
 //   This verb owns: the precheck's own fields (see precheck.ts), runtime.json's
-//                   waiting→idle transition, the auto-closed Monitoring line.
+//                   waiting→idle and conservative-pickup transitions, the
+//                   auto-closed Monitoring line.
 //   SKILL.md owns:  sending the notifications, `--mark-budget-notified` for each
 //                   `mark_key` AFTER a confirmed send, and the injection branch's
 //                   injection-alert.json bookkeeping.
@@ -22,12 +24,13 @@
 // alert but whose send then fails must re-compose it next tick, and only the
 // skill knows whether the send landed.
 
+import fs from 'node:fs';
 import path from 'node:path';
-import { runPrecheck } from './precheck';
+import { runPrecheck, nextTaskQueued } from './precheck';
 import { readSettledConfig } from '../config-read';
 import { readMergedAlerts } from '../alert-state';
 import { isPaused } from '../pause';
-import { appendShellLine } from '../md-write';
+import { appendShellLine, extractSection, firstContentLine } from '../md-write';
 import { readRuntimeJson, writeRuntimeJson } from '../runtime';
 import { currentHHMMOrUTC, parseDuration, resolveHermitNowMs } from '../time';
 import { HEARTBEAT, resolveLocale } from '../messages';
@@ -36,11 +39,14 @@ type Json = any;
 
 type Notification = { text: string; mark_key?: string };
 
+type NextTask = { action: 'waiting' | 'start' };
+
 type TickResult = {
   verdict: string;
   reason?: string;
   alert?: string;
   notifications: Notification[];
+  next_task?: NextTask;
   model: string | null;
 };
 
@@ -56,21 +62,31 @@ function parseVerdict(raw: string): Omit<TickResult, 'model'> {
  * model used to compute by hand, over two fields it had to read anyway. An absent or
  * unparseable `waiting_since`/`waiting_timeout` skips the transition rather than
  * forcing one — a spurious idle drops the operator's waiting_reason.
+ *
+ * Returns whether it released the session, so the queued-task pass below can stay off
+ * the tick that just freed it: composing there would read the idle state this wrote and
+ * park the session straight back into `waiting`, which is not a transition at all.
  */
-function applyWaitingTimeout(hermitDir: string, config: Json, nowMs: number, out: Notification[]): void {
-  if (config.heartbeat?.waiting_timeout == null) return;
+function applyWaitingTimeout(hermitDir: string, config: Json, nowMs: number, out: Notification[]): boolean {
+  if (config.heartbeat?.waiting_timeout == null) return false;
   const stateDir = path.join(hermitDir, 'state');
   const runtime = readRuntimeJson(stateDir);
-  if (runtime?.session_state !== 'waiting') return;
-  if (typeof runtime.waiting_since !== 'string') return;
+  if (runtime?.session_state !== 'waiting') return false;
+  if (typeof runtime.waiting_since !== 'string') return false;
   const since = Date.parse(runtime.waiting_since);
   const timeoutMs = parseDuration(config.heartbeat.waiting_timeout, 0);
-  if (!Number.isFinite(since) || timeoutMs <= 0 || nowMs - since <= timeoutMs) return;
+  if (!Number.isFinite(since) || timeoutMs <= 0 || nowMs - since <= timeoutMs) return false;
 
   runtime.session_state = 'idle';
   delete runtime.waiting_reason;
+  // The stamp goes with the wait it measured. Left behind on an idle runtime it becomes
+  // the elapsed baseline for the *next* wait, and the writers that park without stamping
+  // (channel-responder's `operator_input`) would have their wait torn down on its first
+  // tick, measured against a timestamp from a wait that already ended.
+  delete runtime.waiting_since;
   writeRuntimeJson(runtime, stateDir);
   out.push({ text: HEARTBEAT[resolveLocale(config.language)].waitingTimeout(config.heartbeat.waiting_timeout) });
+  return true;
 }
 
 /**
@@ -105,6 +121,45 @@ async function composeBudgetAlerts(hermitDir: string, config: Json, out: Notific
   }
 }
 
+/** The queued task's headline — the `## Task` section's first non-empty line. */
+function queuedTaskLine(hermitDir: string): string | null {
+  try {
+    const body = extractSection(fs.readFileSync(path.join(hermitDir, 'sessions', 'NEXT-TASK.md'), 'utf-8'), 'Task');
+    return body ? firstContentLine(body) || null : null;
+  } catch { return null; }
+}
+
+/**
+ * A task queued while the session sits idle. `conservative` parks the session in
+ * `waiting` and tells the operator what is pending — one notice, because the parked
+ * state stops the next tick re-firing. `balanced`/`autonomous` mutate nothing and
+ * hand the skill a `start`, leaving session-start to adopt and delete the file.
+ */
+function composeNextTask(hermitDir: string, config: Json, nowMs: number, out: Notification[]): NextTask | undefined {
+  // The same gate precheck applies to the queued-task pierce, mirrored because EVALUATE
+  // arrives here for a dozen unrelated reasons (the 20-tick boundary, a pending budget
+  // alert, a stale session) that carry no always_on condition of their own. Only an
+  // unattended hermit's session-start consumes NEXT-TASK.md; an interactive one presents
+  // it at the operator's next boot, so starting or parking on its behalf is not ours.
+  // First, because it reads settled config already in memory and the queue check stats.
+  if (config.always_on !== true) return undefined;
+  if (!nextTaskQueued(hermitDir)) return undefined;
+  const stateDir = path.join(hermitDir, 'state');
+  const runtime = readRuntimeJson(stateDir) ?? {};
+  if ((runtime.session_state ?? 'idle') !== 'idle') return undefined;
+  if (config.escalation !== 'conservative') return { action: 'start' };
+
+  runtime.session_state = 'waiting';
+  runtime.waiting_reason = 'conservative_pickup';
+  // Stamped because it is what applyWaitingTimeout above measures from: an unstamped
+  // park (or one carrying an earlier wait's stamp) either never releases under a
+  // configured `waiting_timeout` or releases on the tick after it is written.
+  runtime.waiting_since = new Date(nowMs).toISOString();
+  writeRuntimeJson(runtime, stateDir);
+  out.push({ text: HEARTBEAT[resolveLocale(config.language)].queuedTask(queuedTaskLine(hermitDir)) });
+  return { action: 'waiting' };
+}
+
 export async function run(args: string[]): Promise<void> {
   const hermitDir = args[0];
   // Settled once, shared by the model field and the bookkeeping below. Settling
@@ -130,8 +185,12 @@ export async function run(args: string[]): Promise<void> {
     } else if (result.verdict === 'EVALUATE' || result.verdict === 'ALERT') {
       // Both gates are pre-dispatch and read no HEARTBEAT.md, so a suspended
       // checklist still surfaces them — the reason ALERT exists as a verdict.
-      applyWaitingTimeout(hermitDir, config, nowMs, result.notifications);
+      const released = applyWaitingTimeout(hermitDir, config, nowMs, result.notifications);
       await composeBudgetAlerts(hermitDir, config, result.notifications);
+      if (result.verdict === 'EVALUATE' && !released) {
+        const nextTask = composeNextTask(hermitDir, config, nowMs, result.notifications);
+        if (nextTask) result.next_task = nextTask;
+      }
     }
   } catch { /* fail-open: the verdict still ships, minus the bookkeeping */ }
 

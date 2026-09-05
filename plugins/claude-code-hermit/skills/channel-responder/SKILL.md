@@ -199,7 +199,12 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 - **Emergency** ("abort", "revert", "rollback", or "stop")
   - A bare "stop" reaches you rather than the deterministic hook, so this halt is **cooperative, not binding** — it depends on you acting on it. The binding form is `/stop` or `/pause`, which blocks every tool but the channel reply.
   - Halt current work immediately
-  - Set `runtime.json` `session_state` to `waiting` (`waiting_reason: "operator_input"`) and note the halt reason in SHELL.md `## Blockers`
+  - Set `runtime.json` `session_state` to `waiting` (`waiting_reason: "operator_input"`) and note the halt reason in SHELL.md `## Blockers`:
+    ```bash
+    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section blockers <<'HERMIT_LINE'
+    - [HH:MM] halted on operator request: <reason, one line>
+    HERMIT_LINE
+    ```
   - Confirm the halt and ask for next steps
 
 ## 3. Response Guidelines

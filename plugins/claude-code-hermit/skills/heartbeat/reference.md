@@ -26,9 +26,7 @@ This file is read only on the EVALUATE path, once the precheck determines a full
 - Collect all firing items with a short human-readable `text` label for each — see
   § Firing Item Text below for the required style. Items with no matching condition produce nothing.
 
-**3. Self-evaluation:** follow § Self-Evaluation below (only on the every-20-ticks trigger).
-
-**4. Return JSON** — see § Return Schema below for the required fields and exact format.
+**3. Return JSON** — see § Return Schema below for the required fields and exact format.
 
 ## Semantic Key Taxonomy
 
@@ -59,35 +57,9 @@ operator notification — write it for that audience, not as a debug note to you
 
 Return exactly this JSON object — no prose, no markdown fences:
 
-`{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...], "self_eval_updates": {...}}`
+`{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...]}`
 
-Both keys are required. `firing` is `[]` when nothing is currently true — this is the normal "clean tick"
-case; do not omit the key or return anything else in its place. `self_eval_updates` is `{}` outside the
-every-20-ticks trigger (see below) — never omit it.
+`firing` is required and is `[]` when nothing is currently true — this is the normal "clean tick"
+case; do not omit the key or return anything else in its place. Any other key you add is ignored.
 
 **Report only; any fix is the main session's.**
-
-## Self-Evaluation (every 20 ticks)
-
-Triggered when `total_ticks % 20 === 0` (read from `state/alert-state.json` after the precheck has already incremented the counter).
-
-1. Read `state/alert-state.json` for `self_eval{}` and `total_ticks`.
-2. For each HEARTBEAT.md item: count alert lines for that item in the last 20 ticks (SHELL.md `## Monitoring`). If zero → increment `clean_ticks` and update `sessions_seen` / `last_session_id`. If alert fired → reset `clean_ticks` to 0.
-
-   **`sessions_seen`:** number of distinct session IDs (from SHELL.md `**ID:**`) during which this item was evaluated. Incremented only when the current session ID differs from `last_session_id`.
-
-   **Self-eval entry fields:** `text`, `clean_ticks`, `noise_ticks`, `sessions_seen`, `last_session_id`, `first_observed`, `proposed`.
-
-2b. **Proposals scan (dismissal cleanup + noise tracking):** Scan `proposals/` for PROP-NNN files with `self_eval_key` in frontmatter. Apply in a single pass:
-   - **Dismissal cleanup** (all items, every pass): if `source: auto-detected`, `status: dismissed`, and `proposed: true` → reset `proposed: false` and `clean_ticks` to 0.
-   - **Noise tracking** (items that fired alerts in last 20 ticks only): if `status: accepted|resolved` → reset `noise_ticks` to 0; if `status: dismissed` → increment `noise_ticks` by 1.
-
-3. **Checklist weight:** If HEARTBEAT.md has > 10 items: track in `self_eval` with text `"Checklist weight: {N} items"`.
-
-4. **Proposal threshold check:** For each `self_eval` entry where `proposed: false`:
-   - `clean_ticks >= 20` AND `sessions_seen >= 3` → include a proposal request in `self_eval_updates` with `proposed: true` and a `proposal_args` block (category: `capability`, `source: auto-detected`, `self_eval_key: <key>`, evidence: clean-for-N-ticks pattern). The calling main session invokes `/claude-code-hermit:proposal-create` with those args.
-   - `noise_ticks >= 20` AND `sessions_seen >= 3` → same, noisy-alert pattern.
-   - Checklist weight violation: same threshold.
-
-5. **No channel message. No SHELL.md append.** Output flows through `self_eval_updates` in the return JSON only. Keys stay `checklist:<8>` and are snapped by the writer.
-6. Include updated `self_eval{}` entries in `self_eval_updates` in the return JSON.

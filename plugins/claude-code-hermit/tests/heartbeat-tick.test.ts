@@ -31,7 +31,11 @@ const CHECKLIST = '# Heartbeat\n- Review `proposals/` for any with `status: prop
 // real wall-clock (not HERMIT_NOW) — so an unspecified window makes every verdict
 // depend on when the suite runs.
 const ALWAYS_ON = { start: '00:00', end: '23:59' };
-const BASE_CONFIG = { timezone: 'UTC', heartbeat: { every: '30m', active_hours: ALWAYS_ON } };
+// `always_on` is what gates the queued-task pierce, so the base config is an
+// unattended hermit; the interactive case has its own test below.
+const BASE_CONFIG = { timezone: 'UTC', always_on: true, heartbeat: { every: '30m', active_hours: ALWAYS_ON } };
+
+const NEXT_TASK = '# Next Task\n\n## Task\nWire the release-status script\n\n## Context\nQueued by proposal-act.\n';
 
 type Seed = {
   config?: object;
@@ -39,6 +43,7 @@ type Seed = {
   runtime?: object;
   budget?: object;
   checklist?: string | null;
+  nextTask?: string;
 };
 
 function fixture(seed: Seed = {}): string {
@@ -54,6 +59,7 @@ function fixture(seed: Seed = {}): string {
   write(hermit, 'state/runtime.json', seed.runtime ?? { session_state: 'idle' });
   write(hermit, 'state/micro-proposals.json', { pending: [] });
   if (seed.budget) write(hermit, 'state/budget-alerts.json', seed.budget);
+  if (seed.nextTask) fs.writeFileSync(path.join(hermit, 'sessions', 'NEXT-TASK.md'), seed.nextTask);
   if (seed.checklist !== null) {
     fs.writeFileSync(path.join(hermit, 'HEARTBEAT.md'), seed.checklist ?? CHECKLIST);
   }
@@ -146,6 +152,10 @@ describe('heartbeat tick', () => {
     const runtime = read(path.join(hermit, 'state', 'runtime.json'));
     expect(runtime.session_state).toBe('idle');
     expect(runtime.waiting_reason).toBeUndefined();
+    // The stamp is cleared with the wait it measured: a writer that parks without one
+    // (channel-responder's operator_input) would otherwise be released on its first tick
+    // against a leftover timestamp from a wait that already ended.
+    expect(runtime.waiting_since).toBeUndefined();
     expect(out.notifications).toHaveLength(1);
     expect(out.notifications[0].text).toContain('1h');
     expect(out.notifications[0].text).toContain('Tempo de espera'); // config.language honoured
@@ -164,6 +174,39 @@ describe('heartbeat tick', () => {
     const out = await tick(hermit);
     expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('waiting');
     expect(out.notifications).toEqual([]);
+  });
+
+  // The release and the queued-task pass are two writers of the same field. Composing on
+  // the tick that released reads back the idle state the timeout just wrote and parks the
+  // session straight into `waiting` again, restamping waiting_since — so the transition
+  // never completes and the operator gets both notices, once per timeout window forever.
+  test('a queued task does not re-park the session on the tick that released it', async () => {
+    const hermit = fixture({
+      nextTask: NEXT_TASK,
+      config: {
+        timezone: 'UTC', always_on: true, escalation: 'conservative',
+        heartbeat: { every: '30m', active_hours: ALWAYS_ON, waiting_timeout: '1h' },
+      },
+      runtime: {
+        session_state: 'waiting',
+        waiting_reason: 'conservative_pickup',
+        waiting_since: new Date(NOW_MS - 2 * 3600_000).toISOString(),
+      },
+    });
+
+    const released = await tick(hermit);
+    expect(released.next_task).toBeUndefined();
+    expect(released.notifications).toHaveLength(1);
+    expect(released.notifications[0].text).toContain('1h');
+    const runtime = read(path.join(hermit, 'state', 'runtime.json'));
+    expect(runtime.session_state).toBe('idle');
+    expect(runtime.waiting_reason).toBeUndefined();
+
+    // The following tick sees a genuinely idle session and parks it once.
+    const parked = await tick(hermit);
+    expect(parked.next_task).toEqual({ action: 'waiting' });
+    expect(parked.notifications).toHaveLength(1);
+    expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('waiting');
   });
 
   // `notified` belongs to cost-tracker. The tick composes and hands back the key;
@@ -222,6 +265,118 @@ describe('heartbeat tick', () => {
     const hermit = fixture();
     await tick(hermit);
     expect(monitoring(hermit)).toEqual([]);
+  });
+
+  // Without the pierce a queued task waits for the next boot: an idle hermit with a
+  // clean checklist resolves OK and never wakes the model.
+  test('idle with a queued task reaches EVALUATE', async () => {
+    expect((await run('precheck', [fixture({ nextTask: NEXT_TASK })])).trim()).toBe('EVALUATE');
+    expect((await tick(fixture({ nextTask: NEXT_TASK }))).verdict).toBe('EVALUATE');
+  });
+
+  test('idle with no queued task keeps its prior verdict', async () => {
+    expect((await run('precheck', [fixture()])).trim()).toBe('OK');
+    expect((await tick(fixture())).verdict).toBe('OK');
+  });
+
+  // An interactive hermit's session-start presents the queued task instead of consuming
+  // it, leaving the file and the idle state untouched — so a pierce here would re-fire
+  // this EVALUATE on every tick for as long as the task sits in the queue.
+  test('a queued task does not pierce on an interactive hermit', async () => {
+    const seed = { nextTask: NEXT_TASK, config: { ...BASE_CONFIG, always_on: false } };
+    expect((await run('precheck', [fixture(seed)])).trim()).toBe('OK');
+    expect((await tick(fixture(seed))).verdict).toBe('OK');
+  });
+
+  // Withholding the pierce is not enough on its own: EVALUATE also arrives from the
+  // 20-tick boundary, a pending budget alert, a stale session. The composition carries
+  // the same always_on gate, or those ticks act on an interactive hermit's queued task.
+  test('a queued task is not composed when an interactive hermit evaluates for another reason', async () => {
+    const hermit = fixture({
+      nextTask: NEXT_TASK,
+      config: { ...BASE_CONFIG, always_on: false, escalation: 'conservative' },
+      alertState: { alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 19 },
+    });
+    const out = await tick(hermit);
+
+    expect(out.verdict).toBe('EVALUATE');
+    expect(out.next_task).toBeUndefined();
+    expect(out.notifications).toEqual([]);
+    const runtime = read(path.join(hermit, 'state', 'runtime.json'));
+    expect(runtime.session_state).toBe('idle');
+    expect(runtime.waiting_reason).toBeUndefined();
+  });
+
+  // The pierce is idle-only: a live or waiting session already has its own gates,
+  // and a queued task must not re-open them.
+  test('a queued task does not change in_progress or waiting verdicts', async () => {
+    const inProgress = fixture({ nextTask: NEXT_TASK, runtime: { session_state: 'in_progress' } });
+    fs.writeFileSync(path.join(inProgress, 'state', 'last-operator-action.json'),
+      JSON.stringify({ at: new Date(NOW_MS - 60_000).toISOString() }));
+    expect((await tick(inProgress)).verdict).toBe('OK');
+
+    const waiting = fixture({ nextTask: NEXT_TASK, runtime: { session_state: 'waiting' } });
+    expect((await tick(waiting)).verdict).toBe('OK');
+  });
+
+  // Conservative parks the session, which is also what stops the notice re-firing
+  // on every subsequent tick — the pierce only fires while the state is idle.
+  test('next_task: conservative flips runtime to waiting and notifies once', async () => {
+    const hermit = fixture({
+      nextTask: NEXT_TASK,
+      config: { timezone: 'UTC', always_on: true, escalation: 'conservative', heartbeat: { every: '30m', active_hours: ALWAYS_ON } },
+    });
+    const out = await tick(hermit);
+
+    expect(out.next_task).toEqual({ action: 'waiting' });
+    const runtime = read(path.join(hermit, 'state', 'runtime.json'));
+    expect(runtime.session_state).toBe('waiting');
+    expect(runtime.waiting_reason).toBe('conservative_pickup');
+    // Stamped, or a configured waiting_timeout has nothing to measure from and the park
+    // never releases.
+    expect(Date.parse(runtime.waiting_since)).toBe(NOW_MS);
+    expect(out.notifications).toHaveLength(1);
+    expect(out.notifications[0].text).toContain('Wire the release-status script');
+    expect(out.notifications[0].mark_key).toBeUndefined();
+
+    // Parked: the next tick no longer sees an idle session, so no second notice.
+    const again = await tick(hermit);
+    expect(again.next_task).toBeUndefined();
+    expect(again.notifications).toEqual([]);
+  });
+
+  test('next_task: conservative honours config.language', async () => {
+    const hermit = fixture({
+      nextTask: NEXT_TASK,
+      config: { timezone: 'UTC', always_on: true, language: 'pt-PT', escalation: 'conservative', heartbeat: { every: '30m', active_hours: ALWAYS_ON } },
+    });
+    expect((await tick(hermit)).notifications[0].text).toContain('tarefa em fila');
+  });
+
+  test('next_task: balanced and autonomous start without mutating anything', async () => {
+    for (const escalation of ['balanced', 'autonomous']) {
+      const hermit = fixture({
+        nextTask: NEXT_TASK,
+        config: { timezone: 'UTC', always_on: true, escalation, heartbeat: { every: '30m', active_hours: ALWAYS_ON } },
+      });
+      const out = await tick(hermit);
+      expect(out.next_task).toEqual({ action: 'start' });
+      expect(out.notifications).toEqual([]);
+      expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('idle');
+      expect(fs.existsSync(path.join(hermit, 'sessions', 'NEXT-TASK.md'))).toBe(true);
+    }
+  });
+
+  test('next_task: the key is absent with no queued task', async () => {
+    expect((await tick(fixture())).next_task).toBeUndefined();
+    expect((await tick(fixture({ alertState: { alerts: {}, self_eval: {}, total_ticks: 19 } }))).next_task).toBeUndefined();
+  });
+
+  test('--peek mutates nothing when a task is queued', async () => {
+    const hermit = fixture({ nextTask: NEXT_TASK });
+    const before = fs.readFileSync(path.join(hermit, 'state', 'alert-state.json'), 'utf8');
+    expect((await run('precheck', ['--peek', hermit])).trim()).toBe('EVALUATE');
+    expect(fs.readFileSync(path.join(hermit, 'state', 'alert-state.json'), 'utf8')).toBe(before);
   });
 
   test('model: a string heartbeat.model passes through', async () => {

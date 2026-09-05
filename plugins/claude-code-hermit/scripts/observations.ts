@@ -2,6 +2,8 @@
 //
 // Usage: bun observations.ts observe <hermit-state-dir> <source> [--origin=<own-work|external-content>]
 //        <free-text label on stdin, via a quoted heredoc>
+//    or: bun observations.ts graduate <hermit-state-dir> [--cursor <iso>]
+//        prints one JSON line — the patterns reflect promotes to candidates this run.
 //
 // Replaces append-metrics.ts, which took an arbitrary path and arbitrary JSON and
 // so granted every holder of its unattended permission strictly more authority
@@ -17,19 +19,20 @@
 // Exit 0 always; the verdict is the stdout line (OK | ERROR|<token>), matching
 // proposal.ts. A metrics row is telemetry — it must never abort a skill step.
 
-import { emit, flagEq as flag, readStdin } from './lib/cli';
+import { emit, flagEq as flag, flagValue, readStdin } from './lib/cli';
 import { pinStateDirOrExit } from './lib/cc-compat';
-import { CLI_SOURCES, appendObservation, resolveSessionId, type CliSource, type Origin } from './lib/observations';
+import { CLI_SOURCES, appendObservation, graduateObservations, resolveSessionId, type CliSource, type Origin } from './lib/observations';
 
 const USAGE = `Usage: bun observations.ts observe <hermit-state-dir> <${CLI_SOURCES.join('|')}> [--origin=own-work|external-content]
-       <label on stdin>`;
+       <label on stdin>
+   or: bun observations.ts graduate <hermit-state-dir> [--cursor <iso>]`;
 
 async function main(): Promise<void> {
-  const [verb, stateDirArg, source, ...rest] = process.argv.slice(2);
+  const [verb, stateDirArg, ...args] = process.argv.slice(2);
 
   // A mis-invocation is not a resolved verdict — exit 1 so a broken call site is
   // loud in tests and CI rather than silently recording nothing.
-  if (verb !== 'observe' || !stateDirArg || !source) {
+  if ((verb !== 'observe' && verb !== 'graduate') || !stateDirArg) {
     console.error(USAGE);
     process.exit(1);
   }
@@ -40,6 +43,18 @@ async function main(): Promise<void> {
   // model-authored rows to another project's observations ledger — the same
   // mis-invocation class, and refused the same way. See cc-compat.ts.
   const stateDir = pinStateDirOrExit(stateDirArg, 'observations');
+
+  // The graduation set is a pure read over the ledger; one JSON line, never prose.
+  if (verb === 'graduate') {
+    process.stdout.write(JSON.stringify(graduateObservations(stateDir, flagValue(args, '--cursor'))) + '\n');
+    process.exit(0);
+  }
+
+  const [source, ...rest] = args;
+  if (!source) {
+    console.error(USAGE);
+    process.exit(1);
+  }
 
   // Rejecting the computed sources here is what keeps ownership honest: cost-spike,
   // behavior-digest and startup-drift are derived from data the model does not hold,

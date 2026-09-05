@@ -42,7 +42,7 @@
 //     already ends with the identical line). `--request-compact` writes
 //     state/compact-requested.json. Output: `OK|<id>` or `ERROR|<reason>`.
 //
-//   shell-append <stateDir> --section <findings|progress>
+//   shell-append <stateDir> --section <findings|progress|monitoring|blockers>
 //     stdin: the one line to append. Output: `OK` or `ERROR|<reason>`.
 //
 //   next-task <stateDir>
@@ -372,12 +372,21 @@ export function verbPatch(stateDir: string, stdin: string, args: string[]): stri
 
 // ----------------------------------------------------------- shell-append --
 
+const SHELL_SECTIONS: Record<string, string> = {
+  findings: 'Findings',
+  progress: 'Progress Log',
+  monitoring: 'Monitoring',
+  blockers: 'Blockers',
+};
+
 export function verbShellAppend(stateDir: string, stdin: string, args: string[]): string {
   const line = stdin.trim();
-  const section = flagValue(args, '--section');
-  if (section !== 'findings' && section !== 'progress') return 'ERROR|unknown-section';
+  const section = flagValue(args, '--section') ?? '';
+  const heading = Object.prototype.hasOwnProperty.call(SHELL_SECTIONS, section)
+    ? SHELL_SECTIONS[section]
+    : undefined;
+  if (!heading) return 'ERROR|unknown-section';
   if (!line) return 'ERROR|empty-line';
-  const heading = section === 'findings' ? 'Findings' : 'Progress Log';
   const err = appendShellLine(path.join(stateDir, 'sessions'), heading, line);
   if (err) {
     if (err.startsWith('SHELL.md unreadable')) return 'ERROR|shell-unreadable';

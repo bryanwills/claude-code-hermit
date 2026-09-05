@@ -3704,8 +3704,9 @@ describe('heartbeat eval-runner return contract', () => {
     'operator_message', 'suppressed', 'consecutive_clean',
   ];
 
-  test('reference.md Return Schema is exactly {firing, self_eval_updates}', () => {
-    expect(reference).toContain('{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...], "self_eval_updates": {...}}');
+  test('reference.md Return Schema is exactly {firing}', () => {
+    expect(reference).toContain('{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...]}');
+    expect(reference).not.toContain('self_eval_updates');
   });
 
   test('reference.md checklist firing entry documents item', () => {
@@ -3726,14 +3727,21 @@ describe('heartbeat eval-runner return contract', () => {
   });
 
   test('SKILL.md step 5 validates exactly the new required-key list', () => {
-    expect(skill).toContain('missing either required **key** (`firing`, `self_eval_updates`)');
+    expect(skill).toContain('missing the required **key** `firing`');
     for (const field of REMOVED_MODEL_FIELDS) {
       expect(skill).not.toContain(`\`${field}\``);
     }
   });
 
+  // The counters are derived from files the script already reads, so a subagent
+  // that still returns self_eval_updates must not be able to write through.
+  test('SKILL.md takes the self-evaluation from the script, not the subagent', () => {
+    expect(skill).toContain('`self_eval_proposals`');
+    expect(skill).not.toContain('self_eval_updates');
+  });
+
   test('SKILL.md reads appended/notifications/heartbeat_result from the script, not the subagent', () => {
-    expect(skill).toContain('{"appended": <n>, "append_error": "<msg>"?, "notifications": [...], "heartbeat_result"');
+    expect(skill).toContain('{"appended": <n>, "append_error": "<msg>"?, "notifications": [...], "self_eval_proposals"');
     expect(skill).toContain("per the **script's** `heartbeat_result`");
   });
 

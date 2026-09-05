@@ -235,6 +235,16 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
       // file existence was already checked above; any error here is unexpected
       return { id: 'state', status: 'fail', detail: 'template-manifest.json: unreadable' };
     }
+    // A SHELL.md at the hermit root is a wrong-path write: the session file lives in
+    // sessions/, so a stray copy quietly collects appends the real one never gets and
+    // is never archived with the session.
+    if (fs.existsSync(path.join(hermitDir, 'SHELL.md'))) {
+      return {
+        id: 'state',
+        status: 'warn',
+        detail: 'stray SHELL.md at the hermit root: the session file is sessions/SHELL.md — move anything worth keeping across, then delete the stray copy',
+      };
+    }
     return { id: 'state', status: 'ok', detail: `${stateFiles.length} state file(s) parse cleanly` };
   } catch (e: any) {
     return { id: 'state', status: 'fail', detail: `check failed: ${e.message}` };

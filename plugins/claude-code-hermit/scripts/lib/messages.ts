@@ -171,14 +171,19 @@ export const BUDGET: Localized<BudgetMessages> = {
 
 export interface HeartbeatMessages {
   waitingTimeout(timeout: string): string;
+  queuedTask(task: string | null): string;
 }
 
 export const HEARTBEAT: Localized<HeartbeatMessages> = {
   en: {
     waitingTimeout: (timeout) => `Waiting timeout reached after ${timeout} — session returning to idle.`,
+    queuedTask: (task) =>
+      `A task is queued and ready to start${task ? `: ${task}` : ''}. Tell me to go ahead and I'll pick it up.`,
   },
   'pt-PT': {
     waitingTimeout: (timeout) => `Tempo de espera esgotado ao fim de ${timeout} — a sessão volta a ficar inativa.`,
+    queuedTask: (task) =>
+      `Há uma tarefa em fila pronta a começar${task ? `: ${task}` : ''}. Diga-me para avançar e eu trato dela.`,
   },
 };
 

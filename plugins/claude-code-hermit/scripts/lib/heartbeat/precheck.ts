@@ -12,8 +12,8 @@
 // Owner contract (write-field split with SKILL.md):
 //   This script owns: alert-state.json total_ticks, last_stale_wake_at, last_micro_corrupt_wake_at;
 //                     pending-close-drain.json (shared with lib/routines/due.ts, non-peek only)
-//   SKILL.md owns:    alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at,
-//                     structured_read_failure_notified_date (written by `heartbeat.ts alert-state`)
+//   alert-state owns: alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at,
+//                     structured_read_failure_notified_date (the `heartbeat.ts alert-state` verb)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,6 +41,11 @@ const readJSON = (p: string): Json => {
 // the pause-escape gate, the pending-budget gate, and the injection branch.
 export const budgetPending = (dir: string): boolean =>
   Object.values(readMergedAlerts(dir)).some((e: Json) => e?.kind === 'budget' && e.notified === false);
+
+// A task queued by `proposal-act` / `session-start --task` and not yet consumed.
+// Shared by the idle pierce below and the tick's `next_task` composition.
+export const nextTaskQueued = (dir: string): boolean =>
+  fs.existsSync(path.join(dir, 'sessions', 'NEXT-TASK.md'));
 
 // True when an in_progress session has been operator-quiet for >12h (prefers
 // last-operator-action.json, falls back to SHELL.md mtime). Pure read; fail-open
@@ -356,6 +361,19 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
 
   const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
   const sessionState = runtime.session_state ?? 'idle';
+
+  // A queued task on an idle always-on session pierces the damped gates below, the
+  // same way a pending budget alert does: the tick composes `next_task` and the skill
+  // either notifies (conservative) or starts the session. Without this the queue sits
+  // until the next boot.
+  //
+  // Gated on always_on because that is the same condition session-start applies before
+  // it will consume NEXT-TASK.md: an interactive hermit presents the queued task to the
+  // operator instead, leaving the file and the idle state exactly as they were — so an
+  // ungated pierce would re-fire this EVALUATE on every tick for as long as the task
+  // sits there, and each one is a paid full-context wake. Their next boot presents it
+  // anyway, which is the wait this pierce exists to remove for unattended hermits only.
+  if (sessionState === 'idle' && config.always_on === true && nextTaskQueued(stateDir)) return 'EVALUATE';
 
   if (sessionState === 'in_progress') {
     // 12h operator-quiet → auto-close. The action-file resolution below is kept

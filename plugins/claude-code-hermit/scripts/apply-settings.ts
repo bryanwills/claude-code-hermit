@@ -86,11 +86,17 @@ const HERMIT_ALLOW = [
   // trailing `*` — CC 2.1.246 warns at startup on a fully-literal argument following
   // a wildcard-containing one (e.g. `observe *`), so this mirrors the other
   // verb-pinned `bun */scripts/…` entries below (`tz-shift*`, `precheck*`, etc).
-  // `observations.ts:32` still hard-rejects any verb but `observe`, so `observe*`
+  // `observations.ts` still hard-rejects any verb it does not own, so `observe*`
   // matching a hypothetical `observeXYZ` reaches a script that refuses it — the
   // grant is not actually widened by dropping the space. Replaces the old
   // append-metrics.ts entry, which granted "write any JSON to any path".
   'Bash(bun */scripts/observations.ts observe*)',
+  // `graduate` is reflect's step-3b read of the ledger; it writes nothing. Like every
+  // wildcarded entry here it clears the permission engine in the other modes and is
+  // suspended under auto mode (docs/security.md § Auto-mode Classifier) — the literal
+  // hermit-run grants below are not the remedy for that, they exist for a different
+  // reason (routes with no pre-resolved path; reflect's call site resolves its own).
+  'Bash(bun */scripts/observations.ts graduate*)',
   'Bash(bun */scripts/proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',
   'Bash(bun */scripts/update-reflection-state.ts*)',

@@ -19,7 +19,8 @@
 //   bun routines.ts finish <routine-id> [delivery]
 //     Terminal gate for a fire. Verifies any declared `expect_artifact` contract
 //     against the baseline `precheck` froze, writes the one terminal ledger row,
-//     and prints `fired` or `failed|<reason>|<detail>`.
+//     and prints `fired` or `failed|<reason>|<detail>`. Optional stdin: the fire's
+//     one-line outcome, appended to SHELL.md's `## Progress Log`.
 //
 //   bun routines.ts log-event <routine-id> <event> [delivery]
 //     Appends one line to state/routine-metrics.jsonl.
@@ -69,8 +70,10 @@ switch (verb) {
     break;
   }
   case 'finish': {
+    const { readStdin } = await import('./lib/cli');
+    const outcome = process.stdin.isTTY ? '' : await readStdin();
     const { run } = await import('./lib/routines/finish');
-    run(rest);
+    run(rest, outcome);
     break;
   }
   case 'log-event': {
