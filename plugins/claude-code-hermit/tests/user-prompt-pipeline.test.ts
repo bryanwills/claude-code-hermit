@@ -12,7 +12,7 @@
 // Driven as a subprocess against a local HTTP stub, mirroring shutdown-gate.test.ts
 // and channel-status-responder.test.ts.
 
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
@@ -23,12 +23,23 @@ import { startHttpStub } from './helpers/http-stub';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
+const workdirs: Workdir[] = [];
+afterAll(() => {
+  for (const wd of workdirs.splice(0)) wd.cleanup();
+});
+
+function trackedWorkdir(): Workdir {
+  const wd = setupWorkdir();
+  workdirs.push(wd);
+  return wd;
+}
+
 function envelope(body: string, user = 'u1', chatId = '12345'): string {
   return `<channel source="telegram" chat_id="${chatId}" user="${user}">${body}</channel>`;
 }
 
 function setupChannelWorkdir(channelExtra: Record<string, unknown> = {}): Workdir {
-  const wd = setupWorkdir();
+  const wd = trackedWorkdir();
   const stateDir = path.join(wd.dir, '.claude.local', 'channels', 'telegram');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_TOKEN=test-token\n');
@@ -356,7 +367,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   }
 
   test('reports the transcript model once the switch is observable, then clears the marker', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     seedDeliveredSwitch(wd);
     const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: POST_SWITCH_AT }]);
 
@@ -371,7 +382,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   // The marker belongs to the RESIDENT — a guest reporting it would announce a switch
   // that never touched its own session, and clear the marker before the resident read it.
   test('a guest session reports nothing and leaves the marker for the resident', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     seedDeliveredSwitch(wd);
     const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: POST_SWITCH_AT }]);
     markGuest(hermit(wd.dir, 'state'), 'guest-1');
@@ -385,7 +396,7 @@ describe('user-prompt-pipeline: switch verification', () => {
 
   // The bug this whole path exists to prevent: answering from the PRE-switch entry.
   test('holds the marker while only pre-switch entries exist, and never names that model', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     seedDeliveredSwitch(wd);
     const transcript = writeTranscript(wd, [{ model: 'claude-sonnet-5', timestamp: PRE_SWITCH_AT }]);
 
@@ -398,7 +409,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   });
 
   test('a payload without a transcript_path holds the marker rather than guessing', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     seedDeliveredSwitch(wd);
 
     const r = await runWith(wd, null);
@@ -409,7 +420,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   });
 
   test('no marker means the stage says nothing', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
     const transcript = writeTranscript(wd, [{ model: 'claude-fable-5', timestamp: POST_SWITCH_AT }]);
 
@@ -423,7 +434,7 @@ describe('user-prompt-pipeline: switch verification', () => {
   // must not get to it first — held there it would sit behind an assistant entry that says
   // nothing about it, and describe itself in model terms while doing so.
   test('answers a permission-mode switch from the pane, not the transcript gate', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
     fs.mkdirSync(path.dirname(verifyMarker(wd.dir)), { recursive: true });
     fs.writeFileSync(verifyMarker(wd.dir), JSON.stringify({
@@ -450,7 +461,7 @@ describe('user-prompt-pipeline: fail-open contract', () => {
   test('malformed stdin exits 0 and still runs the payload-independent stages', async () => {
     // A prompt did arrive — MAX_STDIN_BYTES truncation is what cuts it mid-JSON —
     // so the turn must still be recorded and timestamped.
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
 
     const r = await runScript('user-prompt-pipeline.ts', { stdin: '{broken', cwd: wd.dir });
@@ -508,14 +519,14 @@ describe('user-prompt-pipeline: fail-open contract', () => {
   });
 
   test('empty stdin exits 0 and emits nothing', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     const r = await runScript('user-prompt-pipeline.ts', { stdin: '', cwd: wd.dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
   });
 
   test('an over-cap prompt is truncated but still recorded', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
 
     const r = await runScript('user-prompt-pipeline.ts', {
@@ -529,7 +540,7 @@ describe('user-prompt-pipeline: fail-open contract', () => {
   });
 
   test('an ordinary prompt still records the operator-action markers', async () => {
-    const wd = setupWorkdir();
+    const wd = trackedWorkdir();
     fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
 
     const r = await runScript('user-prompt-pipeline.ts', {

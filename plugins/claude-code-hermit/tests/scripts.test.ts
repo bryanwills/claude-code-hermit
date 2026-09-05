@@ -16,7 +16,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 import { runScript, runProposal, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR, MONOREPO_ROOT } from './helpers/run';
-import { setupGitWorkdir, setupWorkdir, fixturesDir, withDir, writeConfig, type Workdir } from './helpers/workdir';
+import { setupGitWorkdir, setupWorkdir, fixturesDir, freshDirFactory, withDir, writeConfig, type Workdir } from './helpers/workdir';
 import { assistantEntry } from './helpers/transcript';
 import { deriveStaleSession, STALE_KEY } from '../scripts/lib/alert-state';
 import { logRoutineEvent } from '../scripts/lib/routines/event';
@@ -36,6 +36,11 @@ import { search } from '../scripts/lib/search';
 import { logMessage, searchLog, unconsolidated, markConsolidated, prune, dbExists } from '../scripts/lib/channel-log';
 
 // ---------- small local helpers ----------
+
+// Fixtures handed out as bare paths (no per-test teardown hook to hang cleanup on).
+const { freshDir: freshCredRoot, cleanup: cleanupCredRoots } = freshDirFactory('hermit-credroot-');
+const { freshDir: freshModelDir, cleanup: cleanupModelDirs } = freshDirFactory('last-model-');
+afterAll(() => { cleanupCredRoots(); cleanupModelDirs(); });
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
@@ -1225,7 +1230,7 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
 
-    const pluginRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-credroot-')), 'plugins', 'claude-code-hermit');
+    const pluginRoot = path.join(freshCredRoot(), 'plugins', 'claude-code-hermit');
     fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
     fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), '{"name":"claude-code-hermit","version":"1.0.0"}');
     fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'hermit-meta.json'), JSON.stringify({
@@ -3491,7 +3496,7 @@ describe('cc-compat', () => {
   // lastAssistantModel: the transcript is ground truth for the serving model
   describe('cc-compat.js: lastAssistantModel', () => {
     const write = (lines: string[]): string => {
-      const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'last-model-')), 'transcript.jsonl');
+      const file = path.join(freshModelDir(), 'transcript.jsonl');
       fs.writeFileSync(file, `${lines.join('\n')}\n`);
       return file;
     };

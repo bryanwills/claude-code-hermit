@@ -5,7 +5,7 @@
 // The remote is a local bare repo (`local` push kind), so the push path is
 // exercised end to end without a network or a token.
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -13,6 +13,7 @@ import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-backup-run-');
+afterAll(cleanup);
 
 const IDENT = ['-c', 'user.name=test', '-c', 'user.email=test@test', '-c', 'commit.gpgsign=false'];
 
@@ -330,5 +331,3 @@ describe('backup status', () => {
     expect(git(f.root, 'rev-parse', 'HEAD').trim()).toBe(head);
   });
 });
-
-process.on('exit', cleanup);

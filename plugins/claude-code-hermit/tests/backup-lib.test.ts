@@ -4,7 +4,7 @@
 // Scheduling is asserted with an injected `now` rather than wall-clock so the
 // cursor semantics (at-most-once, no catch-up, 24h floor) are provable.
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -28,6 +28,7 @@ import {
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-backup-lib-');
+afterAll(cleanup);
 
 function hermitAt(dir: string): string {
   const h = path.join(dir, '.claude-code-hermit');
@@ -337,5 +338,3 @@ describe('validate-config: backup block', () => {
     expect(errorsFor(['nope'])[0]).toContain('backup: must be an object');
   });
 });
-
-process.on('exit', cleanup);

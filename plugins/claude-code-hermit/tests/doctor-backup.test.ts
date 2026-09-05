@@ -3,7 +3,7 @@
 // windows warn; one does not (a reboot or a busy tick looks like one miss, and a
 // check that cries at that gets ignored).
 
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { checkBackup, resolvePaths } from '../scripts/doctor-check';
@@ -11,6 +11,7 @@ import { PLUGIN_ROOT } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-doctor-backup-');
+afterAll(cleanup);
 
 const HOUR = 3600_000;
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
@@ -112,5 +113,3 @@ describe('doctor: backup', () => {
     expect(r.status).not.toBe('fail');
   });
 });
-
-process.on('exit', cleanup);

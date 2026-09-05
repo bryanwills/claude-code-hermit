@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { markerOnward, extractSiblingMarker, classifyDockerTemplates } from '../scripts/evolve-plan';
 import { render, renderSources } from '../scripts/render-docker-templates';
 
@@ -27,6 +28,10 @@ let SP: string;
 // Path to a file containing `[]` — passed as --plugin-list-json to keep existing
 // tests hermetic (no live `claude plugin list` spawn needed for non-sibling tests).
 let EMPTY_PLUGIN_LIST: string;
+
+// The only fixture here without its own `finally` cleanup: writePluginList()
+// hands back a path, so removal has to wait for the end of the file.
+const { freshDir: freshPluginListDir, cleanup: cleanupPluginListDirs } = freshDirFactory('hermit-pl-');
 
 beforeAll(() => {
   PR = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-evolve-pr-'));
@@ -106,6 +111,7 @@ afterAll(() => {
   try { fs.rmSync(PR, { recursive: true, force: true }); } catch {}
   try { fs.rmSync(SP, { recursive: true, force: true }); } catch {}
   try { fs.rmSync(EMPTY_PLUGIN_LIST); } catch {}
+  cleanupPluginListDirs();
 });
 
 /** Run a test body against a throwaway project tree, always cleaning up. */
@@ -721,7 +727,7 @@ test('docker entrypoint: base_path absent without a pristine copy', withProj(asy
 
 /** Write a plugin-list fixture JSON to a temp file and return its path. */
 function writePluginList(entries: any[]): string {
-  const p = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-pl-')) + '/list.json';
+  const p = freshPluginListDir() + '/list.json';
   fs.writeFileSync(p, JSON.stringify(entries, null, 2));
   return p;
 }

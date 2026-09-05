@@ -182,17 +182,18 @@ describe('persistDmChannelId — default_chat_id pin', () => {
 // event.transcript_path, finds the boundary prompt that opened the current
 // turn, and checks it's a <channel> envelope from the SAME chat as the reply.
 describe('isEligibleInboundReply — transcript-derived eligibility', () => {
-  let tmpFile: string | null = null;
+  const tmpDirs: string[] = [];
 
   afterEach(() => {
-    if (tmpFile) {
-      try { fs.rmSync(tmpFile, { force: true }); } catch {}
-      tmpFile = null;
+    for (const d of tmpDirs.splice(0)) {
+      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
     }
   });
 
   function writeTranscript(lines: string[]): string {
-    tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'channel-hook-test-')), 'transcript.jsonl');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'channel-hook-test-'));
+    tmpDirs.push(dir);
+    const tmpFile = path.join(dir, 'transcript.jsonl');
     fs.writeFileSync(tmpFile, lines.map(l => JSON.stringify({ type: 'user', message: { content: l } })).join('\n') + '\n');
     return tmpFile;
   }

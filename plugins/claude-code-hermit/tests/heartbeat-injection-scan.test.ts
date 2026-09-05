@@ -6,14 +6,18 @@
 //
 // Usage: bun test tests/heartbeat-injection-scan.test.ts   (from the plugin root)
 
-import { describe, test, expect } from 'bun:test';
+import { afterAll, describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
 import { scanForInjection } from '../scripts/lib/injection-scan';
 import { sha256 } from '../scripts/lib/hash';
+
+const { freshDir, cleanup } = freshDirFactory('hermit-hbinject-');
+const { freshDir: freshMonitorDir, cleanup: cleanupMonitor } = freshDirFactory('hermit-hbmonitor-');
+afterAll(() => { cleanup(); cleanupMonitor(); });
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
@@ -39,7 +43,7 @@ function build(opts: {
   budget?: 'pending' | 'notified';
   staleInProgress?: boolean;
 }): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-hbinject-'));
+  const dir = freshDir();
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
   fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
   fs.writeFileSync(hermit(dir, 'config.json'), CONFIG);
@@ -188,7 +192,7 @@ describe('injection gate: safety-gate pass-through under taint', () => {
 
 describe('heartbeat-monitor.sh wakes on ALERT', () => {
   test('ALERT verdict from precheck triggers HEARTBEAT_EVALUATE even on first iteration', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-hbmonitor-'));
+    const dir = freshMonitorDir();
     const stub = path.join(dir, 'stub-precheck.ts');
     fs.writeFileSync(stub, `process.stdout.write('ALERT|injection-suspect:abc123|override at line 4\\n');\n`);
     const scriptsDir = path.join(PLUGIN_ROOT, 'scripts');
