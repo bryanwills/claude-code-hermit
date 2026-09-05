@@ -5,7 +5,7 @@
 import { run as costTracker } from './cost-tracker';
 import { run as sessionDiff } from './session-diff';
 import { run as evaluateSession } from './evaluate-session';
-import { sessionCrons, backgroundTasks, ccVersion, hermitDir } from './lib/cc-compat';
+import { sessionCrons, backgroundTasks, ccVersion, hermitDir, sessionId } from './lib/cc-compat';
 import { drainHarnessCommand } from './lib/harness-drain';
 import { isGuest } from './lib/guest-marker';
 import fs from 'node:fs';
@@ -39,12 +39,16 @@ async function main(): Promise<void> {
     }
   }
 
+  const guest = isGuest(STATE_DIR, sessionId(payload));
+
   // Operator-turn marker: whichever turn opened it is over — routines may fire.
   // Cleared before the stages, not after: this hook has a 15s timeout and the
   // stages below can burn it on a large session. A clear stranded behind them
   // would defer every monitor-delivered routine for the marker's full TTL —
   // the starvation class issue #617 fixed, just time-bounded.
-  try { fs.unlinkSync(TURN_FILE); } catch {}
+  if (!guest) {
+    try { fs.unlinkSync(TURN_FILE); } catch {}
+  }
 
   const profile = (process.env.AGENT_HOOK_PROFILE || 'standard').trim().toLowerCase();
   const isStandardPlus = profile !== 'minimal';
@@ -74,8 +78,10 @@ async function main(): Promise<void> {
   // the hook that recorded it deliberately did NOT type, because it runs at turn START.
   // Runs before the heartbeat touch but after the accounting stages, so a /clear can
   // never race cost-tracker still reading the outgoing transcript.
-  try { drainHarnessCommand(HERMIT_DIR); }
-  catch (e: any) { console.error(`[stop-pipeline] harness-command: ${e.message}`); }
+  if (!guest) {
+    try { drainHarnessCommand(HERMIT_DIR); }
+    catch (e: any) { console.error(`[stop-pipeline] harness-command: ${e.message}`); }
+  }
 
   // Guaranteed heartbeat touch — runs even if all stages fail.
   //
@@ -84,9 +90,11 @@ async function main(): Promise<void> {
   // frozen resident never looks stale and is never restarted. The verdict was frozen
   // at the guest's session start, so if the resident dies mid-session the file goes
   // stale and the restart happens — which is the wanted outcome.
-  if (!isGuest(STATE_DIR, payload.session_id)) {
+  if (!guest) {
     try { fs.writeFileSync(HEARTBEAT_FILE, new Date().toISOString() + '\n'); } catch {}
   }
+
+  if (guest) return;
 
   // Write CC-stop-payload snapshot (tri-state, labeled with captured_at).
   // sole writer for state/cc-stop-snapshot.json. Fail-open.

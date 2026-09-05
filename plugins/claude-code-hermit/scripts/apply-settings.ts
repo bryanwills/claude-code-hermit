@@ -131,6 +131,7 @@ const HERMIT_ALLOW = [
   // deterministic call out of the permission engine.
   'Bash(bun */scripts/routines.ts arm*)',
   'Bash(bun */scripts/heartbeat.ts tick*)',
+  'Bash(bun */scripts/heartbeat.ts ack-next-task*)',
   'Bash(bun */scripts/heartbeat.ts start-check*)',
   'Bash(bun */scripts/heartbeat.ts start-commit*)',
   // Domain plugins reach core's shared scripts through the project-resident

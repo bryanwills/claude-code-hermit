@@ -5,13 +5,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pinStateDirOrExit } from './lib/cc-compat';
-import { findSection } from './lib/md-write';
+import { findSection, withShellLock } from './lib/md-write';
 
 type Json = any;
 
 function emit(obj: Json) {
   process.stdout.write(JSON.stringify(obj) + '\n');
-  process.exit(0);
 }
 
 function pad2(n: number) { return String(n).padStart(2, '0'); }
@@ -61,6 +60,12 @@ function main() {
   const stateDir = typeof args['state-dir'] === 'string'
     ? pinStateDirOrExit(args['state-dir'], 'archive-shell')
     : path.resolve(process.env.HERMIT_STATE_DIR || '.claude-code-hermit');
+  const shellPath = path.join(stateDir, 'sessions', 'SHELL.md');
+  if (!fs.existsSync(path.dirname(shellPath))) return emit({ archived: false, reason: 'shell-empty' });
+  return withShellLock(shellPath, () => snapshotShell(stateDir, source));
+}
+
+function snapshotShell(stateDir: string, source: string): void {
   const sessionsDir = path.join(stateDir, 'sessions');
   const snapshotsDir = path.join(sessionsDir, 'snapshots');
   const shellPath = path.join(sessionsDir, 'SHELL.md');
@@ -134,8 +139,8 @@ function main() {
     );
   }
 
-  // Single-writer: archive fires only inside reflect-precheck, after
-  // hermit-start has settled — so RMW here doesn't race other writers.
+  // Coordinate with session lifecycle writes through the SHELL lock. Other
+  // runtime-only writers keep their own existing ownership contracts.
   try {
     const runtimeRaw = fs.readFileSync(runtimePath, 'utf-8');
     const runtime = JSON.parse(runtimeRaw);

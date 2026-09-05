@@ -2,14 +2,14 @@
 // still earn its place, and is the checklist itself getting too heavy?
 //
 // Every input is a file this process already reads — the checklist, the alert
-// texts, SHELL.md's `## Monitoring` history and session id, and `proposals/*.md`
+// state, SHELL.md's session id, and `proposals/*.md`
 // frontmatter — so none of it needs judgment. It runs inside `heartbeat.ts
 // alert-state`, which owns `self_eval{}`; the counters it produces are written
 // with the rest of the tick's state, and the entries that cross a threshold are
 // handed back for the skill to turn into proposals.
 //
 // Two counters, mirror images, both advanced once per pass (not per tick):
-//   clean_ticks — passes in which the item raised nothing. Twenty of those with
+//   clean_ticks: intervals in which the item raised nothing. Twenty of those with
 //                 three distinct sessions behind them means the item is dead weight.
 //   noise_ticks — passes in which an item whose proposal the operator already
 //                 dismissed fired anyway. Same threshold, opposite conclusion.
@@ -17,14 +17,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, listProposalFiles } from '../frontmatter';
-import { extractSection } from '../md-write';
 import { normalizeItemKey, parseChecklistItems } from '../heartbeat-items';
 
 type Json = any;
 
 export const WEIGHT_KEY = 'checklist-weight';
-/** Heartbeat monitoring lines that count as "the last 20 ticks" of history. */
-const WINDOW_LINES = 20;
 const TICK_THRESHOLD = 20;
 const SESSIONS_THRESHOLD = 3;
 const MAX_CHECKLIST_ITEMS = 10;
@@ -53,16 +50,6 @@ function readSessionId(shell: string): string | null {
 }
 
 /**
- * The tail of SHELL.md's `## Monitoring` — the durable per-tick record of what the
- * heartbeat actually said. An item fired during the window when one of these lines
- * carries its alert text.
- */
-function monitoringWindow(shell: string, pending: string[]): string[] {
-  const body = extractSection(shell, 'Monitoring') ?? '';
-  return [...body.split('\n'), ...pending].filter(l => l.includes('Heartbeat:')).slice(-WINDOW_LINES);
-}
-
-/**
  * Compute this pass's `self_eval{}` and the entries that crossed a proposal
  * threshold. Pure over its inputs apart from the two file reads it owns
  * (HEARTBEAT.md, proposals/). Never throws: a read it cannot make contributes
@@ -73,13 +60,11 @@ export function runSelfEval(opts: {
   prevSelfEval: Json;
   alerts: Json;          // this tick's classified alerts, keyed like the checklist
   shell: string;         // sessions/SHELL.md content ('' when unreadable)
-  pendingLines: string[]; // this tick's monitoring lines, not yet on disk
   today: string;         // tz-local YYYY-MM-DD, for first_observed
 }): { self_eval: Json; proposals: SelfEvalProposal[] } {
   const { stateDir, alerts, shell, today } = opts;
   const self_eval: Json = { ...(opts.prevSelfEval && typeof opts.prevSelfEval === 'object' ? opts.prevSelfEval : {}) };
   const items = readChecklist(stateDir);
-  const window = monitoringWindow(shell, opts.pendingLines);
   const sessionId = readSessionId(shell);
 
   const upsert = (key: string, text: string): Json => {
@@ -113,17 +98,18 @@ export function runSelfEval(opts: {
     markSession(entry);
   };
 
-  // A pass is "clean" for an item when nothing in the window mentions it. The alert
-  // text is the only link between a key and its monitoring lines, so it is carried
-  // on the entry — an item that has never fired has none, and reads clean.
+  // Count any firing since the previous pass, including suppressed alerts that
+  // recovered before this boundary. Consume the evidence for the next interval.
   const fired = new Set<string>();
   for (const item of items) {
     const key = normalizeItemKey(item);
     if (!key) continue;
     const entry = upsert(key, item);
-    const alertText = typeof alerts?.[key]?.text === 'string' ? alerts[key].text : entry.alert_text;
-    if (typeof alertText === 'string' && alertText) entry.alert_text = alertText;
-    if (typeof entry.alert_text === 'string' && window.some(l => l.includes(entry.alert_text))) {
+    delete entry.alert_text;
+    const alert = alerts?.[key];
+    const firedInInterval = entry.fired_since_self_eval === true;
+    delete entry.fired_since_self_eval;
+    if (firedInInterval || (alert && (alert.consecutive_clean ?? 0) === 0)) {
       fired.add(key);
       entry.clean_ticks = 0;
       markSession(entry);

@@ -11,6 +11,7 @@
 
 import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
+import { acquireLock, releaseLock } from '../scripts/lib/lockfile';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
@@ -81,10 +82,12 @@ function monitoring(hermit: string): string[] {
 }
 
 async function run(verb: string, args: string[], env: Record<string, string> = {}) {
-  const r = await runScript('heartbeat.ts', { args: [verb, ...args], env: { HERMIT_NOW: NOW, ...env } });
+  const r = await runScript('heartbeat.ts', { args: [verb, ...args], env: { HERMIT_NOW: NOW, ...(verb === 'ack-next-task' ? { AGENT_DIR: args[0] } : {}), ...env } });
   expect(r.exitCode).toBe(0);
   return r.stdout;
 }
+
+const ack = async (hermit: string, token: string) => JSON.parse((await run('ack-next-task', [hermit, token])).trim());
 
 const tick = async (hermit: string) => JSON.parse((await run('tick', [hermit])).trim());
 
@@ -206,6 +209,7 @@ describe('heartbeat tick', () => {
     const parked = await tick(hermit);
     expect(parked.next_task).toEqual({ action: 'waiting' });
     expect(parked.notifications).toHaveLength(1);
+    expect((await ack(hermit, parked.notifications[0].ack_next_task)).parked).toBe(true);
     expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('waiting');
   });
 
@@ -321,7 +325,7 @@ describe('heartbeat tick', () => {
 
   // Conservative parks the session, which is also what stops the notice re-firing
   // on every subsequent tick — the pierce only fires while the state is idle.
-  test('next_task: conservative flips runtime to waiting and notifies once', async () => {
+  test('next_task: conservative parks only after confirmed delivery', async () => {
     const hermit = fixture({
       nextTask: NEXT_TASK,
       config: { timezone: 'UTC', always_on: true, escalation: 'conservative', heartbeat: { every: '30m', active_hours: ALWAYS_ON } },
@@ -329,6 +333,9 @@ describe('heartbeat tick', () => {
     const out = await tick(hermit);
 
     expect(out.next_task).toEqual({ action: 'waiting' });
+    expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('idle');
+    expect(out.notifications[0].ack_next_task).toMatch(/^[a-f0-9]{64}$/);
+    expect((await ack(hermit, out.notifications[0].ack_next_task)).parked).toBe(true);
     const runtime = read(path.join(hermit, 'state', 'runtime.json'));
     expect(runtime.session_state).toBe('waiting');
     expect(runtime.waiting_reason).toBe('conservative_pickup');
@@ -616,4 +623,65 @@ describe('heartbeat start-commit', () => {
     // heartbeat leg is absent from the reasons.
     expect(r.stdout).not.toContain('heartbeat:');
   });
+});
+
+
+describe('queued-task delivery acknowledgement', () => {
+  const queued = () => fixture({ nextTask: NEXT_TASK, config: {
+    ...BASE_CONFIG, always_on: true, escalation: 'conservative',
+  } });
+
+  test('failed delivery or exit before acknowledgement leaves the request eligible', async () => {
+    const hermit = queued();
+    const first = await tick(hermit);
+    const retry = await tick(hermit);
+    expect(retry.notifications).toEqual(first.notifications);
+    expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('idle');
+    const token = retry.notifications[0].ack_next_task;
+    expect((await ack(hermit, token)).parked).toBe(true);
+    const parked = fs.readFileSync(path.join(hermit, 'state', 'runtime.json'), 'utf-8');
+    expect((await ack(hermit, token)).parked).toBe(false);
+    expect(fs.readFileSync(path.join(hermit, 'state', 'runtime.json'), 'utf-8')).toBe(parked);
+  });
+
+  test('the acknowledgement CLI rejects another project even with its matching token', async () => {
+    const own = queued();
+    const foreign = queued();
+    const token = (await tick(foreign)).notifications[0].ack_next_task;
+    const result = await runScript('heartbeat.ts', {
+      args: ['ack-next-task', foreign, token], env: { AGENT_DIR: own },
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(read(path.join(foreign, 'state', 'runtime.json')).session_state).toBe('idle');
+    expect(read(path.join(own, 'state', 'runtime.json')).session_state).toBe('idle');
+  });
+
+  test('acknowledgement retries while the session lifecycle holds the shared lock', async () => {
+    const hermit = queued();
+    const token = (await tick(hermit)).notifications[0].ack_next_task;
+    const lock = path.join(hermit, 'sessions', 'SHELL.md.lock');
+    expect(acquireLock(lock)).toBe(true);
+    try {
+      expect(await ack(hermit, token)).toEqual({ parked: false, reason: 'lock-unavailable' });
+      expect(read(path.join(hermit, 'state', 'runtime.json')).session_state).toBe('idle');
+    } finally { releaseLock(lock); }
+    expect((await ack(hermit, token)).parked).toBe(true);
+  }, 10000);
+
+  for (const change of ['replace queue', 'remove queue', 'start task', 'new idle arc', 'change escalation', 'unreadable runtime']) {
+    test(`delayed acknowledgement preserves current state after ${change}`, async () => {
+      const hermit = queued();
+      const out = await tick(hermit);
+      const token = out.notifications[0].ack_next_task;
+      if (change === 'replace queue') fs.appendFileSync(path.join(hermit, 'sessions', 'NEXT-TASK.md'), '\nDifferent instructions.');
+      if (change === 'remove queue') fs.unlinkSync(path.join(hermit, 'sessions', 'NEXT-TASK.md'));
+      if (change === 'start task') write(hermit, 'state/runtime.json', { session_state: 'in_progress' });
+      if (change === 'new idle arc') write(hermit, 'state/runtime.json', { session_state: 'idle', session_id: 'S-099' });
+      if (change === 'change escalation') write(hermit, 'config.json', { ...BASE_CONFIG, always_on: true, escalation: 'balanced' });
+      if (change === 'unreadable runtime') fs.writeFileSync(path.join(hermit, 'state', 'runtime.json'), '{broken');
+      const before = fs.readFileSync(path.join(hermit, 'state', 'runtime.json'), 'utf-8');
+      expect((await ack(hermit, token)).parked).toBe(false);
+      expect(fs.readFileSync(path.join(hermit, 'state', 'runtime.json'), 'utf-8')).toBe(before);
+    });
+  }
 });

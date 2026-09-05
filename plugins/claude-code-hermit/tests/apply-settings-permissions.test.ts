@@ -69,6 +69,7 @@ describe('apply-settings permissions-plan', () => {
   test('reports every canonical entry as missing for an absent target', withTarget(async (target) => {
     const plan = await run(target, 'permissions-plan');
     expect(plan.missing).toEqual(HERMIT_ALLOW);
+    expect(plan.missing).toContain('Bash(bun */scripts/heartbeat.ts ack-next-task*)');
     expect(plan.obsolete).toEqual([]);
     expect(plan.obsolete_deny).toEqual([]);
   }));

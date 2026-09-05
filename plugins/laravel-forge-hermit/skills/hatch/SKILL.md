@@ -75,7 +75,7 @@ If composer exits non-zero, surface the error. Common cause: egress blocked — 
 
 ## Step 3 — Verify .env + consumer .gitignore
 
-**Do NOT use `cat`, `grep`, `echo`, or any Bash command to read `.env`.** The `FORGE_API_TOKEN` key name contains `TOKEN`, which triggers the base hermit's deny-pattern hook on Bash args. Use the **Read tool** only — and only to check the file exists / has the key, never to relay the value.
+Credential verification belongs to `forge.php check` in Step 4. Do not read `.env` into context.
 
 Tell the operator:
 

@@ -1,58 +1,20 @@
 # hermit-scribe
 
-A maintainer utility skill that files GitHub issues via a configured GitHub App bot identity. No server, no build, pure Node stdlib APIs run with Bun.
+A maintainer utility skill that files GitHub issues and comments through a configured GitHub App bot identity. No server, no build, Node stdlib APIs only, run with Bun. A Claude Code plugin, not a standalone project: install from the marketplace (README) into a project where core is already hatched.
 
-## This Repo is a Plugin
+## Structure
 
-This repo is structured as a Claude Code plugin. It is NOT a standalone project. It requires `claude-code-hermit` ≥1.2.53; upgrade core with `/claude-code-hermit:hermit-evolve` before installing or running this release. It gets installed into other projects via:
+- `skills/hermit-scribe/SKILL.md`: the skill (`/hermit-scribe:hermit-scribe`): prepare content, run the sanitizer, show the final content, get operator approval, then publish. A clean sanitizer pass never authorizes posting on its own.
+- `agents/issue-sanitizer.md`: strips anything personal or specific to the operator's machine and project unless it is clearly part of an upstream hermit plugin. It has no tools: pass it the draft text itself, never a path or an identifier.
+- `skills/hermit-scribe/file-issue.ts`: signs the App JWT, gets an installation token, and files or comments. Positional args `<title-file> <body-file> [label...]`; the `hermit-filed` label is always present and extra labels append to it. Also `--check <proposal-id>` (dedup lookup), `--comment <issue-number> <body-file>`, `--templates` (issue-template filenames from the target repo via the API), and `classify <category> <title-file> <body-file>` (Conventional-Commits `{type, scope, labels, title_line}`, scope resolved against `_hermit_versions` in `.claude-code-hermit/config.json`). Exports `{ buildLabels, deriveType, resolveScope, deriveLabels, buildTitleLine }` for unit tests. Title and body are read from files; nothing is interpolated into a shell command.
+- `skills/hatch/SKILL.md`: version-gated setup/refresh: appends or replaces the marked Issue Filing block from `state-templates/CLAUDE-APPEND.md`, stamps `_hermit_versions["hermit-scribe"]` in `config.json`, and runs `scripts/automode-env.ts`, which writes one `autoMode.environment` entry for `api.github.com` (scoped to `HERMIT_GH_REPO`) into `.claude/settings.local.json`; additive and idempotent, ungated because filing is always operator-confirmed.
 
-```
-claude plugin marketplace add gtapps/claude-code-hermit
-claude plugin install hermit-scribe@claude-code-hermit --scope local
-```
+## Configuration
 
-## Plugin Structure
+`HERMIT_GH_APP_ID`, `HERMIT_GH_APP_INSTALL_ID`, `HERMIT_GH_APP_KEY_FILE`, and the optional `HERMIT_GH_REPO` override (default `gtapps/claude-code-hermit`) are described in `README.md` § Env vars; they come from the project `.env` (Docker `env_file:`) or the `env` block of `.claude/settings.local.json`. The private key lives at `.claude.local/hermit-scribe-key.pem` (gitignored), outside the plugin tree. The script targets the configured repo with the bot identity, never the maintainer's ambient `gh` login.
 
-- `agents/issue-sanitizer.md`: subagent that sanitizes draft issue content before filing — strips anything personal or specific to the operator's machine and project unless it's clearly part of an upstream hermit plugin. Tools: none (pure text transform).
-- `skills/hermit-scribe/SKILL.md`: the skill, namespaced as `/hermit-scribe:hermit-scribe`
-- `skills/hermit-scribe/file-issue.ts`: stdlib-only TypeScript script (run with Bun) that signs the JWT, gets an install token, and POSTs the issue. Positional args: `<title-file> <body-file> [label...]` — extra labels are appended to the always-present `hermit-filed` label and passed in the POST body. Supports `--check <proposal-id>` to query existing issues before filing, `--comment <issue-number> <body-file>` to post a comment on an existing issue, `--templates` to list issue-template filenames under the target repo's `.github/ISSUE_TEMPLATE/` (GitHub API, not the local checkout), and `classify <category> <title-file> <body-file>` to derive the Conventional-Commits `{type, scope, labels, title_line}` from a proposal's category and raw text (scope resolved against `_hermit_versions` in `.claude-code-hermit/config.json`). Exports `{ buildLabels, deriveType, resolveScope, deriveLabels, buildTitleLine }` for unit testing.
-- `skills/hatch/SKILL.md`: version-gated setup/refresh — appends or replaces `state-templates/CLAUDE-APPEND.md`'s marked Issue Filing block, stamps `_hermit_versions["hermit-scribe"]` in `.claude-code-hermit/config.json`, and runs `scripts/automode-env.ts` to seed an auto-mode classifier environment entry for `api.github.com`.
-- `scripts/automode-env.ts`: writes one `autoMode.environment` entry (scoped to `HERMIT_GH_REPO`) into `.claude/settings.local.json`. Additive, idempotent, sealed content — no config to gate it, since filing is always operator-confirmed regardless.
-- `.claude-plugin/plugin.json`: plugin manifest
+## Development
 
-## Required env vars
-
-Set these in your project `.env` (loaded by Docker hermit via `env_file:`) or in `.claude/settings.local.json` `env` block for interactive sessions:
-
-| Var | Description |
-|-----|-------------|
-| `HERMIT_GH_APP_ID` | GitHub App ID (shown on the App's settings page) |
-| `HERMIT_GH_APP_INSTALL_ID` | Installation ID (from the App's installation page URL) |
-| `HERMIT_GH_APP_KEY_FILE` | Absolute path to the `.pem` private key file |
-| `HERMIT_GH_REPO` | Optional override; target `owner/repo` (default: `gtapps/claude-code-hermit`) |
-
-Place the private key at `.claude.local/hermit-scribe-key.pem` (`.claude.local/` is gitignored).
-
-## Manual smoke test
-
-```bash
-# Should exit non-zero with a clear error message (missing key), not a crash
-HERMIT_GH_APP_ID=1 HERMIT_GH_APP_INSTALL_ID=2 HERMIT_GH_APP_KEY_FILE=/nonexistent \
-  bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" /dev/null /dev/null
-
-# Extra label args should parse cleanly and reach token acquisition
-TMP_DIR="$(mktemp -d)" && (
-  trap 'rm -r "$TMP_DIR"' EXIT
-  printf 't\n' > "$TMP_DIR/t" && printf 'b\n' > "$TMP_DIR/b.md" && \
-  HERMIT_GH_APP_ID=1 HERMIT_GH_APP_INSTALL_ID=2 HERMIT_GH_APP_KEY_FILE=/nonexistent \
-    bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" \
-    "$TMP_DIR/t" "$TMP_DIR/b.md" enhancement homeassistant-hermit
-)
-```
-
-The script takes two positional file paths: title file (single line; trimmed) and body file (markdown). Both are read directly; nothing is interpolated into shell commands, so title content is safe from quoting issues.
-
-## Development constraints
-
-- **No npm dependencies, ever.** The script uses only the Node stdlib APIs Bun provides (`node:crypto`, `node:https`, `node:fs`). Do not add `package.json` or `node_modules`.
-- Test locally against a target project without publishing: `claude --plugin-dir /path/to/plugins/hermit-scribe`
+- No npm dependencies, ever: only the Node stdlib APIs Bun provides (`node:crypto`, `node:https`, `node:fs`). No `package.json`, no `node_modules`.
+- Tests: `bash tests/run-all.sh` from this directory. Manual smoke checks: `README.md` § Development.
+- Local run against a target project: `claude --plugin-dir /path/to/plugins/hermit-scribe`.

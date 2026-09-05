@@ -133,7 +133,7 @@ rg -l -e '#<issue>' -e '<branch-slug>' .claude-code-hermit/proposals/PROP-*.md
 
 The proposal match is loose (frontmatter has no issue field); "no proposal" is a valid answer, never guess one. Commits that landed without a PR are reviewed from their commit messages. PROP ids may appear in this report (terminal-only) but never travel into a follow-up PR, commit, or CHANGELOG.
 
-**Review against the repository conventions** in the root `CLAUDE.md` (mechanism not policy, token discipline, one-way dependency, `hermit-evolve` survival, `/plugin update` semantics, downstream operators as the audience) and name the convention each finding rests on. Load `/delta-diagrams` before drawing. Keep the PR and issue bodies out of the report; only the findings below go in.
+**Review against the repository conventions** in the root and applicable plugin `AGENTS.md` files (mechanism not policy, token discipline, one-way dependency, `hermit-evolve` survival, `/plugin update` semantics, downstream operators as the audience) and name the convention each finding rests on. Load `/delta-diagrams` before drawing. Keep the PR and issue bodies out of the report; only the findings below go in.
 
 Per change, with `file:line` evidence:
 

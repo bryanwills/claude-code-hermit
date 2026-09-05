@@ -22,15 +22,15 @@ If the project's own CLAUDE.md or skills define a branch-naming convention (e.g.
 
 Before starting code changes:
 
-1. Verify clean working tree (`git status --porcelain` returns empty). If dirty, stop and surface the diff — let the operator commit or stash before proceeding.
-2. Branch from the first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`). Use `git checkout -b <prefix>/<slug> origin/<base>` so the new branch tracks the latest remote.
+1. Inspect `git status --porcelain` and preserve unrelated changes. Reuse the task's existing feature branch, or isolate new work in a worktree when changes cannot safely coexist. Ask only when ownership or separation is unclear.
+2. If a new branch is needed, branch from the first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`), using the fetched `origin/<base>`. Do not switch branches through unrelated changes.
 3. Name it `<prefix>/<kebab-slug>`, prefix from {feature, fix, chore, hotfix} matched at the start of the input, default `feature`.
-4. Append a one-line entry to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
+4. When you create a branch, append to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
 
 <!-- mode:standard-only -->
 ## Implementation Flow
 
-If the project's own CLAUDE.md or skills define a commit/test/PR sequence, follow that. The fallback: run `commands.test` (`claude-code-dev-hermit.commands.test`, set via `/claude-code-dev-hermit:hatch`) → `/claude-code-dev-hermit:dev-quality` → commit → `/claude-code-dev-hermit:dev-pr`.
+If the project's own CLAUDE.md or skills define a commit/test/PR sequence, follow that. When committing and publishing are authorized, the fallback is `commands.test` (`claude-code-dev-hermit.commands.test`, set via `/claude-code-dev-hermit:hatch`) → `/claude-code-dev-hermit:dev-quality` → commit → `/claude-code-dev-hermit:dev-pr`.
 
 - Cleanup edits from `/claude-code-dev-hermit:dev-quality` must land **before** the commit — that ordering is why the quality gate runs first. `/claude-code-dev-hermit:dev-pr` Gate 0 then enforces a fresh passing test at the current HEAD sha mechanically; don't restate its checks, just run it.
 - Never declare the task done with broken tests.
@@ -46,12 +46,12 @@ Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev wo
 ## Before Archiving a Task
 
 <!-- mode:standard-only -->
-- `/claude-code-dev-hermit:dev-pr` run, or PR opened via other means — URL recorded in `state/bindings.json`.
+- If the task includes publishing a PR: `/claude-code-dev-hermit:dev-pr` run, or PR opened via the project's workflow, with its URL recorded in `state/bindings.json`.
 <!-- /mode:standard-only -->
 <!-- mode:safety-only -->
-- PR opened.
+- If the task includes publishing a PR: PR opened.
 <!-- /mode:safety-only -->
-- Feature branch committed, no uncommitted changes.
+- If committing is authorized and required by the task: intended changes committed on the feature branch. Otherwise, record the uncommitted handoff without staging unrelated work.
 - If partial: Session Summary describes what remains.
 
 ## Dev Session Hygiene

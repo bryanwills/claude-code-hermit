@@ -9,14 +9,14 @@
 // Output (stdout, one JSON line):
 //   {"verdict":"SKIP"|"OK"|"AUTO_CLOSE"|"EVALUATE"|"ALERT",
 //    "reason"?:string, "alert"?:string,
-//    "notifications":[{"text":string,"mark_key"?:string}],
+//    "notifications":[{"text":string,"mark_key"?:string,"ack_next_task"?:string}],
 //    "next_task"?:{"action":"waiting"|"start"},
 //    "model":string|null}
 //
 // Owner contract (write-field split with SKILL.md):
 //   This verb owns: the precheck's own fields (see precheck.ts), runtime.json's
-//                   waiting→idle and conservative-pickup transitions, the
-//                   auto-closed Monitoring line.
+//                   waiting-to-idle transition and the
+//                   auto-closed Monitoring line. ack-next-task parks after delivery.
 //   SKILL.md owns:  sending the notifications, `--mark-budget-notified` for each
 //                   `mark_key` AFTER a confirmed send, and the injection branch's
 //                   injection-alert.json bookkeeping.
@@ -25,19 +25,20 @@
 // skill knows whether the send landed.
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { runPrecheck, nextTaskQueued } from './precheck';
 import { readSettledConfig } from '../config-read';
 import { readMergedAlerts } from '../alert-state';
 import { isPaused } from '../pause';
-import { appendShellLine, extractSection, firstContentLine } from '../md-write';
+import { appendShellLine, withShellLock, extractSection, firstContentLine } from '../md-write';
 import { readRuntimeJson, writeRuntimeJson } from '../runtime';
 import { currentHHMMOrUTC, parseDuration, resolveHermitNowMs } from '../time';
 import { HEARTBEAT, resolveLocale } from '../messages';
 
 type Json = any;
 
-type Notification = { text: string; mark_key?: string };
+type Notification = { text: string; mark_key?: string; ack_next_task?: string };
 
 type NextTask = { action: 'waiting' | 'start' };
 
@@ -122,20 +123,47 @@ async function composeBudgetAlerts(hermitDir: string, config: Json, out: Notific
 }
 
 /** The queued task's headline — the `## Task` section's first non-empty line. */
-function queuedTaskLine(hermitDir: string): string | null {
+function queuedTaskLine(content: string): string | null {
+  const body = extractSection(content, 'Task');
+  return body ? firstContentLine(body) || null : null;
+}
+
+// Bind delivery to the exact queue and runtime observed before the send. No receipt
+// file is needed: a later acknowledgement can only park that unchanged idle state.
+function nextTaskToken(content: string, runtime: Json): string {
+  return createHash('sha256').update(JSON.stringify([content, runtime])).digest('hex');
+}
+
+export function acknowledgeNextTask(hermitDir: string, token: string): { parked: boolean; reason?: string } {
   try {
-    const body = extractSection(fs.readFileSync(path.join(hermitDir, 'sessions', 'NEXT-TASK.md'), 'utf-8'), 'Task');
-    return body ? firstContentLine(body) || null : null;
-  } catch { return null; }
+    return withShellLock(path.join(hermitDir, 'sessions', 'SHELL.md'), () => acknowledgeIdleTask(hermitDir, token));
+  } catch { return { parked: false, reason: 'lock-unavailable' }; }
+}
+
+function acknowledgeIdleTask(hermitDir: string, token: string): { parked: boolean; reason?: string } {
+  const config = readSettledConfig(hermitDir);
+  if (config.always_on !== true || config.escalation !== 'conservative') return { parked: false, reason: 'disabled' };
+  const stateDir = path.join(hermitDir, 'state');
+  const runtime = readRuntimeJson(stateDir);
+  if (!runtime || runtime.session_state !== 'idle' || runtime.transition) return { parked: false, reason: 'not-idle' };
+  try {
+    if (!nextTaskQueued(hermitDir)) return { parked: false, reason: 'queue-missing' };
+    const content = fs.readFileSync(path.join(hermitDir, 'sessions', 'NEXT-TASK.md'), 'utf-8');
+    if (nextTaskToken(content, runtime) !== token) return { parked: false, reason: 'changed' };
+    runtime.session_state = 'waiting';
+    runtime.waiting_reason = 'conservative_pickup';
+    runtime.waiting_since = new Date(resolveHermitNowMs()).toISOString();
+    writeRuntimeJson(runtime, stateDir);
+    return { parked: true };
+  } catch { return { parked: false, reason: 'io-error' }; }
 }
 
 /**
- * A task queued while the session sits idle. `conservative` parks the session in
- * `waiting` and tells the operator what is pending — one notice, because the parked
- * state stops the next tick re-firing. `balanced`/`autonomous` mutate nothing and
- * hand the skill a `start`, leaving session-start to adopt and delete the file.
+ * A task queued while the session sits idle. Conservative mode composes a notice;
+ * only its delivery acknowledgement parks the session, so a failed send can retry.
+ * Balanced/autonomous modes mutate nothing and hand the skill a `start`, leaving session-start to adopt and delete the file.
  */
-function composeNextTask(hermitDir: string, config: Json, nowMs: number, out: Notification[]): NextTask | undefined {
+function composeNextTask(hermitDir: string, config: Json, out: Notification[]): NextTask | undefined {
   // The same gate precheck applies to the queued-task pierce, mirrored because EVALUATE
   // arrives here for a dozen unrelated reasons (the 20-tick boundary, a pending budget
   // alert, a stale session) that carry no always_on condition of their own. Only an
@@ -149,14 +177,12 @@ function composeNextTask(hermitDir: string, config: Json, nowMs: number, out: No
   if ((runtime.session_state ?? 'idle') !== 'idle') return undefined;
   if (config.escalation !== 'conservative') return { action: 'start' };
 
-  runtime.session_state = 'waiting';
-  runtime.waiting_reason = 'conservative_pickup';
-  // Stamped because it is what applyWaitingTimeout above measures from: an unstamped
-  // park (or one carrying an earlier wait's stamp) either never releases under a
-  // configured `waiting_timeout` or releases on the tick after it is written.
-  runtime.waiting_since = new Date(nowMs).toISOString();
-  writeRuntimeJson(runtime, stateDir);
-  out.push({ text: HEARTBEAT[resolveLocale(config.language)].queuedTask(queuedTaskLine(hermitDir)) });
+  if (runtime.session_state !== 'idle' || runtime.transition) return undefined;
+  const content = fs.readFileSync(path.join(hermitDir, 'sessions', 'NEXT-TASK.md'), 'utf-8');
+  out.push({
+    text: HEARTBEAT[resolveLocale(config.language)].queuedTask(queuedTaskLine(content)),
+    ack_next_task: nextTaskToken(content, runtime),
+  });
   return { action: 'waiting' };
 }
 
@@ -181,14 +207,15 @@ export async function run(args: string[]): Promise<void> {
       // Step 2 of the auto-close sequence replaces SHELL.md with a fresh template,
       // so this line has to land before the skill starts closing.
       const hhmm = currentHHMMOrUTC(config.timezone ?? 'UTC', new Date(nowMs));
-      appendShellLine(path.join(hermitDir, 'sessions'), 'Monitoring', `[${hhmm}] Heartbeat: auto-closed.`);
+      const appendError = appendShellLine(path.join(hermitDir, 'sessions'), 'Monitoring', `[${hhmm}] Heartbeat: auto-closed.`);
+      if (appendError) console.error(`[heartbeat] ${appendError}`);
     } else if (result.verdict === 'EVALUATE' || result.verdict === 'ALERT') {
       // Both gates are pre-dispatch and read no HEARTBEAT.md, so a suspended
       // checklist still surfaces them — the reason ALERT exists as a verdict.
       const released = applyWaitingTimeout(hermitDir, config, nowMs, result.notifications);
       await composeBudgetAlerts(hermitDir, config, result.notifications);
       if (result.verdict === 'EVALUATE' && !released) {
-        const nextTask = composeNextTask(hermitDir, config, nowMs, result.notifications);
+        const nextTask = composeNextTask(hermitDir, config, result.notifications);
         if (nextTask) result.next_task = nextTask;
       }
     }

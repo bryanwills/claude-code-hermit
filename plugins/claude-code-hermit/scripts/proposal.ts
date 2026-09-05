@@ -21,7 +21,7 @@
 //     manual), Session (default state/runtime.json session_id), Category
 //     (default improvement; improvement|routine|capability|constraint|bug),
 //     Tags / Related-Sessions (JSON string arrays, default []), Findings
-//     (optional one-line SHELL.md summary). Claims the ID and writes the file
+//     (optional one-line SHELL.md summary), Self-Eval-Key (optional checklist key). Claims the ID and writes the file
 //     as one atomic operation (exclusive create, suffix walk on EEXIST — never
 //     a separate assign-then-write step, which would allow a burned ID with no
 //     file). Best-effort tail: SHELL.md Findings line, `created` metrics event,
@@ -147,6 +147,7 @@ export function verbCreate(stateDir: string, stdin: string): string {
   if (!title) return 'ERROR|missing-title';
 
   const source = grabHeader(header, 'Source') || 'manual';
+  const selfEvalKey = grabHeader(header, 'Self-Eval-Key');
   let session = grabHeader(header, 'Session');
   // Falsy, not just null: a bare `Session:` line means "no session", which must
   // fall through to the runtime.json default (and then to null) rather than
@@ -187,6 +188,7 @@ export function verbCreate(stateDir: string, stdin: string): string {
   const basePatch: Record<string, Json> = {
     title, status: 'proposed', source, session, created,
     related_sessions: relatedSessions, category, tags,
+    ...(selfEvalKey ? { self_eval_key: selfEvalKey } : {}),
   };
 
   const proposalsDir = path.join(stateDir, 'proposals');

@@ -205,3 +205,19 @@ describe('startup-context.ts — guest marker', () => {
     }
   });
 });
+
+
+it('only resident startup seeds activity, after classification, and never resets it', async () => {
+  const wd = setupWorkdir();
+  try {
+    const env = fixture(wd.dir, { tmuxSession: SESSION, tmuxExit: 0 });
+    const activity = path.join(wd.dir, '.claude-code-hermit', 'state', 'last-operator-action.json');
+    await run(wd.dir, { ...env, HERMIT_MANAGED: '' }, 'new-guest');
+    expect(fs.existsSync(activity)).toBe(false);
+    await run(wd.dir, { ...env, HERMIT_MANAGED: '1' }, 'resident');
+    expect(fs.existsSync(activity)).toBe(true);
+    fs.writeFileSync(activity, '{"at":"2000-01-01T00:00:00Z"}');
+    await run(wd.dir, { ...env, HERMIT_MANAGED: '1' }, 'resident');
+    expect(fs.readFileSync(activity, 'utf-8')).toBe('{"at":"2000-01-01T00:00:00Z"}');
+  } finally { wd.cleanup(); }
+});

@@ -252,9 +252,14 @@ function apply(payloadJson: string): void {
       : null;
   }
 
-  // Self-evaluation rides the same every-20-ticks boundary the precheck wakes on.
-  // Off-boundary ticks leave self_eval exactly as they found it.
-  let self_eval: Json = state.self_eval && typeof state.self_eval === 'object' ? state.self_eval : {};
+  // Retain checklist firing evidence until the every-20-ticks self-evaluation.
+  // Recovery can remove an alert before that boundary; suppression only changes
+  // notifications, so record the firing set rather than monitoring output.
+  let self_eval: Json = { ...(state.self_eval && typeof state.self_eval === 'object' ? state.self_eval : {}) };
+  for (const { key } of modelFiring) {
+    if (!canonical?.has(key)) continue;
+    self_eval[key] = { ...self_eval[key], fired_since_self_eval: true };
+  }
   let selfEvalProposals: SelfEvalProposal[] = [];
   if (typeof state.total_ticks === 'number' && state.total_ticks % 20 === 0) {
     try {
@@ -265,7 +270,6 @@ function apply(payloadJson: string): void {
         prevSelfEval: self_eval,
         alerts,
         shell,
-        pendingLines: result.monitoringLines,
         today,
       });
       self_eval = evaluated.self_eval;

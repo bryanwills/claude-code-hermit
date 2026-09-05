@@ -19,10 +19,10 @@ If the project's own CLAUDE.md or skills define a branch-naming convention (e.g.
 
 Before starting code changes:
 
-1. Verify clean working tree (`git status --porcelain` returns empty). If dirty, stop and surface the diff — let the operator commit or stash before proceeding.
-2. Branch from the first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`). Use `git checkout -b <prefix>/<slug> origin/<base>` so the new branch tracks the latest remote.
+1. Inspect `git status --porcelain` and preserve unrelated changes. Reuse the task's existing feature branch, or isolate new work in a worktree when changes cannot safely coexist. Ask only when ownership or separation is unclear.
+2. If a new branch is needed, branch from the first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`), using the fetched `origin/<base>`. Do not switch branches through unrelated changes.
 3. Name it `<prefix>/<kebab-slug>`, prefix from {feature, fix, chore, hotfix} matched at the start of the input, default `feature`.
-4. Append a one-line entry to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
+4. When you create a branch, append to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
 
 ## Technical Constraints
 
@@ -32,8 +32,8 @@ Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev wo
 
 ## Before Archiving a Task
 
-- PR opened.
-- Feature branch committed, no uncommitted changes.
+- If the task includes publishing a PR: PR opened.
+- If committing is authorized and required by the task: intended changes committed on the feature branch. Otherwise, record the uncommitted handoff without staging unrelated work.
 - If partial: Session Summary describes what remains.
 
 ## Dev Session Hygiene

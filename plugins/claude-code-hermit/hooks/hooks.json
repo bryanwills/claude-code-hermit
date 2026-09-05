@@ -150,19 +150,7 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/startup-context.ts"]
           }
         ],
-        "description": "Load session context on startup"
-      },
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts"],
-            "timeout": 3
-          }
-        ],
-        "description": "Reset last-operator-action clock on session start"
+        "description": "Classify residency, seed resident activity if absent, and load session context"
       }
     ],
     "Stop": [

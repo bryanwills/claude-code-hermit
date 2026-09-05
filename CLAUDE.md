@@ -2,17 +2,20 @@
 
 This repo is a multi-plugin Claude Code marketplace. Seven plugins ship from `plugins/<slug>/`, each with its own `CLAUDE.md`, `CHANGELOG.md`, and `tests/`. `.claude-plugin/marketplace.json` is the only marketplace; the root README is the canonical hermit pitch.
 
-Always launch Claude Code from this repo's root. Auto-memory is keyed by CWD, and a plugin dir's own `.claude-plugin/` would load the plugin under test as the project plugin.
+Always launch Claude Code from this repo's root. A plugin dir's own `.claude-plugin/` would load the plugin under test as the project plugin.
 
 ## Conventions
 
-- **Tests run from inside the plugin dir** (`bun test` for core and HA, `bash tests/run-all.sh` for the rest). Helpers use CWD-relative paths and break from repo root.
+- **Tests run from inside the plugin dir** (`bun test` for core, HA, and Feed; `bash tests/run-all.sh` for Dev, Fitness, Forge, and Scribe). Helpers use CWD-relative paths and break from repo root.
 - **Independent versioning, tag `<slug>--v<X.Y.Z>`.** Domain plugins declare core compat as `required_core_version: ">=X.Y.Z"` in `.claude-plugin/hermit-meta.json`, mirrored by `requires` there and `dependencies` in `plugin.json`; `required_core_version` is what `doctor-check.ts` reads. Update all three together. All hermit-internal manifest extensions (`hermit.*`) live in hermit-meta.json.
 - **CC-version-gated work bumps the floor, never shims around it.** When a change depends on Claude Code behavior introduced at a version, raise that plugin's `min_claude_code_version` in hermit-meta.json; no feature detection or fallback paths for older CC.
 - **Dependency direction is one-way**: domain plugins depend on core; core never imports a sibling, hardcodes a sibling slug in logic, or branches on one being installed. It discovers siblings generically (name-contains-`hermit`) and consumes only what they declare in `hermit-meta.json`. Siblings can't import core either: shared logic ships as a `hermit-run` verb behind a `required_core_version` floor.
+- **Reuse native Claude Code features before building.** Check the docs (https://code.claude.com/docs) and plugin catalog for a feature that already covers a capability; on overlap, link to it instead of reimplementing.
 - **Ship mechanism, not policy (all plugins)**: contracts stay strict, content stays loose. An installed hermit belongs to its operator, so give skills data + goal + voice and let the model compose, and anything operator-editable must survive `hermit-evolve`. Contract list, extension points, and how skill text is written: `plugins/claude-code-hermit/CLAUDE.md` § Authorship layers.
 - **Ship standard: default-on, research preview.** Default off only for features needing an operator credential/config, real per-invocation spend, or that are destructive.
-- **Token discipline (all plugins)**: hook stdout, skill-driven `Read`s, and helper-script output land in the operator's context. Print verdict-sized digests; front unbounded surfaces (JSONL logs, DBs) with a script that returns a bounded summary. Every tool call re-reads the full context from cache, so cache reads and writes are the dominant share of an always-on hermit's spend, measured between roughly two-thirds and nine-tenths depending on workload; measure the install. Pattern and examples: `plugins/claude-code-hermit/CLAUDE.md` § Development constraints. This file is loaded every session and re-seeded into every subagent; keep it terse.
+- **Agent references in skill text use the full namespaced form** (`<plugin>:<agent-name>`). The harness namespaces bare names at load, so a bare name in skill text fails with "Agent type not found".
+- **Domain plugins carry core-facing wording** in `skills/`, `agents/`, `state-templates/`, and `docs/`; when core terminology changes, sweep all of them.
+- **Token discipline (all plugins)**: hook stdout, skill-driven `Read`s, helper-script output, and native tool results all land in the operator's context, and every tool call re-reads that context from cache, so cache traffic dominates an always-on hermit's spend. Print verdict-sized digests; front unbounded surfaces (JSONL logs, DBs) with a script that returns a bounded summary. Always-loaded files (this one, plugin `CLAUDE.md`s, `CLAUDE-APPEND` blocks) are paid every session and re-seeded into every subagent, so a new bullet has to change behavior often enough to earn its place. Pattern and examples: `plugins/claude-code-hermit/CLAUDE.md` § Development.
 
 ## Commits
 
@@ -56,5 +59,5 @@ Always launch Claude Code from this repo's root. Auto-memory is keyed by CWD, an
 ## Rules
 
 - Always use Context7 for library/API documentation, code generation, and setup/configuration steps, without waiting for an explicit request.
-- Don't overengineer.
+- Don't overengineer: the minimum change that solves the task, nothing speculative.
 - **This hermit is the plugin-dev special case.** When judging the utility of a feature in `plugins/claude-code-hermit/`, don't use this hermit's session history as evidence; target users are downstream operators on Discord/Telegram who don't open feature branches.

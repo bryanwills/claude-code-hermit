@@ -25,6 +25,7 @@ import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
 import { findResident, ownsResidentIdentity } from './lib/session-registry';
 import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
+import { seedOperatorActivity } from './record-operator-action';
 import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
 
 type Json = any;
@@ -396,6 +397,7 @@ function main(source: string | null, sessionId: string | null) {
   // (resume/compact reuse it; /clear mints a new one): this session is the resident now, so drop
   // the verdict rather than leave it silently muting its own liveness signal.
   clearGuest(stateDir, sessionId);
+  seedOperatorActivity();
   if (source === 'compact') {
     emitCompactCapsule();
   } else {

@@ -13,17 +13,14 @@ allowed-tools:
 
 1. **Pre-check**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha policy-check <artifact_path>` to verify safety. Read the `severity` field in the JSON output:
    - `"block"` (strict mode): stop and explain why. Create a proposal via `/claude-code-hermit:proposal-create`.
-   - `"ask"` (ask mode): use `AskUserQuestion` to confirm with the operator before proceeding. Show which sensitive entities triggered the prompt and what will be applied.
+   - `"ask"` (ask mode): include the sensitive entities in the confirmation in step 2.
    - `"allow"`: proceed to step 2.
 
-2. **Validate and apply**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact_path> --reload automation` (or `script`).
+2. **Confirm with operator before applying**: Present the artifact, policy result, affected entities, and domain to reload. Obtain explicit approval for that concrete change, using the Operator Notification protocol in CLAUDE.md for channel sessions. If the operator already approved the same artifact and reload in this task, reuse that approval; changed content or targets require a new confirmation. Declined or unanswered: stop before step 3.
+
+3. **Validate and apply**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha validate-apply <artifact_path> --reload automation` (or `script`).
    - This runs HA config check, **pushes the config to HA via REST**, then reloads the domain.
    - The artifact must include `id:` at the top level — if missing, the CLI derives an ID from the alias or filename and warns in the output. A derived ID drifts if the alias is renamed, creating a duplicate.
-
-3. **Confirm with operator**: Always ask before executing the apply. Show:
-   - The artifact being applied
-   - Policy check result
-   - What domain will be reloaded
 
 4. **Post-apply**: Check the JSON output for `creation_ok` and read `.claude-code-hermit/raw/audit-ha-apply-latest.md`.
    - `creation_ok: true` — config was pushed and verified via REST. Reload picks it up immediately.
@@ -34,5 +31,5 @@ allowed-tools:
 ## Safety
 
 - The apply path only reloads `automation` and `script` domains.
-- Sensitive entities are blocked at the policy-check step.
+- A `block` policy verdict stops the apply; an `ask` verdict requires approval covering the sensitive entities.
 - The operator must confirm before any reload happens.

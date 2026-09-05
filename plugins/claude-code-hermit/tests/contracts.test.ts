@@ -3769,6 +3769,8 @@ describe('heartbeat eval-runner return contract', () => {
   // every wake, so each needs its deterministic half behind one script call.
   test('SKILL.md run drives the tick verb and marks budget alerts by mark_key', () => {
     expect(skill).toContain('scripts/heartbeat.ts tick');
+    expect(skill).toContain('scripts/heartbeat.ts ack-next-task');
+    expect(skill).toContain('`delivered: true`');
     expect(skill).toContain('--mark-budget-notified <mark_key>');
   });
 
@@ -4077,18 +4079,16 @@ describe('session-start always-on boot never asks', () => {
     }
   });
 
-  // The always-on bootstrap invokes the boot skill, which defaults to
-  // `/claude-code-hermit:session` (hermit-start.ts: `config.boot_skill ||
-  // '/claude-code-hermit:session'`). That wrapper calls session-start and then asks its
-  // own "What should I help with?" in §3, so guarding session-start alone still leaves
-  // the default boot path at an unanswerable ask.
-  test('the session boot skill carries the same guard', () => {
+  // The default boot skill delegates task selection to session-start. Its wrapper
+  // must not reintroduce an unanswered or already-answered task prompt.
+  test('the session boot skill delegates task selection and retains the unattended guard', () => {
     const step3 = extractBlock(
       read(path.join(SKILLS, 'session', 'SKILL.md')),
       '\n### 3. If starting a new session',
       '\n### 4. Plan the work',
     );
-    expect(step3).toContain('What should I help with?');
+    expect(step3).not.toContain('What should I help with?');
+    expect(step3).toContain('`session-start` owns task selection and tags');
     expect(step3, 'session §3 lost its always_on guard').toContain('`config.always_on` is `true`');
     expect(step3, 'session §3 lost its do-not-ask directive').toContain('do **not** ask');
   });

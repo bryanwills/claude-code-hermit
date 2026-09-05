@@ -114,6 +114,27 @@ hermit-scribe/
 
 `file-issue.ts` is a single-shot script run with Bun: signs an RS256 JWT from the App private key, exchanges it for an installation access token at `POST /app/installations/{id}/access_tokens`, then `POST /repos/{owner}/{repo}/issues` with the derived label set (`hermit-filed` always, plus any extra labels passed as trailing positional args). Two HTTPS round-trips per invocation. Bun is required (Claude Code already provides it).
 
+## Development
+
+Manual smoke checks (no network needed; both should fail cleanly on the missing key, not crash):
+
+```bash
+# Missing key file: exits non-zero with a clear error
+HERMIT_GH_APP_ID=1 HERMIT_GH_APP_INSTALL_ID=2 HERMIT_GH_APP_KEY_FILE=/nonexistent \
+  bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" /dev/null /dev/null
+
+# Extra label args parse cleanly and reach token acquisition
+TMP_DIR="$(mktemp -d)" && (
+  trap 'rm -r "$TMP_DIR"' EXIT
+  printf 't\n' > "$TMP_DIR/t" && printf 'b\n' > "$TMP_DIR/b.md" && \
+  HERMIT_GH_APP_ID=1 HERMIT_GH_APP_INSTALL_ID=2 HERMIT_GH_APP_KEY_FILE=/nonexistent \
+    bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" \
+    "$TMP_DIR/t" "$TMP_DIR/b.md" enhancement homeassistant-hermit
+)
+```
+
+The script takes two positional file paths: title file (single line, trimmed) and body file (markdown). Both are read directly; nothing is interpolated into shell commands. Unit tests: `bash tests/run-all.sh` from the plugin directory.
+
 ## License
 
 [MIT](LICENSE)

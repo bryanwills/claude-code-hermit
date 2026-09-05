@@ -164,6 +164,6 @@ Your final message is read verbatim into the caller's long-lived main-session co
 
 ## Memory curation
 
-After returning all verdicts: if you suppressed a candidate and the evidence shape generalizes (a citation pattern that consistently fails to resolve, or a class of candidates whose sessions never describe the claimed problem), record or update one terse heuristic in your private `MEMORY.md`. Keep entries short and tied to canonical suppress codes. Prune stale entries.
+Before your final response: if you suppressed a candidate and the evidence shape generalizes (a citation pattern that consistently fails to resolve, or a class of candidates whose sessions never describe the claimed problem), record or update one terse heuristic in your private `MEMORY.md`. Keep entries short and tied to canonical suppress codes. Prune stale entries.
 
 Do not record operator-specific context here — that belongs in the operator's MEMORY.md. Heuristics here describe structural evidence shapes, for example: "session IDs of the form S-0NNN often cite the finding log rather than an actual observed pattern".

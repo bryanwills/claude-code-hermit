@@ -12,7 +12,7 @@ import path from 'node:path';
 
 import { runSelfEval, WEIGHT_KEY } from '../scripts/lib/heartbeat/self-eval';
 import { normalizeItemKey } from '../scripts/lib/heartbeat-items';
-import { runScript } from './helpers/run';
+import { runScript, runProposal, PLUGIN_ROOT } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-self-eval-');
@@ -69,7 +69,6 @@ const evaluate = (prevSelfEval: object, stateDir = fixture()) => runSelfEval({
   prevSelfEval,
   alerts: { [NOISY_KEY]: { text: NOISY_ALERT } },
   shell: fs.readFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), 'utf-8'),
-  pendingLines: [],
   today: '2026-07-10',
 });
 
@@ -140,24 +139,30 @@ describe('heartbeat self-evaluation', () => {
 });
 
 describe('heartbeat alert-state — self_eval_proposals on stdout', () => {
-  const alertState = async (stateDir: string, total_ticks: number) => {
-    fs.writeFileSync(path.join(stateDir, 'state', 'alert-state.json'),
-      JSON.stringify({ alerts: {}, last_digest_date: null, self_eval: PRIMED(), total_ticks }));
+  const alertState = async (stateDir: string, total_ticks: number,
+    firing = [{ key: NOISY_KEY, text: NOISY_ALERT }]) => {
+    const stateFile = path.join(stateDir, 'state', 'alert-state.json');
+    const state = fs.existsSync(stateFile)
+      ? JSON.parse(fs.readFileSync(stateFile, 'utf-8'))
+      : { alerts: {}, last_digest_date: null, self_eval: PRIMED() };
+    fs.writeFileSync(stateFile, JSON.stringify({ ...state, total_ticks }));
     fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
     const r = await runScript('heartbeat.ts', {
       args: ['alert-state', path.join(stateDir, 'state', 'alert-state.json')],
-      stdin: JSON.stringify({ firing: [{ key: NOISY_KEY, text: NOISY_ALERT }] }),
+      stdin: JSON.stringify({ firing }),
       env: { HERMIT_NOW: '2026-07-10T12:00:00Z' },
     });
     expect(r.exitCode).toBe(0);
     return JSON.parse(r.stdout.trim());
   };
 
-  test('an off-boundary tick reports none and leaves self_eval untouched', async () => {
+  test('an off-boundary tick records firing evidence without advancing counters', async () => {
     const stateDir = fixture();
     expect((await alertState(stateDir, 17)).self_eval_proposals).toEqual([]);
     const written = JSON.parse(fs.readFileSync(path.join(stateDir, 'state', 'alert-state.json'), 'utf-8'));
-    expect(written.self_eval).toEqual(PRIMED());
+    expect(written.self_eval).toEqual({
+      ...PRIMED(), [NOISY_KEY]: { ...PRIMED()[NOISY_KEY], fired_since_self_eval: true },
+    });
   });
 
   test('a boundary tick reports the graduated entries and persists their counters', async () => {
@@ -166,5 +171,88 @@ describe('heartbeat alert-state — self_eval_proposals on stdout', () => {
     expect(out.self_eval_proposals.map((p: any) => p.kind).sort()).toEqual(['clean', 'noisy', 'weight']);
     const written = JSON.parse(fs.readFileSync(path.join(stateDir, 'state', 'alert-state.json'), 'utf-8'));
     expect(written.self_eval[QUIET_KEY]).toMatchObject({ clean_ticks: 20, proposed: true });
+  });
+
+  test('firing at tick 399 then recovering at 400 prevents retirement and the next quiet interval starts fresh', async () => {
+    const stateDir = fixture();
+    const stateFile = path.join(stateDir, 'state', 'alert-state.json');
+    await alertState(stateDir, 399, [{ key: QUIET_KEY, text: 'Certificate expires tomorrow' }]);
+    const out = await alertState(stateDir, 400, []);
+    const written = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    expect(out.self_eval_proposals.map((p: any) => p.key)).not.toContain(QUIET_KEY);
+    expect(written.self_eval[QUIET_KEY]).toMatchObject({ clean_ticks: 0, proposed: false });
+
+    for (let tick = 401; tick <= 420; tick++) await alertState(stateDir, tick, []);
+    const quiet = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    expect(quiet.self_eval[QUIET_KEY]).toMatchObject({ clean_ticks: 1, proposed: false });
+  });
+
+  test('suppressed firing still counts after the alert is removed before the boundary', async () => {
+    const stateDir = fixture();
+    const stateFile = path.join(stateDir, 'state', 'alert-state.json');
+    fs.writeFileSync(stateFile, JSON.stringify({
+      alerts: { [NOISY_KEY]: { count: 6, suppressed: true, consecutive_clean: 0, text: NOISY_ALERT } },
+      last_digest_date: '2026-07-10', self_eval: PRIMED(),
+    }));
+    const silent = await alertState(stateDir, 397);
+    expect(silent.notifications).toEqual([]);
+    await alertState(stateDir, 398, []);
+    await alertState(stateDir, 399, []);
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf-8')).alerts[NOISY_KEY]).toBeUndefined();
+
+    const out = await alertState(stateDir, 400, []);
+    expect(out.self_eval_proposals).toContainEqual({
+      key: NOISY_KEY, kind: 'noisy', clean_ticks: 0, noise_ticks: 20, sessions_seen: 4,
+    });
+    await alertState(stateDir, 420, []);
+    const quiet = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+    expect(quiet.self_eval[NOISY_KEY].noise_ticks).toBe(20);
+  });
+});
+
+
+describe('self-evaluation uses current alert state', () => {
+  test('suppression and changed wording cannot make a firing check look clean', () => {
+    const stateDir = fixture();
+    const { self_eval, proposals } = runSelfEval({
+      stateDir,
+      prevSelfEval: { [QUIET_KEY]: { clean_ticks: 19, sessions_seen: 3, alert_text: 'old wording' } },
+      alerts: { [QUIET_KEY]: { text: 'new wording', suppressed: true, consecutive_clean: 0 } },
+      shell: '**ID:** S-042\n## Monitoring\n', today: '2026-09-05',
+    });
+    expect(self_eval[QUIET_KEY].clean_ticks).toBe(0);
+    expect(self_eval[QUIET_KEY].alert_text).toBeUndefined();
+    expect(proposals.map(p => p.key)).not.toContain(QUIET_KEY);
+  });
+
+  for (const alerts of [
+    { [NOISY_KEY]: { text: NOISY_ALERT, suppressed: true, consecutive_clean: 1 } },
+    {},
+  ]) {
+    test(`a recovered check is clean despite old monitoring text (${Object.keys(alerts).length} retained alerts)`, () => {
+      const { self_eval } = runSelfEval({
+        stateDir: fixture(), prevSelfEval: { [NOISY_KEY]: { alert_text: NOISY_ALERT } }, alerts, shell: SHELL,
+        today: '2026-09-05',
+      });
+      expect(self_eval[NOISY_KEY].clean_ticks).toBe(1);
+      expect(self_eval[NOISY_KEY].noise_ticks).toBe(0);
+    });
+  }
+
+  test('a proposal created and dismissed through the CLI reopens its actual checklist item', async () => {
+    const stateDir = fixture();
+    fs.mkdirSync(path.join(stateDir, 'templates'));
+    fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'PROPOSAL.md.template'),
+      path.join(stateDir, 'templates', 'PROPOSAL.md.template'));
+    const created = await runProposal(stateDir, ['create'], { stdin: [
+      'Title: Review quiet certificate check', 'Source: auto-detected', 'Category: capability',
+      `Self-Eval-Key: ${QUIET_KEY}`, '---', '## Context', 'Review the check.',
+    ].join('\n') });
+    expect(created.exitCode).toBe(0);
+    expect(created.stdout.trim()).toMatch(/^PROP-/);
+    const dismissed = await runProposal(stateDir, ['patch', created.stdout.trim(), '--set', 'status=dismissed']);
+    expect(dismissed.exitCode).toBe(0);
+    const result = evaluate({ [QUIET_KEY]: { proposed: true, clean_ticks: 20, sessions_seen: 3 } }, stateDir);
+    expect(result.self_eval[QUIET_KEY]).toMatchObject({ proposed: false, clean_ticks: 0 });
   });
 });
