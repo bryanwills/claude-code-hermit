@@ -89,8 +89,5 @@ docker-compose.hermit.yml
 docker-entrypoint.hermit.sh
 docker-backup/
 
-# Agents
-AGENTS.md
-
 # Graphify output
 graphify-out/

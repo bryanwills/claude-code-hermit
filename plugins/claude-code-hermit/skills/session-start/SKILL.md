@@ -67,8 +67,8 @@ All state lives under `.claude-code-hermit/` in the project root.
 4b. If `runtime.json` `session_state` is `idle` (session between tasks — SHELL.md exists but no active task):
    - This is a session between tasks — do NOT create a new session or SHELL.md
    - Present: session start date, tasks completed count, latest entry from Session Summary (strip its trailing `($X.XX)` spend figure — spend is on request via `/cost-reflect`)
-   - Skip to step 5 (NEXT-TASK.md check) to determine the task source
-   - When a task is provided: pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to update runtime.json `session_state` to `in_progress` and fill in Task. After confirming the plan with the operator, record its ordered steps in the SHELL.md Progress Log.
+   - Skip to step 6 (NEXT-TASK.md check) to determine the task source
+   - When a task is provided: pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to update runtime.json `session_state` to `in_progress` and fill in Task. Record its ordered steps in the SHELL.md Progress Log.
    - The session ID is pre-computed in runtime.json (set by the previous idle transition's `archive --mode=idle`)
    - If heartbeat is running, it continues
 5. Read `.claude-code-hermit/OPERATOR.md` for project context and constraints
@@ -89,26 +89,26 @@ In always-on mode (`config.always_on` is `true`) with no task known (no `--task`
 9. If resuming an existing session (runtime.json `session_state` is `in_progress` or `waiting`):
    - Read the SHELL.md Progress Log for the plan and how far it got. Present the current task, the most recent Progress Log entries, and blockers.
    - If the session status is `blocked`: suggest running `/debug` to diagnose tool/hook failures before re-attempting the blocked work
-   - Ask the operator if they want to continue the current task or start a new one
+   - If the invoking request already selects the task, continue within that authorization. Otherwise ask whether to continue or start a new task. Recovery choices in step 3 still apply.
 9b. If resuming an idle session (runtime.json `session_state` is `idle`):
    - Show session continuity info: tasks completed, session duration
    - Ask: "What should I work on next?" (unless a task is already known, or the always-on rule above applied)
-   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. After confirming the plan, record its ordered steps in the SHELL.md Progress Log.
+   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to fill Task and update runtime.json `session_state` to `in_progress`. Record its ordered steps in the SHELL.md Progress Log.
 10. If starting a new session:
    - Ask the operator: "What should I help with?" (unless a task is already known, or the always-on rule above applied)
-   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to create the session with the task. After confirming the plan, record its ordered steps in the SHELL.md Progress Log.
+   - Once provided, pipe `Task: <text>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to create the session with the task. Record its ordered steps in the SHELL.md Progress Log.
 11. Once I know what to work on (new session only):
-    - **Tags:** Ask "Any tags for this session? (e.g., refactor, frontend, urgent) Enter to skip." Write the answer to the `Tags:` field in SHELL.md. If skipped, leave blank.
+    - **Tags:** Use operator-provided tags or infer them from the task using the existing vocabulary. Write them to `Tags:` in SHELL.md; tags never block startup.
 11b. **Watch registration.** If `config.monitors` exists and has enabled entries, invoke
      `/claude-code-hermit:watch start` to register them. (Registry was already cleared in
      step 3b.) This is silent — do not prompt the operator about watch registration.
-12. Identify the first actionable step and confirm with the operator before proceeding
+12. State the first actionable step and proceed within the task's existing authorization. Ask only when missing information, a material scope change, or an explicit approval gate requires an operator decision.
 
 ## Context to Load
 
 - `.claude-code-hermit/OPERATOR.md` (always)
 - `.claude-code-hermit/sessions/SHELL.md` (if exists) **(re-read before writing to it or before reusing a value cached in context from before compaction; after a compact-source start the injected capsule's task/progress lines suffice for orientation — don't re-read just to reconstruct context)**
-- Most recent `.claude-code-hermit/sessions/S-*-REPORT.md` (for continuity — only the latest one; skip after a compact-source start, the capsule carries its path)
+- Most recent `.claude-code-hermit/sessions/S-*-REPORT.md` only when the selected task needs continuity missing from the startup context; read the relevant sections. Skip after a compact-source start, where the capsule carries its path.
 - `.claude-code-hermit/state/runtime.json` (always — for lifecycle state)
 
 Do NOT load all session reports — only the most recent one.

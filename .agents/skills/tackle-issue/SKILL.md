@@ -84,7 +84,7 @@ Run against current code before forming any verdict.
    `git log -S "<symbol>"` for named symbols.
 5. **Load-bearing claims about live Claude Code behavior get probed, not recalled.** "The hook
    doesn't receive X" can't be falsified with Read/Grep. Use a tmux `claude --model haiku` probe
-   per root CLAUDE.md § Verification (a probe doesn't mutate the repo; it stays inside the
+   per root AGENTS.md § Development and verification (a probe doesn't mutate the repo; it stays inside the
    read-only posture). Only for load-bearing claims; most issues don't need one.
 
 Skim sibling tests for the existing behavior contract. Every load-bearing claim gets an evidence

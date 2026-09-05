@@ -35,7 +35,8 @@ process.stdout.on('error', () => {});
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { hermitDir } from './lib/cc-compat';
+import { isGuest } from './lib/guest-marker';
+import { hermitDir, sessionId } from './lib/cc-compat';
 import { isAllowedSender } from './lib/channel-auth';
 import { parseChannelEnvelope, type ChannelEnvelope } from './lib/channel-envelope';
 import { readConfigRaw } from './lib/config-read';
@@ -64,6 +65,10 @@ function writeMarker(tmpPath: string, finalPath: string) {
     fs.writeFileSync(tmpPath, JSON.stringify({ at: new Date().toISOString() }) + '\n', 'utf-8');
     fs.renameSync(tmpPath, finalPath);
   } catch { /* fail-open */ }
+}
+
+export function seedOperatorActivity(): void {
+  if (!fs.existsSync(STATE_PATH)) write();
 }
 
 function write() {
@@ -193,7 +198,7 @@ function appendSkillUsage(name: string): void {
 
 // The UserPromptSubmit half, callable in-process by user-prompt-pipeline.ts.
 // `channel` feeds the channel allowlist gate only — see ChannelGateInputs.
-export function run(prompt: string, channel?: ChannelGateInputs, opts: { openTurn?: boolean } = {}): boolean {
+export function run(prompt: string, channel?: ChannelGateInputs, opts: { openTurn?: boolean; sessionId?: string | null } = {}): boolean {
   if (isRoutinePrompt(prompt, channel)) return false;
 
   // Skill-usage capture is operator-activity only — hermit's own injected
@@ -202,6 +207,7 @@ export function run(prompt: string, channel?: ChannelGateInputs, opts: { openTur
   // of the usage ledger (they'd otherwise log as source:'prompt' skill use).
   const skillName = extractSkillName(prompt);
   if (skillName) appendSkillUsage(skillName);
+  if (isGuest(path.join(AGENT_DIR, 'state'), opts.sessionId)) return false;
   write();
   if (opts.openTurn !== false) openTurnMarker();
   return true;
@@ -209,19 +215,21 @@ export function run(prompt: string, channel?: ChannelGateInputs, opts: { openTur
 
 function main(raw: string): void {
   let prompt: string | null = null;
+  let id: string | null = null;
   try {
     const payload = JSON.parse(raw);
+    id = sessionId(payload);
     if (payload && typeof payload.prompt === 'string') prompt = payload.prompt;
   } catch { /* not JSON or empty — SessionStart path */ }
 
   if (prompt === null) {
-    if (!fs.existsSync(STATE_PATH)) write();
+    if (!isGuest(path.join(AGENT_DIR, 'state'), id)) seedOperatorActivity();
     return;
   }
 
   // Direct-script path: no caller-supplied envelope or config, so isRoutinePrompt
   // derives both itself — for a `<channel` prompt only.
-  run(prompt);
+  run(prompt, undefined, { sessionId: id });
 }
 
 // Entry shell only when executed directly — importing this module (the pipeline

@@ -40,6 +40,8 @@ test('applyContextReset anchors both fields to hermitRoot, not the cwd', async (
   const hermitRoot = path.join(freshDir(), '.claude-code-hermit');
   fs.mkdirSync(path.join(hermitRoot, 'state'), { recursive: true });
   fs.mkdirSync(path.join(hermitRoot, 'sessions'), { recursive: true });
+  const shellPath = path.join(hermitRoot, 'sessions', 'SHELL.md');
+  fs.writeFileSync(shellPath, '## Progress Log\n');
   const runtimeJson = path.join(hermitRoot, 'state', 'runtime.json');
   fs.writeFileSync(runtimeJson, JSON.stringify({ session_id: 'S-042', tmux_session: 'hermit' }));
 
@@ -57,6 +59,7 @@ test('applyContextReset anchors both fields to hermitRoot, not the cwd', async (
   // writeRuntimeJson mkdirs its target, so a cwd-relative resolve would have silently
   // created a decoy state dir here and written the flag into it.
   expect(fs.existsSync(path.join(foreignCwd, '.claude-code-hermit'))).toBe(false);
+  expect(fs.readFileSync(shellPath, 'utf-8')).toContain('context cleared (test)');
 
   // The atomic write renames its temp away; nothing is left behind.
   const leftovers = fs.readdirSync(path.join(hermitRoot, 'state')).filter((f) => f.endsWith('.tmp'));

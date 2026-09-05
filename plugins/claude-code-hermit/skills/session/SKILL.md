@@ -10,26 +10,21 @@ Start or resume a session with full context loading. This is the generic session
 
 ### 1. Start or resume
 
-Invoke `/claude-code-hermit:session-start` to check session state and load context.
+Invoke `/claude-code-hermit:session-start` to check session state, load context, and select the task. If it stops for recovery, a collision, or operator input, stop here.
 
 ### 2. If resuming an active session
 
-- Read the SHELL.md Progress Log for the plan and how far it got
-- Show: task, the most recent Progress Log entries, and blockers
-- If the session status is `blocked`: suggest running `/debug` to diagnose tool/hook failures before re-attempting
-- Ask: "Continue this, or start something new?"
+Use the task, progress, and blockers established by `session-start`. Do not repeat its resume question or reload the same context.
 
 ### 3. If starting a new session
 
 - **Always-on** (`config.always_on` is `true`) with no task known: there is no operator to ask, so do **not** ask. Report readiness; the next task arrives from the channel, a routine, or a queued NEXT-TASK.md.
-- Ask: "What should I help with?" (unless a task is already known, or the always-on branch above applied)
-- The session-start skill handles tags
+- `session-start` owns task selection and tags. Continue once it has established a task; do not ask for it again.
 
 ### 4. Plan the work
 
 Once I know what to work on:
-- Propose an ordered plan to get it done
-- Confirm the plan with the operator before starting work
+- State an ordered plan and proceed within the task's existing authorization. Ask only for missing information, a material scope change, or an explicit approval gate.
 - For multi-step work: record the ordered steps in the SHELL.md Progress Log — it is the plan of record
 - For quick single-step tasks: no plan entry needed
 
@@ -38,7 +33,7 @@ Once I know what to work on:
 Work through tasks using whatever tools, skills, and agents are available:
 - Use the tools best suited to each step
 - Append a timestamped `.claude-code-hermit/sessions/SHELL.md` Progress Log entry as each step lands — one entry per significant step, so the plan and its progress stay legible after compaction or a restart
-- If a step is blocked, document the blocker in SHELL.md `## Blockers` and ask the operator how to proceed. When it clears, **prefix that line with `~ ` — never delete it**: the tilde is what stops it being re-injected as current after a compaction or on the next session, and the archive turns it into `- [resolved] <text>` in the report so the record survives
+- If a step is blocked, try permitted alternatives and continue independent work. Document unresolved blockers in SHELL.md `## Blockers`; ask the operator only for the decision or access needed to proceed. When it clears, **prefix that line with `~ `, never delete it**: this stops current-blocker injection while retaining the resolved record in the archive.
 
 ### 6. Work done
 
@@ -54,10 +49,10 @@ When the work is done, or the operator decides to move on (even if partial or bl
    - `Changed:` list of files modified
    - `Artifacts:` optional `[[compiled/...]]` links not already recorded in SHELL.md or found by the session-stamped scan
 2. Verify quality in-context before archiving:
-   - Task status is one of `completed` | `partial` | `blocked`
+   - Verify the requested result against current files, artifacts, or command results. Mark `completed` only when the task's completion criteria hold; record failed or skipped verification with a `partial` or `blocked` result.
    - Changed files are identified
    - SHELL.md `## Blockers` has enough context for a cold start
-3. Create proposals for any high-leverage improvements discovered during work
+3. Carry improvements outside the authorized task into reflect's tier gates; they do not block completion of the requested work.
 4. **Reflect.** Invoke the `claude-code-hermit:reflect` skill; its precheck decides whether anything is due. For quick single-step tasks, skip entirely — progress log is sufficient.
 4b. **Session-triggered scheduled checks.** For each `scheduled_checks` entry (from config already loaded) with `trigger: "session"` and `enabled: true`, invoke the skill. If a skill is unavailable or errors, skip it and continue — never block session finalization on a scheduled check failure. For each check that completed successfully, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts .claude-code-hermit/state/reflection-state.json --scheduled-check-run <id>` (writes only that check's `last_run`; fail-open). Do not run it for failed checks.
 5. Run `scripts/session-archive.ts` to perform an **idle transition** (finalize SHELL.md, archive report, reset task-scoped sections, set `session_state` to `idle`). It derives cost itself from the cost-log window — no `Cost:` line to compute or pass.

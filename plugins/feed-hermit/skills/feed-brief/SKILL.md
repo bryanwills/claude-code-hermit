@@ -32,10 +32,10 @@ Resolve `<slot>` from the flag before starting. All filenames below use that res
 ### Phase 1 — Web/RSS sources
 
 Dispatch the `@feed-hermit:source-fetcher` subagent (model: haiku) to fetch all `web` and `rss`
-sources from `feed-sources.md`. Pass the full source list (URLs + names) and the resolved `<slot>`.
+sources from `feed-sources.md`. Pass the full source list (URLs + names), the resolved `<slot>`, and the absolute project root and output path.
 
 **Output-path contract:** the agent writes its extracted items to `tmp/feed-source-items-<slot>.json`
-in the project root (never `/tmp/`). Items are nested under `sources[]`, each item:
+in the project root (never `/tmp/`). Pass `<absolute-project-root>/tmp/feed-source-items-<slot>.json` to the agent so its inherited working directory cannot redirect the write. Items are nested under `sources[]`, each item:
 `{title, summary, url, published_at, source, section, author}`. No scoring —
 extraction only. After the agent returns, read that file for the collected items.
 

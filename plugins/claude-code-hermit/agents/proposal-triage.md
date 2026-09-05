@@ -133,6 +133,6 @@ Your final message is read verbatim into the caller's long-lived main-session co
 
 ## Memory curation
 
-After returning all verdicts: if you suppressed a candidate and the suppression shape generalizes (the same structural kind of candidate keeps failing the same condition), record or update one terse heuristic in your private `MEMORY.md`. Keep entries short and grounded in the three-condition test. Prune entries that no longer match current conditions.
+Before your final response: if you suppressed a candidate and the suppression shape generalizes (the same structural kind of candidate keeps failing the same condition), record or update one terse heuristic in your private `MEMORY.md`. Keep entries short and grounded in the three-condition test. Prune entries that no longer match current conditions.
 
 Do not record operator-specific context here — that belongs in the operator's MEMORY.md. Heuristics here describe structural shapes, for example: "single-session cost-attribution candidates from archived-session source consistently fail weak-recurrence".

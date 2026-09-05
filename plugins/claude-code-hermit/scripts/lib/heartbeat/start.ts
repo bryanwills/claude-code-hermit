@@ -107,11 +107,12 @@ export async function commitHeartbeatArm(
 
   if (!live) return 'DEAD|liveness-absent';
   const hhmm = currentHHMMOrUTC(config?.timezone ?? 'UTC', new Date(nowMs));
-  appendShellLine(
+  const appendError = appendShellLine(
     path.join(hermitDir, 'sessions'),
     'Monitoring',
     `[${hhmm}] Heartbeat: monitor registered (interval: ${config?.heartbeat?.every ?? `${interval}s`}) — liveness confirmed by /hermit-doctor heartbeat check`,
   );
+  if (appendError) console.error(`[heartbeat] ${appendError}`);
   return `OK|registered|interval=${interval}`;
 }
 

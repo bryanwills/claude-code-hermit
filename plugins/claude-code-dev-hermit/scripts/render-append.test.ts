@@ -1,6 +1,6 @@
-// Golden test: proves the single-source collapse preserves behavior byte-for-byte.
-// render('standard', <annotated template>) must equal the pre-collapse standard file,
-// render('safety',  <annotated template>) must equal the pre-collapse safety file.
+// Golden test: pins the intended standard and safety instruction blocks.
+// Update both fixtures deliberately when shared instructions change; the renderer
+// must preserve each mode's expected content byte-for-byte.
 // The template fed to render() is the LIVE annotated CLAUDE-APPEND.md — if it had no
 // markers the transform would be identity and both assertions would pass vacuously,
 // so reading the real template is what makes this test meaningful.

@@ -36,7 +36,7 @@ import { costLogPath, pinStateDirOrExit } from './lib/cc-compat';
 import { computeSessionCost } from './lib/session-cost';
 import { AUTO_CLOSE_LULL_MINUTES } from './lib/auto-close';
 import { readSettledConfig } from './lib/config-read';
-import { extractSection as sectionBody, firstContentLine, isResolvedBlockerLine, replaceSectionInPlace, stripPlaceholders, stripResolvedMarker } from './lib/md-write';
+import { withShellLock, extractSection as sectionBody, firstContentLine, isResolvedBlockerLine, replaceSectionInPlace, stripPlaceholders, stripResolvedMarker } from './lib/md-write';
 import { isResetBreadcrumb } from './lib/progress-log';
 
 type Json = any;
@@ -1169,9 +1169,17 @@ function main(): void {
   const { verb, flags } = parseArgs(process.argv);
   const stdin = verb === 'archive' || verb === 'open' ? readStdinSync() : '';
 
-  if (verb === 'archive') return emit(verbArchive(flags, stdin));
-  if (verb === 'open') return emit(verbOpen(flags, stdin));
-  if (verb === 'recover') return emit(verbRecover(flags));
+  if (verb === 'archive' || verb === 'open' || verb === 'recover') {
+    const { sessionsDir } = resolveRunContext(flags);
+    const run = () => verb === 'archive' ? verbArchive(flags, stdin)
+      : verb === 'open' ? verbOpen(flags, stdin) : verbRecover(flags);
+    if (verb === 'open') fs.mkdirSync(sessionsDir, { recursive: true });
+    // Missing sessions preserve the existing missing-file/recovery verdicts.
+    const result = fs.existsSync(sessionsDir)
+      ? withShellLock(path.join(sessionsDir, 'SHELL.md'), run) : run();
+    return emit(result);
+  }
+
   if (verb === 'auto-close-decision') return emit(verbAutoCloseDecision(flags));
 
   return emit({ ok: false, reason: `unknown verb: ${verb || '(none)'}. Valid verbs: archive, open, recover, auto-close-decision` });

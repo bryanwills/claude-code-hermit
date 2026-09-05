@@ -23,7 +23,6 @@ Anything operator-facing (deploy success/failure, escalations) is relayed via th
 ### Credentials
 
 - **Never `cat`, `echo`, `grep`, or Read `.env`** to check the token — run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php check` instead. It self-reports `missing`/`invalid`/`unreachable`/`ok` without revealing the value.
-- Any Bash arg containing the literal string `TOKEN` is blocked by the base hermit's deny-pattern hook.
 
 ### Secret hygiene
 

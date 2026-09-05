@@ -55,8 +55,8 @@ Run before anything else. Abort the release if any step fails.
    If any test fails, stop and fix before releasing.
 
 3. **Run the plugin-validator agent in `release` mode** (`plugin-validator <slug> release`) to cross-reference plugin integrity. Pass it the plugin slug explicitly so it knows which plugin to audit:
-   - Skills in `plugins/<slug>/CLAUDE.md` / `state-templates/CLAUDE-APPEND.md` match actual `plugins/<slug>/skills/` directories
-   - Agents in `plugins/<slug>/CLAUDE.md` match actual `plugins/<slug>/agents/` files
+   - Skills referenced in the plugin README, `AGENTS.md`, or `state-templates/CLAUDE-APPEND.md` match actual `plugins/<slug>/skills/` directories
+   - Agents referenced in the plugin README or `AGENTS.md` match actual `plugins/<slug>/agents/` files
    - Hook scripts referenced in `plugins/<slug>/hooks/hooks.json` exist in `plugins/<slug>/scripts/`
    - State-template JSON files parse correctly
    - `config.json.template` keys are in sync with `DEFAULT_CONFIG` in `plugins/<slug>/scripts/hermit-start.ts` (core only)
@@ -104,7 +104,7 @@ Present the suggested version and rationale. Wait for confirmation before procee
 
 Prepend a new entry to `plugins/<slug>/CHANGELOG.md` immediately after the `# Changelog` header, before the previous version entry. If a `[Unreleased]` section already exists, rename it to `[X.Y.Z] - YYYY-MM-DD` instead of prepending a new one — the entry has been accumulating during development.
 
-**Docs-only double-check (do this before promoting/writing the entry).** Read every narrative bullet about to ship in this version and confirm each describes a real code/behavior change an operator experiences. Drop any bullet whose only change is documentation — README, `docs/`, `CLAUDE.md`, or code comments — including bullets that pair a docs correction onto an otherwise-code entry (keep the code half, cut the docs half). Docs corrections belong in the commit message and PR description, never the CHANGELOG. Cross-check against the actual diff: `git diff <last-tag>..HEAD -- plugins/<slug>` — if a bullet's only backing changes are `.md` or comment edits, it should not be in the changelog. This mirrors the root `CLAUDE.md` §Commits rule.
+**Docs-only double-check (do this before promoting/writing the entry).** Read every narrative bullet about to ship in this version and confirm each describes a real code/behavior change an operator experiences. Drop any bullet whose only change is documentation (README, `docs/`, instruction files, or code comments), including bullets that pair a docs correction onto an otherwise-code entry (keep the code half, cut the docs half). Docs corrections belong in the commit message and PR description, never the CHANGELOG. Cross-check against the actual diff: `git diff <last-tag>..HEAD -- plugins/<slug>`; if a bullet's only backing changes are `.md` or comment edits, it should not be in the changelog. This mirrors the root `AGENTS.md` §Commits and releases rule.
 
 **Format**:
 
@@ -127,7 +127,7 @@ No `config.json` changes required.
 
 **Template constraints (enforce these):**
 
-1. **Narrative bullets (Added / Changed / Fixed)** — canonical format lives in root `CLAUDE.md` §Commits; enforce it here: a plain sentence-case line under the category header, no `**component:**` prefix and no leading Fixed/Added verb (the header carries the category). Backticks for commands/paths/flags. Target 1–2 lines. If a bullet wants to grow longer, the surplus belongs in the PR description, not here.
+1. **Narrative bullets (Added / Changed / Fixed)**: canonical format lives in root `AGENTS.md` §Commits and releases; enforce it here: a plain sentence-case line under the category header, no `**component:**` prefix and no leading Fixed/Added verb (the header carries the category). Backticks for commands/paths/flags. Target 1–2 lines. If a bullet wants to grow longer, the surplus belongs in the PR description, not here.
    - Do NOT list internal refactors, helper extractions, test scaffolding, or renamed variables — those are visible in `git diff`.
    - **Recovery procedures, migration shell snippets, and breaking-change steps belong in `### Upgrade Instructions`, never in the narrative bullet.** Write a tight summary ("changed default X to Y") and let that section carry the imperative steps — `hermit-evolve` reads them step-by-step.
 
@@ -149,10 +149,10 @@ No `config.json` changes required.
 
 For each new skill, agent, or hook added since the last release of this plugin, detect missing entries and add them in one pass:
 
-- `plugins/<slug>/CLAUDE.md` quick reference list (skills) and subagent table (agents)
+- Plugin README component descriptions and any affected `plugins/<slug>/AGENTS.md` constraints (keep inventories out of instruction files)
 - `plugins/<slug>/state-templates/CLAUDE-APPEND.md` quick reference (if the template exists for this plugin)
 - `plugins/<slug>/docs/skills.md` (if the doc exists)
-- Hook descriptions in `plugins/<slug>/CLAUDE.md` if the hook surface area changed
+- Hook descriptions in the plugin README or relevant docs if the hook surface area changed
 
 Skip the step entirely if nothing was added. The plugin-validator (Step 1.3) covers structural integrity; this step is about narrative references.
 

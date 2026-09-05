@@ -8,6 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { acquireLockWithWait, releaseLock } from './lockfile';
 
 type Json = any;
 
@@ -158,21 +159,37 @@ export function appendToSection(content: string, heading: string, line: string):
   return before + line + after;
 }
 
+// All mechanical SHELL rewrites share this lock, including lifecycle resets.
+// Dead owners are reclaimed by lockfile; a busy or unwritable lock is a retry,
+// never permission to overwrite a peer's read-modify-write without the lock.
+export function withShellLock<T>(shellPath: string, fn: () => T): T {
+  const lockPath = `${shellPath}.lock`;
+  if (!acquireLockWithWait(lockPath, 2000)) throw new Error('SHELL.md lock unavailable; retry the operation');
+  try { return fn(); }
+  finally { releaseLock(lockPath); }
+}
+
 // Best-effort append of a pre-rendered line to `<stateDir>/sessions/SHELL.md`
 // under `## <heading>` (Findings/Progress Log). Returns null on success, an
 // error message otherwise — never throws.
 export function appendShellLine(sessionsDir: string, heading: string, line: string): string | null {
   const shellPath = path.join(sessionsDir, 'SHELL.md');
-  let shell: string;
-  try { shell = fs.readFileSync(shellPath, 'utf-8'); }
-  catch { return 'SHELL.md unreadable'; }
-  let next: string;
-  try { next = appendToSection(shell, heading, line); }
-  catch (e: any) { return `SHELL.md has no ## ${heading} section: ${e.message}`; }
   try {
-    writeFileAtomic(shellPath, next);
-    return null;
+    return withShellLock(shellPath, () => {
+      let shell: string;
+      try { shell = fs.readFileSync(shellPath, 'utf-8'); }
+      catch { return 'SHELL.md unreadable'; }
+      let next: string;
+      try { next = appendToSection(shell, heading, line); }
+      catch (e: any) { return `SHELL.md has no ## ${heading} section: ${e.message}`; }
+      try {
+        writeFileAtomic(shellPath, next);
+        return null;
+      } catch (e: any) {
+        return 'SHELL.md write failed: ' + e.message;
+      }
+    });
   } catch (e: any) {
-    return 'SHELL.md write failed: ' + e.message;
+    return e.message;
   }
 }

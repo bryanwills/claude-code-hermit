@@ -120,9 +120,12 @@ async function main(raw: string): Promise<void> {
   // shutdown — the operator's message is still recorded and the reply reminder
   // still names the chat to answer on.
   await stage('record-operator-action',
-    () => { operatorActivityKept = recordOperatorAction(prompt, { envelope: ctx.envelope, config: ctx.config() }, { openTurn: false }); }, ctx);
+    () => { operatorActivityKept = recordOperatorAction(prompt, { envelope: ctx.envelope, config: ctx.config() }, { openTurn: false, sessionId }); }, ctx);
   await stage('prompt-context', promptContext, ctx);
   await stage('channel-reply-reminder', channelReplyReminder, ctx);
+
+  // Guest chat still receives context, but cannot control the resident.
+  if (isGuest(path.join(dir, 'state'), sessionId)) return;
 
   const rt = ctx.runtime();
   const shutdownPending = !!rt && !!rt.shutdown_requested_at && !rt.shutdown_completed_at;
@@ -148,14 +151,7 @@ async function main(raw: string): Promise<void> {
   // accumulated context (see emit()). Running it earlier let a blocked `status`
   // turn destroy the marker with the report unread — stage() skips it entirely
   // once a block is settled, so the marker survives for the next real prompt.
-  //
-  // Skipped entirely in a guest session: the marker is the RESIDENT's, written when
-  // its Stop hook delivered the switch. A guest reporting it would announce a switch
-  // that never happened to its own session, and — worse — clear the marker before the
-  // resident's next prompt ever read it.
-  if (!isGuest(path.join(dir, 'state'), sessionId)) {
-    await stage('harness-verify', harnessVerify, ctx);
-  }
+  await stage('harness-verify', harnessVerify, ctx);
 }
 
 function emit(): void {

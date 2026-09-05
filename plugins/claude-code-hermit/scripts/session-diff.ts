@@ -14,7 +14,8 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { hermitDir } from "./lib/cc-compat";
+import { isGuest } from "./lib/guest-marker";
+import { hermitDir, sessionId } from "./lib/cc-compat";
 
 type Json = any;
 
@@ -101,7 +102,8 @@ const DEBOUNCE_MS = 60 * 1000; // 60 seconds
 // Includes state-aware debounce: skips when in_progress and sidecar is fresh.
 // Forces refresh when session state is not in_progress (archive is imminent).
 // process.exit() calls become returns so the pipeline is not killed.
-async function run(_payload: Json): Promise<void> {
+async function run(payload: Json): Promise<void> {
+  if (isGuest(path.join(HERMIT_DIR, "state"), sessionId(payload))) return;
   // Profile gating — run on "standard" and "strict" only
   const profile = (process.env.AGENT_HOOK_PROFILE || "standard").trim().toLowerCase();
   if (profile === "minimal") {
@@ -142,14 +144,20 @@ export { run };
 
 if (import.meta.main) {
   (async () => {
-    // Consume stdin to avoid broken pipe (content not used for diff)
+    // Consume the hook payload before checking its frozen ownership verdict.
     let totalSize = 0;
+    const chunks: Buffer[] = [];
     for await (const chunk of process.stdin) {
       totalSize += chunk.length;
       if (totalSize > MAX_STDIN) break;
+      chunks.push(Buffer.from(chunk));
     }
 
-    // Profile gating — run on "standard" and "strict" only
+    let payload: Json = {};
+    try { payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')); } catch {}
+    if (isGuest(path.join(HERMIT_DIR, 'state'), sessionId(payload))) return;
+
+    // Profile gating: run on standard and strict only.
     const profile = (process.env.AGENT_HOOK_PROFILE || "standard").trim().toLowerCase();
     if (profile === "minimal") {
       process.exit(0);

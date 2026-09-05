@@ -109,3 +109,22 @@ describe('stop-pipeline — cost row session attribution', () => {
     expect(row.guest).toBe(true);
   }));
 });
+
+
+describe('guest Stop preserves resident scheduling state', () => {
+  for (const idKey of ['session_id', 'sessionId']) {
+    test(`preserves turn, snapshot and pending command with ${idKey}`, withDir(async (dir) => {
+      const state = hermit(dir, 'state');
+      markGuest(state, SESSION_ID);
+      const files = ['operator-turn-open.json', 'cc-stop-snapshot.json', 'pending-harness-command.json'];
+      for (const name of files) fs.writeFileSync(path.join(state, name), '{"resident":"untouched"}');
+      const input = JSON.parse(stopHookInput(dir));
+      delete input.session_id;
+      input[idKey] = SESSION_ID;
+      const r = await runScript('stop-pipeline.ts', { stdin: JSON.stringify(input), cwd: dir, env: PIPE_ENV });
+      expect(r.exitCode).toBe(0);
+      for (const name of files) expect(fs.readFileSync(path.join(state, name), 'utf-8')).toBe('{"resident":"untouched"}');
+      expect(r.stderr).toContain('cost-tracker');
+    }));
+  }
+});

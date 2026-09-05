@@ -107,6 +107,7 @@ The script assigns the canonical ID `PROP-NNN-<slug>-HHMMSS` (resolves the next 
 Header fields:
 - `Title:` — required.
 - `Source:` — `manual` (default), `auto-detected` (when invoked by `reflect`), or `operator-request` (when triggered by a direct operator request). Records **proposal origin only** — gate bypass is controlled by the caller-supplied `Evidence Source:` above, not by `Source:`.
+- `Self-Eval-Key:`: optional; preserve the exact `self_eval_key` supplied by heartbeat so later decisions remain linked to that checklist item. Omit for other proposals.
 - `Session:` — optional; defaults to the active session from `state/runtime.json` when omitted.
 - `Category:` — optional (default `improvement`); one of:
   - `improvement` — workflow or tooling fix

@@ -12,6 +12,9 @@
 //     handler used to narrate (waiting timeout, budget composition, the
 //     auto-close Monitoring line). Prints one JSON line the skill branches on.
 //
+//   bun heartbeat.ts ack-next-task <hermit-dir> <token>
+//     Park an unchanged queued task after its notice was delivered.
+//
 //   bun heartbeat.ts start-check <hermit-dir>
 //   bun heartbeat.ts start-commit <hermit-dir> <task-id>
 //     The two halves of `heartbeat start`: is a re-arm needed, and record the
@@ -29,7 +32,7 @@
 
 export {}; // module scope: every import here is dynamic, and top-level await needs it
 
-const USAGE = 'Usage: bun heartbeat.ts <precheck [--peek] <dir> | tick <dir> | start-check <dir> | start-commit <dir> <task-id> | alert-state <state-file>>';
+const USAGE = 'Usage: bun heartbeat.ts <precheck [--peek] <dir> | tick <dir> | ack-next-task <dir> <token> | start-check <dir> | start-commit <dir> <task-id> | alert-state <state-file>>';
 
 const verb = process.argv[2];
 process.argv.splice(2, 1);
@@ -43,6 +46,13 @@ switch (verb) {
   case 'tick': {
     const { run } = await import('./lib/heartbeat/tick');
     await run(process.argv.slice(2));
+    break;
+  }
+  case 'ack-next-task': {
+    const { acknowledgeNextTask } = await import('./lib/heartbeat/tick');
+    const { pinStateDirOrExit } = await import('./lib/cc-compat');
+    const dir = pinStateDirOrExit(process.argv[2], 'heartbeat ack-next-task');
+    console.log(JSON.stringify(acknowledgeNextTask(dir, process.argv[3])));
     break;
   }
   case 'start-check':

@@ -4,8 +4,7 @@
 
 ## Session Discipline (claude-code-hermit)
 
-- If startup context shows no active session, ask what to help with.
-- Lifecycle: `/claude-code-hermit:session-start` / `session-close`.
+- Use `/claude-code-hermit:session-start` to establish or resume work; it owns task selection and unattended startup. Archive via `/claude-code-hermit:session-close`.
 
 ## Watches
 
@@ -55,7 +54,7 @@ Auto-memory handles all learning; `compiled/` is for durable domain outputs, not
 - Calibration: before publishing specifics you didn't verify in this conversation (version-pinned behavior, external system state, recalled signatures, prices/dates/counts), verify against a source or label as recalled-not-verified. `OPERATOR.md` can tighten or relax.
 - Secrets: never log API keys, tokens, passwords, or credentials to SHELL.md, reports, or proposals.
 - OPERATOR.md: operator-curated (tone lives in config's `voice` block); never edit autonomously. Stale or contradictory context: draft the minimal diff and apply only after the operator confirms; in always-on mode flag it via channel instead.
-- Proposals: every improvement goes through `/proposal-create` → operator accepts → implement. Trivial fixes (typos, one-liners) exempt. **Never hand-write `proposals/PROP-*.md` files**: always invoke the skill.
+- Proposals: improvements outside the authorized task follow `/claude-code-hermit:reflect`'s tier gates; full proposals use `/proposal-create` → operator accepts → implement. Authorized work and trivial fixes need no new proposal. **Never hand-write `proposals/PROP-*.md` files**: always invoke the skill.
 - Tasks: multi-step work is ordered steps in the `.claude-code-hermit/sessions/SHELL.md` Progress Log, one timestamped entry per step.
 - Artifact frontmatter: any `.md` file you create outside `.claude-code-hermit/` must include YAML frontmatter with at least `title` (string) and `created` (ISO 8601 with timezone). If inside a hermit session, add `session: S-NNN`.
 - Tag discipline: tag every session report, proposal, and artifact you create; reuse the existing lowercase-hyphenated vocabulary rather than inventing new tags.

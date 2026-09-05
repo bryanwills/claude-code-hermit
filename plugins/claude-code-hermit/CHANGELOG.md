@@ -22,7 +22,7 @@
 - The heartbeat eval contract returns `item`, the `HEARTBEAT.md` line verbatim, for a checklist finding; `checklist:<…>` keys are derived by the writer.
 - Reflect's runner also reads `## Completed` of recent reports.
 - `proposal-create` documents the `## Config` routine block.
-- The every-20-ticks heartbeat self-evaluation is derived by `heartbeat.ts alert-state` from the checklist, the monitoring history and proposal frontmatter. The eval subagent returns `firing` alone; the script prints the entries that crossed a threshold as `self_eval_proposals`.
+- The every-20-ticks heartbeat self-evaluation is derived by `heartbeat.ts alert-state` from the checklist, keyed firing evidence and proposal frontmatter. The eval subagent returns `firing` alone; the script prints the entries that crossed a threshold as `self_eval_proposals`.
 - Reflect graduates ledger patterns through `observations.ts graduate` instead of grouping `observations.jsonl` by hand.
 - Brief's pending-review scan reads `state/proposals-index.json` rather than every proposal's frontmatter.
 - The idle priority-alignment pass against `OPERATOR.md` and the cost log is gone with the heartbeat's `## Idle Agency` section. `idle_behavior` is now reserved: `"discover"` and `"wait"` behave identically, and neither gates queued-task pickup (`always_on` + `escalation`) nor the `reflect` schedule (its own cron). Config reference, FAQ, README, always-on ops and troubleshooting corrected to match.
@@ -37,6 +37,10 @@
 - `operator_turns` removed from `.status.json`, session-report frontmatter and the weekly review.
 
 ### Fixed
+- Concurrent mechanical session-log writes and lifecycle resets share a lock; contention reports a retryable failure instead of overwriting another writer.
+- Conservative queued tasks enter waiting only after notification delivery is acknowledged; failed sends remain eligible for retry and stale acknowledgements preserve current work.
+- Heartbeat self-evaluation retains keyed firing evidence between evaluation boundaries, including suppressed alerts that recover before the next pass, and preserves checklist correlation keys when creating proposals.
+- Guest sessions preserve resident activity, open-turn markers, Stop snapshots, queued harness commands, and captured file changes. Cold-start activity seeding follows residency classification.
 - A waiting timeout left its `waiting_since` stamp behind on the now-idle runtime, so the next wait was measured against a timestamp from the wait before it. A park that stamps nothing of its own, `operator_input` from the channel responder, was released on its first heartbeat.
 - A task queued while an always-on session sat idle waited for the next boot. The heartbeat tick picks it up again: under `conservative` it parks the session in `waiting` and sends one plain-language notice, under `balanced`/`autonomous` it starts the session.
 - The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/**)`, which covers both install trees for every plugin. The dead spelling, and the `Write` twin older installs still carry beside it, are retired via `HERMIT_OBSOLETE_DENY`.
@@ -54,6 +58,8 @@
 ### Upgrade Instructions
 
 Run `/claude-code-hermit:hermit-evolve`.
+
+Custom heartbeat handlers that call `heartbeat.ts tick`: for a notification carrying `ack_next_task`, call `heartbeat.ts ack-next-task <hermit-dir> <ack_next_task>` after confirmed delivery. Failed or partial delivery must leave it unacknowledged for retry. The shipped heartbeat skill already handles this. Evolve's existing permissions sync installs the sealed allow entry for this verb.
 
 1. **Re-seed the plugin-source deny rules.** Resolve `hatch_target` (`.claude-code-hermit/state/hatch-options.json` → `target`, per the same resolution hermit-evolve already does in its own Step 1) to the settings file (`.claude/settings.local.json` for `local`, `.claude/settings.json` for `committed`/`project`). Read that file's `permissions.deny`. If it does **not** contain `"Bash(rm -rf *)"`, the operator chose Skip (or has no deny rules) at hatch time: do nothing, report `skip-preserved`, and preserve that choice. Otherwise run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny standard` to pick up the `//`-anchored `Edit(//**/.claude/plugins/**)` pattern. `permissions-sync` does not re-seed `deny`, so this call is what puts the new rule in place. The merge is additive and idempotent (`mergeDeny` dedups), safe to re-run; it re-seeds the whole standard deny and ask template, so any seeded rule the operator removed by hand comes back, and a Hardened install (which carries the ask rules in `deny`) also gains them in `permissions.ask`, where the deny still wins. The inert single-slash spellings are removed by `permissions-sync`, which hermit-evolve already runs.
 2. **If your config directory is not `~/.claude`** (`CLAUDE_CONFIG_DIR` points elsewhere, such as a `~/.claude-work` profile install), the seeded rules name `.claude` literally and will not match it. Add your own copies with the directory substituted, per `docs/security.md`.
