@@ -1964,6 +1964,26 @@ describe('doctor-check', () => {
     expect(c.detail).toContain('not-executable');
   }));
 
+  test('doctor-check routine-precheck: extra dispatches (wrapper skipped) count as the gate working', withDir(async (dir) => {
+    seedDoctor(dir, WITH_GATED);
+    // One fail-open error plus one extra emit whose session never ran the wrapper:
+    // starts == errors, but dispatches exceed errors, so the gate answered WAKE.
+    write(hermit(dir, 'state', 'routine-metrics.jsonl'),
+      [ledgerRow('precheck-error', { detail: 'exit:1' }), ledgerRow('dispatched'),
+       ledgerRow('dispatched')].join('\n') + '\n');
+    const c = checkById(await doctorReport(dir), 'routine-precheck');
+    expect(c.status).toBe('ok');
+  }));
+
+  test('doctor-check routine-precheck: dispatches equal to errors still warn', withDir(async (dir) => {
+    seedDoctor(dir, WITH_GATED);
+    write(hermit(dir, 'state', 'routine-metrics.jsonl'),
+      [ledgerRow('precheck-error', { detail: 'timeout' }), ledgerRow('dispatched')].join('\n') + '\n');
+    const c = checkById(await doctorReport(dir), 'routine-precheck');
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('timeout');
+  }));
+
   test('doctor-check routine-precheck: a paused stretch does not count as the gate working', withDir(async (dir) => {
     seedDoctor(dir, WITH_GATED);
     // `skipped-paused` says nothing about the gate — only `skipped-precheck` does.

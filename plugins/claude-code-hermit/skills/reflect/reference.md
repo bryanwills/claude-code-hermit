@@ -126,8 +126,8 @@ It prints one JSON object:
   skip the rest of this step: an unreadable ledger is not evidence that routines are healthy.
 - `malformed_rows` — corrupt ledger lines skipped. Mention in a finding only if non-zero.
 - `routines[]` — per routine: `fires`, `failures` (counts keyed by bare reason),
-  `failure_total`, `incomplete`, `orphan_terminals`, `open_attempt`, `skips`, `last_fire`,
-  `cost_usd`.
+  `failure_total`, `incomplete`, `orphan_terminals`, `open_attempt`, `unhandled`,
+  `unhandled_open`, `skips`, `last_fire`, `cost_usd`.
 - `unattributable_multi_cost_usd` — spend from wakes that served two or more routines at once. It
   belongs to no single routine; never fold it into one routine's evidence.
 
@@ -143,6 +143,10 @@ session, a hung skill. If `incomplete >= 2` for a routine, produce a `routine_ca
   "shell_findings_line": "routine '<id>' started but never completed N× in the last 14 days — its output and cost are unattributed." }
 ```
 
+`unhandled` counts emits the session never picked up — fired but the session never ran the
+wrapper, so the fire and its cost are unrecorded. If `unhandled >= 2` for a routine, produce
+the same entry shape with that wording, not the crash wording.
+
 **Failed-contract detection:**
 
 `failures` is a different fault and gets different wording: the routine ran and its declared
@@ -152,7 +156,9 @@ reason — "routine '<id>' ran but its output did not land (artifact-missing) N�
 days" — not the generic errored wording. These are not crashes and the fix is different.
 
 `orphan_terminals` (a terminal row with no matching start) and `open_attempt` (an attempt still
-running at the window edge) are diagnostic context, not candidates on their own.
+running at the window edge) are diagnostic context, not candidates on their own. `unhandled_open`
+is the same for a dispatch still open at the window edge; on a routine that fires less often than
+the window it is more likely a dropped wake than a live turn.
 
 **Uncited-routine detection:**
 

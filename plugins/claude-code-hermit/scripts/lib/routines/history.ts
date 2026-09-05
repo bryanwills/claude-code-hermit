@@ -1,6 +1,7 @@
 // state/routine-metrics.jsonl → an ordered per-routine attempt projection.
 //
-// The ledger records five event kinds: `started` (precheck, at fire time),
+// The ledger records six event kinds: `dispatched` (due.ts, at emit),
+// `started` (precheck, at fire time),
 // `fired` / `failed-<reason>` (finish — exactly one terminal per attempt),
 // `skipped-*` (due.ts gates, which open no attempt at all), and `precheck-error`
 // (a declared wake gate that could not answer, so the fire woke anyway — the one
@@ -59,6 +60,20 @@ export type RoutineHistoryEntry = {
   /** The most recent `precheck-error` detail in-window (timeout | exit:<n> | …). */
   last_precheck_error: { ts: string; detail: string } | null;
   last_fire: string | null;
+  /** `dispatched` rows in-window: one per monitor emit, wrapper or not. */
+  dispatches: number;
+  /**
+   * Dispatches superseded by another `dispatched` without a closer. Closers are
+   * `started`, `fired`, `failed-*`, `skipped-waiting`, `skipped-paused`.
+   * `skipped-precheck` and `precheck-error` do not close.
+   */
+  unhandled: number;
+  /**
+   * A dispatch that opened *inside* the window was still open at its end (the
+   * session may still pick it up). A `dispatched` left dangling from before the
+   * window is not reported: same tail rule as `open_attempt`.
+   */
+  unhandled_open: boolean;
 };
 
 export type RoutineHistory = {
@@ -86,6 +101,9 @@ export function emptyEntry(id: string): RoutineHistoryEntry {
     precheck_errors: 0,
     last_precheck_error: null,
     last_fire: null,
+    dispatches: 0,
+    unhandled: 0,
+    unhandled_open: false,
   };
 }
 
@@ -143,6 +161,8 @@ export function foldRoutineHistory(
   // routine id → ts of the attempt currently open, so the tail below can tell an
   // attempt that opened in-window from a `started` left dangling long before it.
   const open = new Map<string, number>();
+  // Same shape as `open`, for a monitor emit the session has not yet picked up.
+  const dispatchedOpen = new Map<string, number>();
   const touched = new Set<string>();
 
   const entryFor = (id: string): RoutineHistoryEntry => {
@@ -157,6 +177,15 @@ export function foldRoutineHistory(
     const entry = entryFor(row.id);
     if (inWindow) touched.add(row.id);
 
+    if (row.event === 'dispatched') {
+      // A second `dispatched` with the previous still open means the session
+      // never ran the wrapper for the first emit.
+      if (dispatchedOpen.has(row.id) && inWindow) entry.unhandled += 1;
+      if (inWindow) entry.dispatches += 1;
+      dispatchedOpen.set(row.id, row.ts);
+      continue;
+    }
+
     if (row.event === 'started') {
       // A second `started` with the previous attempt still open means the first
       // one never reached `finish`. That is the signal the old subtraction was
@@ -164,6 +193,7 @@ export function foldRoutineHistory(
       if (open.has(row.id) && inWindow) entry.incomplete += 1;
       if (inWindow) entry.starts += 1;
       open.set(row.id, row.ts);
+      dispatchedOpen.delete(row.id);
       continue;
     }
 
@@ -172,6 +202,7 @@ export function foldRoutineHistory(
     if (isFired || isFailure) {
       const wasOpen = open.has(row.id);
       open.delete(row.id);
+      dispatchedOpen.delete(row.id);
       if (!inWindow) continue;
       if (!wasOpen) entry.orphan_terminals += 1;
       if (isFired) {
@@ -183,6 +214,13 @@ export function foldRoutineHistory(
         entry.failure_total += 1;
       }
       continue;
+    }
+
+    // `skipped-waiting` / `skipped-paused` consume a fire without a wake, so they
+    // close a dangling dispatch. `skipped-precheck` and `precheck-error` do not:
+    // a skip-precheck never emits, and a gate error is the inverse of a skip.
+    if (row.event === 'skipped-waiting' || row.event === 'skipped-paused') {
+      dispatchedOpen.delete(row.id);
     }
 
     // `skipped-*` and `precheck-error` (and any other event string the ledger
@@ -205,6 +243,11 @@ export function foldRoutineHistory(
   for (const [id, openedAt] of open) {
     if (openedAt < sinceMs) continue;
     entryFor(id).open_attempt = true;
+    touched.add(id);
+  }
+  for (const [id, openedAt] of dispatchedOpen) {
+    if (openedAt < sinceMs) continue;
+    entryFor(id).unhandled_open = true;
     touched.add(id);
   }
 

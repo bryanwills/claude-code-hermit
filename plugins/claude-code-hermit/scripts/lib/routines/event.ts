@@ -1,9 +1,11 @@
 // `routines.ts log-event <routine-id> <event> [delivery]` — appends one line to
-// state/routine-metrics.jsonl. Events: fired | skipped-waiting | skipped-paused |
-// skipped-precheck | precheck-error | started. delivery: cron-create (default) |
-// monitor. `precheck-error` rows carry a `detail` field naming how the gate failed
-// (timeout | exit:<code> | bad-verdict | spawn | a config reason) — see
-// lib/routines/gate.ts; every other event omits the key.
+// state/routine-metrics.jsonl. Events: dispatched | fired | skipped-waiting |
+// skipped-paused | skipped-precheck | precheck-error | started. delivery:
+// cron-create (default) | monitor. The monitor stamps `dispatched` at emit; the
+// session still owns `started` and `fired`. `precheck-error` rows carry a
+// `detail` field naming how the gate failed (timeout | exit:<code> | bad-verdict
+// | spawn | a config reason) — see lib/routines/gate.ts; every other event
+// omits the key.
 //
 // Ported from log-routine-event.sh, and still emitting the same four keys with
 // the same UTC second-precision stamp. The row shape is pinned (tests assert it,

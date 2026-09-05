@@ -10,9 +10,13 @@
 - Tier 2 routine-bound lane in procedure capture (one proposal with `## Config` + `## Skill Draft`, optional `## Agent Draft`, one accept/dismiss ask; chat-triggered and external-origin stay Tier 3).
 - `## Agent Draft` section and its `proposal-act` install branch.
 - Monthly `capability-brainstorm` routine in the config template.
+- `dispatched` routine event, stamped by the monitor subprocess at emit, so a fire whose session never runs the wrapper still leaves a ledger trace.
+- `unhandled` and `unhandled_open` outcomes in the routine history fold, paired against `dispatched` so no arithmetic reaches a model.
 
 ### Changed
 - `capability-brainstorm` no longer describes itself as never running autonomously.
+- The doctor's "gate never succeeded" heuristic also clears on a dispatch count above the routine's precheck errors.
+- The heartbeat eval contract returns `item`, the `HEARTBEAT.md` line verbatim, for a checklist finding; `checklist:<…>` keys are derived by the writer.
 - Reflect's runner also reads `## Completed` of recent reports.
 - `proposal-create` documents the `## Config` routine block.
 - `/auto-mode-setup` is off in hermit sessions, seeded as `skillOverrides` in `.claude/settings.local.json`. Claude Code offers it in an end-of-turn dialog once auto mode has blocked a few actions with no `autoMode.environment` entries set, and a modal on an unattended hermit blocks every inbound prompt until the watchdog restarts it. Boot writes the key only when absent, so an operator's own value is the opt-out.
@@ -27,6 +31,8 @@
 - Cached-context `/model` and `/effort` confirmation matches with chrome below the dialog, so a channel-delivered switch is no longer left unanswered.
 - Wedge notices say the heartbeat is being woken first, that the agent isn't responding only after a failed wake, and send an all-clear on recovery.
 - Stall notices quote the pane's last 8 non-blank rows.
+- Checklist alerts were filed under a key the heartbeat gate never looked up, so a finding such as a credential re-auth never settled and re-woke the hermit a few times a day, indefinitely. `alert-update` now snaps a firing entry onto the canonical key derived from `HEARTBEAT.md`, and an entry that resolves to nothing lands under `custom:` instead of minting a phantom `checklist:` key.
+- The documented key normalisation yielded a different key than the code for a `- [x] ` item, because the list marker and checkbox were not stripped first.
 
 ### Upgrade Instructions
 

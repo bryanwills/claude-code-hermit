@@ -73,6 +73,9 @@ describe('routine-due', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:test-routine]');
     expect(readSchedule(dir)['test-routine'].last_consumed_mark).toBe('2026-07-15T09:00:00.000Z');
+    const rows = readMetricsRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ routine_id: 'test-routine', event: 'dispatched', delivery: 'monitor' });
   }));
 
   test('two routines due → one line, both bracketed ids, config order', withDir(async (dir) => {
@@ -247,8 +250,11 @@ describe('routine-due', () => {
     const r = await run(dir, '2026-07-15T09:00:00Z');
     expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:rdw-true]');
     const rows = readMetricsRows(dir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ routine_id: 'rdw-false', event: 'skipped-waiting', delivery: 'monitor' });
+    expect(rows.map((x) => `${x.routine_id}:${x.event}`).sort()).toEqual([
+      'rdw-false:skipped-waiting',
+      'rdw-true:dispatched',
+    ]);
+    expect(rows.every((x) => x.delivery === 'monitor')).toBe(true);
   }));
 
   test('heartbeat-restart is never emitted, never touched in schedule file', withDir(async (dir) => {
@@ -355,7 +361,9 @@ describe('routine-due: pending-close drain', () => {
     writePending(dir);
     const r = await run(dir, NOW);
     expect(r.stdout.trim()).toBe(DRAIN_LINE);
-    expect(readMetricsRows(dir)).toEqual([]);
+    const rows = readMetricsRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ routine_id: 'daily-auto-close', event: 'dispatched', delivery: 'monitor' });
   }));
 
   test('no flag → silent (an ordinary poll must not emit)', withDir(async (dir) => {
@@ -500,6 +508,7 @@ describe('routine-due: pending-close drain', () => {
       env: { HERMIT_NOW: NOW, HERMIT_DUE_FORCE_PERSIST_FAIL: '1' },
     });
     expect(r.stdout.trim()).toBe('');
+    expect(readMetricsRows(dir)).toEqual([]);
   }));
 
   test('liveness is still written on a drain-only poll', withDir(async (dir) => {

@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { isProposalScanItem, isCredentialExpiryItem } from '../scripts/lib/heartbeat-items';
+import { isProposalScanItem, isCredentialExpiryItem, normalizeItemKey, parseChecklistItems, canonicalChecklistKeys } from '../scripts/lib/heartbeat-items';
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 
@@ -95,16 +95,6 @@ function build(fix: Fixture): string {
     );
   }
   return dir;
-}
-
-// Mirrors precheck.ts normalizeItemKey: checklist:<first 8 alphanumerics of the bullet>.
-function checklistKey(itemText: string): string {
-  const text = itemText
-    .replace(/^[-*+]\s*(\[.\]\s*)?/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 8);
-  return `checklist:${text}`;
 }
 
 async function verdict(dir: string, peek = false, now = NOW, pluginRoot?: string): Promise<string> {
@@ -293,7 +283,7 @@ const inDays = (n: number) => new Date(Date.now() + n * 24 * 3600000).toISOStrin
 
 describe('default credential-expiry resolution', () => {
   const both = { heartbeat: HEARTBEAT_BOTH };
-  const credKey = checklistKey(CREDENTIAL_BULLET);
+  const credKey = normalizeItemKey(CREDENTIAL_BULLET)!;
 
   test('1. probe healthy, no alerts → OK', async () => {
     const dir = build(both);
@@ -357,7 +347,7 @@ describe('shipped HEARTBEAT.md.template ↔ classifier coherence', () => {
     const tpl = fs.readFileSync(
       path.join(PLUGIN_ROOT, 'state-templates', 'HEARTBEAT.md.template'), 'utf8',
     );
-    const bullets = tpl.split('\n').map(l => l.trim()).filter(l => /^[-*+]\s/.test(l));
+    const bullets = parseChecklistItems(tpl);
     const proposalItem = bullets.find(l => /proposals/i.test(l));
     expect(proposalItem).toBeDefined();
     expect(isProposalScanItem(proposalItem!)).toBe(true);
@@ -367,9 +357,23 @@ describe('shipped HEARTBEAT.md.template ↔ classifier coherence', () => {
     const tpl = fs.readFileSync(
       path.join(PLUGIN_ROOT, 'state-templates', 'HEARTBEAT.md.template'), 'utf8',
     );
-    const bullets = tpl.split('\n').map(l => l.trim()).filter(l => /^[-*+]\s/.test(l));
+    const bullets = parseChecklistItems(tpl);
     const credentialItem = bullets.find(l => /doctor-report/i.test(l));
     expect(credentialItem).toBeDefined();
     expect(isCredentialExpiryItem(credentialItem!)).toBe(true);
+  });
+
+  test('every shipped item derives the same key from both call sites', () => {
+    const tpl = fs.readFileSync(
+      path.join(PLUGIN_ROOT, 'state-templates', 'HEARTBEAT.md.template'), 'utf8',
+    );
+    const items = parseChecklistItems(tpl);
+    expect(items.length).toBeGreaterThan(0);
+    const fromItems = items.map(i => normalizeItemKey(i));
+    expect(fromItems.every(k => k !== null)).toBe(true);
+
+    const fromCanonical = canonicalChecklistKeys(hermit(build({ heartbeat: tpl })));
+    expect(fromCanonical).not.toBeNull();
+    expect([...fromCanonical!].sort()).toEqual((fromItems as string[]).sort());
   });
 });

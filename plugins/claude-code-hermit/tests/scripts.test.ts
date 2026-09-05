@@ -917,8 +917,13 @@ describe('update-alert-state', () => {
       .filter(l => l && l !== '<!-- none -->');
   }
 
-  const firingPayload = (firing: Array<{ key: string; text: string }>, self_eval_updates: object = {}) =>
+  const firingPayload = (firing: Array<{ key?: string; item?: string; text: string }>, self_eval_updates: object = {}) =>
     JSON.stringify({ firing, self_eval_updates });
+
+  const CREDENTIAL_ITEM =
+    '- Read `state/doctor-report.json` → the `credential-expiry` check; if its status is warn or fail, tell the operator which credential needs re-auth and name the plugin\'s reauth skill from the report detail.';
+  const writeHeartbeat = (dir: string, body = `# Heartbeat Checklist\n${CREDENTIAL_ITEM}\n`) =>
+    write(hermit(dir, 'HEARTBEAT.md'), body);
 
   test('update-alert-state (new firing item creates entry, notifies once, preserves total_ticks)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":5}');
@@ -1126,6 +1131,12 @@ describe('update-alert-state', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
     expect(readJson(stateFile)).toEqual(JSON.parse(before));
+
+    write(stateFile, before);
+    r = await runScript('heartbeat.ts', { args: ['alert-state', stateFile], stdin: JSON.stringify({ firing: [{ text: 'x' }], self_eval_updates: {} }), env: { HERMIT_NOW: NOW } }); // neither item nor key
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('');
+    expect(readJson(stateFile)).toEqual(JSON.parse(before));
   }));
 
   test('update-alert-state (duplicate firing keys deduped — first occurrence wins)', withDir(async (dir) => {
@@ -1136,6 +1147,116 @@ describe('update-alert-state', () => {
     ]));
     expect(Object.keys(state.alerts)).toEqual(['checklist:dup00000']);
     expect(state.alerts['checklist:dup00000'].text).toBe('first text');
+  }));
+
+  test('update-alert-state (item matching HEARTBEAT.md is stored under the derived checklist key)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
+    writeHeartbeat(dir);
+    const { state } = await updateAlertState(dir, firingPayload([
+      { item: CREDENTIAL_ITEM, text: 'claude-subscription needs re-auth' },
+    ]));
+    expect(state.alerts['checklist:readstat']).toMatchObject({ text: 'claude-subscription needs re-auth', count: 1 });
+    expect(Object.keys(state.alerts).some(k => k.startsWith('custom:'))).toBe(false);
+  }));
+
+  test('update-alert-state (custom:* and waiting-timeout keep their key)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
+    writeHeartbeat(dir);
+    const { state } = await updateAlertState(dir, firingPayload([
+      { key: 'custom:diskfull', text: 'disk 90% full' },
+      { key: 'waiting-timeout', text: 'waiting timed out' },
+    ]));
+    expect(state.alerts['custom:diskfull']).toBeDefined();
+    expect(state.alerts['waiting-timeout']).toBeDefined();
+    expect(state.alerts['checklist:readstat']).toBeUndefined();
+  }));
+
+  test('update-alert-state (a model-authored derived key is dropped, never remapped to custom:)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
+    writeHeartbeat(dir);
+    const { state, stdout } = await updateAlertState(dir, firingPayload([
+      { key: 'proposal-pending:PROP-042', text: 'PROP-042 waiting' },
+      { key: 'micro-proposal-pending:MP-7', text: 'MP-7 waiting' },
+      { key: 'stale-session', text: 'session stale' },
+      { key: 'doctor:credential-expiry', text: 'doctor finding' },
+    ]));
+    expect(state.alerts).toEqual({});
+    expect(stdout.notifications).toEqual([]);
+    expect(stdout.heartbeat_result).toBe('OK');
+  }));
+
+  test('update-alert-state (unresolvable key dedups on the key, not the reworded text)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
+    writeHeartbeat(dir);
+    await updateAlertState(dir, firingPayload([{ key: 'checklist:gonemiss', text: 'disk is filling up' }]));
+    const { state } = await updateAlertState(dir, firingPayload([{ key: 'checklist:gonemiss', text: 'disk almost full' }]));
+    const customKeys = Object.keys(state.alerts).filter(k => k.startsWith('custom:'));
+    expect(customKeys).toHaveLength(1);
+    expect(state.alerts[customKeys[0]].count).toBe(2);
+  }));
+
+  test('update-alert-state (unresolvable item mints no phantom checklist key)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
+    writeHeartbeat(dir);
+    const { state } = await updateAlertState(dir, firingPayload([
+      { item: 'Totally paraphrased credential check', key: 'checklist:totallyp', text: 'needs re-auth' },
+    ]));
+    expect(state.alerts['checklist:totallyp']).toBeUndefined();
+    expect(state.alerts['checklist:readstat']).toBeUndefined();
+    const customKeys = Object.keys(state.alerts).filter(k => k.startsWith('custom:'));
+    expect(customKeys).toHaveLength(1);
+  }));
+
+  test('update-alert-state (self_eval keys that match a canonical item are snapped)', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":1}');
+    writeHeartbeat(dir);
+    const { state } = await updateAlertState(dir, firingPayload([], {
+      [CREDENTIAL_ITEM]: { clean_ticks: 3 },
+      'unrelated-key': { clean_ticks: 1 },
+    }));
+    expect(state.self_eval['checklist:readstat']).toEqual({ clean_ticks: 3 });
+    expect(state.self_eval[CREDENTIAL_ITEM]).toBeUndefined();
+    expect(state.self_eval['unrelated-key']).toEqual({ clean_ticks: 1 });
+  }));
+
+  test('update-alert-state (credential item six ticks suppress, then precheck is OK)', withDir(async (dir) => {
+    // last_digest_date must be wall-clock today: precheck's digest gate uses
+    // todayYMD, which does not honour HERMIT_NOW.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC' }).format(new Date());
+    writeHeartbeat(dir);
+    write(hermit(dir, 'config.json'), JSON.stringify({
+      timezone: 'UTC',
+      heartbeat: { clean_recheck_cooldown: null, active_hours: { start: '00:00', end: '24:00' } },
+    }));
+    write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
+      alerts: {}, self_eval: {}, total_ticks: 3, last_digest_date: today,
+    }));
+    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+    write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
+    fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
+
+    const pluginRoot = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-credroot-')), 'plugins', 'claude-code-hermit');
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), '{"name":"claude-code-hermit","version":"1.0.0"}');
+    fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'hermit-meta.json'), JSON.stringify({
+      credentials: [{ name: 'claude-subscription', expiry_probe: 'echo EXPIRED', warn_days: 3 }],
+    }));
+
+    for (let i = 0; i < 6; i++) {
+      await updateAlertState(dir, firingPayload([
+        { item: CREDENTIAL_ITEM, text: 'claude-subscription needs re-auth' },
+      ]), {});
+    }
+    const after = readJson(hermit(dir, 'state', 'alert-state.json'));
+    expect(after.alerts['checklist:readstat'].count).toBe(6);
+    expect(after.alerts['checklist:readstat'].suppressed).toBe(true);
+
+    const r = await runScript('heartbeat.ts', {
+      args: ['precheck', hermit(dir)],
+      env: { CLAUDE_PLUGIN_ROOT: pluginRoot },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('OK');
   }));
 
   test('update-alert-state (write failure — no stdout, no side effects)', withDir(async (dir) => {

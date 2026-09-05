@@ -1667,7 +1667,7 @@ function checkRoutinePrecheck(p: DoctorPaths = PATHS) {
       // ever *answered*: a `skipped-precheck` row (a SKIP verdict), or a wake the
       // errors do not account for (a WAKE verdict). Neither means it never worked,
       // and every fire since has been one the operator meant to skip.
-      if (entry.precheck_skips > 0 || entry.starts > entry.precheck_errors) continue;
+      if (entry.precheck_skips > 0 || entry.starts > entry.precheck_errors || entry.dispatches > entry.precheck_errors) continue;
       broken.push(`${routine.id} (${entry.precheck_errors}x ${entry.last_precheck_error?.detail ?? 'unspecified'})`);
     }
 

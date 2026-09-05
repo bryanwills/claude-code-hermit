@@ -32,6 +32,7 @@ import {
 import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from '../time';
 import { readSettledConfig } from '../config-read';
 import { appendShellLine } from '../md-write';
+import { canonicalChecklistKeys, normalizeItemKey, normalizeCustomKey } from '../heartbeat-items';
 
 type Json = any;
 
@@ -51,21 +52,69 @@ const stateDir = path.dirname(path.dirname(stateFile));
 // MICRO_PREFIX/PROPOSAL_PREFIX/isStructuredKey are owned by alert-state.ts
 // (co-located with the derivers and the channel-safe scrub).
 
+type RawFiring = { key?: string; item?: string; text: string };
+
 // Reject the whole tick (return null) rather than coerce a malformed shape to
 // an empty set — an empty set would age every real alert toward resolution.
-function validateFiring(raw: Json): FiringItem[] | null {
+function validateFiring(raw: Json): RawFiring[] | null {
   if (!Array.isArray(raw)) return null;
-  const seen = new Set<string>();
-  const out: FiringItem[] = [];
+  const out: RawFiring[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') return null;
-    if (typeof entry.key !== 'string' || !entry.key) return null;
     if (typeof entry.text !== 'string') return null;
-    if (seen.has(entry.key)) continue; // duplicate key in the same tick — keep first occurrence
-    seen.add(entry.key);
-    out.push({ key: entry.key, text: entry.text });
+    const key = typeof entry.key === 'string' && entry.key ? entry.key : undefined;
+    const item = typeof entry.item === 'string' && entry.item ? entry.item : undefined;
+    if (!key && !item) return null;
+    out.push({ key, item, text: entry.text });
   }
   return out;
+}
+
+// Keys the model may never author. Returned verbatim so the modelFiring filter
+// below still recognises and drops them — minting a `custom:` key for one instead
+// would smuggle a phantom past that guard, with its raw PROP-NNN/MP-… id
+// un-scrubbed on the way to the channel.
+const isReservedKey = (key: string): boolean =>
+  isStructuredKey(key) || key === STALE_KEY || key.startsWith(DOCTOR_PREFIX);
+
+function resolveEntryKey(entry: RawFiring, canonical: Set<string>): string | null {
+  if (entry.key === 'waiting-timeout' || (entry.key && entry.key.startsWith('custom:'))) {
+    return entry.key;
+  }
+  if (entry.key && isReservedKey(entry.key)) return entry.key;
+  if (entry.item) {
+    const derived = normalizeItemKey(entry.item);
+    if (derived && canonical.has(derived)) return derived;
+  }
+  if (entry.key && canonical.has(entry.key)) return entry.key;
+  // `key` before `text`: text is a channel-voice one-liner the eval subagent
+  // rewords tick to tick, so deriving the fallback from it would mint a fresh
+  // key every tick — the entry would never age to suppression or resolution and
+  // would re-notify the operator forever.
+  return normalizeCustomKey(entry.item || entry.key || entry.text || '');
+}
+
+function resolveFiring(entries: RawFiring[], canonical: Set<string> | null): FiringItem[] | null {
+  if (canonical === null) {
+    if (entries.some(e => !e.key)) return null;
+  }
+  const seen = new Set<string>();
+  const out: FiringItem[] = [];
+  for (const entry of entries) {
+    const key = canonical === null ? entry.key! : resolveEntryKey(entry, canonical);
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, text: entry.text });
+  }
+  return out;
+}
+
+function snapSelfEvalKey(key: string, canonical: Set<string>): string {
+  if (canonical.has(key)) return key;
+  const derived = normalizeItemKey(key);
+  if (derived && canonical.has(derived)) return derived;
+  return key;
 }
 
 function apply(payloadJson: string): void {
@@ -79,14 +128,24 @@ function apply(payloadJson: string): void {
 
   const validated = validateFiring(payload.firing);
   if (validated === null) process.exit(0); // malformed firing shape — reject the tick, no write
-  const modelFiring = validated.filter(
+  const canonical = canonicalChecklistKeys(stateDir);
+  const resolved = resolveFiring(validated, canonical);
+  if (resolved === null) process.exit(0);
+  const modelFiring = resolved.filter(
     f => !isStructuredKey(f.key) && f.key !== STALE_KEY && !f.key.startsWith(DOCTOR_PREFIX),
   );
 
-  const selfEvalUpdates: Json =
+  let selfEvalUpdates: Json =
     payload.self_eval_updates && typeof payload.self_eval_updates === 'object' && !Array.isArray(payload.self_eval_updates)
       ? payload.self_eval_updates
       : {};
+  if (canonical) {
+    const snapped: Json = {};
+    for (const [k, v] of Object.entries(selfEvalUpdates)) {
+      snapped[snapSelfEvalKey(k, canonical)] = v;
+    }
+    selfEvalUpdates = snapped;
+  }
 
   // Split read from parse: a transient read error (ioerror) must not clobber a healthy
   // file. ENOENT = first run → seed default. corrupt = bytes read but unparseable →
