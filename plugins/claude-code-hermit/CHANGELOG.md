@@ -10,7 +10,7 @@
 - Tier 2 routine-bound lane in procedure capture (one proposal with `## Config` + `## Skill Draft`, optional `## Agent Draft`, one accept/dismiss ask; chat-triggered and external-origin stay Tier 3).
 - `## Agent Draft` section and its `proposal-act` install branch.
 - Monthly `capability-brainstorm` routine in the config template.
-- `shell-append --section monitoring` and `--section blockers`, so the watch and channel-responder log lines go through the same locked append as findings and progress.
+- `shell-append --section monitoring` and `--section blockers`, so the watch and channel-responder log lines go through the same verb as findings and progress.
 - Optional stdin on `routines.ts finish`: the fire's one-line outcome, timestamped and appended under `## Progress Log` as part of the call that closes the fire.
 - Doctor's state check warns on a stray `SHELL.md` at the hermit root and names the canonical `sessions/SHELL.md`.
 - `dispatched` routine event, stamped by the monitor subprocess at emit, so a fire whose session never runs the wrapper still leaves a ledger trace.
@@ -32,6 +32,7 @@
 - Triage dedups against `state/proposals-index.json`.
 
 ### Fixed
+- A waiting timeout left its `waiting_since` stamp behind on the now-idle runtime, so the next wait was measured against a timestamp from the wait before it. A park that stamps nothing of its own, `operator_input` from the channel responder, was released on its first heartbeat.
 - A task queued while an always-on session sat idle waited for the next boot. The heartbeat tick picks it up again: under `conservative` it parks the session in `waiting` and sends one plain-language notice, under `balanced`/`autonomous` it starts the session.
 - The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/**)`, which covers both install trees for every plugin. The dead spelling, and the `Write` twin older installs still carry beside it, are retired via `HERMIT_OBSOLETE_DENY`.
 - `docs/security.md` said auto mode suspends path rules. It drops execution rules only, and `Read` never reaches the classifier.

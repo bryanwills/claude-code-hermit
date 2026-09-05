@@ -91,8 +91,11 @@ const HERMIT_ALLOW = [
   // grant is not actually widened by dropping the space. Replaces the old
   // append-metrics.ts entry, which granted "write any JSON to any path".
   'Bash(bun */scripts/observations.ts observe*)',
-  // `graduate` is reflect's step-3b read of the ledger; it writes nothing. Without
-  // the grant a scheduled reflect is functionally denied at its graduation step.
+  // `graduate` is reflect's step-3b read of the ledger; it writes nothing. Like every
+  // wildcarded entry here it clears the permission engine in the other modes and is
+  // suspended under auto mode (docs/security.md § Auto-mode Classifier) — the literal
+  // hermit-run grants below are not the remedy for that, they exist for a different
+  // reason (routes with no pre-resolved path; reflect's call site resolves its own).
   'Bash(bun */scripts/observations.ts graduate*)',
   'Bash(bun */scripts/proposal.ts*)',
   'Bash(bun */scripts/generate-summary.ts*)',

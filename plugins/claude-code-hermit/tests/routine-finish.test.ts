@@ -225,6 +225,29 @@ describe('routines.ts finish — outcome line on stdin', () => {
     expect(progressLog(dir)).toEqual(after);
   }));
 
+  // Most routines declare no contract and so never get a run record, which is what the
+  // replay gate above reads. The ledger has to carry the invariant for them, or a
+  // re-triggered fire doubles the row while event.ts's #464 guard hides the duplicate.
+  test('one row per real fire for a routine with no contract, replay included', withDir(async (dir) => {
+    writeConfig(dir, [{ id: 'plain', schedule: '0 9 * * *', skill: 'x', enabled: true }]);
+    await precheck(dir, 'plain');
+
+    const before = progressLog(dir);
+    expect((await finish(dir, 'plain', 'plain routine did the thing\n')).stdout.trim()).toBe('fired');
+    const after = progressLog(dir);
+    expect(after).toHaveLength(before.length + 1);
+    expect(after.at(-1)).toMatch(/^- \[\d{2}:\d{2}\] plain routine did the thing$/);
+
+    expect((await finish(dir, 'plain', 'plain routine did the thing\n')).stdout.trim()).toBe('fired');
+    expect(progressLog(dir)).toEqual(after);
+    expect(events(dir, 'plain').filter((e) => e === 'fired')).toHaveLength(1);
+
+    // A genuine next fire still lands its own row: precheck's `started` clears the replay.
+    await precheck(dir, 'plain');
+    expect((await finish(dir, 'plain', 'plain routine ran again\n')).stdout.trim()).toBe('fired');
+    expect(progressLog(dir)).toHaveLength(after.length + 1);
+  }));
+
   test('empty stdin leaves SHELL.md untouched and stdout unchanged', withDir(async (dir) => {
     writeConfig(dir, [{ id: 'plain', schedule: '0 9 * * *', skill: 'x', enabled: true }]);
     await precheck(dir, 'plain');

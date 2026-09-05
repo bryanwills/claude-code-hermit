@@ -62,21 +62,31 @@ function parseVerdict(raw: string): Omit<TickResult, 'model'> {
  * model used to compute by hand, over two fields it had to read anyway. An absent or
  * unparseable `waiting_since`/`waiting_timeout` skips the transition rather than
  * forcing one — a spurious idle drops the operator's waiting_reason.
+ *
+ * Returns whether it released the session, so the queued-task pass below can stay off
+ * the tick that just freed it: composing there would read the idle state this wrote and
+ * park the session straight back into `waiting`, which is not a transition at all.
  */
-function applyWaitingTimeout(hermitDir: string, config: Json, nowMs: number, out: Notification[]): void {
-  if (config.heartbeat?.waiting_timeout == null) return;
+function applyWaitingTimeout(hermitDir: string, config: Json, nowMs: number, out: Notification[]): boolean {
+  if (config.heartbeat?.waiting_timeout == null) return false;
   const stateDir = path.join(hermitDir, 'state');
   const runtime = readRuntimeJson(stateDir);
-  if (runtime?.session_state !== 'waiting') return;
-  if (typeof runtime.waiting_since !== 'string') return;
+  if (runtime?.session_state !== 'waiting') return false;
+  if (typeof runtime.waiting_since !== 'string') return false;
   const since = Date.parse(runtime.waiting_since);
   const timeoutMs = parseDuration(config.heartbeat.waiting_timeout, 0);
-  if (!Number.isFinite(since) || timeoutMs <= 0 || nowMs - since <= timeoutMs) return;
+  if (!Number.isFinite(since) || timeoutMs <= 0 || nowMs - since <= timeoutMs) return false;
 
   runtime.session_state = 'idle';
   delete runtime.waiting_reason;
+  // The stamp goes with the wait it measured. Left behind on an idle runtime it becomes
+  // the elapsed baseline for the *next* wait, and the writers that park without stamping
+  // (channel-responder's `operator_input`) would have their wait torn down on its first
+  // tick, measured against a timestamp from a wait that already ended.
+  delete runtime.waiting_since;
   writeRuntimeJson(runtime, stateDir);
   out.push({ text: HEARTBEAT[resolveLocale(config.language)].waitingTimeout(config.heartbeat.waiting_timeout) });
+  return true;
 }
 
 /**
@@ -126,6 +136,13 @@ function queuedTaskLine(hermitDir: string): string | null {
  * hand the skill a `start`, leaving session-start to adopt and delete the file.
  */
 function composeNextTask(hermitDir: string, config: Json, nowMs: number, out: Notification[]): NextTask | undefined {
+  // The same gate precheck applies to the queued-task pierce, mirrored because EVALUATE
+  // arrives here for a dozen unrelated reasons (the 20-tick boundary, a pending budget
+  // alert, a stale session) that carry no always_on condition of their own. Only an
+  // unattended hermit's session-start consumes NEXT-TASK.md; an interactive one presents
+  // it at the operator's next boot, so starting or parking on its behalf is not ours.
+  // First, because it reads settled config already in memory and the queue check stats.
+  if (config.always_on !== true) return undefined;
   if (!nextTaskQueued(hermitDir)) return undefined;
   const stateDir = path.join(hermitDir, 'state');
   const runtime = readRuntimeJson(stateDir) ?? {};
@@ -168,9 +185,9 @@ export async function run(args: string[]): Promise<void> {
     } else if (result.verdict === 'EVALUATE' || result.verdict === 'ALERT') {
       // Both gates are pre-dispatch and read no HEARTBEAT.md, so a suspended
       // checklist still surfaces them — the reason ALERT exists as a verdict.
-      applyWaitingTimeout(hermitDir, config, nowMs, result.notifications);
+      const released = applyWaitingTimeout(hermitDir, config, nowMs, result.notifications);
       await composeBudgetAlerts(hermitDir, config, result.notifications);
-      if (result.verdict === 'EVALUATE') {
+      if (result.verdict === 'EVALUATE' && !released) {
         const nextTask = composeNextTask(hermitDir, config, nowMs, result.notifications);
         if (nextTask) result.next_task = nextTask;
       }

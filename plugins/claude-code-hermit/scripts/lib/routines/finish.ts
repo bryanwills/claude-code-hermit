@@ -3,7 +3,8 @@
 // replacing the old `log-event <id> fired`.
 //
 // stdin (optional): the fire's one-line outcome, appended under SHELL.md's
-// `## Progress Log` as `[HH:MM] <line>`. Empty stdin writes nothing.
+// `## Progress Log` as `[HH:MM] <line>`. Empty stdin writes nothing, and neither
+// does a replayed fire — one row per real fire, contract or not.
 //
 // Why a finalizer instead of a verify-then-branch: the old contract asked the
 // model to decide which event to log, so a fire's success was recorded from the
@@ -33,6 +34,7 @@ import { readConfigRaw } from '../config-read';
 import { appendToProgressLog } from '../progress-log';
 import { currentHHMMOrUTC } from '../time';
 import { logRoutineEvent } from './event';
+import { lastRoutineEvent } from './history';
 import { readRunRecord, markOutcome, statIdentity, identityChanged } from './run-record';
 
 type Json = any;
@@ -121,8 +123,16 @@ export function run(args: string[], outcome = ''): void {
     );
   }
 
-  // Past the replay gate: this is a real fire, so its outcome line lands exactly once.
-  appendOutcome(hermit, outcome);
+  // The record gate above only covers routines that declared a contract — a routine
+  // without `expect_artifact` never gets a run record (precheck.ts writes one only for
+  // a valid contract), so a replayed `finish` reaches this line with `record` null and
+  // would append a second identical row. The ledger is the record-independent witness:
+  // a real fire always has precheck's `started` as its latest event, so a terminal
+  // latest event can only be a replay of the fire that wrote it. Terminal by prefix,
+  // not `=== 'fired'`, because the declared-but-recordless path below is terminal too.
+  const lastEvent = lastRoutineEvent(path.join(hermit, 'state', 'routine-metrics.jsonl'), id);
+  const replayed = lastEvent === 'fired' || (lastEvent?.startsWith('failed-') ?? false);
+  if (!replayed) appendOutcome(hermit, outcome);
 
   if (!record) {
     // No run record. If config is readable and this routine declared a contract,
