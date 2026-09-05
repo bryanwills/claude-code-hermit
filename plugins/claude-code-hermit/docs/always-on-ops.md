@@ -141,11 +141,11 @@ Both fire from `/claude-code-hermit:hermit-routines` — a persistent Monitor su
 
 ### Idle agency
 
-When idle and `idle_behavior` is `"discover"` (set via `/hermit-settings idle`), the heartbeat looks for autonomous work:
+When the session is idle, the heartbeat tick checks `sessions/NEXT-TASK.md` and picks up an accepted proposal left there, gated by escalation level: `conservative` sends one notice and parks the session in `waiting`, `balanced` and `autonomous` start it via `session-start`. Pickup requires `always_on` — an interactive hermit is presented the queued task at its next `session-start` instead.
 
-1. **NEXT-TASK.md** — picks up accepted proposals (gated by escalation level). Active for both `wait` and `discover` modes.
-2. **Reflection** — runs reflect if 4+ hours since last
-3. **Priority alignment** — reads OPERATOR.md, checks alignment with the operator's stated priorities and constraints
+Reflection is not driven by idleness; it runs on the `reflect` schedule under `/claude-code-hermit:hermit-routines`.
+
+`idle_behavior` (`"discover"` / `"wait"`, set via `/hermit-settings idle`) is reserved and currently makes no difference to any of this. `"discover"` previously added a priority-alignment pass against OPERATOR.md and the cost log; that pass was removed when pickup moved into the tick.
 
 ### Edge cases
 

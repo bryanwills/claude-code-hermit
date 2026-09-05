@@ -156,12 +156,9 @@ The hermit reflects on its own memory — not by scanning old reports. It notice
 
 ## What happens when my hermit is idle?
 
-Depends on the `idle_behavior` setting in `config.json`:
+It checks for incoming tasks and channel messages, and — on an always-on hermit — picks up an accepted proposal left in `NEXT-TASK.md`, gated by `escalation`: `conservative` notifies you and waits, `balanced` and `autonomous` start it. Reflection runs on its own `reflect` schedule rather than on idleness.
 
-- **`"wait"`** — checks for incoming tasks and channel messages only. Passive.
-- **`"discover"`** (default) — also picks up accepted proposals from `NEXT-TASK.md`, runs reflection, and aligns priorities with OPERATOR.md. Active.
-
-Both modes run the heartbeat if enabled. Change with `/hermit-settings idle`.
+The `idle_behavior` setting (`"discover"` / `"wait"`) is reserved and currently makes no difference: both values behave as described above. `"discover"` used to add a priority-alignment pass against OPERATOR.md and the cost log; that pass was removed when idle pickup moved into the heartbeat tick.
 
 ---
 

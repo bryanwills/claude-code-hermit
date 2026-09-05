@@ -79,7 +79,12 @@ them for decisions. Start/stop decisions read from the runtime registry.
 6. Read `state/monitors.runtime.json` (create if missing: `{"monitors": [], "last_cleared": null}`)
 7. Append entry to `monitors[]` with `source: "adhoc"`
 8. Write registry back
-9. Log to SHELL.md `## Monitoring`: `- [ACTIVE] <instruction> (started HH:MM)`
+9. Log to SHELL.md `## Monitoring`:
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section monitoring <<'HERMIT_LINE'
+   - [ACTIVE] <instruction> (started HH:MM)
+   HERMIT_LINE
+   ```
 
 ### Starting a session watch (`/watch session <name|glob> [note]`)
 
@@ -141,7 +146,11 @@ Called automatically by session-start (step 11b). Can also be called manually.
    c. Append to registry with `source: "config"` and the returned task_id
 4. Write registry back
 5. If any watches were registered: log to SHELL.md `## Monitoring`:
-   `[HH:MM] Watches registered: <id1>, <id2> (<N> total)`
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section monitoring <<'HERMIT_LINE'
+   [HH:MM] Watches registered: <id1>, <id2> (<N> total)
+   HERMIT_LINE
+   ```
 6. If all config watches were already in the registry (idempotent): no log, no output
 
 ### Stopping a watch

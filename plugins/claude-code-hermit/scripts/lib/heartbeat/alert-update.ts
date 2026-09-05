@@ -13,8 +13,9 @@
 //
 // On success, appends this tick's monitoring lines to SHELL.md itself and prints
 // one JSON line on stdout: how many landed, the operator notifications derived
-// from this tick's transitions, and the derived heartbeat_result — so side
-// effects are gated on a durable write. The lines were previously handed back for
+// from this tick's transitions, the self-evaluation entries that crossed a
+// proposal threshold, and the derived heartbeat_result — so side effects are
+// gated on a durable write. The lines were previously handed back for
 // the model to append one Edit at a time; nothing about that needed a model, and
 // each Edit was a full-context call. Sending stays with the caller, which owns the
 // channel.
@@ -23,7 +24,9 @@
 // break shell quoting.
 // Usage: bun heartbeat.ts alert-state <state-file-path>   # eval-json on stdin
 
+import fs from 'node:fs';
 import path from 'node:path';
+import { runSelfEval, type SelfEvalProposal } from './self-eval';
 import {
   readAlertState, defaultAlertState, quarantineAlertState, writeAlertState,
   classifyTick, deriveMicroPendingKeys, deriveProposalPendingKeys, deriveStaleSession, FiringItem,
@@ -82,11 +85,6 @@ function apply(payloadJson: string): void {
   const modelFiring = validated.filter(
     f => !isStructuredKey(f.key) && f.key !== STALE_KEY && !f.key.startsWith(DOCTOR_PREFIX),
   );
-
-  const selfEvalUpdates: Json =
-    payload.self_eval_updates && typeof payload.self_eval_updates === 'object' && !Array.isArray(payload.self_eval_updates)
-      ? payload.self_eval_updates
-      : {};
 
   // Split read from parse: a transient read error (ioerror) must not clobber a healthy
   // file. ENOENT = first run → seed default. corrupt = bytes read but unparseable →
@@ -209,10 +207,26 @@ function apply(payloadJson: string): void {
       : null;
   }
 
-  const self_eval: Json = {
-    ...(state.self_eval && typeof state.self_eval === 'object' ? state.self_eval : {}),
-    ...selfEvalUpdates,
-  };
+  // Self-evaluation rides the same every-20-ticks boundary the precheck wakes on.
+  // Off-boundary ticks leave self_eval exactly as they found it.
+  let self_eval: Json = state.self_eval && typeof state.self_eval === 'object' ? state.self_eval : {};
+  let selfEvalProposals: SelfEvalProposal[] = [];
+  if (typeof state.total_ticks === 'number' && state.total_ticks % 20 === 0) {
+    try {
+      let shell = '';
+      try { shell = fs.readFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), 'utf-8'); } catch { /* no history */ }
+      const evaluated = runSelfEval({
+        stateDir,
+        prevSelfEval: self_eval,
+        alerts,
+        shell,
+        pendingLines: result.monitoringLines,
+        today,
+      });
+      self_eval = evaluated.self_eval;
+      selfEvalProposals = evaluated.proposals;
+    } catch { /* fail-open: the tick's alert bookkeeping still lands */ }
+  }
 
   // Spread state first so precheck-owned fields (total_ticks, last_stale_wake_at) are preserved.
   const updated = {
@@ -246,6 +260,7 @@ function apply(payloadJson: string): void {
     appended,
     ...(appendError ? { append_error: appendError } : {}),
     notifications: result.notifications,
+    self_eval_proposals: selfEvalProposals,
     // Never OK when a structured pending decision couldn't be verified this tick.
     heartbeat_result: hasStructuredReadFailure ? 'ALERT' : result.heartbeatResult,
   }) + '\n');

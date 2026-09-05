@@ -27,7 +27,7 @@ Live files (SHELL.md, `alert-state.json`, `proposals/`) are read fresh on this t
 - No flag + `session_state` is `idle` → **no dispatch** — read the live SHELL.md in main and emit the idle block (Plan step 1b)
 - No flag + no active session (no SHELL.md / no `session_state`) → dispatch (mode: `default-no-session`, Plan step 1c)
 
-For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/brief/reference.md`. Pass in the dispatch prompt: `mode` (one of the values above), `today` (current ISO date), and for `morning` only: `context_recovery` (set to `true` if auto-memory seems sparse — new instance, fresh machine — `false` otherwise).
+For dispatching modes: invoke `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/brief/reference.md`. Pass in the dispatch prompt: `plugin_root` (the resolved absolute path — `${CLAUDE_PLUGIN_ROOT}` is not substituted in `reference.md`), `mode` (one of the values above), `today` (current ISO date), and for `morning` only: `context_recovery` (set to `true` if auto-memory seems sparse — new instance, fresh machine — `false` otherwise).
 
 **Boundary rule:** `sessions/SHELL.md` is the live session document — it stays in main, never goes to the runner. Archived `sessions/S-*-REPORT.md` bodies, `proposals/*.md` frontmatter, `OPERATOR.md`, and `NEXT-TASK.md` go to the runner.
 

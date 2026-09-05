@@ -10,11 +10,13 @@
 //   {"verdict":"SKIP"|"OK"|"AUTO_CLOSE"|"EVALUATE"|"ALERT",
 //    "reason"?:string, "alert"?:string,
 //    "notifications":[{"text":string,"mark_key"?:string}],
+//    "next_task"?:{"action":"waiting"|"start"},
 //    "model":string|null}
 //
 // Owner contract (write-field split with SKILL.md):
 //   This verb owns: the precheck's own fields (see precheck.ts), runtime.json's
-//                   waiting→idle transition, the auto-closed Monitoring line.
+//                   waiting→idle and conservative-pickup transitions, the
+//                   auto-closed Monitoring line.
 //   SKILL.md owns:  sending the notifications, `--mark-budget-notified` for each
 //                   `mark_key` AFTER a confirmed send, and the injection branch's
 //                   injection-alert.json bookkeeping.
@@ -22,12 +24,13 @@
 // alert but whose send then fails must re-compose it next tick, and only the
 // skill knows whether the send landed.
 
+import fs from 'node:fs';
 import path from 'node:path';
-import { runPrecheck } from './precheck';
+import { runPrecheck, nextTaskQueued } from './precheck';
 import { readSettledConfig } from '../config-read';
 import { readMergedAlerts } from '../alert-state';
 import { isPaused } from '../pause';
-import { appendShellLine } from '../md-write';
+import { appendShellLine, extractSection, firstContentLine } from '../md-write';
 import { readRuntimeJson, writeRuntimeJson } from '../runtime';
 import { currentHHMMOrUTC, parseDuration, resolveHermitNowMs } from '../time';
 import { HEARTBEAT, resolveLocale } from '../messages';
@@ -36,11 +39,14 @@ type Json = any;
 
 type Notification = { text: string; mark_key?: string };
 
+type NextTask = { action: 'waiting' | 'start' };
+
 type TickResult = {
   verdict: string;
   reason?: string;
   alert?: string;
   notifications: Notification[];
+  next_task?: NextTask;
   model: string | null;
 };
 
@@ -105,6 +111,38 @@ async function composeBudgetAlerts(hermitDir: string, config: Json, out: Notific
   }
 }
 
+/** The queued task's headline — the `## Task` section's first non-empty line. */
+function queuedTaskLine(hermitDir: string): string | null {
+  try {
+    const body = extractSection(fs.readFileSync(path.join(hermitDir, 'sessions', 'NEXT-TASK.md'), 'utf-8'), 'Task');
+    return body ? firstContentLine(body) || null : null;
+  } catch { return null; }
+}
+
+/**
+ * A task queued while the session sits idle. `conservative` parks the session in
+ * `waiting` and tells the operator what is pending — one notice, because the parked
+ * state stops the next tick re-firing. `balanced`/`autonomous` mutate nothing and
+ * hand the skill a `start`, leaving session-start to adopt and delete the file.
+ */
+function composeNextTask(hermitDir: string, config: Json, nowMs: number, out: Notification[]): NextTask | undefined {
+  if (!nextTaskQueued(hermitDir)) return undefined;
+  const stateDir = path.join(hermitDir, 'state');
+  const runtime = readRuntimeJson(stateDir) ?? {};
+  if ((runtime.session_state ?? 'idle') !== 'idle') return undefined;
+  if (config.escalation !== 'conservative') return { action: 'start' };
+
+  runtime.session_state = 'waiting';
+  runtime.waiting_reason = 'conservative_pickup';
+  // Stamped because it is what applyWaitingTimeout above measures from: an unstamped
+  // park (or one carrying an earlier wait's stamp) either never releases under a
+  // configured `waiting_timeout` or releases on the tick after it is written.
+  runtime.waiting_since = new Date(nowMs).toISOString();
+  writeRuntimeJson(runtime, stateDir);
+  out.push({ text: HEARTBEAT[resolveLocale(config.language)].queuedTask(queuedTaskLine(hermitDir)) });
+  return { action: 'waiting' };
+}
+
 export async function run(args: string[]): Promise<void> {
   const hermitDir = args[0];
   // Settled once, shared by the model field and the bookkeeping below. Settling
@@ -132,6 +170,10 @@ export async function run(args: string[]): Promise<void> {
       // checklist still surfaces them — the reason ALERT exists as a verdict.
       applyWaitingTimeout(hermitDir, config, nowMs, result.notifications);
       await composeBudgetAlerts(hermitDir, config, result.notifications);
+      if (result.verdict === 'EVALUATE') {
+        const nextTask = composeNextTask(hermitDir, config, nowMs, result.notifications);
+        if (nextTask) result.next_task = nextTask;
+      }
     }
   } catch { /* fail-open: the verdict still ships, minus the bookkeeping */ }
 

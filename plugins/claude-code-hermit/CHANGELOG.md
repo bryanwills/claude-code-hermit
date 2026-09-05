@@ -10,16 +10,22 @@
 - Tier 2 routine-bound lane in procedure capture (one proposal with `## Config` + `## Skill Draft`, optional `## Agent Draft`, one accept/dismiss ask; chat-triggered and external-origin stay Tier 3).
 - `## Agent Draft` section and its `proposal-act` install branch.
 - Monthly `capability-brainstorm` routine in the config template.
+- `shell-append --section monitoring` and `--section blockers`, so the watch and channel-responder log lines go through the same locked append as findings and progress.
+- Optional stdin on `routines.ts finish`: the fire's one-line outcome, timestamped and appended under `## Progress Log` as part of the call that closes the fire.
+- Doctor's state check warns on a stray `SHELL.md` at the hermit root and names the canonical `sessions/SHELL.md`.
 
 ### Changed
 - `capability-brainstorm` no longer describes itself as never running autonomously.
 - Reflect's runner also reads `## Completed` of recent reports.
 - `proposal-create` documents the `## Config` routine block.
-
-### Changed
+- The every-20-ticks heartbeat self-evaluation is derived by `heartbeat.ts alert-state` from the checklist, the monitoring history and proposal frontmatter. The eval subagent returns `firing` alone; the script prints the entries that crossed a threshold as `self_eval_proposals`.
+- Reflect graduates ledger patterns through `observations.ts graduate` instead of grouping `observations.jsonl` by hand.
+- Brief's pending-review scan reads `state/proposals-index.json` rather than every proposal's frontmatter.
+- The idle priority-alignment pass against `OPERATOR.md` and the cost log is gone with the heartbeat's `## Idle Agency` section. `idle_behavior` is now reserved: `"discover"` and `"wait"` behave identically, and neither gates queued-task pickup (`always_on` + `escalation`) nor the `reflect` schedule (its own cron). Config reference, FAQ, README, always-on ops and troubleshooting corrected to match.
 - Triage dedups against `state/proposals-index.json`.
 
 ### Fixed
+- A task queued while an always-on session sat idle waited for the next boot. The heartbeat tick picks it up again: under `conservative` it parks the session in `waiting` and sends one plain-language notice, under `balanced`/`autonomous` it starts the session.
 - The seeded deny on plugin source matched nothing. `Edit(*/.claude/plugins/marketplaces/*)` anchors at the settings file's own directory, so the guard has been inert since it was migrated into `state-templates/deny-patterns.json`. Replaced with `Edit(//**/.claude/plugins/**)`, which covers both install trees for every plugin. The dead spelling, and the `Write` twin older installs still carry beside it, are retired via `HERMIT_OBSOLETE_DENY`.
 - `docs/security.md` said auto mode suspends path rules. It drops execution rules only, and `Read` never reaches the classifier.
 - Proposal gates read every source from an absolute root passed by the caller and return a blind verdict, which fails closed, when that root is missing or not a hermit. `memory-dir.ts` keys on the hermit root instead of the shell's cwd.

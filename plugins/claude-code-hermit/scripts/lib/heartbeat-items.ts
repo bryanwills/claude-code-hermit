@@ -34,3 +34,24 @@ export function isProposalScanItem(itemText: string): boolean {
 export function isCredentialExpiryItem(itemText: string): boolean {
   return /doctor-report\.json/i.test(itemText) && /credential-expiry/i.test(itemText);
 }
+
+// Normalises a HEARTBEAT.md checklist item to its dedup key.
+// Key format mirrors the eval reference's taxonomy: 'checklist:<first-8-chars-normalized>'.
+// Shared by the precheck's item loop and the self-evaluation pass, which must agree
+// on the key or an item's counters land under a name no alert ever uses.
+export function normalizeItemKey(itemText: string): string | null {
+  const text = itemText
+    .replace(/^[-*+]\s*(\[.\]\s*)?/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 8);
+  return text ? `checklist:${text}` : null;
+}
+
+// A HEARTBEAT.md file's checklist item lines, trimmed. Shared for the same reason
+// as the key normaliser: the precheck's item loop and the self-evaluation pass have
+// to agree on what counts as an item, or an item accrues counters under a name no
+// alert ever fires.
+export function parseChecklistItems(content: string): string[] {
+  return content.split('\n').map(l => l.trim()).filter(l => /^[-*+]\s/.test(l));
+}

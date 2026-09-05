@@ -2,6 +2,9 @@
 // fire's terminal ledger row. Called unconditionally after the skill is invoked,
 // replacing the old `log-event <id> fired`.
 //
+// stdin (optional): the fire's one-line outcome, appended under SHELL.md's
+// `## Progress Log` as `[HH:MM] <line>`. Empty stdin writes nothing.
+//
 // Why a finalizer instead of a verify-then-branch: the old contract asked the
 // model to decide which event to log, so a fire's success was recorded from the
 // dispatched subagent's self-report. This script decides, so the ledger reflects
@@ -27,6 +30,8 @@
 import path from 'node:path';
 import { hermitDir } from '../cc-compat';
 import { readConfigRaw } from '../config-read';
+import { appendToProgressLog } from '../progress-log';
+import { currentHHMMOrUTC } from '../time';
 import { logRoutineEvent } from './event';
 import { readRunRecord, markOutcome, statIdentity, identityChanged } from './run-record';
 
@@ -52,7 +57,24 @@ function declaresContract(hermit: string, id: string): boolean | null {
   return !!(entry && typeof entry.expect_artifact === 'string' && entry.expect_artifact.trim());
 }
 
-export function run(args: string[]): void {
+/**
+ * The one-line outcome the skill composed, landed under `## Progress Log` as part
+ * of the same call that closes the fire — the write the model used to make by hand,
+ * now serialized against the log's other autonomous writers. Best-effort in both
+ * directions: an empty payload writes nothing, and appendToProgressLog swallows its
+ * own I/O errors, so SHELL.md can never change the routine's verdict.
+ */
+function appendOutcome(hermit: string, outcome: string): void {
+  const line = outcome.split('\n').map(l => l.trim()).find(Boolean);
+  if (!line) return;
+  const timezone = readConfigRaw(hermit)?.timezone ?? 'UTC';
+  // `- [HH:MM] …` is the shape every other Progress Log writer uses; without the
+  // bullet the entry merges into the preceding one when SHELL.md is rendered.
+  const body = line.replace(/^-\s*/, '');
+  appendToProgressLog(path.join(hermit, 'sessions', 'SHELL.md'), `- [${currentHHMMOrUTC(timezone)}] ${body}`);
+}
+
+export function run(args: string[], outcome = ''): void {
   const [id, deliveryArg] = args;
   const delivery = deliveryArg || 'cron-create';
   if (!id) {
@@ -98,6 +120,9 @@ export function run(args: string[]): void {
       record.outcome === 'fired' ? 'fired' : `failed|${record.outcome}|${record.resolved_path}`,
     );
   }
+
+  // Past the replay gate: this is a real fire, so its outcome line lands exactly once.
+  appendOutcome(hermit, outcome);
 
   if (!record) {
     // No run record. If config is readable and this routine declared a contract,

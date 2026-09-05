@@ -71,8 +71,8 @@ Scheduled checks run during idle reflection via `reflect`. If configured checks 
 
 ## No Auto-Proposals Appearing
 
-- Reflection runs at task boundaries, during heartbeat idle checks, and at end of day. If you're closing sessions before finishing work, reflection may not trigger.
-- Check that `idle_behavior` is set to `"discover"` in config — without it, idle-time reflection won't fire.
+- Reflection runs at task boundaries, on the `reflect` schedule, and at end of day. If you're closing sessions before finishing work, reflection may not trigger.
+- Check the `reflect` routine is enabled (`/claude-code-hermit:hermit-settings routines`). `idle_behavior` does not gate it.
 - If you just started using Hermit, give it a few sessions to build up memory. Proposals come from patterns, and patterns take repetition.
 - Check proposals exist: `ls .claude-code-hermit/proposals/PROP-*.md`
 
@@ -108,12 +108,13 @@ After a survivor-blocked stop the shutdown gate keeps the channel silent, becaus
 - `fail` naming "Monitor subprocess spawn likely blocked" usually means seccomp or nested-user-namespace restrictions inside a container prevented the subprocess from starting — the same failure mode that blocks `/watch` streams and the heartbeat monitor. Check `state/routine-monitor-liveness.json` for a `last_peek_at` timestamp; if it's missing or stale, the subprocess isn't running.
 - `/claude-code-hermit:hermit-routines load` re-registers the monitor and, if registration or liveness-verify fails, automatically falls back to CronCreate — re-run it after fixing the underlying container/sandbox restriction to return to monitor mode.
 
-## Idle Agency Not Working
+## Queued Task Not Picked Up
 
-- Check `idle_behavior` in config.json — must be `"discover"` for maintenance tasks. `"wait"` only checks tasks and channels.
-- Your hermit must be in `idle` state (check `session_state` in `.claude-code-hermit/state/runtime.json`). Idle agency only runs between tasks.
-- NEXT-TASK.md pickup is gated by escalation level: `conservative` only alerts, `balanced` auto-starts, `autonomous` runs fully unattended.
-- If no NEXT-TASK.md exists: idle agency runs reflection (every 4+ hours), then priority alignment via OPERATOR.md context.
+- Your hermit must be in `idle` state (check `session_state` in `.claude-code-hermit/state/runtime.json`). Pickup only runs between tasks.
+- Pickup requires `always_on: true`. An interactive hermit is presented the queued task at its next `session-start` instead of having the heartbeat start it.
+- `sessions/NEXT-TASK.md` must exist; with no file the tick reports nothing to pick up.
+- Pickup is gated by escalation level: `conservative` notifies and parks the session in `waiting`, `balanced` auto-starts, `autonomous` runs fully unattended.
+- `idle_behavior` does not gate any of this — it is reserved and currently inert.
 
 ## Morning Brief Not Sending
 

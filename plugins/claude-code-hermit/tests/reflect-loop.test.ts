@@ -164,9 +164,10 @@ describe('observations ledger phrases', () => {
     expect(reflect).toContain('Observations ledger');
   });
 
-  test('reflect: graduation threshold reads graduation_min_sessions from config', () => {
-    expect(reflect).toContain('graduation_min_sessions');
-    expect(reflect).toContain('distinct `session_id`s');
+  // The threshold, the unknown-session sentinel and the cursor are the verb's
+  // (tests/observations-graduate.test.ts); the skill only has to call it.
+  test('reflect: graduation runs through the observations verb', () => {
+    expect(reflect).toContain('observations.ts graduate .claude-code-hermit');
   });
 
   test('reflect: quick-mode deferrals append to ledger', () => {

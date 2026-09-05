@@ -15,6 +15,7 @@ import {
   verbCreate, verbPatch, verbShellAppend, verbNextTask, verbRoutine,
   grabHeader, parseStringArray, sectionEndsWithLine,
 } from '../scripts/proposal';
+import { extractSection } from '../scripts/lib/md-write';
 import { memoryDirFor } from '../scripts/lib/cc-compat';
 import { PLUGIN_ROOT, runProposal, runScript } from './helpers/run';
 import { withDir } from './helpers/workdir';
@@ -190,12 +191,20 @@ describe('verbPatch grammar', () => {
 describe('the remaining write verbs', () => {
   test('shell-append routes each section to its own heading', withDir(async (dir) => {
     const base = seed(dir);
-    expect(verbShellAppend(base, 'a finding\n', ['--section', 'findings'])).toBe('OK');
-    expect(verbShellAppend(base, 'a progress line\n', ['--section', 'progress'])).toBe('OK');
+    const sections: Array<[string, string, string]> = [
+      ['findings', 'a finding', 'Findings'],
+      ['progress', 'a progress line', 'Progress Log'],
+      ['monitoring', 'a monitoring line', 'Monitoring'],
+      ['blockers', 'a blocker', 'Blockers'],
+    ];
+    for (const [flag, line] of sections) {
+      expect(verbShellAppend(base, `${line}\n`, ['--section', flag])).toBe('OK');
+    }
 
     const shell = fs.readFileSync(path.join(base, 'sessions', 'SHELL.md'), 'utf-8');
-    expect(shell).toContain('a finding');
-    expect(shell).toContain('a progress line');
+    for (const [, line, heading] of sections) {
+      expect(extractSection(shell, heading)).toContain(line);
+    }
   }));
 
   test.each([

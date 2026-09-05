@@ -1007,15 +1007,17 @@ describe('update-alert-state', () => {
     expect(monitoring).toEqual(['[12:00] Heartbeat: resolved — flaky check']); // suppressed one resolves silently
   }));
 
-  test('update-alert-state (self_eval_updates overlays self_eval; wrong-type value coerced to {})', withDir(async (dir) => {
+  // self_eval is derived from files this script reads, so nothing the subagent
+  // returns may reach it — a payload that still carries the old key, in any shape,
+  // leaves the counters exactly as they were.
+  test('update-alert-state (a subagent self_eval_updates payload never reaches self_eval)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'alert-state.json'),
       '{"alerts":{},"self_eval":{"existing-key":"old-value"},"total_ticks":1}');
     const { state } = await updateAlertState(dir, firingPayload([], { 'new-key': 'new-value' }));
-    expect(state.self_eval['existing-key']).toBe('old-value');
-    expect(state.self_eval['new-key']).toBe('new-value');
+    expect(state.self_eval).toEqual({ 'existing-key': 'old-value' });
 
     const { state: state2 } = await updateAlertState(dir, JSON.stringify({ firing: [], self_eval_updates: ['not', 'an', 'object'] }));
-    expect(state2.self_eval['existing-key']).toBe('old-value'); // malformed type silently ignored, not fatal
+    expect(state2.self_eval).toEqual({ 'existing-key': 'old-value' });
   }));
 
   test('update-alert-state (empty firing sets last_clean_eval_at to now; firing clears it)', withDir(async (dir) => {
@@ -1152,10 +1154,8 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'state', 'alert-state.json'), '{"alerts":{},"self_eval":{},"total_ticks":7}');
     const { state } = await updateAlertState(dir, firingPayload(
       [{ key: 'checklist:idle0001', text: "the session's been idle" }],
-      { 'last-note': "prod's disk > 80%" },
     ));
     expect(state.alerts['checklist:idle0001'].text).toBe("the session's been idle");
-    expect(state.self_eval['last-note']).toBe("prod's disk > 80%");
     expect(state.total_ticks).toBe(7);
   }));
 
