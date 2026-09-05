@@ -435,26 +435,71 @@ function isToolResult(entry: Json): boolean {
   return Array.isArray(c) && c.some((b: Json) => b && b.type === 'tool_result');
 }
 
+type ExtractedUsage = {
+  inputTokens: number;
+  cacheWriteTokens: number;
+  cacheWrite1hTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  model: string;
+  requestId: string;
+  fast: boolean;
+};
+
 /**
  * Extract token usage from a transcript entry.
  * Returns an object if the entry is an assistant entry with usage, else null.
  * This centralizes the CC-owned field names: input_tokens, output_tokens,
- * cache_creation_input_tokens, cache_read_input_tokens.
+ * cache_creation_input_tokens, cache_read_input_tokens, requestId, cache TTL
+ * split, and speed.
  *
  * @param {object} entry
- * @returns {{ inputTokens: number, cacheWriteTokens: number, cacheReadTokens: number,
- *             outputTokens: number, model: string } | null}
+ * @returns {ExtractedUsage | null}
  */
-function extractUsage(entry: Json): { inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number; model: string } | null {
+function extractUsage(entry: Json): ExtractedUsage | null {
   if (entry.type !== 'assistant' || !entry.message?.usage) return null;
   const u = entry.message.usage;
   return {
-    inputTokens:      u.input_tokens || 0,
-    cacheWriteTokens: u.cache_creation_input_tokens || 0,
-    cacheReadTokens:  u.cache_read_input_tokens || 0,
-    outputTokens:     u.output_tokens || 0,
-    model:            entry.message.model || '',
+    inputTokens:         u.input_tokens || 0,
+    cacheWriteTokens:    u.cache_creation_input_tokens || 0,
+    cacheWrite1hTokens:  u.cache_creation?.ephemeral_1h_input_tokens || 0,
+    cacheReadTokens:     u.cache_read_input_tokens || 0,
+    outputTokens:        u.output_tokens || 0,
+    model:               entry.message.model || '',
+    requestId:           entry.requestId || entry.message?.id || '',
+    fast:                u.speed === 'fast',
   };
+}
+
+/**
+ * Group extracted usages by requestId, keeping the max of each token field
+ * per key. Entries with an empty key pass through unfolded. Order of first
+ * appearance is preserved.
+ */
+function foldUsageByRequest(usages: ExtractedUsage[]): ExtractedUsage[] {
+  const out: ExtractedUsage[] = [];
+  const byId = new Map<string, ExtractedUsage>();
+  for (const u of usages) {
+    if (!u.requestId) {
+      out.push(u);
+      continue;
+    }
+    const prev = byId.get(u.requestId);
+    if (!prev) {
+      const copy = { ...u };
+      byId.set(u.requestId, copy);
+      out.push(copy);
+      continue;
+    }
+    prev.inputTokens = Math.max(prev.inputTokens, u.inputTokens);
+    prev.cacheWriteTokens = Math.max(prev.cacheWriteTokens, u.cacheWriteTokens);
+    prev.cacheWrite1hTokens = Math.max(prev.cacheWrite1hTokens, u.cacheWrite1hTokens);
+    prev.cacheReadTokens = Math.max(prev.cacheReadTokens, u.cacheReadTokens);
+    prev.outputTokens = Math.max(prev.outputTokens, u.outputTokens);
+    if (u.fast) prev.fast = true;
+    if (!prev.model && u.model) prev.model = u.model;
+  }
+  return out;
 }
 
 /**
@@ -720,6 +765,7 @@ export {
   entryText,
   isToolResult,
   extractUsage,
+  foldUsageByRequest,
   isTurnBoundary,
   isSkillInjection,
   turnPromptText,

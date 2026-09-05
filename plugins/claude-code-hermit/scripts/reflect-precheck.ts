@@ -227,8 +227,7 @@ function hasComputeActivity(stateDir: string, lastRunAt: string | null, sessionS
   try {
     const sessionsDir = path.join(stateDir, 'sessions');
     // Exclude empty auto-archives: their auto-close mtime bump would trigger compute
-    // on a report with no operator content. Daily-lull closes carry operator_turns > 0
-    // and DO trigger compute. See isEmptyAutoArchive in lib/frontmatter.ts.
+    // on a report with no operator content. See isEmptyAutoArchive in lib/frontmatter.ts.
     const reports = fs.readdirSync(sessionsDir)
       .filter(f => /^S-\d+-REPORT\.md$/.test(f))
       .filter(f => !isEmptyAutoArchive(readFrontmatter(path.join(sessionsDir, f))));

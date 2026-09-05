@@ -14,7 +14,7 @@ import { kStr } from './lib/format';
 import { costIndexPath, readCostIndex, scanAutomatedOpus, scanRoutineLedger } from './lib/cost-log';
 import { costLogPath, transcriptDirFor, memoryDirFor } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw, configExists } from './lib/config-read';
-import { PRICING } from './lib/pricing';
+import { resolvePricing, PRICING_VERIFIED } from './lib/pricing';
 import { HERMIT_OUTPUT_STYLE, VOICE_FILE_REL, voiceFileExists, resolvePersistedStyle, outputStyleFor } from './lib/voice';
 import { getEnabledChannels } from './lib/channel-config';
 import { isContainer } from './lib/container';
@@ -1813,17 +1813,13 @@ function checkModelPricingKnown(p: DoctorPaths = PATHS) {
     if ('covered' in read) return read.covered;
     const config = read.config;
 
-    const known = new Set(Object.keys(PRICING));
-    // A model is priced correctly iff cost-tracker's detectModel() maps it to a
-    // real tier before pricing (cost-tracker.ts → calculateCost). detectModel
-    // substring-matches haiku/opus/sonnet, so full ids like "claude-opus-4-8"
-    // ARE priced — only a name with no tier substring silently falls back to
-    // sonnet. Mirror that predicate here rather than comparing against the
-    // alias-only PRICING keys, which would false-warn on every full model id.
-    const isPriced = (m: string) => {
-      const lower = m.toLowerCase();
-      return known.has(m) || lower.includes('haiku') || lower.includes('opus') || lower.includes('sonnet');
-    };
+    // A configured model is priced iff resolvePricing(m).exact — full ids and
+    // dated snapshots (`<key>-YYYYMMDD`) hit the table. Config aliases
+    // sonnet|opus|haiku|fable are the documented config values and also pass
+    // (they resolve via tier substring with exact:false). Anything else,
+    // including claude-nova-9, is named.
+    const ALIASES = new Set(['fable', 'opus', 'sonnet', 'haiku']);
+    const isPriced = (m: string) => resolvePricing(m).exact || ALIASES.has(m.toLowerCase());
     const unknown: string[] = [];
     const seen = new Set<string>();
     const consider = (m: unknown, where: string) => {
@@ -1840,29 +1836,33 @@ function checkModelPricingKnown(p: DoctorPaths = PATHS) {
     }
     consider(config.heartbeat?.model, 'heartbeat.model');
 
-    // Secondary signal: cost-log `model` field, last 7d. Inert today —
-    // detectModel() (cost-tracker.ts) collapses every raw model string to
-    // haiku|sonnet|opus before logging, so this can't find an unknown yet.
-    // Kept so it activates automatically once raw model ids ever persist
-    // (e.g. PROP-016), rather than adding it as a second migration later.
+    const since = new Date(Date.now() - 7 * MS_PER_DAY).toISOString().slice(0, 10);
+
+    // One pass: `cost-log.jsonl` is never pruned or rotated and only grows over the
+    // hermit's life, so both the unknown-model names and the model_unpriced count come
+    // out of the same read, against the same date window.
+    let unpricedRows = 0;
     if (fs.existsSync(costLog)) {
-      const since = new Date(Date.now() - 7 * MS_PER_DAY).toISOString().slice(0, 10);
       for (const line of fs.readFileSync(costLog, 'utf8').split('\n')) {
         if (!line.trim()) continue;
         try {
           const entry = JSON.parse(line);
-          if ((entry.timestamp || '').slice(0, 10) >= since) consider(entry.model, 'cost-log');
+          if ((entry.timestamp || '').slice(0, 10) < since) continue;
+          consider(entry.model, 'cost-log');
+          if (entry.model_unpriced) unpricedRows += 1;
         } catch {}
       }
     }
 
+    const verified = `pricing verified ${PRICING_VERIFIED}`;
+    const unpricedBit = `${unpricedRows} unpriced log row${unpricedRows === 1 ? '' : 's'} in last 7d`;
     if (unknown.length > 0) {
       return {
         id: 'model-pricing-known', status: 'warn',
-        detail: `unpriced model(s): ${unknown.join(', ')} — cost tracking silently falls back to sonnet pricing`,
+        detail: `unpriced model(s): ${unknown.join(', ')} — cost tracking silently falls back to sonnet-5 pricing; ${unpricedBit}; ${verified}`,
       };
     }
-    return { id: 'model-pricing-known', status: 'ok', detail: 'all configured models known to the pricing table' };
+    return { id: 'model-pricing-known', status: 'ok', detail: `all configured models known to the pricing table; ${unpricedBit}; ${verified}` };
   } catch (e: any) {
     return { id: 'model-pricing-known', status: 'fail', detail: `check failed: ${e.message}` };
   }

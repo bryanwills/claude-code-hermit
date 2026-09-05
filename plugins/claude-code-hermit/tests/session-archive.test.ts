@@ -240,14 +240,13 @@ describe('cost precedence', () => {
 
   test('never falls back to .status.json — records 0/0 when unmeasurable and no Cost payload (regression, #615)', withTmp(async (dir) => {
     await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
-    fs.writeFileSync(path.join(sessionsDir(dir), '.status.json'), JSON.stringify({ cost_usd: 1.2345, tokens: 9999, operator_turns: 3 }));
+    fs.writeFileSync(path.join(sessionsDir(dir), '.status.json'), JSON.stringify({ cost_usd: 1.2345, tokens: 9999 }));
     const payload = 'Status: completed\nBlockers: none\nLessons: none\nChanged: none\n';
     await archive(dir, 'close', payload, '2026-07-09T13:00:00Z');
     const report = fs.readFileSync(path.join(sessionsDir(dir), 'S-001-REPORT.md'), 'utf-8');
     expect(report).toContain('cost_usd: 0');
     expect(report).toContain('tokens: 0');
-    // .status.json still sources operator_turns — that read is untouched.
-    expect(report).toContain('operator_turns: 3');
+    expect(report).not.toContain('operator_turns');
   }));
 
   test('falls back to 0.00/0 when neither payload nor cost-log window have cost data', withTmp(async (dir) => {
@@ -944,7 +943,7 @@ describe('structural equivalence with the session-mgr.md spec', () => {
   const REQUIRED_FRONTMATTER_KEYS = [
     'id', 'status', 'date', 'duration', 'cost_usd', 'tokens', 'tags',
     'proposals_created', 'task', 'artifacts', 'blockers', 'lessons', 'next_start',
-    'escalation', 'operator_turns', 'closed_via',
+    'escalation', 'closed_via',
   ];
   const REQUIRED_SECTIONS = [
     '## Overview', '## Completed', '## Findings', '## Changed', '## Artifacts',

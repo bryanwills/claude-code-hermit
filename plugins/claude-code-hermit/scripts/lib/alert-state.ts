@@ -89,7 +89,7 @@ export function writeAlertState(p: string, obj: Json): boolean {
 
 /**
  * Union of alert entries across the four per-writer files, for generic readers
- * (dashboard, cost-summary, telemetry bundle, the heartbeat budget scan) that
+ * (dashboard, telemetry bundle, the heartbeat budget scan) that
  * want the full alert view. Later files win on a key collision, but the keyspaces
  * are disjoint by construction. Unreadable/corrupt/missing files contribute nothing.
  */

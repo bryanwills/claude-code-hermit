@@ -251,7 +251,7 @@ At **80%** of any cap, a one-time warning alert is queued (separate from the 100
 
 Under OAuth/subscription auth, `estimated_cost_usd` (and therefore this cap) is notional — Claude Code isn't billing per-token — but the cap still bounds a runaway loop (a misfiring routine gets stopped regardless of what the dollar figure means). On an API-key client box the figure is real money; pair `monthly_usd` with a provider-side hard limit for true belt-and-suspenders coverage — this cap is a fast, in-hermit backstop, not a replacement for one.
 
-An unrecognized model string is still priced at sonnet rates (so caps keep working) but its cost-log line is flagged `model_unpriced: true`, surfaced as a warning in `cost-summary.md`.
+An unrecognized model string is still priced at the sonnet-5 rate (so caps keep working) but its cost-log line is flagged `model_unpriced: true` and surfaced by `hermit-doctor`. What is priced: base input/output rates, 5-minute and 1-hour cache writes, cache reads, and fast mode. `inference_geo: "us"` is not applied.
 
 ```json
 "budget": {
@@ -296,7 +296,7 @@ hermit: { agent_name, versions },
 doctor: { ts, checks: [{ id, status }] } | null,
 cost: { today, this_month, all_time: { total_cost_usd, total_tokens, total_sessions }, by_source } | null,
 alerts: { active, suppressed, total_ticks } | null,
-session: { id, status, date, duration, cost_usd, tokens, escalation, operator_turns, closed_via, proposals_created_count } | null,
+session: { id, status, date, duration, cost_usd, tokens, escalation, closed_via, proposals_created_count } | null,
 runtime: { session_state, runtime_mode, paused, paused_until, watchdog: { last_run, events_last_24h } }
 ```
 

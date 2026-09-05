@@ -6,7 +6,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { costByType } from '../pricing';
 import { readSettledConfig } from '../config-read';
 import { money, resolveTimezone, budgetLine } from '../spend-status';
 import { todayYMD } from '../time';
@@ -62,6 +61,21 @@ function formatCost(n: number) {
   return n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`;
 }
 
+function storedCost(e: Json): number {
+  return typeof e.estimated_cost_usd === 'number' ? e.estimated_cost_usd : 0;
+}
+
+function storedByType(e: Json): { input: number; cacheWrite: number; cacheRead: number; output: number } | null {
+  const c = e.cost_by_type;
+  if (!c || typeof c !== 'object') return null;
+  return {
+    input: c.input || 0,
+    cacheWrite: c.cache_write || 0,
+    cacheRead: c.cache_read || 0,
+    output: c.output || 0,
+  };
+}
+
 // Total-vs-typical framing for the plain statement. `typical` is the trailing
 // 7-day daily average (today excluded, so a still-running day isn't self-compared).
 function compareToTypical(today: number, typical: number): string {
@@ -112,9 +126,7 @@ function buildPlainStatement(stateDir: string, costLog: string): string {
   const byDate: Record<string, number> = {};
   const bySource: Record<string, number> = {};
   for (const e of recent) {
-    const model = e.model || 'sonnet';
-    const types = costByType(model, e.input_tokens || 0, e.cache_write_tokens || 0, e.cache_read_tokens || 0, e.output_tokens || 0);
-    const cost = types.input + types.cacheWrite + types.cacheRead + types.output;
+    const cost = storedCost(e);
     const date = entryDate(e);
     if (date) byDate[date] = (byDate[date] || 0) + cost;
     bySource[e.source || 'other'] = (bySource[e.source || 'other'] || 0) + cost;
@@ -172,6 +184,7 @@ function report(rawArgs: string[]) {
   }
 
   const totals = { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 };
+  let hasTypeSplit = false;
   let coldStartTurns = 0;
   let coldStartCost = 0;
   const sessionMap: Record<string, Json> = {}; // session_id -> { cost, turns, byType }
@@ -180,17 +193,19 @@ function report(rawArgs: string[]) {
 
   for (const e of window) {
     const model = e.model || 'sonnet';
-    const inp  = e.input_tokens        || 0;
     const cw   = e.cache_write_tokens  || 0;
     const cr   = e.cache_read_tokens   || 0;
     const out  = e.output_tokens       || 0;
 
-    const types = costByType(model, inp, cw, cr, out);
-    const entryCost = types.input + types.cacheWrite + types.cacheRead + types.output;
-    totals.input      += types.input;
-    totals.cacheWrite += types.cacheWrite;
-    totals.cacheRead  += types.cacheRead;
-    totals.output     += types.output;
+    const entryCost = storedCost(e);
+    const types = storedByType(e);
+    if (types) {
+      hasTypeSplit = true;
+      totals.input      += types.input;
+      totals.cacheWrite += types.cacheWrite;
+      totals.cacheRead  += types.cacheRead;
+      totals.output     += types.output;
+    }
 
     // Subagent lines contribute to cost totals but not to turn counts or cold-start detection.
     if (!e.subagent && cw > 0 && cr === 0 && out < COLD_START_OUTPUT_MAX) {
@@ -198,7 +213,7 @@ function report(rawArgs: string[]) {
       coldStartCost += entryCost;
     }
 
-    // Per-session attribution (by sub-cost, not token volume)
+    // Per-session attribution (by stored dollars, not token volume)
     const sid = e.session_id || '';
     if (sid) {
       if (!sessionMap[sid]) {
@@ -207,10 +222,12 @@ function report(rawArgs: string[]) {
       const s = sessionMap[sid];
       s.cost += entryCost;
       if (!e.subagent) s.turns++;
-      s.byType.input      += types.input;
-      s.byType.cacheWrite += types.cacheWrite;
-      s.byType.cacheRead  += types.cacheRead;
-      s.byType.output     += types.output;
+      if (types) {
+        s.byType.input      += types.input;
+        s.byType.cacheWrite += types.cacheWrite;
+        s.byType.cacheRead  += types.cacheRead;
+        s.byType.output     += types.output;
+      }
     }
 
     // Per-source attribution; legacy entries without 'source' bucket to 'other'
@@ -221,13 +238,15 @@ function report(rawArgs: string[]) {
     if (!modelMap[model]) modelMap[model] = { cost: 0, byType: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 } };
     const mm = modelMap[model];
     mm.cost += entryCost;
-    mm.byType.input      += types.input;
-    mm.byType.cacheWrite += types.cacheWrite;
-    mm.byType.cacheRead  += types.cacheRead;
-    mm.byType.output     += types.output;
+    if (types) {
+      mm.byType.input      += types.input;
+      mm.byType.cacheWrite += types.cacheWrite;
+      mm.byType.cacheRead  += types.cacheRead;
+      mm.byType.output     += types.output;
+    }
   }
 
-  const total = totals.input + totals.cacheWrite + totals.cacheRead + totals.output;
+  const total = window.reduce((sum, e) => sum + storedCost(e), 0);
   const sessions = Object.keys(sessionMap).length;
   const turns = window.filter(e => !e.subagent).length;
 
@@ -235,7 +254,8 @@ function report(rawArgs: string[]) {
     .sort((a, b) => b[1].cost - a[1].cost)
     .slice(0, MAX_TOP_SESSIONS)
     .map(([sid, s]) => {
-      const dominant = Object.entries(s.byType).sort((a: Json, b: Json) => b[1] - a[1])[0][0];
+      const typed = Object.entries(s.byType).filter(([, v]) => (v as number) > 0) as [string, number][];
+      const dominant = typed.sort((a, b) => b[1] - a[1])[0]?.[0];
       const label = dominant === 'cacheRead' ? 'cache_read' : dominant === 'cacheWrite' ? 'cache_write' : dominant;
       return { id: sid.slice(0, 8), cost: s.cost, turns: s.turns, dominant: label };
     });
@@ -243,11 +263,20 @@ function report(rawArgs: string[]) {
   // All source entries sorted desc by cost; tail count used for the '+N more' line
   const allSources = Object.entries(sourceMap).sort((a, b) => b[1] - a[1]);
 
-  const header = `### Cost by token type (${days}d · ${formatCost(total)} · ${turns} turns / ${sessions} sessions)\n` +
-    `- cache_read ${formatCost(totals.cacheRead)} (${pct(totals.cacheRead, total)})` +
-    ` · cache_write ${formatCost(totals.cacheWrite)} (${pct(totals.cacheWrite, total)})` +
-    ` · output ${formatCost(totals.output)} (${pct(totals.output, total)})` +
-    ` · input ${formatCost(totals.input)} (${pct(totals.input, total)})\n`;
+  // Percentages are shares of the rows that carry a breakdown, not of `total` — rows
+  // written before cost_by_type existed contribute dollars to `total` but nothing to
+  // `totals`, and dividing by `total` would report cache_read at a few percent on a
+  // window that is mostly legacy rows.
+  const typedTotal = totals.input + totals.cacheWrite + totals.cacheRead + totals.output;
+  let header = `### Cost by token type (${days}d · ${formatCost(total)} · ${turns} turns / ${sessions} sessions)\n`;
+  if (hasTypeSplit) {
+    const coverage = typedTotal < total ? ` — of ${formatCost(typedTotal)} with a recorded split` : '';
+    header +=
+      `- cache_read ${formatCost(totals.cacheRead)} (${pct(totals.cacheRead, typedTotal)})` +
+      ` · cache_write ${formatCost(totals.cacheWrite)} (${pct(totals.cacheWrite, typedTotal)})` +
+      ` · output ${formatCost(totals.output)} (${pct(totals.output, typedTotal)})` +
+      ` · input ${formatCost(totals.input)} (${pct(totals.input, typedTotal)})${coverage}\n`;
+  }
 
   const coldSection = coldStartTurns > 0
     ? `\n### Cold starts\n- ${coldStartTurns} turn${coldStartTurns === 1 ? '' : 's'} · ${formatCost(coldStartCost)} (${pct(coldStartCost, total)}) — cache-write, no cache-read, <${COLD_START_OUTPUT_MAX} output tokens\n`
@@ -295,9 +324,11 @@ function report(rawArgs: string[]) {
 
   function buildTopSection(n: number) {
     if (n <= 0 || topSessions.length === 0) return '';
-    const lines = topSessions.slice(0, n).map(s =>
-      `- ${s.id}: ${formatCost(s.cost)} (${s.turns} turn${s.turns === 1 ? '' : 's'}, mostly ${s.dominant})`
-    ).join('\n');
+    const lines = topSessions.slice(0, n).map(s => {
+      const turns = `${s.turns} turn${s.turns === 1 ? '' : 's'}`;
+      const mostly = s.dominant ? `, mostly ${s.dominant}` : '';
+      return `- ${s.id}: ${formatCost(s.cost)} (${turns}${mostly})`;
+    }).join('\n');
     return `\n### Top sessions\n${lines}\n`;
   }
 

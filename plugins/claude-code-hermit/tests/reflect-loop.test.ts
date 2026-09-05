@@ -151,10 +151,6 @@ Work.
   test('weekly-review: regression — sessions_count intact', () => {
     expect(review).toContain('sessions_count: 2');
   });
-
-  test('weekly-review: regression — self_directed_rate intact', () => {
-    expect(review).toContain('self_directed_rate:');
-  });
 });
 
 // ── item 3: observations ledger ─────────────────────────────────────────────

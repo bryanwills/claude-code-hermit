@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
-import { triggerPrompt, assistantEntryFor as assistantEntry } from './helpers/transcript';
+import { triggerPrompt, assistantEntry as assistantEntryFull, assistantEntryFor as assistantEntry } from './helpers/transcript';
 
 const HELPER = path.join(import.meta.dir, 'helpers', 'collect-subagent-usage.ts');
 
@@ -184,14 +184,20 @@ describe('cost-tracker subagent log lines', () => {
     const entry = JSON.parse(firstLine);
     expect(entry.subagent).toBeFalsy();
     expect(entry.source).toBe('routine:demo');
-    expect(entry.model).toBe('sonnet');
+    expect(entry.model).toBe('claude-sonnet-4-6');
+    expect(entry.cost_by_type).toEqual({
+      input: expect.any(Number),
+      cache_write: expect.any(Number),
+      cache_read: expect.any(Number),
+      output: expect.any(Number),
+    });
   });
 
   test('cost-tracker: second line is the subagent entry at haiku', () => {
     const lines = fs.readFileSync(logPath, 'utf-8').trim().split('\n');
     const entry = JSON.parse(lines[1]);
     expect(entry.subagent).toBe(true);
-    expect(entry.model).toBe('haiku');
+    expect(entry.model).toBe('claude-haiku-4-5-20251001');
     expect(entry.agent_type).toBe('general-purpose');
     expect(entry.api_calls).toBe(0);
     expect(entry.model_resolved).toBe(true); // resolvedModel was present
@@ -261,7 +267,7 @@ describe('cost-tracker subagent with no resolvedModel', () => {
     const subEntry = JSON.parse(lines[1]);
     expect(subEntry.subagent).toBe(true);
     expect(subEntry.model_resolved).toBe(false);
-    expect(subEntry.model).toBe('sonnet');
+    expect(subEntry.model).toBe('');
     expect(subEntry.input_tokens).toBe(1000);
   });
 });
@@ -592,4 +598,44 @@ describe('cost-tracker: opened_at / closed_at arc window', () => {
     const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
     expect(rt.opened_at).toBeUndefined();
   }));
+});
+
+// Streamed chunks of one request share a requestId; they must bill once, at the max
+// of each token field, not once per transcript entry.
+describe('cost-tracker: same requestId billed once', () => {
+  let dir: string;
+  let logPath: string;
+
+  beforeAll(async () => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cost-tracker-reqid-'));
+    fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+    logPath = path.join(dir, '.claude', 'cost-log.jsonl');
+    const stateDir = path.join(dir, '.claude-code-hermit', 'state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+
+    const transcriptLines = [
+      triggerPrompt('[hermit-routine:demo] start'),
+      assistantEntryFull({ model: 'claude-sonnet-4-6', requestId: 'req_same', inputTokens: 100, outputTokens: 10 }),
+      assistantEntryFull({ model: 'claude-sonnet-4-6', requestId: 'req_same', inputTokens: 100, outputTokens: 20 }),
+      assistantEntryFull({ model: 'claude-sonnet-4-6', requestId: 'req_same', inputTokens: 100, outputTokens: 30 }),
+    ];
+    const transcriptPath = path.join(dir, 'transcript.jsonl');
+    fs.writeFileSync(transcriptPath, transcriptLines.join('\n') + '\n');
+
+    const stdin = JSON.stringify({ session_id: 'test-session', transcript_path: transcriptPath });
+    await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
+  });
+
+  afterAll(() => {
+    if (dir) fs.rmSync(dir, { recursive: true });
+  });
+
+  test('three streamed entries of one requestId bill as api_calls: 1', () => {
+    const [firstLine] = fs.readFileSync(logPath, 'utf-8').trim().split('\n');
+    const entry = JSON.parse(firstLine);
+    expect(entry.api_calls).toBe(1);
+    expect(entry.output_tokens).toBe(30);
+    expect(entry.input_tokens).toBe(100);
+  });
 });

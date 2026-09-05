@@ -31,7 +31,7 @@ import {
 import * as costLog from '../scripts/lib/cost-log';
 import { costIndexPath, readCostIndex, updateCostIndex, scanAutomatedOpus } from '../scripts/lib/cost-log';
 import * as pricing from '../scripts/lib/pricing';
-import { calculateCost, costByType } from '../scripts/lib/pricing';
+import { calculateCost } from '../scripts/lib/pricing';
 import { search } from '../scripts/lib/search';
 import { logMessage, searchLog, unconsolidated, markConsolidated, prune, dbExists } from '../scripts/lib/channel-log';
 
@@ -3474,9 +3474,12 @@ describe('cc-compat', () => {
     expect(u).not.toBeNull();
     expect(u!.inputTokens).toBe(10);
     expect(u!.cacheWriteTokens).toBe(20);
+    expect(u!.cacheWrite1hTokens).toBe(0);
     expect(u!.cacheReadTokens).toBe(30);
     expect(u!.outputTokens).toBe(40);
     expect(u!.model).toContain('sonnet');
+    expect(u!.requestId).toBe('');
+    expect(u!.fast).toBe(false);
   });
   test('cc-compat.js: extractUsage non-assistant entry → null', () => {
     expect(extractUsage({ type: 'user', message: { content: 'hi' } })).toBeNull();
@@ -3763,25 +3766,27 @@ describe('cost-log', () => {
 // -------------------------------------------------------
 
 describe('pricing', () => {
-  test('pricing.js: exports PRICING, costByType, calculateCost', () => {
-    for (const k of ['PRICING', 'costByType', 'calculateCost']) {
+  test('pricing.js: exports PRICING, resolvePricing, calculateCost', () => {
+    for (const k of ['PRICING', 'resolvePricing', 'calculateCost']) {
       expect((pricing as any)[k]).toBeDefined();
     }
   });
 
-  test('pricing.js: calculateCost golden (sonnet 1M cache_read = $0.30)', () => {
-    expect(calculateCost('sonnet', 0, 0, 1000000, 0)).toBeCloseTo(0.30, 9);
+  test('pricing.js: calculateCost golden (sonnet-5 1M cache_read = $0.20)', () => {
+    const empty = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0 };
+    expect(calculateCost('claude-sonnet-5', { ...empty, cacheRead: 1_000_000 }).total).toBeCloseTo(0.20, 9);
   });
 
-  test('pricing.js: costByType sums equal calculateCost', () => {
-    const t = costByType('opus', 100, 200, 300, 400);
-    const s = t.input + t.cacheWrite + t.cacheRead + t.output;
-    expect(Math.abs(s - calculateCost('opus', 100, 200, 300, 400))).toBeLessThan(1e-12);
+  test('pricing.js: byType sums equal total', () => {
+    const r = calculateCost('opus', { input: 100, cacheWrite5m: 200, cacheWrite1h: 0, cacheRead: 300, output: 400 });
+    const s = r.byType.input + r.byType.cacheWrite + r.byType.cacheRead + r.byType.output;
+    expect(Math.abs(s - r.total)).toBeLessThan(1e-12);
   });
 
-  test('pricing.js: unknown model falls back to sonnet', () => {
+  test('pricing.js: unknown model falls back to sonnet-5', () => {
+    const t = { input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 1_000_000, output: 0 };
     expect(Math.abs(
-      calculateCost('unknown-model', 0, 0, 1000000, 0) - calculateCost('sonnet', 0, 0, 1000000, 0),
+      calculateCost('unknown-model', t).total - calculateCost('sonnet', t).total,
     )).toBeLessThan(1e-12);
   });
 });
@@ -3811,7 +3816,7 @@ describe('cost-reflect', () => {
         `{"timestamp":"${inWindow}T10:01:00.000Z","session_id":"sessionA1","model":"sonnet","input_tokens":0,"cache_write_tokens":50000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":50500,"estimated_cost_usd":0.195}`,
         `{"timestamp":"${inWindow}T10:02:00.000Z","session_id":"sessionA1","model":"haiku","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":200000,"output_tokens":2000,"total_tokens":202000,"estimated_cost_usd":0.024}`,
         `{"timestamp":"${inWindow}T10:03:00.000Z","session_id":"sessionB2","model":"opus","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":0,"output_tokens":100000,"total_tokens":100000,"estimated_cost_usd":7.5}`,
-        `{"timestamp":"${inWindow}T10:04:00.000Z","session_id":"sessionD4","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":20000,"output_tokens":1000,"total_tokens":21000,"estimated_cost_usd":0.021}`,
+        `{"timestamp":"${inWindow}T10:04:00.000Z","session_id":"sessionD4","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":20000,"output_tokens":1000,"total_tokens":21000,"estimated_cost_usd":0.021,"cost_by_type":{"input":0,"cache_write":0,"cache_read":0.006,"output":0.015}}`,
         `{"timestamp":"${old}T10:00:00.000Z","session_id":"session-OLD","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":999999,"output_tokens":0,"total_tokens":999999,"estimated_cost_usd":99.9999}`,
         'NOT_VALID_JSON', // malformed line to test resilience
         '',
@@ -3825,8 +3830,8 @@ describe('cost-reflect', () => {
       expect(out.length).toBeGreaterThan(0);
     });
 
-    // Grand total = sum of 5 in-window entries (session-OLD and malformed line excluded)
-    // Recomputed from tokens (not estimated_cost_usd): 0.03 + 0.195 + 0.024 + 7.5 + 0.021 = 7.77
+    // Grand total = sum of 5 in-window stored dollars (session-OLD and malformed line excluded)
+    // 0.03 + 0.195 + 0.024 + 7.5 + 0.021 = 7.77
     test('cost-reflect: total includes all 5 in-window entries', () => {
       expect(out).toMatch(/7\.7[0-9]/);
     });
@@ -4375,19 +4380,19 @@ describe('cost-tracker sumTurnUsage', () => {
     expect(r.model).toBe('claude-sonnet-4-6');
   });
 
-  // Three-call turn — the core undercount fix
+  // Three-call turn — distinct requestIds bill three times
   test('cost-tracker: sumTurnUsage sums three billed entries in one turn', () => {
     const lines = [
       // Prior turn (must NOT be included)
       JSON.stringify({ type: 'user', message: { content: 'prior turn prompt' } }),
-      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 999, output_tokens: 999 } } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_prior', message: { usage: { input_tokens: 999, output_tokens: 999 } } }),
       // Current turn
       JSON.stringify({ type: 'user', message: { content: '[hermit-routine:reflect] go' } }),
-      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 10 }, content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_1', message: { usage: { input_tokens: 100, output_tokens: 10 }, content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't1', type: 'tool_result', content: 'ok' }] } }),
-      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 200, output_tokens: 20 }, content: [{ type: 'tool_use', id: 't2', name: 'Write', input: {} }] } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_2', message: { usage: { input_tokens: 200, output_tokens: 20 }, content: [{ type: 'tool_use', id: 't2', name: 'Write', input: {} }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 't2', type: 'tool_result', content: 'written' }] } }),
-      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 300, output_tokens: 30, cache_read_input_tokens: 150 }, model: 'claude-sonnet-4-6' } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_3', message: { usage: { input_tokens: 300, output_tokens: 30, cache_read_input_tokens: 150 }, model: 'claude-sonnet-4-6' } }),
     ];
     const billedIndex = lines.length - 1; // last assistant entry
     const r = sumTurnUsage(lines, billedIndex);
@@ -4397,6 +4402,33 @@ describe('cost-tracker sumTurnUsage', () => {
     expect(r.cacheReadTokens).toBe(150);
     // Prior turn's 999 tokens must not bleed in
     expect(r.inputTokens).not.toBeGreaterThanOrEqual(999);
+  });
+
+  // Id-less entries have no request key, so they still sum as one bill each.
+  test('cost-tracker: sumTurnUsage sums three id-less billed entries in one turn', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'go' } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 10 } } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 200, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 300, output_tokens: 30 } } }),
+    ];
+    const r = sumTurnUsage(lines, 3);
+    expect(r.apiCalls).toBe(3);
+    expect(r.inputTokens).toBe(600);
+    expect(r.outputTokens).toBe(60);
+  });
+
+  test('cost-tracker: sumTurnUsage folds three streamed entries of one requestId', () => {
+    const lines = [
+      JSON.stringify({ type: 'user', message: { content: 'go' } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_same', message: { usage: { input_tokens: 100, output_tokens: 10 } } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_same', message: { usage: { input_tokens: 100, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'assistant', requestId: 'req_same', message: { usage: { input_tokens: 100, output_tokens: 30 } } }),
+    ];
+    const r = sumTurnUsage(lines, 3);
+    expect(r.apiCalls).toBe(1);
+    expect(r.inputTokens).toBe(100);
+    expect(r.outputTokens).toBe(30);
   });
 
   // Boundary respected: prior turn's billed entries are excluded

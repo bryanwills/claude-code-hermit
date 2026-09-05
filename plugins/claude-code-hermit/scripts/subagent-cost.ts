@@ -23,12 +23,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
-  hermitDir, costLogPath, extractUsage,
+  hermitDir, costLogPath, extractUsage, foldUsageByRequest,
   transcriptPath as parentTranscriptPath, agentTranscriptPath, agentId as payloadAgentId,
   sessionId as payloadSessionId,
 } from './lib/cc-compat';
 import { calculateCost } from './lib/pricing';
-import { resolveTurnSource, detectModel } from './cost-tracker';
+import { resolveTurnSource } from './cost-tracker';
 import { buildSubagentCostRow, appendCostRows, costIndexPath, updateCostIndex } from './lib/cost-log';
 import { readSettledConfig } from './lib/config-read';
 
@@ -44,26 +44,33 @@ function readRuntimeSessionId(): string {
 
 function sumSubagentTranscript(transcriptPath: string): {
   model: string; inputTokens: number; cacheWriteTokens: number;
-  cacheReadTokens: number; outputTokens: number;
+  cacheWrite1hTokens: number; cacheReadTokens: number; outputTokens: number;
+  fast: boolean;
 } | null {
   let content: string;
   try { content = fs.readFileSync(transcriptPath, 'utf-8'); } catch { return null; }
-  let inputTokens = 0, cacheWriteTokens = 0, cacheReadTokens = 0, outputTokens = 0;
-  let model = '';
-  let found = false;
+  const collected: NonNullable<ReturnType<typeof extractUsage>>[] = [];
   for (const line of content.split('\n')) {
     try {
       const usage = extractUsage(JSON.parse(line));
-      if (!usage) continue;
-      inputTokens += usage.inputTokens;
-      cacheWriteTokens += usage.cacheWriteTokens;
-      cacheReadTokens += usage.cacheReadTokens;
-      outputTokens += usage.outputTokens;
-      if (!model) model = usage.model;
-      found = true;
+      if (usage) collected.push(usage);
     } catch {}
   }
-  return found ? { model, inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens } : null;
+  if (collected.length === 0) return null;
+  const folded = foldUsageByRequest(collected);
+  let inputTokens = 0, cacheWriteTokens = 0, cacheWrite1hTokens = 0, cacheReadTokens = 0, outputTokens = 0;
+  let model = '';
+  let fast = false;
+  for (const usage of folded) {
+    inputTokens += usage.inputTokens;
+    cacheWriteTokens += usage.cacheWriteTokens;
+    cacheWrite1hTokens += usage.cacheWrite1hTokens;
+    cacheReadTokens += usage.cacheReadTokens;
+    outputTokens += usage.outputTokens;
+    if (usage.fast) fast = true;
+    if (!model) model = usage.model;
+  }
+  return { model, inputTokens, cacheWriteTokens, cacheWrite1hTokens, cacheReadTokens, outputTokens, fast };
 }
 
 // Locate this agent's ASYNC launch entry in the parent transcript. Returns the scanned
@@ -113,7 +120,7 @@ process.stdin.on('end', () => {
     const usage = sumSubagentTranscript(subPath);
     if (!usage) { process.exit(0); return; }
 
-    const { model: rawModel, inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens } = usage;
+    const { model: rawModel, inputTokens, cacheWriteTokens, cacheWrite1hTokens, cacheReadTokens, outputTokens, fast } = usage;
     const totalTokens = inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens;
     if (totalTokens === 0) { process.exit(0); return; }
 
@@ -124,10 +131,27 @@ process.stdin.on('end', () => {
     let source = 'other';
     try { source = resolveTurnSource(launch.lines, launch.index).source; } catch {}
 
-    const model = detectModel(rawModel);
-    const estimatedCost = Math.round(
-      calculateCost(model, inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens) * 10000
-    ) / 10000;
+    const model = rawModel || '';
+    // Clamped: the 1h split and the cache-write total are folded per request as
+    // independent maxima, so a disagreeing pair could otherwise yield a negative 5m
+    // component and a cost below the real figure.
+    const cacheWrite1h = Math.min(cacheWrite1hTokens, cacheWriteTokens);
+    const priced = calculateCost(model, {
+      input: inputTokens,
+      cacheWrite5m: cacheWriteTokens - cacheWrite1h,
+      cacheWrite1h,
+      cacheRead: cacheReadTokens,
+      output: outputTokens,
+      fast,
+    });
+    const round4 = (n: number) => Math.round(n * 10000) / 10000;
+    const estimatedCost = round4(priced.total);
+    const costByType = {
+      input: round4(priced.byType.input),
+      cache_write: round4(priced.byType.cacheWrite),
+      cache_read: round4(priced.byType.cacheRead),
+      output: round4(priced.byType.output),
+    };
 
     const entry = buildSubagentCostRow({
       sessionId: payloadSessionId(payload) || readRuntimeSessionId() || 'unknown',
@@ -141,6 +165,7 @@ process.stdin.on('end', () => {
       agentType: payload.agent_type || '',
       modelResolved: !!rawModel,   // subagent transcript always carries a model → effectively always true
       estimatedCostUsd: estimatedCost,
+      costByType,
     });
 
     try { appendCostRows(COST_LOG, [entry]); } catch { process.exit(0); return; }

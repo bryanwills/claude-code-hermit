@@ -313,15 +313,6 @@ function resolveCost(
   return { cost_usd: 0, tokens: 0 };
 }
 
-function resolveOperatorTurns(sessionsDir: string): number {
-  const raw = readFileSafe(path.join(sessionsDir, '.status.json'));
-  if (!raw) return 0;
-  try {
-    const status = JSON.parse(raw);
-    return typeof status.operator_turns === 'number' ? status.operator_turns : 0;
-  } catch { return 0; }
-}
-
 // config.json is static for the duration of one invocation — read it once per
 // verb and pass the parsed object into these instead of each resolving it
 // independently (was 3 separate reads+parses per idle-mode archive call).
@@ -647,7 +638,6 @@ function buildReport(opts: {
   const payloadTask = firstContentLine(payload['Task'] ?? '', 120);
   const task = recordedTask || firstRecordedTask(shell, payload['Task']);
   const escalation = resolveEscalation(config);
-  const operatorTurns = resolveOperatorTurns(sessionsDir);
   const closedVia = payload['Closed Via'] || (mode === 'auto' ? 'auto' : 'operator');
 
   const blockersMerge = mergeRecordedBlockers(
@@ -692,7 +682,6 @@ function buildReport(opts: {
     `lessons: ${yamlArray(contentLines(lessons))}`,
     `next_start: ${JSON.stringify(firstContentLine(nextStart, 200))}`,
     `escalation: ${escalation}`,
-    `operator_turns: ${operatorTurns}`,
     `closed_via: ${closedVia}`,
     '---',
   ].join('\n');

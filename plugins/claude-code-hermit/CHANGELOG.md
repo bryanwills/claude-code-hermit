@@ -30,6 +30,11 @@
 - `autoMode.environment` reaches the classifier on every install, not only one publishing artifact pages. The entries name the hermit's own notification domains and state directory, so a hermit with artifacts off was declaring nothing and drawing denials on its own channel sends.
 - The sealed `apply-settings` grant is likewise unconditional. `hermit-evolve`, `hatch`, `channel-setup` and `docker-setup` all run the ops it covers on installs that publish nothing. `artifact-allow` is the exception: it writes the native Artifact permission, so it is enumerated only where the boot grant applies and stays Self-Modification elsewhere.
 - Triage dedups against `state/proposals-index.json`.
+- Cost rows record the full model id and a `cost_by_type` breakdown.
+- `cost-report reflect` sums stored cost instead of re-pricing.
+- Doctor's pricing check reports the table's verified date.
+- `cost-summary.md` no longer written.
+- `operator_turns` removed from `.status.json`, session-report frontmatter and the weekly review.
 
 ### Fixed
 - A waiting timeout left its `waiting_since` stamp behind on the now-idle runtime, so the next wait was measured against a timestamp from the wait before it. A park that stamps nothing of its own, `operator_input` from the channel responder, was released on its first heartbeat.
@@ -42,6 +47,9 @@
 - Stall notices quote the pane's last 8 non-blank rows.
 - Checklist alerts were filed under a key the heartbeat gate never looked up, so a finding such as a credential re-auth never settled and re-woke the hermit a few times a day, indefinitely. `alert-update` now snaps a firing entry onto the canonical key derived from `HEARTBEAT.md`, and an entry that resolves to nothing lands under `custom:` instead of minting a phantom `checklist:` key.
 - The documented key normalisation yielded a different key than the code for a `- [x] ` item, because the list marker and checkbox were not stripped first.
+- Each API request billed once per turn instead of once per streamed transcript entry, in both the Stop hook and the async subagent hook.
+- Rate table refreshed for the current generations and keyed on the full model id.
+- 1-hour cache writes and fast mode priced at their own rates.
 
 ### Upgrade Instructions
 
@@ -52,8 +60,9 @@ Run `/claude-code-hermit:hermit-evolve`.
 3. **Add the monthly `capability-brainstorm` routine** if missing. Read routines with `bun "<plugin_root>/scripts/settings-edit.ts" .claude-code-hermit/config.json get routines`. If an entry with id `capability-brainstorm` exists, report `already-present`. Otherwise pipe `{"id":"capability-brainstorm","schedule":"0 10 1 * *","skill":"claude-code-hermit:capability-brainstorm","run_during_waiting":true,"enabled":true}` to `bun "<plugin_root>/scripts/proposal.ts" routine .claude-code-hermit` and expect `OK|added`. Safe non-destructive default: take it silently. Step 10 re-arms routines.
 4. **Nothing to do for the `/auto-mode-setup` kill-switch.** Boot writes it to the settings file on the next restart. Tell the operator the command is gone from this hermit's own sessions, and that adding classifier context is now done by editing `autoMode.environment` in `~/.claude/settings.json` from a terminal. _(Opt-out: set `skillOverrides["auto-mode-setup"]` to `"on"` in the hermit's `.claude/settings.local.json`; boot leaves any value already present untouched.)_
 5. **Optional: delete the `autoMode` block from the hermit's `.claude/settings.local.json`** if one is present. Leaving it is the default and is safe. The key has been inert since Claude Code 2.1.207 stopped reading `autoMode` from project settings files, and the hermit now ships that policy per session through its launch overlay, so it is a leftover of the retired `automode-seed` op rather than live configuration. Do not delete it here: report to the operator that it was found, and let them remove it if they want.
+6. **Cost figures drop on upgrade day; history is untouched.** New turns bill each API request once, at current rates, with 1-hour cache writes and fast mode priced on their own. Rows already in `.claude/cost-log.jsonl` keep the dollars they were written with; `cost-report reflect` sums those stored figures and does not re-price them. Tell the operator to revisit `budget` caps set under the old (roughly 2×) figures, or a daily/weekly/monthly pause that used to trip will now fire later. `.claude-code-hermit/cost-summary.md` is no longer written and may be deleted; it is not read.
 
-No config.json changes required for steps 4 and 5.
+No config.json changes required for steps 4, 5, and 6.
 
 ## [1.3.1] - 2026-09-03
 

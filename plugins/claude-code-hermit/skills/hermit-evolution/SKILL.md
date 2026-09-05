@@ -4,7 +4,7 @@ description: "Show how this hermit has evolved: cost trend and source split, rou
 ---
 # Hermit Evolution
 
-Synthesize a coherent evolution report: cost trend and source split, autonomy and proposal velocity, active routines and watches, top things produced last month, and what grew organically since hatch.
+Synthesize a coherent evolution report: cost trend and source split, proposal velocity, active routines and watches, top things produced last month, and what grew organically since hatch.
 
 ## Step 0 — Channel reply
 
@@ -36,9 +36,6 @@ Deliver the runner's `report` verbatim (≤1500 chars) via the Step 0 target. Th
 ### Cost
 - Trend (weekly): $A → $B → $C → $X (Δ +/-N%)
 - Last 30d: $X.XX total — scheduled (routines/heartbeat): $Y (N%), interactive: $Z (N%)
-
-### Autonomy
-- Self-directed: N% this week (vs M% prior, Δ +/-N pp)
 
 ### Proposal velocity
 - Median resolution: Nd (N proposals, last 30d)

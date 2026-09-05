@@ -148,10 +148,10 @@ bun test
   No numeric budgets: this is a boundary rule (where digestion happens), not a size quota.
   (SKILL.md size has its own rule above.) **The atom of cost is the API call**: every
   tool-call round trip re-reads the full accumulated context from cache, so
-  cache_read+cache_write dominates an always-on hermit's bill (≈85-90%, measured live
-  across production hermits), not per-prompt injection — the boundary rule above therefore
-  also covers **native tool outputs** (`CronList` returning full prompt text per entry,
-  etc.), not just file reads.
+  cache_read+cache_write dominates an always-on hermit's bill (roughly two-thirds to
+  nine-tenths depending on workload; measure the install), not per-prompt injection.
+  The boundary rule above therefore also covers **native tool outputs** (`CronList`
+  returning full prompt text per entry, etc.), not just file reads.
 
 ## Debugging gotchas
 

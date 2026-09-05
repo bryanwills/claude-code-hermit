@@ -17,6 +17,9 @@ export interface AssistantEntryOpts {
   cacheRead?: number;
   cacheWrite?: number;
   outputTokens?: number;
+  requestId?: string;
+  messageId?: string;
+  cacheWrite1h?: number;
 }
 
 export function assistantEntry(opts: AssistantEntryOpts = {}): string {
@@ -28,18 +31,29 @@ export function assistantEntry(opts: AssistantEntryOpts = {}): string {
     cacheRead = 0,
     cacheWrite = 0,
     outputTokens = 50,
+    requestId,
+    messageId,
+    cacheWrite1h,
   } = opts;
   return JSON.stringify({
     type: 'assistant',
     ...(timestamp !== undefined ? { timestamp } : {}),
     ...(isSidechain !== undefined ? { isSidechain } : {}),
+    ...(requestId !== undefined ? { requestId } : {}),
     message: {
+      ...(messageId !== undefined ? { id: messageId } : {}),
       model,
       usage: {
         input_tokens: inputTokens,
         cache_creation_input_tokens: cacheWrite,
         cache_read_input_tokens: cacheRead,
         output_tokens: outputTokens,
+        ...(cacheWrite1h !== undefined ? {
+          cache_creation: {
+            ephemeral_5m_input_tokens: cacheWrite - cacheWrite1h,
+            ephemeral_1h_input_tokens: cacheWrite1h,
+          },
+        } : {}),
       },
       content: [{ type: 'text', text: 'ok' }],
     },

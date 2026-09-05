@@ -2941,12 +2941,25 @@ describe('doctor model-pricing-known check', () => {
   }), 20000);
 
   test('full Claude model id (detectModel-priced) → ok, not a false warn', withTmpdir(async (dir) => {
-    // "claude-opus-4-8" is priced correctly (detectModel substring-maps it to
-    // opus), so it must not be flagged as unpriced. Guards the fix for the
-    // alias-only false positive.
+    // "claude-opus-4-8" is an exact rate-table key, so it must not be flagged.
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-opus-4-8' });
     const report = await runDoctorCheck(dir);
     expect(priceCheck(report).status).toBe('ok');
+    expect(priceCheck(report).detail).toContain('pricing verified 2026-09-05');
+  }), 20000);
+
+  test('dated haiku snapshot is priced; unknown id is named', withTmpdir(async (dir) => {
+    writeConfig(dir, { ...BASE_CONFIG, model: 'claude-haiku-4-5-20251001' });
+    const okReport = await runDoctorCheck(dir);
+    expect(priceCheck(okReport).status).toBe('ok');
+    expect(priceCheck(okReport).detail).toContain('pricing verified 2026-09-05');
+
+    writeConfig(dir, { ...BASE_CONFIG, model: 'claude-nova-9' });
+    const warnReport = await runDoctorCheck(dir);
+    const c = priceCheck(warnReport);
+    expect(c.status).toBe('warn');
+    expect(c.detail).toContain('claude-nova-9');
+    expect(c.detail).toContain('pricing verified 2026-09-05');
   }), 20000);
 
   test('unknown routine model → warn naming the routine', withTmpdir(async (dir) => {

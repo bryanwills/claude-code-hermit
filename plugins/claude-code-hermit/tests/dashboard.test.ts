@@ -286,9 +286,9 @@ describe('loadDashboardState', () => {
   }));
 
   test('reads latest weekly review and computes deltas against the prior week', withHermitDir((hermitDir) => {
-    writeWeekly(hermitDir, '2026-W26', { week: '2026-W26', total_cost_usd: '3.65', self_directed_rate: '0.61' }, 'Prior body.');
+    writeWeekly(hermitDir, '2026-W26', { week: '2026-W26', total_cost_usd: '3.65' }, 'Prior body.');
     writeWeekly(hermitDir, '2026-W27', {
-      week: '2026-W27', total_cost_usd: '3.20', self_directed_rate: '0.64',
+      week: '2026-W27', total_cost_usd: '3.20',
       proposals_created: '3', proposals_resolved: '2',
     }, '## Summary\nThis week had **14 sessions**.');
 
@@ -298,13 +298,11 @@ describe('loadDashboardState', () => {
     expect(state.weekly!.costUsd).toBeCloseTo(3.20, 5);
     expect(state.weekly!.priorCostUsd).toBeCloseTo(3.65, 5);
     expect(state.weekly!.hasPrior).toBe(true);
-    expect(state.weekly!.autonomyPct).toBeCloseTo(64, 5);
-    expect(state.weekly!.priorAutonomyPct).toBeCloseTo(61, 5);
     expect(state.weekly!.bodyHtml).toContain('<strong>14 sessions</strong>');
   }));
 
   test('weekly review with no prior week omits comparison fields', withHermitDir((hermitDir) => {
-    writeWeekly(hermitDir, '2026-W27', { week: '2026-W27', total_cost_usd: '3.20', self_directed_rate: '0.64' }, 'Body.');
+    writeWeekly(hermitDir, '2026-W27', { week: '2026-W27', total_cost_usd: '3.20' }, 'Body.');
     const state = loadDashboardState(hermitDir);
     expect(state.weekly!.hasPrior).toBe(false);
     expect(state.weekly!.priorCostUsd).toBeNull();

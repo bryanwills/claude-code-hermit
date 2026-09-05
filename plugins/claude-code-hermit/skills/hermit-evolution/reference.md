@@ -15,9 +15,10 @@ Steps are independent — read files and run scripts concurrently where possible
 
 1. `.claude-code-hermit/compiled/review-weekly-*.md` — glob all, sort by `week` frontmatter
    descending, read the 8 most recent. Extract per-file: `week`, `total_cost_usd`,
-   `self_directed_rate`, `proposals_created`, `proposals_resolved`.
-2. `.claude-code-hermit/cost-summary.md` — frontmatter `total_cost_usd` for the current partial
-   week if the review file for it doesn't exist yet.
+   `proposals_created`, `proposals_resolved`.
+2. Partial-week total: from the step 5 `cost-report.ts reflect` output (the header
+   total), when the review file for the current week doesn't exist yet. Skip if
+   step 5 is unavailable.
 3. `.claude-code-hermit/state/proposal-metrics.jsonl` — scan from the end (most recent first); stop
    at entries older than 30 days. Use `resolved_at` and `created_at` to compute resolution days.
 4. Run `bun <plugin_root>/scripts/proposal.ts metrics .claude-code-hermit` and
@@ -31,7 +32,7 @@ Steps are independent — read files and run scripts concurrently where possible
    stdout — one JSON object with per-routine `fires`, `failures`, `incomplete`, `cost_usd` and a
    `source` status. Skip gracefully if unavailable. Do not read `routine-metrics.jsonl` directly.
 8. `.claude-code-hermit/sessions/S-NNN-REPORT.md` files for the last 30 days — read Artifacts and
-   Changed sections plus `proposals_created` and `operator_turns` frontmatter. List filenames in
+   Changed sections plus `proposals_created` frontmatter. List filenames in
    `.claude-code-hermit/compiled/` created in the last 30 days.
 9. `.claude-code-hermit/OPERATOR.md` and `<plugin_root>/state-templates/OPERATOR.md` —
    read both.
@@ -47,9 +48,6 @@ data". From the step 5 output, locate the `### Cost by source` block and compute
 line). Note that watches (Monitor tool) cost ~0 tokens when quiet and will not appear. If step 5
 is unavailable, omit the split.
 
-**Autonomy:** From review files, `self_directed_rate` (fraction of sessions with no operator
-turns) for the latest week and Δ vs the prior week. If fewer than 2 reviews: "not enough data".
-
 **Proposal velocity:** From `proposal-metrics.jsonl`, median days `created_at` → `resolved_at`
 for proposals resolved in the last 30 days. From step 4 output, show the acceptance-by-source
 table (rows with n>0 only). Note any triggered kill gates.
@@ -59,8 +57,7 @@ string. Use the step 7 output for 30-day fire counts, and flag any routine whose
 `unhandled`, or `failure_total` is non-zero. List enabled monitors and heartbeat cadence. Omit disabled entries.
 
 **Top-3 produced (inferred):** From step 8, rank outputs by operator signal — prefer: (1)
-proposals accepted or resolved, (2) compiled outputs cited in sessions with `operator_turns > 0`,
-(3) sessions with Artifacts/Changed and `operator_turns = 0` (autonomous wins). Pick the top 3
+proposals accepted or resolved, then (2) sessions with Artifacts/Changed. Pick the top 3
 and describe each in one line. Label: _inferred — no operator-used signal exists._
 
 **Grown since hatch (approximated):** From step 9, diff `.claude-code-hermit/OPERATOR.md`
@@ -78,9 +75,6 @@ no data rather than showing a heading with an empty body; keep each bullet to on
 ### Cost
 - Trend (weekly): $A → $B → $C → $X (Δ +/-N%)
 - Last 30d: $X.XX total — scheduled (routines/heartbeat): $Y (N%), interactive: $Z (N%)
-
-### Autonomy
-- Self-directed: N% this week (vs M% prior, Δ +/-N pp)
 
 ### Proposal velocity
 - Median resolution: Nd (N proposals, last 30d)

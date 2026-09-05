@@ -204,7 +204,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/pending-close-drain.json` | lib/auto-close.ts `stampDrainCooldown`, called by routines.ts due and lib/heartbeat/precheck.ts (non-peek only) | the same two drainers (shared backoff before re-emitting a queued close: 30 min for the routine poll, halved by the heartbeat drainer once `heartbeat.every` reaches 30 min) |
 | `state/.heartbeat`             | heartbeat-touch.ts only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.ts only                                | hermit-stop.ts (cleanup)                                      |
-| `state/cost-index.json`        | cost-tracker.ts + subagent-cost.ts (each folds its own append; tmp+rename, offset-based) | cost-tracker.ts (writeCostSummary, getCumulativeCost fallback), doctor-check.ts |
+| `state/cost-index.json`        | cost-tracker.ts + subagent-cost.ts (each folds its own append; tmp+rename, offset-based) | cost-tracker.ts (getCumulativeCost fallback), doctor-check.ts |
 | `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (`last_run` liveness + `consecutive_stale` + `last_hygiene_eval` + `hygiene_eval_counts`) |
 | `state/context-surface.json`   | cost-tracker.ts only (derived at each compaction boundary) | hermit-watchdog.ts (compact-tier conversation gate), doctor-check.ts (`context-age`) |
 | `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), session-start (restart reason)|
@@ -403,7 +403,7 @@ Deny patterns block dangerous operations regardless of permission mode. See [Sec
 
 ## Known Limitations
 
-1. ~~**O(n) cost-log scan**~~ — Fixed: `cost-tracker.ts` now maintains `cost-index.json`, an incremental byte-offset index updated on every Stop hook. `writeCostSummary` and the `getCumulativeCost` fallback both render from the index; the O(n) scan only runs on first use or after log truncation.
+1. ~~**O(n) cost-log scan**~~ — Fixed: `cost-tracker.ts` now maintains `cost-index.json`, an incremental byte-offset index updated on every Stop hook. The `getCumulativeCost` fallback renders from the index; the O(n) scan only runs on first use or after log truncation.
 
 2. **Boot script timing** — `hermit-start.ts` waits 3 seconds before sending commands to tmux. May not be enough on slow hardware. Fix: poll `tmux capture-pane` for readiness.
 
