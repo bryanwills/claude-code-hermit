@@ -99,13 +99,15 @@ unchanged (render, then the hash and backend gate). Steps 3 and 5 change:
   instead.
 
 Registering the server, minting its token, and granting its tool permissions are the
-operator's own manual setup — core neither performs nor verifies them. `hermit-start`'s
-boot-time grant is no help here and is not meant to be: it covers only the native
-`Artifact` tool, and on a non-`claude` backend it is **skipped entirely**, so the tool this
-backend must never call is never newly pre-approved. It is not *revoked*, though — a hermit
-that ran on the default backend before the switch keeps the `Artifact` entry its earlier
-boots wrote; drop it by hand from `.claude/settings.local.json` (`permissions.allow`) if you
-want that pre-approval gone.
+operator's own manual setup; core neither performs nor verifies them. A native
+`Artifact` publish on this backend is denied by the plugin's `PreToolUse` hook
+(`scripts/artifact-backend-guard.ts`), which names the backend in its reason so the
+model publishes with the server's own MCP tools instead. The tool and its design
+skills stay available. `hermit-start`'s boot-time grant still covers only the native
+`Artifact` tool and is skipped on a non-`claude` backend, so that tool is never newly
+pre-approved; a hermit that ran on the default backend before the switch keeps the
+`Artifact` entry its earlier boots wrote. Drop it by hand from
+`.claude/settings.local.json` (`permissions.allow`) if you want that pre-approval gone.
 
 ## Dashboard
 
