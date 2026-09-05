@@ -15,7 +15,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from './lib/lockfile';
-import { readConfigRaw } from './lib/config-read';
+import { foreignArtifactBackend, readConfigRaw } from './lib/config-read';
 import { auditConfigChange } from './lib/config-audit';
 import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
@@ -1084,8 +1084,7 @@ function artifactGrantApplies(config: Json): boolean {
   const artifacts = isDict(config.artifacts) ? config.artifacts : {};
   const anyPage = ['dashboard', 'proposals', 'weekly_review'].some((k) => pyTruthy(artifacts[k]));
   if (!anyPage || artifacts.publish_authorized !== true) return false;
-  const backend = typeof artifacts.backend === 'string' ? artifacts.backend.trim() : '';
-  return backend === '' || backend === 'claude';
+  return foreignArtifactBackend(config) === null;
 }
 
 /**

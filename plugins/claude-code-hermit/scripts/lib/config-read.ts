@@ -205,6 +205,18 @@ export function agentNameFromConfig(config: Json): string {
   return typeof config?.agent_name === 'string' && config.agent_name.trim() ? config.agent_name : 'Hermit';
 }
 
+/** The configured artifact backend when it is NOT the default claude.ai path,
+ *  else null. Unset, non-string, whitespace-only and the literal `"claude"` all
+ *  mean the default. Lives here, not with a caller, because two independent
+ *  paths decide on it — hermit-start's boot-time Artifact grant and the
+ *  PreToolUse publish guard — and a drift between them would either pre-approve
+ *  or fail to block exactly the publish the backend exists to prevent. */
+export function foreignArtifactBackend(config: Json): string | null {
+  const raw = config?.artifacts?.backend;
+  const backend = typeof raw === 'string' ? raw.trim() : '';
+  return backend === '' || backend === 'claude' ? null : backend;
+}
+
 /** Never throws: unreadable or malformed config settles to full defaults. */
 export function readSettledConfig(dir: string): SettledConfig {
   const raw = readConfigRaw(dir);

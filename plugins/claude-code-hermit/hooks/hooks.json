@@ -48,6 +48,18 @@
           }
         ],
         "description": "Deny AskUserQuestion on always-on channel-primary sessions with a redirect to the channel reply tool + micro-proposal bridge (binds the callers the static contract test cannot see)"
+      },
+      {
+        "matcher": "Artifact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/artifact-backend-guard.ts"],
+            "timeout": 3
+          }
+        ],
+        "description": "Deny Artifact publish when config.artifacts.backend is not claude, naming the backend and its MCP tools so the model publishes there instead"
       }
     ],
     "PermissionDenied": [

@@ -37,6 +37,7 @@
 - `operator_turns` removed from `.status.json`, session-report frontmatter and the weekly review.
 
 ### Fixed
+- A native `Artifact` publish on a non-`claude` `artifacts.backend` is now denied by a `PreToolUse` hook that names the backend, so an operator-requested page can no longer land on claude.ai.
 - Concurrent mechanical session-log writes and lifecycle resets share a lock; contention reports a retryable failure instead of overwriting another writer.
 - Conservative queued tasks enter waiting only after notification delivery is acknowledged; failed sends remain eligible for retry and stale acknowledgements preserve current work.
 - Heartbeat self-evaluation retains keyed firing evidence between evaluation boundaries, including suppressed alerts that recover before the next pass, and preserves checklist correlation keys when creating proposals.

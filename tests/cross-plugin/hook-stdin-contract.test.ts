@@ -63,6 +63,14 @@ const SPECS: Spec[] = [
     failExit: 0,
   },
   {
+    name: 'core/artifact-backend-guard',
+    script: 'plugins/claude-code-hermit/scripts/artifact-backend-guard.ts',
+    // Bash, not Artifact: the guard returns on any non-Artifact tool_name, so
+    // the benign case stays independent of the sandbox's artifacts.backend.
+    benign: BASH_LS,
+    failExit: 0,
+  },
+  {
     name: 'core/channel-settings-gate',
     script: 'plugins/claude-code-hermit/scripts/channel-settings-gate.ts',
     benign: BASH_LS,
