@@ -285,4 +285,8 @@ if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
   }
 }
 
+// After the drain so its id is included; after persist-failure's finish([]) so a
+// rolled-back cursor never gets a phantom row. One row per emitted id.
+for (const id of dueIds) stamp(id, 'dispatched');
+
 finish(dueIds.length ? [`ROUTINE_DUE ${dueIds.map(id => `[hermit-routine:${id}]`).join(' ')}`] : []);

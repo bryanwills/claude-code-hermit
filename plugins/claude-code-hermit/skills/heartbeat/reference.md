@@ -21,24 +21,24 @@ This file is read only on the EVALUATE path, once the precheck determines a full
   `heartbeat.ts alert-state` derives its live state directly from `proposals/` frontmatter every tick,
   independent of anything returned here — there is nothing for you to evaluate or report.
 - **Custom items** (disk thresholds, SQL checks, file patterns, etc.): apply LLM judgment using
-  available project files and context needed to evaluate the condition. Produce a semantic key per
+  available project files and context needed to evaluate the condition. Return `item` or `key` per
   the taxonomy table below.
-- Collect all firing items with their keys and a short human-readable `text` label for each — see
+- Collect all firing items with a short human-readable `text` label for each — see
   § Firing Item Text below for the required style. Items with no matching condition produce nothing.
 
 **3. Return JSON** — see § Return Schema below for the required fields and exact format.
 
 ## Semantic Key Taxonomy
 
-Produce one semantic key per firing item:
+Produce one firing entry per true item:
 
-| Situation | Key format |
-|-----------|-----------|
-| Checklist item | `checklist:<first-8-chars-of-item-normalized>` |
-| Waiting timeout | `waiting-timeout` |
-| Custom / freeform | `custom:<first-100-chars-normalized>` — fallback only |
+| Situation | Return |
+|-----------|--------|
+| Checklist item | `item`: the HEARTBEAT.md line, verbatim. `checklist:<…>` is owned by the writer, not the model. |
+| Waiting timeout | `key`: `waiting-timeout` |
+| Custom / freeform | `key`: `custom:<first-100-chars-normalized>` — fallback only; also receives an unresolvable checklist entry |
 
-Normalise: lowercase, remove non-alphanumeric characters, truncate at the listed limit.
+Normalise: strip the list marker and any checkbox first, then lowercase, remove non-alphanumeric characters, truncate at the listed limit.
 
 **Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key, or the `stale-session` key.
 Those are derived and owned entirely by `heartbeat.ts alert-state` — the two prefixes from
@@ -57,7 +57,7 @@ operator notification — write it for that audience, not as a debug note to you
 
 Return exactly this JSON object — no prose, no markdown fences:
 
-`{"firing": [{"key": "<semantic key>", "text": "<channel-voice one-liner>"}, ...]}`
+`{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...]}`
 
 `firing` is required and is `[]` when nothing is currently true — this is the normal "clean tick"
 case; do not omit the key or return anything else in its place. Any other key you add is ignored.

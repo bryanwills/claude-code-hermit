@@ -55,8 +55,8 @@ for proposals resolved in the last 30 days. From step 4 output, show the accepta
 table (rows with n>0 only). Note any triggered kill gates.
 
 **Routines & watches:** From config.json, list enabled routines with their `schedule` cron
-string. Use the step 7 output for 30-day fire counts, and flag any routine whose `incomplete` or
-`failure_total` is non-zero. List enabled monitors and heartbeat cadence. Omit disabled entries.
+string. Use the step 7 output for 30-day fire counts, and flag any routine whose `incomplete`,
+`unhandled`, or `failure_total` is non-zero. List enabled monitors and heartbeat cadence. Omit disabled entries.
 
 **Top-3 produced (inferred):** From step 8, rank outputs by operator signal — prefer: (1)
 proposals accepted or resolved, (2) compiled outputs cited in sessions with `operator_turns > 0`,

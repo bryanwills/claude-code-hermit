@@ -1,6 +1,9 @@
-// Pure predicate shared by lib/heartbeat/precheck.ts and its coherence test.
-// Extracted so both reference one definition.
-//
+// Checklist classifiers and alert-key helpers shared by precheck, alert-update,
+// and their coherence tests.
+
+import fs from 'node:fs';
+import path from 'node:path';
+
 // Does a HEARTBEAT.md checklist item represent the default proposal-scan item?
 // Matches the shipped default ("Review `proposals/` for any with `status:
 // proposed` …"): it references proposals AND the `proposed` status it scans for.
@@ -35,23 +38,46 @@ export function isCredentialExpiryItem(itemText: string): boolean {
   return /doctor-report\.json/i.test(itemText) && /credential-expiry/i.test(itemText);
 }
 
-// Normalises a HEARTBEAT.md checklist item to its dedup key.
-// Key format mirrors the eval reference's taxonomy: 'checklist:<first-8-chars-normalized>'.
-// Shared by the precheck's item loop and the self-evaluation pass, which must agree
-// on the key or an item's counters land under a name no alert ever uses.
-export function normalizeItemKey(itemText: string): string | null {
-  const text = itemText
+function alnumSlug(text: string, maxLen: number): string {
+  return text
     .replace(/^[-*+]\s*(\[.\]\s*)?/, '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
-    .slice(0, 8);
+    .slice(0, maxLen);
+}
+
+// Normalises a HEARTBEAT.md checklist item to its dedup key.
+// Key format: 'checklist:<first-8-chars-normalized>'.
+export function normalizeItemKey(itemText: string): string | null {
+  const text = alnumSlug(itemText, 8);
   return text ? `checklist:${text}` : null;
 }
 
-// A HEARTBEAT.md file's checklist item lines, trimmed. Shared for the same reason
-// as the key normaliser: the precheck's item loop and the self-evaluation pass have
-// to agree on what counts as an item, or an item accrues counters under a name no
-// alert ever fires.
+// Fallback key for unresolvable / freeform firing entries.
+// Key format: 'custom:<first-100-chars-normalized>'.
+export function normalizeCustomKey(text: string): string | null {
+  const n = alnumSlug(text, 100);
+  return n ? `custom:${n}` : null;
+}
+
 export function parseChecklistItems(content: string): string[] {
-  return content.split('\n').map(l => l.trim()).filter(l => /^[-*+]\s/.test(l));
+  return content
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => /^[-*+]\s/.test(l));
+}
+
+/** Derived key set from `<stateDir>/HEARTBEAT.md`. `null` on any read failure. */
+export function canonicalChecklistKeys(stateDir: string): Set<string> | null {
+  try {
+    const content = fs.readFileSync(path.join(stateDir, 'HEARTBEAT.md'), 'utf-8');
+    const keys = new Set<string>();
+    for (const item of parseChecklistItems(content)) {
+      const key = normalizeItemKey(item);
+      if (key) keys.add(key);
+    }
+    return keys;
+  } catch {
+    return null;
+  }
 }

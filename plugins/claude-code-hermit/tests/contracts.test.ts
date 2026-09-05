@@ -3705,8 +3705,12 @@ describe('heartbeat eval-runner return contract', () => {
   ];
 
   test('reference.md Return Schema is exactly {firing}', () => {
-    expect(reference).toContain('{"firing": [{"key": "<semantic key>", "text": "<channel-voice one-liner>"}, ...]}');
+    expect(reference).toContain('{"firing": [{"item": "<HEARTBEAT.md line, verbatim>", "text": "<channel-voice one-liner>"} or {"key": "custom:<…>"|"waiting-timeout", "text": "<channel-voice one-liner>"}, ...]}');
     expect(reference).not.toContain('self_eval_updates');
+  });
+
+  test('reference.md checklist firing entry documents item', () => {
+    expect(reference).toContain('`item`: the HEARTBEAT.md line, verbatim');
   });
 
   test('reference.md never instructs the model to author removed bookkeeping fields', () => {
