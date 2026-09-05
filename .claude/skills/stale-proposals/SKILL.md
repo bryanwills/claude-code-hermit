@@ -106,7 +106,11 @@ Apply confirmed answers with the same `proposal.ts patch` call, following `/clau
 
 Say what the operator chose, and their reason, in the Decision line. If a dismissal reason states a durable preference that would apply to a whole *family* of future proposals rather than just this one, that is worth remembering as feedback — see proposal-act's dismissal-learning step. A proposal-specific "this doesn't apply here" is not.
 
-## Step 5 — Report
+## Step 5 — Refresh the artifact pages
+
+Skip if Step 3 resolved nothing and Step 4 changed nothing (queue is unchanged). Otherwise, refresh the dashboard and the proposals page (`config.artifacts.proposals`) per `plugins/claude-code-hermit/docs/artifacts.md` — both silently, no URL re-post.
+
+## Step 6 — Report
 
 ```
 Proposal queue: <N> open → <M> open
