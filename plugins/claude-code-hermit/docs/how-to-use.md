@@ -112,7 +112,7 @@ When it finishes, it archives the report and says "What's next?" — tell it wha
 
 Hermit isn't just a work engine. During any session, you can ask it to reflect and improve:
 
-- **"remember for this channel: when X, do Y"** saves a standing role in memory. "For this channel" pins it to that chat; a plain "remember" applies everywhere. Ask "what do you remember about this channel?" to list roles or "forget the X rule" to remove one. Posts not addressed to the hermit never trigger a role.
+- **"remember for this channel: when X, do Y"** saves a standing role in memory. "For this channel" pins it to that chat; a plain "remember" applies hermit-wide only from a primary operator (`channels.<name>.operators`, or the first allowed user when unset). Other senders pin to the requesting chat. Ask "what do you remember about this channel?" to list roles or "forget the X rule" to remove one. Posts not addressed to the hermit never trigger a role.
 - **"Can you understand voice notes?"** Not out of the box. [Voice Notes](voice-notes.md) is the two-step setup: a speech-to-text tool where the hermit runs, then one standing role.
 - **"What slowed you down recently?"** — Reviews its experience and tells you what caused delays.
 - **"What permissions do you keep getting blocked on?"** — Suggests the exact `settings.json` entries to add so it stops getting prompted.
