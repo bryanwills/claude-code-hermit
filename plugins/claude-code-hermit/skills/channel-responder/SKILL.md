@@ -358,6 +358,8 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
 - Never send a proactive notice through a channel reply tool, and never advise `/<channel>:access`
   for a maintainer chat — the maintainer chat is reached by direct API POST, not `access.json` pairing (it is outbound routing for technical alerts, `docs/security.md` § Tiered disclosure, not reply routing).
 
+A request from chat to listen in a group or server channel goes through `hermit-settings channels → edit <name> → group`, never the plugin's `/<channel>:access` skill or a direct `access.json` edit.
+
 ## 6. Channel-safe ask bridge
 
 Canonical dual-delivery rule for any skill that hits a decision point on a channel-tagged turn (inbound prompt contains a `<channel source="...">` tag) — referenced from `proposal-act` and `hermit-settings` (and any future skill that needs to ask a bounded question over a channel).

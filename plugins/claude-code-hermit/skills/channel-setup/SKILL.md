@@ -287,6 +287,7 @@ Skip this step if the current channel is `imessage`, or if `access.json` is not 
       - The plugin-global `ackReaction` reacts to every member's message; `/<channel>:access set ackReaction ""` removes it.
       - Discord threads inherit the parent's mention gate and `allowFrom` sender list. For mention-free steering in a bound thread, configure `/discord:access group add <parent> --no-mention` against this install's state directory. The bot needs Create Public Threads to open task threads; if that permission is missing, ask the sender to open a thread and ask there. A quote-reply to the bot counts as an implicit mention at the plugin gate. Unbound passive chats still require a self-mention at the Hermit gate. Forum channels are unsupported; denying thread creation prevents automatic task threads.
       - Telegram privacy mode must be disabled in BotFather.
+      Later group additions from chat go through `hermit-settings channels`.
    c. Ask with `AskUserQuestion` (header: `"Add another?"`) — `"Yes — add another"` with the next ID via `Other`; `"Done — continue"`. On `"Done — continue"`: exit the loop.
 After the loop, if any nickname regex was given, read existing `mentionPatterns` from `<state_dir>/access.json`, merge the requested regexes without duplicates while preserving existing patterns, and run once with the state-dir hint:
 
@@ -352,7 +353,7 @@ Channel setup complete!
   State dir:      <state_dir>
 
   hermit-start passes --channels automatically on next boot.
-  Later changes: /claude-code-hermit:hermit-settings channel edit <channel> (recall, record, operators, bind_home_chat)
+  Later changes: /claude-code-hermit:hermit-settings channels (recall, record, operators, bind_home_chat)
 ```
 
 If anything was skipped, list the remaining steps.
