@@ -33,6 +33,26 @@ async function runHatchConfig(projectRoot: string, answers: any, reinit = false)
 }
 
 describe('hatch-config.ts', () => {
+  test('reinit overlays state_dir, preserves omitted values, and is byte-idempotent', async () => {
+    const dir = freshDir();
+    expect((await runHatchConfig(dir, { project_name: 'x', channels: { discord: {} } })).exitCode).toBe(0);
+    const read = () => fs.readFileSync(configPathFor(dir), 'utf8');
+    expect(JSON.parse(read()).channels.discord.state_dir).toBe('.claude.local/channels/discord');
+    const answers = { channels: { discord: { state_dir: '/abs/custom' } } };
+    expect((await runHatchConfig(dir, answers, true)).exitCode).toBe(0);
+    expect(JSON.parse(read()).channels.discord.state_dir).toBe('/abs/custom');
+    const before = read();
+    expect((await runHatchConfig(dir, answers, true)).exitCode).toBe(0);
+    expect(read()).toBe(before);
+    expect((await runHatchConfig(dir, { channels: { discord: {} } }, true)).exitCode).toBe(0);
+    expect(read()).toBe(before);
+    const config = JSON.parse(read());
+    delete config.channels.discord.state_dir;
+    seedConfig(dir, config);
+    expect((await runHatchConfig(dir, { channels: { discord: {} } }, true)).exitCode).toBe(0);
+    expect(JSON.parse(read()).channels.discord.state_dir).toBe('.claude.local/channels/discord');
+  });
+
   test('template ships watchdog.scheduler_enabled true', () => {
     const template = JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8'));
     expect(template.watchdog.scheduler_enabled).toBe(true);

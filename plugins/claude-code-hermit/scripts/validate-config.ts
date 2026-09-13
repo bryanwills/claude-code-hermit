@@ -426,26 +426,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           `channels.${name}.dm_channel_id equals maintainer_channel_id — the maintainer chat is bound as the operator DM, so it carries control authority too; send a message from the real DM chat to re-pair`,
         );
       }
-      // When the pinned home is a group or server channel — the shape this
-      // heuristic reads: a pin that differs from the last chat the operator
-      // wrote from — every member of it can pause or resume the hermit, since
-      // with no allowed_users the chat id is the only factor. Warn, don't
-      // error: a shared home is a legitimate setup, it just has to name its
-      // operators.
-      //
-      // Partial signal, deliberately: `dm_channel_id` is the last inbound chat,
-      // not a verified 1:1 DM, and channel-hook seeds `default_chat_id` from the
-      // same first message — so a hermit that only ever hears from one group has
-      // the two equal and is never warned. Nothing in a chat id says whether the
-      // chat is shared; this catches the divergent case and no more.
-      if (!Array.isArray(ch.allowed_users) && !ch.maintainer_channel_id &&
-          ch.default_chat_id != null && ch.dm_channel_id != null &&
-          String(ch.default_chat_id) !== String(ch.dm_channel_id) &&
-          config.operator_profile !== 'non-technical') {
-        warnings.push(
-          `channels.${name}.default_chat_id looks like a shared chat (it differs from dm_channel_id) with no allowed_users and no maintainer_channel_id — every member of it can pause or resume this hermit; set allowed_users to name your operators`,
-        );
-      }
     }
     if (config.channels.primary !== undefined) {
       const primary = config.channels.primary;

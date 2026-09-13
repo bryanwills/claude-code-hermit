@@ -42,6 +42,28 @@ function cmd(rest: string): string {
   return `bun /p/scripts/settings-edit.ts .claude-code-hermit/config.json ${rest}`;
 }
 
+test('channel-access group-add asks with the listening chat in the reason', async () => {
+  const dir = fixture();
+  for (const command of [
+    'bun /p/scripts/channel-access.ts /state group-add discord 123',
+    'bun "/p with spaces/scripts/channel-access.ts" "/state with spaces" group-add telegram -123 --no-mention',
+    "bun /p/scripts/channel-access.ts /state 'group-add' discord 123",
+    'bun /p/scripts/channel-access.ts /state gr\\oup-add discord 123',
+  ]) {
+    const r = await runGate(payload({ dir, tool: 'Bash', input: { command } }), dir);
+    expect(r.exitCode).toBe(0);
+    const output = JSON.parse(r.stdout).hookSpecificOutput;
+    expect(output.permissionDecision).toBe('ask');
+    expect(output.permissionDecisionReason).toContain(command.includes('telegram') ? 'listen in telegram chat -123' : 'listen in discord chat 123');
+  }
+  const chained = await runGate(payload({ dir, tool: 'Bash', input: {
+    command: `bun /p/scripts/channel-access.ts /state group-add discord 123 && ${cmd('set permission_mode bypassPermissions')}`,
+  } }), dir);
+  expect(JSON.parse(chained.stdout).hookSpecificOutput.permissionDecisionReason).toContain('permission_mode');
+  const r = await runGate(payload({ dir, tool: 'Bash', input: { command: 'bun /p/scripts/channel-access.ts /state help' } }), dir);
+  expectSilent(r);
+});
+
 function expectAsk(stdout: string, reason: string) {
   expect(JSON.parse(stdout.trim())).toEqual({
     hookSpecificOutput: {
