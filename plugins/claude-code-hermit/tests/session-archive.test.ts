@@ -362,6 +362,15 @@ describe('idle vs. close reset semantics', () => {
     expect(shell).toContain('**S-001** (2026-07-09): first task — completed ($0.42)');
   }));
 
+  test('idle archive stamps closed_at so a script-side archive closes the cost arc', withTmp(async (dir) => {
+    await open(dir, 'Task: x\n', '2026-07-09T12:00:00Z');
+    await archive(dir, 'idle', BASIC_CLOSE_PAYLOAD, '2026-07-09T13:00:00Z');
+    const rt = readRuntime(dir);
+    expect(rt.session_state).toBe('idle');
+    expect(typeof rt.closed_at).toBe('string');
+    expect(Number.isNaN(new Date(rt.closed_at).getTime())).toBe(false);
+  }));
+
   test('close reset replaces SHELL.md with a fresh template and carries forward Blockers', withTmp(async (dir) => {
     await open(dir, 'Task: wrap up\n', '2026-07-09T12:00:00Z');
     let shell = readShell(dir);

@@ -19,6 +19,7 @@ import { triggerPrompt } from './helpers/transcript';
 import { cidrOverlap } from '../scripts/doctor-check';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
 import { markGuest } from '../scripts/lib/guest-marker';
+import { replaceSectionInPlace } from '../scripts/lib/md-write';
 
 // ---------- small local helpers ----------
 
@@ -573,6 +574,76 @@ describe('stop-pipeline', () => {
       expect(accounted).toBeLessThan(delivered);
       expect(fs.existsSync(hermit(dir, 'state', '.heartbeat'))).toBe(true);
     }));
+
+  const AUTO_IDLE_NOW = '2026-05-20T22:00:00.000Z';
+
+  function seedAutoIdleFixture(dir: string, opts: { operatorAt: string }): void {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC', heartbeat: { stale_threshold: '2h' } }));
+    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
+      session_state: 'in_progress',
+      session_id: 'S-001',
+      opened_at: '2026-05-20T19:00:00+00:00',
+    }));
+    write(hermit(dir, 'state', 'last-operator-action.json'), JSON.stringify({ at: opts.operatorAt }));
+    const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
+    write(hermit(dir, 'sessions', 'SHELL.md'),
+      replaceSectionInPlace(shell, 'Progress Log', '\n[19:00] Did some work\n\n'));
+  }
+
+  test('stop-pipeline auto-idles a quiet in_progress session', withGitDir(async (dir) => {
+    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T19:00:00+00:00' });
+    const r = await runScript('stop-pipeline.ts', {
+      stdin: stopHookInput(dir),
+      cwd: dir,
+      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
+    });
+    expect(r.exitCode).toBe(0);
+    const rt = readJson(hermit(dir, 'state', 'runtime.json'));
+    expect(rt.session_state).toBe('idle');
+    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(true);
+  }));
+
+  test('stop-pipeline leaves a fresh-operator in_progress session untouched', withGitDir(async (dir) => {
+    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T21:30:00+00:00' });
+    const r = await runScript('stop-pipeline.ts', {
+      stdin: stopHookInput(dir),
+      cwd: dir,
+      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
+    });
+    expect(r.exitCode).toBe(0);
+    const rt = readJson(hermit(dir, 'state', 'runtime.json'));
+    expect(rt.session_state).toBe('in_progress');
+    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(false);
+  }));
+
+  test('stop-pipeline closing a long operator turn stamps its end and does not auto-idle', withGitDir(async (dir) => {
+    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T19:00:00+00:00' });
+    write(hermit(dir, 'state', 'operator-turn-open.json'), JSON.stringify({ at: '2026-05-20T19:00:00.000Z' }));
+    const r = await runScript('stop-pipeline.ts', {
+      stdin: stopHookInput(dir),
+      cwd: dir,
+      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(dir, 'state', 'operator-turn-open.json'))).toBe(false);
+    expect(readJson(hermit(dir, 'state', 'last-operator-action.json')).at).toBe(AUTO_IDLE_NOW);
+    expect(readJson(hermit(dir, 'state', 'runtime.json')).session_state).toBe('in_progress');
+    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(false);
+  }));
+
+  test('stop-pipeline guest Stop never auto-idles', withGitDir(async (dir) => {
+    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T19:00:00+00:00' });
+    markGuest(hermit(dir, 'state'), 'test-session-001');
+    const r = await runScript('stop-pipeline.ts', {
+      stdin: stopHookInput(dir),
+      cwd: dir,
+      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
+    });
+    expect(r.exitCode).toBe(0);
+    const rt = readJson(hermit(dir, 'state', 'runtime.json'));
+    expect(rt.session_state).toBe('in_progress');
+    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(false);
+  }));
 });
 
 // -------------------------------------------------------

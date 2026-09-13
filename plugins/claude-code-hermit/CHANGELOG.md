@@ -8,11 +8,13 @@
 
 ### Changed
 - Channel pairing, policy, and group enrolment from `channel-setup`, `docker-setup`, and chat share one questionnaire and `channel-access.ts` file writes, without typing into the hermit session or requiring Docker tmux. Pairing and enrolment are refused in bypass-mode sessions and ask elsewhere; `config.json` writers share one persistence path.
+- A session left `in_progress` with no operator activity and no progress for `heartbeat.stale_threshold` is archived to idle at the next turn end or watchdog tick; the stale-session alert and the Stop-hook progress reminders are removed.
 - `hermit-settings channels` adds only a channel that isn't configured yet and writes just the answers given, so an existing entry is no longer replaced; `hatch-config` honours a supplied `state_dir`.
 - `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step.
 
 ### Fixed
 - Re-running setup preserves a seen-emoji that was turned off.
+- Watchdog wake and recovery notices no longer reach the primary chat when no maintainer channel is configured.
 - `channel-setup` and `hermit-settings` ask whether to turn off the seen-emoji reaction when a passive group is added instead of only warning that it reacts to every message.
 - `hermit-doctor` no longer warns that the briefing chat looks shared when the operator writes from a second chat, thread, or fork; who may pause, resume, or read full status is unchanged.
 
@@ -20,6 +22,7 @@
 - `channel-pair.ts`.
 
 ### Upgrade Instructions
+- Remove the `stale-session` entry under `alerts` and the `last_stale_wake_at` key from `.claude-code-hermit/state/alert-state.json` if present.
 - Nothing extra to run for the allow-list entry: the unconditional `permissions-sync` step adds `Bash(bun */scripts/channel-access.ts*)`.
 
 ## [1.3.7] - 2026-09-12

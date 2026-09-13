@@ -59,9 +59,9 @@ const TMP_PATH   = path.join(AGENT_DIR, 'state', '.last-operator-action.json.tmp
 const TURN_PATH  = path.join(AGENT_DIR, 'state', 'operator-turn-open.json');
 const TURN_TMP   = path.join(AGENT_DIR, 'state', '.operator-turn-open.json.tmp');
 
-function writeMarker(tmpPath: string, finalPath: string) {
+function writeMarker(tmpPath: string, finalPath: string, atMs = Date.now()) {
   try {
-    fs.writeFileSync(tmpPath, JSON.stringify({ at: new Date().toISOString() }) + '\n', 'utf-8');
+    fs.writeFileSync(tmpPath, JSON.stringify({ at: new Date(atMs).toISOString() }) + '\n', 'utf-8');
     fs.renameSync(tmpPath, finalPath);
   } catch { /* fail-open */ }
 }
@@ -72,6 +72,13 @@ export function seedOperatorActivity(): void {
 
 function write() {
   writeMarker(TMP_PATH, STATE_PATH);
+}
+
+// Stop that closed an operator turn: the turn's end is operator activity too, so quiet
+// clocks (auto-idle, AUTO_CLOSE lull, watchdog operator-recent) run from when the work
+// the operator asked for finished, not from when the prompt arrived.
+export function recordOperatorTurnEnd(nowMs: number): void {
+  writeMarker(TMP_PATH, STATE_PATH, nowMs);
 }
 
 // Marks "an operator turn is in flight" for `routines.ts due`'s defer gate. The pipeline

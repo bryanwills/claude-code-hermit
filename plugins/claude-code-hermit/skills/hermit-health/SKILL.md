@@ -15,7 +15,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 Read the following (gracefully skip any file that doesn't exist). The nine sources are independent — read them concurrently:
 
-1. `.claude-code-hermit/state/alert-state.json` — the `alerts` object, keyed by alert id (`checklist:*`, `proposal-pending:PROP-NNN`, `micro-proposal-pending:*`, `stale-session`). Each entry has `text`, `count`, `first_seen`, `last_seen`, `suppressed`, `consecutive_clean`.
+1. `.claude-code-hermit/state/alert-state.json` — the `alerts` object, keyed by alert id (`checklist:*`, `proposal-pending:PROP-NNN`, `micro-proposal-pending:*`). Each entry has `text`, `count`, `first_seen`, `last_seen`, `suppressed`, `consecutive_clean`.
 2. `.claude-code-hermit/state/runtime.json` — `last_activity`, `session_id`.
 3. `.claude-code-hermit/state/reflection-state.json` — `last_reflection` timestamp, `counters` (including `judge_suppress_by_code` map and run/output fields), and `queue` (pending micro-proposals and reflect candidates).
 4. `.claude-code-hermit/config.json` — `routines` array (id, schedule, enabled); `channels` object (each channel's `default_chat_id` and `dm_channel_id`).

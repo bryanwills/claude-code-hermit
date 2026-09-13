@@ -9,20 +9,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { hermitDir } from './lib/cc-compat';
-import { currentHHMM, elapsedSinceHHMM, resolveHermitNowMs } from './lib/time';
-import { readSettledConfig } from './lib/config-read';
 import { extractSection, stripPlaceholders } from './lib/md-write';
 
 type Json = any;
 
-const now = resolveHermitNowMs();
 const HERMIT_DIR = hermitDir();
 const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
 const HASH_FILE = path.join(HERMIT_DIR, 'sessions', '.eval-hash');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
 
-// Progress Log [HH:MM] stamps in append order. Single parser shared by the plan-tracking
-// criterion and the staleness nudge in _evaluate.
+// Progress Log [HH:MM] stamps in append order. Used by the plan-tracking criterion.
 function progressStamps(content: Json): string[] {
   const text = (extractSection(content, 'Progress Log') ?? '').trim();
   return (text.match(/\[(\d{1,2}:\d{2})\]/g) ?? []).map(s => s.replace(/[\[\]]/g, ''));
@@ -160,39 +156,7 @@ async function _evaluate(): Promise<string | null> {
     try { fs.writeFileSync(HASH_FILE, hash + '\n'); } catch {}
   }
 
-  // Active nudges — output to stderr so they surface as hook feedback
   if (content !== null) {
-    const status = results.status || 'unknown';
-
-    // Only nudge during in_progress — not waiting (intentionally paused) or idle
-    if (status === 'in_progress') {
-      // >24h elapsed is unknowable from date-less stamps — use SHELL.md mtime for
-      // the "may be complete" nudge (nothing, not even Monitoring appends, wrote for 48h).
-      let sessionMayBeComplete = false;
-      try { sessionMayBeComplete = (now - fs.statSync(SHELL_SESSION).mtime.getTime()) / 3600000 > 48; }
-      catch { /* fail-open */ }
-
-      if (sessionMayBeComplete) {
-        console.error('Session may be complete. Consider /session-close or idle transition.');
-      } else {
-        // Progress Log timestamps are date-less [HH:MM]. Use the bottom-most entry
-        // (append-ordered) and resolve it as its most recent past occurrence, so a
-        // session spanning midnight doesn't backdate today's entries.
-        const timeEntries = progressStamps(content);
-        if (timeEntries.length > 0) {
-          const lastTime = timeEntries[timeEntries.length - 1];
-          const nowDate = new Date(now);
-          // config.timezone is the zone Progress Log [HH:MM] stamps are written in.
-          const nowHHMM = currentHHMM(readSettledConfig(HERMIT_DIR).timezone ?? 'UTC', nowDate) ?? nowDate.toISOString().slice(11, 16);
-          const hoursAgo = elapsedSinceHHMM(nowHHMM, lastTime) / 3600000;
-          if (hoursAgo > 4) {
-            console.error(`No progress logged in ${Math.round(hoursAgo)}h. Update Progress Log or Blockers.`);
-          }
-        }
-      }
-    }
-
-    // Monitoring bloat check (any status)
     const monitoringSection = extractSection(content, 'Monitoring');
     if (monitoringSection !== null) {
       const monitoringLines = (monitoringSection.match(/\n/g) || []).length;

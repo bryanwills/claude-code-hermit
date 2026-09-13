@@ -139,7 +139,7 @@ describe('pending-budget-alert gate (action:"alert", not paused)', () => {
     writeAlertState(dir, {
       // suppressed:true here would ALSO fire EVALUATE via the pre-existing
       // suppressed-digest gate — omit it so this isolates the budget gate itself.
-      'stale-session': { suppressed: false },
+      'checklist:other': { suppressed: false },
     });
 
     expect(await precheck(dir)).toBe('OK');

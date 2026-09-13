@@ -31,10 +31,10 @@ import path from 'node:path';
 import { runSelfEval, type SelfEvalProposal } from './self-eval';
 import {
   readAlertState, defaultAlertState, quarantineAlertState, writeAlertState,
-  classifyTick, deriveMicroPendingKeys, deriveProposalPendingKeys, deriveStaleSession, FiringItem,
-  MICRO_PREFIX, PROPOSAL_PREFIX, STALE_KEY, DOCTOR_PREFIX, isStructuredKey,
+  classifyTick, deriveMicroPendingKeys, deriveProposalPendingKeys, FiringItem,
+  MICRO_PREFIX, PROPOSAL_PREFIX, DOCTOR_PREFIX, isStructuredKey,
 } from '../alert-state';
-import { currentHHMM, todayYMD, resolveHermitNowMs, parseDuration } from '../time';
+import { currentHHMM, todayYMD, resolveHermitNowMs } from '../time';
 import { readSettledConfig } from '../config-read';
 import { appendShellLine } from '../md-write';
 import { canonicalChecklistKeys, normalizeItemKey, normalizeCustomKey } from '../heartbeat-items';
@@ -80,7 +80,7 @@ function validateFiring(raw: Json): RawFiring[] | null {
 // would smuggle a phantom past that guard, with its raw PROP-NNN/MP-… id
 // un-scrubbed on the way to the channel.
 const isReservedKey = (key: string): boolean =>
-  isStructuredKey(key) || key === STALE_KEY || key.startsWith(DOCTOR_PREFIX);
+  isStructuredKey(key) || key.startsWith(DOCTOR_PREFIX);
 
 function resolveEntryKey(entry: RawFiring, canonical: Set<string>): string | null {
   if (entry.key === 'waiting-timeout' || (entry.key && entry.key.startsWith('custom:'))) {
@@ -160,9 +160,7 @@ function apply(payloadJson: string): void {
   const canonical = canonicalChecklistKeys(stateDir);
   const resolved = resolveFiring(validated, canonical);
   if (resolved === null) indeterminate('unresolvable-firing');
-  const modelFiring = resolved.filter(
-    f => !isStructuredKey(f.key) && f.key !== STALE_KEY && !f.key.startsWith(DOCTOR_PREFIX),
-  );
+  const modelFiring = resolved.filter(f => !isReservedKey(f.key));
 
   // Split read from parse: a transient read error (ioerror) must not clobber a healthy
   // file. ENOENT = first run → seed default. corrupt = bytes read but unparseable →
@@ -192,10 +190,6 @@ function apply(payloadJson: string): void {
 
   const micro = deriveMicroPendingKeys(stateDir);
   const proposal = deriveProposalPendingKeys(stateDir);
-  const stale = deriveStaleSession(stateDir, {
-    hhmmNow: hhmm,
-    staleThresholdMs: parseDuration(config.heartbeat?.stale_threshold, 2 * 3600000),
-  });
 
   // Fail-safe: an ambiguous source-of-truth read must never age or resolve
   // that prefix's existing entries this tick (the exact #594 harm this
@@ -219,15 +213,14 @@ function apply(payloadJson: string): void {
   };
   if (!micro.ok) freezePrefix(MICRO_PREFIX);
   if (!proposal.ok) freezePrefix(PROPOSAL_PREFIX);
-  if (!stale.ok) freezePrefix(STALE_KEY);
 
   // An ambiguous structured read means this tick's view is partial: never report
   // a verified-clean eval (would arm the precheck damper over an unverifiable
   // pending decision) and never emit/advance the digest on a partial view.
-  const hasStructuredReadFailure = !micro.ok || !proposal.ok || !stale.ok;
+  const hasStructuredReadFailure = !micro.ok || !proposal.ok;
 
   const structuredItems = [...(micro.ok ? micro.items : []), ...(proposal.ok ? proposal.items : [])];
-  const firing: FiringItem[] = [...modelFiring, ...structuredItems, ...(stale.ok ? stale.items : [])];
+  const firing: FiringItem[] = [...modelFiring, ...structuredItems];
 
   // Structured keys' text bakes in a raw PROP-NNN/MP-… id, which must never
   // reach the operator channel (house channel-voice rule) — silence their
@@ -256,18 +249,13 @@ function apply(payloadJson: string): void {
   const shouldNotifyStructuredFailure =
     hasStructuredReadFailure && state.structured_read_failure_notified_date !== today;
   if (shouldNotifyStructuredFailure) {
-    // deriveStaleSession only reports ok:false for a non-ENOENT read of sessions/SHELL.md
-    // (an unreadable runtime.json falls back to 'idle' and stays ok) — name that file, or
-    // the monitoring line points the repair at a healthy one.
     const failedSources = [
       !micro.ok && 'micro-proposals.json',
       !proposal.ok && 'proposals/',
-      !stale.ok && 'sessions/SHELL.md',
     ].filter(Boolean) as string[];
-    const hasDecisionReadFailure = !micro.ok || !proposal.ok;
-    result.notifications.push(hasDecisionReadFailure
-      ? "I can't read the record of decisions waiting on you — some may be pending without showing up. It needs a repair before I can see them again."
-      : "I can't read my own session notes right now, so I can't tell whether the current session has gone quiet. It needs a repair before I can check again.");
+    result.notifications.push(
+      "I can't read the record of decisions waiting on you — some may be pending without showing up. It needs a repair before I can see them again.",
+    );
     result.monitoringLines.push(
       `[${hhmm}] Heartbeat: structured read failure (${failedSources.join(', ')})` +
       (micro.error ? ` — ${micro.error}` : '') + '. Pending-decision alerts frozen.');
@@ -310,7 +298,7 @@ function apply(payloadJson: string): void {
     } catch { /* fail-open: the tick's alert bookkeeping still lands */ }
   }
 
-  // Spread state first so precheck-owned fields (total_ticks, last_stale_wake_at) are preserved.
+  // Spread state first so precheck-owned fields (total_ticks, last_micro_corrupt_wake_at) are preserved.
   const updated = {
     ...state,
     alerts,

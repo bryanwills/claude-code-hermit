@@ -33,7 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
-import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary } from './lib/time';
+import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary, parseDuration as parseDurationMs, resolveHermitNowMs } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
@@ -49,7 +49,7 @@ import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { claudeStateFile, credentialsFilePath, defaultConfigDir, envAuthPresent, inspectStoredLogin, msUntilExpiry, msUntilLoginExpiry, resolveAuthMode, storedLoginUsable } from './lib/setup-token';
 import { isContainer } from './lib/container';
 import { writeFileAtomic } from './lib/md-write';
-import { AUTO_CLOSE_LULL_MS } from './lib/auto-close';
+import { AUTO_CLOSE_LULL_MS, autoIdleDue, runAutoIdle } from './lib/auto-close';
 import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS, isOwnTurn } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
@@ -57,6 +57,7 @@ import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCa
 import { ensureLedgerFile } from './lib/append-jsonl';
 import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
+import { resolveMaintainerTarget } from './resolve-outbound-channel';
 
 type Json = any;
 
@@ -206,6 +207,18 @@ function pushOperatorMessage(text: string): void {
   } catch (e) {
     appendEvent('push_failed', String(e).slice(0, 80));
   }
+}
+
+/** Wake/recovery notices that must not fall back to the primary client chat.
+ *  With a maintainer channel, sends exactly as pushOperatorMessage; without one,
+ *  only records the event and sends nothing. */
+function pushMaintainerOnly(text: string): void {
+  const channels = readSettledConfig(HERMIT_ROOT).channels;
+  if (!resolveMaintainerTarget(channels)) {
+    appendEvent('push_skipped', text.slice(0, 80));
+    return;
+  }
+  pushOperatorMessage(text);
 }
 
 /** Current time as "HH:MM" in `timezone`, falling back to the UTC clock if the zone is invalid. */
@@ -1247,7 +1260,7 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
   const via = watchdogState.last_nudge_transport === 'socket' ? 'nudge-socket' : 'nudge';
   appendEvent(via, socketUndelivered ? `stale cycle ${consecutive} — socket undelivered` : `stale cycle ${consecutive}`);
   process.stderr.write(`[watchdog] nudged "${sessionName}" via ${watchdogState.last_nudge_transport} (stale cycle ${consecutive})\n`);
-  if (notify === 'waking') pushOperatorMessage(composeWedgeMessage(timezone));
+  if (notify === 'waking') pushMaintainerOnly(composeWedgeMessage(timezone));
   else if (notify === 'escalated') pushOperatorMessage(composeWedgeMessage(timezone, OPERATOR_LOCALE, true));
 }
 
@@ -1458,6 +1471,30 @@ function maybePostCloseClear(config: Json): void {
     releaseLock(LIFECYCLE_LOCK);
   }
   process.exit(0);
+}
+
+function maybeAutoIdle(config: Json): void {
+  const runtime = readRuntimeJson();
+  if (!runtime) return;
+  const guard = passesLifecycleGuards(runtime);
+  if (!guard.ok) return;
+  const nowMs = resolveHermitNowMs();
+  const staleMs = parseDurationMs(config.heartbeat?.stale_threshold, 2 * 3600_000);
+  if (!autoIdleDue(HERMIT_ROOT, nowMs, staleMs).due) return;
+  // Quiescence guard: a turn still in flight (a long tool call with no Progress Log
+  // entry) redraws the pane, so require it unchanged across two consecutive ticks.
+  const watchdogState = readWatchdogState();
+  const currentHash = getPaneHash(guard.sessionName);
+  if (currentHash === null || currentHash !== (watchdogState.last_pane_hash_idle ?? null)) {
+    watchdogState.last_pane_hash_idle = currentHash;
+    writeWatchdogState(watchdogState);
+    return;
+  }
+  watchdogState.last_pane_hash_idle = null;
+  writeWatchdogState(watchdogState);
+  if (runAutoIdle(HERMIT_ROOT, nowMs, config) === 'archived') {
+    appendEvent('auto-idle', 'quiet in_progress archived');
+  }
 }
 
 // --- Shared lifecycle/token guards (maybeContextClear + maybeContextCompact) ---
@@ -1980,6 +2017,7 @@ async function main(): Promise<void> {
 
   // 0a. Post-close clear — independent of watchdog.enabled; runs on any hermit with a scheduler
   maybePostCloseClear(config);
+  maybeAutoIdle(config);
 
   // 0b. Context-size clear — independent of watchdog.enabled; runs on any always-on hermit.
   // A fired clear ends the tick: the context it was measuring no longer exists, so every
@@ -2430,7 +2468,7 @@ async function main(): Promise<void> {
           // for up to 12s, and a tick killed inside that window would otherwise leave
           // wedge_notified set and repeat the all-clear on the next tick.
           if (recovered) {
-            pushOperatorMessage(composeWedgeRecoveredMessage(timezone));
+            pushMaintainerOnly(composeWedgeRecoveredMessage(timezone));
             appendEvent('wedge-recovered', 'heartbeat fresh');
           }
         }
