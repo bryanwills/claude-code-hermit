@@ -54,7 +54,7 @@ Core's `scripts/domain-hatch.ts` owns target resolution and `hatch-options.json`
 
 ## Development
 
-`claude --plugin-dir /path/to/claude-code-homeassistant-hermit` from a target project, then `/claude-code-homeassistant-hermit:hatch`. Tests: `bun test` from this directory.
+From the repo root, `bun run dev <target-project>`, hatch core, then `/claude-code-homeassistant-hermit:hatch`. Tests: `bun test` from this directory.
 
 - The CLI and both hooks are TypeScript run directly by bun with zero runtime dependencies. Python is test-only: `tests/gate-corpus.test.ts` replays the retired Python hooks from git history and `tests/yaml-parity.test.ts` compares against PyYAML. The suite needs full git history and Python with `python-dotenv` and `PyYAML`; set `GATE_PARITY_PYTHON` when that interpreter is outside PATH.
 - The safety hook fails closed: an MCP call whose target cannot be resolved to concrete entity IDs is blocked. Changes to `hooks/mcp-safety-gate.ts` or `src/policy.ts` must keep `tests/gate-corpus.test.ts` (golden byte-equivalence with the retired gate) and `tests/gate-fuzz.test.ts` (fail-closed property) green.

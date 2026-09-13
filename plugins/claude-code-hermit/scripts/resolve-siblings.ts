@@ -13,7 +13,7 @@
  * in. Drops user-scope, managed, disabled, and cross-project entries.
  *
  * Usage: bun resolve-siblings.ts [project-root] [--role all|siblings|core-scope]
- *                                [--dedupe] [--stdin-json]
+ *                                [--dedupe] [--stdin-json] [--core-root <path>]
  *   project-root defaults to process.cwd(); callers pass the shell's `$(pwd)`.
  *   --role all (default): the canonical-filtered list.
  *   --role siblings: filtered to plugin names containing "hermit" (excluding
@@ -25,12 +25,16 @@
  *     and `project` scope, keep the `local` entry (local overrides project).
  *   --stdin-json: read the plugin-list JSON from stdin instead of shelling
  *     `claude plugin list --json` (test seam — tests never invoke live claude).
+ *   --core-root: when `--role siblings` and core is not registered for the
+ *     project, list checkout siblings next to this core plugin root (used by
+ *     `--plugin-dir` hatch; without it, behavior is unchanged).
  *
  * Prints JSON to stdout and always exits 0 — callers inspect the emitted
  * fields, not the exit code. Any probe that errors degrades to []/null.
  */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 interface PluginEntry {
@@ -56,6 +60,7 @@ type Role = 'all' | 'siblings' | 'core-scope';
 interface Options {
   role?: Role;
   dedupe?: boolean;
+  coreRoot?: string;
 }
 
 function splitId(id: string): { plugin: string; marketplace_name: string } {
@@ -133,6 +138,38 @@ function coreScope(list: PluginEntry[], projectRoot: string): {
   return { core_scope, target };
 }
 
+function checkoutSiblings(coreRoot: string): FilteredEntry[] {
+  const parent = path.resolve(coreRoot, '..');
+  let names: string[];
+  try {
+    names = fs.readdirSync(parent);
+  } catch {
+    return [];
+  }
+  const out: FilteredEntry[] = [];
+  for (const name of names) {
+    const installPath = path.join(parent, name);
+    let manifest: { name?: string };
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(installPath, '.claude-plugin', 'plugin.json'), 'utf8'));
+    } catch {
+      continue;
+    }
+    const plugin = manifest?.name;
+    if (typeof plugin !== 'string' || !plugin.includes('hermit') || plugin === 'claude-code-hermit') continue;
+    out.push({
+      plugin,
+      id: `${plugin}@inline`,
+      marketplace_name: 'inline',
+      scope: '',
+      projectPath: '',
+      installPath,
+      enabled: true,
+    });
+  }
+  return out;
+}
+
 function resolveSiblings(pluginList: PluginEntry[], projectRoot: string, opts: Options = {}) {
   const role: Role = opts.role ?? 'all';
   if (role === 'core-scope') {
@@ -140,6 +177,9 @@ function resolveSiblings(pluginList: PluginEntry[], projectRoot: string, opts: O
   }
   let entries = canonicalFilter(pluginList, projectRoot);
   if (role === 'siblings') {
+    if (coreScope(pluginList, projectRoot).core_scope === null && opts.coreRoot) {
+      return checkoutSiblings(opts.coreRoot);
+    }
     entries = entries.filter((e) => e.plugin.includes('hermit') && e.plugin !== 'claude-code-hermit');
   }
   if (opts.dedupe) {
@@ -176,6 +216,7 @@ if (import.meta.main) {
   let role: Role = 'all';
   let dedupe = false;
   let useStdin = false;
+  let coreRoot: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -183,11 +224,13 @@ if (import.meta.main) {
     else if (a === '--stdin-json') useStdin = true;
     else if (a === '--role') role = (argv[++i] as Role) ?? 'all';
     else if (a.startsWith('--role=')) role = a.slice('--role='.length) as Role;
+    else if (a === '--core-root') coreRoot = argv[++i];
+    else if (a.startsWith('--core-root=')) coreRoot = a.slice('--core-root='.length);
     else if (!a.startsWith('--') && projectRoot === undefined) projectRoot = a;
   }
   projectRoot = projectRoot ?? process.cwd();
 
   const list = useStdin ? readStdin() : pluginListFromClaude();
-  console.log(JSON.stringify(resolveSiblings(list, projectRoot, { role, dedupe })));
+  console.log(JSON.stringify(resolveSiblings(list, projectRoot, { role, dedupe, coreRoot })));
   process.exit(0);
 }

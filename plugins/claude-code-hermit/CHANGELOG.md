@@ -11,6 +11,7 @@
 - `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step, and `docker-setup` group pairing asks the same group questions.
 
 ### Fixed
+- `hatch` and the `domain-hatch` verbs resolve a plugin loaded with `--plugin-dir` from the checkout instead of stopping with `plugin_not_installed`.
 - `channel-setup` and `hermit-settings` ask whether to turn off the seen-emoji reaction when a passive group is added instead of only warning that it reacts to every message.
 - `hermit-doctor` no longer warns that the briefing chat looks shared when the operator writes from a second chat, thread, or fork; who may pause, resume, or read full status is unchanged.
 
