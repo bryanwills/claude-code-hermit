@@ -289,7 +289,7 @@ describe('settings-gate file writes', () => {
 describe('settings-gate silent paths', () => {
   test('reads print nothing', async () => {
     const dir = fixture();
-    for (const rest of ['show', 'get permission_mode', 'history']) {
+    for (const rest of ['show', 'get permission_mode', 'history', 'record-file HEARTBEAT.md']) {
       const r = await runGate(payload({ dir, tool: 'Bash', input: { command: cmd(rest) } }), dir);
       expectSilent(r);
     }

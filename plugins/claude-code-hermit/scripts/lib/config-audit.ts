@@ -21,7 +21,7 @@ import { utcISOStamp } from './time';
 
 type Json = any;
 
-export type AuditTarget = 'config.json' | '.claude/settings.json' | '.claude/settings.local.json' | `${string}/access.json`;
+export type AuditTarget = 'config.json' | '.claude/settings.json' | '.claude/settings.local.json' | `${string}/access.json` | 'HEARTBEAT.md';
 
 export interface AuditRow {
   ts: string;

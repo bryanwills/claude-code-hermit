@@ -122,6 +122,7 @@ Open `.claude-code-hermit/HEARTBEAT.md` for the operator to modify.
 - If count > 10: note "Checklist: {count} items (recommended: ≤10). Move periodic items to routines?"
 - Ask what to add, remove, or change. Suggest additions based on project context.
 - Write updated checklist back.
+- Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json record-file HEARTBEAT.md`. Relay `unchanged` as "checklist unchanged".
 
 ---
 
