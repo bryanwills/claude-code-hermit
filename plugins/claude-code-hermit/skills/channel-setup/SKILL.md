@@ -14,7 +14,7 @@ Activate a channel, adding the `config.json` entry first when there isn't one. L
 **Runtime routing (first):** evaluate in this order.
 
 1. **Inside the container.** Run `[ -f /.dockerenv ] || [ -f /run/.containerenv ] && echo container || echo host`. If `container`: read `.claude-code-hermit/config.json`. For each enabled channel object, resolve `state_dir` as step 4 does (config `state_dir`, default `.claude.local/channels/<channel>`; if relative, make it absolute against the project root) and print that absolute path literally. Print and stop:
-   > The channel is live in this session. DM the bot for a code, then type `/<channel>:access pair <code> — save access.json to <state_dir>/ not ~/.claude` and `/<channel>:access policy allowlist` here. Or run `/claude-code-hermit:channel-setup` from the host project root.
+   > DM the bot for a code, then run `/claude-code-hermit:channel-setup` from a normal host session at the project root.
    If no enabled channel, print only the host-run sentence and stop. No `AskUserQuestion` on this path.
 
 2. **No compose file.** If `docker-compose.hermit.yml` is absent at the project root, continue with the local/tmux flow below.
@@ -23,7 +23,7 @@ Activate a channel, adding the `config.json` entry first when there isn't one. L
 
 4. **Compose present.** Run `docker compose -f docker-compose.hermit.yml ps --status running --format '{{.Service}}'`. Non-zero exit → print its output, stop. If `hermit` is absent from the output: after channel selection, run steps 2 and 4, skip 3, then stop with `.claude-code-hermit/bin/hermit-docker up` and "re-run this skill to pair". If `hermit` is present: docker-running.
 
-5. **docker-running.** After channel selection, skip step 3 (the container installs channel plugins at boot). Run step 4; a `SKIP … HTTP 401` or `403` from its `channel-bot-id.ts` line is reported as "token rejected by <platform>, fix it before restarting". If this run created the config entry or wrote the token → stop: "The bot is offline until the container restarts and loads it: `.claude-code-hermit/bin/hermit-docker restart`, then DM the bot for a code and re-run this skill. Still no code after a restart: `hermit-docker logs --tail=60` shows the plugin's own error (wrong token, missing Message Content intent, install failure), and `/claude-code-hermit:hermit-doctor` checks the token." Otherwise skip steps 5 to 6c and run docker-setup's **Channel pairing** sub-steps 1 to 9 against the container (`Read` only the **Channel pairing** heading through sub-step 9 of `${CLAUDE_SKILL_DIR}/../docker-setup/SKILL.md`, not the rest of the wizard): `channel-pair.ts pair` / `policy` / `group-add` with `--compose-file docker-compose.hermit.yml --service hermit --session <session>`, session from `tmux_session_name` in `config.json` with `{project_name}` replaced by the project directory basename, `<state_dir>` absolute. Precondition `docker compose -f docker-compose.hermit.yml exec -T hermit tmux has-session -t <session>`; on failure stop with "container is still booting or the first-run screens were never accepted: `hermit-docker attach`, accept them, re-run". After the docker-setup hand-off, continue with §6a, §6d, §6e, then §7 for each paired channel; use the verified host-side access.json and carry forward the group answers. The "I have the code / Skip this channel" question on this branch adds one sentence: "No code from the bot? It has not loaded the token: `hermit-docker restart`, then re-run this skill."
+5. **docker-running.** After channel selection, skip step 3 (the container installs channel plugins at boot). Run step 4; a `SKIP … HTTP 401` or `403` from its `channel-bot-id.ts` line is reported as "token rejected by <platform>, fix it before restarting". If this run created the config entry or wrote the token → stop: "The bot is offline until the container restarts and loads it: `.claude-code-hermit/bin/hermit-docker restart`, then DM the bot for a code and re-run this skill. Still no code after a restart: `hermit-docker logs --tail=60` shows the plugin's own error (wrong token, missing Message Content intent, install failure), and `/claude-code-hermit:hermit-doctor` checks the token." Otherwise run §5, §6, §6a, §6b, and §6c against the host-visible channel `<state_dir>`, passing the absolute project `.claude-code-hermit` directory as `<hermit_state_dir>` to `channel-access.ts`. No restart prompt is needed for an already-running bot. Continue with §6d, §6e, then §7 for each paired channel. Add to the pairing question: "No code from the bot? It has not loaded the token: `hermit-docker restart`, then re-run this skill."
 
 Read `.claude-code-hermit/config.json`. Collect all entries under `channels` that are valid objects, tracking which are disabled (`enabled: false`).
 
@@ -151,7 +151,7 @@ Then proceed to step 5 without a token (pairing will be skipped in step 5).
 > - Manual: `claude --channels plugin:<channel>@<marketplace>`
 >   (use the same `<marketplace>` resolved in step 3 — `claude-plugins-official` for built-in channels, or `channels.<channel>.marketplace` for third-party plugins.)
 
-**If token is configured:** check whether the channel is already active in the current session by checking if the channel's reply tool is available. If active, skip the restart prompt and go straight to the pairing question batch.
+**If token is configured:** on docker-running go straight to the pairing question batch. Otherwise check whether the channel is already active in the current session by checking if the channel's reply tool is available. If active, skip the restart prompt and go straight to the pairing question batch.
 
 If not active, display:
 > Token saved. Restart Claude Code to activate the channel:
@@ -198,12 +198,16 @@ questions: [
 ]
 ```
 
-If code provided (via Other):
-1. Run `/<channel>:access pair <code>` — include the state dir hint in the message to the LLM running the tool: "save access.json to `<state_dir>/` not `~/.claude`"
-2. Run `/<channel>:access policy allowlist`
-3. Verify access.json landing (step 6).
+If code provided (via Other), use the absolute project `.claude-code-hermit` directory as `<hermit_state_dir>` (distinct from the channel's `<state_dir>`):
 
-If Skip: "DM the bot later, then run `/<channel>:access pair <code>` and `/<channel>:access policy allowlist`." Stop.
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<hermit_state_dir>" pair <channel> <code>
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<hermit_state_dir>" policy <channel> allowlist
+```
+
+Run the policy command only after pairing succeeds. Relay the `OK|` result, retaining `file=state`, `file=home` or `file=home+state` for §6. On `ERROR|`, report the token and stop. Pairing and policy each raise the native permission prompt; bypass-mode callers are refused. Verify the location in §6.
+
+If Skip: "DM the bot later, then run `/claude-code-hermit:channel-setup` from a normal host session." Stop.
 
 ### 6. Verify access.json location
 
@@ -216,7 +220,9 @@ Check if `access.json` exists at `<state_dir>/access.json`.
   mv ~/.claude/channels/<channel>/access.json <state_dir>/access.json
   ```
   Confirm: "Moved access.json to `<state_dir>/`."
-- If found in neither location: note — "access.json not found. Pairing may not have completed. Run `/<channel>:access pair <code>` after DMing your bot."
+- If found in neither location: note — "access.json not found. Pairing may not have completed. Run `/claude-code-hermit:channel-setup` after DMing your bot."
+
+After `file=home` or `file=home+state`, the bot that handed out the code still reads `~/.claude`; the hermit reads the state directory, which `file=home+state` already updated and the move above covers otherwise. Use `${CLAUDE_CONFIG_DIR}` instead of `~/.claude` when that environment override is set.
 
 If access.json is verified, continue to step 6a.
 
@@ -237,71 +243,21 @@ Merge both answers in one payload through the existing reinit command:
 echo '{"channels":{"<channel>":{"allowed_users":<selected_string_array>,"bind_home_chat":<boolean>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "$(pwd)" --reinit >/dev/null
 ```
 
-Omit `allowed_users` when the row was dropped or Allow everyone was chosen. Never use Edit/Write on `config.json`. Stop on a non-zero merge exit as in Adding an entry. Repeating the same answers must leave the file byte-identical. Continue to §6b on local/tmux; on docker-running continue to §6d.
+Omit `allowed_users` when the row was dropped or Allow everyone was chosen. Never use Edit/Write on `config.json`. Stop on a non-zero merge exit as in Adding an entry. Repeating the same answers must leave the file byte-identical. Continue to §6b.
 
 ### 6b. Default delivery settings
 
-Once `access.json` is at `<state_dir>/access.json` (§6), set sensible delivery defaults the operator hasn't customized.
+Once §6 verifies the channel state, skip iMessage; otherwise run:
 
-Skip this step if the current channel is `imessage`. Otherwise:
+```bash
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<hermit_state_dir>" ensure-defaults <channel>
+```
 
-1. Read `<state_dir>/access.json`. If `ackReaction` is already a non-empty string, skip — don't overwrite operator customization.
-2. Otherwise run, with the state-dir hint (same pattern as §5):
-   ```
-   /<channel>:access set ackReaction 👀 — save access.json to <state_dir>/, not ~/.claude
-   ```
-
-`👀` works on Discord (any unicode emoji accepted) and is in Telegram's fixed reaction whitelist. Operators get an emoji on their inbound DM as soon as the bot receives it — fills the gap after the 5–10s typing indicator times out. Idempotent: re-running channel-setup leaves customized values alone; §6c may offer to turn the reaction off when a passive chat is added.
+Relay `OK|ack=set` or `OK|ack=kept`. The default is `👀` only when `ackReaction` is absent; an empty string and customized values are preserved. On `ERROR|`, report the token and stop.
 
 ### 6c. Server channel / group chat (optional)
 
-Skip this step if the current channel is `imessage`, or if `access.json` is not present at `<state_dir>/access.json` (note: "Pairing didn't complete — skipping group setup.").
-
-1. Ask with `AskUserQuestion` — label and prompt vary by channel:
-   - `discord`: header `"Server channel"` — "Want the hermit to also listen in a Discord server channel? Channel ID: enable Developer Mode in Discord settings → right-click the channel → Copy Channel ID."
-   - `telegram`: header `"Group chat"` — "Want the hermit to also listen in a Telegram group? Group ID: forward a message from the group to `@userinfobot` or use `@RawDataBot`. Group IDs are negative integers (e.g. `-1001234567890`)."
-   - Options: `"Yes — add a channel"` (discord) / `"Yes — add a group"` (telegram) with ID captured via `Other`; `"Skip — DMs only"`.
-2. If **Skip**: continue to §6d.
-3. **For each ID provided** (the first ID comes from step 1's `Other`; each subsequent ID from step 3c's `Other` — loop until "Done"):
-   a. Ask all four questions for this ID in one `AskUserQuestion` call (the option marked `(default)` is the Recommended pre-selection):
-
-      | Header | Question | Options (`label`: description) |
-      |---|---|---|
-      | Mention required | Require an @mention for this chat? | `Yes, require @mention`: safer for noisy channels (default) / `No, respond to all messages`: respond without a mention |
-      | Shared history | Let every other chat recall what is said here? | `No, private to this chat`: keep this chat's history private (default) / `Yes, shared with every chat`: let any chat on any channel recall this one |
-      | Trigger nicknames | Which nickname regexes should also trigger replies? | `None`: no new patterns (default) / Other: regex list |
-      | Who can trigger | Who may trigger replies in this chat? | `Anyone in the chat`: no sender restriction (default) / Other: user ids |
-
-      Shared means any chat on any channel can recall what is said here.
-   b. Run the slash command directly, with the state-dir hint (same pattern as §6b):
-      - With `"Yes, require @mention"`: `/<channel>:access group add <channelId> — save access.json to <state_dir>/, not ~/.claude`
-      - With `"No, respond to all messages"`: `/<channel>:access group add <channelId> --no-mention — save access.json to <state_dir>/, not ~/.claude`
-      For explicit trigger ids, append `--allow id1,id2` before the state-dir hint in either command, alongside `--no-mention` when selected. Validate ids as comma-separated numeric strings. Retain the requested ids for read-back. Collect nickname regexes across the loop; they apply channel-wide, not only to this group.
-      After the respond-to-all command, ask once with `AskUserQuestion`: "Record the chat but wake only on @mention (passive)?" Options: **Yes**, **No**.
-      Read the current `channels.<channel>.passive_chats` and `channels.<channel>.shared_chats` arrays (absent means `[]`). For passive, on Yes include this chat id once; on No remove it; if the passive question was not asked, preserve that array. For Shared history, on Yes include this chat id once; on No remove it. Preserve every other id in both arrays. After the access command, merge both **full resulting arrays** with the same `hatch-config.ts --reinit` flow used above:
-      ```bash
-      echo '{"channels":{"<channel>":{"passive_chats":<full_passive_array>,"shared_chats":<full_shared_array>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "$(pwd)" --reinit >/dev/null
-      ```
-      Substitute the actual channel key and JSON string arrays. Never use Edit/Write on `config.json`. Stop on a non-zero merge exit as in Adding an entry. Repeating the same answers must leave the arrays unchanged.
-      On Yes, confirm the group's `allowFrom` is empty in the plugin settings so every member's messages can be recorded. `Read` `<state_dir>/access.json`. If `ackReaction` is a non-empty string and this question was not already answered earlier in the loop, ask once with `AskUserQuestion`:
-
-      | Header | Question | Options (`label`: description) |
-      |---|---|---|
-      | Seen emoji | Turn off the plugin-global seen-emoji? | `Turn off`: also stops the emoji on the operator's DMs for this channel (default) / `Keep 👀`: leave the reaction as-is |
-
-      Missing or empty `ackReaction` asks nothing. On **Turn off**, run `/<channel>:access set ackReaction "" — save access.json to <state_dir>/, not ~/.claude` (literal `""`). After Turn off, name the restore command `/<channel>:access set ackReaction 👀`. After Keep, name the clear command `/<channel>:access set ackReaction ""`. If the question was not asked, skip that sentence.
-      Explain these facts in the operator's language:
-      - Discord threads inherit the parent's mention gate and `allowFrom` sender list. For mention-free steering in a bound thread, configure `/discord:access group add <parent> --no-mention` against this install's state directory. The bot needs Create Public Threads to open task threads; if that permission is missing, ask the sender to open a thread and ask there. A quote-reply to the bot counts as an implicit mention at the plugin gate. Unbound passive chats still require a self-mention at the Hermit gate. Forum channels are unsupported; denying thread creation prevents automatic task threads.
-      - Telegram privacy mode must be disabled in BotFather.
-      Later group additions from chat go through `hermit-settings channels`.
-   c. Ask with `AskUserQuestion` (header: `"Add another?"`) — `"Yes — add another"` with the next ID via `Other`; `"Done — continue"`. On `"Done — continue"`: exit the loop.
-After the loop, if any nickname regex was given, read existing `mentionPatterns` from `<state_dir>/access.json`, merge the requested regexes without duplicates while preserving existing patterns, and run once with the state-dir hint:
-
-```
-/<channel>:access set mentionPatterns '<json array>' : save access.json to <state_dir>/, not ~/.claude
-```
-
-4. **Verify all added channels** (one `Read` after the loop): open `<state_dir>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: "Group entry didn't land — run `/<channel>:access group add <channelId>` manually after setup." Also check that `mentionPatterns` contains every requested regex and `groups.<id>.allowFrom` equals the requested trigger ids (compare ids as strings, ignoring order). When Turn off was chosen, also confirm `ackReaction` is `""`. For each miss print "`<key>` didn't land, this plugin may not support it; set it with `/<channel>:access` manually after setup", naming the exact key. Do not error. Then proceed to §6d.
+Skip for iMessage or when pairing did not complete. Run [the group questionnaire](references/group-enrollment.md) with the channel key, absolute `<hermit_state_dir>`, and native `AskUserQuestion` prompts. Carry forward the returned group answers, then continue to §6d.
 
 ### 6d. Maintainer channel check (optional)
 
@@ -328,7 +284,7 @@ Once per selected channel, re-read config after the preceding merges. Ask the ap
 | Primary | Which enabled channel should receive default outbound messages? | `<this channel>`: use this channel (default) / each other enabled channel by name |
 | Record | Record chats on this channel for recall? | `Inherit global setting, currently <on|off>`: leave `log_chats` absent (default) / `No, never`: set `log_chats: false` / `Yes, always`: set `log_chats: true` |
 
-Show Recall scope only if a group was added in §6c (or docker-setup's group loop on docker-running). Show Operators only if `channels.<channel>.allowed_users` contains at least two ids; for the default option omit `operators` (absence already means the first allowed user); for Other write the selected ids as the `operators` string array. Show Primary only if at least two channel objects have `enabled: true` and `channels.primary` is unset. Always show Record; read `knowledge.channel_log_enabled` to render the current global setting as on or off.
+Show Recall scope only if a group was added in §6c. Show Operators only if `channels.<channel>.allowed_users` contains at least two ids; for the default option omit `operators` (absence already means the first allowed user); for Other write the selected ids as the `operators` string array. Show Primary only if at least two channel objects have `enabled: true` and `channels.primary` is unset. Always show Record; read `knowledge.channel_log_enabled` to render the current global setting as on or off.
 
 Merge the answered per-channel keys in one payload, omitting unselected keys and keys whose default is absence:
 

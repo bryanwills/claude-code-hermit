@@ -1,11 +1,15 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { GROUP_ID_RE } from './channel-pair';
-import { pinStateDirOrExit } from './lib/cc-compat';
+import { assertStateDir, pinStateDirOrExit } from './lib/cc-compat';
 import { channelStateDir } from './lib/channel-token';
 import { auditConfigChange } from './lib/config-audit';
 import { readConfigRaw } from './lib/config-read';
+import { persistConfig } from './lib/config-write';
 import { writeFileAtomic } from './lib/md-write';
+
+export const CODE_RE = /^[A-Za-z0-9]{6}$/;
+export const GROUP_ID_RE = /^-?\d{1,20}$/;
 
 interface GroupEntry {
   requireMention: boolean;
@@ -14,7 +18,11 @@ interface GroupEntry {
 
 interface Access {
   dmPolicy: string;
+  allowFrom?: string[];
+  pending?: Record<string, { senderId: string; chatId: string; expiresAt: number }>;
   groups?: Record<string, GroupEntry>;
+  mentionPatterns?: string[];
+  ackReaction?: string;
   [key: string]: unknown;
 }
 
@@ -25,52 +33,166 @@ export function mergeGroupEntry(access: Access, chatId: string, entry: GroupEntr
   };
 }
 
-function options(args: string[]): GroupEntry {
-  let requireMention = true;
-  let allowFrom: string[] = [];
-  const seen = new Set<string>();
+function options(args: string[]) {
+  const values = new Map<string, string>();
+  let ackOff = false;
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
-    if (seen.has(flag)) throw new Error('invalid-options');
-    seen.add(flag);
-    if (flag === '--no-mention') requireMention = false;
-    else if (flag === '--allow' && args[i + 1] !== undefined) allowFrom = args[++i].split(',');
-    else throw new Error('invalid-options');
+    if (flag === '--ack-off' && !ackOff) {
+      ackOff = true;
+    } else if (['--mention', '--allow', '--shared', '--passive', '--nicknames'].includes(flag)
+      && !values.has(flag) && args[i + 1] !== undefined) {
+      values.set(flag, args[++i]);
+    } else throw new Error('invalid-options');
   }
+  for (const flag of ['--mention', '--shared', '--passive']) {
+    if (!['yes', 'no'].includes(values.get(flag) ?? '')) throw new Error('invalid-options');
+  }
+  if (!values.has('--allow')) throw new Error('invalid-options');
+  const allowFrom = values.get('--allow') === 'none' ? [] : values.get('--allow')!.split(',');
   if (allowFrom.some(id => !GROUP_ID_RE.test(id))) throw new Error('invalid-id');
-  return { requireMention, allowFrom };
+  const requireMention = values.get('--mention') === 'yes';
+  const shared = values.get('--shared') === 'yes';
+  const passive = values.get('--passive') === 'yes';
+  if (passive && (requireMention || allowFrom.length > 0)) throw new Error('passive-needs-open-group');
+  let nicknames: string[] = [];
+  if (values.has('--nicknames')) {
+    try {
+      nicknames = JSON.parse(values.get('--nicknames')!);
+    } catch { throw new Error('invalid-options'); }
+    if (!Array.isArray(nicknames) || nicknames.some(pat => typeof pat !== 'string')) throw new Error('invalid-options');
+    try {
+      for (const pat of nicknames) new RegExp(pat, 'i');
+    } catch { throw new Error('invalid-regex'); }
+  }
+  return { entry: { requireMention, allowFrom }, shared, passive, nicknames, ackOff };
 }
 
-function main(): void {
-  const [argvDir, verb, channel, chatId, ...args] = process.argv.slice(2);
-  if (!argvDir || !verb) throw new Error('usage');
-  const dir = pinStateDirOrExit(argvDir, 'channel-access.ts');
-  if (verb !== 'group-add') throw new Error('unknown-verb');
-  if (channel !== 'discord' && channel !== 'telegram') throw new Error('unsupported-channel');
-  if (!chatId || !GROUP_ID_RE.test(chatId)) throw new Error('invalid-id');
-  const entry = options(args);
-  const config = readConfigRaw(dir);
-  if (config === null) throw new Error('no-config');
-  if (config.permission_mode === 'bypassPermissions') throw new Error('needs-terminal');
-  const file = path.join(channelStateDir(dir, channel, config.channels?.[channel]), 'access.json');
-  let raw: string;
+function readAccess(file: string): Access {
   try {
-    raw = fs.readFileSync(file, 'utf8');
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('no-access-file');
     throw error;
   }
-  const access: Access = JSON.parse(raw);
-  if (access.dmPolicy === 'disabled') throw new Error('policy-disabled');
-  const next = mergeGroupEntry(access, chatId, entry);
-  writeFileAtomic(file, JSON.stringify(next, null, 2) + '\n', 0o600);
-  // Treat the group policy as one audit leaf, including when replacing it.
-  const dotted = `groups.${chatId}`;
-  auditConfigChange(dir,
-    { [dotted]: JSON.stringify(access.groups?.[chatId]) },
-    { [dotted]: JSON.stringify(entry) },
-    'channel-access', `${channel}/access.json`);
-  console.log(`OK|${channel}:${chatId}`);
+}
+
+function writeAccess(dir: string, channel: string, file: string, before: Access, after: Access): void {
+  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  writeFileAtomic(file, JSON.stringify(after, null, 2) + '\n', 0o600);
+  auditConfigChange(dir, before, after, 'channel-access', `${channel}/access.json`);
+}
+
+function main(): void {
+  const [argvDir, verb, channel, value, ...args] = process.argv.slice(2);
+  if (!argvDir || !verb) throw new Error('usage');
+  // Keep the CLI's token protocol even when the shared pin would exit directly.
+  if (!assertStateDir(argvDir)) throw new Error('invalid-state-dir');
+  const dir = pinStateDirOrExit(argvDir, 'channel-access.ts');
+  if (channel !== 'discord' && channel !== 'telegram') throw new Error('unsupported-channel');
+  const config = readConfigRaw(dir);
+  if (config === null) throw new Error('no-config');
+  const file = path.join(channelStateDir(dir, channel, config.channels?.[channel]), 'access.json');
+
+  const homeFile = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'channels', channel, 'access.json');
+
+  if (verb === 'pair') {
+    if (!value || !CODE_RE.test(value) || args.length > 0) throw new Error('invalid-code');
+    let source: 'state' | 'home' = 'state';
+    let pairFile = file;
+    let access: Access | undefined;
+    for (const candidate of [file, homeFile]) {
+      try { access = readAccess(candidate); } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'no-access-file') throw error;
+        access = undefined;
+      }
+      if (access?.pending?.[value]) {
+        pairFile = candidate;
+        source = candidate === file ? 'state' : 'home';
+        break;
+      }
+    }
+    const pending = access?.pending?.[value];
+    if (!access || !pending) throw new Error('code-unknown');
+    if (pending.expiresAt < Date.now()) throw new Error('code-expired');
+    if (!GROUP_ID_RE.test(pending.senderId) || !GROUP_ID_RE.test(pending.chatId)) throw new Error('invalid-id');
+    const next = structuredClone(access);
+    next.allowFrom = [...new Set([...(access.allowFrom ?? []), pending.senderId])];
+    delete next.pending![value];
+    writeAccess(dir, channel, pairFile, access, next);
+    const approve = (accessFile: string) => {
+      const approved = path.join(path.dirname(accessFile), 'approved');
+      fs.mkdirSync(approved, { recursive: true });
+      writeFileAtomic(path.join(approved, pending.senderId), pending.chatId, 0o600);
+    };
+    approve(pairFile);
+    let label: string = source;
+    // A home code with an existing state file: the hermit reads the state file, and
+    // channel-setup only moves the home file when the state file is absent.
+    if (source === 'home' && fs.existsSync(file)) {
+      const stateAccess = readAccess(file);
+      const stateNext = structuredClone(stateAccess);
+      stateNext.allowFrom = [...new Set([...(stateAccess.allowFrom ?? []), pending.senderId])];
+      writeAccess(dir, channel, file, stateAccess, stateNext);
+      approve(file);
+      label = 'home+state';
+    }
+    console.log(`OK|pair|${channel}:${pending.senderId}|file=${label}`);
+    return;
+  }
+
+  if (verb === 'policy') {
+    if (!['pairing', 'allowlist', 'disabled'].includes(value) || args.length > 0) throw new Error('invalid-policy');
+    let policyFile = file;
+    let access: Access;
+    try { access = readAccess(policyFile); } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'no-access-file') throw error;
+      policyFile = homeFile;
+      access = readAccess(policyFile);
+    }
+    writeAccess(dir, channel, policyFile, access, { ...access, dmPolicy: value });
+    console.log(`OK|policy|${channel}:${value}`);
+    return;
+  }
+
+  if (verb === 'ensure-defaults') {
+    if (value !== undefined) throw new Error('invalid-options');
+    const access = readAccess(file);
+    const kept = Object.hasOwn(access, 'ackReaction');
+    if (!kept) writeAccess(dir, channel, file, access, { ...access, ackReaction: '👀' });
+    console.log(`OK|ack=${kept ? 'kept' : 'set'}`);
+    return;
+  }
+
+  if (verb !== 'group-add') throw new Error('unknown-verb');
+  if (!value || !GROUP_ID_RE.test(value)) throw new Error('invalid-id');
+  const { entry, shared, passive, nicknames, ackOff } = options(args);
+  if (config.channels?.[channel]?.maintainer_channel_id === value) throw new Error('maintainer-chat');
+  if (readAccess(file).dmPolicy === 'disabled') throw new Error('policy-disabled');
+  const before = readConfigRaw(dir);
+  if (before === null) throw new Error('no-config');
+  const after = structuredClone(before);
+  const channelConfig = after.channels?.[channel];
+  if (!channelConfig) throw new Error('no-channel-config');
+  for (const [key, include] of [['passive_chats', passive], ['shared_chats', shared]] as const) {
+    const ids: string[] = channelConfig[key] ?? [];
+    channelConfig[key] = include ? [...new Set([...ids, value])] : ids.filter(id => id !== value);
+  }
+  const result = persistConfig({ hermitDir: dir, before, after, actor: 'channel-access' });
+  if (result.newErrors.length > 0) throw new Error('invalid-config');
+  for (const warning of result.newWarnings) console.error(`Warning: ${warning}`);
+  let next: Access;
+  try {
+    const access = readAccess(file);
+    next = mergeGroupEntry(access, value, entry);
+    if (nicknames.length > 0) next.mentionPatterns = [...new Set([...(access.mentionPatterns ?? []), ...nicknames])];
+    if (ackOff) next.ackReaction = '';
+    writeAccess(dir, channel, file, access, next);
+  } catch {
+    console.error('re-run the same command');
+    throw new Error('partial-config-written');
+  }
+  console.log(`OK|${channel}:${value}|mention=${entry.requireMention ? 'yes' : 'no'}|allow=${entry.allowFrom.length || 'anyone'}|shared=${shared ? 'yes' : 'no'}|passive=${passive ? 'yes' : 'no'}|patterns=${next.mentionPatterns?.length ?? 0}|ack=${ackOff ? 'off' : 'kept'}`);
 }
 
 if (import.meta.main) {

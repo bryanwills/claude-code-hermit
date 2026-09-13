@@ -10,7 +10,7 @@ afterAll(cleanup);
 
 const entry = { requireMention: true, allowFrom: [] };
 const access = {
-  dmPolicy: 'allowlist', allowFrom: ['1'], pending: { code: '2' },
+  dmPolicy: 'allowlist', allowFrom: ['1'], pending: { ABC123: { senderId: '2', chatId: '3', expiresAt: 1 } },
   mentionPatterns: ['hello'], unknown: { keep: true },
   groups: { '123': entry, '456': entry },
 };
@@ -32,17 +32,23 @@ test('mergeGroupEntry replaces an entry and preserves siblings and other groups'
   expect(access.groups['123']).toEqual(entry);
 });
 
-function fixture(permissionMode = 'default', policy = 'allowlist', createAccess = true) {
+function fixture(channel: string) {
   const dir = freshDir();
   const channelDir = path.join(dir, 'channel');
+  const home = path.join(dir, 'home');
   fs.mkdirSync(channelDir);
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
-    permission_mode: permissionMode,
-    channels: { discord: { state_dir: channelDir }, telegram: { state_dir: channelDir } },
+  const configFile = path.join(dir, 'config.json');
+  fs.writeFileSync(configFile, JSON.stringify({
+    permission_mode: 'bypassPermissions',
+    channels: { [channel]: { state_dir: channelDir, passive_chats: ['456'], shared_chats: ['456'] } },
   }));
   const file = path.join(channelDir, 'access.json');
-  if (createAccess) fs.writeFileSync(file, JSON.stringify({ ...access, dmPolicy: policy }), { mode: 0o644 });
-  return { dir, file };
+  fs.writeFileSync(file, JSON.stringify(access), { mode: 0o644 });
+  const run = (verb: string, args: string[] = []) => runScript('channel-access.ts', {
+    args: [dir, verb, channel, ...args],
+    env: { AGENT_DIR: dir, DISCORD_STATE_DIR: '', TELEGRAM_STATE_DIR: '', CLAUDE_CONFIG_DIR: home },
+  });
+  return { dir, file, channelDir, home, configFile, run };
 }
 
 function rows(dir: string): any[] {
@@ -50,45 +56,184 @@ function rows(dir: string): any[] {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
 }
 
+const groupArgs = ['123', '--mention', 'no', '--allow', 'none', '--shared', 'no', '--passive', 'yes'];
+
 for (const channel of ['discord', 'telegram']) {
-  test(`CLI writes ${channel} group policy with private mode and one audit row`, async () => {
-    const { dir, file } = fixture();
-    const result = await runScript('channel-access.ts', {
-      args: [dir, 'group-add', channel, '-123', '--no-mention', '--allow', '1,-2'],
-      env: { AGENT_DIR: dir, DISCORD_STATE_DIR: '', TELEGRAM_STATE_DIR: '' },
+  for (const source of ['state', 'home', 'home+state']) {
+    test(`${channel} pairs from ${source}, writes approval and consumes code only once`, async () => {
+      const f = fixture(channel);
+      const file = source === 'state' ? f.file : path.join(f.home, 'channels', channel, 'access.json');
+      if (source === 'home') fs.unlinkSync(f.file);
+      if (source === 'home+state') fs.writeFileSync(f.file, JSON.stringify({ ...access, pending: {} }));
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({ ...access, pending: { ABC123: { senderId: '7', chatId: '8', expiresAt: Date.now() + 60000 } } }));
+      const configBytes = fs.readFileSync(f.configFile);
+      const result = await f.run('pair', ['ABC123']);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe(`OK|pair|${channel}:7|file=${source}\n`);
+      const paired = JSON.parse(fs.readFileSync(file, 'utf8'));
+      expect(paired.allowFrom).toEqual(['1', '7']);
+      expect(paired.pending).toEqual({});
+      expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(path.join(path.dirname(file), 'approved/7'), 'utf8')).toBe('8');
+      if (source === 'home+state') {
+        expect(JSON.parse(fs.readFileSync(f.file, 'utf8')).allowFrom).toEqual(['1', '7']);
+        expect(fs.readFileSync(path.join(f.channelDir, 'approved/7'), 'utf8')).toBe('8');
+      }
+      if (source === 'home') expect(fs.existsSync(f.file)).toBe(false);
+      const bytes = fs.readFileSync(file);
+      const audit = rows(f.dir);
+      expect(audit.length).toBeGreaterThan(0);
+      expect(audit.every(row => row.actor === 'channel-access')).toBe(true);
+      expect((await f.run('pair', ['ABC123'])).stdout).toBe('ERROR|code-unknown\n');
+      expect(fs.readFileSync(file)).toEqual(bytes);
+      expect(fs.readFileSync(f.configFile)).toEqual(configBytes);
+      expect(rows(f.dir)).toEqual(audit);
     });
+  }
+
+  for (const expired of [false, true]) {
+    test(`${channel} refuses ${expired ? 'expired' : 'unknown'} code without writing`, async () => {
+      const f = fixture(channel);
+      fs.writeFileSync(f.file, JSON.stringify({ ...access, pending: expired ? { ABC123: { senderId: '7', chatId: '8', expiresAt: 1 } } : {} }));
+      const bytes = fs.readFileSync(f.file);
+      const result = await f.run('pair', ['ABC123']);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe(`ERROR|code-${expired ? 'expired' : 'unknown'}\n`);
+      expect(fs.readFileSync(f.file)).toEqual(bytes);
+      expect(rows(f.dir)).toEqual([]);
+    });
+  }
+
+  for (const policy of ['pairing', 'allowlist', 'disabled']) {
+    test(`${channel} policy ${policy} is stable on repeat`, async () => {
+      const f = fixture(channel);
+      expect((await f.run('policy', [policy])).stdout).toBe(`OK|policy|${channel}:${policy}\n`);
+      expect(JSON.parse(fs.readFileSync(f.file, 'utf8')).dmPolicy).toBe(policy);
+      const bytes = fs.readFileSync(f.file);
+      const audit = rows(f.dir);
+      expect((await f.run('policy', [policy])).exitCode).toBe(0);
+      expect(fs.readFileSync(f.file)).toEqual(bytes);
+      expect(rows(f.dir)).toEqual(audit);
+    });
+  }
+
+  for (const ack of [undefined, '', 'custom']) {
+    test(`${channel} defaults preserve ${JSON.stringify(ack)} and repeat without audit`, async () => {
+      const f = fixture(channel);
+      fs.writeFileSync(f.file, JSON.stringify({ ...access, ackReaction: ack }));
+      expect((await f.run('ensure-defaults')).stdout).toBe(`OK|ack=${ack === undefined ? 'set' : 'kept'}\n`);
+      expect(JSON.parse(fs.readFileSync(f.file, 'utf8')).ackReaction).toBe(ack ?? '👀');
+      const bytes = fs.readFileSync(f.file);
+      const audit = rows(f.dir);
+      expect((await f.run('ensure-defaults')).stdout).toBe('OK|ack=kept\n');
+      expect(fs.readFileSync(f.file)).toEqual(bytes);
+      expect(rows(f.dir)).toEqual(audit);
+    });
+  }
+
+  test(`${channel} replaces group options both ways, unions patterns, keeps siblings and audits leaves`, async () => {
+    const f = fixture(channel);
+    const args = [...groupArgs, '--nicknames', '["hello","bot"]', '--ack-off'];
+    const result = await f.run('group-add', args);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(`OK|${channel}:-123\n`);
-    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
-      ...access, groups: { ...access.groups, '-123': { requireMention: false, allowFrom: ['1', '-2'] } },
+    expect(result.stdout).toBe(`OK|${channel}:123|mention=no|allow=anyone|shared=no|passive=yes|patterns=2|ack=off\n`);
+    expect(JSON.parse(fs.readFileSync(f.file, 'utf8'))).toEqual({
+      ...access, groups: { ...access.groups, '123': { requireMention: false, allowFrom: [] } },
+      mentionPatterns: ['hello', 'bot'], ackReaction: '',
     });
-    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-    expect(rows(dir)).toHaveLength(1);
-    expect(rows(dir)[0]).toMatchObject({ actor: 'channel-access', path: 'groups.-123', target: `${channel}/access.json` });
+    expect(JSON.parse(fs.readFileSync(f.configFile, 'utf8')).channels[channel]).toMatchObject({ passive_chats: ['456', '123'], shared_chats: ['456'] });
+    expect(fs.statSync(f.file).mode & 0o777).toBe(0o600);
+    const files = [f.file, f.configFile].map(file => fs.readFileSync(file));
+    const audit = rows(f.dir);
+    expect(audit.length).toBeGreaterThan(0);
+    expect(audit.every(row => row.actor === 'channel-access')).toBe(true);
+    expect(audit.some(row => row.path === 'groups.123.requireMention')).toBe(true);
+    expect((await f.run('group-add', args)).exitCode).toBe(0);
+    expect([f.file, f.configFile].map(file => fs.readFileSync(file))).toEqual(files);
+    expect(rows(f.dir)).toEqual(audit);
+    expect((await f.run('group-add', ['123', '--mention', 'yes', '--allow', '1,-2', '--shared', 'yes', '--passive', 'no'])).exitCode).toBe(0);
+    expect(JSON.parse(fs.readFileSync(f.configFile, 'utf8')).channels[channel]).toMatchObject({ passive_chats: ['456'], shared_chats: ['456', '123'] });
+    expect(JSON.parse(fs.readFileSync(f.file, 'utf8')).groups['123']).toEqual({ requireMention: true, allowFrom: ['1', '-2'] });
+    expect(JSON.parse(fs.readFileSync(f.file, 'utf8')).ackReaction).toBe('');
+  });
+
+  const failures = [
+    { token: 'invalid-policy', verb: 'policy', args: ['open'] },
+    { token: 'invalid-id', verb: 'group-add', args: ['abc', ...groupArgs.slice(1)] },
+    { token: 'invalid-regex', verb: 'group-add', args: [...groupArgs, '--nicknames', '["["]'] },
+    { token: 'invalid-options', verb: 'group-add', args: [...groupArgs, '--nicknames', '[1]'] },
+    { token: 'passive-needs-open-group', verb: 'group-add', args: groupArgs.map((v, i) => i === 2 ? 'yes' : v) },
+    { token: 'passive-needs-open-group', verb: 'group-add', args: groupArgs.map((v, i) => i === 4 ? '1' : v) },
+    ...['--mention', '--allow', '--shared', '--passive'].map(flag => ({ token: 'invalid-options', verb: 'group-add', args: groupArgs.filter((_, i) => i !== groupArgs.indexOf(flag) && i !== groupArgs.indexOf(flag) + 1) })),
+  ];
+  for (const failure of failures) {
+    test(`${channel} refuses ${failure.token} ${failure.args.join(' ')} before writing`, async () => {
+      const f = fixture(channel);
+      const files = [f.file, f.configFile].map(file => fs.readFileSync(file));
+      const result = await f.run(failure.verb, failure.args);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe(`ERROR|${failure.token}\n`);
+      expect([f.file, f.configFile].map(file => fs.readFileSync(file))).toEqual(files);
+      expect(rows(f.dir)).toEqual([]);
+    });
+  }
+
+  test(`${channel} refuses maintainer enrolment before writing`, async () => {
+    const f = fixture(channel);
+    const config = JSON.parse(fs.readFileSync(f.configFile, 'utf8'));
+    config.channels[channel].maintainer_channel_id = '123';
+    fs.writeFileSync(f.configFile, JSON.stringify(config));
+    const bytes = fs.readFileSync(f.configFile);
+    expect((await f.run('group-add', groupArgs)).stdout).toBe('ERROR|maintainer-chat\n');
+    expect(fs.readFileSync(f.configFile)).toEqual(bytes);
+    expect(rows(f.dir)).toEqual([]);
+  });
+
+  test(`${channel} reports partial config persistence and succeeds on rerun`, async () => {
+    const f = fixture(channel);
+    const bytes = fs.readFileSync(f.file);
+    fs.chmodSync(f.channelDir, 0o500);
+    try {
+      const result = await f.run('group-add', groupArgs);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe('ERROR|partial-config-written\n');
+      expect(result.stderr).toContain('re-run the same command');
+      expect(fs.readFileSync(f.file)).toEqual(bytes);
+      expect(JSON.parse(fs.readFileSync(f.configFile, 'utf8')).channels[channel].passive_chats).toEqual(['456', '123']);
+    } finally { fs.chmodSync(f.channelDir, 0o700); }
+    expect((await f.run('group-add', groupArgs)).exitCode).toBe(0);
+    expect(JSON.parse(fs.readFileSync(f.file, 'utf8')).groups['123'].requireMention).toBe(false);
   });
 }
 
-const failures = [
-  { token: 'unsupported-channel', args: ['slack', '123'] },
-  { token: 'invalid-id', args: ['discord', 'abc'] },
-  { token: 'invalid-id', args: ['discord', '123', '--allow', '1,bad'] },
-  { token: 'needs-terminal', args: ['discord', '123'], mode: 'bypassPermissions' },
-  { token: 'no-access-file', args: ['discord', '123'], missing: true },
-  { token: 'policy-disabled', args: ['discord', '123'], policy: 'disabled' },
-  { token: 'no-config', args: ['discord', '123'], noConfig: true },
-];
-for (const outcome of failures) {
-  test(`CLI refuses ${outcome.token}: ${outcome.args.join(' ')}`, async () => {
-    const { dir, file } = fixture(outcome.mode, outcome.policy, !outcome.missing);
-    if (outcome.noConfig) fs.unlinkSync(path.join(dir, 'config.json'));
-    const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+for (const token of ['no-access-file', 'policy-disabled', 'no-config', 'unsupported-channel', 'invalid-state-dir']) {
+  test(`CLI retains ${token} refusal without writes`, async () => {
+    const f = fixture('discord');
+    if (token === 'no-access-file') fs.unlinkSync(f.file);
+    if (token === 'no-config') fs.unlinkSync(f.configFile);
+    if (token === 'policy-disabled') fs.writeFileSync(f.file, JSON.stringify({ ...access, dmPolicy: 'disabled' }));
+    const before = fs.existsSync(f.file) ? fs.readFileSync(f.file) : null;
     const result = await runScript('channel-access.ts', {
-      args: [dir, 'group-add', ...outcome.args],
-      env: { AGENT_DIR: dir, DISCORD_STATE_DIR: '', TELEGRAM_STATE_DIR: '' },
+      args: [token === 'invalid-state-dir' ? path.join(f.dir, 'other') : f.dir, 'group-add', token === 'unsupported-channel' ? 'slack' : 'discord', ...groupArgs],
+      env: { AGENT_DIR: f.dir, DISCORD_STATE_DIR: '', TELEGRAM_STATE_DIR: '' },
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe(`ERROR|${outcome.token}\n`);
-    expect(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null).toBe(before);
-    expect(rows(dir)).toEqual([]);
+    expect(result.stdout).toBe(`ERROR|${token}\n`);
+    expect(fs.existsSync(f.file) ? fs.readFileSync(f.file) : null).toEqual(before);
+    expect(rows(f.dir)).toEqual([]);
+  });
+}
+
+for (const channel of ['discord', 'telegram']) {
+  test(`${channel} policy after home pairing works before the location move`, async () => {
+    const f = fixture(channel);
+    fs.unlinkSync(f.file);
+    const file = path.join(f.home, 'channels', channel, 'access.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ ...access, dmPolicy: 'pairing', pending: { ABC123: { senderId: '7', chatId: '8', expiresAt: Date.now() + 60000 } } }));
+    expect((await f.run('pair', ['ABC123'])).exitCode).toBe(0);
+    expect((await f.run('policy', ['allowlist'])).exitCode).toBe(0);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).dmPolicy).toBe('allowlist');
   });
 }

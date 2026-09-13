@@ -37,7 +37,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { validate } from './validate-config';
-import { auditConfigChange } from './lib/config-audit';
+import { persistConfig } from './lib/config-write';
 import { configExists, readConfigRaw } from './lib/config-read';
 
 type Json = any;
@@ -220,34 +220,23 @@ if (Object.hasOwn(answers, 'channels')) {
   // base (template default `true`, or the existing re-init value) already carries.
 }
 
-// --- output-level validation guard ---
-// Only errors this run introduced block the write; pre-existing ones are surfaced
-// and carried through (see priorErrors above).
-const { errors } = validate(config);
-const newErrors = errors.filter((e) => !priorErrors.includes(e));
+// Only errors introduced by this run block persistence.
+const preExisting = configExists(hermitDir) ? (readConfigRaw(hermitDir) ?? {}) : undefined;
+let result;
+try {
+  result = persistConfig({ hermitDir, before: preExisting, after: config, actor: 'hatch-config', priorErrors });
+} catch (e: any) {
+  die(`write failed: ${e.message}`);
+}
+const { newErrors, keptErrors } = result;
 if (newErrors.length > 0) {
   console.error('hatch-config: assembled config.json failed validation:');
   for (const e of newErrors) console.error(`  FAIL  ${e}`);
   process.exit(1);
 }
-for (const e of errors.filter((e) => priorErrors.includes(e))) {
+for (const e of keptErrors) {
   console.error(`hatch-config: pre-existing config error, left as-is:  ${e}`);
 }
-
-// --- atomic write: serialize -> .tmp -> rename (mirrors evolve-finalize.ts) ---
-fs.mkdirSync(hermitDir, { recursive: true });
-const tmp = configPath + '.tmp';
-// `readConfigRaw` returns null for both "absent" and "present but unparseable";
-// only genuine absence is a creation, so decide on the file, not the parse.
-const preExisting = configExists(hermitDir) ? (readConfigRaw(hermitDir) ?? {}) : undefined;
-try {
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, configPath);
-} catch (e: any) {
-  try { fs.unlinkSync(tmp); } catch {}
-  die(`write failed: ${e.message}`);
-}
-auditConfigChange(hermitDir, preExisting, config, 'hatch-config');
 
 console.log(JSON.stringify(config));
 process.exit(0);

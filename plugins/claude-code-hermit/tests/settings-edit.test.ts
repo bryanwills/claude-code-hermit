@@ -542,6 +542,14 @@ describe('settings-edit unset', () => {
     expect(auditRows(dir)[0]).toMatchObject({ path: 'channels.discord' });
   });
 
+  test('set on a config.json that does not exist yet creates it', async () => {
+    const dir = freshDir();
+    const file = path.join(dir, 'config.json');
+    const r = await runScript('settings-edit.ts', { args: [file, 'set', 'model', '"sonnet"'] });
+    expect(r.exitCode).toBe(0);
+    expect(readConfig(file).model).toBe('sonnet');
+  });
+
   test('a missing path is a no-op, not an error', async () => {
     const dir = freshDir();
     const file = seedConfig(dir, validConfig());

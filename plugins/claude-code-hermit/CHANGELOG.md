@@ -7,13 +7,18 @@
 - Add a Discord server channel or Telegram group from chat with `hermit-settings channels`; the write asks for approval in the paired DM and is refused under bypass permissions.
 
 ### Changed
+- Channel pairing, policy, and group enrolment from `channel-setup`, `docker-setup`, and chat share one questionnaire and `channel-access.ts` file writes, without typing into the hermit session or requiring Docker tmux. Pairing and enrolment are refused in bypass-mode sessions and ask elsewhere; `config.json` writers share one persistence path.
 - `hermit-settings channels` adds only a channel that isn't configured yet and writes just the answers given, so an existing entry is no longer replaced; `hatch-config` honours a supplied `state_dir`.
-- `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step, and `docker-setup` group pairing asks the same group questions.
+- `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step.
 
 ### Fixed
 - `hatch` and the `domain-hatch` verbs resolve a plugin loaded with `--plugin-dir` from the checkout instead of stopping with `plugin_not_installed`.
+- Re-running setup preserves a seen-emoji that was turned off.
 - `channel-setup` and `hermit-settings` ask whether to turn off the seen-emoji reaction when a passive group is added instead of only warning that it reacts to every message.
 - `hermit-doctor` no longer warns that the briefing chat looks shared when the operator writes from a second chat, thread, or fork; who may pause, resume, or read full status is unchanged.
+
+### Removed
+- `channel-pair.ts`.
 
 ### Upgrade Instructions
 - Nothing extra to run for the allow-list entry: the unconditional `permissions-sync` step adds `Bash(bun */scripts/channel-access.ts*)`.
