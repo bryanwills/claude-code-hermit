@@ -44,16 +44,15 @@ The test suite covers all hooks and helpers; add tests for any new hook or lib l
 
 ```
 skills/hatch/        — one-time setup wizard
-skills/dev-pr/       — push branch + open PR
-hooks/hooks.json     — registers git-push-guard
-scripts/             — git-push-guard.ts (the only script)
+skills/              : diagnosis, merge conflicts, domain brainstorm
+hooks/hooks.json     : registers both guards
+scripts/             : git-push-guard.ts, worktree-boundary-guard.ts, their tests, lib/find-hermit-dir.ts and its test
 tests/               — run-all.sh + skill-structure.test.ts
 state-templates/     — CLAUDE-APPEND.md (injected into target project's CLAUDE.md)
 docs/                — user-facing documentation
 .claude-plugin/      — plugin manifest + hermit-meta.json
 ```
 
-The plugin shipped no agents and no `scripts/lib/` after v0.3.0 — see CHANGELOG `[0.3.0]` for what was removed.
 
 ## PR Workflow
 

@@ -477,9 +477,9 @@ function extractSiblingMarker(text: string, name: string): string | null {
 }
 
 // A template block carrying mode: markers must be rendered by its own plugin
-// before install (e.g. dev-hermit's scripts/render-append.ts). Core cannot
+// before install. Core cannot
 // render it, so the raw text is neither a valid comparison base nor a valid
-// replacement payload — sync must be skipped entirely for such a block.
+// replacement payload, so sync must be skipped entirely for such a block.
 function requiresRendering(blockText: string): boolean {
   return /<!--\s*\/?mode:/.test(blockText);
 }
