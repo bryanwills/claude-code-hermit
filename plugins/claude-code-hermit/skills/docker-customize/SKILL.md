@@ -1,11 +1,15 @@
 ---
 name: docker-customize
-description: Route a request to install a tool, binary, package, env var, persistent directory, or side service in the hermit Docker container to the first channel that can carry it. Apt packages go in the Dockerfile operator block; boot-time shell work goes in docker-entrypoint.hermit-local.sh; compose and Dockerfile only when nothing else fits. Activates on messages like "install gog in the container", "add an apt package", "download a binary into the container", "set a container env var", "add a volume or port to compose".
+description: Route a request to install a tool, binary, package, env var, persistent directory, side service, or personal/third-party skill in the hermit Docker container to the first channel that can carry it. Apt packages go in the Dockerfile operator block; boot-time shell work goes in docker-entrypoint.hermit-local.sh; compose and Dockerfile only when nothing else fits. Activates on messages like "install skills in the container", "install gog in the container", "add an apt package", "download a binary into the container", "set a container env var", "add a volume or port to compose".
 ---
 
 # Docker Customize
 
 Land a container change in the first channel that can carry it, in the order below. Files sit on the project bind mount, so this skill runs from inside the container or on the host. Rebuild, restart, and compose validation are host-only (the image has no Docker CLI): name the command for the operator, do not run it from inside the container.
+
+For installing or importing personal and third-party skills, read only the "Personal and third-party skills in Docker" section in `${CLAUDE_PLUGIN_ROOT}/docs/creating-your-own-hermit.md` ([guide](../../docs/creating-your-own-hermit.md#personal-and-third-party-skills-in-docker)). Use the sections below for any required dependencies or container configuration.
+
+When deployment context is needed, read `runtime_mode` from `.claude-code-hermit/state/runtime.json`. Before environment-dependent commands, locate the current shell with `[ -f /.dockerenv ] || [ -f /run/.containerenv ] && echo container || echo host`, the check used by `docker-setup`. Recorded deployment mode does not locate the current shell: a host session can manage a Docker Hermit's shared project. Do not use `$TMUX` to distinguish them; Docker also runs Claude inside tmux. Keep rebuild, restart, and compose validation on the host as above.
 
 ## 1. Apt package
 
