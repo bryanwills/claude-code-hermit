@@ -225,6 +225,16 @@ function ask(reason: string): void {
   }) + '\n');
 }
 
+function deny(reason: string): void {
+  fs.writeSync(1, JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  }) + '\n');
+}
+
 /**
  * A shell write that lands on config.json without going through settings-edit:
  * a redirect, `cp`/`mv` with it as the destination (the last argument), `tee`
@@ -243,17 +253,28 @@ const CONFIG_FILE_WRITE = new RegExp(
 /** A token the shell would still expand: the hook cannot know what it names. */
 const SHELL_EXPANDS = /[$`]/;
 
-/**
- * Every `channel-access` group-add in the command, labelled by its chat. The
- * shell strips quotes and escapes before the script reads its verb, so
- * `'group-add'` still writes; an expansion after the script name is opaque.
- */
+/** Label recognized channel writes; shell expansions remain opaque. */
 function channelAccessAsks(command: string): string[] {
   const at = command.search(/channel-access(?:\.ts)?\b/);
   if (at < 0) return [];
-  const rest = command.slice(at).replace(/['"\\]/g, '');
-  if (SHELL_EXPANDS.test(rest)) return ['channel-access'];
-  return [...rest.matchAll(/(?:^|\s)group-add\s+(\S+)\s+(\S+)/g)].map(m => `listen in ${m[1]} chat ${m[2]}`);
+  const tail = command.slice(at);
+  // Single-quoted text is literal, so a nickname regex's `$` anchor stays readable.
+  if (SHELL_EXPANDS.test(tail.replace(/'[^']*'/g, ''))) return ['channel-access'];
+  // Separate shell commands before stripping quotes: nickname regexes can contain pipes.
+  const commands = tail.match(/(?:'[^']*'|"[^"]*"|\\[\s\S]|[^;&|\n])+/g) ?? [];
+  return commands.flatMap(command => {
+    const rest = command.replace(/['"\\]/g, '');
+    return [...rest.matchAll(/(?:^|\s)(pair|policy|group-add)\s+(\S+)\s+(\S+)(.*)/g)].map(m => {
+      const [, verb, channel, value, flags] = m;
+      if (verb === 'pair') return `pair ${channel} code ${value}`;
+      if (verb === 'policy') return `policy ${channel} ${value}`;
+      const option = (name: string) => flags.match(new RegExp(`(?:^|\\s)--${name}\\s+(\\S+)`))?.[1] ?? '?';
+      const allow = option('allow');
+      return `listen in ${channel} chat ${value}: mention=${option('mention')} allow=${allow === 'none' ? 'anyone' : allow === '?' ? '?' : `${allow.split(',').length} ids`} shared=${option('shared')} passive=${option('passive')}`
+        + (/--nicknames(?:\s|$)/.test(flags) ? ' + nickname triggers (channel-wide)' : '')
+        + (/--ack-off(?:\s|$)/.test(flags) ? ' + seen-emoji off (channel-wide)' : '');
+    });
+  });
 }
 
 /**
@@ -341,6 +362,11 @@ function main(payload: any): void {
   let asked: string[] | null = null;
 
   if (tool === 'Bash') {
+    if (payload.permission_mode === 'bypassPermissions'
+      && channelAccessAsks(typeof input.command === 'string' ? input.command : '').length > 0) {
+      deny('Channel pairing and group enrolment are refused in bypass mode; run /claude-code-hermit:channel-setup from a normal session.');
+      return;
+    }
     asked = protectedMutation(typeof input.command === 'string' ? input.command : '',
       typeof payload.cwd === 'string' ? payload.cwd : process.cwd());
   } else {

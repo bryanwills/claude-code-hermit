@@ -135,6 +135,7 @@ describe('read-path gate', () => {
     'lib/config-read.ts', // the reader itself
     'validate-config.ts', // advisory schema validator — raw by design
     'hatch-config.ts', // writer: strict read before write
+    'lib/config-write.ts', // shared config.json persister for settings-edit, hatch-config and channel-access
     'evolve-finalize.ts', // writer: upgrade path
     'evolve-plan.ts', // upgrade tooling: differentiated error taxonomy (no_config vs invalid vs unreadable)
     'channel-hook.ts', // writer: dm_channel_id persist path keeps its strict read

@@ -21,12 +21,14 @@ function payload(opts: {
   dir: string;
   tool: 'Bash' | 'Edit' | 'Write';
   input: any;
+  permission_mode?: string;
 }): string {
   return JSON.stringify({
     hook_event_name: 'PreToolUse',
     tool_name: opts.tool,
     tool_input: opts.input,
     cwd: opts.dir,
+    permission_mode: opts.permission_mode ?? 'default',
   });
 }
 
@@ -439,4 +441,44 @@ describe('static settings policy', () => {
         `Hermit setting: routines.0.${field}`);
     }
   });
+});
+
+for (const mode of ['bypassPermissions', 'auto', 'default']) {
+  for (const [args, label] of [
+    ['pair discord ABC123', 'pair discord code ABC123'],
+    ['policy telegram allowlist', 'policy telegram allowlist'],
+    ['group-add discord 123 --mention no --allow none --shared no --passive yes --ack-off', 'listen in discord chat 123: mention=no allow=anyone shared=no passive=yes + seen-emoji off (channel-wide)'],
+    ["'group-add' 'telegram' '-123' --mention 'yes' --allow '1,2' --shared yes --passive no --nicknames '[\"bot\"]'", 'listen in telegram chat -123: mention=yes allow=2 ids shared=yes passive=no + nickname triggers (channel-wide)'],
+  ]) {
+    test(`channel access ${mode}: ${args}`, async () => {
+      const dir = fixture();
+      const r = await runGate(payload({ dir, tool: 'Bash', permission_mode: mode, input: { command: `bun '/p with spaces/channel-access.ts' '/state with spaces' ${args}` } }), dir);
+      expect(r.exitCode).toBe(0);
+      const output = JSON.parse(r.stdout).hookSpecificOutput;
+      expect(output.permissionDecision).toBe(mode === 'bypassPermissions' ? 'deny' : 'ask');
+      expect(output.permissionDecisionReason).toBe(mode === 'bypassPermissions'
+        ? 'Channel pairing and group enrolment are refused in bypass mode; run /claude-code-hermit:channel-setup from a normal session.'
+        : `Hermit setting: ${label}`);
+    });
+  }
+}
+
+test('channel access expansion fallback and multiple writes remain guarded', async () => {
+  const dir = fixture();
+  for (const mode of ['default', 'bypassPermissions']) {
+    const r = await runGate(payload({ dir, tool: 'Bash', permission_mode: mode, input: { command: 'bun channel-access.ts "$STATE" "$VERB" discord "$CODE"' } }), dir);
+    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe(mode === 'default' ? 'ask' : 'deny');
+  }
+  const r = await runGate(payload({ dir, tool: 'Bash', input: { command: 'bun channel-access.ts /state pair discord ABC123 && bun channel-access.ts /state policy telegram allowlist' } }), dir);
+  const reason = JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+  expect(reason).toContain('pair discord code ABC123');
+  expect(reason).toContain('policy telegram allowlist');
+});
+
+test('quoted nickname alternation does not truncate enrollment approval values', async () => {
+  const dir = fixture();
+  const r = await runGate(payload({ dir, tool: 'Bash', input: {
+    command: `bun channel-access.ts /state group-add discord 123 --nicknames '["bot|helper"]' --mention no --allow none --shared yes --passive yes --ack-off`,
+  } }), dir);
+  expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason).toBe('Hermit setting: listen in discord chat 123: mention=no allow=anyone shared=yes passive=yes + nickname triggers (channel-wide) + seen-emoji off (channel-wide)');
 });
