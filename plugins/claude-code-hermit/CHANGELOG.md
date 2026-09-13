@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Checklist edits made through `heartbeat edit` are recorded in `hermit-settings history` as a fingerprint and line count.
 - Add a Discord server channel or Telegram group from chat with `hermit-settings channels`; the write asks for approval in the paired DM and is refused under bypass permissions.
 
 ### Changed

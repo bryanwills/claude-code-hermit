@@ -62,6 +62,7 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.js
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json toggle <dotted.path>       # boolean flip (absent → true)
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json unset <dotted.path>        # delete a key (siblings and parents untouched)
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json history [dotted.path] [--limit N]   # recent audited changes
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json record-file HEARTBEAT.md            # record checklist fingerprint
 ```
 
 **Every write goes through these verbs — never edit `config.json` with Edit/Write.** The script preserves siblings, refuses a change that would make the config invalid, and records the change in the audit ledger that `history` reads. A hand-edit bypasses all three.
@@ -394,7 +395,7 @@ Run `settings-edit ... set quality_gate.tier <chosen>` (creates the `quality_gat
 Note: if you commit autonomous-implementation diffs through a skill that already runs `/simplify` before committing, consider **Budget** — any non-Budget tier here would run the cleanup pass twice per committed implementation.
 
 **If argument is "history":**
-Run `settings-edit ... history [dotted.path] [--limit N]` (the operator may name a setting: "history heartbeat"). Relay the rows in the operator's language, naming who made each change — `settings-edit` is an operator edit, `hermit-evolve` a change an upgrade made, `evolve-finalize` an upgrade's version stamp alone, `channel-hook` a channel the hermit learned, `hermit-start`/`hermit-stop` a boot flip. In a channel reply, drop the dotted paths and script names for plain language ("the heartbeat interval went from 2h to 30m on the 18th"). An empty ledger means nothing has changed since the audit trail started, not that the setting is unset.
+Run `settings-edit ... history [dotted.path] [--limit N]` (the operator may name a setting: "history heartbeat"). Relay the rows in the operator's language, naming who made each change — `settings-edit` is an operator edit, `hermit-evolve` a change an upgrade made, `evolve-finalize` an upgrade's version stamp alone, `channel-hook` a channel the hermit learned, `hermit-start`/`hermit-stop` a boot flip, `heartbeat-edit` a checklist edit made from chat (hash and line count, never the text). In a channel reply, drop the dotted paths and script names for plain language ("the heartbeat interval went from 2h to 30m on the 18th"). An empty ledger means nothing has changed since the audit trail started, not that the setting is unset.
 
 **If argument is "artifact-authorization":**
 This records a decision only — it never runs `apply-settings.ts` and never touches a settings file from this session. A channel reply may only flip hermit config, never permissions (auto-mode classifier invariant); the actual grant is applied by `hermit-start`'s boot-time `applyArtifactGrant`, outside any session.

@@ -623,3 +623,55 @@ describe('settings-edit history', () => {
     expect(r.stdout).toContain('No recorded settings changes');
   });
 });
+
+describe('settings-edit record-file', () => {
+  test('records a baseline, skips an unchanged rewrite, then records a change', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig());
+    const heartbeat = path.join(dir, '.claude-code-hermit', 'HEARTBEAT.md');
+    fs.writeFileSync(heartbeat, '# Heartbeat\n- item one\n');
+
+    const first = await runScript('settings-edit.ts', { args: [file, 'record-file', 'HEARTBEAT.md'] });
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout).toContain('recorded HEARTBEAT.md');
+    const rows = auditRows(dir);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      actor: 'heartbeat-edit',
+      target: 'HEARTBEAT.md',
+      path: 'HEARTBEAT.md',
+    });
+    expect(rows[0].old).toBeUndefined();
+    const firstNew = rows[0].new;
+    expect(firstNew).toMatch(/^[0-9a-f]{12} \(\d+ lines\)$/);
+
+    const second = await runScript('settings-edit.ts', { args: [file, 'record-file', 'HEARTBEAT.md'] });
+    expect(second.exitCode).toBe(0);
+    expect(second.stdout).toContain('unchanged');
+    expect(auditRows(dir)).toHaveLength(1);
+
+    fs.writeFileSync(heartbeat, '# Heartbeat\n- item one\n- item two\n');
+    const third = await runScript('settings-edit.ts', { args: [file, 'record-file', 'HEARTBEAT.md'] });
+    expect(third.exitCode).toBe(0);
+    expect(third.stdout).toContain('recorded HEARTBEAT.md');
+    const after = auditRows(dir);
+    expect(after).toHaveLength(2);
+    expect(after[1].old).toBe(firstNew);
+    expect(after[1].new).not.toBe(firstNew);
+
+    const history = await runScript('settings-edit.ts', { args: [file, 'history', 'HEARTBEAT.md'] });
+    expect(history.exitCode).toBe(0);
+    expect(history.stdout).toContain('HEARTBEAT.md');
+    expect(history.stdout).toContain('[heartbeat-edit]');
+    expect(history.stdout.trim().split('\n')).toHaveLength(2);
+  });
+
+  test('an unsupported file name exits 1', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig());
+    const r = await runScript('settings-edit.ts', { args: [file, 'record-file', 'OPERATOR.md'] });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr.trim().split('\n')).toHaveLength(1);
+    expect(auditRows(dir)).toHaveLength(0);
+  });
+});
