@@ -11,6 +11,7 @@
  *   show                     Render the operator-facing settings summary from live values
  *   apply-known <arg> <val>  Write one registry-backed setting, validated by kind/enum
  *   history [path] [--limit N]  Print recent audited changes, newest last
+ *   record-file HEARTBEAT.md    Record the checklist fingerprint in the audit ledger
  *
  * Value parsing for `set`: 'none'/'clear' → null; otherwise JSON.parse first
  * (so true, 42, "x", {...} work), falling back to the raw string on parse failure.
@@ -27,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SETTINGS, READ_ONLY, byArg, type Setting } from './lib/settings/registry';
 import { auditConfigChange, readHistory } from './lib/config-audit';
+import { sha256 } from './lib/hash';
 import { validate } from './validate-config';
 import { flagValue, flagEq } from './lib/cli';
 import { safeForLLM } from './lib/sanitize';
@@ -367,6 +369,36 @@ if (import.meta.main) {
     process.exit(0);
   }
 
+  // Same reason as history: a malformed config.json must not block this.
+  if (op === 'record-file') {
+    const name = rest[0];
+    if (name !== 'HEARTBEAT.md') {
+      console.error(`record-file: unsupported file ${name ?? ''}`);
+      process.exit(1);
+    }
+    const filePath = path.join(stateDir, name);
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      console.error(`record-file: ${name} not found`);
+      process.exit(1);
+    }
+    const trimmed = content.endsWith('\n') ? content.slice(0, -1) : content;
+    const lineCount = trimmed.split('\n').length;
+    const current = `${sha256(content).slice(0, 12)} (${lineCount} lines)`;
+    const previous = readHistory(stateDir, 'HEARTBEAT.md', 1).at(-1)?.new;
+    auditConfigChange(
+      stateDir,
+      { 'HEARTBEAT.md': previous },
+      { 'HEARTBEAT.md': current },
+      'heartbeat-edit',
+      'HEARTBEAT.md',
+    );
+    console.log(previous === current ? 'HEARTBEAT.md unchanged' : `recorded HEARTBEAT.md ${current}`);
+    process.exit(0);
+  }
+
   const config = readTargetJson(targetFile);
   // Snapshot before any mutation — setPath and friends mutate in place, so a
   // reference would diff against itself and report nothing.
@@ -466,7 +498,7 @@ if (import.meta.main) {
     }
 
     default: {
-      console.error(`Unknown operation: ${op}. Valid ops: get, set, unset, toggle, show, apply-known, history`);
+      console.error(`Unknown operation: ${op}. Valid ops: get, set, unset, toggle, show, apply-known, history, record-file`);
       process.exit(1);
     }
   }

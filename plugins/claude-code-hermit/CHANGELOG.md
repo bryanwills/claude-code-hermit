@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Checklist edits made through `heartbeat edit` are recorded in `hermit-settings history` as a fingerprint and line count.
 - Add a Discord server channel or Telegram group from chat with `hermit-settings channels`; the write asks for approval in the paired DM and is refused under bypass permissions.
 
 ### Changed
@@ -10,6 +11,7 @@
 - `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step, and `docker-setup` group pairing asks the same group questions.
 
 ### Fixed
+- `channel-setup` and `hermit-settings` ask whether to turn off the seen-emoji reaction when a passive group is added instead of only warning that it reacts to every message.
 - `hermit-doctor` no longer warns that the briefing chat looks shared when the operator writes from a second chat, thread, or fork; who may pause, resume, or read full status is unchanged.
 
 ### Upgrade Instructions

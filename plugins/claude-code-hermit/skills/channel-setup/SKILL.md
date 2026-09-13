@@ -251,7 +251,7 @@ Skip this step if the current channel is `imessage`. Otherwise:
    /<channel>:access set ackReaction 👀 — save access.json to <state_dir>/, not ~/.claude
    ```
 
-`👀` works on Discord (any unicode emoji accepted) and is in Telegram's fixed reaction whitelist. Operators get an emoji on their inbound DM as soon as the bot receives it — fills the gap after the 5–10s typing indicator times out. Idempotent: re-running channel-setup leaves customized values alone.
+`👀` works on Discord (any unicode emoji accepted) and is in Telegram's fixed reaction whitelist. Operators get an emoji on their inbound DM as soon as the bot receives it — fills the gap after the 5–10s typing indicator times out. Idempotent: re-running channel-setup leaves customized values alone; §6c may offer to turn the reaction off when a passive chat is added.
 
 ### 6c. Server channel / group chat (optional)
 
@@ -283,8 +283,14 @@ Skip this step if the current channel is `imessage`, or if `access.json` is not 
       echo '{"channels":{"<channel>":{"passive_chats":<full_passive_array>,"shared_chats":<full_shared_array>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "$(pwd)" --reinit >/dev/null
       ```
       Substitute the actual channel key and JSON string arrays. Never use Edit/Write on `config.json`. Stop on a non-zero merge exit as in Adding an entry. Repeating the same answers must leave the arrays unchanged.
-      On Yes, confirm the group's `allowFrom` is empty in the plugin settings so every member's messages can be recorded. Explain these facts in the operator's language:
-      - The plugin-global `ackReaction` reacts to every member's message; `/<channel>:access set ackReaction ""` removes it.
+      On Yes, confirm the group's `allowFrom` is empty in the plugin settings so every member's messages can be recorded. `Read` `<state_dir>/access.json`. If `ackReaction` is a non-empty string and this question was not already answered earlier in the loop, ask once with `AskUserQuestion`:
+
+      | Header | Question | Options (`label`: description) |
+      |---|---|---|
+      | Seen emoji | Turn off the plugin-global seen-emoji? | `Turn off`: also stops the emoji on the operator's DMs for this channel (default) / `Keep 👀`: leave the reaction as-is |
+
+      Missing or empty `ackReaction` asks nothing. On **Turn off**, run `/<channel>:access set ackReaction "" — save access.json to <state_dir>/, not ~/.claude` (literal `""`). After Turn off, name the restore command `/<channel>:access set ackReaction 👀`. After Keep, name the clear command `/<channel>:access set ackReaction ""`. If the question was not asked, skip that sentence.
+      Explain these facts in the operator's language:
       - Discord threads inherit the parent's mention gate and `allowFrom` sender list. For mention-free steering in a bound thread, configure `/discord:access group add <parent> --no-mention` against this install's state directory. The bot needs Create Public Threads to open task threads; if that permission is missing, ask the sender to open a thread and ask there. A quote-reply to the bot counts as an implicit mention at the plugin gate. Unbound passive chats still require a self-mention at the Hermit gate. Forum channels are unsupported; denying thread creation prevents automatic task threads.
       - Telegram privacy mode must be disabled in BotFather.
       Later group additions from chat go through `hermit-settings channels`.
@@ -295,7 +301,7 @@ After the loop, if any nickname regex was given, read existing `mentionPatterns`
 /<channel>:access set mentionPatterns '<json array>' : save access.json to <state_dir>/, not ~/.claude
 ```
 
-4. **Verify all added channels** (one `Read` after the loop): open `<state_dir>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: "Group entry didn't land — run `/<channel>:access group add <channelId>` manually after setup." Also check that `mentionPatterns` contains every requested regex and `groups.<id>.allowFrom` equals the requested trigger ids (compare ids as strings, ignoring order). For each miss print "`<key>` didn't land, this plugin may not support it; set it with `/<channel>:access` manually after setup", naming the exact key. Do not error. Then proceed to §6d.
+4. **Verify all added channels** (one `Read` after the loop): open `<state_dir>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: "Group entry didn't land — run `/<channel>:access group add <channelId>` manually after setup." Also check that `mentionPatterns` contains every requested regex and `groups.<id>.allowFrom` equals the requested trigger ids (compare ids as strings, ignoring order). When Turn off was chosen, also confirm `ackReaction` is `""`. For each miss print "`<key>` didn't land, this plugin may not support it; set it with `/<channel>:access` manually after setup", naming the exact key. Do not error. Then proceed to §6d.
 
 ### 6d. Maintainer channel check (optional)
 
