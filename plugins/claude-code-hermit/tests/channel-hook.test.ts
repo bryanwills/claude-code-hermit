@@ -94,6 +94,21 @@ describe('persistDmChannelId — maintainer chat exclusion', () => {
     expect(warnings.some(w => w.includes('discord.dm_channel_id equals maintainer_channel_id'))).toBe(true);
   });
 
+  test('validate-config stays quiet when default_chat_id differs from dm_channel_id', () => {
+    const { warnings } = validate({
+      operator_profile: 'technical',
+      channels: { discord: { enabled: true, default_chat_id: 'H1', dm_channel_id: 'D1' } },
+    });
+    expect(warnings.some(w => w.includes('looks like a shared chat'))).toBe(false);
+  });
+
+  test('validate-config warns when default_chat_id equals maintainer_channel_id', () => {
+    const { warnings } = validate({
+      channels: { discord: { enabled: true, default_chat_id: 'M1', maintainer_channel_id: 'M1' } },
+    });
+    expect(warnings.some(w => w.includes('default_chat_id equals maintainer_channel_id'))).toBe(true);
+  });
+
   test('validate-config stays quiet when the two ids differ', () => {
     const { warnings } = validate({
       channels: { discord: { enabled: true, dm_channel_id: 'D1', maintainer_channel_id: 'M1' } },
