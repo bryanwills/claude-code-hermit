@@ -41,11 +41,10 @@ Produce one firing entry per true item:
 
 Normalise: strip the list marker and any checkbox first, then lowercase, remove non-alphanumeric characters, truncate at the listed limit.
 
-**Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key, or the `stale-session` key.
-Those are derived and owned entirely by `heartbeat.ts alert-state` — the two prefixes from
-`state/micro-proposals.json` and `proposals/*.md` frontmatter, `stale-session` from `runtime.json` +
-the bottom-most SHELL.md Progress Log timestamp — an entry you emit under any of them is dropped as
-a phantom and has no effect.
+**Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key.
+Those are derived and owned entirely by `heartbeat.ts alert-state` from
+`state/micro-proposals.json` and `proposals/*.md` frontmatter — an entry you emit under either
+prefix is dropped as a phantom and has no effect.
 
 ## Firing Item Text
 

@@ -10,7 +10,7 @@
 // writes stdout or exits, keeping the verb's output byte-identical.
 //
 // Owner contract (write-field split with SKILL.md):
-//   This script owns: alert-state.json total_ticks, last_stale_wake_at, last_micro_corrupt_wake_at;
+//   This script owns: alert-state.json total_ticks, last_micro_corrupt_wake_at;
 //                     pending-close-drain.json (shared with lib/routines/due.ts, non-peek only)
 //   alert-state owns: alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at,
 //                     structured_read_failure_notified_date (the `heartbeat.ts alert-state` verb)
@@ -51,7 +51,7 @@ export const nextTaskQueued = (dir: string): boolean =>
 // last-operator-action.json, falls back to SHELL.md mtime). Pure read; fail-open
 // to false so a read error never forces a close. Shared by the injection branch
 // (AUTO_CLOSE never reads HEARTBEAT.md, so it survives a tainted checklist) and
-// the stale-session block below.
+// the 12h AUTO_CLOSE path below.
 function staleAutoCloseDue(dir: string, nowMs: number): boolean {
   try {
     const runtime = readJSON(path.join(dir, 'state', 'runtime.json')) ?? {};
@@ -375,50 +375,8 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
   // anyway, which is the wait this pierce exists to remove for unattended hermits only.
   if (sessionState === 'idle' && config.always_on === true && nextTaskQueued(stateDir)) return 'EVALUATE';
 
-  if (sessionState === 'in_progress') {
-    // 12h operator-quiet → auto-close. The action-file resolution below is kept
-    // only to feed the separate stale-EVALUATE damper (different threshold/purpose).
-    if (staleAutoCloseDue(stateDir, now)) return 'AUTO_CLOSE';
-    // Prefer last-operator-action.json: records genuine operator prompts only, unaffected
-    // by routine writes (reflect, plugin-check routines, heartbeat alerts) that bump SHELL.md mtime.
-    // Absent/malformed → !usedActionFile leaves opQuiet true, so the damper still wakes.
-    let usedActionFile = false;
-    let lastActionAt = NaN;
-    try {
-      const lastAction = readJSON(path.join(stateDir, 'state', 'last-operator-action.json'));
-      if (lastAction && typeof lastAction.at === 'string') {
-        const t = new Date(lastAction.at).getTime();
-        if (!isNaN(t)) {
-          usedActionFile = true;
-          lastActionAt = t;
-        }
-      }
-    } catch { /* fail-open */ }
-
-    // Stale-session check: wake once per stale_threshold, not every tick.
-    // Falls back to EVALUATE when last-operator-action.json is absent (pre-upgrade installs),
-    // mtime fallback was used, or timestamp is future-dated (clock skew / cross-machine).
-    // Damped by last_stale_wake_at: if the staleness condition is unchanged and stale_threshold
-    // hasn't elapsed since last wake, fall through to the digest/checklist gates instead of
-    // emitting EVALUATE — identical operator-visible behavior, 1 LLM wake per interval instead of N.
-    const staleMs = parseDuration(hbConfig.stale_threshold, 2 * 3600000);
-    const opQuiet = !usedActionFile || lastActionAt > now || (now - lastActionAt) > staleMs;
-    const staleAlertActive = !!(alertState.alerts ?? {})['stale-session'];
-    if (opQuiet || staleAlertActive) {
-      const lastStaleWakeAt = typeof alertState.last_stale_wake_at === 'string'
-        ? new Date(alertState.last_stale_wake_at).getTime()
-        : NaN;
-      const operatorAdvanced = usedActionFile && !isNaN(lastStaleWakeAt) && lastActionAt > lastStaleWakeAt;
-      const wakeDue = isNaN(lastStaleWakeAt) || operatorAdvanced || (now - lastStaleWakeAt) >= staleMs;
-      if (wakeDue) {
-        if (!peek) {
-          alertState.last_stale_wake_at = new Date(now).toISOString();
-          writeAlertState(alertStatePath, alertState);
-        }
-        return 'EVALUATE';
-      }
-    }
-  }
+  // 12h operator-quiet → auto-close.
+  if (sessionState === 'in_progress' && staleAutoCloseDue(stateDir, now)) return 'AUTO_CLOSE';
 
   // waiting-timeout check requires elapsed computation — delegate to LLM
   if (sessionState === 'waiting' && hbConfig.waiting_timeout) return 'EVALUATE';
@@ -430,7 +388,7 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
   if (hasSuppressed && alertState.last_digest_date !== today) return 'EVALUATE';
 
   // Clean-recheck damper: suppress re-evaluation for clean_recheck_cooldown after a tick
-  // concludes nothing actionable. Sits after all change-detecting gates so stale/micro-
+  // concludes nothing actionable. Sits after all change-detecting gates so micro-
   // proposal/suppressed-digest still pre-empt it. Two bypasses, both bounded:
   //   - a resolving entry (consecutive_clean > 0), so the hysteresis window is never masked;
   //   - a `proposal-pending:*` entry that has not reached suppression yet. These keys bake a
