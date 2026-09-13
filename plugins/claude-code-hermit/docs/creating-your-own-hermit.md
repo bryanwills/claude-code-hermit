@@ -96,12 +96,14 @@ For more on [skills](https://code.claude.com/docs/en/skills), see the Claude Cod
 
 ### Personal and third-party skills in Docker
 
-You can bring an existing collection or your own skills to a Hermit. Choose a Claude plugin when you want a publisher-maintained bundle, or use the [Skills CLI](https://github.com/vercel-labs/skills) to install selected, editable skills from a Git repository or local folder. [Matt Pocock's collection](https://github.com/mattpocock/skills) documents both options and its per-project setup. Choose one installation method for a collection to avoid duplicates; follow its setup instructions after installing.
+You can bring an existing collection or your own skills to a Hermit. Choose a Claude plugin when you want a publisher-maintained bundle, or use the [Skills CLI](https://github.com/vercel-labs/skills) to install selected, editable skills from a Git repository or local folder. Choose one installation method for a collection to avoid duplicates; follow its setup instructions after installing.
 
-For one Hermit, project scope is the simplest default. Run these examples from the Hermit project root, selecting the skills you want:
+For one Hermit, project scope is the simplest default. You can run skill installation commands inside the container from the mounted project root: the standard Hermit image includes Node.js, npm, and `npx`. Installing skill files there needs no image rebuild. You can also run the commands from the same project on the host if Node.js and npm are installed there. Docker rebuilds, restarts, and Compose validation remain host-only.
+
+In these examples, replace `OWNER/SKILLS-REPO` with your chosen repository, or `./my-personal-skills` with your local source folder, and select the skills you want:
 
 ```bash
-npx skills@latest add mattpocock/skills --agent claude-code
+npx skills@latest add OWNER/SKILLS-REPO --agent claude-code
 npx skills@latest add ./my-personal-skills --agent claude-code
 ```
 
