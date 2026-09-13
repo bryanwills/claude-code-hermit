@@ -374,15 +374,8 @@ Manual deployment guide
      - bypassPermissions: arrow keys → "Yes, I accept" → Enter.
      - auto: "Enable auto mode?" → press 1 then Enter (persists in the named volume).
 
-4. (Channels only) Pair each bot — DM it to get a 6-char code, then run
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts pair <code> \
-     --channel <plugin> --session <session> \
-     --compose-file docker-compose.hermit.yml --service hermit \
-     --state-dir <project_path>/.claude.local/channels/<plugin>/
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts policy \
-     --channel <plugin> --session <session> \
-     --compose-file docker-compose.hermit.yml --service hermit
-   Verify access.json landed at: .claude.local/channels/<plugin>/access.json
+4. (Channels only) From a normal host session, pair each bot:
+   /claude-code-hermit:channel-setup
 
 5. Verify everything is healthy:
    .claude-code-hermit/bin/hermit-status
@@ -464,81 +457,30 @@ Wait for the operator to confirm they have detached before continuing.
 
 **Channel pairing** (skip if no channels or no tokens configured):
 
-Before pairing, confirm the operator has completed the first-run acceptance step above — if they haven't, the pair commands are swallowed by the consent screen and appear to do nothing (`channel-pair.ts` reports `OK`, because tmux accepted the keys; the REPL never saw them).
-
-Confirm the tmux session still exists (reuse the `has-session` check from the acceptance step). If it's gone, surface container logs and stop.
-
 For each channel, **first verify the token is configured** — check that `.claude.local/channels/<plugin>/.env` exists and contains the expected `*_BOT_TOKEN` var. If missing, skip pairing for this channel and tell the operator: "No token configured for `<channel>` — write it to `.claude.local/channels/<plugin>/.env`, restart the container, then re-run `/claude-code-hermit:channel-setup` to pair." Move to the next channel.
 
 If the token is present, ask if already paired. If not:
 1. Ask with `AskUserQuestion` (header: `"<channel> pairing"`) — `"I have the code"` / `"Skip this channel"`. On `"I have the code"`: ask for the 6-char code via `Other` (header: `"Bot code"`).
-2. Send the pair command:
+2. Pair against the host-visible Hermit state directory:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts pair <code> \
-     --channel <plugin> --session <session> \
-     --compose-file docker-compose.hermit.yml --service hermit \
-     --state-dir <project_path>/.claude.local/channels/<plugin>/
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<project_path>/.claude-code-hermit" pair <plugin> <code>
    ```
-   The script owns the delivery mechanics (the text/Enter split that keeps the TUI from reading the pair command as a bracketed paste), the `--state-dir` hint that stops the plugin writing to `~/.claude`, and the code/slug grammar. `OK|<text>` means tmux accepted the keystrokes, not that the plugin acted on them — sub-step 5 is what verifies it landed. `ERROR|<reason>` names what was rejected; a missing session usually means the container is still installing plugins or the first-run prompts were never accepted.
-3. Set policy:
+   `OK|pair|...|file=state` confirms the access write and approval marker. If `file=home` or `file=home+state`, retain that result for sub-step 5. On `ERROR|`, report the token and stop this channel. The native permission prompt names the code; bypass-mode callers are refused.
+3. Set policy after successful pairing:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts policy \
-     --channel <plugin> --session <session> \
-     --compose-file docker-compose.hermit.yml --service hermit
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<project_path>/.claude-code-hermit" policy <plugin> allowlist
    ```
+   Relay the `OK|policy|` result or stop on `ERROR|`.
 4. Ask with `AskUserQuestion` (header: `"Pair result"`) — `"Bot confirmed paired"` / `"No response"` (description: `Still nothing after waiting up to 1 min`). On `"No response"`: run `docker compose -f docker-compose.hermit.yml exec -T hermit tmux capture-pane -t <session> -p`, show output, and skip `access.json` verification for this channel — don't fail the whole setup.
-5. **Verify `access.json` landed in the right place** (only on `"Bot confirmed paired"`): Check `.claude.local/channels/<plugin>/access.json`. If absent, run `docker compose -f docker-compose.hermit.yml exec -T hermit tmux capture-pane -t <session> -p` and show output. If it landed in `~/.claude/channels/<plugin>/` instead, move it:
-   ```
-   docker compose -f docker-compose.hermit.yml exec -T hermit bash -c 'src="${CLAUDE_CONFIG_DIR:-/home/claude/.claude}/channels/<plugin>/access.json"; dst="<project_path>/.claude.local/channels/<plugin>/"; [ -f "$src" ] && mkdir -p "$dst" && mv "$src" "$dst" && echo moved'
-   ```
-6. **Default delivery settings** (skip if `"Already paired"` was chosen or pairing was skipped this run):
-   1. Use the `Read` tool on `<project_path>/.claude.local/channels/<plugin>/access.json` (host file). If `ackReaction` is already non-empty, skip — preserve operator customization.
-   2. Otherwise use the `Edit` tool to set the `ackReaction` value to `"👀"` while preserving every other key in the file unchanged (read-modify-write a single field — do NOT overwrite the file with a fresh object). The bind-mount makes the change visible inside the container immediately.
-   3. Idempotent: re-running docker-setup leaves customized values alone (sub-step 1 short-circuits when `ackReaction` is non-empty).
-7. **Server channel / group chat (optional)** (run even if `"Already paired"` was chosen; skip only if `imessage`, if `"Skip this channel"` was chosen, or if pairing returned `"No response"`):
-   1. Ask with `AskUserQuestion` — label and prompt vary by channel:
-      - `discord`: header `"Server channel"` — "Want the hermit to also listen in a Discord server channel? Channel ID: enable Developer Mode in Discord settings → right-click the channel → Copy Channel ID."
-      - `telegram`: header `"Group chat"` — "Want the hermit to also listen in a Telegram group? Group ID: forward a message from the group to `@userinfobot` or use `@RawDataBot`. Group IDs are negative integers (e.g. `-1001234567890`)."
-      - Options: `"Yes — add a channel"` (discord) / `"Yes — add a group"` (telegram) with ID captured via `Other`; `"Skip — DMs only"`.
-   2. If **Skip**: continue to sub-step 8.
-   3. **For each ID provided** (the first ID comes from step 1's `Other`; each subsequent ID from step 3d's `Other` — loop until "Done"):
-      a. Ask all four questions for this ID in one `AskUserQuestion` call, with the default options recommended:
-
-         | Header | Question | Options (`label`: description) |
-         |---|---|---|
-         | Mention required | Require an @mention for this chat? | `Yes, require @mention`: safer for noisy channels (default) / `No, respond to all messages`: respond without a mention |
-         | Shared history | Let every other chat recall what is said here? | `No, private to this chat`: keep this chat's history private (default) / `Yes, shared with every chat`: let any chat on any channel recall this one |
-         | Trigger nicknames | Which nickname regexes should also trigger replies? | `None`: no new patterns (default) / Other: regex list |
-         | Who can trigger | Who may trigger replies in this chat? | `Anyone in the chat`: no sender restriction (default) / Other: user ids |
-
-         Collect nickname regexes across the loop; they apply channel-wide, not only to this group.
-      Later group additions from chat go through `hermit-settings channels`.
-      b. Send `group add`:
-         ```bash
-         bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts group-add <channelId> \
-           --channel <plugin> --session <session> \
-           --compose-file docker-compose.hermit.yml --service hermit \
-           --state-dir <project_path>/.claude.local/channels/<plugin>/ \
-           [--no-mention] [--allow <ids>]
-         ```
-         Pass `--no-mention` only for `"No, respond to all messages"`; omit it to require an @mention. For explicit trigger ids, pass `--allow id1,id2` (numeric string ids); otherwise omit it. Retain the requested ids for read-back.
-         For the history answer, read the host config's `channels.<plugin>.shared_chats` (absent means `[]`). On Yes include this id once; on No remove it, preserving every other id. Merge the full resulting string array on the host:
-         ```bash
-         echo '{"channels":{"<plugin>":{"shared_chats":<full_shared_array>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "<project_path>" --reinit >/dev/null
-         ```
-         Never use Edit/Write on `config.json`. Stop on a non-zero merge exit and report the `hatch-config:` stderr line. Repeating the same answers must leave the file byte-identical.
-      c. Confirm (text only): "Sent `group add` for `<channelId>`. Will verify after all channels are added."
-      d. Ask with `AskUserQuestion` (header: `"Add another?"`) — `"Yes — add another"` with the next ID via `Other`; `"Done — continue"`. On `"Done — continue"`: exit the loop.
-   After the loop, if any nickname regex was given, read existing `mentionPatterns` from the host-side access.json and merge the requested regexes without duplicates, preserving existing patterns. Run once with the same transport and state-dir flags:
+5. **Verify the host-side pairing and policy results** (only on "Bot confirmed paired"): use the `channel-access.ts` results from sub-steps 2 and 3 and read the configured channel's `access.json` under `<project_path>`. If pairing reported `file=home` (not `file=home+state`, which already updated the state file), the bot that issued the code is using the host's Claude home directory; run `/claude-code-hermit:channel-setup` from the host to complete its home-to-state location check before proceeding.
+6. **Default delivery settings** (skip if pairing was skipped this run):
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts set mentionPatterns '<json array>' \
-     --channel <plugin> --session <session> \
-     --compose-file docker-compose.hermit.yml --service hermit \
-     --state-dir <project_path>/.claude.local/channels/<plugin>/
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<project_path>/.claude-code-hermit" ensure-defaults <plugin>
    ```
-
-   4. **Verify all added channels** (one `Read` after the loop): open `<project_path>/.claude.local/channels/<plugin>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: run `docker compose -f docker-compose.hermit.yml exec -T hermit tmux capture-pane -t <session> -p`, surface the output, and warn — do not fail the whole setup. Also check that `mentionPatterns` contains every requested regex and `groups.<id>.allowFrom` equals the requested trigger ids (compare ids as strings, ignoring order). For each miss print "`<key>` didn't land, this plugin may not support it; set it with `/<channel>:access` manually after setup", naming the exact key and substituting the plugin name for `<channel>`. Do not error. Then proceed to sub-step 8.
-8. **Capture the bot's own identity** (host-side, like `channel-pair.ts` — `config.json` and the channel `.env` are both on the host):
+   Relay `OK|ack=set` or `OK|ack=kept`; an empty string or custom reaction stays unchanged. Stop this channel on `ERROR|`.
+7. **Server channel / group chat (optional)** (run even if "Already paired" was chosen; skip only if `imessage`, if "Skip this channel" was chosen, or if pairing returned "No response"):
+   Run [the group questionnaire](../channel-setup/references/group-enrollment.md) with the channel key, absolute `<project_path>/.claude-code-hermit` state directory, and native `AskUserQuestion` prompts. Then continue to sub-step 8.
+8. **Capture the bot's own identity** (host-side, like `channel-access.ts` — `config.json` and the channel `.env` are both on the host):
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-bot-id.ts <project_path>/.claude-code-hermit <plugin> --write
    ```

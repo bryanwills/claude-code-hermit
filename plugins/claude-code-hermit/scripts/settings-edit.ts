@@ -29,6 +29,7 @@ import path from 'node:path';
 import { SETTINGS, READ_ONLY, byArg, type Setting } from './lib/settings/registry';
 import { auditConfigChange, readHistory } from './lib/config-audit';
 import { sha256 } from './lib/hash';
+import { persistConfig } from './lib/config-write';
 import { validate } from './validate-config';
 import { flagValue, flagEq } from './lib/cli';
 import { safeForLLM } from './lib/sanitize';
@@ -55,16 +56,6 @@ function readTargetJson(filePath: string): Json {
     );
     process.exit(1);
   }
-}
-
-function writeJson(filePath: string, data: Json): void {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  // Atomic write: a torn config.json would make readTargetJson (strict) exit(1)
-  // on every later run, locking the operator out of config edits.
-  const tmp = filePath + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, filePath);
 }
 
 function parseValue(raw: string): Json {
@@ -416,9 +407,11 @@ if (import.meta.main) {
    * never trip it), which is why the check lives here.
    */
   const persist = (actor = 'settings-edit'): void => {
-    const priorReport = validate(before);
-    const report = validate(config);
-    const newErrors = report.errors.filter((e) => !priorReport.errors.includes(e));
+    const { newErrors, newWarnings } = persistConfig({
+      hermitDir: stateDir, before: existedBefore ? before : undefined, after: config, actor,
+      // A new file forgives what an empty config already fails (missing required keys).
+      priorErrors: existedBefore ? undefined : validate({}).errors,
+    });
     if (newErrors.length > 0) {
       console.error(`Refusing to write ${targetFile} — the change is invalid:`);
       newErrors.forEach((e) => console.error(`  ${e}`));
@@ -427,11 +420,7 @@ if (import.meta.main) {
     // Warnings don't block, but they must still be seen: the branches rerouted
     // through this path used to write via Edit/Write, where the validate-config
     // PostToolUse hook surfaced them. Dropping them silently would be a regression.
-    report.warnings
-      .filter((w) => !priorReport.warnings.includes(w))
-      .forEach((w) => console.error(`Warning: ${safeForLLM(w)}`));
-    writeJson(targetFile, config);
-    auditConfigChange(stateDir, existedBefore ? before : undefined, config, actor);
+    newWarnings.forEach((w) => console.error(`Warning: ${safeForLLM(w)}`));
   };
 
   switch (op) {
