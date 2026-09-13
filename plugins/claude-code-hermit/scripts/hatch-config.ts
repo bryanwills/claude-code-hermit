@@ -197,7 +197,7 @@ if (Object.hasOwn(answers, 'channels')) {
       // An explicit replacement must pass validation even if the old value had the same error.
       priorErrors = priorErrors.filter((e) => !e.startsWith(`channels.${name}.passive_chats:`));
     }
-    for (const key of ['isolate_chats', 'shared_chats', 'operators', 'log_chats']) {
+    for (const key of ['isolate_chats', 'shared_chats', 'operators', 'log_chats', 'bind_home_chat']) {
       if (Object.hasOwn(ans, key)) {
         merged[key] = ans[key];
         priorErrors = priorErrors.filter((e) => !e.startsWith(`channels.${name}.${key}:`));
