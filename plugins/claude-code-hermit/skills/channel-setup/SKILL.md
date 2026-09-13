@@ -352,7 +352,7 @@ Channel setup complete!
   State dir:      <state_dir>
 
   hermit-start passes --channels automatically on next boot.
-  Later changes: /claude-code-hermit:hermit-settings channel edit <channel> (recall, record, operators, bind_home_chat)
+  Later changes: /claude-code-hermit:hermit-settings channels (recall, record, operators, bind_home_chat)
 ```
 
 If anything was skipped, list the remaining steps.

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- `hermit-settings channels` adds only a channel that isn't configured yet and writes just the answers given, so an existing entry is no longer replaced; `hatch-config` honours a supplied `state_dir`.
 - `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step, and `docker-setup` group pairing asks the same group questions.
 
 ### Fixed
