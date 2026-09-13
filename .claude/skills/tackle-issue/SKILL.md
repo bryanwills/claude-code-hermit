@@ -198,7 +198,7 @@ git checkout -b <branch> origin/$BASE
 If the branch already exists locally: `git checkout <branch>` and warn.
 
 `TaskCreate` one task per plan bullet, then three trailing tasks: run
-`/claude-code-dev-hermit:dev-quality`, run `/commit`, run `/claude-code-dev-hermit:dev-pr`.
+`/simplify`, run `/commit`, run `/open-pr`.
 Report "On branch <branch>, ready to implement" and stop. No code edits, no commits, no PR.
 
 ## Never

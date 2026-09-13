@@ -11,8 +11,8 @@ test('returns null without a frontmatter block', () => {
 });
 
 test('parses plain scalars and strips surrounding quotes', () => {
-  const fm = parseFrontmatter('---\nname: dev-pr\ntitle: "quoted"\n---\nbody text\n');
-  expect(fm?.fields.name).toBe('dev-pr');
+  const fm = parseFrontmatter('---\nname: example-skill\ntitle: "quoted"\n---\nbody text\n');
+  expect(fm?.fields.name).toBe('example-skill');
   expect(fm?.fields.title).toBe('quoted');
   expect(fm?.body).toBe('body text\n');
 });

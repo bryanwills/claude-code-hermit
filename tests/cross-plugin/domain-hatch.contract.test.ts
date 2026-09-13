@@ -182,7 +182,7 @@ for (const { slug, text } of HATCHES) {
 
     // sync-block replaces between the markers, so the template must carry both.
     // The open marker is read from the template itself, never hardcoded — dev's
-    // SKILL.md legitimately never names its marker (render-append generates it).
+    // SKILL.md never names its marker.
     // Reuses evolve-plan's own marker resolver instead of a second regex: that
     // heuristic has a documented bug history (unrelated leading comments
     // mistaken for the block marker) a from-scratch regex would re-expose.
@@ -204,8 +204,8 @@ for (const { slug, text } of HATCHES) {
     // now the single source of truth (sync-block derives the marker from it,
     // block.ts falls back to APPEND when the target's block has a stale name),
     // so pin the skill prose to the template instead: any marker the skill
-    // names must be the template's own. Dev's SKILL.md names none (render-append
-    // generates it), which passes vacuously; a rename that touches only one
+    // names must be the template's own. Dev's SKILL.md names none,
+    // which passes vacuously; a rename that touches only one
     // side fails here.
     test('any marker the skill names matches the template', () => {
       const { open } = loadTemplate();
