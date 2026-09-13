@@ -12,7 +12,8 @@
 // Usage:
 //   channel-pair.ts pair <code>            --channel <slug> --session <name> [transport] [--state-dir <path>]
 //   channel-pair.ts policy                 --channel <slug> --session <name> [transport]
-//   channel-pair.ts group-add <id>         --channel <slug> --session <name> [transport] [--state-dir <path>] [--no-mention]
+//   channel-pair.ts group-add <id>         --channel <slug> --session <name> [transport] [--state-dir <path>] [--no-mention] [--allow <ids>]
+//   channel-pair.ts set <key> <value>      --channel <slug> --session <name> [transport] [--state-dir <path>]
 //
 //   transport: --compose-file <file> --service <name>   (omit both for host tmux)
 //
@@ -55,10 +56,15 @@ export function buildPolicyMessage(channel: string): string {
 }
 
 export function buildGroupAddMessage(
-  channel: string, groupId: string, noMention: boolean, stateDir?: string,
+  channel: string, groupId: string, noMention: boolean, stateDir?: string, allow?: string,
 ): string {
-  const base = `/${channel}:access group add ${groupId}${noMention ? ' --no-mention' : ''}`;
+  const base = `/${channel}:access group add ${groupId}${noMention ? ' --no-mention' : ''}${allow ? ` --allow ${allow}` : ''}`;
   return stateDir ? `${base} — save access.json to ${stateDir} not ~/.claude` : base;
+}
+
+export function buildSetMessage(channel: string, key: string, value: string, stateDir?: string): string {
+  const base = `/${channel}:access set ${key} ${value}`;
+  return stateDir ? `${base} \u2014 save access.json to ${stateDir} not ~/.claude` : base;
 }
 
 export function resolveTransport(argv: string[]): Transport {
@@ -77,6 +83,7 @@ function main(): void {
   const channel = flagValue(argv, '--channel');
   const session = flagValue(argv, '--session');
   const stateDir = flagValue(argv, '--state-dir');
+  const allow = flagValue(argv, '--allow');
   const noMention = argv.includes('--no-mention');
 
   if (!channel || !SLUG_RE.test(channel)) fail('--channel must be a lowercase plugin slug');
@@ -96,10 +103,16 @@ function main(): void {
       break;
     case 'group-add':
       if (!positional || !GROUP_ID_RE.test(positional)) fail('group-add needs a numeric channel/group id');
-      message = buildGroupAddMessage(channel!, positional!, noMention, stateDir);
+      if (argv.includes('--allow') && (!allow || !/^-?\d{1,20}(,-?\d{1,20})*$/.test(allow))) fail('--allow needs comma-separated numeric ids');
+      message = buildGroupAddMessage(channel!, positional!, noMention, stateDir, allow);
+      break;
+    case 'set':
+      if (positional !== 'mentionPatterns' && positional !== 'ackReaction') fail('set key must be mentionPatterns or ackReaction');
+      if (argv[2] === undefined || argv[2].startsWith('--') || /[\r\n]/.test(argv[2])) fail('set needs a value without newlines');
+      message = buildSetMessage(channel!, positional, argv[2], stateDir);
       break;
     default:
-      fail(`unknown verb "${verb ?? ''}" — expected pair, policy, or group-add`);
+      fail(`unknown verb "${verb ?? ''}" — expected pair, policy, group-add, or set`);
   }
 
   // A missing session is the common real failure (the container is still
