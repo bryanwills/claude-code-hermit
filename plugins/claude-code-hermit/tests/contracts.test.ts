@@ -1482,9 +1482,30 @@ describe('channel-setup empty-channels branch', () => {
 // channel-setup docker routing (static SKILL.md scan, not a live probe)
 // ============================================================
 
-describe('channel-setup docker routing', () => {
+describe('channel setup ownership', () => {
   const channelSetup = read(path.join(SKILLS, 'channel-setup', 'SKILL.md'));
   const dockerSetup = read(path.join(SKILLS, 'docker-setup', 'SKILL.md'));
+
+  const settings = read(path.join(SKILLS, 'hermit-settings', 'SKILL.md'));
+  const questionnaire = read(path.join(SKILLS, 'channel-setup', 'references', 'group-enrollment.md'));
+
+  test('one questionnaire owns group enrollment in all three flows', () => {
+    expect(questionnaire.match(/Mention required/g)).toHaveLength(1);
+    for (const skill of [channelSetup, dockerSetup, settings]) {
+      expect(skill).not.toContain('Mention required');
+      expect(skill).toContain('group-enrollment.md');
+      expect(skill).not.toContain('save access.json to');
+      expect(skill).not.toMatch(/echo[^\n]*passive_chats":/);
+      const lines = skill.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('access.json')) {
+          expect(lines.slice(Math.max(0, i - 5), i + 6).join('\n')).not.toContain('Edit');
+        }
+      }
+    }
+    expect(fs.existsSync(path.join(SCRIPTS, ['channel', 'pair.ts'].join('-')))).toBe(false);
+    expect(settings).toContain('Never call `AskUserQuestion` on a channel-tagged turn');
+  });
 
   test('does not redirect Docker operators to docker-setup', () => {
     // Old gate: runtime.json runtime_mode, or a scaffolded Dockerfile.hermit.

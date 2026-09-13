@@ -1,7 +1,6 @@
 /**
  * Shared tmux helpers for the lifecycle scripts
- * (hermit-start, hermit-stop, hermit-watchdog), the harness-command drain, and
- * `channel-pair.ts`, which drives the REPL inside the hermit container.
+ * (hermit-start, hermit-stop, hermit-watchdog) and the harness-command drain.
  *
  * Two transports, one implementation. `docker` prefixes the same tmux argv with
  * `docker compose … exec -T <service>`; nothing else differs, because tmux
