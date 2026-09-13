@@ -77,9 +77,9 @@ export function planBlock(
   }
 
   // A template carrying `mode:` markers is rendered by its own plugin before
-  // install (dev-hermit's render-append.ts). Core cannot render it, so the raw
-  // text is neither a valid comparison base nor a valid payload — the same
-  // refusal evolve-plan makes. Without this, `sync-block <dev> ` with no
+  // install. Core cannot render it, so the raw
+  // text is neither a valid comparison base nor a valid payload, the same
+  // refusal evolve-plan makes. Without this, `sync-block <plugin>` with no
   // --rendered-stdin appends both mode regions and their fence comments
   // verbatim into the operator's CLAUDE.md.
   if (requiresRendering(tmplText)) {
