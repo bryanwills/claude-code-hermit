@@ -31,8 +31,8 @@ const USAGE = 'Usage: routines.ts log-event <routine-id> <event> [delivery]';
 //
 // A hatched project (config.json) wins, so the walk goes PAST a config-less
 // `.claude-code-hermit/`. That does NOT single out a git worktree's partial copy:
-// the copy carries config.json, because the dev hermit's /dev-quality and /dev-pr
-// read commands.test and commands.pr_create from it. Discriminating the worktree
+// the copy carries config.json so skills can Read it at the relative path they
+// expect. Discriminating the worktree
 // case needs a sentinel the copy does not carry, and belongs in hermitDir()
 // rather than here.
 //

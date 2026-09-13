@@ -5,7 +5,6 @@
 - [Claude Code](https://code.claude.com) v2.1.110+
 - [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) core, installed and hatched; `/claude-code-dev-hermit:hatch` enforces the required version from `.claude-plugin/hermit-meta.json`
 - Node.js 24+ (for the `git-push-guard` hook at strict profile)
-- `gh` (GitHub) or `glab` (GitLab) for `/dev-pr`; Bitbucket and other forges need `commands.pr_create` set via `/hatch`
 
 ---
 
@@ -17,10 +16,7 @@ claude plugin install claude-code-dev-hermit@claude-code-hermit --scope local
 /claude-code-dev-hermit:hatch
 ```
 
-The wizard installs `git-push-guard` at strict profile (with an explicit opt-out) and offers companion plugins. It scans the project for existing `/commit`, `/create-pr`, or `/release` skills and chooses a mode:
-
-- **`safety` mode** (default when existing skills are detected) — injects only §Git Safety, §Branch Discipline, and supporting sections. Does not inject §Implementation Flow or `/dev-pr`/`/dev-quality`/`/dev-test` references. Use this when the project already has its own dev workflow.
-- **`standard` mode** (default for greenfield) — injects the full workflow and prompts for `commands.test`, lint, format, and PR template. Behavior unchanged from v0.3.1.
+The wizard configures protected branches, installs strict hook enforcement with an explicit opt-out, syncs dev instructions, and offers Context7.
 
 **Already set up?** Re-run `/claude-code-dev-hermit:hatch` any time. Every key offers `Keep current (<value>)` as the recommended option, so you can sweep through with Enter-presses to fast-confirm — or change individual values.
 
@@ -28,7 +24,7 @@ The wizard installs `git-push-guard` at strict profile (with an explicit opt-out
 
 ## The Dev Cycle
 
-After `/hatch`, every code-writing agent in the project reads the rules in your CLAUDE.md (`§Git Safety`, `§Branch Discipline`, `§Implementation Flow`). The cycle below is what those rules describe — there's no "dev-hermit workflow"; it's the working agreement every agent follows.
+After `/hatch`, agents follow Git Safety and Branch Discipline in CLAUDE.md, with resident task bookkeeping in `.claude-code-hermit/RESIDENT.md`.
 
 ### 1. Plan
 
@@ -43,31 +39,13 @@ Per `§Branch Discipline` in the injected CLAUDE.md:
 3. Name the branch `<prefix>/<slug>` where `prefix ∈ {feature, fix, chore, hotfix}`.
 4. Log the creation to `.claude-code-hermit/sessions/SHELL.md`.
 
-Then write the code. The CLAUDE.md `§Git Safety` rules apply throughout: no push, no `--no-verify`, no commits to protected, no force-push. At strict hook profile, `git-push-guard` blocks the dangerous commands at `bash` time.
+Then write the code. The CLAUDE.md `§Git Safety` rules apply throughout: feature-branch pushes only, no `--no-verify`, no commits to protected, no force-push. At strict hook profile, `git-push-guard` blocks the dangerous commands at `bash` time.
 
-### 3. Test before declaring done
+### 3. Verify and publish
 
-Per `§Implementation Flow`: run the configured test command (`claude-code-dev-hermit.commands.test`) before claiming the task is done. If tests fail, fix or report — never declare done with broken tests.
+Follow the project's own tests and workflow. Run `/simplify` for cleanup and verify the final changes. When publishing is authorized, push the feature branch and open a PR through the project's workflow or the forge CLI. Record the PR URL in the Progress Log before archiving the task.
 
-### 4. Cleanup pass, then test again
-
-Per `§Implementation Flow`:
-
-1. Run `/claude-code-dev-hermit:dev-quality` on the working tree. It wraps `/simplify` (parallel reviewers, applies its own edits) and re-runs the test command.
-2. If tests pass, proceed.
-3. If tests fail, `git checkout -- <changed-files>` to revert the applied edits and stop. Surface the regression.
-
-For PR review, security-sensitive changes, or large refactors, invoke `/code-review` (built-in) after the dev-quality pass — that's the deeper bug-finding option.
-
-### 5. Open the PR
-
-```
-/claude-code-dev-hermit:dev-pr
-```
-
-Pushes the branch and opens a PR with body assembled inline from your commits, last test result, screenshots, and an optional project PR template. Refuses on protected branches, dirty trees, or zero commits ahead. There's no `--force` flag — fix the failing condition.
-
-### 6. Reflect
+### 4. Reflect
 
 At every task boundary, the hermit invokes `reflect` to surface patterns. These become proposals you can accept, defer, or dismiss.
 
@@ -75,7 +53,7 @@ At every task boundary, the hermit invokes `reflect` to surface patterns. These 
 
 ## Branch Cleanup
 
-dev-hermit no longer ships a `/dev-cleanup` skill. Use plain git:
+Use the project's branch cleanup workflow:
 
 ```bash
 # Delete merged feature branches (skip protected branches):
@@ -104,7 +82,7 @@ The setup wizard offers `context7` from `claude-plugins-official`. See [Recommen
 
 - **First session in a new project?** Let the agent orient itself before starting work — read existing code, review tests, scan the README.
 - **Talk to your hermit.** "What slowed you down?" / "Suggest improvements" — feedback feeds into the learning loop.
-- **After plugin updates**, run `/claude-code-hermit:hermit-evolve`, then re-run `/claude-code-dev-hermit:hatch`. Evolve defers this plugin's CLAUDE-APPEND refresh because only its renderer can resolve the mode annotations.
+- **After plugin updates**, run `/claude-code-hermit:hermit-evolve` to sync the dev block.
 - **Proposals have categories.** Dev-specific prefixes (`[missing-tests]`, `[tech-debt]`, `[dependency]`, `[tooling]`, `[architecture]`) keep things organized.
-- **"What should I be fixing?"** Run `/claude-code-dev-hermit:domain-brainstorm`. It reads git churn, your last test result, manifest drift, and README coverage to surface at most 2 grounded improvement ideas as PROPs — no manual triage needed.
+- **"What should I be fixing?"** Run `/claude-code-dev-hermit:domain-brainstorm`. It reads git churn, manifest drift, and README coverage to surface at most 2 grounded improvement ideas as PROPs : no manual triage needed.
 - **Channel activation**: run `/claude-code-hermit:channel-setup` for messaging between operator and hermit.

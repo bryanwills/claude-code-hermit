@@ -1,6 +1,6 @@
 ---
 name: domain-brainstorm
-description: On-demand dev-voice brainstorm — reads codebase friction signals (git churn, test signal, manifest drift, README coverage) and emits at most 2 improvement ideas, each gated by proposal-triage before becoming a PROP. Invoke when the operator asks "what should I be fixing?", "anything wrong with X?", or "brainstorm improvements". Never runs autonomously.
+description: On-demand dev-voice brainstorm: reads codebase friction signals (git churn, manifest drift, README coverage) and emits at most 2 improvement ideas, each gated by proposal-triage before becoming a PROP. Invoke when the operator asks "what should I be fixing?", "anything wrong with X?", or "brainstorm improvements". Never runs autonomously.
 ---
 
 # Domain Brainstorm
@@ -20,9 +20,6 @@ git log --format= --name-only -50 | sort | uniq -c | sort -rn | head -20
 ```
 Note the 5 most-churned files and any subsystem clusters.
 
-**Test signal**
-Read `.claude-code-hermit/state/last-test.json` (written by `/dev-test`). Extract `status`, `exit_code`, and `duration_ms`. If absent or last-modified >24h ago, note "no recent test run" — do not run the suite.
-
 **Manifest drift**
 `ls` for `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`. For each found, check its lockfile (`package-lock.json`/`yarn.lock`/`pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`, `go.sum`) exists alongside it. Flag any mismatch.
 
@@ -31,10 +28,10 @@ Read `README.md` and a one-level `ls` of the repo root. Note features or modules
 
 ### Gate 1 — Generate ideas (max 2)
 
-Think across all four inputs. For each candidate, both constraints must pass before including it:
+Think across all three inputs. For each candidate, both constraints must pass before including it:
 
 1. **Concrete friction** — state the operator pain in one sentence. What breaks, slows, or misleads today without this fix? If no specific pain, discard.
-2. **≥2 named grounding items** — cite at least two by name (e.g. `git:cli/index.js`, `state:last-test.json duration=38s`, `file:package-lock.json missing`, `readme:§Feature X`). These support the friction; friction is the bar.
+2. **≥2 named grounding items**: cite at least two by name (e.g. `git:cli/index.js`, `file:package-lock.json missing`, `readme:§Feature X`). These support the friction; friction is the bar.
 
 Map each passing idea to the closest dev prefix: `[missing-tests]`, `[tech-debt]`, `[dependency]`, `[tooling]`, or `[architecture]`.
 

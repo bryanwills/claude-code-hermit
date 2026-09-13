@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+- `/dev-test`, `/dev-pr`, and `/dev-quality` skills and their scripts.
+- Test-recording hook and cached test results.
+- Standard/safety template mode split.
+- `hatch_mode`, `commands`, `pr_base_branch`, and `pr_template_path` configuration keys.
+
+### Changed
+- Feature-branch pushes only when publishing is authorized, with PRs through the project's own workflow or forge CLI and the PR URL in the Progress Log.
+- Mode-free hatch configures protected branches and hook profile, and offers Context7.
+
+### Upgrade Instructions
+- Core `hermit-evolve`'s sibling block sync re-syncs the dev instruction block. No manual block edits are needed.
+- The `claude-code-dev-hermit.hatch_mode`, `claude-code-dev-hermit.commands`, `claude-code-dev-hermit.pr_base_branch`, and `claude-code-dev-hermit.pr_template_path` keys in `.claude-code-hermit/config.json` are inert and may be removed. `.claude-code-hermit/state/last-test.json` and `.claude-code-hermit/state/bindings.json` are also inert and may be removed.
+
 ## [0.4.15] - 2026-09-10
 
 ### Fixed

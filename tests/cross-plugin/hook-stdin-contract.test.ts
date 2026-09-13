@@ -106,12 +106,6 @@ const SPECS: Spec[] = [
     failExit: 0,
   },
   {
-    name: 'dev/record-test-result',
-    script: 'plugins/claude-code-dev-hermit/scripts/record-test-result.ts',
-    benign: BASH_LS,
-    failExit: 0,
-  },
-  {
     name: 'ha/mcp-safety-gate',
     script: 'plugins/claude-code-homeassistant-hermit/hooks/mcp-safety-gate.ts',
     // A read-only tool is allowed before any entity/config resolution, so the
@@ -298,8 +292,7 @@ test('the corpus covers every fleet hook registered in a hooks.json or a launch 
     expect(registered.has(entry)).toBe(true);
   }
   // A registered PreToolUse gate missing from SPECS would silently skip the
-  // corpus. Other hook types aren't required here — dev/record-test-result is
-  // PostToolUse and is in SPECS by hand.
+  // corpus. Other hook types aren't required here.
   for (const entry of registeredPreToolUse) {
     expect(covered.has(entry)).toBe(true);
   }

@@ -1,6 +1,3 @@
-<!-- mode:standard-only -->
-
-<!-- /mode:standard-only -->
 ---
 <!-- claude-code-dev-hermit: Development Workflow -->
 
@@ -8,7 +5,7 @@
 
 These rules apply to every agent doing dev work in this project — the native `Agent` tool, custom subagents, the main session. The `git-push-guard` hook backs them at strict profile.
 
-- **Never `git push`** from agent context. Stop and ask the operator. The sanctioned answer is `/claude-code-dev-hermit:dev-pr`, which runs Gate 0 checks then pushes + opens a PR. This forbids *improvised* pushes, not the push performed by that skill itself: while executing it, its Gate 1 push **is** the sanctioned action — run it, don't stop to ask.
+- **Push only feature branches, and only when publishing is authorized.** Open PRs through the project's own workflow or the forge CLI. Never push to a branch in `claude-code-dev-hermit.protected_branches` (hook-enforced at strict profile).
 - **Never use `--no-verify`** on any git command (commit, push, merge, rebase). Pre-commit hooks exist for a reason.
 - **Never commit to a branch in `claude-code-dev-hermit.protected_branches`** (defaults to `main`/`master` if unset). Always work on a feature branch.
 - **Never force-push from agent context.** No bare `--force` or `-f`. `--force-with-lease` is allowed only to a non-protected branch with an explicit refspec (the safe rebase-recovery case); ambiguous-target leases and leases to protected branches are blocked. When in doubt, surface the divergence and let the operator resolve.
@@ -27,18 +24,6 @@ Before starting code changes:
 3. Name it `<prefix>/<kebab-slug>`, prefix from {feature, fix, chore, hotfix} matched at the start of the input, default `feature`.
 4. When you create a branch, append to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
 
-<!-- mode:standard-only -->
-<!-- resident-only -->
-## Implementation Flow
-
-If the project's own CLAUDE.md or skills define a commit/test/PR sequence, follow that. When committing and publishing are authorized, the fallback is `commands.test` (`claude-code-dev-hermit.commands.test`, set via `/claude-code-dev-hermit:hatch`) → `/claude-code-dev-hermit:dev-quality` → commit → `/claude-code-dev-hermit:dev-pr`.
-
-- Cleanup edits from `/claude-code-dev-hermit:dev-quality` must land **before** the commit — that ordering is why the quality gate runs first. `/claude-code-dev-hermit:dev-pr` Gate 0 then enforces a fresh passing test at the current HEAD sha mechanically; don't restate its checks, just run it.
-- Never declare the task done with broken tests.
-- Working inside a nested git repo (submodule, Composer path package, npm/pnpm path workspace, vendored dep)? Pass the same `--cwd <relative/path>` to `/claude-code-dev-hermit:dev-quality` and `/claude-code-dev-hermit:dev-pr`. State stays under the parent's `.claude-code-hermit/`.
-
-<!-- /resident-only -->
-<!-- /mode:standard-only -->
 ## Technical Constraints
 
 Session state (`in_progress`/`waiting`/`idle`/`dead_process`) lives in `.claude-code-hermit/state/runtime.json` (`.session_state`). SHELL.md `Status:` is cosmetic — never parse it for programmatic checks.
@@ -48,12 +33,7 @@ Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev wo
 <!-- resident-only -->
 ## Before Archiving a Task
 
-<!-- mode:standard-only -->
-- If the task includes publishing a PR: `/claude-code-dev-hermit:dev-pr` run, or PR opened via the project's workflow, with its URL recorded in `state/bindings.json`.
-<!-- /mode:standard-only -->
-<!-- mode:safety-only -->
-- If the task includes publishing a PR: PR opened.
-<!-- /mode:safety-only -->
+- If the task includes publishing a PR: PR opened, URL in the Progress Log.
 - If committing is authorized and required by the task: intended changes committed on the feature branch. Otherwise, record the uncommitted handoff without staging unrelated work.
 - If partial: Session Summary describes what remains.
 
@@ -83,11 +63,6 @@ Tier mapping:
 ## Dev Quick Reference
 
 - One-time setup / re-config: `/claude-code-dev-hermit:hatch`
-<!-- mode:standard-only -->
-- Mid-task test run + cache warm: `/claude-code-dev-hermit:dev-test`
-- Pre-wrap quality gate: `/claude-code-dev-hermit:dev-quality`
-- Open the PR: `/claude-code-dev-hermit:dev-pr`
-<!-- /mode:standard-only -->
 - Cleanup pass: `/simplify` (parallel reviewers, applies its own edits)
 <!-- /resident-only -->
 <!-- /claude-code-dev-hermit: Development Workflow -->

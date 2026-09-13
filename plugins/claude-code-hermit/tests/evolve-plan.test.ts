@@ -946,9 +946,9 @@ test('work_pending: all current + no drift -> false', withProj(async (proj) => {
 // -------------------------------------------------------
 
 // Defect A: extractSiblingMarker used to return the FIRST HTML comment line in
-// a template, so dev-hermit's leading "<!-- mode:standard-only -->" (its
-// render-append.ts mode annotation) was mistaken for the block marker. Since
-// render-append.ts strips mode markers before install, that "marker" never
+// a template, so a leading "<!-- mode:standard-only -->" annotation
+// was mistaken for the block marker. Since mode markers are stripped
+// before install, that "marker" never
 // exists in the target -> append branch -> the full un-rendered template
 // (both mode variants + mode markers) would be appended to the operator's file.
 //

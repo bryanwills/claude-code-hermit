@@ -4,8 +4,7 @@
 //
 // Returning null (rather than a fail-open default path) is load-bearing:
 // git-push-guard falls back to the built-in protected-branch list on null instead
-// of blocking, and record-test-result / dev-pr-transforms skip their hermit-state
-// writes. Do NOT change this to core's fail-open hermitDir() default.
+// of blocking. The guards read config here. Do NOT change this to core's fail-open hermitDir() default.
 //
 // The env check is sentinel-gated and falls through on a miss, so a stale
 // CLAUDE_PROJECT_DIR degrades to the walk (today's behavior) rather than to null
@@ -26,13 +25,10 @@ import path from 'node:path';
 
 // A worktree's projected `.claude-code-hermit/` — never a resolution target.
 // `.worktreeinclude`'s managed block copies config.json into a worktree so
-// skills can Read it at the relative path they expect (`/dev-pr` Gate 0 reads
-// `commands.pr_create` that way), but never `state/`: hermit state is
-// main-rooted and shared across worktrees. So the sentinel without `state/`
-// means a projection of a real root further up, and the walk continues to it.
-// That keeps this resolver's writers (record-test-result's `last-test.json`)
-// on main's state dir, which is also what stops `state/` from ever appearing
-// inside a projection. Mirrored in core's cc-compat.ts — fix one, fix both.
+// skills can Read it at the relative path they expect, but never `state/`:
+// hermit state is main-rooted and shared across worktrees. So the sentinel
+// without `state/` means a projection of a real root further up, and the walk
+// continues to it. Mirrored in core's cc-compat.ts: fix one, fix both.
 function isWorktreeProjection(cchDir: string): boolean {
   return fs.existsSync(path.join(cchDir, 'config.json')) && !fs.existsSync(path.join(cchDir, 'state'));
 }

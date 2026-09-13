@@ -168,7 +168,7 @@ Run it with the `$review_base` computed in Step 1:
 Notes:
 - The **Step 1–3 per-plugin boundary + changelog audit remains the authoritative "what's shipping."** `/code-review` is the correctness engine over the union window. Because `$review_base` is the *oldest* in-scope tag, the range may re-review already-released commits of a plugin whose own tag is newer — harmless, and useful for catching cross-plugin interactions.
 - **Cost:** `/code-review high` is the expensive step (multi-agent, minutes, real tokens). Steps 1–3 are cheap; Step 3D costs one subagent per plugin plus the `gh` reads.
-- `--fix` mutates the working tree *after* the Step 3 audit, so the audit won't reflect the fixes. After it completes, note that fixes were applied and still need a CHANGELOG line and a `/commit`. **Never push** — that's the operator's explicit call (`/release` / `dev-pr`).
+- `--fix` mutates the working tree *after* the Step 3 audit, so the audit won't reflect the fixes. After it completes, note that fixes were applied and still need a CHANGELOG line and a `/commit`. **Never push**: that's the operator's explicit call (`/release`).
 
 ## Report structure
 
