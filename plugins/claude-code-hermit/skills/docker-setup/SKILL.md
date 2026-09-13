@@ -512,6 +512,7 @@ If the token is present, ask if already paired. If not:
          | Who can trigger | Who may trigger replies in this chat? | `Anyone in the chat`: no sender restriction (default) / Other: user ids |
 
          Collect nickname regexes across the loop; they apply channel-wide, not only to this group.
+      Later group additions from chat go through `hermit-settings channels`.
       b. Send `group add`:
          ```bash
          bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts group-add <channelId> \

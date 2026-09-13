@@ -33,7 +33,7 @@ import { flagValue } from './lib/cli';
 // discord/telegram/imessage would close a seam the rest of the plugin keeps open.
 const SLUG_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const CODE_RE = /^[A-Za-z0-9]{6}$/;
-const GROUP_ID_RE = /^-?\d{1,20}$/;
+export const GROUP_ID_RE = /^-?\d{1,20}$/;
 const SESSION_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 // The state dir is interpolated into the message body, so it must not be able to
 // introduce a newline (which would submit early) or quote characters. Spaces are

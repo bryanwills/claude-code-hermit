@@ -244,6 +244,19 @@ const CONFIG_FILE_WRITE = new RegExp(
 const SHELL_EXPANDS = /[$`]/;
 
 /**
+ * Every `channel-access` group-add in the command, labelled by its chat. The
+ * shell strips quotes and escapes before the script reads its verb, so
+ * `'group-add'` still writes; an expansion after the script name is opaque.
+ */
+function channelAccessAsks(command: string): string[] {
+  const at = command.search(/channel-access(?:\.ts)?\b/);
+  if (at < 0) return [];
+  const rest = command.slice(at).replace(/['"\\]/g, '');
+  if (SHELL_EXPANDS.test(rest)) return ['channel-access'];
+  return [...rest.matchAll(/(?:^|\s)group-add\s+(\S+)\s+(\S+)/g)].map(m => `listen in ${m[1]} chat ${m[2]}`);
+}
+
+/**
  * Does this Bash command mutate an asked hermit setting?
  *
  * Matches both invocation forms, the script path
@@ -258,6 +271,8 @@ const SHELL_EXPANDS = /[$`]/;
  * launder a protected one behind it.
  */
 function protectedMutation(command: string, cwd: string): string[] | null {
+  const listen = channelAccessAsks(command);
+
   // An opaque write of the whole file can replace any asked path, so it
   // raises the native prompt regardless of what it happens to contain.
   const fileWrite = CONFIG_FILE_WRITE.exec(command);
@@ -267,7 +282,7 @@ function protectedMutation(command: string, cwd: string): string[] | null {
     // alternative starts at `>` so it holds only one. Taking the first would
     // name the source of `cp .../config.json .../RESIDENT.md` in the prompt.
     const names = fileWrite[0].match(new RegExp(PROTECTED_FILE_ALT, 'g'));
-    return [names ? names[names.length - 1] : 'config.json'];
+    return [...listen, names ? names[names.length - 1] : 'config.json'];
   }
 
   // The script path and the config path may each be quoted (a plugin root or
@@ -280,9 +295,9 @@ function protectedMutation(command: string, cwd: string): string[] | null {
   const matches = [...command.matchAll(
     /(?:settings-edit(?:\.ts)?)["']?\s+('[^']*'|"[^"]*"|\S+)\s+([a-z-]+)(?:\s+(\S+))?(?:\s+('[^']*'|"[^"]*"|\S+))?/g
   )];
-  if (matches.length === 0) return null;
+  if (matches.length === 0) return listen.length ? listen : null;
 
-  const shown: string[] = [];
+  const shown: string[] = [...listen];
   for (const m of matches) {
     const verb = m[2];
     if (!WRITE_VERBS.has(verb)) continue;

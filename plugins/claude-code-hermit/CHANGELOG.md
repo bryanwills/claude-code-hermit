@@ -2,12 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+- Add a Discord server channel or Telegram group from chat with `hermit-settings channels`; the write asks for approval in the paired DM and is refused under bypass permissions.
+
 ### Changed
 - `hermit-settings channels` adds only a channel that isn't configured yet and writes just the answers given, so an existing entry is no longer replaced; `hatch-config` honours a supplied `state_dir`.
 - `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step, and `docker-setup` group pairing asks the same group questions.
 
 ### Fixed
 - `hermit-doctor` no longer warns that the briefing chat looks shared when the operator writes from a second chat, thread, or fork; who may pause, resume, or read full status is unchanged.
+
+### Upgrade Instructions
+- Nothing extra to run for the allow-list entry: the unconditional `permissions-sync` step adds `Bash(bun */scripts/channel-access.ts*)`.
 
 ## [1.3.7] - 2026-09-12
 
