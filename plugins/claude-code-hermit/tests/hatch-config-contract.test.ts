@@ -276,7 +276,7 @@ describe('hatch-config.ts', () => {
     expect(out.channels.discord.state_dir).toBe('.claude.local/channels/discord');
   });
 
-  for (const key of ['isolate_chats', 'shared_chats', 'operators', 'log_chats']) {
+  for (const key of ['isolate_chats', 'shared_chats', 'operators', 'log_chats', 'bind_home_chat']) {
     test(`re-init: ${key} can be added, replaced, cleared, and omitted`, async () => {
       const dir = freshDir();
       const channel = { enabled: true, dm_channel_id: 'D1', default_chat_id: 'D1', state_dir: '.claude.local/channels/discord', custom_key: 'keep' };
@@ -297,6 +297,17 @@ describe('hatch-config.ts', () => {
       expect((await runHatchConfig(dir, { channels: { discord: { [key]: values[0] } } }, true)).exitCode).toBe(0);
     });
   }
+
+  test('re-init: bind_home_chat lands and repeating the answer preserves bytes', async () => {
+    const dir = freshDir();
+    seedConfig(dir, { ...JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8')), channels: { discord: { enabled: true } } });
+    const answers = { channels: { discord: { bind_home_chat: true } } };
+    expect((await runHatchConfig(dir, answers, true)).exitCode).toBe(0);
+    const before = fs.readFileSync(configPathFor(dir), 'utf8');
+    expect(JSON.parse(before).channels.discord.bind_home_chat).toBe(true);
+    expect((await runHatchConfig(dir, answers, true)).exitCode).toBe(0);
+    expect(fs.readFileSync(configPathFor(dir), 'utf8')).toBe(before);
+  });
 
   test('re-init: passive_chats can be added, replaced, cleared, and omitted without losing channel state', async () => {
     const dir = freshDir();

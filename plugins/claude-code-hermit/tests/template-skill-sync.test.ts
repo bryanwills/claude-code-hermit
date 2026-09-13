@@ -92,6 +92,37 @@ describe('nested artifacts.* keys are referenced in operator-facing docs', () =>
   }
 });
 
+describe('channel settings stay referenced in operator skills', () => {
+  const VALIDATED_CHANNEL_KEYS = [
+    'allowed_users', 'bind_home_chat', 'passive_chats', 'isolate_chats', 'log_chats',
+    'shared_chats', 'operators', 'maintainer_channel_id', 'default_chat_id', 'dm_channel_id',
+  ];
+  const WIZARD_CHANNEL_KEYS = [
+    'allowed_users', 'bind_home_chat', 'isolate_chats', 'log_chats', 'shared_chats',
+    'passive_chats', 'operators', 'channels.primary',
+  ];
+  const validator = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'validate-config.ts'), 'utf8');
+  const settings = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'hermit-settings', 'SKILL.md'), 'utf8');
+  const wizard = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'channel-setup', 'SKILL.md'), 'utf8');
+
+  for (const key of VALIDATED_CHANNEL_KEYS) {
+    test(`validator references channel key '${key}' as a quoted or dotted literal`, () => {
+      expect(validator).toMatch(new RegExp(`['"]${key}['"]|\\.${key}\\b`));
+    });
+    // passive_chats has no hermit-settings edit path; validator and wizard checks still cover it.
+    if (key !== 'passive_chats') {
+      test(`hermit-settings references channel key '${key}'`, () => {
+        expect(settings).toContain(key);
+      });
+    }
+  }
+  for (const key of WIZARD_CHANNEL_KEYS) {
+    test(`channel-setup references wizard key '${key}'`, () => {
+      expect(wizard).toContain(key);
+    });
+  }
+});
+
 // -------------------------------------------------------
 // Deny-patterns template file referenced in hatch/SKILL.md
 // -------------------------------------------------------

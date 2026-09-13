@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { tmuxArgv, HOST } from '../scripts/lib/tmux';
-import { buildPairMessage, buildPolicyMessage, buildGroupAddMessage } from '../scripts/channel-pair';
+import { buildPairMessage, buildPolicyMessage, buildGroupAddMessage, buildSetMessage } from '../scripts/channel-pair';
 import { runScript } from './helpers/run';
 import { freshDirFactory } from './helpers/workdir';
 
@@ -52,6 +52,18 @@ describe('tmuxArgv', () => {
 });
 
 describe('message grammar', () => {
+  test('group-add carries allow ids before the hint', () => {
+    expect(buildGroupAddMessage('discord', '123', false, '/p/dir', '1,-2'))
+      .toBe('/discord:access group add 123 --allow 1,-2 \u2014 save access.json to /p/dir not ~/.claude');
+    expect(buildGroupAddMessage('discord', '123', true, '/p/dir', '1,2'))
+      .toBe('/discord:access group add 123 --no-mention --allow 1,2 \u2014 save access.json to /p/dir not ~/.claude');
+  });
+
+  test('set mentionPatterns carries the value and hint', () => {
+    expect(buildSetMessage('discord', 'mentionPatterns', '["^hey"]', '/p/dir'))
+      .toBe('/discord:access set mentionPatterns ["^hey"] \u2014 save access.json to /p/dir not ~/.claude');
+  });
+
   test('pair carries the state-dir hint when given one', () => {
     expect(buildPairMessage('discord', 'AB12CD', '/p/.claude.local/channels/discord'))
       .toBe('/discord:access pair AB12CD — save access.json to /p/.claude.local/channels/discord not ~/.claude');
@@ -79,6 +91,9 @@ describe('CLI validation', () => {
   const base = ['--channel', 'discord', '--session', 'hermit-p'];
 
   const bad: Array<[string, string[]]> = [
+    ['set replyToMode', ['set', 'replyToMode', 'all', ...base]],
+    ['a set newline', ['set', 'mentionPatterns', 'a\nb', ...base]],
+    ['invalid allow ids', ['group-add', '123', '--allow', '1,,2', ...base]],
     ['a 5-char code', ['pair', 'AB12C', ...base]],
     ['a code with punctuation', ['pair', 'AB-2CD', ...base]],
     ['a non-numeric group id', ['group-add', 'abc', ...base]],

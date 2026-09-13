@@ -502,21 +502,41 @@ If the token is present, ask if already paired. If not:
       - Options: `"Yes — add a channel"` (discord) / `"Yes — add a group"` (telegram) with ID captured via `Other`; `"Skip — DMs only"`.
    2. If **Skip**: continue to sub-step 8.
    3. **For each ID provided** (the first ID comes from step 1's `Other`; each subsequent ID from step 3d's `Other` — loop until "Done"):
-      a. Ask with `AskUserQuestion` (header: `"Mention required"`) for this ID:
-         - `"Yes — require @mention"` (default — safer for noisy channels)
-         - `"No — respond to all messages"`
+      a. Ask all four questions for this ID in one `AskUserQuestion` call, with the default options recommended:
+
+         | Header | Question | Options (`label`: description) |
+         |---|---|---|
+         | Mention required | Require an @mention for this chat? | `Yes, require @mention`: safer for noisy channels (default) / `No, respond to all messages`: respond without a mention |
+         | Shared history | Let every other chat recall what is said here? | `No, private to this chat`: keep this chat's history private (default) / `Yes, shared with every chat`: let any chat on any channel recall this one |
+         | Trigger nicknames | Which nickname regexes should also trigger replies? | `None`: no new patterns (default) / Other: regex list |
+         | Who can trigger | Who may trigger replies in this chat? | `Anyone in the chat`: no sender restriction (default) / Other: user ids |
+
+         Collect nickname regexes across the loop; they apply channel-wide, not only to this group.
       b. Send `group add`:
          ```bash
          bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts group-add <channelId> \
            --channel <plugin> --session <session> \
            --compose-file docker-compose.hermit.yml --service hermit \
            --state-dir <project_path>/.claude.local/channels/<plugin>/ \
-           [--no-mention]
+           [--no-mention] [--allow <ids>]
          ```
-         Pass `--no-mention` only for `"No — respond to all messages"`; omit it to require an @mention.
+         Pass `--no-mention` only for `"No, respond to all messages"`; omit it to require an @mention. For explicit trigger ids, pass `--allow id1,id2` (numeric string ids); otherwise omit it. Retain the requested ids for read-back.
+         For the history answer, read the host config's `channels.<plugin>.shared_chats` (absent means `[]`). On Yes include this id once; on No remove it, preserving every other id. Merge the full resulting string array on the host:
+         ```bash
+         echo '{"channels":{"<plugin>":{"shared_chats":<full_shared_array>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "<project_path>" --reinit >/dev/null
+         ```
+         Never use Edit/Write on `config.json`. Stop on a non-zero merge exit and report the `hatch-config:` stderr line. Repeating the same answers must leave the file byte-identical.
       c. Confirm (text only): "Sent `group add` for `<channelId>`. Will verify after all channels are added."
       d. Ask with `AskUserQuestion` (header: `"Add another?"`) — `"Yes — add another"` with the next ID via `Other`; `"Done — continue"`. On `"Done — continue"`: exit the loop.
-   4. **Verify all added channels** (one `Read` after the loop): open `<project_path>/.claude.local/channels/<plugin>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: run `docker compose -f docker-compose.hermit.yml exec -T hermit tmux capture-pane -t <session> -p`, surface the output, and warn — do not fail the whole setup. Then proceed to sub-step 8.
+   After the loop, if any nickname regex was given, read existing `mentionPatterns` from the host-side access.json and merge the requested regexes without duplicates, preserving existing patterns. Run once with the same transport and state-dir flags:
+   ```bash
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-pair.ts set mentionPatterns '<json array>' \
+     --channel <plugin> --session <session> \
+     --compose-file docker-compose.hermit.yml --service hermit \
+     --state-dir <project_path>/.claude.local/channels/<plugin>/
+   ```
+
+   4. **Verify all added channels** (one `Read` after the loop): open `<project_path>/.claude.local/channels/<plugin>/access.json`. For each ID added in step 3, confirm `groups.<channelId>` is present with the expected `requireMention` value. For any missing: run `docker compose -f docker-compose.hermit.yml exec -T hermit tmux capture-pane -t <session> -p`, surface the output, and warn — do not fail the whole setup. Also check that `mentionPatterns` contains every requested regex and `groups.<id>.allowFrom` equals the requested trigger ids (compare ids as strings, ignoring order). For each miss print "`<key>` didn't land, this plugin may not support it; set it with `/<channel>:access` manually after setup", naming the exact key and substituting the plugin name for `<channel>`. Do not error. Then proceed to sub-step 8.
 8. **Capture the bot's own identity** (host-side, like `channel-pair.ts` — `config.json` and the channel `.env` are both on the host):
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-bot-id.ts <project_path>/.claude-code-hermit <plugin> --write

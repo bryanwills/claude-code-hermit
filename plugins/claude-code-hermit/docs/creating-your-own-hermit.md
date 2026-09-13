@@ -94,6 +94,31 @@ description: Deploys the current branch to staging or production.
 
 For more on [skills](https://code.claude.com/docs/en/skills), see the Claude Code docs.
 
+### Personal and third-party skills in Docker
+
+You can bring an existing collection or your own skills to a Hermit. Choose a Claude plugin when you want a publisher-maintained bundle, or use the [Skills CLI](https://github.com/vercel-labs/skills) to install selected, editable skills from a Git repository or local folder. Choose one installation method for a collection to avoid duplicates; follow its setup instructions after installing.
+
+For one Hermit, project scope is the simplest default. You can run skill installation commands inside the container from the mounted project root: the standard Hermit image includes Node.js, npm, and `npx`. Installing skill files there needs no image rebuild. You can also run the commands from the same project on the host if Node.js and npm are installed there. Docker rebuilds, restarts, and Compose validation remain host-only.
+
+In these examples, replace `OWNER/SKILLS-REPO` with your chosen repository, or `./my-personal-skills` with your local source folder, and select the skills you want:
+
+```bash
+npx skills@latest add OWNER/SKILLS-REPO --agent claude-code
+npx skills@latest add ./my-personal-skills --agent claude-code
+```
+
+The second example assumes your source folder is accessible in the shell running the command. A personal Git repository URL works too; private repositories need authentication in that environment. A local-source install creates an installed copy, so editing the source folder later does not automatically change that copy. You can also author a skill directly in `.claude/skills/<name>/SKILL.md`, with scripts and supporting files alongside it, as described in [Claude Code's skill documentation](https://code.claude.com/docs/en/skills).
+
+**Where the files live matters.** A host/tmux Hermit uses host paths and its Claude configuration directory. A Docker Hermit sees the mounted project and its own Claude configuration volume. A host session can install project skills into that shared project, but installing to the host's global skills directory does not make those skills available in the container. Docker also runs Claude inside tmux; being in tmux alone does not identify which environment you are using.
+
+In the CLI's default symlink mode, project installations keep the skill contents under `.agents/skills/`, links under `.claude/skills/`, and update metadata in `skills-lock.json`. The standard Hermit project mount preserves all three across container recreation. Keep them together when backing up or moving the project. For personal files you do not want committed, exclude the relevant installed files, links, and metadata from Git; project scope does not itself mean private.
+
+Avoid assuming that `--global` inside Docker is persistent. Its links under `/home/claude/.claude/skills/` can point to `/home/claude/.agents/skills/`, while update records normally live in `/home/claude/.agents/.skill-lock.json`. The standard container persists the Claude configuration directory, but not `.agents` in the container home. Recreation can leave broken links and lose update records. `--copy` alone does not preserve those update records. Import existing host skills with their actual contents, not just links to unmounted directories.
+
+Keep your own source skills backed up. Before updating an edited third-party skill, preserve the changes in a personal copy or fork; an upstream update is not a merge of your edits. Use the CLI's [list](https://github.com/vercel-labs/skills#skills-list), [update](https://github.com/vercel-labs/skills#skills-update), and [remove](https://github.com/vercel-labs/skills#skills-remove) instructions for CLI installations, and Claude's plugin management for plugin installations.
+
+For skills marked `disable-model-invocation: true`, type the skill command in a terminal or the Claude app. Confirm an installed skill is available before relying on it from chat. If its scripts need packages, environment variables, or persistent tool downloads, use [/claude-code-hermit:docker-customize](../skills/docker-customize/SKILL.md) for the container setup.
+
 ---
 
 ## Building a Reusable Hermit
