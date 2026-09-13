@@ -24,7 +24,7 @@ function withRoot(fn: (dir: string) => void) {
 describe('alert-state file split', () => {
   test('budget, telemetry, doctor, and skill alerts coexist and merge', withRoot((dir) => {
     // skill alert in alert-state.json (heartbeat/update-alert-state territory)
-    writeAlertState(alertStatePath(dir), { alerts: { 'stale-session': { suppressed: false } }, total_ticks: 7 });
+    writeAlertState(alertStatePath(dir), { alerts: { 'checklist:checksys': { suppressed: false } }, total_ticks: 7 });
     // budget alert in its own file (cost-tracker)
     mutateOwnedAlerts(budgetAlertsPath(dir), (a) => { a['budget-breach:daily:2026-07-05'] = { kind: 'budget', notified: false }; });
     // telemetry alert in its own file (report-export)
@@ -34,12 +34,12 @@ describe('alert-state file split', () => {
 
     const merged = readMergedAlerts(dir);
     expect(Object.keys(merged).sort()).toEqual([
-      'budget-breach:daily:2026-07-05', 'doctor:permissions', 'stale-session', 'telemetry:export-failed',
+      'budget-breach:daily:2026-07-05', 'checklist:checksys', 'doctor:permissions', 'telemetry:export-failed',
     ]);
   }));
 
   test('a doctor write leaves the heartbeat-owned alert file untouched', withRoot((dir) => {
-    writeAlertState(alertStatePath(dir), { alerts: { 'stale-session': { suppressed: false } }, total_ticks: 7 });
+    writeAlertState(alertStatePath(dir), { alerts: { 'checklist:checksys': { suppressed: false } }, total_ticks: 7 });
     const before = fs.readFileSync(alertStatePath(dir), 'utf-8');
 
     mutateOwnedAlerts(doctorAlertsPath(dir), (a) => { a['doctor:permissions'] = { status: 'warn' }; });

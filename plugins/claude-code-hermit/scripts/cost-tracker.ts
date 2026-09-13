@@ -839,7 +839,7 @@ async function run(data: Json): Promise<string | null> {
     // a nested claude inherits HERMIT_MANAGED and would otherwise repoint the record on
     // every one of its own turns. writeRuntimeFields (not lib/runtime's updateRuntimeField)
     // because this is not a lifecycle event — refreshing updated_at here would hide a
-    // wedged session from doctor's stale-session check.
+    // wedged session from doctor's liveness check.
     if (!guest && process.env.HERMIT_MANAGED === '1') {
       const runtime = readRuntimeJsonCached();
       // Id comparison first: ownsResidentIdentity scans the session registry (a readdir

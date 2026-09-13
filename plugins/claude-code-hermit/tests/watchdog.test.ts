@@ -586,6 +586,14 @@ function configureChannel(h: Hermit): void {
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_TOKEN=test-token\n');
 }
 
+function configureMaintainerChannel(h: Hermit): void {
+  configureChannel(h);
+  const p = path.join(h.dir, '.claude-code-hermit', 'config.json');
+  const cfg = readJson(p);
+  cfg.channels.telegram.maintainer_channel_id = '99999';
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
+}
+
 describe('watchdog state-write failure', () => {
   for (const lastStartError of [null, 'resident-missing']) {
     test(`notifies each tick and recovers after permissions return (${lastStartError})`, withHermit(async (h) => {
@@ -1861,7 +1869,7 @@ test('no inbox socket in runtime.json → wedge nudge types, exactly as before',
 
 test('5h-stale heartbeat first run pushes waking, not unresponsive', withHermit(async (h) => {
   writeConfig(h);
-  configureChannel(h);
+  configureMaintainerChannel(h);
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 1);
   touchAgo(state(h, '.heartbeat'), 5 * 3600);
@@ -1898,7 +1906,7 @@ test('second stale run with consecutive_stale 1 due pushes unresponsive once', w
 
 test('stale then fresh heartbeat pushes all-clear', withHermit(async (h) => {
   writeConfig(h);
-  configureChannel(h);
+  configureMaintainerChannel(h);
   writeFakeTmux(h, 0);
   writeFakePgrep(h, 1);
   touchAgo(state(h, '.heartbeat'), 5 * 3600);
@@ -1912,6 +1920,44 @@ test('stale then fresh heartbeat pushes all-clear', withHermit(async (h) => {
     const r2 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
     expect(r2.exitCode).toBe(0);
     expect(stub.requests.some((req) => String(req.body?.text ?? '').includes('responding again'))).toBe(true);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('wedge-recovered');
+  } finally { stub.stop(); }
+}));
+
+test('wedge-recovered with no maintainer channel sends nothing', withHermit(async (h) => {
+  writeConfig(h);
+  configureChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+  const stub = startHttpStub();
+  try {
+    const r1 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r1.exitCode).toBe(0);
+    touchAgo(state(h, '.heartbeat'), 60);
+    const r2 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r2.exitCode).toBe(0);
+    expect(stub.requests).toHaveLength(0);
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('wedge-recovered');
+  } finally { stub.stop(); }
+}));
+
+test('wedge-recovered with a maintainer channel sends there', withHermit(async (h) => {
+  writeConfig(h);
+  configureMaintainerChannel(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  touchAgo(state(h, '.heartbeat'), 5 * 3600);
+  const stub = startHttpStub();
+  try {
+    const r1 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r1.exitCode).toBe(0);
+    touchAgo(state(h, '.heartbeat'), 60);
+    const r2 = await watchdog(h, 'run', { env: { HERMIT_TELEGRAM_API_URL: stub.url } });
+    expect(r2.exitCode).toBe(0);
+    const recovered = stub.requests.filter((req) => String(req.body?.text ?? '').includes('responding again'));
+    expect(recovered.length).toBe(1);
+    expect(recovered[0].body.chat_id).toBe('99999');
     expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('wedge-recovered');
   } finally { stub.stop(); }
 }));
@@ -2953,6 +2999,118 @@ test('run stamps last_run before the enabled gate (enabled:false)', withHermit(a
   expect(typeof ws.last_run).toBe('string');
   expect(Date.now() - Date.parse(ws.last_run)).toBeLessThan(60_000);
 }));
+
+function autoIdleConfig(): string {
+  return JSON.stringify({
+    timezone: 'UTC',
+    watchdog: { enabled: false, context_clear_tokens: null },
+    post_close_clear: false,
+    context_hygiene: { compact: { enabled: false } },
+    heartbeat: { stale_threshold: '2h' },
+  }) + '\n';
+}
+
+function seedAutoIdleShell(h: Hermit, progressHHMM: string): void {
+  const sessions = path.join(h.dir, '.claude-code-hermit', 'sessions');
+  fs.mkdirSync(sessions, { recursive: true });
+  fs.writeFileSync(path.join(sessions, 'SHELL.md'), `# Active Session
+
+## Session Info
+- **ID:** S-001
+- **Started:** 2026-05-20 19:00
+- **Tags:**
+- **Tasks Completed:** 0
+- **Session Mode:**
+
+## Task
+quiet work
+
+## Progress Log
+[${progressHHMM}] Did some work
+
+## Blockers
+
+## Findings
+
+## Changed
+
+## Monitoring
+
+## Session Summary
+`);
+}
+
+function quietProgressHHMM(): string {
+  return new Date(Date.now() - 3 * 3600_000).toISOString().slice(11, 16);
+}
+
+test('watchdog auto-idles a quiet in_progress session and appends an auto-idle event', withHermit(async (h) => {
+  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), autoIdleConfig());
+  patchRuntime(h, { session_id: 'S-001', opened_at: isoAgo(3) });
+  fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(3) }) + '\n');
+  seedAutoIdleShell(h, quietProgressHHMM());
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  const env = { env: { AGENT_DIR: path.join(h.dir, '.claude-code-hermit') } };
+  // First tick only records the pane hash (quiescence pending).
+  expect((await watchdog(h, 'run', env)).exitCode).toBe(0);
+  expect(readJson(state(h, 'runtime.json')).session_state).toBe('in_progress');
+  const r = await watchdog(h, 'run', env);
+  expect(r.exitCode).toBe(0);
+  expect(readJson(state(h, 'runtime.json')).session_state).toBe('idle');
+  expect(fs.existsSync(path.join(h.dir, '.claude-code-hermit', 'sessions', 'S-001-REPORT.md'))).toBe(true);
+  expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('"action":"auto-idle"');
+}));
+
+test('watchdog auto-idle leaves a session whose pane changes between ticks in_progress', withHermit(async (h) => {
+  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), autoIdleConfig());
+  patchRuntime(h, { session_id: 'S-001', opened_at: isoAgo(3) });
+  fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(3) }) + '\n');
+  seedAutoIdleShell(h, quietProgressHHMM());
+  writeFakePgrep(h, 1);
+  const env = { env: { AGENT_DIR: path.join(h.dir, '.claude-code-hermit') } };
+  writeFakeTmux(h, 0, 'running tool call (1m)');
+  expect((await watchdog(h, 'run', env)).exitCode).toBe(0);
+  writeFakeTmux(h, 0, 'running tool call (2m)');
+  expect((await watchdog(h, 'run', env)).exitCode).toBe(0);
+  expect(readJson(state(h, 'runtime.json')).session_state).toBe('in_progress');
+  expect(fs.existsSync(path.join(h.dir, '.claude-code-hermit', 'sessions', 'S-001-REPORT.md'))).toBe(false);
+}));
+
+test('watchdog auto-idle leaves interactive, paused, and operator-recent fixtures untouched', async () => {
+  const progress = quietProgressHHMM();
+  const variants: Array<{ name: string; setup: (h: Hermit) => void }> = [
+    { name: 'interactive', setup: (h) => patchRuntime(h, { runtime_mode: 'interactive' }) },
+    {
+      name: 'paused',
+      setup: (h) => fs.writeFileSync(state(h, 'operator-pause.json'), JSON.stringify({
+        paused: true, paused_until: null, reason: 'operator', by: 'test', ts: new Date().toISOString(),
+      }) + '\n'),
+    },
+    {
+      name: 'operator-recent',
+      setup: (h) => fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(0.05) }) + '\n'),
+    },
+  ];
+  for (const v of variants) {
+    const h = setupHermit();
+    try {
+      fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), autoIdleConfig());
+      patchRuntime(h, { session_id: 'S-001', opened_at: isoAgo(3) });
+      fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(3) }) + '\n');
+      seedAutoIdleShell(h, progress);
+      writeFakeTmux(h, 0);
+      writeFakePgrep(h, 1);
+      v.setup(h);
+      const r = await watchdog(h, 'run', { env: { AGENT_DIR: path.join(h.dir, '.claude-code-hermit') } });
+      expect(r.exitCode, v.name).toBe(0);
+      expect(readJson(state(h, 'runtime.json')).session_state, v.name).toBe('in_progress');
+      expect(fs.existsSync(path.join(h.dir, '.claude-code-hermit', 'sessions', 'S-001-REPORT.md')), v.name).toBe(false);
+    } finally {
+      h.cleanup();
+    }
+  }
+});
 
 test('doctor checkWatchdog: enabled + fresh last_run + quiet → ok, shows last tick', withHermit(async (h) => {
   writeDoctorConfig(h);

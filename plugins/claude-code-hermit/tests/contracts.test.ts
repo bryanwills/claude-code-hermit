@@ -3762,7 +3762,7 @@ describe('heartbeat eval-runner return contract', () => {
   });
 
   test('reference.md forbids the model from emitting structured (file-backed) keys', () => {
-    expect(reference).toContain('**Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key, or the `stale-session` key.');
+    expect(reference).toContain('**Never** emit a `micro-proposal-pending:*` or `proposal-pending:*` key.');
   });
 
   test('SKILL.md step 5 leaves validation to the script', () => {

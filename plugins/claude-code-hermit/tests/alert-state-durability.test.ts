@@ -159,7 +159,7 @@ describe('update-alert-state durability', () => {
 
   test('preserves precheck-owned total_ticks under atomic write, no .tmp leak', withTmp(async (dir) => {
     fs.writeFileSync(alertPath(dir), JSON.stringify({
-      alerts: {}, last_digest_date: null, self_eval: { a: 1 }, total_ticks: 686, last_stale_wake_at: '2026-05-19T00:00:00Z',
+      alerts: {}, last_digest_date: null, self_eval: { a: 1 }, total_ticks: 686, last_micro_corrupt_wake_at: '2026-05-19T00:00:00Z',
     }));
 
     // Off-boundary firing evidence is script-owned. A subagent that still emits
@@ -168,7 +168,7 @@ describe('update-alert-state durability', () => {
 
     const written = JSON.parse(fs.readFileSync(alertPath(dir), 'utf-8'));
     expect(written.total_ticks).toBe(686);
-    expect(written.last_stale_wake_at).toBe('2026-05-19T00:00:00Z');
+    expect(written.last_micro_corrupt_wake_at).toBe('2026-05-19T00:00:00Z');
     expect(written.self_eval).toEqual({ a: 1, 'checklist:checksys': { fired_since_self_eval: true } });
     expect(written.alerts['checklist:checksys']).toMatchObject({ count: 1, suppressed: false, text: 'k fired' });
     expect(stateFiles(dir).some(f => f.endsWith('.tmp'))).toBe(false);

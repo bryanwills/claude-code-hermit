@@ -2,7 +2,7 @@
 // Covers: heartbeat-precheck AUTO_CLOSE verdict, the last-operator-action.json
 // signal (record-operator-action hook), the daily-auto-close pending-close
 // drain, reflect-precheck closed_via handling, weekly-review partition of
-// auto-archived sessions, and the stale-session gate.
+// auto-archived sessions, and the quiet-session auto-idle predicate.
 //
 // Scripts are exercised as subprocesses (via runScript) because that is the
 // boundary the hooks/routines see — args + cwd + HERMIT_NOW in, verdict out.
@@ -17,6 +17,10 @@ import path from 'node:path';
 import { runScript, runPinnedScript, PLUGIN_ROOT, SCRIPTS_DIR } from './helpers/run';
 import { fixturesDir } from './helpers/workdir';
 import { composeCompactSteeringMessage } from '../scripts/hermit-watchdog';
+import { autoIdleDue, runAutoIdle } from '../scripts/lib/auto-close';
+import { setPause } from '../scripts/lib/pause';
+import { replaceSectionInPlace } from '../scripts/lib/md-write';
+import { readFrontmatter } from '../scripts/lib/frontmatter';
 
 // ---------- fixture scaffolding ----------
 
@@ -1052,189 +1056,6 @@ describe('empty-12h-archive exclusion in weekly-review / reflect-precheck', () =
     }));
 });
 
-// -------------------------------------------------------
-// stale-session gate: skip LLM wake when operator is present
-// -------------------------------------------------------
-
-describe('stale-session gate: skip LLM wake when operator is present', () => {
-  // Shared setup: HEARTBEAT.md with one suppressed item (all OK for checklist gate),
-  // last_digest_date = today so the digest gate doesn't fire, total_ticks = 1.
-  const SUPPRESSED_ALERT_STATE = JSON.stringify({
-    alerts: {
-      'checklist:checksys': {
-        count: 6, consecutive_clean: 0, suppressed: true,
-        first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Check system',
-      },
-    },
-    last_digest_date: TODAY_DATE, self_eval: {}, total_ticks: 1,
-  });
-  const NOW = '2026-05-20T22:00:00+00:00';
-
-  // HEARTBEAT.md with a plain (non-checkbox) item, per the bash fixture.
-  function seedStale(dir: string, alertState: string = SUPPRESSED_ALERT_STATE): void {
-    fs.writeFileSync(hermit(dir, 'config.json'), FULL_DAY_HEARTBEAT_CONFIG);
-    fs.writeFileSync(hermit(dir, 'HEARTBEAT.md'), '# Heartbeat\n\n- Check system\n');
-    fs.writeFileSync(hermit(dir, 'sessions', 'SHELL.md'), '');
-    writeState(dir, 'runtime.json', RUNTIME_IN_PROGRESS);
-    writeState(dir, 'alert-state.json', alertState);
-  }
-
-  // stale.1. in_progress + operator within stale_threshold + all items suppressed + digest ran → OK
-  test('stale-gate: in_progress + operator 30min ago + suppressed checklist + digest done → OK', withTmp(async (dir) => {
-    seedStale(dir);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T21:30:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('OK');
-  }));
-
-  // stale.2. in_progress + operator quiet beyond stale_threshold → EVALUATE (unchanged)
-  test('stale-gate: in_progress + operator 3h ago (> 2h threshold) → EVALUATE', withTmp(async (dir) => {
-    seedStale(dir);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T19:00:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.3. in_progress + operator recent + stale-session alert active → EVALUATE (resolution tracking)
-  test('stale-gate: operator recent + stale-session alert active → EVALUATE (resolution tracking)', withTmp(async (dir) => {
-    const staleActive = JSON.stringify({
-      alerts: {
-        'checklist:checksys': {
-          count: 6, consecutive_clean: 0, suppressed: true,
-          first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Check system',
-        },
-        'stale-session': {
-          count: 1, consecutive_clean: 0, suppressed: false,
-          first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Stale session',
-        },
-      },
-      last_digest_date: TODAY_DATE, self_eval: {}, total_ticks: 1,
-    });
-    seedStale(dir, staleActive);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T21:30:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.4. in_progress + future-dated last-operator-action (clock skew) → EVALUATE (fail-open)
-  test('stale-gate: future-dated last-operator-action (clock skew) → EVALUATE (fail-open)', withTmp(async (dir) => {
-    seedStale(dir);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T23:00:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.5. in_progress + no last-operator-action.json → EVALUATE (no regression for pre-upgrade installs)
-  test('stale-gate: absent last-operator-action (pre-upgrade install) → EVALUATE (no regression)', withTmp(async (dir) => {
-    seedStale(dir);
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.6. stale.1 variant WITHOUT last_digest_date=today → EVALUATE (digest gate fires correctly)
-  test('stale-gate: operator recent + suppressed but digest not yet run today → EVALUATE (daily digest)', withTmp(async (dir) => {
-    // Same suppressed item but last_digest_date is yesterday → digest gate fires
-    const staleNoDigest = JSON.stringify({
-      alerts: {
-        'checklist:checksys': {
-          count: 6, consecutive_clean: 0, suppressed: true,
-          first_seen: '2026-05-19', last_seen: '2026-05-19', text: 'Check system',
-        },
-      },
-      last_digest_date: '2026-05-19', self_eval: {}, total_ticks: 1,
-    });
-    seedStale(dir, staleNoDigest);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T21:30:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.7. Damper: second tick within stale_threshold, unchanged condition → fall-through → OK
-  test('stale-gate: damper — stale condition unchanged within threshold → fall-through → OK', withTmp(async (dir) => {
-    const damped = JSON.stringify({
-      alerts: {
-        'checklist:checksys': {
-          count: 6, consecutive_clean: 0, suppressed: true,
-          first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Check system',
-        },
-      },
-      last_digest_date: TODAY_DATE, self_eval: {}, total_ticks: 1,
-      last_stale_wake_at: '2026-05-20T21:00:00+00:00', // 1h before NOW, < 2h threshold
-    });
-    seedStale(dir, damped);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T19:00:00+00:00"}'); // 3h ago (opQuiet)
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('OK');
-  }));
-
-  // stale.8. Damper: stale_threshold elapsed since last wake → EVALUATE again
-  test('stale-gate: damper — stale_threshold elapsed since last_stale_wake_at → EVALUATE', withTmp(async (dir) => {
-    const damped = JSON.stringify({
-      alerts: {
-        'checklist:checksys': {
-          count: 6, consecutive_clean: 0, suppressed: true,
-          first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Check system',
-        },
-      },
-      last_digest_date: TODAY_DATE, self_eval: {}, total_ticks: 1,
-      last_stale_wake_at: '2026-05-20T19:30:00+00:00', // 2.5h before NOW, > 2h threshold
-    });
-    seedStale(dir, damped);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T19:00:00+00:00"}'); // 3h ago (opQuiet)
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.9. Damper: operator advances after damp period → EVALUATE (operatorAdvanced)
-  test('stale-gate: damper — operator advances after damp → EVALUATE', withTmp(async (dir) => {
-    const staleActive = JSON.stringify({
-      alerts: {
-        'checklist:checksys': {
-          count: 6, consecutive_clean: 0, suppressed: true,
-          first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Check system',
-        },
-        'stale-session': {
-          count: 1, consecutive_clean: 0, suppressed: false,
-          first_seen: TODAY_DATE, last_seen: TODAY_DATE, text: 'Stale session',
-        },
-      },
-      last_digest_date: TODAY_DATE, self_eval: {}, total_ticks: 1,
-      last_stale_wake_at: '2026-05-20T21:30:00+00:00', // 30min before NOW
-    });
-    seedStale(dir, staleActive);
-    // Operator acted at 21:45 — after last_stale_wake_at (21:30) → operatorAdvanced = true
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T21:45:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.10. Regression: digest gate still fires when staleness is damped (fall-through must reach it)
-  test('stale-gate: damper — digest gate fires through the damp fall-through', withTmp(async (dir) => {
-    const dampedNoDigest = JSON.stringify({
-      alerts: {
-        'checklist:checksys': {
-          count: 6, consecutive_clean: 0, suppressed: true,
-          first_seen: '2026-05-19', last_seen: '2026-05-19', text: 'Check system',
-        },
-      },
-      last_digest_date: '2026-05-19', self_eval: {}, total_ticks: 1, // yesterday → digest due
-      last_stale_wake_at: '2026-05-20T21:00:00+00:00', // 1h ago (within threshold → damped)
-    });
-    seedStale(dir, dampedNoDigest);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T19:00:00+00:00"}'); // 3h ago (opQuiet)
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-  }));
-
-  // stale.11. Non-peek: first stale wake writes last_stale_wake_at to alert-state.json
-  test('stale-gate: non-peek first stale wake writes last_stale_wake_at', withTmp(async (dir) => {
-    seedStale(dir);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T19:00:00+00:00"}'); // 3h ago (opQuiet)
-    expect(await precheck(dir, { now: NOW })).toBe('EVALUATE'); // non-peek
-    const state = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'alert-state.json'), 'utf-8'));
-    expect(typeof state.last_stale_wake_at).toBe('string');
-    expect(new Date(state.last_stale_wake_at).toISOString()).toBe(new Date(NOW).toISOString());
-  }));
-
-  // stale.12. Peek: does NOT write last_stale_wake_at
-  test('stale-gate: peek does not write last_stale_wake_at', withTmp(async (dir) => {
-    seedStale(dir);
-    writeState(dir, 'last-operator-action.json', '{"at":"2026-05-20T19:00:00+00:00"}');
-    expect(await precheck(dir, { now: NOW, peek: true })).toBe('EVALUATE');
-    const state = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'alert-state.json'), 'utf-8'));
-    expect(state.last_stale_wake_at).toBeUndefined();
-  }));
-});
 
 // -------------------------------------------------------
 // auto-close-decision verb: the deterministic midnight branch table
@@ -1428,4 +1249,191 @@ describe('auto-close-decision verb', () => {
       expect(src, `${name} must not hardcode the lull`).not.toContain('1000 * 60) > 10');
     }
   });
+});
+
+// -------------------------------------------------------
+// autoIdleDue: quiet-session predicate for script-owned idle
+// -------------------------------------------------------
+
+describe('autoIdleDue', () => {
+  const STALE_MS = 2 * 3600_000;
+  const NOW_ISO = '2026-05-20T22:00:00+00:00';
+  const NOW_MS = Date.parse(NOW_ISO);
+  const QUIET_AT = '2026-05-20T19:00:00+00:00';
+  const FRESH_AT = '2026-05-20T21:30:00+00:00';
+
+  function seedQuiet(dir: string, runtime: object = { session_state: 'in_progress' }): void {
+    fs.writeFileSync(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
+    writeState(dir, 'runtime.json', JSON.stringify(runtime));
+    writeState(dir, 'last-operator-action.json', JSON.stringify({ at: QUIET_AT }));
+    fs.writeFileSync(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Progress Log\n[19:00] Did some work\n\n## Monitoring\n');
+  }
+
+  function snapshotState(dir: string): Record<string, string> {
+    const stateDir = hermit(dir, 'state');
+    const out: Record<string, string> = {};
+    for (const name of fs.readdirSync(stateDir)) {
+      const p = path.join(stateDir, name);
+      if (fs.statSync(p).isFile()) out[name] = fs.readFileSync(p, 'utf-8');
+    }
+    return out;
+  }
+
+  test('both axes quiet → due', withTmp((dir) => {
+    seedQuiet(dir);
+    const before = snapshotState(dir);
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: true, hours: 3 });
+    expect(snapshotState(dir)).toEqual(before);
+  }));
+
+  test('operator fresh → not due', withTmp((dir) => {
+    seedQuiet(dir);
+    writeState(dir, 'last-operator-action.json', JSON.stringify({ at: FRESH_AT }));
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('progress fresh → not due', withTmp((dir) => {
+    seedQuiet(dir);
+    fs.writeFileSync(hermit(dir, 'sessions', 'SHELL.md'),
+      '# Active Session\n\n## Progress Log\n[21:30] Did some work\n\n## Monitoring\n');
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('interactive → not due', withTmp((dir) => {
+    seedQuiet(dir, { session_state: 'in_progress', runtime_mode: 'interactive' });
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('transition → not due', withTmp((dir) => {
+    seedQuiet(dir, { session_state: 'in_progress', transition: 'archiving' });
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('shutdown stamp → not due', withTmp((dir) => {
+    seedQuiet(dir, { session_state: 'in_progress', shutdown_requested_at: QUIET_AT });
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('paused → not due', withTmp((dir) => {
+    seedQuiet(dir);
+    setPause(hermit(dir), { reason: 'operator', by: 'test' });
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('waiting → not due', withTmp((dir) => {
+    seedQuiet(dir, { session_state: 'waiting' });
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('no SHELL.md → not due', withTmp((dir) => {
+    seedQuiet(dir);
+    fs.unlinkSync(hermit(dir, 'sessions', 'SHELL.md'));
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+
+  test('fresh attempt marker → not due', withTmp((dir) => {
+    seedQuiet(dir);
+    writeState(dir, 'auto-idle-attempt.json', JSON.stringify({ last_attempt_at: FRESH_AT }));
+    expect(autoIdleDue(hermit(dir), NOW_MS, STALE_MS)).toEqual({ due: false });
+  }));
+});
+
+describe('runAutoIdle', () => {
+  const NOW_ISO = '2026-05-20T22:00:00.000Z';
+  const NOW_MS = Date.parse(NOW_ISO);
+  const QUIET_AT = '2026-05-20T19:00:00+00:00';
+  const SHELL_TEMPLATE = fs.readFileSync(
+    path.join(import.meta.dir, '..', 'state-templates', 'SHELL.md.template'), 'utf-8',
+  );
+  const UTC_CONFIG = { timezone: 'UTC' };
+
+  function seedArchivable(dir: string): void {
+    fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify(UTC_CONFIG));
+    writeState(dir, 'runtime.json', JSON.stringify({
+      session_state: 'in_progress',
+      session_id: 'S-001',
+      opened_at: QUIET_AT,
+    }));
+    writeState(dir, 'last-operator-action.json', JSON.stringify({ at: QUIET_AT }));
+    const shell = replaceSectionInPlace(SHELL_TEMPLATE, 'Progress Log', '\n[19:00] Did some work\n\n');
+    fs.writeFileSync(hermit(dir, 'sessions', 'SHELL.md'), shell);
+  }
+
+  function withPinned<T>(dir: string, fn: () => T): T {
+    const prevAgent = process.env.AGENT_DIR;
+    const prevNow = process.env.HERMIT_NOW;
+    process.env.AGENT_DIR = hermit(dir);
+    process.env.HERMIT_NOW = NOW_ISO;
+    try { return fn(); }
+    finally {
+      if (prevAgent === undefined) delete process.env.AGENT_DIR;
+      else process.env.AGENT_DIR = prevAgent;
+      if (prevNow === undefined) delete process.env.HERMIT_NOW;
+      else process.env.HERMIT_NOW = prevNow;
+    }
+  }
+
+  function captureStdout<T>(fn: () => T): { result: T; stdout: string } {
+    let stdout = '';
+    const orig = process.stdout.write;
+    process.stdout.write = ((chunk: any, encoding?: any, cb?: any) => {
+      stdout += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf-8');
+      if (typeof encoding === 'function') encoding();
+      else if (typeof cb === 'function') cb();
+      return true;
+    }) as typeof process.stdout.write;
+    try { return { result: fn(), stdout }; }
+    finally { process.stdout.write = orig; }
+  }
+
+  test('success archives to idle with marker, report, monitoring line, empty stdout', withTmp((dir) => {
+    seedArchivable(dir);
+    const { result, stdout } = withPinned(dir, () => captureStdout(() => runAutoIdle(hermit(dir), NOW_MS, UTC_CONFIG)));
+    expect(result).toBe('archived');
+    expect(stdout).toBe('');
+
+    const marker = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'auto-idle-attempt.json'), 'utf-8'));
+    expect(marker.last_attempt_at).toBe(new Date(NOW_MS).toISOString());
+
+    const reportPath = hermit(dir, 'sessions', 'S-001-REPORT.md');
+    expect(fs.existsSync(reportPath)).toBe(true);
+    const fm = readFrontmatter(reportPath);
+    expect(fm.closed_via).toBe('auto');
+    expect(fm.status).toBe('partial');
+
+    const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
+    expect(shell).toContain('[22:00] Heartbeat: auto-idled (quiet ~3h).');
+
+    const rt = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'runtime.json'), 'utf-8'));
+    expect(rt.session_state).toBe('idle');
+    expect(typeof rt.closed_at).toBe('string');
+    expect(Number.isNaN(new Date(rt.closed_at).getTime())).toBe(false);
+  }));
+
+  test('a second run after a successful archive skips instead of re-archiving', withTmp((dir) => {
+    seedArchivable(dir);
+    expect(withPinned(dir, () => runAutoIdle(hermit(dir), NOW_MS, UTC_CONFIG))).toBe('archived');
+    const reports = () => fs.readdirSync(hermit(dir, 'sessions')).filter(f => f.endsWith('-REPORT.md'));
+    const before = reports();
+    expect(withPinned(dir, () => runAutoIdle(hermit(dir), NOW_MS, UTC_CONFIG))).toBe('skipped');
+    expect(reports()).toEqual(before);
+  }));
+
+  test('failure stamps the marker, logs the failure line, leaves runtime not idle, empty stdout', withTmp((dir) => {
+    seedArchivable(dir);
+    fs.mkdirSync(hermit(dir, 'sessions', 'S-001-REPORT.md'));
+    const { result, stdout } = withPinned(dir, () => captureStdout(() => runAutoIdle(hermit(dir), NOW_MS, UTC_CONFIG)));
+    expect(result).toBe('failed');
+    expect(stdout).toBe('');
+
+    const marker = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'auto-idle-attempt.json'), 'utf-8'));
+    expect(marker.last_attempt_at).toBe(new Date(NOW_MS).toISOString());
+
+    const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
+    expect(shell).toContain('Heartbeat: auto-idle failed:');
+
+    const rt = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'runtime.json'), 'utf-8'));
+    expect(rt.session_state).not.toBe('idle');
+  }));
 });

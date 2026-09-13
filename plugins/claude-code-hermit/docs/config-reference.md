@@ -126,12 +126,12 @@ Manage with `/hermit-settings channels` (subcommands include `primary <name>` an
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable heartbeat on idle transitions. |
-| `every` | string | `"30m"` | Heartbeat interval (e.g., `"15m"`, `"30m"`, `"2h"`). Quiet polls are zero-token at any cadence, so this sets how fast the damper-bypassing gates (pending proposals, budget, suppressed digest, stale sessions) are picked up — not how often the full checklist is re-read, which `clean_recheck_cooldown` governs. |
+| `every` | string | `"30m"` | Heartbeat interval (e.g., `"15m"`, `"30m"`, `"2h"`). Quiet polls are zero-token at any cadence, so this sets how fast the damper-bypassing gates (pending proposals, budget, suppressed digest) are picked up — not how often the full checklist is re-read, which `clean_recheck_cooldown` governs. |
 | `active_hours.start` | string | `"08:00"` | Start of active window (heartbeat pauses outside). |
 | `active_hours.end` | string | `"23:00"` | End of active window. |
-| `stale_threshold` | string | `"2h"` | Alert if active session has no operator activity and no progress for this duration. |
+| `stale_threshold` | string | `"2h"` | Quiet period after which an in_progress session is archived to idle. |
 | `waiting_timeout` | string/null | `null` | Auto-transition from `waiting` to `idle` after this duration (e.g., `"4h"`). `null` = no timeout. |
-| `clean_recheck_cooldown` | string/null | `"6h"` | After a clean EVALUATE (nothing found), suppress re-evaluation for this window. Trades up to this much latency for surfacing a newly-arising condition in exchange for ~3× fewer LLM wakes/active-day. `null` disables (reverts to per-tick EVALUATE). All time-sensitive gates — stale session, micro-proposal, pending-proposal, pending-close, suppressed-digest — bypass the damper. Bypassing it is not the same as firing forever: the micro-proposal and pending-proposal gates damp on their own `micro-proposal-pending:*` / `proposal-pending:*` suppression ladders, and stale-session on `last_stale_wake_at`. |
+| `clean_recheck_cooldown` | string/null | `"6h"` | After a clean EVALUATE (nothing found), suppress re-evaluation for this window. Trades up to this much latency for surfacing a newly-arising condition in exchange for ~3× fewer LLM wakes/active-day. `null` disables (reverts to per-tick EVALUATE). All time-sensitive gates — micro-proposal, pending-proposal, pending-close, suppressed-digest — bypass the damper. Bypassing it is not the same as firing forever: the micro-proposal and pending-proposal gates damp on their own `micro-proposal-pending:*` / `proposal-pending:*` suppression ladders. |
 
 > **Note:** The tick counter (`total_ticks`) lives in `state/alert-state.json`, not here. It is runtime state, not operator configuration.
 

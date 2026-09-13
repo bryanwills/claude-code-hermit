@@ -783,6 +783,7 @@ function closeFinalUpdates(mode: 'idle' | 'close' | 'auto', sessionsDir: string,
   };
   if (mode === 'idle') {
     finalUpdates.session_id = nextSessionId(sessionsDir);
+    finalUpdates.closed_at = localISOStamp(now);
   } else {
     finalUpdates.session_id = null;
     if (currentShutdownRequestedAt) {
@@ -1193,4 +1194,4 @@ if (import.meta.main) {
   }
 }
 
-export { parsePayload, normalizeStatus, resolveCost, extractProposalIds, compactSection, nextSessionId, readRuntime, updateRuntime };
+export { parsePayload, normalizeStatus, resolveCost, extractProposalIds, compactSection, nextSessionId, readRuntime, updateRuntime, verbArchive };

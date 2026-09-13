@@ -128,7 +128,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `heartbeat.enabled` | timed idle sweeps: **`true`** |
 | `heartbeat.every` | idle sweep cadence: **`30m`** |
 | `heartbeat.active_hours` | active window: **`08:00`–`23:00`** |
-| `heartbeat.stale_threshold` | alert if no progress for: **`2h`** |
+| `heartbeat.stale_threshold` | quiet period after which an in_progress session is archived to idle: **`2h`** |
 | `heartbeat.waiting_timeout` | auto `waiting`→`idle` after: **`null`** (off) |
 | `routines` | persistent routines managed via `/hermit-routines` |
 | `monitors` | persistent background watches managed via `/watch` |

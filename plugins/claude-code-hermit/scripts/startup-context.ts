@@ -349,7 +349,7 @@ function stampSessionEnv(stateDir: string, sessionId: string | null): void {
     // recomputes the same values; /clear mints a new session id, which is a real
     // change and must be written. Skip the write when nothing moved:
     // writeRuntimeJson stamps updated_at, and refreshing that on the strength of a
-    // compaction alone would hide a wedged session from doctor's stale-session
+    // compaction alone would hide a wedged session from doctor's liveness
     // check. stampContextReset in lib/context-reset.ts avoids the same hazard by
     // writing around the helper.
     if (

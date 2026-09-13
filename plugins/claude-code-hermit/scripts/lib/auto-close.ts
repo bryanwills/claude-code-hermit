@@ -13,10 +13,20 @@
 // No module-level state; safe to import from CLI scripts. Reads only, with one
 // sanctioned write: `stampDrainCooldown` persists the drain backoff marker, which
 // both drainers must record before emitting.
+//
+// `autoIdleDue` is the quiet-session predicate for the script-owned idle
+// transition. It never writes. `runAutoIdle` stamps the attempt marker and
+// archives; it writes no stdout.
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJson as readJSON } from './cli';
-import { writeFileAtomic } from './md-write';
+import { writeFileAtomic, extractSection, appendShellLine, withShellLock } from './md-write';
+import { isPaused } from './pause';
+import { readRuntimeJson } from './runtime';
+import { currentHHMMOrUTC, elapsedSinceHHMM, parseDuration } from './time';
+import { readSettledConfig } from './config-read';
+import { verbArchive } from '../session-archive';
+import { acquireLock, releaseLock } from './lockfile';
 
 export const AUTO_CLOSE_LULL_MINUTES = 10;
 export const AUTO_CLOSE_LULL_MS = AUTO_CLOSE_LULL_MINUTES * 60_000;
@@ -135,4 +145,129 @@ export function pendingCloseDrainDue(hermitDir: string, nowMs: number): boolean 
   const qStr = typeof pendingClose.queued_at === 'string' ? pendingClose.queued_at : null;
   const q = qStr ? new Date(qStr).getTime() : NaN;
   return !isNaN(q) && (nowMs - q) / (1000 * 60 * 60) <= 24;
+}
+
+export type AutoIdleDue = { due: false } | { due: true; hours: number };
+
+const AUTO_IDLE_NOT_DUE: AutoIdleDue = { due: false };
+
+function stampAgeMs(value: unknown, nowMs: number): number | null {
+  if (typeof value !== 'string') return null;
+  const t = new Date(value).getTime();
+  return isNaN(t) ? null : nowMs - t;
+}
+
+// True when an in_progress session has been operator-quiet and Progress-Log-quiet
+// for longer than `staleMs`. Fail-open to not-due on any read error so a broken
+// state file never archives a live session. Never writes.
+export function autoIdleDue(hermitDir: string, nowMs: number, staleMs: number): AutoIdleDue {
+  try {
+    const runtime = readRuntimeJson(path.join(hermitDir, 'state'));
+    if (!runtime) return AUTO_IDLE_NOT_DUE;
+    if (runtime.session_state !== 'in_progress') return AUTO_IDLE_NOT_DUE;
+    if (runtime.transition || runtime.shutdown_requested_at || runtime.shutdown_completed_at) {
+      return AUTO_IDLE_NOT_DUE;
+    }
+    if (runtime.runtime_mode === 'interactive') return AUTO_IDLE_NOT_DUE;
+    if (isPaused(hermitDir).paused) return AUTO_IDLE_NOT_DUE;
+
+    const lastAction = readJSON(path.join(hermitDir, 'state', 'last-operator-action.json'));
+    const actionAge = stampAgeMs(lastAction?.at, nowMs);
+    if (actionAge !== null && actionAge >= 0 && actionAge <= staleMs) return AUTO_IDLE_NOT_DUE;
+
+    if (operatorTurnOpen(hermitDir, nowMs)) return AUTO_IDLE_NOT_DUE;
+
+    const attempt = readJSON(path.join(hermitDir, 'state', 'auto-idle-attempt.json'));
+    const attemptAge = stampAgeMs(attempt?.last_attempt_at, nowMs);
+    if (attemptAge !== null && attemptAge >= 0 && attemptAge <= staleMs) return AUTO_IDLE_NOT_DUE;
+
+    const shell = fs.readFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), 'utf-8');
+
+    const section = extractSection(shell, 'Progress Log');
+    const entries = section ? section.match(/\[(\d{1,2}:\d{2})\]/g) : null;
+    if (!entries || entries.length === 0) return AUTO_IDLE_NOT_DUE;
+
+    const last = entries[entries.length - 1].replace(/[\[\]]/g, '');
+    const timezone = readSettledConfig(hermitDir).timezone ?? 'UTC';
+    const elapsedMs = elapsedSinceHHMM(currentHHMMOrUTC(timezone, new Date(nowMs)), last);
+    if (elapsedMs <= staleMs) return AUTO_IDLE_NOT_DUE;
+
+    return { due: true, hours: elapsedMs / 3600000 };
+  } catch {
+    return AUTO_IDLE_NOT_DUE;
+  }
+}
+
+function quietHoursLabel(hours: number): string {
+  const rounded = Math.round(hours * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+const AUTO_IDLE_PAYLOAD = [
+  'Status: partial',
+  'Blockers: none',
+  'Lessons: none',
+  'Changed: none',
+  'Artifacts: none',
+  'Closed Via: auto',
+].join('\n') + '\n';
+
+// Archives a quiet in_progress session to idle. Stamps the attempt marker first
+// so a crash mid-archive cannot retry within stale_threshold. Appends the
+// Monitoring line before verbArchive so idleReset keeps it on the reset SHELL.
+// Returns without writing stdout.
+export function runAutoIdle(
+  hermitDir: string,
+  nowMs: number,
+  config: { timezone?: string; heartbeat?: { stale_threshold?: unknown } },
+): 'archived' | 'failed' | 'skipped' {
+  // The Stop hook and the watchdog both reach here: serialize on the lifecycle
+  // lock and re-check under it, or the loser archives the fresh idle SHELL again.
+  const lockPath = path.join(hermitDir, 'state', '.lifecycle.lock');
+  if (!acquireLock(lockPath)) return 'skipped';
+  try {
+    return runAutoIdleLocked(hermitDir, nowMs, config);
+  } finally {
+    releaseLock(lockPath);
+  }
+}
+
+function runAutoIdleLocked(
+  hermitDir: string,
+  nowMs: number,
+  config: { timezone?: string; heartbeat?: { stale_threshold?: unknown } },
+): 'archived' | 'failed' | 'skipped' {
+  const timezone = config?.timezone ?? 'UTC';
+  const now = new Date(nowMs);
+  const hhmm = currentHHMMOrUTC(timezone, now);
+  const sessionsDir = path.join(hermitDir, 'sessions');
+  const staleMs = parseDuration(config?.heartbeat?.stale_threshold, 2 * 3600_000);
+  const due = autoIdleDue(hermitDir, nowMs, staleMs);
+  if (!due.due) return 'skipped';
+  const hoursLabel = quietHoursLabel(due.hours);
+
+  try {
+    const markerPath = path.join(hermitDir, 'state', 'auto-idle-attempt.json');
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    writeFileAtomic(markerPath, JSON.stringify({ last_attempt_at: now.toISOString() }, null, 2) + '\n');
+  } catch {
+    return 'failed';
+  }
+
+  const successLine = `[${hhmm}] Heartbeat: auto-idled (quiet ~${hoursLabel}h).`;
+  appendShellLine(sessionsDir, 'Monitoring', successLine);
+
+  try {
+    const result = withShellLock(path.join(sessionsDir, 'SHELL.md'), () => verbArchive(
+      { mode: 'idle', 'state-dir': hermitDir },
+      AUTO_IDLE_PAYLOAD,
+    ));
+    if (result?.ok) return 'archived';
+    const reason = typeof result?.reason === 'string' ? result.reason : 'unknown';
+    appendShellLine(sessionsDir, 'Monitoring', `[${hhmm}] Heartbeat: auto-idle failed: ${reason}`);
+    return 'failed';
+  } catch (e: any) {
+    appendShellLine(sessionsDir, 'Monitoring', `[${hhmm}] Heartbeat: auto-idle failed: ${e?.message ?? e}`);
+    return 'failed';
+  }
 }

@@ -7,8 +7,8 @@
 // Alert entries are split across per-writer files so cross-process writers can't
 // clobber each other's keys with a whole-file overwrite (the same reasoning that
 // split pause.json out of runtime.json):
-//   - alert-state.json     — skill/checklist alerts + self_eval + total_ticks +
-//                            last_stale_wake_at (heartbeat-precheck, update-alert-state;
+//   - alert-state.json     — skill/checklist alerts + self_eval + total_ticks
+//                            (heartbeat-precheck, update-alert-state;
 //                            within one heartbeat cycle, so merge-safe as before)
 //   - budget-alerts.json   — budget-* alerts (cost-tracker, Stop hook — sole writer)
 //   - telemetry-alert.json — the telemetry export-failed alert (report-export,
@@ -27,8 +27,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseFrontmatter, listProposalFiles } from './frontmatter';
 import { readMicroProposals } from './micro-proposals-io';
-import { elapsedSinceHHMM } from './time';
-import { extractSection } from './md-write';
 
 type Json = any;
 
@@ -134,7 +132,7 @@ export function mutateOwnedAlerts(p: string, mutator: (alerts: Json) => void): b
 // (checklist/custom/waiting-timeout); this ladder is prefix-agnostic — the
 // caller (lib/heartbeat/alert-update.ts) is responsible for only including keys it
 // trusts in `firing` (model judgment keys plus script-derived keys — see
-// deriveMicroPendingKeys / deriveProposalPendingKeys / deriveStaleSession below).
+// deriveMicroPendingKeys / deriveProposalPendingKeys below).
 // ---------------------------------------------------------------------------
 
 // `text` is the file surface (SHELL.md monitoring lines) — id-carrying is fine
@@ -151,13 +149,6 @@ export const PROPOSAL_PREFIX = 'proposal-pending:';
 export const STRUCTURED_PREFIXES = [MICRO_PREFIX, PROPOSAL_PREFIX];
 export const isStructuredKey = (key: string): boolean =>
   STRUCTURED_PREFIXES.some(p => key.startsWith(p));
-
-// stale-session is derived (see deriveStaleSession below), not prefix-structured
-// like MICRO_PREFIX/PROPOSAL_PREFIX — its text carries no internal id, so it is
-// intentionally excluded from STRUCTURED_PREFIXES/isStructuredKey (no id-scrubbing,
-// no channel-silencing). Its model-phantom-drop is a separate exact-match check
-// in lib/heartbeat/alert-update.ts.
-export const STALE_KEY = 'stale-session';
 
 // doctor:* episodes live in doctor-alerts.json, written by doctor-check.ts alone.
 // Deliberately NOT in STRUCTURED_PREFIXES: those get id-scrubbing and first-fire
@@ -385,48 +376,4 @@ export function deriveProposalPendingKeys(stateDir: string): { ok: boolean; item
     });
   }
   return { ok: true, items };
-}
-
-// stale-session (issue: heartbeat false-alarms on sessions spanning midnight).
-// Progress Log timestamps are date-less [HH:MM]; the eval model was asked to
-// pick "the most recent" and subtract — across midnight it picks yesterday's
-// numerically-larger time and invents the date. Deriving here uses the
-// bottom-most entry (append-ordered) and resolves it as its most recent past
-// occurrence in `timezone` (mod-24), so the model never authors the key.
-// Residuals (accepted): elapsed >24h is indistinguishable from elapsed-mod-24h
-// (the 12h auto-close path covers true abandonment via last-operator-action),
-// and a DST transition can skew one tick by ±1h.
-export function deriveStaleSession(
-  stateDir: string,
-  opts: { hhmmNow: string; staleThresholdMs: number },
-): { ok: boolean; items: FiringItem[] } {
-  let runtime: Json = {};
-  try { runtime = JSON.parse(fs.readFileSync(path.join(stateDir, 'state', 'runtime.json'), 'utf-8')); }
-  catch { return { ok: true, items: [] }; } // absent/unreadable → 'idle' (matches precheck's ?? 'idle')
-  if ((runtime.session_state ?? 'idle') !== 'in_progress') return { ok: true, items: [] };
-
-  let shell: string;
-  try { shell = fs.readFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), 'utf-8'); }
-  catch (err: any) {
-    // in_progress with unreadable SHELL.md is ambiguous — freeze, don't resolve.
-    // ENOENT (no session file at all) → nothing to measure, not firing.
-    return err?.code === 'ENOENT' ? { ok: true, items: [] } : { ok: false, items: [] };
-  }
-
-  const section = extractSection(shell, 'Progress Log');
-  const entries = section ? section.match(/\[(\d{1,2}:\d{2})\]/g) : null;
-  if (!entries || entries.length === 0) return { ok: true, items: [] };
-
-  const last = entries[entries.length - 1].replace(/[\[\]]/g, '');
-  const elapsedMs = elapsedSinceHHMM(opts.hhmmNow, last);
-  if (elapsedMs <= opts.staleThresholdMs) return { ok: true, items: [] };
-
-  const hours = (elapsedMs / 3600000).toFixed(1);
-  return {
-    ok: true,
-    items: [{
-      key: STALE_KEY,
-      text: `session marked in-progress but quiet — no Progress Log entry since [${last}] (~${hours}h)`,
-    }],
-  };
 }
