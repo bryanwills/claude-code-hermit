@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.8] - 2026-09-14
 
 ### Added
 - Persistent tasks with requester, due date, result confirmation, progress cards, cost attribution, and a dashboard view by person.

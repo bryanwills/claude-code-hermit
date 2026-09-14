@@ -1,7 +1,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.7-green.svg" alt="Version 1.3.7" /></a>
+  <a href="plugins/claude-code-hermit/CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.8-green.svg" alt="Version 1.3.8" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -89,7 +89,7 @@ Optional [Docker security controls](plugins/claude-code-hermit/docs/docker-secur
 
 - **Proactive work.** Heartbeats regularly check the responsibilities you give the agent. Routines run scheduled work, and watches surface changes. Together, they let the agent follow up without waiting for another request.
 
-- **Work through chat.** Assign work and receive results in your connected chat. Longer assignments get threaded progress updates, with a separate reply when the agent needs a decision.
+- **Work through chat.** Assign work and receive results in your connected chat. Longer assignments get threaded progress updates, with a separate reply when the agent needs a decision. Assignments can also carry a persistent task record with requester, due date, result confirmation, and a dashboard view by person.
 
 - **Token efficiency.** With Claude Code’s [Monitor](https://code.claude.com/docs/en/tools-reference#monitor-tool), heartbeat checks and optional routine prechecks run outside the model. Quiet checks and skipped routines use no model tokens; eligible routines due together can share a wake.
 
@@ -128,7 +128,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `heartbeat.enabled` | timed idle sweeps: **`true`** |
 | `heartbeat.every` | idle sweep cadence: **`30m`** |
 | `heartbeat.active_hours` | active window: **`08:00`–`23:00`** |
-| `heartbeat.stale_threshold` | alert if no progress for: **`2h`** |
+| `heartbeat.stale_threshold` | quiet period after which an in_progress session is archived to idle: **`2h`** |
 | `heartbeat.waiting_timeout` | auto `waiting`→`idle` after: **`null`** (off) |
 | `routines` | persistent routines managed via `/hermit-routines` |
 | `monitors` | persistent background watches managed via `/watch` |

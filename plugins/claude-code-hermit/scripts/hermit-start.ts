@@ -179,6 +179,10 @@ const DEFAULT_CONFIG: Json = {
     summary_threshold: 30,
     summary_keep: 15,
   },
+  tasks: {
+    handle_in_dm: false,
+    duties_open_records: true,
+  },
   heartbeat: {
     enabled: true,
     every: '30m',
