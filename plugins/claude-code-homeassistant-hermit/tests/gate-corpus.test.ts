@@ -46,7 +46,7 @@ interface CorpusEntry {
   note?: string;
 }
 
-let python = '';
+let python: string[] = [];
 let goldenDir = ''; // materialized pre-deletion Python hooks + ha_agent_lab package
 
 function gitShow(path: string): string {
@@ -59,16 +59,19 @@ function gitShow(path: string): string {
   return r.stdout.toString();
 }
 
-function resolvePython(): string {
+// Returns the interpreter as an argv prefix. Falls back to uv supplying both
+// deps when no plain interpreter on PATH has them (common on dev machines).
+function resolvePython(): string[] {
   const candidates = [
     process.env.GATE_PARITY_PYTHON,
     'python3',
     '/usr/bin/python3',
     'python',
-  ].filter((c): c is string => !!c);
+  ].filter((c): c is string => !!c).map(c => [c]);
+  candidates.push(['uv', 'run', '--no-project', '--with', 'python-dotenv', '--with', 'pyyaml', 'python']);
   for (const c of candidates) {
     try {
-      const r = Bun.spawnSync([c, '-c', 'import dotenv, yaml']);
+      const r = Bun.spawnSync([...c, '-c', 'import dotenv, yaml']);
       if (r.exitCode === 0) return c;
     } catch {
       // candidate not on PATH
@@ -76,7 +79,7 @@ function resolvePython(): string {
   }
   throw new Error(
     'No Python with python-dotenv + PyYAML found (the retired gate needs both). ' +
-      'Install them or set GATE_PARITY_PYTHON. This equivalence gate must not be skipped.',
+      'Install them, install uv, or set GATE_PARITY_PYTHON. This equivalence gate must not be skipped.',
   );
 }
 
@@ -148,7 +151,7 @@ async function run(cmd: string[], entry: CorpusEntry, cwd: string, extraEnv: Rec
 
 function runOldPython(entry: CorpusEntry, cwd: string): Promise<RunResult> {
   const hook = join(goldenDir, 'hooks', entry.gate === 'mcp' ? 'mcp-safety-gate.py' : 'curl-host-gate.py');
-  return run([python, hook], entry, cwd, {
+  return run([...python, hook], entry, cwd, {
     PYTHONPATH: join(goldenDir, 'src'),
     // Pin stdio to UTF-8 so locale-less environments don't make CPython die
     // on raw unicode entity names in stderr (CI shells were always UTF-8).

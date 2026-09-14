@@ -27,12 +27,14 @@ function run(command: string, env: Json = {}) {
   return runRaw(makeInput(command), env);
 }
 
-function runRaw(rawInput: string, env: Json = {}) {
+function runRaw(rawInput: string, env: Json = {}, unset: string[] = []) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-test-'));
+  const childEnv: Json = { ...process.env, ...env };
+  for (const key of unset) delete childEnv[key];
   try {
     const result = spawnSync(process.execPath, [GUARD], {
       input: rawInput,
-      env: { ...process.env, ...env },
+      env: childEnv,
       encoding: 'utf-8',
       cwd: tmpDir,
     });
@@ -160,11 +162,7 @@ assert('--no-verify passes through', run('git commit --no-verify', { AGENT_HOOK_
 assert('force push passes through', run('git push --force origin feature/x', { AGENT_HOOK_PROFILE: 'standard' }), 0);
 
 console.log('\nNon-strict profile (AGENT_HOOK_PROFILE unset):');
-assert('push to main passes through when unset', (() => {
-  const env: Json = { ...process.env };
-  delete env.AGENT_HOOK_PROFILE;
-  return runRaw(makeInput('git push origin main'), env);
-})(), 0);
+assert('push to main passes through when unset', runRaw(makeInput('git push origin main'), {}, ['AGENT_HOOK_PROFILE']), 0);
 
 // --- Strict profile: blocked commands ---
 console.log('\nStrict profile — blocked:');

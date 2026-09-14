@@ -113,7 +113,9 @@ export async function runScript(script: string, opts: RunOptions = {}): Promise<
   const proc = Bun.spawn({
     cmd: [process.execPath, path.join(SCRIPTS_DIR, script), ...(opts.args ?? [])],
     cwd: opts.cwd,
-    env: { ...process.env, ...opts.env },
+    // Pin the plugin root to the tree under test: a Claude Code session exports
+    // CLAUDE_PLUGIN_ROOT for the installed plugin, whose templates may differ.
+    env: { ...process.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, ...opts.env },
     stdin: opts.openStdin ? 'pipe' : Buffer.from(opts.stdin ?? ''),
     stdout: 'pipe',
     stderr: 'pipe',
