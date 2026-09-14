@@ -108,6 +108,10 @@ const operatorExisted = seedIfAbsent(path.join(hermit, 'OPERATOR.md'), () =>
 seedIfAbsent(path.join(hermit, 'HEARTBEAT.md'), () =>
   copy(path.join(TEMPLATES, 'HEARTBEAT.md.template'), path.join(hermit, 'HEARTBEAT.md')),
 );
+seedIfAbsent(path.join(hermit, 'TASKS.md'), () =>
+  copy(path.join(TEMPLATES, 'TASKS.md.template'), path.join(hermit, 'TASKS.md')),
+);
+fs.mkdirSync(path.join(hermit, 'tasks'), { recursive: true });
 seedIfAbsent(path.join(hermit, 'knowledge-schema.md'), () =>
   copy(path.join(TEMPLATES, 'knowledge-schema.md.template'), path.join(hermit, 'knowledge-schema.md')),
 );

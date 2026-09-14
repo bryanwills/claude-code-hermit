@@ -33,6 +33,8 @@ process.stdout.on('error', () => {});
 // is logged to stderr and the rest still run (the stop-pipeline.ts pattern).
 
 import path from 'node:path';
+import { observeExecution } from './lib/tasks';
+import { classifySource } from './lib/trigger-source';
 
 import { hermitDir, transcriptPath as ccTranscriptPath, sessionId as ccSessionId } from './lib/cc-compat';
 import { parseChannelEnvelope } from './lib/channel-envelope';
@@ -60,6 +62,9 @@ const MAX_STDIN_BYTES = 1024 * 1024;
 const out: string[] = [];
 let blockReason: string | null = null;
 let operatorActivityKept = false;
+let residentAdmitted = false;
+let admittedSession: string | null = null;
+let admittedSource: string | null = null;
 
 async function stage(name: string, fn: (ctx: StageContext) => any, ctx: StageContext): Promise<void> {
   if (blockReason) return; // a disposition is already settled
@@ -122,6 +127,9 @@ async function main(raw: string): Promise<void> {
   };
 
   const guest = isGuest(path.join(dir, 'state'), sessionId);
+  residentAdmitted = !guest;
+  admittedSession = sessionId;
+  admittedSource = classifySource(prompt);
 
   await stage('resident-gate', () => {
     if (!ctx.envelope) return;
@@ -196,6 +204,7 @@ function emit(): void {
   // this turn". Written after stdout so a throw on this write can never swallow
   // the decision or the injected context — emit()'s caller catches and exits 0.
   if (operatorActivityKept) openTurnMarker();
+  if (residentAdmitted) observeExecution(hermitDir(), 'in_flight', admittedSession, admittedSource, null);
 }
 
 try {

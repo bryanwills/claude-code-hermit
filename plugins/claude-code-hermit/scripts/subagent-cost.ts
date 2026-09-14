@@ -1,3 +1,4 @@
+import { dispatchTaskAttribution, readTaskCostRows } from './lib/tasks';
 // SubagentStop hook — captures async-dispatched subagent token cost.
 //
 // Problem: async Agent dispatches complete via XML <task-notification> with no usage
@@ -23,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
-  hermitDir, costLogPath, extractUsage, foldUsageByRequest,
+  hermitDir, costLogPath, extractUsage, foldUsageByRequest, turnPromptText,
   transcriptPath as parentTranscriptPath, agentTranscriptPath, agentId as payloadAgentId,
   sessionId as payloadSessionId,
 } from './lib/cc-compat';
@@ -153,7 +154,12 @@ process.stdin.on('end', () => {
       output: round4(priced.byType.output),
     };
 
+    const boundary = turnPromptText(launch.lines, launch.index);
+    let boundaryAt = '';
+    try { boundaryAt = JSON.parse(launch.lines[boundary.index]).timestamp ?? ''; } catch {}
+    const taskAttribution = dispatchTaskAttribution(HERMIT_DIR, readTaskCostRows(HERMIT_DIR), payloadSessionId(payload) ?? '', boundaryAt);
     const entry = buildSubagentCostRow({
+      taskAttribution,
       sessionId: payloadSessionId(payload) || readRuntimeSessionId() || 'unknown',
       source,
       model,

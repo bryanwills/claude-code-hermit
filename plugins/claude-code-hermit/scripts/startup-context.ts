@@ -1,3 +1,4 @@
+import { observeExecution, startupTasks } from './lib/tasks';
 // Suppress EPIPE errors (e.g. when stdout pipe closes early in tests)
 process.stdout.on('error', () => {});
 
@@ -388,6 +389,7 @@ function main(source: string | null, sessionId: string | null) {
   // (resume/compact reuse it; /clear mints a new one): this session is the resident now, so drop
   // the verdict rather than leave it silently muting its own liveness signal.
   clearGuest(stateDir, sessionId);
+  observeExecution(AGENT_DIR, 'unknown', sessionId, null, `session-start:${source ?? 'startup'}`);
   seedOperatorActivity();
   if (source === 'compact') {
     emitCompactCapsule();
@@ -404,7 +406,9 @@ function main(source: string | null, sessionId: string | null) {
 // chars of state the session just paid to summarize.
 function emitCompactCapsule(): void {
   try {
-    const pointers = buildCompactionPointers(AGENT_DIR);
+    let openTasks = '';
+    try { openTasks = startupTasks(AGENT_DIR)[0]; } catch { /* malformed task record must not drop the capsule */ }
+    const pointers = [openTasks === 'Open tasks: 0' ? '' : openTasks, buildCompactionPointers(AGENT_DIR)].filter(Boolean).join('\n');
     if (!pointers) return;
     const header = '---Compaction Pointers---\n';
     const maxBody = COMPACT_CAP - header.length - 1;
@@ -518,6 +522,8 @@ function emitFullContext(source: string | null) {
       emit('Active Session', 'Session file exists but has no actionable content');
     }
   }
+
+  try { emit('Open tasks', guarded('tasks/', startupTasks(AGENT_DIR).join('\n'))); } catch { /* malformed task record */ }
 
   // -------------------------------------------------------
   // 4. Compiled knowledge (priority 2.5, budget from config — default 2500)

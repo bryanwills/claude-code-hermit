@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Persistent tasks with requester, due date, result confirmation, progress cards, cost attribution, and a dashboard view by person.
 - Checklist edits made through `heartbeat edit` are recorded in `hermit-settings history` as a fingerprint and line count.
 - Add a Discord server channel or Telegram group from chat with `hermit-settings channels`; the write asks for approval in the paired DM and is refused under bypass permissions.
 
@@ -22,6 +23,7 @@
 - `channel-pair.ts`.
 
 ### Upgrade Instructions
+- Run `mkdir -p .claude-code-hermit/tasks` and, only if `.claude-code-hermit/TASKS.md` is absent, copy `${CLAUDE_PLUGIN_ROOT}/state-templates/TASKS.md.template` to it. Preserve existing `TASKS.md` edits.
 - Remove the `stale-session` entry under `alerts` and the `last_stale_wake_at` key from `.claude-code-hermit/state/alert-state.json` if present.
 - Nothing extra to run for the allow-list entry: the unconditional `permissions-sync` step adds `Bash(bun */scripts/channel-access.ts*)`.
 

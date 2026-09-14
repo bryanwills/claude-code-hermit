@@ -172,11 +172,12 @@ function search(hermitDir: string, query: string, opts?: Json): Json[] {
   const scoped = scope != null;
 
   const dirs = scoped
-    ? [path.join(hermitDir, 'compiled')]
+    ? [path.join(hermitDir, 'compiled'), path.join(hermitDir, 'tasks')]
     : [
         path.join(hermitDir, 'sessions'),
         path.join(hermitDir, 'compiled'),
         path.join(hermitDir, 'proposals'),
+        path.join(hermitDir, 'tasks'),
       ];
 
   const results: Json[] = [];

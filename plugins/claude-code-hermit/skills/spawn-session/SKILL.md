@@ -21,6 +21,8 @@ claude --bg --worktree <n> --name <n> [--permission-mode <p>] [--remote-control 
 
 `--remote-control <n>` is present when `config.json`'s `remote` is `true` and
 absent otherwise; `--model` and `--effort` only when the operator passed them.
+The helper never reads or writes `tasks/`; the resident records progress and results after validating REPORT sender and generation.
+
 Four limits sit on that command:
 
 - The helper's worktree `.claude-code-hermit/` is a projection (`OPERATOR.md`,

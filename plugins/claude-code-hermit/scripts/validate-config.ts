@@ -115,6 +115,12 @@ function retiredKeyWarning(key: string): string {
 function validate(config: Json): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  if (config.tasks !== undefined) {
+    if (!config.tasks || typeof config.tasks !== 'object' || Array.isArray(config.tasks)) errors.push('tasks: expected object');
+    else for (const key of ['handle_in_dm', 'duties_open_records']) {
+      if (config.tasks[key] !== undefined && typeof config.tasks[key] !== 'boolean') errors.push(`tasks.${key}: expected boolean`);
+    }
+  }
 
   for (const [key, types] of Object.entries(REQUIRED_KEYS)) {
     if (!(key in config)) {

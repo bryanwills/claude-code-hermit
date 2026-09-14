@@ -393,6 +393,15 @@ The limit requires Monitor scheduling. CronCreate fallback warns during registra
 
 Modify with `/hermit-settings routines`.
 
+### Tasks
+
+| Key | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `tasks.handle_in_dm` | boolean | `false` | Show task handles in DMs when multiple tasks are open. |
+| `tasks.duties_open_records` | boolean | `true` | Let heartbeat and watch skills open deduplicated records when a human must act. |
+
+Task policy wording lives in operator-owned `TASKS.md`. Transition validity and closure evidence stay in code. See [Task records](task-records.md).
+
 ### Cron schedule rules
 
 The `schedule` field uses standard 5-field cron syntax: `minute hour dom month dow`.
