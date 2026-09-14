@@ -3,7 +3,7 @@ import { pinStateDirOrExit } from './lib/cc-compat';
 import { createThread, isThreadType, lookupChat } from './lib/channel-chats';
 import { conversationHistory } from './lib/channel-log';
 import { readSettledConfig } from './lib/config-read';
-import { bind, list, lookup, prune, unbind, update, type ConversationPatch } from './lib/conversations';
+import { awaitAgent, bind, list, lookup, prune, unbind, update, type ConversationPatch } from './lib/conversations';
 
 function options(args: string[]): Record<string, string> {
   const result: Record<string, string> = {};
@@ -35,6 +35,23 @@ async function main(): Promise<void> {
   if (verb === 'list') {
     if (key) throw new Error('invalid-options');
     console.log(JSON.stringify(list(dir)));
+    return;
+  }
+  if (verb === 'await-agent') {
+    const opts = options(key ? [key, ...args] : args);
+    if (Object.keys(opts).some(k => !['bg_id', 'timeout'].includes(k)) || !opts.bg_id) throw new Error('invalid-options');
+    const timeoutSec = opts.timeout === undefined ? 120 : Number(opts.timeout);
+    if (!Number.isInteger(timeoutSec) || timeoutSec <= 0) throw new Error('invalid-timeout');
+    const found = await awaitAgent(opts.bg_id, {
+      timeoutMs: timeoutSec * 1000,
+      readRegistry: () => Bun.spawnSync(['claude', 'agents', '--json'], { env: process.env, timeout: timeoutSec * 1000 }).stdout.toString(),
+    });
+    if (!found) {
+      console.log(`TIMEOUT|${opts.bg_id}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`OK|${found.sessionId}|${found.cwd}`);
     return;
   }
   // Keyless verbs wrapping the channel library calls channel-responder makes

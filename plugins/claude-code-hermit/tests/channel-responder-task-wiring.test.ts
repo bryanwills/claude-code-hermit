@@ -7,3 +7,11 @@ it('task precedence is before the state check and honors micro-approval first', 
 for (const branch of ['Bound conversation', 'Bind', 'Task assignment', 'New instruction']) it(`${branch} names task invocation`, () => { const text = read('channel-responder'); const index = text.indexOf(`- **${branch}**`); expect(index).toBeGreaterThan(-1); expect(text.slice(index, index + 5500)).toContain('task.ts'); });
 it('session-start remains and card milestones and close-out use records', () => { expect(read('channel-responder')).toContain('/claude-code-hermit:session-start'); const text = read('session'); for (const term of ['task.ts note', 'task.ts block', 'task.ts list', 'queued']) expect(text).toContain(term); });
 it('REPORT handling records result and validates sender as before', () => { const text = read('watch'); expect(text).toContain('task.ts block'); expect(text).toContain('generation'); });
+it('parked resume continues in place without renaming flags', () => {
+  const text = read('channel-responder');
+  expect(text).toContain("claude --bg --resume '<session_id>' '<body>'");
+  expect(text).not.toContain("--resume '<session_id>' --name");
+});
+it('watch re-reads the registry before parking', () => {
+  expect(read('watch')).toContain('re-read `claude agents --json`');
+});
