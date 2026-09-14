@@ -65,7 +65,7 @@ Above the contract line, give skills data + goal + voice and let the model compo
 
 ## Development
 
-Test locally against a target project with `claude --plugin-dir /path/to/this-repo` from that project, then `/claude-code-hermit:hatch`. Unit tests: `bun test` from this directory; fixtures and hook checks in [docs/testing.md](docs/testing.md).
+Test locally against a target project from the repo root with `bun run dev <target-project>`, then `/claude-code-hermit:hatch`. `HERMIT_PLUGIN_ROOT` makes `hermit-run` dispatch to the checkout. Unit tests: `bun test` from this directory; fixtures and hook checks in [docs/testing.md](docs/testing.md).
 
 Preserve subprocess coverage for stdin, environment, exit-code, and side-effect contracts. Use explicit readiness/completion signals for process synchronization instead of fixed sleeps.
 

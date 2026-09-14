@@ -31,4 +31,4 @@ Core's `scripts/domain-hatch.ts` owns target resolution and `hatch-options.json`
 
 ## Development
 
-`claude --plugin-dir /path/to/feed-hermit` from a target project, then `/feed-hermit:hatch`. Tests: `bun test` from this directory.
+From the repo root, `bun run dev <target-project>`, hatch core, then `/feed-hermit:hatch`. Tests: `bun test` from this directory.

@@ -46,6 +46,17 @@ function splitId(id: string): string {
   return at < 0 ? id : id.slice(0, at);
 }
 
+function loadResolved(pluginId: string, installPath: string): ResolvedPlugin {
+  const manifest = readJson(path.join(installPath, '.claude-plugin', 'plugin.json'));
+  const meta = readJson(path.join(installPath, '.claude-plugin', 'hermit-meta.json'));
+  return {
+    plugin: pluginId,
+    installPath,
+    version: manifest?.version ?? null,
+    required_core_version: meta?.required_core_version ?? null,
+  };
+}
+
 // Resolve one plugin ID to the install that would actually load in this
 // project. Precedence mirrors coreScope()'s: `local` > `project` (both require
 // `projectPath == project root`) > `user` (any `projectPath` — a user-scope
@@ -55,20 +66,39 @@ function splitId(id: string): string {
 // hatch-options.json is explicitly allowed to carry.
 // Ambiguity across marketplaces is an error, not a silent first-match:
 // picking wrong here writes a hermit block sourced from the wrong template.
-export function resolvePlugin(
-  list: Json[],
-  pluginId: string,
-  projectRoot: string,
-): ResolvedPlugin | ResolveError {
+// localRoot is the running core's plugin root (CLAUDE_PLUGIN_ROOT), never argv.
+// `--plugin-dir` plugins are absent from `claude plugin list`; when neither the
+// plugin nor core has a candidate, core resolves to localRoot and any other id to ../<id>
+// only if that directory's plugin.json name matches.
+function candidatesFor(list: Json[], pluginId: string, projectRoot: string): Json[] {
   const enabled = list.filter((e) => splitId(e?.id ?? '') === pluginId && e?.enabled === true);
   const here = enabled.filter((e) => e?.projectPath === projectRoot);
   const byScope = (pool: Json[], s: string) => pool.filter((e) => e?.scope === s);
   const local = byScope(here, 'local');
   const project = byScope(here, 'project');
   const user = byScope(enabled, 'user');
-  const candidates = local.length ? local : project.length ? project : user;
+  return local.length ? local : project.length ? project : user;
+}
+
+export function resolvePlugin(
+  list: Json[],
+  pluginId: string,
+  projectRoot: string,
+  localRoot?: string,
+): ResolvedPlugin | ResolveError {
+  const candidates = candidatesFor(list, pluginId, projectRoot);
 
   if (!candidates.length) {
+    // Only when core itself is unregistered (the `--plugin-dir` case): a
+    // marketplace clone root also has every fleet plugin at ../<id>, installed
+    // or not, so a registered core must keep the not-installed verdict.
+    if (localRoot && !candidatesFor(list, 'claude-code-hermit', projectRoot).length) {
+      const installPath = pluginId === 'claude-code-hermit'
+        ? localRoot
+        : path.resolve(localRoot, '..', pluginId);
+      const manifest = readJson(path.join(installPath, '.claude-plugin', 'plugin.json'));
+      if (manifest?.name === pluginId) return loadResolved(pluginId, installPath);
+    }
     return list.length
       ? { error: 'plugin_not_installed', message: `${pluginId} is not installed and enabled for this project` }
       : { error: 'plugin_list_unavailable', message: 'could not read `claude plugin list --json`' };
@@ -85,14 +115,7 @@ export function resolvePlugin(
     return { error: 'plugin_path_missing', message: `${pluginId} resolved to a path that does not exist: ${installPath || '(empty)'}` };
   }
 
-  const manifest = readJson(path.join(installPath, '.claude-plugin', 'plugin.json'));
-  const meta = readJson(path.join(installPath, '.claude-plugin', 'hermit-meta.json'));
-  return {
-    plugin: pluginId,
-    installPath,
-    version: manifest?.version ?? null,
-    required_core_version: meta?.required_core_version ?? null,
-  };
+  return loadResolved(pluginId, installPath);
 }
 
 export function isResolveError(r: ResolvedPlugin | ResolveError): r is ResolveError {

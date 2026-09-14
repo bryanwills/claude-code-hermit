@@ -111,7 +111,7 @@ export function preflight(input: PreflightInput): Preflight {
     needs_target_question: state.needs_target_question,
   };
 
-  const resolved = resolvePlugin(list, pluginId, projectRoot);
+  const resolved = resolvePlugin(list, pluginId, projectRoot, corePluginRoot);
   if (isResolveError(resolved)) {
     return { ok: false, error: resolved.error, message: resolved.message, plugin: pluginId, ...targetFields };
   }

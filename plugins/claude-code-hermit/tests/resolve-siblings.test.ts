@@ -1,5 +1,11 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, afterAll } from 'bun:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { runScript } from './helpers/run';
+import { freshDirFactory } from './helpers/workdir';
+
+const { freshDir, cleanup } = freshDirFactory('hermit-resolve-siblings-');
+afterAll(cleanup);
 
 const ROOT = '/home/user/project';
 
@@ -112,5 +118,32 @@ describe('resolve-siblings.ts', () => {
   test('empty / malformed stdin degrades to []', async () => {
     const out = await run([ROOT], 'not json');
     expect(out).toEqual([]);
+  });
+
+  test('unregistered core lists checkout siblings next to --core-root', async () => {
+    const plugins = path.join(freshDir(), 'plugins');
+    for (const name of ['claude-code-hermit', 'feed-hermit', 'not-a-hermit']) {
+      const dir = path.join(plugins, name);
+      fs.mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
+      const pluginName = name === 'not-a-hermit' ? 'not-a-plugin' : name;
+      fs.writeFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: pluginName }));
+    }
+    const coreRoot = path.join(plugins, 'claude-code-hermit');
+    const out = await run([ROOT, '--role', 'siblings', '--core-root', coreRoot], '[]');
+    expect(out.map((e: any) => e.plugin)).toEqual(['feed-hermit']);
+  });
+
+  test('registered core ignores --core-root and returns listed siblings only', async () => {
+    const plugins = path.join(freshDir(), 'plugins');
+    for (const name of ['claude-code-hermit', 'feed-hermit', 'not-a-hermit']) {
+      const dir = path.join(plugins, name);
+      fs.mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name }));
+    }
+    const out = await run(
+      [ROOT, '--role', 'siblings', '--core-root', path.join(plugins, 'claude-code-hermit')],
+      JSON.stringify(FIXTURE),
+    );
+    expect(out.map((e: any) => e.plugin).sort()).toEqual(['claude-code-dev-hermit', 'hermit-scribe']);
   });
 });

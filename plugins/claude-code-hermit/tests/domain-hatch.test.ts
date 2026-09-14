@@ -11,6 +11,7 @@ import path from 'node:path';
 import { freshDirFactory } from './helpers/workdir';
 import { runScript, SCRIPTS_DIR } from './helpers/run';
 import { satisfiesFloor, preflight } from '../scripts/lib/domain-hatch/preflight';
+import { resolvePlugin, isResolveError } from '../scripts/lib/domain-hatch/resolve';
 import { ensureHatchTarget, readTargetState, optionsPath } from '../scripts/lib/domain-hatch/target';
 import { planBlock, applyBlock, splitResident, planResidentRemoval } from '../scripts/lib/domain-hatch/block';
 
@@ -84,6 +85,54 @@ function run(s: ReturnType<typeof scaffold>) {
     stdinJson: s.stdinJson,
   });
 }
+
+describe('resolvePlugin', () => {
+  test('empty list falls back to the checkout when the manifest name matches', () => {
+    const s = scaffold();
+    const core = resolvePlugin([], 'claude-code-hermit', s.root, s.coreRoot);
+    if (isResolveError(core)) throw new Error(core.error);
+    expect(core.installPath).toBe(s.coreRoot);
+
+    const feed = resolvePlugin([], PLUGIN, s.root, s.coreRoot);
+    if (isResolveError(feed)) throw new Error(feed.error);
+    expect(feed.installPath).toBe(s.install);
+  });
+
+  test('empty list without a matching checkout dir is plugin_list_unavailable', () => {
+    const s = scaffold();
+    const r = resolvePlugin([], 'no-such-hermit', s.root, s.coreRoot);
+    expect(isResolveError(r)).toBe(true);
+    if (isResolveError(r)) expect(r.error).toBe('plugin_list_unavailable');
+  });
+
+  test('a non-empty list without a match and no sibling dir is plugin_not_installed', () => {
+    const s = scaffold();
+    const r = resolvePlugin(JSON.parse(s.stdinJson), 'no-such-hermit', s.root, s.coreRoot);
+    expect(isResolveError(r)).toBe(true);
+    if (isResolveError(r)) expect(r.error).toBe('plugin_not_installed');
+  });
+
+  test('a registered core does not fall back to an unregistered sibling dir', () => {
+    const s = scaffold();
+    const list = JSON.parse(s.stdinJson).filter((e: any) => !e.id.startsWith(PLUGIN));
+    const r = resolvePlugin(list, PLUGIN, s.root, s.coreRoot);
+    expect(isResolveError(r)).toBe(true);
+    if (isResolveError(r)) expect(r.error).toBe('plugin_not_installed');
+  });
+
+  test('a registered entry still wins when a checkout copy also exists', () => {
+    const s = scaffold();
+    const other = path.join(s.root, 'checkout', 'claude-code-hermit');
+    fs.mkdirSync(path.join(other, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(other, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'claude-code-hermit', version: '9.9.9' }),
+    );
+    const r = resolvePlugin(JSON.parse(s.stdinJson), 'claude-code-hermit', s.root, other);
+    if (isResolveError(r)) throw new Error(r.error);
+    expect(r.installPath).toBe(s.coreRoot);
+  });
+});
 
 describe('satisfiesFloor', () => {
   test('accepts an equal and a higher version', () => {
@@ -177,7 +226,7 @@ describe('preflight', () => {
       hatchOptions: { target: 'local', core_install_scope: 'local', stamped_at: 'x', stamped_by: 'y', version: '1.0.0' },
     });
     const r = preflight({
-      pluginId: PLUGIN,
+      pluginId: 'no-such-hermit',
       hermitDir: s.hermit,
       projectRoot: s.root,
       corePluginRoot: s.coreRoot,
@@ -381,6 +430,28 @@ describe('CLI contract', () => {
     const out = JSON.parse(r.stdout);
     expect(out.ok).toBe(false);
     expect(typeof out.error).toBe('string');
+  });
+
+  test('ensure-target then sync-block write the core marker from CLAUDE_PLUGIN_ROOT', async () => {
+    const s = scaffold();
+    const marker = 'claude-code-hermit: Session Discipline';
+    fs.mkdirSync(path.join(s.coreRoot, 'state-templates'), { recursive: true });
+    fs.writeFileSync(
+      path.join(s.coreRoot, 'state-templates', 'CLAUDE-APPEND.md'),
+      `<!-- ${marker} -->\n\n## Session Discipline\n\n<!-- /${marker} -->\n`,
+    );
+    const env = { CLAUDE_PLUGIN_ROOT: s.coreRoot, AGENT_DIR: s.hermit };
+    const ensure = await runScript('domain-hatch.ts', {
+      args: ['ensure-target', 'claude-code-hermit', '--target', 'local'],
+      env,
+    });
+    expect(ensure.exitCode).toBe(0);
+    const sync = await runScript('domain-hatch.ts', {
+      args: ['sync-block', 'claude-code-hermit'],
+      env,
+    });
+    expect(sync.exitCode).toBe(0);
+    expect(fs.readFileSync(path.join(s.root, 'CLAUDE.local.md'), 'utf8')).toContain(marker);
   });
 
   // bad_target is CLI-only argv validation (ensureHatchTarget() has no

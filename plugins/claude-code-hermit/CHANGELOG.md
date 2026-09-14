@@ -14,6 +14,7 @@
 - `channel-setup` asks about allowed users, home-chat helpers, nickname triggers, trigger allowlists, recall scope, operators, the primary channel, and recording, names platform prerequisites before the token step.
 
 ### Fixed
+- `hatch` and the `domain-hatch` verbs resolve a plugin loaded with `--plugin-dir` from the checkout instead of stopping with `plugin_not_installed`.
 - Re-running setup preserves a seen-emoji that was turned off.
 - Watchdog wake and recovery notices no longer reach the primary chat when no maintainer channel is configured.
 - `channel-setup` and `hermit-settings` ask whether to turn off the seen-emoji reaction when a passive group is added instead of only warning that it reacts to every message.
