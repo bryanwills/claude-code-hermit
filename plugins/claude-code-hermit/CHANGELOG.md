@@ -1,11 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.9] - 2026-09-14
 
 ### Fixed
 - A bound helper's follow-ups continue the same session instead of starting a copy
 - A slow-registering background launch is awaited for up to two minutes and is never stopped on timeout
 - A helper is parked only after the registry confirms it stopped
+
+### Upgrade Instructions
+
+Run `/claude-code-hermit:hermit-evolve`.
+
+No config.json changes required.
 
 ## [1.3.8] - 2026-09-14
 
