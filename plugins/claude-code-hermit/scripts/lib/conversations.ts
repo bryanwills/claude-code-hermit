@@ -81,6 +81,27 @@ export function unbind(dir: string, key: string): void {
   withStore(dir, true, store => { delete store[key]; });
 }
 
+export async function awaitAgent(
+  bgId: string,
+  opts: { timeoutMs: number; readRegistry: () => unknown },
+): Promise<{ sessionId: string; cwd: string } | null> {
+  if (!/^[0-9a-f]{8}$/.test(bgId)) throw new Error('invalid-bg-id');
+  const deadline = Date.now() + opts.timeoutMs;
+  while (true) {
+    let agents: unknown = opts.readRegistry();
+    if (typeof agents === 'string') {
+      try { agents = JSON.parse(agents); } catch { agents = []; }
+    }
+    const entry = Array.isArray(agents) ? agents.find(agent => agent?.id === bgId) : undefined;
+    if (entry && typeof entry.sessionId === 'string' && typeof entry.cwd === 'string') {
+      return { sessionId: entry.sessionId, cwd: entry.cwd };
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    await Bun.sleep(Math.min(1000, remaining));
+  }
+}
+
 export function prune(dir: string, agentsText: string): void {
   withStore(dir, false, store => {
     let agents: unknown;

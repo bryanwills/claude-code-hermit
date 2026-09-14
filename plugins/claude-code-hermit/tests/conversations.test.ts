@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { logMessage } from '../scripts/lib/channel-log';
-import { bind, list, lookup, prune, unbind, update } from '../scripts/lib/conversations';
+import { awaitAgent, bind, list, lookup, prune, unbind, update } from '../scripts/lib/conversations';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('conversations-');
@@ -46,6 +46,21 @@ test('prune preserves empty or unparsable input and matches stable session ids o
   expect(lookup(dir, key)?.status).toBe('parked');
 });
 
+test('awaitAgent returns the listing once it appears and treats unparsable output as unlisted', async () => {
+  let n = 0;
+  const found = await awaitAgent('abcd1234', {
+    timeoutMs: 3000,
+    readRegistry: () => {
+      n += 1;
+      return n === 1 ? [] : [{ id: 'abcd1234', sessionId: 'abcd1234-sess', cwd: '/w' }];
+    },
+  });
+  expect(found).toEqual({ sessionId: 'abcd1234-sess', cwd: '/w' });
+  expect(n).toBe(2);
+  expect(await awaitAgent('abcd1234', { timeoutMs: 300, readRegistry: () => [] })).toBeNull();
+  expect(await awaitAgent('abcd1234', { timeoutMs: 300, readRegistry: () => 'broken' })).toBeNull();
+});
+
 // AGENT_DIR is applied last so an ambient one from the shell running the suite can
 // never outrank the fixture dir and trip the state-dir pin; a caller that wants a
 // mismatch sets AGENT_DIR in `env` explicitly.
@@ -54,6 +69,40 @@ async function cli(dir: string, args: string[], env?: typeof process.env) {
   const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
   return { stdout, code };
 }
+
+function fakeClaudePath(script: string): { PATH: string } {
+  const shimDir = freshDir();
+  const binDir = path.join(shimDir, 'bin');
+  fs.mkdirSync(binDir);
+  const claude = path.join(binDir, 'claude');
+  fs.writeFileSync(claude, script);
+  fs.chmodSync(claude, 0o755);
+  return { PATH: `${binDir}${path.delimiter}${process.env.PATH}` };
+}
+
+test('await-agent lists on the second registry read and times out when never listed', async () => {
+  const dir = freshDir();
+  const countFile = path.join(freshDir(), 'count');
+  fs.writeFileSync(countFile, '0');
+  const listed = fakeClaudePath(`#!/bin/sh
+n=$(($(cat '${countFile}') + 1))
+echo "$n" > '${countFile}'
+if [ "$n" = 1 ]; then echo '[]'; else echo '[{"id":"abcd1234","sessionId":"abcd1234-sess","cwd":"/w"}]'; fi
+`);
+  expect(await cli(dir, ['await-agent', '--bg-id', 'abcd1234', '--timeout', '5'], listed)).toEqual({
+    stdout: 'OK|abcd1234-sess|/w\n',
+    code: 0,
+  });
+  const empty = fakeClaudePath('#!/bin/sh\necho \'[]\'\n');
+  expect(await cli(dir, ['await-agent', '--bg-id', 'abcd1234', '--timeout', '1'], empty)).toEqual({
+    stdout: 'TIMEOUT|abcd1234\n',
+    code: 1,
+  });
+  expect(await cli(dir, ['await-agent', '--bg-id', 'nope'])).toEqual({
+    stdout: 'ERROR|invalid-bg-id\n',
+    code: 1,
+  });
+});
 
 test('CLI output and two concurrent updates both land', async () => {
   const dir = freshDir();
