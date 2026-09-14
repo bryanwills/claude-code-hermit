@@ -198,6 +198,7 @@ a lesson    a change
 ```
 
 Reflection runs at eligible task or session pauses, daily, and after routines configured to reflect. Approved changes can start now, become a task, or be left for manual implementation. Proposals are resolved when verification passes or later evidence shows the problem is gone.
+Chat assignments can also carry a persistent task record with requester, due date, result confirmation, and a dashboard view by person.
 
 **Follow-up verification.** The agent checks whether a fix or prediction held up over time. For example: “`/later` check tomorrow whether those errors have returned.”
 

@@ -386,3 +386,9 @@ Plugins run with the same permissions as Hermit. The default `auto` mode applies
 See [Recommended Plugins](recommended-plugins.md) for the full list and installation instructions.
 
 Resident duties in `.claude-code-hermit/RESIDENT.md` are appended only by the launcher. Writes to that file and the operator-owned `claude-settings.json` use the same settings gate as config.json, with redirect denies and Edit ask rules.
+
+### Task record script boundary
+
+`task.ts` and `duties.ts` pin their state-directory arguments with `pinStateDirOrExit` before accessing task or duty data, under the Script Argument Trust contract. Their per-script grants are `Bash(bun */scripts/task.ts*)` and `Bash(bun */scripts/duties.ts*)`, installed by sealed `permissions-sync`.
+
+`Edit(*.claude-code-hermit/tasks/**)` is denied (Edit rules cover every built-in file-editing tool). `Edit(*.claude-code-hermit/TASKS.md)` asks. The resident uses the validated task verbs as the sole record writer; helpers report to it. Policy remains operator-editable; policy text cannot bypass revision, approver, evidence or transition checks.

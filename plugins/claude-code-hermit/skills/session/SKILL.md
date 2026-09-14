@@ -36,6 +36,8 @@ Work through tasks using whatever tools, skills, and agents are available:
 - If a step is blocked, try permitted alternatives and continue independent work. Document unresolved blockers in SHELL.md `## Blockers`; ask the operator only for the decision or access needed to proceed. When it clears, **prefix that line with `~ `, never delete it**: this stops current-blocker injection while retaining the resolved record in the archive.
 - When the Progress Log holds a `Progress card: <source> <chat_id> <message_id>` line for this task (written by `channel-responder` when the assignment arrived from chat), keep that message current: `edit_message` it with a short cumulative summary of what is done and what comes next, for someone following on a phone, only at milestones you would tell a colleague about, never per tool call or on a timer. A blocker or a needed decision also gets a new reply threaded on the operator's original message, because edits do not notify, and the card says it is waiting on them. A failed edit gets one Progress Log line and no retry; the next milestone edits again.
 
+- Pair each task card milestone with a progress line piped into `task.ts note .claude-code-hermit <id>`.
+
 ### 6. Work done
 
 When the work is done, or the operator decides to move on (even if partial or blocked):
@@ -72,6 +74,8 @@ When the work is done, or the operator decides to move on (even if partial or bl
 7. After the idle transition (step 5) succeeds (`ok === true`), check `.claude-code-hermit/sessions/NEXT-TASK.md` and read `escalation` from config:
 
    **Progress card close-out.** If the Progress Log held a `Progress card:` line for this task, `edit_message` that card once with the final state (done, partial, or blocked, plus the one-line outcome) before the notification below. Keep the card's `<source> <chat_id> <message_id>` from the SHELL.md read step 1 already makes; the archive resets the Progress Log. The notification below is the only new message; a card edit never replaces it, and an archive that did not succeed never marks the card done.
+
+   After posting the result, pipe it into `task.ts block .claude-code-hermit <id> --result-stdin`, or use `task.ts close .claude-code-hermit <id> --by check --actor hermit --claim <linked-held-claim>` when that objective evidence exists. Read `task.ts list .claude-code-hermit --open` and offer the next queued record; this backlog does not automatically drain.
 
    **Delivery-moment voice rule for both branches below:** compose the notification in owner language — no `S-NNN`, no internal IDs, no file paths, no slash commands. Lead with what was delivered. If this task produced a durable `compiled/` output (you already know this from your own context — it's whatever you just wrote this task, the same thing session-archive.ts is about to cite in `## Artifacts`), name it plainly in one clause (e.g. "Done — investigated the login bug. Prepared: a summary of what's causing it."). If the task produced no `compiled/` deliverable, state the one-line outcome instead (e.g. "Done — fixed the login redirect bug.").
 

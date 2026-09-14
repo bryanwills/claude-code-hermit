@@ -127,3 +127,11 @@ Open `.claude-code-hermit/HEARTBEAT.md` for the operator to modify.
 ---
 
 Morning/evening routines are handled by `/claude-code-hermit:hermit-routines`. Manage routines with `/claude-code-hermit:hermit-settings routines`.
+
+## Task records for human action
+
+Read `TASKS.md`. A trailing item token `[ask]` (default) asks before action, `[act]` permits action within existing authority, and `[note]` reports without acting. Keep tokens trailing to preserve `normalizeItemKey`. Bookkeeping one-liners remain ledger duty entries.
+
+When an evaluated finding needs a human and `config.tasks.duties_open_records` is true, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit --title ... --requester duty:heartbeat --done ... --due <ISO> --dedupe-key duty:heartbeat:<item-key>` and then `task.ts block .claude-code-hermit <id> --waiting-on <human> --status-line ... --next ...`. Post the one stall message to the digest's destination only for `created:true`; the alert ladder still owns notification suppression. If the setting is false, use plain messages.
+
+Only when the alert ladder reports the item resolved, find its open record with `task.ts list .claude-code-hermit --dedupe-key duty:heartbeat:<item-key>` and run `task.ts close .claude-code-hermit <id> --by check --actor duty:heartbeat`. An ambiguous read, SKIP or generic OK alone never closes a task.

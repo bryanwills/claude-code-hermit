@@ -1,3 +1,4 @@
+import { observeExecution } from './lib/tasks';
 // stop-failure-stamp.ts — StopFailure hook
 //
 // Claude Code fires StopFailure when a turn ends in an upstream failure instead
@@ -34,6 +35,7 @@ function main(payload: Json): void {
 
   const stateDir = path.join(hermitDir(), 'state');
   if (isGuest(stateDir, sessionId(payload))) return;
+  observeExecution(hermitDir(), 'idle', sessionId(payload), null, 'stop-failure');
 
   const stamp = {
     error: payload.error,

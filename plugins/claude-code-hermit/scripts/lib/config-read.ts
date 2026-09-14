@@ -87,6 +87,7 @@ const TABLE: Record<string, Spec> = {
     summary_threshold: num(30),
     summary_keep: num(15),
   }),
+  tasks: shape({ handle_in_dm: bool(false), duties_open_records: bool(true) }),
   heartbeat: shape({
     enabled: bool(true),
     every: str('30m'),

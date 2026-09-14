@@ -8,7 +8,7 @@ import { readSettledConfig } from './config-read';
 import { parseSchema } from '../knowledge-lint';
 
 export function findStorageDrift(hermitDir: string): string[] {
-  const KNOWN_DIRS = new Set(['raw', 'compiled', 'sessions', 'proposals', 'state', 'templates',
+  const KNOWN_DIRS = new Set(['tasks', 'raw', 'compiled', 'sessions', 'proposals', 'state', 'templates',
     'memory', 'bin', 'docker', 'memory-mirror']);
 
   // Fail-open: any parse error → no exemptions applied.

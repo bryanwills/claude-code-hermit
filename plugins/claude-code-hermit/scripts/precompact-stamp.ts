@@ -1,3 +1,4 @@
+import { observeExecution } from './lib/tasks';
 process.stdout.on('error', () => {});
 
 // PreCompact hook — stamps SHELL.md's Progress Log with a breadcrumb before Claude Code
@@ -45,7 +46,10 @@ function main(raw: string): void {
   // Not for a guest: the stamp says the RESIDENT's context was reset, and the watchdog
   // reads it to decide that the resident's last cost entry describes a context that no
   // longer exists. The guest's own compaction says nothing about the resident's context.
-  if (!guest) stampContextReset(agentDir);
+  if (!guest) {
+    stampContextReset(agentDir);
+    observeExecution(agentDir, 'unknown', payload.session_id ?? null, null, 'precompact');
+  }
 }
 
 try {
