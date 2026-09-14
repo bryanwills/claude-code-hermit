@@ -30,8 +30,8 @@
     {
       "name": "claude-code-dev-hermit",
       "source": "./plugins/claude-code-dev-hermit",
-      "description": "A development layer for claude-code-hermit. Enforces git safety across every coding agent and adds optional test, quality, debugging, conflict-resolution, and PR workflows.",
-      "version": "0.4.15",
+      "description": "A development layer for claude-code-hermit. Enforces git safety across every coding agent and adds optional debugging and conflict-resolution workflows.",
+      "version": "0.4.16",
       "category": "development",
       "author": {
         "name": "gtapps"
