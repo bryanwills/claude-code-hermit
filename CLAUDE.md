@@ -53,7 +53,7 @@ Always launch Claude Code from this repo's root. A plugin dir's own `.claude-plu
 
 ## Verification
 
-- **Confirm Claude Code's own behavior empirically before building on it**, with `/probe`: it owns the tmux session, the sentinel-verdict protocol, and the model choice. Live behavior wins over docs, memory, or assumption; a contradiction is the finding. Under `--plugin-dir`, skills load at session start (relaunch to test edited skill text) and `${CLAUDE_PLUGIN_ROOT}` is not substituted (derive the root from the skill's Base directory).
+- **Confirm Claude Code's own behavior empirically before building on it**, with `/probe`: it owns the tmux session, the sentinel-verdict protocol, and the model choice. Live behavior wins over docs, memory, or assumption; a contradiction is the finding. Under `--plugin-dir`, skills load at session start (relaunch or `/reload-plugins` to test edited skill text).
 - **Auto mode suspends wildcarded-interpreter `permissions.allow` rules** (e.g. `Bash(bun */scripts/*.ts*)`), so a hermit's sealed script allow-list buys nothing there. Details: `plugins/claude-code-hermit/docs/security.md` § Auto-mode Classifier.
 
 ## Rules

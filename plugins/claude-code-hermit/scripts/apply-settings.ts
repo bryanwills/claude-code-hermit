@@ -119,6 +119,8 @@ const HERMIT_ALLOW = [
   // a prompt; the script validates its own key and verbs and pins its state dir
   // because thread-create reads the bot token.
   'Bash(bun */scripts/conversation.ts*)',
+  'Bash(bun */scripts/task.ts*)',
+  'Bash(bun */scripts/duties.ts*)',
   'Bash(bun */scripts/channel-access.ts*)',
   'Bash(bun */scripts/session-archive.ts*)',
   'Bash(bun */scripts/routines.ts precheck*)',

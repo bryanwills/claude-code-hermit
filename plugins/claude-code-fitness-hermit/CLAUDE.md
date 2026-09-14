@@ -39,5 +39,5 @@ Core's `scripts/domain-hatch.ts` owns target resolution and `hatch-options.json`
 
 ## Development
 
-`claude --plugin-dir /path/to/claude-code-fitness-hermit` from a target project, then `/claude-code-fitness-hermit:hatch`. Tests: `bash tests/run-all.sh`.
+From the repo root, `bun run dev <target-project>`, hatch core, then `/claude-code-fitness-hermit:hatch`. Tests: `bash tests/run-all.sh`.
 

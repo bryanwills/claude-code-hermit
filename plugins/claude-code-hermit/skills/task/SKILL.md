@@ -1,0 +1,32 @@
+---
+name: task
+description: 'Track commitments, progress, results and confirmations beside sessions.'
+---
+
+# Tasks
+
+Read `.claude-code-hermit/TASKS.md` first for record threshold, wording and confirmation policy. Use `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts <verb> .claude-code-hermit ...` for every record operation. Never edit `tasks/` directly. Consult `../../docs/task-records.md` for the command contract.
+
+## Intake
+Pending micro-proposal answers take precedence. Run `task.ts list .claude-code-hermit --open --conversation <sourceKey>:<chat_id>` before interpreting task steering. A bound thread, open handle, or continuation of the sole open task identifies the record. If multiple tasks are open without a handle or thread, ask one short question naming the handles. Plain questions create nothing.
+
+Use `open --title ... --requester <sourceKey>:<user_id> --done ...` for assignments. Pass requester display name, origin message id, conversation, due date and explicitly named approver when available. Resident records may carry `--card`; helpers use `--owner helper:<conversation key>` and never own card fields or write records themselves. Session gates and session-start still apply as before.
+
+For work requested after the current work, open a resident record and state its queue position from the open-task ordering. Offer queued work at session close-out; do not drain automatically. Show the handle in cards and replies only when at least two tasks are open in that conversation; in DMs also require `config.tasks.handle_in_dm`.
+
+## Progress and results
+Pipe one progress line into `note <id>`, pairing it with milestone card edits. Metadata flags include `--due`, `--card`, `--clear-waiting`, `--decision`, and `--approval "<actor>: <what>"`. A changed definition uses `note <id> --done ... --actor <human identity>`: it increments result_rev and clears the old result.
+
+Post an outcome then pipe it into `block <id> --result-stdin`. It increments result_rev and waits on the named approver or requester. A stall without a result requires `--waiting-on`, `--status-line` and `--next`; post the digest's one status/next-step message to its requester in its conversation.
+
+## Closure
+Stored status is only `open` or `closed`; closed_by is only `check`, `confirmed`, `cancelled` or null. Only close and cancel close records. Never infer closure from harness idleness.
+
+Use `close <id> --by confirmed --actor <sourceKey>:<user_id> --result-rev <current> --reason-stdin` for confirmation of a posted result. The revision must match and a named approver must be the actor. Any authorized human in the conversation may otherwise confirm, cancel, or change the definition of done. There is no owner list.
+
+Use `close <id> --by check --actor hermit --claim <linked claim>` only when the later claim is held. A resolved duty uses its matching `duty:<name>` actor and dedupe key. Free-text proof alone cannot close a task. Use `cancel <id> --actor <human identity> --reason-stdin` with a nonempty reason to cancel.
+
+## Standup and duties
+`standup --json` groups promised, late and waiting work by stable identity. Execution is advisory. A shared turn bills whole to its first bound task; a missed progress note may bill to conversation. Older rows without buckets are pre-upgrade.
+
+Duties open deduplicated records only when a human must act and `config.tasks.duties_open_records` permits it. Otherwise post plain messages. An ambiguous duty read never closes a record.

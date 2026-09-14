@@ -1,3 +1,4 @@
+import { observeExecution } from './lib/tasks';
 // stop-pipeline.ts — unified Stop hook
 // Reads stdin once, runs all stop stages in sequence, touches heartbeat.
 // Stages, in order: cost tracking, session diff, evaluation, auto-idle, heartbeat.
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
   // would defer every monitor-delivered routine for the marker's full TTL —
   // the starvation class issue #617 fixed, just time-bounded.
   if (!guest) {
+    observeExecution(HERMIT_DIR, 'idle', sessionId(payload), null, null);
     let closedOperatorTurn = false;
     try { fs.unlinkSync(TURN_FILE); closedOperatorTurn = true; } catch {}
     // Quiet time runs from the operator turn's end, so a long turn is not auto-idled

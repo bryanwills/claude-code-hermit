@@ -122,7 +122,7 @@ if (verb === 'ensure-target') {
   // unwritten and every later consumer re-asking the Visibility question — a
   // far worse outcome than a `0.0.0` stamp. The plugin id is regex-validated
   // above and only ever lands in core's own state dir as a string field.
-  const resolved = resolvePlugin(list, pluginId, projectRoot);
+  const resolved = resolvePlugin(list, pluginId, projectRoot, PLUGIN_ROOT);
   const unresolved = isResolveError(resolved);
   const scope = coreScope(list as any, projectRoot);
   const res = ensureHatchTarget(stateDir, {
@@ -147,7 +147,7 @@ if (verb === 'sync-block') {
       import('./resolve-siblings'),
     ]);
   const list = pluginList();
-  const resolved = resolvePlugin(list, pluginId, projectRoot);
+  const resolved = resolvePlugin(list, pluginId, projectRoot, PLUGIN_ROOT);
   if (isResolveError(resolved)) die(resolved.error, resolved.message);
 
   const state = readTargetState(stateDir, coreScope(list as any, projectRoot), projectRoot);

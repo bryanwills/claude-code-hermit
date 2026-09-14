@@ -1,3 +1,4 @@
+import type { TaskAttribution } from './tasks';
 // Hermit-owned cost-log index: incremental byte-offset tracking + corrupt-line counting.
 // cc-compat.js owns the cost-log PATH only; this module owns the record shape and the index.
 //
@@ -366,6 +367,7 @@ function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; run
 // ---------------------------------------------------------------------------
 
 type MainCostObservation = {
+  taskAttribution?: TaskAttribution;
   timestamp?: string;
   sessionId: string;
   /** The Claude Code session that produced this turn — always the hook payload's own id,
@@ -397,6 +399,7 @@ type MainCostObservation = {
 };
 
 type SubagentCostObservation = {
+  taskAttribution?: TaskAttribution;
   timestamp?: string;
   sessionId: string;
   source: string;
@@ -416,6 +419,10 @@ type SubagentCostObservation = {
 
 function buildMainCostRow(o: MainCostObservation): Json {
   return {
+    task_id: o.taskAttribution?.task_id ?? null,
+    bucket: o.taskAttribution?.bucket ?? (o.source === 'heartbeat' || o.source.startsWith('routine:') ? 'duties' : 'conversation'),
+    attribution: o.taskAttribution?.attribution ?? 'source',
+    ...(o.taskAttribution?.task_ids ? { task_ids: o.taskAttribution.task_ids } : {}),
     timestamp: o.timestamp ?? new Date().toISOString(),
     session_id: o.sessionId,
     cc_session_id: o.ccSessionId,
@@ -442,6 +449,10 @@ function buildMainCostRow(o: MainCostObservation): Json {
 
 function buildSubagentCostRow(o: SubagentCostObservation): Json {
   return {
+    task_id: o.taskAttribution?.task_id ?? null,
+    bucket: o.taskAttribution?.bucket ?? (o.source === 'heartbeat' || o.source.startsWith('routine:') ? 'duties' : 'conversation'),
+    attribution: o.taskAttribution?.attribution ?? 'source',
+    ...(o.taskAttribution?.task_ids ? { task_ids: o.taskAttribution.task_ids } : {}),
     timestamp: o.timestamp ?? new Date().toISOString(),
     session_id: o.sessionId,
     source: o.source,

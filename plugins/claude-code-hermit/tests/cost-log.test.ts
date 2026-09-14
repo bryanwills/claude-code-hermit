@@ -363,19 +363,19 @@ describe('cost row builders', () => {
 
   test('main row key set is stable', () => {
     expect(Object.keys(buildMainCostRow(mainBase)).sort()).toEqual([
-      'api_calls', 'cache_read_tokens', 'cache_write_tokens', 'cc_session_id', 'context_usage',
+      'api_calls', 'attribution', 'bucket', 'cache_read_tokens', 'cache_write_tokens', 'cc_session_id', 'context_usage',
       'estimated_cost_usd', 'input_tokens', 'last_call_prompt_tokens', 'max_prompt_tokens',
       'model', 'model_unpriced', 'output_tokens', 'session_id', 'source',
-      'source_attribution_version', 'timestamp', 'total_tokens',
+      'source_attribution_version', 'task_id', 'timestamp', 'total_tokens',
     ]);
   });
 
   test('subagent row key set is stable and marks subagent:true', () => {
     const row = buildSubagentCostRow(subBase);
     expect(Object.keys(row).sort()).toEqual([
-      'agent_type', 'api_calls', 'cache_read_tokens', 'cache_write_tokens', 'context_usage',
+      'agent_type', 'api_calls', 'attribution', 'bucket', 'cache_read_tokens', 'cache_write_tokens', 'context_usage',
       'estimated_cost_usd', 'input_tokens', 'model', 'model_resolved', 'output_tokens',
-      'session_id', 'source', 'source_attribution_version', 'subagent', 'timestamp', 'total_tokens',
+      'session_id', 'source', 'source_attribution_version', 'subagent', 'task_id', 'timestamp', 'total_tokens',
     ]);
     expect(row).toMatchObject({ subagent: true, api_calls: 0, context_usage: null });
   });

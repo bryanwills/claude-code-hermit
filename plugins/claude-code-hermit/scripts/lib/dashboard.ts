@@ -1,3 +1,4 @@
+import { taskStandup, type PersonTasks } from './tasks';
 // Deterministic renderer for the Hermit Dashboard artifact — the render itself is
 // script-authored, not model-authored, so a publish costs a render (pennies) instead
 // of a generation (dollars). Reads only state already on disk (runtime.json,
@@ -79,6 +80,7 @@ export interface CompiledDocRow {
 }
 
 export interface DashboardState {
+  byPerson: PersonTasks[];
   agentName: string;
   sessionState: string | null;
   aliveNow: boolean;
@@ -299,7 +301,11 @@ export function loadDashboardState(hermitDir: string): DashboardState {
     });
   }
 
+  let byPerson: PersonTasks[] = [];
+  try { byPerson = taskStandup(hermitDir).byPerson; } catch { /* malformed task record: render the rest */ }
+
   return {
+    byPerson,
     agentName: agentNameFromConfig(config),
     sessionState: typeof runtime?.session_state === 'string' ? runtime.session_state : null,
     aliveNow,
@@ -592,13 +598,23 @@ function renderCompiledIndex(state: DashboardState): string {
       <ul class="proposal-history">${items}${omittedLine}</ul>`);
 }
 
-/** The default page's five cards, each as a standalone HTML fragment. Exported so a
+function renderByPerson(state: DashboardState): string {
+  const groups = (state.byPerson ?? []).map(person => {
+    const sections = ([['Promised', person.promised], ['Late', person.late], ['Waiting on them', person.waiting]] as const).map(([title, rows]) =>
+      `<h3>${title}</h3><ul>${rows.map(row => `<li>${escapeHtml(row.handle)}: ${escapeHtml(row.title)} (${escapeHtml(row.due ?? 'no due date')}) ${escapeHtml(row.listing.join(', '))} $${row.cost_usd.toFixed(4)}</li>`).join('')}</ul>`).join('');
+    return `<article><h2>${escapeHtml(person.identity)}${person.name ? ` (${escapeHtml(person.name)})` : ''}</h2>${sections}</article>`;
+  });
+  return `<section class="card"><h2>By person</h2>${groups.join('') || '<p>No open tasks</p>'}</section>`;
+}
+
+/** The default page's cards, each as a standalone HTML fragment. Exported so a
  *  hermit-local dashboard renderer (see docs/artifacts.md § Custom renderer) can embed
  *  any of them verbatim instead of reimplementing them; `renderDashboard` composes the
  *  same map, so the two cannot drift. `weekly` is empty when there is no review yet. */
 export function renderCoreSections(state: DashboardState): Record<string, string> {
   return {
     status: renderStatus(state),
+    byPerson: renderByPerson(state),
     brief: renderBrief(state),
     proposals: renderProposals(state),
     weekly: renderWeekly(state),
@@ -625,6 +641,7 @@ export function renderDashboard(state: DashboardState, opts?: { now?: string }):
     updatedToken: UPDATED_TOKEN,
     body: [
       sections.status,
+      sections.byPerson,
       sections.brief,
       sections.proposals,
       sections.weekly,

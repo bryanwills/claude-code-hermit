@@ -29,7 +29,7 @@ Before the setup-mode gate or any file writes, gather context silently. Run all 
 
 2. **Silent hermit detection + core scope detection** (split out so it's available before the mode gate without an operator prompt):
    - **Core scope detection:** run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-siblings.ts "$(pwd)" --role core-scope`. It emits `{ "core_scope": "local"|"project"|"user"|null, "target": "committed"|"local" }` — set `core_install_scope` from `core_scope` and `hatch_target` from `target`. (project → committed; local/user/null → local, the safer default the operator can override in Advanced.)
-   - **Sibling hermit detection:** run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-siblings.ts "$(pwd)" --role siblings`. It emits a JSON array of the project-or-local + enabled hermit siblings (each carrying `plugin`, `id`, `marketplace_name`, `installPath`), already excluding user-scope, disabled, cross-project, and `claude-code-hermit` itself.
+   - **Sibling hermit detection:** run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-siblings.ts "$(pwd)" --role siblings --core-root "${CLAUDE_PLUGIN_ROOT}"`. It emits a JSON array of the project-or-local + enabled hermit siblings (each carrying `plugin`, `id`, `marketplace_name`, `installPath`), already excluding user-scope, disabled, cross-project, and `claude-code-hermit` itself.
    - Stash the array as `detected_hermits`. Step 3 reads `state-templates/CLAUDE-APPEND.md` and `plugin.json` from each entry's `installPath` directly.
    - Note: sibling detection is intentionally restrictive. A hermit installed at user scope does NOT auto-detect — operator can install it at project scope and re-run, or activate via `/hermit-settings`.
 
@@ -413,15 +413,15 @@ The target file is determined by `hatch_target` (computed in Step 1.5):
 
 Check CLAUDE.md, CLAUDE.local.md and .claude-code-hermit/RESIDENT.md for duplicate markers within each file. The shared block and resident block belong in their respective destinations. Perform the shared-block idempotency check across both CLAUDE files first: if the marker `claude-code-hermit: Session Discipline` exists in the non-target file, surface a conflict — ask operator: **Move to target file** (diff-and-confirm) / **Keep both** (warn that both load) / **Skip conflict**. Never silently leave duplicate markers.
 
-Use `.claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-hermit` to write shared instructions to the hatch-resolved CLAUDE file and resident duties to `.claude-code-hermit/RESIDENT.md`. Never regenerate the template by hand.
+Use `bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts sync-block claude-code-hermit` to write shared instructions to the hatch-resolved CLAUDE file and resident duties to `.claude-code-hermit/RESIDENT.md`. Never regenerate the template by hand.
 
 For the target file:
 - If it exists: check if it already contains `claude-code-hermit: Session Discipline`
   - If yes: ask with `AskUserQuestion` (header: "CLAUDE block") — options: **Yes — replace** (update to latest) / **No — keep** (preserve current, default)
-    - If "Yes — replace": remove the existing hermit block (from its `<!-- claude-code-hermit: Session Discipline -->` marker — and any blank line / `---` separator immediately above it — through its closing `<!-- /claude-code-hermit: Session Discipline -->` marker; if the target's block predates the closing marker, fall back to the first standalone `---` line after the opening marker, or end of file), then sync the fresh blocks: `.claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-hermit`
+    - If "Yes — replace": remove the existing hermit block (from its `<!-- claude-code-hermit: Session Discipline -->` marker — and any blank line / `---` separator immediately above it — through its closing `<!-- /claude-code-hermit: Session Discipline -->` marker; if the target's block predates the closing marker, fall back to the first standalone `---` line after the opening marker, or end of file), then sync the fresh blocks: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts sync-block claude-code-hermit`
     - If "No — keep": skip
-  - If no: `.claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-hermit`
-- If the target file doesn't exist: `.claude-code-hermit/bin/hermit-run domain-hatch sync-block claude-code-hermit`
+  - If no: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts sync-block claude-code-hermit`
+- If the target file doesn't exist: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts sync-block claude-code-hermit`
 
 If a hermit was activated in step 3, also run `domain-hatch sync-block <activated_hermit.plugin>` through hermit-run, using the same skip/overwrite logic if its marker already exists.
 

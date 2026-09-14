@@ -1,4 +1,5 @@
 # Heartbeat Checklist
+<!-- End each item with [ask] (default), [act], or [note] to set its trust policy; keep the token trailing so its item key stays stable. -->
 <!-- Keep under 10 items. Move periodic checks to routines (/hermit-settings routines). -->
 
 ## Standing Checks

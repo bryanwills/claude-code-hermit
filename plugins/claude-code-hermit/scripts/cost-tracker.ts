@@ -1,3 +1,4 @@
+import { resolveTaskAttribution, consumeTaskBinding } from './lib/tasks';
 // Adapted from Everything Claude Code (https://github.com/affaan-m/everything-claude-code)
 // Original: scripts/hooks/cost-tracker.js — MIT License
 // Changes: Added SHELL.md cost injection for session tracking,
@@ -867,7 +868,9 @@ async function run(data: Json): Promise<string | null> {
     // describes), and `source_inherited` marks a source that came from the dispatch
     // hop rather than this turn's own prompt. Both are absent, not false, when they
     // do not apply.
+    const taskAttribution = resolveTaskAttribution(HERMIT_DIR, sessionId, source, lastRow?.observed_at ?? null);
     const logEntry = buildMainCostRow({
+      taskAttribution,
       sessionId: runtimeSessionId || sessionId,
       // The harness id of the session that actually ran this turn — never the runtime
       // override above, which is the shared S-NNN arc label. Paired with `guest`, this is
@@ -906,6 +909,7 @@ async function run(data: Json): Promise<string | null> {
       const saPriced = priceUsage(saModel, sa);
       const saCost = saPriced.total;
       subagentRows.push(buildSubagentCostRow({
+        taskAttribution,
         sessionId: runtimeSessionId || sessionId,
         source,
         model: saModel,
@@ -924,6 +928,7 @@ async function run(data: Json): Promise<string | null> {
     }
 
     appendCostRows(COST_LOG, [logEntry, ...subagentRows]);
+    consumeTaskBinding(HERMIT_DIR, taskAttribution);
 
     // Update incremental index — O(1) in the common case; O(n) only on first run or log truncation.
     // Must happen before getCumulativeCost so the index fallback sees this turn's lines.

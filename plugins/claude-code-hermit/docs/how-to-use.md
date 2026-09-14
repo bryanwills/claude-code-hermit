@@ -282,7 +282,7 @@ Most common actions auto-trigger from natural language — just say what you mea
 
 | Category       | Skills                                                             |
 | -------------- | ------------------------------------------------------------------ |
-| **Session**    | `session`, `session-start`, `session-close`                        |
+| **Session**    | `session`, `session-start`, `session-close`, `task`                        |
 | **Status**     | `brief`                                                            |
 | **Monitoring** | `watch`, `heartbeat`                                               |
 | **Learning**   | `proposal-create`, `proposal-list`, `proposal-act`, `reflect`      |

@@ -52,7 +52,7 @@ describe('artifact.ts state dashboard', () => {
     // Theme comes from the live stylesheet, so core-side theme fixes reach custom pages.
     expect(payload.themeCss).toBe(CSS);
     expect(Object.keys(payload.coreSections).sort())
-      .toEqual(['brief', 'compiledIndex', 'proposals', 'status', 'weekly']);
+      .toEqual(['brief', 'byPerson', 'compiledIndex', 'proposals', 'status', 'weekly']);
     expect(payload.state.agentName).toBe('Hermit');
     expect(typeof payload.updatedToken).toBe('string');
     expect(payload.updatedToken.length).toBeGreaterThan(0);

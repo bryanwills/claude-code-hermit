@@ -1,5 +1,6 @@
 {
   "deny": [
+    "Edit(*.claude-code-hermit/tasks/**)",
     "Bash(rm -rf *)",
     "Bash(rm -fr *)",
     "Bash(rm -r -f *)",
@@ -35,6 +36,7 @@
     "Edit(//**/.claude/plugins/**)"
   ],
   "ask": [
+    "Edit(*.claude-code-hermit/TASKS.md)",
     "Bash(ssh *)",
     "Bash(docker *)",
     "Bash(kubectl *)",
