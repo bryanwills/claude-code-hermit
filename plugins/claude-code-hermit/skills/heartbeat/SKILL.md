@@ -72,38 +72,32 @@ This subcommand is the handler for `HEARTBEAT_EVALUATE` notifications emitted by
 
 ### start
 
-Start the heartbeat as a persistent CC Monitor subprocess.
+Start the heartbeat as a native plugin monitor.
 
-1. Ask whether a re-arm is needed at all:
+1. Ask whether activation is needed:
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts start-check .claude-code-hermit
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts start-check .claude-code-hermit --session-id "${CLAUDE_SESSION_ID}"
    ```
-   - `FRESH|interval=<s>` → the registered monitor matches config and is ticking. **Stop here**: log that line, make no `TaskStop`, `Monitor`, `Cron*` or file write. This is the common case when the daily anchor calls `start`, and it is the whole saving.
-   - `REARM|<reason>` → continue. The lines after it are the plan: `OLD_TASK:<id>`, `FIRST_START:1`, `INTERVAL:<s>`, `CMD:<command>`. The verb has already cleared the previous monitor's liveness record, so a file that reappears by `start-commit` is evidence the new subprocess spawned.
-2. If `OLD_TASK:<id>` was printed, `TaskStop` it — ignore not-found errors (the monitor may have already exited). It is printed unless the record belongs to a previous boot, whose task died with that process; a record with no `boot_id` at all was written by this one.
-3. Delete any CronCreate entry whose `prompt` matches `/claude-code-hermit:heartbeat run` (`CronList` → `CronDelete`). Idempotent.
-4. Register a new Monitor:
-   - `description`: `heartbeat-monitor` (reserved slot — operators must not reuse this description for ad-hoc `/watch` entries)
-   - `command`: the `CMD:` string **verbatim** (already absolute — `$PWD` would trigger Claude Code's `simple_expansion` approval)
-   - `timeout_ms`: 86400000 (schema-required; a `persistent: true` Monitor does not expire on it)
-   - `persistent`: true
-5. Record it:
+   - `GUEST|native-monitors-resident-only`: log the line and stop.
+   - `FRESH|interval=<s>`: log the line and stop without further tools or file writes.
+   - `RESTART_REQUIRED|<reason>`: report that the resident must be restarted to pick up the new plugin path. Stop without arming anything.
+   - `REARM|<reason>`: follow the plan. `FIRST_START:1` marks the first registration; `INTERVAL:<s>` reports the configured cadence.
+2. Delete any CronCreate entry whose `prompt` matches `/claude-code-hermit:heartbeat run` (`CronList` then `CronDelete`).
+3. On `ACTIVATE:/claude-code-hermit:monitor-activate`, invoke that named skill once through the `Skill` tool. The host starts the resident-guarded supervisors on dispatch.
+4. Record activation:
    ```
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts start-commit .claude-code-hermit <task-id>
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts start-commit .claude-code-hermit native
    ```
-   It waits for the monitor's first liveness tick (≤10s), writes `state/heartbeat-monitor.runtime.json` and appends the SHELL.md Monitoring line.
-   - `OK|registered|interval=<s>` → done; log it.
-   - `DEAD|liveness-absent` → the subprocess never ticked (seccomp / nested-userns, the same failure that kills `/watch` streams). Report it: the heartbeat will not run this session.
+   The verb accepts a live supervisor PID or waits up to 10 seconds for a tick, records the runtime and appends the existing Monitoring line.
+   - `OK|registered|interval=<s>`: log it.
+   - `DEAD|liveness-absent`: report that the heartbeat will not run this session.
 
-Safe to call from a routine — idempotent (`FRESH` short-circuits, and a re-arm deletes any leftover cron, stops the existing Monitor and rewrites the state file).
-
-The monitor's poll interval is fixed at registration from `heartbeat.every`. The `/hermit-doctor` heartbeat check derives its staleness threshold from the current `config.heartbeat.every`, so editing `every` without re-running `start` leaves the live monitor on the old cadence while the doctor judges it against the new one. Re-run `start` after changing `every` to resync.
+The poller resolves `heartbeat.every` each iteration. Explicit start enables a session-only heartbeat even when `heartbeat.enabled` is false.
 
 ### stop
 
-1. Read `state/heartbeat-monitor.runtime.json`. If a `task_id` is present, TaskStop it.
-2. Clear `state/heartbeat-monitor.runtime.json` (write `{}`). Delete `state/heartbeat-liveness.json` if it exists — the cleared runtime file has no `started_at`, so a leftover `last_peek_at` would be trusted as current and read fresh until it ages past the threshold, after which the watchdog re-arms the heartbeat the operator just stopped.
-3. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: stopped`.
+1. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/heartbeat.ts stop .claude-code-hermit`. The verb writes the stopped control state, clears the registration and deletes liveness. The heartbeat becomes silent within 60 seconds; its supervisor remains available for a later start.
+2. Append to SHELL.md Monitoring: `[HH:MM] Heartbeat: stopped`.
 
 ### status
 

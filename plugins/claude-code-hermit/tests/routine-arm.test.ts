@@ -44,11 +44,11 @@ function fixture(options: { scheduled?: boolean; heartbeat?: boolean } = {}) {
       },
     },
   }));
-  const routineCommand = `bash ${path.join(pluginRoot, 'scripts', 'routine-monitor.sh')} 60 ${hermit}`;
-  const heartbeatCommand = `bash ${path.join(pluginRoot, 'scripts', 'heartbeat-monitor.sh')} 1800 ${hermit}`;
+  const routineCommand = `bash "${pluginRoot}"/scripts/monitor-supervisor.sh routines "${hermit}"`;
+  const heartbeatCommand = `bash "${pluginRoot}"/scripts/monitor-supervisor.sh heartbeat "${hermit}"`;
   if (options.scheduled !== false) {
     fs.writeFileSync(path.join(state, 'routine-monitor.runtime.json'), JSON.stringify({
-      description: 'routine-monitor', task_id: 'task-old', command: routineCommand,
+      description: 'routine-monitor', launch: 'native', command: routineCommand,
       interval: 60, started_at: iso(now - 60_000), mode: 'monitor', boot_id: 'boot-a',
     }));
     fs.writeFileSync(path.join(state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: iso() }));
@@ -60,7 +60,7 @@ function fixture(options: { scheduled?: boolean; heartbeat?: boolean } = {}) {
   }
   if (options.heartbeat !== false) {
     fs.writeFileSync(path.join(state, 'heartbeat-monitor.runtime.json'), JSON.stringify({
-      command: heartbeatCommand, interval: 1800, started_at: iso(now - 60_000), boot_id: 'boot-a',
+      command: heartbeatCommand, launch: 'native', interval: 1800, started_at: iso(now - 60_000), boot_id: 'boot-a',
     }));
     fs.writeFileSync(path.join(state, 'heartbeat-liveness.json'), JSON.stringify({ last_peek_at: iso() }));
   }
@@ -71,6 +71,45 @@ async function arm(hermit: string, args: string[], env: Record<string, string> =
   const [subverb, ...flags] = args;
   return runScript('routines.ts', { args: ['arm', subverb, hermit, pluginRoot, ...flags], env });
 }
+
+test('native commit accepts a live supervisor with a stale tick', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid: process.pid, last_peek_at: iso(0) }));
+  expect((await arm(f.hermit, ['commit', 'native'])).stdout).toStartWith('OK|monitor|');
+  const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8'));
+  expect(runtime.launch).toBe('native');
+  expect(runtime.task_id).toBeUndefined();
+});
+
+test('native commit with a dead supervisor and no tick falls back', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid: 2147483647 }));
+  expect((await arm(f.hermit, ['commit', 'native'])).stdout).toBe('FALLBACK|liveness-absent\n');
+}, 20_000);
+
+test('begin preserves native liveness', async () => {
+  const f = fixture();
+  const file = path.join(f.state, 'routine-monitor-liveness.json');
+  const before = fs.readFileSync(file, 'utf8');
+  await arm(f.hermit, ['begin', '--reset']);
+  expect(fs.readFileSync(file, 'utf8')).toBe(before);
+});
+
+test('command drift with a live supervisor requires restart', async () => {
+  const f = fixture();
+  const file = path.join(f.state, 'routine-monitor.runtime.json');
+  const runtime = JSON.parse(fs.readFileSync(file, 'utf8'));
+  runtime.command = 'bash /old/plugin/scripts/monitor-supervisor.sh';
+  fs.writeFileSync(file, JSON.stringify(runtime));
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid: process.pid }));
+  expect((await arm(f.hermit, ['begin'])).stdout).toBe('RESTART_REQUIRED|command-drift\n');
+});
+
+test('guest begin only reports the guest verdict', async () => {
+  const f = fixture();
+  fs.writeFileSync(path.join(f.state, '.guest-test-guest'), iso());
+  expect((await arm(f.hermit, ['begin', '--session-id', 'test-guest'])).stdout).toBe('GUEST|native-monitors-resident-only\n');
+});
 
 test('anchor HEALTHY stamps started and fired', async () => {
   const f = fixture();
@@ -124,15 +163,15 @@ test('begin reset always plans, removes cursor, and renders the anchor prompt', 
   fs.writeFileSync(path.join(f.state, 'routine-schedule.json'), '{}');
   const result = await arm(f.hermit, ['begin', '--reset']);
   expect(result.stdout).toContain('ARM|routines,heartbeat|reset');
-  expect(result.stdout).toContain('OLD_TASK:task-old');
-  expect(result.stdout).toContain('MONITOR_CMD:bash ');
+  expect(result.stdout).not.toContain('OLD_TASK:');
+  expect(result.stdout).toContain('ACTIVATE:/claude-code-hermit:monitor-activate');
   expect(result.stdout).toContain('ANCHOR_PROMPT_BEGIN\n[hermit-routine:heartbeat-restart]');
   expect(result.stdout).toContain('arm anchor');
   expect(result.stdout).toContain('finish heartbeat-restart cron-create');
   expect(fs.existsSync(path.join(f.state, 'routine-schedule.json'))).toBe(false);
 });
 
-test('begin reports OLD_TASK only for the current boot', async () => {
+test('begin never prints an old task from a previous boot', async () => {
   const f = fixture();
   const runtimePath = path.join(f.state, 'routine-monitor.runtime.json');
   const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
@@ -142,17 +181,15 @@ test('begin reports OLD_TASK only for the current boot', async () => {
   expect(result.stdout).not.toContain('OLD_TASK:');
 });
 
-// A record written before the field existed belongs to whatever process is reading
-// it: an in-process upgrade re-arms while the old monitor is still polling, so
-// skipping the stop leaves two monitors firing the same routines.
-test('begin stops a task from a runtime record without boot_id', async () => {
+// Legacy records without boot_id must not produce task-stop instructions.
+test('begin never stops a task from a runtime record without boot_id', async () => {
   const f = fixture();
   const runtimePath = path.join(f.state, 'routine-monitor.runtime.json');
   const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
   delete runtime.boot_id;
   fs.writeFileSync(runtimePath, JSON.stringify(runtime));
   const result = await arm(f.hermit, ['begin', '--reset']);
-  expect(result.stdout).toContain('OLD_TASK:task-old');
+  expect(result.stdout).not.toContain('OLD_TASK:');
 });
 
 test('commit none writes monitor runtime and commits the anchor mirror', async () => {
@@ -210,23 +247,22 @@ test('begin plans the heartbeat leg with the same lines start-check would print'
 
   // Same plan, modulo each fixture's own tmp dir.
   const expected = checked.stdout.split('\n')
-    .filter(line => line && !line.startsWith('REARM|'))
+    .filter(line => line && !line.startsWith('REARM|') && !line.startsWith('ACTIVATE:'))
     .map(line => `HB_${line.split(g.hermit).join(f.hermit)}`);
   expect(expected).toEqual([
     'HB_INTERVAL:1800',
-    `HB_CMD:bash ${path.join(pluginRoot, 'scripts', 'heartbeat-monitor.sh')} 1800 ${f.hermit}`,
   ]);
   expect(hbLines(begun.stdout)).toEqual(expected);
 });
 
-test('begin carries the old heartbeat task id and the first-start marker', async () => {
+test('begin preserves the first-start marker without carrying old heartbeat tasks', async () => {
   const f = fixture();
   fs.writeFileSync(
     path.join(f.state, 'heartbeat-monitor.runtime.json'),
     JSON.stringify({ task_id: 'hb-old', interval: 600 }),
   );
   const result = await arm(f.hermit, ['begin']);
-  expect(hbLines(result.stdout)).toContain('HB_OLD_TASK:hb-old');
+  expect(result.stdout).not.toContain('OLD_TASK:');
   expect(hbLines(result.stdout)).toContain('HB_FIRST_START:1');
 });
 
@@ -258,12 +294,12 @@ test('commit --heartbeat records the heartbeat monitor after the routine leg', a
   fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: iso() }));
   fs.writeFileSync(path.join(f.state, 'heartbeat-liveness.json'), JSON.stringify({ last_peek_at: iso(Date.now() + 1000) }));
 
-  const result = await arm(f.hermit, ['commit', 'task-new', '--heartbeat', 'hb-new']);
+  const result = await arm(f.hermit, ['commit', 'native', '--heartbeat', 'native']);
   const lines = result.stdout.trim().split('\n');
   expect(lines[0]).toStartWith('OK|monitor|');
   expect(lines[1]).toBe('HEARTBEAT:OK|registered|interval=1800');
   const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'heartbeat-monitor.runtime.json'), 'utf8'));
-  expect(runtime).toMatchObject({ task_id: 'hb-new', interval: 1800 });
+  expect(runtime).toMatchObject({ launch: 'native', interval: 1800 });
 });
 
 test('a symlinked plugin root writes the same heartbeat command as start-commit', async () => {
@@ -275,7 +311,7 @@ test('a symlinked plugin root writes the same heartbeat command as start-commit'
   fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: iso() }));
   fs.writeFileSync(path.join(f.state, 'heartbeat-liveness.json'), JSON.stringify({ last_peek_at: iso(Date.now() + 1000) }));
 
-  await runScript('routines.ts', { args: ['arm', 'commit', f.hermit, pluginLink, 'task-new', '--heartbeat', 'hb-new'] });
+  await runScript('routines.ts', { args: ['arm', 'commit', f.hermit, pluginLink, 'native', '--heartbeat', 'native'] });
   const checked = await runScript('heartbeat.ts', { args: ['start-check', f.hermit] });
   expect(checked.stdout).toStartWith('FRESH|interval=1800');
 });
@@ -289,7 +325,7 @@ test('a routine fallback still commits the heartbeat leg', async () => {
   fs.rmSync(path.join(f.state, 'routine-monitor-liveness.json'), { force: true });
   fs.writeFileSync(path.join(f.state, 'heartbeat-liveness.json'), JSON.stringify({ last_peek_at: iso(Date.now() + 1000) }));
 
-  const result = await arm(f.hermit, ['commit', 'task-new', '--heartbeat', 'hb-new']);
+  const result = await arm(f.hermit, ['commit', 'native', '--heartbeat', 'native']);
   expect(result.stdout).toContain('FALLBACK|liveness-absent');
   expect(result.stdout).toContain('HEARTBEAT:OK|registered|interval=1800');
   // The absent routine liveness file costs waitForFirstTick its full ~10s poll.
@@ -299,7 +335,7 @@ test('commit without --heartbeat leaves the heartbeat runtime untouched', async 
   const f = fixture();
   const before = fs.readFileSync(path.join(f.state, 'heartbeat-monitor.runtime.json'), 'utf8');
   fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: iso() }));
-  const result = await arm(f.hermit, ['commit', 'task-new']);
+  const result = await arm(f.hermit, ['commit', 'native']);
   expect(result.stdout).not.toContain('HEARTBEAT:');
   expect(fs.readFileSync(path.join(f.state, 'heartbeat-monitor.runtime.json'), 'utf8')).toBe(before);
 });
@@ -317,7 +353,7 @@ test('commit stamps started_at from its own clock, not the liveness tick', async
   const tick = iso(now - 60_000);
   fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ last_peek_at: tick }));
   const before = Date.now();
-  await arm(f.hermit, ['commit', 'task-new', '--reset']);
+  await arm(f.hermit, ['commit', 'native', '--reset']);
 
   const runtime = JSON.parse(fs.readFileSync(path.join(f.state, 'routine-monitor.runtime.json'), 'utf8'));
   expect(runtime.started_at).not.toBe(tick);

@@ -1,31 +1,12 @@
-// `heartbeat.ts start-check` / `start-commit` — the two halves of `heartbeat start`.
-//
-// Between them the skill does the only things a script cannot: TaskStop the old
-// monitor and register the new one. Everything else — deciding whether a re-arm is
-// needed at all, resolving the interval and command, waiting for the first tick,
-// recording the registration — is deterministic and lives here.
-//
-// Ownership: `start` alone. Teardown stays skill-side (`stop` clears the runtime
-// file and deletes the liveness record), because a stop is one TaskStop plus two
-// file operations with no decision in it.
-//
-// start-check <hermit-dir>
-//   FRESH|interval=<s>                      nothing to do; the live monitor matches config
-//   REARM|<reason>                          followed by, as applicable:
-//     OLD_TASK:<id>                         TaskStop this before registering; omitted
-//                                           when the record belongs to a previous boot
-//     FIRST_START:1                         no prior registration
-//     INTERVAL:<s>
-//     CMD:bash <abs>/heartbeat-monitor.sh <s> <abs hermit dir>
-//
-// start-commit <hermit-dir> <task-id>
-//   OK|registered|interval=<s>              liveness confirmed within 10s
-//   DEAD|liveness-absent                    subprocess never ticked (seccomp / nested-userns)
+// Deterministic heartbeat activation, registration, interval and stop commands.
+// The skill invokes the native activation skill between start-check and start-commit.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
+import { isGuest } from '../guest-marker';
+import { pidAlive } from '../lockfile';
 import { appendShellLine } from '../md-write';
 import { bootMismatch, waitForFirstTick } from '../monitor-health';
 import { readBootId } from '../routines/registry';
@@ -53,23 +34,23 @@ const livenessPath = (hermitDir: string) =>
  * planning different registrations.
  */
 export function prepareHeartbeatArm(hermitDir: string, config: Json): string[] {
+  const bootId = readBootId(hermitDir);
+  writeJson(path.join(hermitDir, 'state', 'heartbeat-monitor.control.json'), config?.heartbeat?.enabled === false
+    ? { mode: 'forced', boot_id: bootId }
+    : { mode: 'auto' });
   const runtime = readJson(runtimePath(hermitDir));
   // Same reason as the routine leg: the commit waits for a liveness file to
   // appear, so the outgoing monitor's last tick has to go before the new one spawns
   // — otherwise a monitor blocked by seccomp reads as alive, and the doctor flags
   // stale data from the prior session during the startup window.
-  try { fs.rmSync(livenessPath(hermitDir), { force: true }); } catch {}
+  if (runtime?.launch !== 'native' || bootMismatch(runtime.boot_id, bootId)) {
+    try { fs.rmSync(livenessPath(hermitDir), { force: true }); } catch {}
+  }
 
   const lines: string[] = [];
-  // A task id from a previous boot is already dead — stopping it would hit a
-  // stranger's task. Same boot rule the routine leg applies to its OLD_TASK.
-  if (typeof runtime?.task_id === 'string' && runtime.task_id
-    && !bootMismatch(runtime.boot_id, readBootId(hermitDir))) {
-    lines.push(`OLD_TASK:${runtime.task_id}`);
-  }
   if (!hasStartedRegistration(runtime)) lines.push('FIRST_START:1');
   lines.push(`INTERVAL:${heartbeatInterval(config)}`);
-  lines.push(`CMD:${heartbeatCommand(hermitDir, config)}`);
+  lines.push('ACTIVATE:/claude-code-hermit:monitor-activate');
   return lines;
 }
 
@@ -87,7 +68,9 @@ export async function commitHeartbeatArm(
 ): Promise<string> {
   const interval = heartbeatInterval(config);
   const nowMs = resolveHermitNowMs();
-  const live = await waitForFirstTick(livenessPath(hermitDir));
+  const liveness = readJson(livenessPath(hermitDir));
+  const live = (typeof liveness?.pid === 'number' && pidAlive(liveness.pid))
+    || await waitForFirstTick(livenessPath(hermitDir));
 
   // The monitor's first tick lands before this commit, so started_at postdates it and
   // readers see it untrusted. That is what the predates-grace in monitorFreshness rides
@@ -98,7 +81,7 @@ export async function commitHeartbeatArm(
   // monitor "warming up" forever.
   writeJson(runtimePath(hermitDir), {
     description: 'heartbeat-monitor',
-    task_id: taskId,
+    launch: 'native',
     command: heartbeatCommand(hermitDir, config),
     interval,
     started_at: new Date(nowMs).toISOString(),
@@ -118,6 +101,11 @@ export async function commitHeartbeatArm(
 
 function cmdCheck(hermitDir: string, config: Json): void {
   const health = heartbeatHealth(hermitDir, config, resolveHermitNowMs());
+  const live = readJson(livenessPath(hermitDir));
+  if (health.reason === 'command-drift' && typeof live?.pid === 'number' && pidAlive(live.pid)) {
+    process.stdout.write('RESTART_REQUIRED|command-drift\n');
+    return;
+  }
   // `disabled` is healthy to the daily anchor, which must leave a deliberately-off
   // heartbeat alone. Reaching `start` at all is an explicit act, so re-arm instead.
   if (health.healthy && health.reason !== 'disabled') {
@@ -143,6 +131,17 @@ export async function run(verb: string, args: string[]): Promise<void> {
     return;
   }
   const config = readConfigRaw(hermitDir) ?? {};
-  if (verb === 'start-check') cmdCheck(hermitDir, config);
+  const sessionIndex = args.indexOf('--session-id');
+  if (verb === 'start-check' && isGuest(path.join(hermitDir, 'state'), sessionIndex < 0 ? null : args[sessionIndex + 1])) {
+    process.stdout.write('GUEST|native-monitors-resident-only\n');
+    return;
+  }
+  if (verb === 'interval') process.stdout.write(`${heartbeatInterval(config)}\n`);
+  else if (verb === 'stop') {
+    writeJson(path.join(hermitDir, 'state', 'heartbeat-monitor.control.json'), { mode: 'stopped' });
+    writeJson(runtimePath(hermitDir), {});
+    fs.rmSync(livenessPath(hermitDir), { force: true });
+  }
+  else if (verb === 'start-check') cmdCheck(hermitDir, config);
   else await cmdCommit(hermitDir, config, args[1] ?? '');
 }

@@ -104,9 +104,10 @@ After a survivor-blocked stop the shutdown gate keeps the channel silent, becaus
 
 ## Routine Monitor Not Ticking
 
-- Run `/claude-code-hermit:hermit-doctor` and check the `routine-monitor` line. `ok` naming `croncreate-fallback mode` means Monitor is unavailable on this platform (Bedrock/Google Cloud Agent Platform/Foundry, or `DISABLE_TELEMETRY`/`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) and routines are running via CronCreate instead — nothing to fix.
-- `fail` naming "Monitor subprocess spawn likely blocked" usually means seccomp or nested-user-namespace restrictions inside a container prevented the subprocess from starting — the same failure mode that blocks `/watch` streams and the heartbeat monitor. Check `state/routine-monitor-liveness.json` for a `last_peek_at` timestamp; if it's missing or stale, the subprocess isn't running.
-- `/claude-code-hermit:hermit-routines load` re-registers the monitor and, if registration or liveness-verify fails, automatically falls back to CronCreate — re-run it after fixing the underlying container/sandbox restriction to return to monitor mode.
+- Run `/claude-code-hermit:hermit-doctor` and check the `routine-monitor` line. `croncreate-fallback mode` means routines use CronCreate because native monitors were unavailable or activation produced no liveness proof.
+- `/claude-code-hermit:hermit-routines load` invokes the activation skill to start native plugin monitors. It accepts a live supervisor PID or a liveness tick; it no longer registers a Monitor tool task. Check `state/routine-monitor-liveness.json` for `pid` and `last_peek_at`.
+- An exited inner poller is respawned by its supervisor. A dead supervisor causes the watchdog to restart the resident when lifecycle guards pass and execution is idle; active or unknown execution defers the restart.
+- `RESTART_REQUIRED|command-drift` means the live supervisor still uses the old plugin path. Restart the resident to pick up the new path; invoking activation again cannot replace an already-armed native monitor in the same session.
 
 ## Queued Task Not Picked Up
 
