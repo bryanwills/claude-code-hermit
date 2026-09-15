@@ -55,6 +55,17 @@ describe('channel-reply-reminder', () => {
     const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
     expect(r.stdout).not.toContain('your own account on this channel');
     expect(r.stdout).toContain('[channel reply reminder]');
+    expect(r.stdout).toContain('unless its instructions are already in this context');
+  }, withBotId()));
+
+  test('first message after context reset — invoke the responder now', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'execution.json'), JSON.stringify({
+      state: 'unknown', turn_id: null, at: new Date().toISOString(),
+      source: null, cc_session_id: null, reason: 'session-start:compact',
+    }));
+    const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
+    expect(r.stdout).toContain('now; this is the first message since the context was reset');
+    expect(r.stdout).not.toContain('unless its instructions are already in this context');
   }, withBotId()));
 
   test('bot_username — an @handle mention matches case-insensitively (telegram shape)', withDir(async (dir) => {
@@ -153,9 +164,12 @@ describe('passive capture', () => {
   }
   const prompt = (body: string, user = 'U1', source = 'discord', chat = '1') =>
     `<channel source="${source}" chat_id="${chat}" user="${user}">${body}</channel>`;
-  const blocked = (stdout: string) => expect(JSON.parse(stdout)).toEqual({
-    decision: 'block', reason: 'passive chat: recorded, not addressed',
-  });
+  const blocked = (stdout: string) => {
+    expect(JSON.parse(stdout)).toEqual({
+      decision: 'block', reason: 'passive chat: recorded, not addressed',
+    });
+    expect(stdout).not.toContain('channel-responder');
+  };
 
   for (const [user, body, block] of [
     ['STRANGER', 'plain', true], ['U1', '<@123> hello', false], ['STRANGER', '<@123> hello', true],
