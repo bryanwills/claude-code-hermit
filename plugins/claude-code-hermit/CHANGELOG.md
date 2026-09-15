@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- A helper launch in a repo with no commits is refused with the cause and remedy instead of crash-looping in the background daemon
 - `.claude-code-hermit/tasks/` and `.claude-code-hermit/TASKS.md` gitignored by the hatch template
 
 ### Changed

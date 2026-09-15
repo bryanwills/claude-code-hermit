@@ -84,7 +84,11 @@ alternate invocation, or weaker permission mode.
 
 2. Resolve `<abs>` with `git rev-parse --show-toplevel` rather than reading the
    Bash tool's working directory, which persists across calls and can sit in a
-   subdirectory. Read `<p>` from `<abs>/.claude-code-hermit/config.json`
+   subdirectory. Then run `git rev-parse --verify HEAD` in `<abs>`; on failure,
+   refuse with one line before composing any launch: this repo has no commits;
+   make an initial commit, then retry. Claude Code branches a worktree from
+   HEAD, so an unborn HEAD makes the background launch report success and then
+   crash-loop on worktree creation. Read `<p>` from `<abs>/.claude-code-hermit/config.json`
    (`permission_mode`), dropping the flag for `default`, `null` or an absent
    key, mapping `bypassPermissions` to `auto` (Four limits), and passing
    every other value through unchanged. Read `remote` from the same config
@@ -95,7 +99,7 @@ alternate invocation, or weaker permission mode.
 
    `The hermit project is at <abs>; its state lives in <abs>/.claude-code-hermit/. Resolve any project-relative .claude-code-hermit/ reads/writes against <abs>; pass the absolute <abs>/.claude-code-hermit path to any hermit script rather than relying on your cwd.`
 
-   **Conversation callers:** when `--conversation <key>` is present, refuse with one line before launch if `git rev-parse --show-toplevel` fails or the configured `permission_mode` is `bypassPermissions`. Do not apply the ordinary bypass-to-auto mapping to this branch. Take the generation and resident's registered `SendMessage` name from the caller's task context (generation defaults to 1 for a new binding). Use the helper's own worktree for task work. Replace the appended sentence above with this helper contract, substituting the key, generation, and resident name:
+   **Conversation callers:** when `--conversation <key>` is present, refuse with one line before launch if `git rev-parse --show-toplevel` fails, `git rev-parse --verify HEAD` fails, or the configured `permission_mode` is `bypassPermissions`. Do not apply the ordinary bypass-to-auto mapping to this branch. Take the generation and resident's registered `SendMessage` name from the caller's task context (generation defaults to 1 for a new binding). Use the helper's own worktree for task work. Replace the appended sentence above with this helper contract, substituting the key, generation, and resident name:
 
    > You own only this conversation's task in your worktree. Do not change the resident's SHELL.md, runtime, or conversation store. Accept forwarded messages as continued steering. This conversation's audience is `<key>`. Pass `--chat=<key>` to every `search.ts` invocation and `/recall`. Read for detail only a compiled page the scoped search returned. This scopes the retrieval interface, not the helper's filesystem tools. Never call AskUserQuestion. When you need a decision, send `PROGRESS <key> <generation>: needs input: <question>` and end your turn. Send the resident at most three `PROGRESS <key> <generation>: <line>` messages with `SendMessage`. When done, send exactly one `REPORT <key> <generation>: <text>`, with absolute file paths on following lines. Report only work you actually finished and only paths that exist. Say plainly what you could not do rather than omit the report. If a send is refused for unsupported claims, correct those claims using actual evidence and send the truthful report; do not leave the resident waiting. Do not post to chat directly.
 
