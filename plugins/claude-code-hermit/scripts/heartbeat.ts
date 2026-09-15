@@ -56,6 +56,8 @@ switch (verb) {
     break;
   }
   case 'start-check':
+  case 'stop':
+  case 'interval':
   case 'start-commit': {
     const { run } = await import('./lib/heartbeat/start');
     await run(verb, process.argv.slice(2));

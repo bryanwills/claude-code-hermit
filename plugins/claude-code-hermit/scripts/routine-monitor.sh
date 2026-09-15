@@ -41,6 +41,12 @@ sweep_tick=0
 # load-bearing: record-operator-action.ts isRoutinePrompt() drops these lines;
 # tests/auto-close.test.ts drift guard syncs them.
 while true; do
+  # Under the supervisor, a fallback recorded after this poller started (a spawn
+  # slower than arm commit's wait) hands routines to CronCreate: exit so both
+  # schedulers never fire the same routine.
+  if [[ -n "${MONITOR_SUPERVISOR_PID:-}" ]] && bun "$SCRIPT_DIR/lib/monitor-leg-stopped.ts" "$RT_DIR" routines >/dev/null 2>&1; then
+    exit 0
+  fi
   if out="$(bun "${DUE[@]}" "$RT_DIR" 2>/dev/null)"; then
     fail_count=0
     [[ -n "$out" ]] && echo "$out"

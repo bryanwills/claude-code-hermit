@@ -2583,6 +2583,55 @@ const writeRoutineMonitorConfig = (h: Hermit) =>
     routines: [{ id: 'scheduled-checks', enabled: true, schedule: '*/30 * * * *' }],
   }, null, 2) + '\n');
 
+for (const execution of ['idle', 'in_flight', 'unknown']) {
+  test(`monitor-dead supervisor with execution ${execution}`, withHermit(async (h) => {
+    writeConfig(h);
+    writeFakeTmux(h, 0);
+    writeFakePgrep(h, 1);
+    fs.writeFileSync(state(h, '.boot-id'), 'native-boot\n');
+    writeState(h, 'heartbeat-monitor.runtime.json', { launch: 'native', boot_id: 'native-boot', started_at: isoAgo(1) });
+    writeState(h, 'heartbeat-liveness.json', { pid: 2147483647, last_peek_at: isoAgo(0) });
+    writeState(h, 'execution.json', { state: execution, at: new Date().toISOString() });
+    const result = await watchdog(h, 'run');
+    expect(result.exitCode).toBe(0);
+    if (execution === 'idle') {
+      expect(events(h)).toContain('monitor-restart');
+      expect(readJson(state(h, 'runtime.json')).watchdog_restart_reason).toBe('monitor-dead');
+      expect(tmuxCalls(h)).toContain('kill-session');
+    } else {
+      expect(events(h)).toContain('monitor-dead-deferred');
+      expect(events(h)).toContain(execution);
+      expect(tmuxCalls(h)).not.toContain('kill-session');
+    }
+  }));
+}
+
+test('monitor-dead from a previous boot does not restart', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, '.boot-id'), 'new-boot\n');
+  writeState(h, 'heartbeat-monitor.runtime.json', { launch: 'native', boot_id: 'old-boot', started_at: isoAgo(1) });
+  writeState(h, 'heartbeat-liveness.json', { pid: 2147483647, last_peek_at: isoAgo(0) });
+  writeState(h, 'execution.json', { state: 'idle', at: new Date().toISOString() });
+  await watchdog(h, 'run');
+  expect(events(h)).not.toContain('monitor-restart');
+  expect(tmuxCalls(h)).not.toContain('kill-session');
+}));
+
+test('monitor-rearm still handles stale liveness with a live supervisor', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, '.boot-id'), 'native-boot\n');
+  writeState(h, 'heartbeat-monitor.runtime.json', { launch: 'native', boot_id: 'native-boot', started_at: isoAgo(9) });
+  writeState(h, 'heartbeat-liveness.json', { pid: process.pid, last_peek_at: isoAgo(8) });
+  writeState(h, 'execution.json', { state: 'idle', at: new Date().toISOString() });
+  await watchdog(h, 'run');
+  expect(events(h)).not.toContain('monitor-restart');
+  expect(events(h)).toContain('monitor-rearm');
+}));
+
 test('stale heartbeat liveness → monitor-rearm event, only heartbeat start injected', withHermit(async (h) => {
   writeConfig(h); // heartbeat every 2h → threshold 6h; no routines
   // Trusted but stale: last tick 8h ago, monitor registered 9h ago.

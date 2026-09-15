@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
+import { isGuest } from '../guest-marker';
+import { pidAlive } from '../lockfile';
 import { heartbeatHealth, livenessReason, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
 import { commitHeartbeatArm, prepareHeartbeatArm } from '../heartbeat/start';
 import { bootMismatch, monitorFreshness, waitForFirstTick } from '../monitor-health';
@@ -71,7 +73,7 @@ function context(hermitDirArg: string, pluginRootArg: string): Context {
 }
 
 function routineCommand(ctx: Context): string {
-  return `bash ${path.join(ctx.pluginRoot, 'scripts', 'routine-monitor.sh')} ${MONITOR_INTERVAL_SECS} ${ctx.hermitDir}`;
+  return `bash "${ctx.pluginRoot}"/scripts/monitor-supervisor.sh routines "${ctx.hermitDir}"`;
 }
 
 function plan(ctx: Context, fallback: boolean, reset: boolean): { plan: PlanResult; routines: Json[] } {
@@ -115,8 +117,8 @@ function monitorHealth(ctx: Context): LegHealth {
   if (runtime.command !== routineCommand(ctx) && ctx.scheduled.length > 0) {
     return { healthy: false, reason: 'command-drift' };
   }
-  if ((ctx.scheduled.length > 0) !== (typeof runtime.task_id === 'string' && runtime.task_id.length > 0)) {
-    return { healthy: false, reason: 'task-drift' };
+  if (ctx.scheduled.length > 0 && runtime.launch !== 'native') {
+    return { healthy: false, reason: 'launch-drift' };
   }
   if (ctx.scheduled.length > 0) {
     const live = readJson(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
@@ -226,13 +228,26 @@ function cmdCheck(ctx: Context): void {
 }
 
 function cmdBegin(ctx: Context, flags: string[]): void {
+  const sessionIndex = flags.indexOf('--session-id');
+  if (isGuest(path.join(ctx.hermitDir, 'state'), sessionIndex < 0 ? null : flags[sessionIndex + 1])) {
+    process.stdout.write('GUEST|native-monitors-resident-only\n');
+    return;
+  }
   const reset = flags.includes('--reset');
   const fallback = flags.includes('--fallback');
   // Read once for both the HEALTHY short-circuit and the HB_ plan below: heartbeatHealth
   // re-reads two state files plus `.boot-id`, and both sites see identical inputs. Null
   // on `--fallback`, the one path that never plans the heartbeat leg.
   const heartbeat = fallback ? null : heartbeatHealth(ctx.hermitDir, ctx.config, ctx.nowMs);
-  if (heartbeat && !reset && heartbeat.healthy && monitorHealth(ctx).healthy) {
+  const routines = monitorHealth(ctx);
+  for (const [health, file] of [[heartbeat, 'heartbeat-liveness.json'], [fallback ? null : routines, 'routine-monitor-liveness.json']] as const) {
+    const live = readJson(path.join(ctx.hermitDir, 'state', file));
+    if (health?.reason === 'command-drift' && typeof live?.pid === 'number' && pidAlive(live.pid)) {
+      process.stdout.write('RESTART_REQUIRED|command-drift\n');
+      return;
+    }
+  }
+  if (heartbeat && !reset && heartbeat.healthy && routines.healthy) {
     process.stdout.write(`HEALTHY|${summary(ctx, heartbeat)}\n`);
     return;
   }
@@ -244,13 +259,12 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   // The heartbeat leg rides along so one `load` arms both monitors. `--fallback` is
   // the second pass of a load whose first pass already committed the heartbeat, and
   // a `disabled` verdict is healthy — neither emits a plan.
+  let activate = false;
   if (heartbeat && !heartbeat.healthy) {
     for (const line of prepareHeartbeatArm(ctx.hermitDir, ctx.config)) {
-      process.stdout.write(`HB_${line}\n`);
+      if (line.startsWith('ACTIVATE:')) activate = true;
+      else process.stdout.write(`HB_${line}\n`);
     }
-  }
-  if (typeof runtime?.task_id === 'string' && runtime.task_id && !bootMismatch(runtime.boot_id, ctx.bootId)) {
-    process.stdout.write(`OLD_TASK:${runtime.task_id}\n`);
   }
   // Only ever a transition INTO monitor mode. The line tells the skill to CronDelete
   // every non-anchor `[hermit-routine:*]` entry, which is right when those crons are
@@ -263,11 +277,14 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   // The outgoing monitor's last tick must not be mistaken for the incoming one's
   // first: `arm commit` waits for a liveness file to appear, and a leftover one
   // would let a subprocess that never spawned read as alive.
-  try { fs.rmSync(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'), { force: true }); } catch {}
+  if (runtime?.launch !== 'native' || bootMismatch(runtime.boot_id, ctx.bootId)) {
+    try { fs.rmSync(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'), { force: true }); } catch {}
+  }
   if (!fallback) {
     if (ctx.scheduled.length === 0) process.stdout.write('MONITOR_SKIP:zero-scheduled\n');
-    else process.stdout.write(`MONITOR_CMD:${routineCommand(ctx)}\n`);
+    else activate = true;
   }
+  if (activate) process.stdout.write('ACTIVATE:/claude-code-hermit:monitor-activate\n');
   if (fallback && ctx.scheduled.length > 0) {
     process.stdout.write('WARN:routines|routine_max_lateness_minutes is not enforced in CronCreate fallback; Monitor scheduling is required\n');
   }
@@ -327,16 +344,18 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
   }
 
   const noMonitor = taskId === 'none';
-  const live = noMonitor || await waitForFirstTick(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
+  const liveness = readJson(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
+  const live = noMonitor || (typeof liveness?.pid === 'number' && pidAlive(liveness.pid))
+    || await waitForFirstTick(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
   const runtime: Json = {
     description: 'routine-monitor',
     command: routineCommand(ctx),
     interval: MONITOR_INTERVAL_SECS,
     started_at: new Date(ctx.nowMs).toISOString(),
     mode: live ? 'monitor' : 'croncreate-fallback',
+    launch: 'native',
     boot_id: ctx.bootId,
   };
-  if (!noMonitor && taskId) runtime.task_id = taskId;
   if (noMonitor) runtime.routines = 0;
   writeJson(path.join(ctx.hermitDir, 'state', 'routine-monitor.runtime.json'), runtime);
   process.stdout.write(

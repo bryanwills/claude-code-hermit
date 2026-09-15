@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: heartbeat-monitor.sh <interval_seconds> <hermit_state_dir>
+# Usage: heartbeat-monitor.sh <auto|interval_seconds> <hermit_state_dir>
 # Env: HEARTBEAT_MONITOR_ONCE=1  → run one iteration and exit (tests)
 #      HEARTBEAT_PRECHECK=<path> → override precheck path (tests). Still a bare
 #                                  script path called with `--peek <dir>`; the
@@ -24,11 +24,31 @@ else
   PRECHECK=("$(dirname "$0")/heartbeat.ts" precheck)
 fi
 mkdir -p "$HB_DIR/state"
+control_state() {
+  bun -e '
+    const dir = process.argv[1];
+    let control, config, boot;
+    try { control = JSON.parse(await Bun.file(`${dir}/state/heartbeat-monitor.control.json`).text()); } catch {}
+    try { config = JSON.parse(await Bun.file(`${dir}/config.json`).text()); } catch {}
+    try { boot = (await Bun.file(`${dir}/state/.boot-id`).text()).trim() || undefined; } catch {}
+    // An explicit start on a disabled heartbeat lasts for the boot that issued it.
+    const forcedElsewhere = control?.mode === "forced" && (control.boot_id ?? null) !== (boot ?? null);
+    const mode = forcedElsewhere ? "auto" : control?.mode ?? "auto";
+    console.log(mode === "stopped" ? "stopped" : mode === "auto" && config?.heartbeat?.enabled === false ? "disabled" : "active");
+  ' "$HB_DIR"
+}
 first=1
 while true; do
-  verdict="$(bun "${PRECHECK[@]}" --peek "$HB_DIR" 2>/dev/null || echo "ERROR")"
+  control="$(control_state)"
+  [[ "$control" == 'stopped' ]] && exit 0
+  verdict='OK'
+  if [[ "$control" != 'disabled' ]]; then
+    verdict="$(bun "${PRECHECK[@]}" --peek "$HB_DIR" 2>/dev/null || echo "ERROR")"
+  fi
   _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf '{"last_peek_at":"%s"}\n' "$_ts" > "$HB_DIR/state/.heartbeat-liveness.tmp" \
+  _pid=''
+  [[ -n "${MONITOR_SUPERVISOR_PID:-}" ]] && _pid=",\"pid\":${MONITOR_SUPERVISOR_PID}"
+  printf '{"last_peek_at":"%s"%s}\n' "$_ts" "$_pid" > "$HB_DIR/state/.heartbeat-liveness.tmp" \
     && mv "$HB_DIR/state/.heartbeat-liveness.tmp" "$HB_DIR/state/heartbeat-liveness.json" \
     || true
   # Emission grammar is load-bearing: record-operator-action.ts isRoutinePrompt()
@@ -44,5 +64,16 @@ while true; do
   esac
   first=""
   [[ -n "${HEARTBEAT_MONITOR_ONCE:-}" ]] && break
-  sleep "$INTERVAL"
+  remaining="$INTERVAL"
+  if [[ "$INTERVAL" == 'auto' ]]; then
+    remaining="$(bun "$(dirname "$0")/heartbeat.ts" interval "$HB_DIR" 2>/dev/null)"
+    [[ "$remaining" =~ ^[0-9]+$ ]] || remaining=1800
+  fi
+  while [[ "$remaining" != '0' ]]; do
+    read -r slice remaining < <(awk -v n="$remaining" 'BEGIN { s = n > 30 ? 30 : n; print s, n - s }')
+    sleep "$slice"
+    next_control="$(control_state)"
+    [[ "$next_control" == 'stopped' ]] && exit 0
+    [[ "$next_control" != "$control" ]] && break
+  done
 done
