@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The channel reply reminder names the responder skill so a chat turn runs its intake (the first prompt after a boot or compaction loads it unconditionally)
+- A chat assignment opens its task record right after the "On it" reply, before the progress-card line
+
 ## [1.3.10] - 2026-09-15
 
 ### Fixed

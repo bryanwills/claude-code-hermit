@@ -10,6 +10,7 @@
 
 import { safeForLLM } from '../sanitize';
 import { logMessage, isLoggingEnabled, unaddressedSince } from '../channel-log';
+import { readExecution } from '../tasks';
 import { isAllowedSender, allowedUserIds, channelBotIdentity, isPassiveChat, isSelfMentioned } from '../channel-auth';
 import { escapeRegExp } from '../md-write';
 import type { ChannelEnvelope, StageContext, StageResult } from './types';
@@ -107,10 +108,17 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
     ? `\`${tool}\` with chat_id="${chatId}"`
     : `the channel's \`reply\` tool with chat_id="${chatId}"`;
 
+  const execution = readExecution(ctx.dir);
+  const invokeNow = execution.state === 'unknown'
+    && (execution.reason?.startsWith('session-start:') || execution.reason === 'precompact');
+
   let reminder =
     `[channel reply reminder] Inbound message arrived on the \`${source || 'unknown'}\` channel` +
     ` (chat_id=\`${chatId}\`). Every reply, including a short acknowledgement, must go through ${toolLine}.` +
     ` Transcript/terminal output does not reach the operator.` +
+    (invokeNow
+      ? ' Handle it with the channel-responder skill: invoke `/claude-code-hermit:channel-responder` now; this is the first message since the context was reset.'
+      : ' Handle it with the channel-responder skill: invoke `/claude-code-hermit:channel-responder` unless its instructions are already in this context.') +
     selfMentionClause(ctx, envelope) + '\n';
 
   const addressed = passive
