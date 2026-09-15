@@ -10,6 +10,7 @@
 
 - Native plugin monitors for session-length heartbeat and routine polling, activated by `monitor-activate` with resident guards and supervisor recovery.
 - Bounded watch deadlines with task-id renewal on expiry.
+- Unbound `spawn-session` helpers are left running after their idle notice instead of being stopped; the notice says the helper finished its turn.
 - Minimum Claude Code version `2.1.271`.
 
 ### Upgrade Instructions

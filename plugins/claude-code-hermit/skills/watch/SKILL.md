@@ -234,8 +234,8 @@ for X:
 1. Find a `peer-idle` entry whose `target === X`. If none exists, do nothing: no
    reply, channel notification, or log entry.
 2. Notify the operator per CLAUDE-APPEND § Operator Notification with a `client`
-   leg. For an idle notice, use `"<note>: <name> finished. Last status: «<one-line status>»"`.
-   If the notice carries no status, use `"<note>: <name> finished."` instead. The
+   leg. For an idle notice, use `"<note>: <name> finished its turn. Last status: «<one-line status>»"`.
+   If the notice carries no status, use `"<note>: <name> finished its turn."` instead. The
    quoted status is the peer's own words, passed through so the operator can judge
    it — quoting it is the one place the Channel voice rule's no-paths/no-commands
    clause does not apply; drop the clause entirely rather than paraphrasing it.
@@ -246,7 +246,9 @@ for X:
    entry, write the registry, and log one SHELL.md line.
 
 Never message the watched session back. The notice fires when X's turn ends, not
-when its background work ends.
+when its background work ends. Leave the helper running: never `claude stop` an
+unbound helper because it went idle; Claude Code's supervisor reclaims an idle
+unattached session itself. Stop one only when the operator asks or it is stuck.
 
 ## Notes
 

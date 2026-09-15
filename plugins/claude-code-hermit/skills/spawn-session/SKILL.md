@@ -122,3 +122,4 @@ alternate invocation, or weaker permission mode.
 ## Stuck helper
 
 `claude logs <id>`, `claude stop <id>`, and the watch expiry notice. Never tmux.
+Idle is not stuck: watch's idle-notice relay leaves an idle helper running.
