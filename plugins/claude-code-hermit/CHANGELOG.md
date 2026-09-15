@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.10] - 2026-09-15
 
 ### Fixed
 - A helper launch in a repo with no commits is refused with the cause and remedy instead of crash-looping in the background daemon
