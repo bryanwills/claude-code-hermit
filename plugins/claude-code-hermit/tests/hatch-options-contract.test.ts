@@ -43,6 +43,11 @@ describe('GITIGNORE-APPEND.txt', () => {
     expect(lines).toContain('.claude/settings.local.json');
   });
 
+  test('GITIGNORE-APPEND.txt lists .claude-code-hermit/tasks/ and TASKS.md', () => {
+    expect(lines).toContain('.claude-code-hermit/tasks/');
+    expect(lines).toContain('.claude-code-hermit/TASKS.md');
+  });
+
   // Derived from the settings gate's own list rather than spelled out here:
   // a file sensitive enough to need a native prompt on edit is sensitive
   // enough not to be committed, and claude-settings.json carries an operator

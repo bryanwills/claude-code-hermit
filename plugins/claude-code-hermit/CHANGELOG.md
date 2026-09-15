@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `.claude-code-hermit/tasks/` and `.claude-code-hermit/TASKS.md` gitignored by the hatch template
+
+### Upgrade Instructions
+- Read the project `.gitignore`. Skip if it contains the line `# .claude-code-hermit state is tracked here (backup: workspace mode)`. Otherwise append `.claude-code-hermit/tasks/` and `.claude-code-hermit/TASKS.md`, each only if absent. If either path was tracked, run `git rm --cached -r <path>` so it leaves the index without being deleted from disk.
+
 ## [1.3.9] - 2026-09-14
 
 ### Fixed
