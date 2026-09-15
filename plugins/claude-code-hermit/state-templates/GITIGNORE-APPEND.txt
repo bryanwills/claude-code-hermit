@@ -7,6 +7,8 @@
 .claude-code-hermit/sessions/
 .claude-code-hermit/templates/
 .claude-code-hermit/proposals/
+.claude-code-hermit/tasks/
+.claude-code-hermit/TASKS.md
 .claude-code-hermit/MEMORY-SEED.md
 .claude-code-hermit/sessions/.eval-hash
 .claude-code-hermit/state/

@@ -136,6 +136,7 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/heartbeat.ts ack-next-task*)',
   'Bash(bun */scripts/heartbeat.ts start-check*)',
   'Bash(bun */scripts/heartbeat.ts start-commit*)',
+  'Bash(bun */scripts/heartbeat.ts stop*)',
   // Domain plugins reach core's shared scripts through the project-resident
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
   // cache dir). Pinned to the two verbs they actually need, not a bare

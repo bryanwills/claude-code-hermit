@@ -83,7 +83,10 @@ function writeJSONAtomic(p: string, value: Json): boolean {
 }
 
 function writeLiveness(): void {
-  writeJSONAtomic(livenessPath, { last_peek_at: new Date().toISOString() });
+  writeJSONAtomic(livenessPath, {
+    last_peek_at: new Date().toISOString(),
+    ...(process.env.MONITOR_SUPERVISOR_PID ? { pid: Number(process.env.MONITOR_SUPERVISOR_PID) } : {}),
+  });
 }
 
 function stamp(id: string, event: string, detail?: string): void {

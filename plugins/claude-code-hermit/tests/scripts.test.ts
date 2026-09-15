@@ -2699,6 +2699,58 @@ __iterN++; fs.writeFileSync(__iterFile,String(__iterN));
 describe('heartbeat-monitor', () => {
   const MONITOR_SH = path.join(SCRIPTS_DIR, 'heartbeat-monitor.sh');
 
+  for (const mode of ['auto', 'forced', 'stopped']) {
+    test(`heartbeat-monitor control ${mode} with disabled config`, async () => {
+      const dir = fs.mkdtempSync(path.join(PLUGIN_ROOT, '.heartbeat-control-test-'));
+      try {
+        fs.mkdirSync(path.join(dir, 'state'));
+        fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ heartbeat: { enabled: false } }));
+        fs.writeFileSync(path.join(dir, 'state/heartbeat-monitor.control.json'), JSON.stringify({ mode }));
+        const stub = path.join(dir, 'precheck.ts');
+        fs.writeFileSync(stub, `
+const dir = process.argv.at(-1);
+const file = Bun.file(dir + '/count');
+const count = await file.exists() ? Number(await file.text()) + 1 : 1;
+await Bun.write(file, String(count));
+if (count === 2) await Bun.write(dir + '/state/heartbeat-monitor.control.json', JSON.stringify({ mode: 'stopped' }));
+console.log('EVALUATE');
+`);
+        const result = await runBash(MONITOR_SH, {
+          args: ['0.1', dir],
+          env: {
+            HEARTBEAT_PRECHECK: stub,
+            HEARTBEAT_MONITOR_ONCE: mode === 'forced' ? '' : '1',
+            MONITOR_SUPERVISOR_PID: String(process.pid),
+          },
+        });
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toBe(mode === 'forced' ? 'HEARTBEAT_EVALUATE\n' : '');
+        const live = path.join(dir, 'state/heartbeat-liveness.json');
+        if (mode === 'stopped') expect(fs.existsSync(live)).toBe(false);
+        else expect(readJson(live).pid).toBe(process.pid);
+        expect(fs.existsSync(path.join(dir, 'count'))).toBe(mode === 'forced');
+      } finally {
+        fs.rmSync(dir, { recursive: true });
+      }
+    });
+  }
+
+  test('heartbeat-monitor observes stopped during a long sliced sleep', async () => {
+    const dir = fs.mkdtempSync(path.join(PLUGIN_ROOT, '.heartbeat-stop-test-'));
+    try {
+      fs.mkdirSync(path.join(dir, 'state'));
+      const stub = path.join(dir, 'precheck.ts');
+      fs.writeFileSync(stub, `await Bun.write(process.argv.at(-1) + '/state/heartbeat-monitor.control.json', '{"mode":"stopped"}'); console.log('OK');`);
+      const start = Date.now();
+      const result = await runBash(MONITOR_SH, { args: ['43200', dir], env: { HEARTBEAT_PRECHECK: stub, HEARTBEAT_MONITOR_ONCE: '' } });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(Date.now() - start).toBeLessThan(60_000);
+    } finally {
+      fs.rmSync(dir, { recursive: true });
+    }
+  }, 65_000);
+
   function makeStub(body: string): { path: string; cleanup(): void } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-stub-'));
     const p = path.join(dir, 'stub.js');
@@ -2842,6 +2894,29 @@ describe('routine-monitor', () => {
     const r = await rtMonitorOnce('process.stdout.write("ROUTINE_DUE [hermit-routine:reflect]\\n");\n');
     r.cleanup();
     expect(r.stdout).toBe('ROUTINE_DUE [hermit-routine:reflect]');
+  });
+
+  test('routine-monitor under the supervisor exits on a fallback recorded for this boot, polls on a stale one', async () => {
+    const stub = makeRtStub('process.stdout.write("ROUTINE_DUE [hermit-routine:reflect]\\n");\n');
+    const rtDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-hermit-'));
+    try {
+      fs.mkdirSync(path.join(rtDir, 'state'), { recursive: true });
+      fs.writeFileSync(path.join(rtDir, 'state', '.boot-id'), 'boot-now\n');
+      const runtime = path.join(rtDir, 'state', 'routine-monitor.runtime.json');
+      const env = { ROUTINE_MONITOR_ONCE: '1', ROUTINE_DUE_SCRIPT: stub.path, MONITOR_SUPERVISOR_PID: '1' };
+
+      fs.writeFileSync(runtime, JSON.stringify({ mode: 'croncreate-fallback', boot_id: 'boot-now' }));
+      const current = await runBash(RT_MONITOR_SH, { args: ['60', rtDir], env });
+      expect(current.exitCode).toBe(0);
+      expect(current.stdout).toBe('');
+
+      fs.writeFileSync(runtime, JSON.stringify({ mode: 'croncreate-fallback', boot_id: 'boot-old' }));
+      const stale = await runBash(RT_MONITOR_SH, { args: ['60', rtDir], env });
+      expect(stale.stdout.trimEnd()).toBe('ROUTINE_DUE [hermit-routine:reflect]');
+    } finally {
+      stub.cleanup();
+      fs.rmSync(rtDir, { recursive: true, force: true });
+    }
   });
 
   test('routine-monitor (empty stdout → silent)', async () => {

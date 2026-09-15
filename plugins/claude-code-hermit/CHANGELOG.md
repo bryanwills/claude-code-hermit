@@ -4,6 +4,17 @@
 
 ### Fixed
 - A helper launch in a repo with no commits is refused with the cause and remedy instead of crash-looping in the background daemon
+- `.claude-code-hermit/tasks/` and `.claude-code-hermit/TASKS.md` gitignored by the hatch template
+
+### Changed
+
+- Native plugin monitors for session-length heartbeat and routine polling, activated by `monitor-activate` with resident guards and supervisor recovery.
+- Bounded watch deadlines with task-id renewal on expiry.
+- Minimum Claude Code version `2.1.271`.
+
+### Upgrade Instructions
+
+Restart the resident with `hermit-docker update` or the operator's usual restart procedure. No `config.json` change is required. The first boot after upgrade re-arms both legs with the new commands; pre-upgrade registrations are detected through `command-drift`.
 
 ## [1.3.9] - 2026-09-14
 
@@ -15,6 +26,7 @@
 ### Upgrade Instructions
 
 Run `/claude-code-hermit:hermit-evolve`.
+- Read the project `.gitignore`. Skip if it contains the line `# .claude-code-hermit state is tracked here (backup: workspace mode)`. Otherwise append `.claude-code-hermit/tasks/` and `.claude-code-hermit/TASKS.md`, each only if absent. If either path was tracked, run `git rm --cached -r <path>` so it leaves the index without being deleted from disk.
 
 No config.json changes required.
 
