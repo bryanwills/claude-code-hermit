@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Native plugin monitors for session-length heartbeat and routine polling, activated by `monitor-activate` with resident guards and supervisor recovery.
+- Bounded watch deadlines with task-id renewal on expiry.
+- Minimum Claude Code version `2.1.271`.
+
+### Upgrade Instructions
+
+Restart the resident with `hermit-docker update` or the operator's usual restart procedure. No `config.json` change is required. The first boot after upgrade re-arms both legs with the new commands; pre-upgrade registrations are detected through `command-drift`.
+
 ## [1.3.9] - 2026-09-14
 
 ### Fixed

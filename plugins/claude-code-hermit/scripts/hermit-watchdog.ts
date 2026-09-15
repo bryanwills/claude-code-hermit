@@ -33,6 +33,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
+import { readExecution } from './lib/tasks';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary, parseDuration as parseDurationMs, resolveHermitNowMs } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
@@ -1388,7 +1389,27 @@ export function rearmDamperOpen(lastStamp: unknown, world: World = REAL_WORLD): 
  * record-operator-action's INJECTED_EXACT, so neither stamps the operator-activity
  * clock).
  */
-function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number): void {
+async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number): Promise<void> {
+  const bootId = readBootId(HERMIT_ROOT);
+  for (const [record, liveness] of [
+    ['heartbeat-monitor.runtime.json', 'heartbeat-liveness.json'],
+    ['routine-monitor.runtime.json', 'routine-monitor-liveness.json'],
+  ]) {
+    const monitor = readJson(path.join(STATE_DIR, record));
+    const live = readJson(path.join(STATE_DIR, liveness));
+    if (monitor?.launch !== 'native' || !bootId || monitor.boot_id !== bootId
+      || typeof live?.pid !== 'number' || pidAlive(live.pid)) continue;
+    const runtime = readRuntimeJson();
+    const guard = passesLifecycleGuards(runtime ?? {});
+    const execution = readExecution(HERMIT_ROOT);
+    if (guard.ok && execution.state === 'idle') {
+      await doRestart(sessionName, 'monitor-dead', runtime, config.timezone ?? 'UTC', config);
+      appendEvent('monitor-restart', `${record} supervisor dead`);
+    } else {
+      appendEvent('monitor-dead-deferred', guard.ok ? execution.state : guard.reason);
+    }
+    return;
+  }
   if (isPaused(HERMIT_ROOT).paused) return;               // no injection while paused (mirrors doNudge)
   if (!sessionAlive) return;                              // dead session belongs to the doRestart path
   const opAge = getOperatorLastActionAgeSecs();
@@ -2479,7 +2500,7 @@ async function main(): Promise<void> {
   // 5. Liveness-keyed monitor re-arm: recover a heartbeat/routine Monitor that died
   // mid-session, detected via its stale liveness file — ground truth the monitors
   // stamp themselves, never a model-issued routine metric.
-  maybeMonitorRearm(config, sessionName, sessionAlive, operatorGraceSecs);
+  await maybeMonitorRearm(config, sessionName, sessionAlive, operatorGraceSecs);
 }
 
 // --- Install / uninstall ---

@@ -35,6 +35,8 @@ This is the **sole source of truth** — not SHELL.md.
     {
       "id": "deploy-errors",
       "task_id": "bmg9y1le3",
+      "command": "tail -f deploy.log",
+      "timeout_ms": 1800000,
       "description": "errors in deploy.log",
       "started_at": "2026-04-12T15:00:00Z",
       "source": "config",
@@ -71,13 +73,12 @@ them for decisions. Start/stop decisions read from the runtime registry.
      ```
      while true; do <check-command> && echo "<brief-event-description>"; sleep <interval_secs>; done
      ```
-5. Invoke Monitor tool with all 4 required params:
+5. Invoke Monitor tool with all 3 required params:
    - `description`: the operator's instruction text (shown in every notification)
    - `command`: the constructed command
-   - `timeout_ms`: 300000 (ignored when persistent, but always required)
-   - `persistent`: true (runs until stopped or session ends)
+   - `timeout_ms`: `min(config.timeout_ms ?? 1800000, 1800000)`
 6. Read `state/monitors.runtime.json` (create if missing: `{"monitors": [], "last_cleared": null}`)
-7. Append entry to `monitors[]` with `source: "adhoc"`
+7. Append entry to `monitors[]` with `source: "adhoc"`, the returned `task_id`, and the exact `command`, `description` and `timeout_ms` used for registration.
 8. Write registry back
 9. Log to SHELL.md `## Monitoring`:
    ```bash
@@ -141,9 +142,8 @@ Called automatically by session-start (step 11b). Can also be called manually.
    b. Invoke Monitor tool:
       - `description`: from config entry
       - `command`: the resolved command string
-      - `timeout_ms`: `config.timeout_ms ?? 300000`
-      - `persistent`: `config.persistent ?? true`
-   c. Append to registry with `source: "config"` and the returned task_id
+      - `timeout_ms`: `min(config.timeout_ms ?? 1800000, 1800000)`
+   c. Append to registry with `source: "config"`, the returned `task_id`, and the exact `command`, `description` and `timeout_ms` used for registration.
 4. Write registry back
 5. If any watches were registered: log to SHELL.md `## Monitoring`:
    ```bash
@@ -188,9 +188,24 @@ Active watches:
 
 Show `peer-idle` as-is in the CLASS column.
 
+### Handling Monitor expiry notices (`/watch notice <text>`)
+
+Before the idle-notice handler, inspect the harness `task-notification`. When its
+`event` body starts with `Monitor expired after` (inside the host's surrounding
+square brackets), treat it as an expiry notice. Use its `task-id` only to match a
+current Monitor entry in `state/monitors.runtime.json`; never match by description
+or watch id.
+
+1. Re-read the registry. If the task id is unmatched, stopped, or already replaced,
+   ignore the notice without registering anything.
+2. For a matching entry, re-register its stored `command`, `description` and
+   `timeout_ms` with the Monitor tool.
+3. Replace that entry's `task_id` with the returned id and write the registry back.
+   Preserve its other fields. Return without entering the idle-notice handler.
+
 ### Handling self-exit notifications
 
-When a Monitor subprocess exits on its own (timeout, script crash, or clean exit),
+For a script crash or clean exit, after excluding expiry notices above,
 CC sends a completion notification into the conversation. On seeing this:
 
 1. Match the `task_id` from the notification against the runtime registry
@@ -235,8 +250,7 @@ when its background work ends.
 
 ## Notes
 
-- **All 4 Monitor tool params are required.** Always pass `timeout_ms` even when
-  `persistent: true` (the tool schema requires it; the value is ignored).
+- **All 3 Monitor tool params are required:** `description`, `command` and `timeout_ms`. Every watch has a bounded deadline.
 - **`$CLAUDE_PLUGIN_ROOT` is NOT available in Monitor subprocess.** Resolve it at
   registration time. `$PWD` is the project root in the subprocess.
 - **`grep --line-buffered` is required in pipes.** Without it, pipe buffering can
