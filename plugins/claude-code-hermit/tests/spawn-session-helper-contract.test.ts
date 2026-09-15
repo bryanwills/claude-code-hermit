@@ -12,3 +12,12 @@ test('conversation helpers route decisions through progress and end their turn',
   expect(skill).toContain('await-agent --bg-id');
   expect(skill).not.toContain('read `claude agents --json` once');
 });
+
+test('helper launch refuses an unborn HEAD before composing claude --bg --worktree', () => {
+  const channelResponder = fs.readFileSync(
+    path.join(PLUGIN_ROOT, 'skills', 'channel-responder', 'SKILL.md'),
+    'utf-8',
+  );
+  expect(skill).toContain('git rev-parse --verify HEAD');
+  expect(channelResponder).toContain('git rev-parse --verify HEAD');
+});
