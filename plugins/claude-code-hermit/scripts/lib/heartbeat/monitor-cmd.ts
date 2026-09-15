@@ -48,7 +48,7 @@ export function heartbeatInterval(config: Json): number {
 const PLUGIN_ROOT = path.resolve(import.meta.dir, '../../..');
 
 export function heartbeatCommand(hermitDir: string, config: Json): string {
-  return `bash ${path.join(PLUGIN_ROOT, 'scripts', 'heartbeat-monitor.sh')} ${heartbeatInterval(config)} ${hermitDir}`;
+  return `bash "${PLUGIN_ROOT}"/scripts/monitor-supervisor.sh heartbeat "${hermitDir}"`;
 }
 
 /**
@@ -65,7 +65,7 @@ export function heartbeatHealth(hermitDir: string, config: Json, nowMs: number):
   }
   const interval = heartbeatInterval(config);
   if (runtime.interval !== interval) return { healthy: false, reason: 'interval-drift' };
-  if (runtime.command !== heartbeatCommand(hermitDir, config)) {
+  if (runtime.command !== heartbeatCommand(hermitDir, config) || runtime.launch !== 'native') {
     return { healthy: false, reason: 'command-drift' };
   }
   const live = readJson(path.join(hermitDir, 'state', 'heartbeat-liveness.json'));
