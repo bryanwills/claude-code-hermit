@@ -136,7 +136,8 @@ describe('final next-steps keys off deployment', () => {
 
   test('interactive points at resident-start', () => {
     const out = renderFinal(observe(hatched()), 'interactive');
-    expect(out).toContain('resident-start');
+    expect(out).toContain('resident-start` — start the agent');
+    expect(out).toContain('The agent is not running until step');
     expect(out).not.toContain(':session');
   });
 
