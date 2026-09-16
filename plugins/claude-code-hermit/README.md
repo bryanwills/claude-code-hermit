@@ -1,7 +1,7 @@
 <p align="center">
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://code.claude.com/docs/en/plugins"><img src="https://img.shields.io/badge/Claude%20Code-plugin-orange.svg" alt="Claude Code Plugin" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.3.10-green.svg" alt="Version 1.3.10" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-1.4.0-green.svg" alt="Version 1.4.0" /></a>
   <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/gtapps/claude-code-hermit/_gh_traffic_stats/.github/badges/clones.json" alt="Downloads" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
@@ -28,7 +28,7 @@ Hermit is a **Claude Code always-on instance**, that means you can run on your *
 <details open>
 <summary>Install the Claude Code plugin</summary>
 
-With Claude Code 2.1.263+ and Bun 1.3+ installed:
+With Claude Code 2.1.271+ and Bun 1.3+ installed:
 
 ```bash
 claude plugin marketplace add gtapps/claude-code-hermit
@@ -128,8 +128,6 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `heartbeat.enabled` | timed idle sweeps: **`true`** |
 | `heartbeat.every` | idle sweep cadence: **`30m`** |
 | `heartbeat.active_hours` | active window: **`08:00`–`23:00`** |
-| `heartbeat.stale_threshold` | quiet period after which an in_progress session is archived to idle: **`2h`** |
-| `heartbeat.waiting_timeout` | auto `waiting`→`idle` after: **`null`** (off) |
 | `routines` | persistent routines managed via `/hermit-routines` |
 | `monitors` | persistent background watches managed via `/watch` |
 | `scheduled_checks` | session-triggered skills at task completion |

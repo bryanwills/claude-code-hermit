@@ -100,12 +100,12 @@ No arguments. Returns the configured inventory only.
 ### `get_status`
 
 Argument: `root`. Runtime digest distinguishes `missing` vs `invalid` vs `ok`.
-`.status.json` fields are returned verbatim (including that file's `updated`
-timestamp) or `null` when absent. `paused` and `liveness_age_secs` as in
-`list_hermits`. `resident` is the validated registry entry for
-`runtime.session_pid` looked up in the per-root stamped `runtime.config_dir`
-(never the server's own default config dir); absent enrichment is `null`, not
-an error.
+`status` is `{ execution, tasks, tasks_omitted }`: hook-observed execution
+plus up to 20 normalized task records (newest first). `paused` and
+`liveness_age_secs` as in `list_hermits`. `resident` is the validated
+registry entry for `runtime.session_pid` looked up in the per-root stamped
+`runtime.config_dir` (never the server's own default config dir); absent
+enrichment is `null`, not an error.
 
 ### `get_health`
 

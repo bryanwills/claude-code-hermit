@@ -36,7 +36,7 @@ Either way, the first launch needs one attended step to clear the trust gate, th
 | **Docker**               | Container    | `docker compose` v2 (Docker Desktop or modern Docker Engine) — see [Install Docker Compose](https://docs.docker.com/compose/install/) |
 | **Node.js 22+**          | Hooks        | Inside the container — handled by the Dockerfile |
 | **Bun**                  | Plugins      | Inside the container — always included          |
-| **Claude Code v2.1.263+** | Channels, sandbox | Minimum supported version |
+| **Claude Code v2.1.271+** | Channels, sandbox | Minimum supported version |
 
 ---
 
@@ -240,10 +240,11 @@ To queue work for the hermit to pick up next, use `/claude-code-hermit:proposal-
 .claude-code-hermit/bin/hermit-status
 ```
 
-One-liner, no tokens burned:
+No tokens burned. Prints agent, project, docker state, then `task list --open` JSON:
 
 ```
-atlas (myproject) | in_progress | "Add input validation" | $1.80 | no blockers | docker:up
+atlas (myproject) | docker:up
+{"rows":[{"id":"T-20260916-120000","title":"Add input validation","listing":[]}],"total":1,"omitted":0,"execution":{"state":"idle"}}
   attach: .claude-code-hermit/bin/hermit-docker attach
 ```
 

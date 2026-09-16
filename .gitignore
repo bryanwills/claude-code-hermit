@@ -67,7 +67,7 @@ Thumbs.db
 .claude-code-hermit/RESIDENT.md
 .claude-code-hermit/claude-settings.json
 .claude-code-hermit/dashboard-render.ts
-
+.claude-code-hermit/tasks/
 
 # Claude Code internal state
 .claude/agent-memory/
