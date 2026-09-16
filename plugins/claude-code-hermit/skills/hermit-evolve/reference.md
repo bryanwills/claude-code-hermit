@@ -1,3 +1,5 @@
+Record notes only inside an open record's turn, using `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Hermit Evolve — Upgrade Steps Reference
 
 This file is the instruction spec for the isolated-context subagent dispatched by `hermit-evolve/SKILL.md`'s `## Execution routing` section (`evolve-runner`). The subagent reads this file directly — not `SKILL.md`, which stays a thin routing stub — and executes steps 0 through 9 exactly as written below. Step 10 (report handling) lives in `SKILL.md` and runs in the main loop after the subagent returns its report.
@@ -129,7 +131,6 @@ Special-default keys — the **only** keys this step writes, because their value
 
 ### 4b. Legacy plan-table check
 
-If an active SHELL.md has a `## Plan` section (legacy plan table), note it for the step-10 report: "Close active sessions before upgrading, or the old plan table will be orphaned." **Delegated mode: warn only — never strip** (stripping needs operator confirmation, which the subagent can't get).
 
 ### 5. Update templates
 
@@ -149,18 +150,16 @@ After all template resolutions (see manifest-write note at end of Step 5b).
 
 Only update files in `templates/`:
 
-- `SHELL.md.template`
 - `SESSION-REPORT.md.template`
 - `PROPOSAL.md.template`
 
-Note: SHELL.md.template has no `## Plan` section — plan steps live in the `## Progress Log`.
 
 ### 5a. Migrate obsidian/ surface
 
 If `<project-root>/obsidian/` exists in the target project:
 
 - Leave the directory untouched — operators may have customised it.
-- Append to `.claude-code-hermit/sessions/SHELL.md` Findings: `"obsidian/ no longer maintained by hermit; safe to delete or keep as personal vault."`
+- Append to open record notes: `"obsidian/ no longer maintained by hermit; safe to delete or keep as personal vault."`
 - Also leave `.claude-code-hermit/cortex-manifest.json` in place if present — operator-managed.
 
 ### 5b. Update boot script wrappers

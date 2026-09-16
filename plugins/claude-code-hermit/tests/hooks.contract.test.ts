@@ -3,29 +3,39 @@
 //
 // These are CONTRACT tests: hooks are exercised as subprocesses (via runScript)
 // because that is the boundary Claude Code sees — stdin in, exit code/stdout out,
-// fail-open. Only pure exported helpers (getCumulativeCost, cidrOverlap)
+// fail-open. Only pure exported helpers (composeBudgetMessage, cidrOverlap)
 // are tested in-process.
 //
 // Usage: bun test tests/hooks.contract.test.ts   (from the plugin root)
 
-import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, PLUGIN_ROOT, MONOREPO_ROOT } from './helpers/run';
-import { setupWorkdir, setupGitWorkdir, fixturesDir, type Workdir } from './helpers/workdir';
+import { setupWorkdir, setupGitWorkdir, fixturesDir } from './helpers/workdir';
 import { triggerPrompt } from './helpers/transcript';
 import { cidrOverlap } from '../scripts/doctor-check';
 import { unconsolidated, dbExists } from '../scripts/lib/channel-log';
 import { markGuest } from '../scripts/lib/guest-marker';
-import { replaceSectionInPlace } from '../scripts/lib/md-write';
+import { composeBudgetMessage } from '../scripts/cost-tracker';
 
 // ---------- small local helpers ----------
 
 const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
 const readJson = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8'));
+
+/** Create task fixtures through the same locked writer used by the resident. */
+async function seedTask(dir: string, title = 'Previous task outcome') {
+  const result = await runScript('task.ts', {
+    cwd: dir, env: { AGENT_DIR: hermit(dir) },
+    args: ['open', hermit(dir), '--owner', 'resident', '--requester', 'operator', '--title', title, '--done', 'Verified'],
+  });
+  expect(result.exitCode).toBe(0);
+  return JSON.parse(result.stdout);
+}
 
 /** Run a test body inside a throwaway workdir, always cleaning up. */
 function withDir(fn: (dir: string) => Promise<void> | void) {
@@ -35,7 +45,7 @@ function withDir(fn: (dir: string) => Promise<void> | void) {
   };
 }
 
-/** Same, but with a git-initialised workdir (needed by session-diff). */
+/** Same, but with a git-initialised workdir (used by accounting hooks). */
 function withGitDir(fn: (dir: string) => Promise<void> | void) {
   return async () => {
     const wd = setupGitWorkdir();
@@ -148,48 +158,7 @@ describe('cost-tracker', () => {
   }));
 });
 
-// In-process: getCumulativeCost is a pure-ish exported helper, but cost-tracker.ts
-// freezes its CWD-relative state paths (.status.json etc.) at import time. So we
-// chdir into ONE shared workdir for the first (and only) import, restore CWD, and
-// both cases rewrite .status.json inside that same frozen workdir.
-// Empirically confirmed (bun 1.3.14 & 1.4.0): describe.serial does not reliably force
-// sequential execution under --concurrent — per-test .serial marking does,
-// and also keeps this describe's beforeAll (which does a real process.chdir)
-// out of the concurrent pool.
-describe('cost-tracker getCumulativeCost (in-process)', () => {
-  let wd: Workdir;
-  let getCumulativeCost: typeof import('../scripts/cost-tracker').getCumulativeCost;
-  let composeBudgetMessage: typeof import('../scripts/cost-tracker').composeBudgetMessage;
-
-  beforeAll(async () => {
-    wd = setupWorkdir();
-    const prev = process.cwd();
-    process.chdir(wd.dir);
-    try {
-      ({ getCumulativeCost, composeBudgetMessage } = await import('../scripts/cost-tracker'));
-    } finally {
-      process.chdir(prev);
-    }
-  });
-
-  afterAll(() => wd.cleanup());
-
-  test.serial('getCumulativeCost (same session → accumulates)', () => {
-    write(hermit(wd.dir, 'sessions', '.status.json'),
-      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000}');
-    const r = getCumulativeCost(0.10, 1000, 'S-001', undefined);
-    expect(r.cost).toBeCloseTo(698.88, 3);
-    expect(r.tokens).toBe(300001000);
-  });
-
-  test.serial('getCumulativeCost (session change → resets)', () => {
-    write(hermit(wd.dir, 'sessions', '.status.json'),
-      '{"session_id":"S-001","cost_usd":698.78,"tokens":300000000}');
-    const r = getCumulativeCost(0.10, 1000, 'S-002', undefined);
-    expect(r.cost).toBeCloseTo(0.10, 3);
-    expect(r.tokens).toBe(1000);
-  });
-
+describe('cost-tracker budget message', () => {
   // Chat voice contract: composeBudgetMessage is the one deterministic
   // (non-model) channel sender that composes prose, so it's the only place a
   // forbidden-string assertion can enforce actual output, not just documented
@@ -206,49 +175,6 @@ describe('cost-tracker getCumulativeCost (in-process)', () => {
     expect(msg).not.toMatch(/cache_read|cache_write|token/i);
     expect(msg).not.toMatch(/\/claude-code-hermit:/);
   });
-});
-
-// -------------------------------------------------------
-// evaluate-session
-// -------------------------------------------------------
-
-describe('evaluate-session', () => {
-  test('evaluate-session (empty stdin)', withDir(async (dir) => {
-    const r = await runScript('evaluate-session.ts', {
-      stdin: '', cwd: dir, env: { AGENT_HOOK_PROFILE: 'standard' },
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-});
-
-// -------------------------------------------------------
-// session-diff (self-gated on AGENT_HOOK_PROFILE)
-// -------------------------------------------------------
-
-describe('session-diff', () => {
-  test('session-diff', withGitDir(async (dir) => {
-    const r = await runScript('session-diff.ts', {
-      stdin: '{}', cwd: dir, env: PIPE_ENV,
-    });
-    expect(r.exitCode).toBe(0);
-  }));
-
-  test('session-diff sidecar', withGitDir(async (dir) => {
-    const r = await runScript('session-diff.ts', {
-      stdin: '{}', cwd: dir, env: PIPE_ENV,
-    });
-    expect(r.exitCode).toBe(0);
-    const sidecar = hermit(dir, 'state', 'session-diff.json');
-    expect(fs.existsSync(sidecar)).toBe(true);
-    expect(() => readJson(sidecar)).not.toThrow();
-  }));
-
-  test('session-diff (empty stdin)', withGitDir(async (dir) => {
-    const r = await runScript('session-diff.ts', {
-      stdin: '', cwd: dir, env: PIPE_ENV,
-    });
-    expect(r.exitCode).toBe(0);
-  }));
 });
 
 // -------------------------------------------------------
@@ -475,7 +401,7 @@ describe('stop-pipeline', () => {
     expect(r.exitCode).toBe(0);
     const combined = r.stdout + r.stderr;
     expect(combined).toContain('cost-tracker');
-    expect(combined).toContain('session-eval');
+    expect(combined).not.toContain('session-eval');
     expect(fs.existsSync(hermit(dir, 'state', '.heartbeat'))).toBe(true);
   }));
 
@@ -552,7 +478,6 @@ describe('stop-pipeline', () => {
       write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
       write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
         version: 1,
-        session_state: 'in_progress',
         runtime_mode: 'headless',
         tmux_session: 'hermit-test',
       }));
@@ -575,114 +500,16 @@ describe('stop-pipeline', () => {
       expect(fs.existsSync(hermit(dir, 'state', '.heartbeat'))).toBe(true);
     }));
 
-  const AUTO_IDLE_NOW = '2026-05-20T22:00:00.000Z';
-
-  function seedAutoIdleFixture(dir: string, opts: { operatorAt: string }): void {
-    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC', heartbeat: { stale_threshold: '2h' } }));
-    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
-      session_state: 'in_progress',
-      session_id: 'S-001',
-      opened_at: '2026-05-20T19:00:00+00:00',
-    }));
-    write(hermit(dir, 'state', 'last-operator-action.json'), JSON.stringify({ at: opts.operatorAt }));
-    const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      replaceSectionInPlace(shell, 'Progress Log', '\n[19:00] Did some work\n\n'));
-  }
-
-  test('stop-pipeline auto-idles a quiet in_progress session', withGitDir(async (dir) => {
-    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T19:00:00+00:00' });
-    const r = await runScript('stop-pipeline.ts', {
-      stdin: stopHookInput(dir),
-      cwd: dir,
-      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
-    });
-    expect(r.exitCode).toBe(0);
-    const rt = readJson(hermit(dir, 'state', 'runtime.json'));
-    expect(rt.session_state).toBe('idle');
-    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(true);
-  }));
-
-  test('stop-pipeline leaves a fresh-operator in_progress session untouched', withGitDir(async (dir) => {
-    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T21:30:00+00:00' });
-    const r = await runScript('stop-pipeline.ts', {
-      stdin: stopHookInput(dir),
-      cwd: dir,
-      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
-    });
-    expect(r.exitCode).toBe(0);
-    const rt = readJson(hermit(dir, 'state', 'runtime.json'));
-    expect(rt.session_state).toBe('in_progress');
-    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(false);
-  }));
-
-  test('stop-pipeline closing a long operator turn stamps its end and does not auto-idle', withGitDir(async (dir) => {
-    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T19:00:00+00:00' });
+  test('stop-pipeline closing a long operator turn stamps its end', withGitDir(async (dir) => {
+    const now = '2026-05-20T22:00:00.000Z';
     write(hermit(dir, 'state', 'operator-turn-open.json'), JSON.stringify({ at: '2026-05-20T19:00:00.000Z' }));
     const r = await runScript('stop-pipeline.ts', {
-      stdin: stopHookInput(dir),
-      cwd: dir,
-      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
+      stdin: stopHookInput(dir), cwd: dir,
+      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: now },
     });
     expect(r.exitCode).toBe(0);
     expect(fs.existsSync(hermit(dir, 'state', 'operator-turn-open.json'))).toBe(false);
-    expect(readJson(hermit(dir, 'state', 'last-operator-action.json')).at).toBe(AUTO_IDLE_NOW);
-    expect(readJson(hermit(dir, 'state', 'runtime.json')).session_state).toBe('in_progress');
-    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(false);
-  }));
-
-  test('stop-pipeline guest Stop never auto-idles', withGitDir(async (dir) => {
-    seedAutoIdleFixture(dir, { operatorAt: '2026-05-20T19:00:00+00:00' });
-    markGuest(hermit(dir, 'state'), 'test-session-001');
-    const r = await runScript('stop-pipeline.ts', {
-      stdin: stopHookInput(dir),
-      cwd: dir,
-      env: { ...PIPE_ENV, AGENT_DIR: hermit(dir), HERMIT_NOW: AUTO_IDLE_NOW },
-    });
-    expect(r.exitCode).toBe(0);
-    const rt = readJson(hermit(dir, 'state', 'runtime.json'));
-    expect(rt.session_state).toBe('in_progress');
-    expect(fs.existsSync(hermit(dir, 'sessions', 'S-001-REPORT.md'))).toBe(false);
-  }));
-});
-
-// -------------------------------------------------------
-// session-diff debounce (via stop-pipeline)
-// -------------------------------------------------------
-
-describe('session-diff debounce', () => {
-  test('session-diff (debounce skip)', withGitDir(async (dir) => {
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
-    const sidecar = hermit(dir, 'state', 'session-diff.json');
-    write(sidecar, '{"changed_files":[],"captured_at":"2026-01-01T00:00:00Z"}');
-    // Backdate by 5s (still within the 60s debounce window) so a rewrite is detectable.
-    const past = new Date(Date.now() - 5000);
-    fs.utimesSync(sidecar, past, past);
-    const before = fs.statSync(sidecar).mtimeMs;
-    await runScript('stop-pipeline.ts', { stdin: '{}', cwd: dir, env: PIPE_ENV });
-    expect(fs.statSync(sidecar).mtimeMs).toBe(before);
-  }));
-
-  test('session-diff (debounce force on idle)', withGitDir(async (dir) => {
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
-    const sidecar = hermit(dir, 'state', 'session-diff.json');
-    write(sidecar, '{"changed_files":[],"captured_at":"2026-01-01T00:00:00Z"}');
-    const past = new Date(Date.now() - 5000);
-    fs.utimesSync(sidecar, past, past);
-    const before = fs.statSync(sidecar).mtimeMs;
-    await runScript('stop-pipeline.ts', { stdin: '{}', cwd: dir, env: PIPE_ENV });
-    expect(fs.statSync(sidecar).mtimeMs).not.toBe(before);
-  }));
-
-  test('session-diff (debounce expired)', withGitDir(async (dir) => {
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
-    const sidecar = hermit(dir, 'state', 'session-diff.json');
-    write(sidecar, '{"changed_files":[],"captured_at":"2020-01-01T00:00:00Z"}');
-    const past = new Date('2020-01-01T00:00:00Z');
-    fs.utimesSync(sidecar, past, past);
-    const before = fs.statSync(sidecar).mtimeMs;
-    await runScript('stop-pipeline.ts', { stdin: '{}', cwd: dir, env: PIPE_ENV });
-    expect(fs.statSync(sidecar).mtimeMs).not.toBe(before);
+    expect(readJson(hermit(dir, 'state', 'last-operator-action.json')).at).toBe(now);
   }));
 });
 
@@ -697,7 +524,7 @@ describe('startup-context', () => {
   test('startup-context', withDir(async (dir) => {
     const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('---Active Session---');
+    expect(r.stdout).toContain('---Open tasks---');
   }));
 
   // The label names OPERATOR.md so the model can tell operator-curated context
@@ -709,104 +536,6 @@ describe('startup-context', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('---Operator Context (OPERATOR.md)---');
     expect(r.stdout).toContain('Project focus body.');
-  }));
-
-  test('startup-context (large SHELL.md)', withDir(async (dir) => {
-    const fixture = fs.readFileSync(path.join(fixturesDir, 'shell-session.md'), 'utf-8');
-    const extra = Array.from({ length: 150 },
-      (_, i) => `- [10:${String(i).padStart(2, '0')}] Progress entry ${i}`).join('\n');
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      fixture.replace('- [10:00] Started test session', extra));
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout.trimEnd().length).toBeLessThan(8000);
-  }));
-
-  test('startup-context (no session)', withDir(async (dir) => {
-    fs.rmSync(hermit(dir, 'sessions', 'SHELL.md'));
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('No active session');
-  }));
-
-  test('startup-context (populated Findings → present after Monitoring)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      '## Blockers\n\n## Monitoring\n- [10:05] watch tick\n\n## Findings\nsomething unexpected was discovered\n');
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('## Findings (last 5)');
-    expect(r.stdout).toContain('something unexpected was discovered');
-    const monIdx = r.stdout.indexOf('## Monitoring');
-    const findIdx = r.stdout.indexOf('## Findings');
-    expect(monIdx).toBeGreaterThan(-1);
-    expect(findIdx).toBeGreaterThan(monIdx);
-  }));
-
-  test('startup-context (placeholder-only Findings → absent)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      '## Blockers\n\n## Findings\n<!-- Anything unexpected found during work. -->\n');
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('## Findings');
-  }));
-
-  test('startup-context (no ## Findings heading at all → absent, exit 0)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n## Blockers\n');
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('## Findings');
-  }));
-
-  test('startup-context (bare-bullet Blockers/Findings after placeholder strip → both sections absent)', withDir(async (dir) => {
-    // Comment-only bullets collapse to a bare "-" once stripPlaceholders runs —
-    // must not surface as "## Blockers\n-" / "## Findings (last 5)\n-".
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      '## Blockers\n- <!-- resolved: fixed already -->\n\n## Findings\n- <!-- nothing yet -->\n');
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('## Blockers');
-    expect(r.stdout).not.toContain('## Findings');
-  }));
-
-  test('startup-context (Findings with more than 5 lines → only the last 5)', withDir(async (dir) => {
-    const findings = Array.from({ length: 8 }, (_, i) => `- finding ${i}`).join('\n');
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      `# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n## Blockers\n\n## Findings\n${findings}\n`);
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('finding 7');
-    expect(r.stdout).toContain('finding 3');
-    expect(r.stdout).not.toContain('finding 0');
-    expect(r.stdout).not.toContain('finding 2');
-  }));
-
-  test('startup-context (oversized Progress Log alone → Findings dropped, the first of the five sections lost)', withDir(async (dir) => {
-    const progress = Array.from({ length: 10 }, (_, i) => `[10:${String(i).padStart(2, '0')}] ${'P'.repeat(340)}`).join('\n');
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      `# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n${progress}\n\n` +
-      '## Blockers\nwaiting on review\n\n## Monitoring\n- [10:05] watch tick\n\n## Findings\nsomething unexpected was discovered\n');
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('## Findings');
-    expect(r.stdout).not.toContain('something unexpected was discovered');
-  }));
-
-  test('startup-context (section priority)', withDir(async (dir) => {
-    write(hermit(dir, 'OPERATOR.md'), '# Operator\n' + ('x'.repeat(80) + '\n').repeat(22));
-    const extra = Array.from({ length: 200 },
-      (_, i) => `- [10:${String(i).padStart(2, '0')}] Entry ${i}`).join('\n');
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      `# Active Session\n\n## Task\nTest\n\n## Progress Log\n${extra}\n\n## Blockers\nNone\n`);
-    write(hermit(dir, 'sessions', 'S-001-REPORT.md'),
-      '# Session Report: S-001\n\n## Overview\nSHOULD_NOT_APPEAR_IN_OUTPUT_IF_CAP_HIT\n');
-    const r = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('Operator');
-    expect(r.stdout.trimEnd().length).toBeLessThan(8000);
   }));
 
   test('startup-context (injection_stub replaces body)', withDir(async (dir) => {
@@ -1012,55 +741,18 @@ Rota body.
 
   // ---- PROP-011 compaction pointers: gated on SessionStart source === "compact" ----
 
-  test('startup-context (source=compact, only default SHELL.md → pointers with task only)', withDir(async (dir) => {
-    // No runtime.json/micro-proposals.json/config.json — only the default fixture
-    // SHELL.md that setupWorkdir seeds. The task line still surfaces on its own.
+  test('startup-context (source=compact, empty state → task policy pointer)', withDir(async (dir) => {
     const r = await runScript('startup-context.ts', {
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('---Compaction Pointers---');
-    expect(r.stdout).toContain('task: Test task for hook validation');
+    expect(r.stdout).not.toMatch(/^task: /m);
     expect(r.stdout).not.toContain('session_state:');
     expect(r.stdout).not.toContain('pending micro-proposals:');
     expect(r.stdout).not.toContain('outbound channel:');
     // Fixture's ## Blockers is placeholder-only — no blockers: line.
     expect(r.stdout).not.toMatch(/^blockers: /m);
-  }));
-
-  test('startup-context (source=compact, populated Blockers → bounded blockers: pointer last)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      '## Blockers\nwaiting on review\n\n## Findings\n');
-    const r = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/^blockers: waiting on review$/m);
-    // Ordered after last progress, before the trailing "Full state" instruction.
-    const lastProgressIdx = r.stdout.indexOf('last progress:');
-    const blockersIdx = r.stdout.indexOf('blockers:');
-    expect(lastProgressIdx).toBeGreaterThan(-1);
-    expect(blockersIdx).toBeGreaterThan(lastProgressIdx);
-  }));
-
-  // The capsule is hard-capped, so field order decides what a state-heavy hermit loses
-  // first. A hermit that loses its outbound route stops being reachable at all; one
-  // that loses the blockers line re-reads SHELL.md. Blockers yields.
-  test('startup-context (source=compact, blockers ordered after the outbound channel)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      '## Blockers\nwaiting on review\n\n## Findings\n');
-    write(hermit(dir, 'config.json'),
-      '{"channels":{"primary":"discord","discord":{"enabled":true,"dm_channel_id":"999888"}}}');
-    const r = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
-    });
-    expect(r.exitCode).toBe(0);
-    const channelIdx = r.stdout.indexOf('outbound channel:');
-    const blockersIdx = r.stdout.indexOf('blockers:');
-    expect(channelIdx).toBeGreaterThan(-1);
-    expect(blockersIdx).toBeGreaterThan(channelIdx);
   }));
 
   // `~` is the mid-session mark for a blocker that cleared; `[resolved]` is the
@@ -1074,16 +766,12 @@ Rota body.
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/^blockers: needs approval$/m);
+    expect(r.stdout).not.toMatch(/^blockers: /m);
     expect(r.stdout).not.toContain('waiting on review');
     expect(r.stdout).not.toContain('vendor key');
   }));
 
-  // The PreCompact hook appends the breadcrumb immediately before this capsule is
-  // built, so without the filter `last progress` is always "context compacted (…)" —
-  // 200 characters of a tight budget saying only that the thing that just happened
-  // happened.
-  test('startup-context (source=compact, last progress skips the compaction breadcrumb)', withDir(async (dir) => {
+  test('startup-context (source=compact, frozen progress is not injected)', withDir(async (dir) => {
     write(hermit(dir, 'sessions', 'SHELL.md'),
       '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n' +
       '- [10:00] traced the failing deploy\n' +
@@ -1093,7 +781,7 @@ Rota body.
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/^last progress: - \[10:00\] traced the failing deploy$/m);
+    expect(r.stdout).not.toMatch(/^last progress: /m);
     expect(r.stdout).not.toContain('context compacted');
   }));
 
@@ -1106,34 +794,6 @@ Rota body.
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toMatch(/^blockers: /m);
-  }));
-
-  test('startup-context (source=compact, multi-line Blockers → last 2 entries only, joined)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      '## Blockers\n- oldest blocker\n- middle blocker\n- newest blocker\n\n## Findings\n');
-    const r = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/^blockers: middle blocker \| newest blocker$/m);
-    expect(r.stdout).not.toContain('oldest blocker');
-  }));
-
-  test('startup-context (source=compact, two verbose Blockers → newest survives the cap, not just the oldest)', withDir(async (dir) => {
-    // The char cap applies per entry: capping the joined string would spend the
-    // whole budget on the older blocker and truncate the newest one away.
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      '# Active Session\n\n## Task\nShip the thing\n\n## Progress Log\n[10:00] Started\n\n' +
-      `## Blockers\n- OLD ${'o'.repeat(200)}\n- NEW ${'n'.repeat(200)}\n\n## Findings\n`);
-    const r = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
-    });
-    expect(r.exitCode).toBe(0);
-    const line = r.stdout.split('\n').find(l => l.startsWith('blockers: '))!;
-    expect(line).toContain('OLD ');
-    expect(line).toContain('NEW ');
-    expect(line.length).toBeLessThanOrEqual('blockers: '.length + 240);
   }));
 
   test('startup-context (source=compact, bare-bullet Blockers after placeholder strip → no blockers: line)', withDir(async (dir) => {
@@ -1177,7 +837,7 @@ Rota body.
     expect(r.stdout).not.toContain('---Compaction Pointers---');
   }));
 
-  test('startup-context (source=compact, full state → pointers with runtime/task/MPs/channel)', withDir(async (dir) => {
+  test('startup-context (source=compact, full state → task policy and task/MPs/channel pointers without lifecycle flags)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'runtime.json'),
       '{"session_state":"waiting","waiting_reason":"operator_input"}');
     write(hermit(dir, 'state', 'micro-proposals.json'),
@@ -1189,8 +849,10 @@ Rota body.
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('---Compaction Pointers---');
-    expect(r.stdout).toContain('session_state: waiting (waiting_reason: operator_input)');
-    expect(r.stdout).toContain('task: Test task for hook validation');
+    expect(r.stdout).toContain('Task policy: read TASKS.md before intake or confirmation.');
+    expect(r.stdout).not.toContain('session_state:');
+    expect(r.stdout).not.toContain('waiting_reason:');
+    expect(r.stdout).not.toMatch(/^task: /m);
     // Only the pending entry surfaces — the resolved sibling stays out.
     expect(r.stdout).toContain('pending micro-proposals: MP-20260701-0');
     expect(r.stdout).not.toContain('MP-20260701-1');
@@ -1198,9 +860,6 @@ Rota body.
   }));
 
   test('startup-context (source=compact, malformed runtime/MP/config → fail-open per field)', withDir(async (dir) => {
-    // SHELL.md (from setupWorkdir's fixture) is intact, so the task line still
-    // surfaces — the other three fields must each fail open independently
-    // rather than blanking the whole section.
     write(hermit(dir, 'state', 'runtime.json'), 'not json');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{ broken');
     write(hermit(dir, 'config.json'), 'also not json');
@@ -1209,7 +868,7 @@ Rota body.
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('---Compaction Pointers---');
-    expect(r.stdout).toContain('task: Test task for hook validation');
+    expect(r.stdout).not.toMatch(/^task: /m);
     expect(r.stdout).not.toContain('session_state:');
     // MP is the exception to silent fail-open: omitting the line entirely implies an
     // empty queue, which is how a corrupt file buried pending questions (#764).
@@ -1226,13 +885,13 @@ Rota body.
     expect(r.stdout).not.toContain('pending micro-proposals:');
   }));
 
-  test('startup-context (source=compact, no state at all → total fail-open, no section)', withDir(async (dir) => {
-    fs.rmSync(hermit(dir, 'sessions', 'SHELL.md'));
+  test('startup-context (source=compact, no state at all → task policy pointer survives)', withDir(async (dir) => {
     const r = await runScript('startup-context.ts', {
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('---Compaction Pointers---');
+    expect(r.stdout).toContain('---Compaction Pointers---');
+    expect(r.stdout).toContain('Task policy: read TASKS.md before intake or confirmation.');
   }));
 
   // ---- source-gated renderer: compact = delta capsule only; resume trims Last Report ----
@@ -1255,6 +914,7 @@ Rota body.
 
   test('startup-context (source=compact → pointer lines, never bodies)', withDir(async (dir) => {
     write(hermit(dir, 'OPERATOR.md'), '# Operator\nSecret operator body.\n');
+    const record = await seedTask(dir, 'Task body text');
     write(hermit(dir, 'sessions', 'S-001-REPORT.md'), '# Report\nReport body text.\n');
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
     write(hermit(dir, 'proposals', 'open-proposal.md'), '---\nid: x\n---\nProposal body.\n');
@@ -1262,10 +922,12 @@ Rota body.
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('latest report: sessions/S-001-REPORT.md');
+    expect(r.stdout).toContain(`latest task: tasks/${record.id}.md`);
+    expect(r.stdout).not.toContain('latest report:');
+    expect(r.stdout).not.toContain('Task body text');
     expect(r.stdout).toContain('operator context: OPERATOR.md');
     expect(r.stdout).toContain('proposals dir: proposals/');
-    expect(r.stdout).toContain('last progress: - [10:00] Started test session');
+    expect(r.stdout).not.toMatch(/^last progress: /m);
     expect(r.stdout).not.toContain('Report body text');
     expect(r.stdout).not.toContain('Secret operator body');
     expect(r.stdout).not.toContain('Proposal body');
@@ -1313,10 +975,8 @@ Rota body.
       channels: { primary: 'discord', discord: { enabled: true, chat_id: '123456789012345678' } },
     }));
     write(hermit(dir, 'sessions', 'S-001-REPORT.md'), '# r\n');
-    write(hermit(dir, 'sessions', 'SHELL.md'),
-      `# Session\n\n## Task\n${'T'.repeat(400)}\n\n## Progress Log\n[10:00] ${'P'.repeat(400)}\n`);
     write(hermit(dir, 'state', 'micro-proposals.json'), JSON.stringify({
-      pending: Array.from({ length: 10 }, (_, i) => ({ id: `MP-${'x'.repeat(60)}-${i}`, status: 'pending' })),
+      pending: Array.from({ length: 10 }, (_, i) => ({ id: `MP-${'x'.repeat(100)}-${i}`, status: 'pending' })),
     }));
     write(hermit(dir, 'OPERATOR.md'), 'context\n');
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
@@ -1332,14 +992,11 @@ Rota body.
     // Line-boundary truncation: every emitted pointer line is intact, not a
     // partial fragment of the field that follows it.
     for (const line of r.stdout.trimEnd().split('\n').slice(1)) {
-      expect(line).toMatch(/^(operator language|session_state|task|last progress|blockers|pending micro-proposals|outbound channel|latest report|operator context|proposals dir): /);
+      expect(line).toMatch(/^(operator language|Task policy|pending micro-proposals|outbound channel|latest task|operator context|proposals dir): /);
     }
   }));
 
-  test('startup-context (source=compact, single oversized field → capsule collapses to nothing, not a garbled line)', withDir(async (dir) => {
-    // No operator language configured, so the unbounded session_state line is
-    // first and alone exceeds the slice budget — there is no earlier newline
-    // to cut back to.
+  test('startup-context (source=compact, oversized retired lifecycle fields do not suppress task pointers)', withDir(async (dir) => {
     write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
       session_state: 'waiting', waiting_reason: 'x'.repeat(2000),
     }));
@@ -1347,12 +1004,15 @@ Rota body.
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('---Compaction Pointers---');
+    expect(r.stdout).toContain('---Compaction Pointers---');
+    expect(r.stdout).toContain('Task policy: read TASKS.md before intake or confirmation.');
+    expect(r.stdout).not.toMatch(/^task: /m);
     expect(r.stdout).not.toContain('session_state:');
+    expect(r.stdout).not.toContain('waiting_reason:');
+    expect(r.stdout.length).toBeLessThanOrEqual(1200);
   }));
 
   test('startup-context (source=compact, language-only state → capsule still emits)', withDir(async (dir) => {
-    fs.rmSync(hermit(dir, 'sessions', 'SHELL.md'));
     write(hermit(dir, 'config.json'), '{"language":"pt"}');
     const r = await runScript('startup-context.ts', {
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'compact', session_id: 'x' }),
@@ -1362,14 +1022,14 @@ Rota body.
     expect(r.stdout).toContain('operator language: pt (reply in this language)');
   }));
 
-  test('startup-context (source=resume, active SHELL.md → Last Report omitted, rest intact)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'S-001-REPORT.md'), '# Report\n## Overview\nPrev session overview.\n');
+  test('startup-context (source=resume, task record → Last Task and open tasks emitted)', withDir(async (dir) => {
+    await seedTask(dir);
     const r = await runScript('startup-context.ts', {
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'resume', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).not.toContain('---Last Report---');
-    expect(r.stdout).toContain('---Active Session---');
+    expect(r.stdout).toContain('---Last Task---');
+    expect(r.stdout).toContain('---Open tasks---');
   }));
 
   // Spend telemetry stays out of the injected context on every source: routine
@@ -1388,71 +1048,42 @@ Rota body.
     }
   }));
 
-  test('startup-context (source=resume, no actionable SHELL.md → Last Report still emitted)', withDir(async (dir) => {
-    fs.rmSync(hermit(dir, 'sessions', 'SHELL.md'));
-    write(hermit(dir, 'sessions', 'S-001-REPORT.md'), '# Report\n## Overview\nPrev session overview.\n');
+  test('startup-context (source=resume → Last Task emitted)', withDir(async (dir) => {
+    const record = await seedTask(dir);
     const r = await runScript('startup-context.ts', {
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'resume', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('---Last Report---');
-    expect(r.stdout).toContain('Prev session overview');
+    expect(r.stdout).toContain('---Last Task---');
+    expect(r.stdout).toContain('Previous task outcome');
+    expect(r.stdout).toContain(`${record.id}.md`);
   }));
 
-  test('startup-context (source=startup and source-less → Last Report emitted)', withDir(async (dir) => {
-    const startup = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'startup', session_id: 'x' }),
-    });
-    expect(startup.exitCode).toBe(0);
-    expect(startup.stdout).toContain('---Last Report---');
-    const sourceless = await runScript('startup-context.ts', { cwd: dir, env: ENV });
-    expect(sourceless.exitCode).toBe(0);
-    expect(sourceless.stdout).toContain('---Last Report---');
+  test('startup-context (source=startup and source-less → task adapter summary emitted)', withDir(async (dir) => {
+    await seedTask(dir);
+    for (const stdin of [JSON.stringify({ source: 'startup', session_id: 'x' }), undefined]) {
+      const r = await runScript('startup-context.ts', { cwd: dir, env: ENV, stdin });
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('---Last Task---');
+      expect(r.stdout).toContain('"title":"Previous task outcome"');
+      expect(r.stdout).toContain('"outcome":"open"');
+      expect(r.stdout).toContain('"requester":"operator"');
+    }
   }));
 
-  test('startup-context (source=startup, new-format report → frontmatter row, no Overview body)', withDir(async (dir) => {
+  test('startup-context (frozen session reports do not become Last Task)', withDir(async (dir) => {
     write(hermit(dir, 'sessions', 'S-001-REPORT.md'),
-      '---\nid: S-001\nstatus: completed\nblockers: ["waiting on review", "infra blocked"]\n' +
-      'next_start: "pick up the migration script"\ntask: "ship the thing"\n---\n' +
-      '# Session Report: S-001\n\n## Overview\nship the thing\n');
+      '---\nid: S-001\nstatus: completed\nnext_start: "retired next step"\n---\n# Report\n## Overview\nFrozen report body.\n');
     const r = await runScript('startup-context.ts', {
       cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'startup', session_id: 'x' }),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('---Last Report---');
-    expect(r.stdout).toContain('status=completed ship the thing');
-    expect(r.stdout).toContain('next: pick up the migration script');
-    expect(r.stdout).toContain('blockers: waiting on review (+1 more)');
-    expect(r.stdout).not.toContain('## Overview');
+    expect(r.stdout).not.toContain('---Last Task---');
+    expect(r.stdout).not.toContain('---Last Report---');
+    expect(r.stdout).not.toContain('Frozen report body');
+    expect(r.stdout).not.toContain('retired next step');
   }));
 
-  // The archived report keeps a cleared blocker as `[resolved] <text>` — that is the
-  // record, not a current fact. Naming it in the Last Report pointer would hand the
-  // next session a blocker the last one cleared, on the one surface the resolved-blocker
-  // filters did not cover.
-  test('startup-context (source=startup, resolved report blockers are not named)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'S-001-REPORT.md'),
-      '---\nid: S-001\nstatus: completed\nblockers: ["[resolved] waiting on review", "infra blocked"]\n' +
-      'next_start: "pick up the migration script"\ntask: "ship the thing"\n---\n' +
-      '# Session Report: S-001\n\n## Overview\nship the thing\n');
-    const r = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'startup', session_id: 'x' }),
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('blockers: infra blocked');
-    expect(r.stdout).not.toContain('waiting on review');
-  }));
-
-  test('startup-context (source=startup, legacy report with no next_start key → Overview fallback preserved)', withDir(async (dir) => {
-    write(hermit(dir, 'sessions', 'S-001-REPORT.md'), '---\nid: S-001\nstatus: completed\n---\n# Report\n## Overview\nPrev session overview.\n');
-    const r = await runScript('startup-context.ts', {
-      cwd: dir, env: ENV, stdin: JSON.stringify({ source: 'startup', session_id: 'x' }),
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('---Last Report---');
-    expect(r.stdout).toContain('## Overview');
-    expect(r.stdout).toContain('Prev session overview');
-  }));
 });
 
 // -------------------------------------------------------
@@ -1747,7 +1378,7 @@ describe('doctor-check', () => {
     const report = await doctorReport(dir);
     expect(report.checks.map((c: any) => c.id)).toEqual([
       'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
-      'permissions', 'permission-rules', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age', 'opus-wake', 'routine-cost', 'heartbeat',
+      'permissions', 'permission-rules', 'docker-security', 'reflect', 'scheduler', 'watchdog', 'context-age', 'opus-wake', 'routine-cost', 'heartbeat',
       'routine-monitor', 'routine-precheck', 'raw-size', 'credential-expiry', 'model-pricing-known', 'memory-size', 'passive-chats', 'context-scan', 'voice-carrier', 'overlay-hooks', 'classifier-denials', 'channel-liveness', 'peer-inbox', 'backup',
     ]);
   }));
@@ -1810,7 +1441,7 @@ describe('doctor-check', () => {
     write(path.join(dir, '.claude', 'cost-log.jsonl'),
       `{"timestamp":"${today}T10:00:00.000Z","total_tokens":350,"cache_read_tokens":200,"estimated_cost_usd":0.0012}\n`);
     write(hermit(dir, 'state', 'cost-index.json'),
-      JSON.stringify({ version: 3, skipped_corrupt_lines: 2 }));
+      JSON.stringify({ version: 4, by_task: {}, skipped_corrupt_lines: 2 }));
 
     const c = checkById(await doctorReport(dir), 'cost');
     expect(c.status).toBe('warn');
@@ -1882,7 +1513,7 @@ describe('doctor-check', () => {
     const today = new Date().toISOString().slice(0, 10);
     write(path.join(dir, '.claude', 'cost-log.jsonl'), [
       `{"timestamp":"${today}T10:00:00.000Z","session_id":"s1","source":"heartbeat","model":"opus","total_tokens":100000,"estimated_cost_usd":7.50}`,
-      `{"timestamp":"${today}T11:00:00.000Z","session_id":"s1","source":"routine:daily-auto-close","model":"opus","total_tokens":5000,"estimated_cost_usd":1.00}`,
+      `{"timestamp":"${today}T11:00:00.000Z","session_id":"s1","source":"routine:daily-review","model":"opus","total_tokens":5000,"estimated_cost_usd":1.00}`,
       `{"timestamp":"${today}T12:00:00.000Z","session_id":"s1","source":"other","model":"opus","total_tokens":5000,"estimated_cost_usd":0.50}`,
       '',
     ].join('\n'));
@@ -1901,16 +1532,16 @@ describe('doctor-check', () => {
     expect(c.detail).toContain('disabled');
   }));
 
-  test('doctor-check heartbeat: enabled + no active session → ok', withDir(async (dir) => {
+  test('doctor-check heartbeat: enabled + no runtime state → ok', withDir(async (dir) => {
     seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+    fs.rmSync(hermit(dir, 'state', 'runtime.json'), { force: true });
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('ok');
   }));
 
   test('doctor-check heartbeat: enabled + active session + fresh liveness → ok', withDir(async (dir) => {
     seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'heartbeat-liveness.json'), `{"last_peek_at":"${new Date().toISOString()}"}`);
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('ok');
@@ -1919,7 +1550,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: enabled + active session + stale liveness → fail', withDir(async (dir) => {
     seedDoctor(dir, '{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"every":"2h"},"routines":[]}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     // 7h ago — well past 3×2h=6h threshold
     const stale = new Date(Date.now() - 7 * 3600 * 1000).toISOString();
     write(hermit(dir, 'state', 'heartbeat-liveness.json'), `{"last_peek_at":"${stale}"}`);
@@ -1931,7 +1562,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: active session + liveness missing + recent started_at → ok (warming up)', withDir(async (dir) => {
     seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${new Date().toISOString()}"}`);
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('ok');
@@ -1940,7 +1571,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: active session + liveness missing + old started_at → fail', withDir(async (dir) => {
     seedDoctor(dir, '{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"every":"2h"},"routines":[]}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     const old = new Date(Date.now() - 7 * 3600 * 1000).toISOString();
     write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${old}"}`);
     const c = checkById(await doctorReport(dir), 'heartbeat');
@@ -1950,7 +1581,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: active session + liveness missing + no started_at → ok (not yet registered)', withDir(async (dir) => {
     seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     // No heartbeat-monitor.runtime.json at all
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('ok');
@@ -1959,7 +1590,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: liveness present but predates current monitor start → fail (not trusted)', withDir(async (dir) => {
     seedDoctor(dir, '{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"every":"2h"},"routines":[]}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     // Liveness is recent (4h ago, under the 6h threshold) but predates a monitor
     // restarted 3h ago — it is a leftover from the prior session, not proof of life.
     const peek = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
@@ -1974,7 +1605,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: liveness missing + started_at past startup grace → fail', withDir(async (dir) => {
     seedDoctor(dir, '{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"every":"2h"},"routines":[]}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     // Started 10m ago — well under the 6h stale threshold but past the short
     // startup grace, so a missing first tick is a real blocked spawn.
     const started = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -2102,10 +1733,10 @@ describe('doctor-check', () => {
     expect(c.detail).toContain('croncreate-fallback');
   }));
 
-  test('doctor-check routine-monitor: enabled + no active session → ok', withDir(async (dir) => {
+  test('doctor-check routine-monitor: enabled + no runtime state → ok', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
     write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"monitor","interval":60}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+    fs.rmSync(hermit(dir, 'state', 'runtime.json'), { force: true });
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('ok');
   }));
@@ -2113,7 +1744,7 @@ describe('doctor-check', () => {
   test('doctor-check routine-monitor: active session + fresh liveness → ok (ticking)', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
     write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"monitor","interval":60}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'routine-monitor-liveness.json'), `{"last_peek_at":"${new Date().toISOString()}"}`);
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('ok');
@@ -2123,7 +1754,7 @@ describe('doctor-check', () => {
   test('doctor-check routine-monitor: active session + stale liveness → fail', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
     write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"monitor","interval":60}');
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     // threshold = max(10*60s, 10m) = 10m; 15m ago is well past it
     const stale = new Date(Date.now() - 15 * 60 * 1000).toISOString();
     write(hermit(dir, 'state', 'routine-monitor-liveness.json'), `{"last_peek_at":"${stale}"}`);
@@ -2135,7 +1766,7 @@ describe('doctor-check', () => {
   test('doctor-check routine-monitor: liveness missing + recent started_at → ok (warming up)', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
     write(hermit(dir, 'state', 'routine-monitor.runtime.json'), `{"mode":"monitor","interval":60,"started_at":"${new Date().toISOString()}"}`);
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('warming up');
@@ -2146,7 +1777,7 @@ describe('doctor-check', () => {
     const peek = new Date(Date.now() - 4 * 60 * 1000).toISOString();
     const started = new Date(Date.now() - 3 * 60 * 1000).toISOString();
     write(hermit(dir, 'state', 'routine-monitor.runtime.json'), `{"mode":"monitor","interval":60,"started_at":"${started}"}`);
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'routine-monitor-liveness.json'), `{"last_peek_at":"${peek}"}`);
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('fail');
@@ -2491,114 +2122,10 @@ exit 0
 });
 
 // -------------------------------------------------------
-// checkArchival / checkReflectLoop (doctor-check)
+// checkReflectLoop (doctor-check)
 // -------------------------------------------------------
 
-describe('doctor-check archival + reflect loop', () => {
-  const staleTs = () =>
-    new Date(Date.now() - 5 * 86400000).toISOString().replace(/\.\d{3}Z$/, 'Z');
-
-  test('checkArchival (stale in_progress → warn)', withDir(async (dir) => {
-    seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'),
-      `{"version":1,"session_state":"in_progress","session_id":"S-042","updated_at":"${staleTs()}"}`);
-    const a = checkById(await doctorReport(dir), 'archive');
-    expect(a.status).toBe('warn');
-    expect(a.detail).toContain('stale active session');
-  }));
-
-  // checkAutoClose is a SEPARATE id from `archive` on purpose: a check returns one
-  // {id,status,detail} and the alert ledger keys on id, so folding queue health into
-  // `archive` would force a priority call between two independent failures.
-  const pending = (dir: string, queuedAt: string) =>
-    write(hermit(dir, 'state', 'pending-close.json'),
-      `{"queued_at":"${queuedAt}","queued_by":"daily-auto-close"}`);
-  const runtime = (dir: string, state: string) =>
-    write(hermit(dir, 'state', 'runtime.json'),
-      `{"version":1,"session_state":"${state}","updated_at":"${new Date().toISOString()}"}`);
-
-  test('checkAutoClose (no queued close → ok)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'idle');
-    const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('ok');
-    expect(a.detail).toBe('no queued close');
-  }));
-
-  test('checkAutoClose (queued >1d while idle → warn)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'idle');
-    pending(dir, staleTs());
-    const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('warn');
-    expect(a.detail).toContain('not drained');
-  }));
-
-  test('checkAutoClose (queued an hour ago → ok)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'in_progress');
-    pending(dir, new Date(Date.now() - 3600000).toISOString());
-    const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('ok');
-    expect(a.detail).toContain('pending');
-  }));
-
-  test('checkAutoClose (flag but no runtime.json → ok, auto-close-decision reaps it like any non-closeable state)', withDir(async (dir) => {
-    seedDoctor(dir);
-    try { fs.rmSync(hermit(dir, 'state', 'runtime.json')); } catch {}
-    pending(dir, staleTs());
-    const report = await doctorReport(dir);
-    const a = checkById(report, 'auto-close');
-    expect(a.status).toBe('ok');
-    expect(a.detail).toContain('reaped at next fire');
-    // The absent file itself is the state check's finding, not this one's.
-    expect(checkById(report, 'state').status).toBe('warn');
-  }));
-
-  test('checkAutoClose (corrupt pending-close.json → ok, file integrity is the state check)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'idle');
-    write(hermit(dir, 'state', 'pending-close.json'), '{not json');
-    const report = await doctorReport(dir);
-    expect(checkById(report, 'auto-close').status).toBe('ok');
-    expect(checkById(report, 'state').status).toBe('fail');
-  }));
-
-  test('checkAutoClose (pending-close.json is literal null → ok, no queued_at to judge)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'idle');
-    write(hermit(dir, 'state', 'pending-close.json'), 'null');
-    const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('ok');
-  }));
-
-  test('checkAutoClose (malformed queued_at → ok, matches the drain fail-open stance)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'idle');
-    write(hermit(dir, 'state', 'pending-close.json'), '{"queued_by":"daily-auto-close"}');
-    const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('ok');
-  }));
-
-  test('checkAutoClose (session not closeable → ok, flag is reaped at next fire)', withDir(async (dir) => {
-    seedDoctor(dir);
-    runtime(dir, 'closed');
-    pending(dir, staleTs());
-    const a = checkById(await doctorReport(dir), 'auto-close');
-    expect(a.status).toBe('ok');
-  }));
-
-  // The whole reason auto-close is its own id: both can be true at once.
-  test('a stale session and a stranded queued close surface as two findings', withDir(async (dir) => {
-    seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'),
-      `{"version":1,"session_state":"in_progress","session_id":"S-042","updated_at":"${staleTs()}"}`);
-    pending(dir, staleTs());
-    const report = await doctorReport(dir);
-    expect(checkById(report, 'archive').status).toBe('warn');
-    expect(checkById(report, 'auto-close').status).toBe('warn');
-  }));
-
+describe('doctor-check reflect loop', () => {
   async function reflectCheck(dir: string, counters: string) {
     seedDoctor(dir);
     write(hermit(dir, 'state', 'reflection-state.json'), `{"counters":${counters}}`);
@@ -2654,12 +2181,5 @@ describe('doctor-check archival + reflect loop', () => {
     expect(rc.detail).toContain('absent');
   }));
 
-  test('checkArchival (idle + non-null session_id → warn)', withDir(async (dir) => {
-    seedDoctor(dir);
-    write(hermit(dir, 'state', 'runtime.json'),
-      `{"version":1,"session_state":"idle","session_id":"S-042","updated_at":"${staleTs()}"}`);
-    const a = checkById(await doctorReport(dir), 'archive');
-    expect(a.status).toBe('warn');
-    expect(a.detail).toContain('orphaned session');
-  }));
+
 });

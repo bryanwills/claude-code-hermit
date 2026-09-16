@@ -3,16 +3,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PLUGIN_ROOT } from './helpers/run';
 const read = (skill: string) => fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', skill, 'SKILL.md'), 'utf8');
-it('task precedence is before the state check and honors micro-approval first', () => { const text = read('channel-responder'); const pre = text.slice(0, text.indexOf('## 1b. Check Session State')); expect(pre).toContain('Micro-approval'); expect(pre).toContain('task.ts list'); expect(pre.indexOf('Micro-approval')).toBeLessThan(pre.indexOf('task.ts list')); });
-for (const branch of ['Bound conversation', 'Bind', 'Task assignment', 'New instruction']) it(`${branch} names task invocation`, () => { const text = read('channel-responder'); const index = text.indexOf(`- **${branch}**`); expect(index).toBeGreaterThan(-1); expect(text.slice(index, index + 5500)).toContain('task.ts'); });
-it('task assignment opens the record before the progress-card line', () => {
+it('intake uses the bounded task digest and injected policy', () => {
   const text = read('channel-responder');
-  const slice = text.slice(text.indexOf('- **Task assignment**'), text.indexOf('- **Micro-approval response**'));
-  expect(slice.indexOf('task.ts open')).toBeGreaterThan(-1);
-  expect(slice.indexOf('task.ts open')).toBeLessThan(slice.indexOf('Progress card:'));
-  expect(slice).not.toContain('- After the On it reply');
+  const pre = text.slice(text.indexOf('## 1. Load Context'), text.indexOf('## 1c.'));
+  expect(pre).toContain('task.ts list');
+  expect(pre).toContain('record-operator-action.ts --force');
+  expect(pre).toContain('injected TASKS.md');
+  expect(pre).not.toContain('session-archive.ts');
 });
-it('session-start remains and card milestones and close-out use records', () => { expect(read('channel-responder')).toContain('/claude-code-hermit:session-start'); const text = read('session'); for (const term of ['task.ts note', 'task.ts block', 'task.ts list', 'queued']) expect(text).toContain(term); });
+for (const branch of ['Bound conversation', 'Bind', 'Task assignment', 'New instruction']) it(`${branch} names task invocation`, () => { const text = read('channel-responder'); const index = text.indexOf(`- **${branch}**`); expect(index).toBeGreaterThan(-1); expect(text.slice(index, index + 5500)).toContain('task.ts'); });
+it('resident guild threads bypass helper binding', () => {
+  const text = read('channel-responder');
+  expect(text.indexOf('- **Resident guild thread**')).toBeLessThan(text.indexOf('- **Bind**'));
+  expect(text).toContain('[resident task thread <key>]');
+  expect(text).toContain('--owner resident --conversation <sourceKey>:<thread-id>');
+  expect(text).toContain('Never call `conversation.ts bind`');
+  expect(text).not.toContain('/claude-code-hermit:session-start');
+});
 it('REPORT handling records result and validates sender as before', () => { const text = read('watch'); expect(text).toContain('task.ts block'); expect(text).toContain('generation'); });
 it('parked resume continues in place without renaming flags', () => {
   const text = read('channel-responder');

@@ -1,4 +1,5 @@
-import { taskStandup, type PersonTasks } from './tasks';
+import { readTaskReports, type TaskReport } from './task-report';
+import { readExecution, taskStandup, type PersonTasks } from './tasks';
 // Deterministic renderer for the Hermit Dashboard artifact — the render itself is
 // script-authored, not model-authored, so a publish costs a render (pennies) instead
 // of a generation (dollars). Reads only state already on disk (runtime.json,
@@ -82,7 +83,8 @@ export interface CompiledDocRow {
 export interface DashboardState {
   byPerson: PersonTasks[];
   agentName: string;
-  sessionState: string | null;
+  executionState: string;
+  tasks: TaskReport[];
   aliveNow: boolean;
   todayCostUsd: number;
   todayTokens: number;
@@ -286,7 +288,6 @@ export function loadDashboardState(hermitDir: string): DashboardState {
   const config = readSettledConfig(hermitDir);
   const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
   const strings = loadStrings(hermitDir);
-  const runtime = readJsonSafe(path.join(hermitDir, 'state', 'runtime.json'));
   const liveAge = sharedLivenessAgeSecs(hermitDir);
   const aliveNow = liveAge !== null && liveAge < LIVENESS_FRESH_SECS;
   const today = loadTodayCost(hermitDir, timezone);
@@ -307,7 +308,8 @@ export function loadDashboardState(hermitDir: string): DashboardState {
   return {
     byPerson,
     agentName: agentNameFromConfig(config),
-    sessionState: typeof runtime?.session_state === 'string' ? runtime.session_state : null,
+    executionState: readExecution(hermitDir).state,
+    tasks: readTaskReports(hermitDir),
     aliveNow,
     todayCostUsd: today.costUsd,
     todayTokens: today.tokens,
@@ -476,27 +478,20 @@ function renderAlerts(state: DashboardState): string {
   return `<div class="alerts">${rows.join('')}</div>`;
 }
 
-// runtime.json's `idle` means "no formal work session open", which is the normal
-// state of a healthy always-on hermit between sessions — but read alone it looks
-// indistinguishable from a dead process. A fresh shared-liveness signal (see
-// liveness.ts) proves some instance of this project is alive right now, so idle
-// renders as the presence verdict "On watch" instead. Stale/absent liveness proves
-// nothing, so it falls back to today's "Idle" rather than ever claiming dead.
-// runtime.json otherwise stores a machine enum (`in_progress`); show the
-// operator-facing label when one exists, and the raw value rather than a blank
-// when it doesn't.
-function sessionDisplay(state: DashboardState): { label: string; tone: 'acc' | 'good' } {
-  const raw = state.sessionState ?? 'idle';
+function executionDisplay(state: DashboardState): { label: string; tone: 'acc' | 'good' } {
+  const raw = state.executionState;
   if (raw === 'idle' && state.aliveNow) return { label: state.strings.session_on_watch, tone: 'good' };
-  const label = state.strings[`session_${raw}` as keyof ArtifactStrings];
-  return { label: typeof label === 'string' ? label : escapeHtml(raw), tone: 'acc' };
+  if (raw === 'in_flight') return { label: state.strings.session_in_progress, tone: 'acc' };
+  if (raw === 'idle') return { label: state.strings.session_idle, tone: 'acc' };
+  return { label: 'Unknown', tone: 'acc' };
 }
 
 function renderStatus(state: DashboardState): string {
   const s = state.strings;
-  const session = sessionDisplay(state);
+  const execution = executionDisplay(state);
   const tiles = [
-    statTile(s.status_session, session.label, session.tone),
+    statTile('Execution', execution.label, execution.tone),
+    statTile('Open tasks', String(state.tasks.filter(task => task.outcome === 'open' || task.outcome === 'unconfirmed').length)),
     statTile(s.status_today, `$${state.todayCostUsd.toFixed(2)}`),
     statTile(s.status_tokens, escapeHtml(formatTokens(state.todayTokens))),
     statTile(s.status_alerts, String(state.alerts.length), state.alerts.length ? 'warn' : undefined),

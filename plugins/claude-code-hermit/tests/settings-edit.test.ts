@@ -256,7 +256,7 @@ describe('settings registry', () => {
     const tableArgs = new Set(tableSettings().map(s => s.arg));
     // A branch that is also in the table means the prose was left behind.
     for (const b of branches) expect(tableArgs.has(b)).toBe(false);
-    expect(branches.length).toBe(14); // 9 stateful + 3 side-effecting + history (read-only) + voice (edits a file, not config)
+    expect(branches.length).toBe(13); // 8 stateful + 3 side-effecting + history (read-only) + voice (edits a file, not config)
   });
 
   test('enums come from the shared module, not a second copy', () => {
@@ -681,5 +681,57 @@ describe('settings-edit record-file', () => {
     expect(r.exitCode).toBe(1);
     expect(r.stderr.trim().split('\n')).toHaveLength(1);
     expect(auditRows(dir)).toHaveLength(0);
+  });
+});
+
+describe('migrate 1.4.0', () => {
+  test('migrates legacy settings once and preserves operator choices', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, {
+      post_close_clear: false,
+      boot_skill: '/claude-code-hermit:session-start',
+      context_hygiene: { compact: { enabled: false } },
+      routines: [
+        { id: 'daily-auto-close', schedule: '0 0 * * *', skill: 'claude-code-hermit:session-close', enabled: true },
+        { id: 'custom', schedule: '0 9 * * *', skill: 'custom:run', enabled: false, run_during_waiting: true },
+      ],
+      agent_name: 'Preserved',
+    });
+    const args = [file, 'migrate', '1.4.0'];
+    const first = await runScript('settings-edit.ts', { args });
+    expect(first.exitCode).toBe(0);
+    const config = readConfig(file);
+    expect(config.post_close_clear).toBeUndefined();
+    expect(config.boot_skill).toBe('/claude-code-hermit:resident-start');
+    expect(config.context_hygiene).toEqual({
+      compact: { enabled: false },
+      clear: { enabled: true, quiet: '1h', max_age: '24h', min_tokens: 20000 },
+    });
+    expect(config.routines).toEqual([
+      { id: 'custom', schedule: '0 9 * * *', skill: 'custom:run', enabled: false },
+    ]);
+    expect(config.agent_name).toBe('Preserved');
+    const ledger = path.join(path.dirname(file), 'state/settings-audit.jsonl');
+    const recorded = fs.readFileSync(ledger, 'utf8');
+    const rows = recorded.trim().split('\n').map(line => JSON.parse(line));
+    expect(rows.map(row => row.path).sort()).toEqual([
+      'boot_skill', 'context_hygiene.clear', 'post_close_clear', 'routines',
+    ]);
+    const bytes = fs.readFileSync(file, 'utf8');
+    const mtime = fs.statSync(file).mtimeMs;
+    expect((await runScript('settings-edit.ts', { args })).exitCode).toBe(0);
+    expect(fs.readFileSync(file, 'utf8')).toBe(bytes);
+    expect(fs.statSync(file).mtimeMs).toBe(mtime);
+    expect(fs.readFileSync(ledger, 'utf8')).toBe(recorded);
+  });
+
+  test('preserves domain boot skills and existing clear policy', async () => {
+    const file = seedConfig(freshDir(), {
+      boot_skill: '/domain:boot',
+      context_hygiene: { clear: { enabled: false, quiet: '2h', max_age: '48h', min_tokens: 30000 } },
+    });
+    const before = fs.readFileSync(file, 'utf8');
+    expect((await runScript('settings-edit.ts', { args: [file, 'migrate', '1.4.0'] })).exitCode).toBe(0);
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
   });
 });

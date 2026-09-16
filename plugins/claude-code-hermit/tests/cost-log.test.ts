@@ -182,7 +182,7 @@ describe('index version bump forces a rebuild', () => {
 
     const idx = updateCostIndex(logPath, idxPath, 'UTC');
 
-    expect(idx.version).toBe(3);
+    expect(idx.version).toBe(4);
     expect(idx.by_week).toBeDefined();
     expect(idx.by_month).toBeDefined();
     expect(idx.total_cost_usd).toBe(1.0);
@@ -316,14 +316,14 @@ describe('scanRoutineLedger — single-population cost and runs', () => {
 
 describe('cost row builders', () => {
   const mainBase = {
-    sessionId: 's-1', ccSessionId: 'cc-1', source: 'other', model: 'sonnet',
+    ccSessionId: 'cc-1', source: 'other', model: 'sonnet',
     inputTokens: 10, cacheWriteTokens: 20, cacheReadTokens: 30, outputTokens: 40,
     totalTokens: 100, apiCalls: 3, maxPromptTokens: 5000,
     lastCallPromptTokens: 4000, contextUsage: null,
     estimatedCostUsd: 0.1234, modelUnpriced: false,
   };
   const subBase = {
-    sessionId: 's-1', source: 'heartbeat', model: 'haiku',
+    source: 'heartbeat', model: 'haiku',
     inputTokens: 1, cacheWriteTokens: 2, cacheReadTokens: 3, outputTokens: 4,
     totalTokens: 10, agentType: 'claude-code-hermit:skill-eval-runner',
     modelResolved: true, estimatedCostUsd: 0.005,
@@ -365,7 +365,7 @@ describe('cost row builders', () => {
     expect(Object.keys(buildMainCostRow(mainBase)).sort()).toEqual([
       'api_calls', 'attribution', 'bucket', 'cache_read_tokens', 'cache_write_tokens', 'cc_session_id', 'context_usage',
       'estimated_cost_usd', 'input_tokens', 'last_call_prompt_tokens', 'max_prompt_tokens',
-      'model', 'model_unpriced', 'output_tokens', 'session_id', 'source',
+      'model', 'model_unpriced', 'output_tokens', 'source',
       'source_attribution_version', 'task_id', 'timestamp', 'total_tokens',
     ]);
   });
@@ -375,7 +375,7 @@ describe('cost row builders', () => {
     expect(Object.keys(row).sort()).toEqual([
       'agent_type', 'api_calls', 'attribution', 'bucket', 'cache_read_tokens', 'cache_write_tokens', 'context_usage',
       'estimated_cost_usd', 'input_tokens', 'model', 'model_resolved', 'output_tokens',
-      'session_id', 'source', 'source_attribution_version', 'subagent', 'task_id', 'timestamp', 'total_tokens',
+      'source', 'source_attribution_version', 'subagent', 'task_id', 'timestamp', 'total_tokens',
     ]);
     expect(row).toMatchObject({ subagent: true, api_calls: 0, context_usage: null });
   });

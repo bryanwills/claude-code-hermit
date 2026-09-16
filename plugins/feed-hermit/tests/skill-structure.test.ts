@@ -51,17 +51,19 @@ test("hatch idempotently registers the plugin-owned brief archive", () => {
   expect(raw).toMatch(/already present[\s\S]{0,60}leave the array\s+unchanged/);
 });
 
-for (const f of [
-  "routine-feed-brief-morning.md",
-  "routine-feed-brief-evening.md",
-  "routine-weekly-digest.md",
-]) {
-  test(`routine prompt ${f} is a routine-prompt`, () => {
-    const path = join(ROOT, "state-templates", "compiled", f);
-    expect(existsSync(path)).toBe(true);
-    expect(frontmatter(readFileSync(path, "utf8")).type).toBe("routine-prompt");
-  });
-}
+test('hatch routines invoke the domain skills with their slot arguments', () => {
+  const hatch = readFileSync(join(ROOT, 'skills/hatch/SKILL.md'), 'utf8');
+  const entries = [...hatch.matchAll(/\{\n  "id": "([^"]+)",[\s\S]*?\n\}/g)]
+    .map(([block]) => JSON.parse(block.replace(/<[^>]+>/g, 'true')));
+  for (const [id, skill] of [
+    ['feed-brief-morning', 'feed-hermit:feed-brief --morning'],
+    ['feed-brief-evening', 'feed-hermit:feed-brief --evening'],
+    ['weekly-digest', 'feed-hermit:weekly-digest'],
+  ]) {
+    expect(entries.find((entry) => entry.id === id)?.skill).toBe(skill);
+    expect(existsSync(join(ROOT, 'skills', skill.split(':')[1].split(' ')[0], 'SKILL.md'))).toBe(true);
+  }
+});
 
 // ── CLAUDE-APPEND token-efficiency guard ────────────────────────────────────
 // The block is re-paid on every session load and every subagent dispatch. The

@@ -5,7 +5,7 @@
 // than an in-process import to avoid polluting the module cache — cost-tracker.ts
 // initialises HERMIT_DIR at load time, and hooks.contract.test.ts imports the
 // same module in-process from a different cwd.  A shared cache would cause
-// getCumulativeCost to read the wrong .status.json path.
+// cost tracking to read the wrong project state.
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
@@ -133,7 +133,6 @@ describe('cost-tracker subagent log lines', () => {
   // Minimal hermit dir structure cost-tracker needs:
   //   <dir>/.claude/cost-log.jsonl     (written by cost-tracker)
   //   <dir>/.claude-code-hermit/state/runtime.json
-  //   <dir>/.claude-code-hermit/sessions/SHELL.md  (optional; non-fatal if absent)
   let dir: string;
   let transcriptPath: string;
   let logPath: string;
@@ -149,7 +148,7 @@ describe('cost-tracker subagent log lines', () => {
     // Hermit state dir
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     // Transcript: routine trigger → assistant call → subagent dispatch → final assistant
     const transcriptLines = [
@@ -172,6 +171,12 @@ describe('cost-tracker subagent log lines', () => {
 
   test('cost-tracker: cost-log.jsonl is written', () => {
     expect(fs.existsSync(logPath)).toBe(true);
+  });
+
+  test('cost tracking creates no retired cache or lifecycle row field', () => {
+    expect(fs.existsSync(path.join(dir, '.claude-code-hermit', 'sessions', '.status.json'))).toBe(false);
+    const rows = fs.readFileSync(logPath, 'utf-8').trim().split('\n').map(line => JSON.parse(line));
+    for (const row of rows) expect('session_id' in row).toBe(false);
   });
 
   test('cost-tracker: cost-log.jsonl has exactly 2 lines (main + subagent)', () => {
@@ -243,7 +248,7 @@ describe('cost-tracker subagent with no resolvedModel', () => {
     logPath = path.join(dir, '.claude', 'cost-log.jsonl');
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     const transcriptLines = [
       triggerPrompt('[hermit-routine:demo] start'),
@@ -288,7 +293,7 @@ describe('cost-tracker: oversized turn with boundary outside the tail window', (
     logPath = path.join(dir, '.claude', 'cost-log.jsonl');
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     // The REAL trigger for this turn — a plain operator prompt, no routine marker.
     // Followed by >512KB of filler tool_use/tool_result pairs so this line falls
@@ -358,7 +363,7 @@ describe('cost-tracker: a skill companion entry never ends the prompt walk', () 
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     const transcriptPath = path.join(dir, 'transcript.jsonl');
     fs.writeFileSync(transcriptPath, [...entries, assistantEntry('claude-sonnet-4-6', 5000, 2000)].join('\n') + '\n');
@@ -415,7 +420,7 @@ describe('cost-tracker: 600KB single-turn transcript (boundary outside the 512KB
     logPath = path.join(dir, '.claude', 'cost-log.jsonl');
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     // The turn's only prompt, followed by >512KB of billed calls and their tool_results.
     // No stale marker anywhere: the ONLY classifiable text is the wake at the very top,
@@ -467,7 +472,7 @@ describe('cost-tracker: max_prompt_tokens (real context size vs per-turn sum)', 
     logPath = path.join(dir, '.claude', 'cost-log.jsonl');
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     // Three API calls in one turn: 100k, 300k (the largest), 50k (billedIndex).
     // Summed, the turn logs 450k prompt tokens; the real context peak was 300k.
@@ -497,109 +502,6 @@ describe('cost-tracker: max_prompt_tokens (real context size vs per-turn sum)', 
   });
 });
 
-// ---------------------------------------------------------------------------
-// Subprocess: cost-tracker stamps/clears runtime.json's opened_at (PR-6 part b —
-// cost-report.ts session's window-delta mode reads this field). See maintainOpenedAt in
-// cost-tracker.ts.
-// ---------------------------------------------------------------------------
-
-async function runCostTrackerWithRuntime(dir: string, runtimeState: object): Promise<string> {
-  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
-  const stateDir = path.join(dir, '.claude-code-hermit', 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  const runtimePath = path.join(stateDir, 'runtime.json');
-  fs.writeFileSync(runtimePath, JSON.stringify(runtimeState));
-
-  // A non-zero-usage turn is required — run() returns early (before touching
-  // runtime.json at all) when totalTokens === 0.
-  const transcriptLines = [
-    triggerPrompt('operator message'),
-    assistantEntry('claude-sonnet-4-6', 100, 50),
-  ];
-  const transcriptPath = path.join(dir, 'transcript.jsonl');
-  fs.writeFileSync(transcriptPath, transcriptLines.join('\n') + '\n');
-
-  const stdin = JSON.stringify({ session_id: 'proc-uuid', transcript_path: transcriptPath });
-  await runScript('cost-tracker.ts', { stdin, cwd: dir, env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT } });
-
-  return runtimePath;
-}
-
-// The subprocess stdin tags the transcript id as 'proc-uuid'; maintainOpenedAt keys
-// the arc-reset on it. A stale opened_transcript (a prior/dead process) forces a new arc.
-describe('cost-tracker: opened_at / closed_at arc window', () => {
-  test('in_progress with no opened_at → opens an arc (opened_at ISO, closed_at null, transcript recorded)', withTmpdir(async (dir) => {
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(typeof rt.opened_at).toBe('string');
-    expect(Number.isFinite(Date.parse(rt.opened_at))).toBe(true);
-    expect(rt.closed_at).toBeNull();
-    expect(rt.opened_transcript).toBe('proc-uuid');
-  }));
-
-  test('in_progress, same transcript + live arc → opened_at left unchanged', withTmpdir(async (dir) => {
-    const existing = '2020-01-01T00:00:00.000Z';
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing, closed_at: null, opened_transcript: 'proc-uuid' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).toBe(existing);
-  }));
-
-  test('in_progress with a stale transcript → arc reset (crash/restart no longer over-counts)', withTmpdir(async (dir) => {
-    const existing = '2020-01-01T00:00:00.000Z';
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing, opened_transcript: 'dead-uuid' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).not.toBe(existing);
-    expect(Number.isFinite(Date.parse(rt.opened_at))).toBe(true);
-    expect(rt.opened_transcript).toBe('proc-uuid');
-    expect(rt.closed_at).toBeNull();
-  }));
-
-  test('in_progress after a closed arc (closed_at set) → new arc opens, closed_at cleared', withTmpdir(async (dir) => {
-    const existing = '2020-01-01T00:00:00.000Z';
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'in_progress', opened_at: existing, closed_at: '2020-01-01T01:00:00.000Z', opened_transcript: 'proc-uuid' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).not.toBe(existing);
-    expect(rt.closed_at).toBeNull();
-  }));
-
-  test('idle with a live arc → stamps closed_at, keeps opened_at (close after idle can still recover the window)', withTmpdir(async (dir) => {
-    const existing = '2020-01-01T00:00:00.000Z';
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle', opened_at: existing, opened_transcript: 'proc-uuid' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).toBe(existing);
-    expect(typeof rt.closed_at).toBe('string');
-    expect(Number.isFinite(Date.parse(rt.closed_at))).toBe(true);
-  }));
-
-  test('idle with an already-closed arc → closed_at left unchanged', withTmpdir(async (dir) => {
-    const closed = '2020-01-01T01:00:00.000Z';
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle', opened_at: '2020-01-01T00:00:00.000Z', closed_at: closed, opened_transcript: 'proc-uuid' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.closed_at).toBe(closed);
-  }));
-
-  test('idle with no opened_at → stays unset, no spurious write', withTmpdir(async (dir) => {
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'idle' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).toBeUndefined();
-    expect(rt.closed_at).toBeUndefined();
-  }));
-
-  test('waiting with opened_at set → left unchanged, not closed (bounce stays one arc)', withTmpdir(async (dir) => {
-    const existing = '2020-01-01T00:00:00.000Z';
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'waiting', opened_at: existing, opened_transcript: 'proc-uuid' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).toBe(existing);
-    expect(rt.closed_at).toBeUndefined();
-  }));
-
-  test('waiting with no opened_at → stays unset', withTmpdir(async (dir) => {
-    const runtimePath = await runCostTrackerWithRuntime(dir, { session_state: 'waiting' });
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    expect(rt.opened_at).toBeUndefined();
-  }));
-});
-
 // Streamed chunks of one request share a requestId; they must bill once, at the max
 // of each token field, not once per transcript entry.
 describe('cost-tracker: same requestId billed once', () => {
@@ -612,7 +514,7 @@ describe('cost-tracker: same requestId billed once', () => {
     logPath = path.join(dir, '.claude', 'cost-log.jsonl');
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
     fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+    fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
 
     const transcriptLines = [
       triggerPrompt('[hermit-routine:demo] start'),

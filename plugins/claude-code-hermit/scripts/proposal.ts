@@ -18,13 +18,13 @@
 //   create <stateDir>
 //     stdin (heredoc): `Key: value` header lines, a bare `---` separator line,
 //     then the raw markdown body. Headers: Title (required), Source (default
-//     manual), Session (default state/runtime.json session_id), Category
+//     manual), Session (task id when provided), Category
 //     (default improvement; improvement|routine|capability|constraint|bug),
-//     Tags / Related-Sessions (JSON string arrays, default []), Findings
-//     (optional one-line SHELL.md summary), Self-Eval-Key (optional checklist key). Claims the ID and writes the file
+//     Tags / Related-Sessions (JSON string arrays, default []),
+//     Self-Eval-Key (optional checklist key). Claims the ID and writes the file
 //     as one atomic operation (exclusive create, suffix walk on EEXIST — never
 //     a separate assign-then-write step, which would allow a burned ID with no
-//     file). Best-effort tail: SHELL.md Findings line, `created` metrics event,
+//     file). Best-effort tail: `created` metrics event,
 //     proposals-index + state-summary regen. Output: the canonical ID, or
 //     `ERROR|<token>` with zero writes.
 //
@@ -41,13 +41,6 @@
 //     touch nothing. The Decision append is idempotent (skipped if the section
 //     already ends with the identical line). `--request-compact` writes
 //     state/compact-requested.json. Output: `OK|<id>` or `ERROR|<reason>`.
-//
-//   shell-append <stateDir> --section <findings|progress|monitoring|blockers>
-//     stdin: the one line to append. Output: `OK` or `ERROR|<reason>`.
-//
-//   next-task <stateDir>
-//     stdin: full NEXT-TASK.md content. Exclusive create — an existing file
-//     is left untouched. Output: `OK` or `ERROR|<reason>`.
 //
 //   routine <stateDir>
 //     stdin: one routine entry as JSON ({id, schedule, skill, enabled, ...}).
@@ -82,7 +75,7 @@ import { emit, readStdin, readStdinIfFlagged, readJson, flagValue } from './lib/
 import { pinStateDirOrExit, memoryDirFor } from './lib/cc-compat';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { auditConfigChange } from './lib/config-audit';
-import { writeFileAtomic, patchFrontmatter, appendToSection, appendShellLine, findSection, escapeRegExp, PATCH_KEY_RE } from './lib/md-write';
+import { writeFileAtomic, patchFrontmatter, appendToSection, findSection, escapeRegExp, PATCH_KEY_RE } from './lib/md-write';
 import { computeBase, SUFFIX_LETTERS } from './lib/prop-id';
 import { readSettledConfig } from './lib/config-read';
 import { zonedISOStamp, utcISOStamp } from './lib/time';
@@ -148,14 +141,8 @@ export function verbCreate(stateDir: string, stdin: string): string {
 
   const source = grabHeader(header, 'Source') || 'manual';
   const selfEvalKey = grabHeader(header, 'Self-Eval-Key');
-  let session = grabHeader(header, 'Session');
-  // Falsy, not just null: a bare `Session:` line means "no session", which must
-  // fall through to the runtime.json default (and then to null) rather than
-  // writing `session: ""` — every other header defaults on falsy too.
-  if (!session) {
-    const runtime = readJson(path.join(stateDir, 'state', 'runtime.json'));
-    session = runtime?.session_id ?? null;
-  }
+  const session = grabHeader(header, 'Session') || null;
+
   const category = grabHeader(header, 'Category') || 'improvement';
   if (!VALID_CATEGORIES.has(category)) return 'ERROR|invalid-category';
 
@@ -163,7 +150,6 @@ export function verbCreate(stateDir: string, stdin: string): string {
   if (tags === null) return 'ERROR|invalid-tags';
   const relatedSessions = parseStringArray(grabHeader(header, 'Related-Sessions'));
   if (relatedSessions === null) return 'ERROR|invalid-related-sessions';
-  const findingsSummary = grabHeader(header, 'Findings');
 
   if (!fs.existsSync(stateDir)) return 'ERROR|state-dir-not-found';
 
@@ -216,10 +202,6 @@ export function verbCreate(stateDir: string, stdin: string): string {
 
   // Best-effort tail — the proposal file already exists; failures warn on
   // stderr but never change the stdout verdict or roll anything back.
-  const findingsLine = `- ${claimedId}: ${findingsSummary || title}`;
-  const shellErr = appendShellLine(path.join(stateDir, 'sessions'), 'Findings', findingsLine);
-  if (shellErr) warn(`findings append: ${shellErr}`);
-
   try {
     const metricsErr = appendJsonlLine(
       path.join(stateDir, 'state', 'proposal-metrics.jsonl'),
@@ -372,45 +354,6 @@ export function verbPatch(stateDir: string, stdin: string, args: string[]): stri
   return `OK|${path.basename(targetPath).replace(/\.md$/, '')}`;
 }
 
-// ----------------------------------------------------------- shell-append --
-
-const SHELL_SECTIONS: Record<string, string> = {
-  findings: 'Findings',
-  progress: 'Progress Log',
-  monitoring: 'Monitoring',
-  blockers: 'Blockers',
-};
-
-export function verbShellAppend(stateDir: string, stdin: string, args: string[]): string {
-  const line = stdin.trim();
-  const section = flagValue(args, '--section') ?? '';
-  const heading = Object.prototype.hasOwnProperty.call(SHELL_SECTIONS, section)
-    ? SHELL_SECTIONS[section]
-    : undefined;
-  if (!heading) return 'ERROR|unknown-section';
-  if (!line) return 'ERROR|empty-line';
-  const err = appendShellLine(path.join(stateDir, 'sessions'), heading, line);
-  if (err) {
-    if (err.startsWith('SHELL.md unreadable')) return 'ERROR|shell-unreadable';
-    return 'ERROR|shell-append-failed';
-  }
-  return 'OK';
-}
-
-// --------------------------------------------------------------- next-task -
-
-export function verbNextTask(stateDir: string, stdin: string): string {
-  if (!stdin.trim()) return 'ERROR|empty-content';
-  const target = path.join(stateDir, 'sessions', 'NEXT-TASK.md');
-  try {
-    fs.writeFileSync(target, stdin, { flag: 'wx' });
-  } catch (e: any) {
-    if (e.code === 'EEXIST') return 'ERROR|next-task-exists';
-    return 'ERROR|write-failed';
-  }
-  return 'OK';
-}
-
 // ------------------------------------------------------------------ routine
 
 const ROUTINE_REQUIRED_FIELDS = ['id', 'schedule', 'skill', 'enabled'];
@@ -447,7 +390,7 @@ export function verbRoutine(stateDir: string, stdin: string): string {
 
 // ------------------------------------------------------------------- main --
 
-const VERBS = 'create|patch|shell-append|next-task|routine|resolve-id|gate|queue-micro|micro|index|anchor|metrics|event|success-signal|quality-gate';
+const VERBS = 'create|patch|routine|resolve-id|gate|queue-micro|micro|index|anchor|metrics|event|success-signal|quality-gate';
 
 // The state dir is not caller-chosen. Every production call passes the literal
 // `.claude-code-hermit` from the project root; accepting an arbitrary root let
@@ -520,8 +463,6 @@ async function main(): Promise<void> {
       const stdin = await readStdinIfFlagged(rest, '--stdin');
       return emit(verbPatch(stateDir, stdin, rest));
     }
-    case 'shell-append': return emit(verbShellAppend(stateDir, await readStdin(), rest));
-    case 'next-task': return emit(verbNextTask(stateDir, await readStdin()));
     case 'routine': return emit(verbRoutine(stateDir, await readStdin()));
     case 'resolve-id': return runResolveId(stateDir, rest[0]);
     case 'gate': return runGate(stateDir, rest);

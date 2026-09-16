@@ -28,7 +28,6 @@ function fixture(dir: string, opts: { tmuxSession?: string; tmuxExit?: number; p
     path.join(stateDir, 'runtime.json'),
     JSON.stringify({
       version: 1,
-      session_state: 'idle',
       tmux_session: opts.tmuxSession ?? null,
       peer_name: opts.peerName ?? null,
     }),
@@ -65,12 +64,12 @@ describe('startup-context.ts — resident vs guest', () => {
         const pid = ownParent ? process.pid : process.ppid;
         writeRegistryEntry(configDir, pid);
         fs.writeFileSync(path.join(wd.dir, '.claude-code-hermit', 'state', 'runtime.json'), JSON.stringify({
-          version: 1, session_state: 'idle', session_pid: pid, config_dir: configDir,
+          version: 1, session_pid: pid, config_dir: configDir,
         }));
         const sessionId = 'registry-residency-test';
         const res = await run(wd.dir, { ...env, HERMIT_RESIDENT: '1' }, sessionId);
         expect(res.exitCode).toBe(0);
-        expect(res.stdout).toContain(ownParent ? '---Active Session---' : '---Guest Session---');
+        expect(res.stdout).toContain(ownParent ? '---Open tasks---' : '---Guest Session---');
         expect(fs.existsSync(markerFor(wd.dir, sessionId))).toBe(!ownParent);
       } finally {
         wd.cleanup();
@@ -85,7 +84,7 @@ describe('startup-context.ts — resident vs guest', () => {
       const res = await run(wd.dir, { ...env, HERMIT_MANAGED: '', HERMIT_RESIDENT: '1' });
       expect(res.exitCode).toBe(0);
       expect(res.stdout).not.toContain('---Guest Session---');
-      expect(res.stdout).toContain('---Active Session---');
+      expect(res.stdout).toContain('---Open tasks---');
     } finally {
       wd.cleanup();
     }
@@ -101,7 +100,7 @@ describe('startup-context.ts — resident vs guest', () => {
       expect(res.stdout).toContain('A managed hermit session is already running here');
       expect(res.stdout).toContain('@hermit-peer');
       expect(res.stdout).toContain('GUEST_REPORT:');
-      expect(res.stdout).not.toContain('---Active Session---');
+      expect(res.stdout).not.toContain('---Open tasks---');
       expect(res.stdout.trim().split('\n').length).toBeLessThanOrEqual(8);
     } finally {
       wd.cleanup();
@@ -131,7 +130,7 @@ describe('startup-context.ts — resident vs guest', () => {
       const res = await run(wd.dir, { ...env, HERMIT_MANAGED: '' });
       expect(res.exitCode).toBe(0);
       expect(res.stdout).toContain('---Guest Session---');
-      expect(res.stdout).not.toContain('---Active Session---');
+      expect(res.stdout).not.toContain('---Open tasks---');
       expect(res.stdout).toContain('.claude-code-hermit/bin/hermit-start');
     } finally {
       wd.cleanup();
@@ -145,7 +144,7 @@ describe('startup-context.ts — resident vs guest', () => {
       const res = await run(wd.dir, { ...env, HERMIT_MANAGED: '' });
       expect(res.exitCode).toBe(0);
       expect(res.stdout).toContain('---Guest Session---');
-      expect(res.stdout).not.toContain('---Active Session---');
+      expect(res.stdout).not.toContain('---Open tasks---');
       expect(res.stdout).toContain('.claude-code-hermit/bin/hermit-start');
     } finally {
       wd.cleanup();

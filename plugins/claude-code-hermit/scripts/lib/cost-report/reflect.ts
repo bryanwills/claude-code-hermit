@@ -214,7 +214,7 @@ function report(rawArgs: string[]) {
     }
 
     // Per-session attribution (by stored dollars, not token volume)
-    const sid = e.session_id || '';
+    const sid = e.session_id || e.cc_session_id || '';
     if (sid) {
       if (!sessionMap[sid]) {
         sessionMap[sid] = { cost: 0, turns: 0, byType: { input: 0, cacheWrite: 0, cacheRead: 0, output: 0 } };

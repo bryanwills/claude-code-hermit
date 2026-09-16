@@ -287,7 +287,7 @@ tags: [brief, foundational]
 **morning brief · 2026-01-15** — one-sentence lead story. 6 items across 8 sources.
 ```
 
-Frontmatter keys: `title, type, created, tags`. The `foundational` tag forces session-start
+Frontmatter keys: `title, type, created, tags`. The `foundational` tag forces startup
 injection. Body: <=250 chars, one line.
 
 ---

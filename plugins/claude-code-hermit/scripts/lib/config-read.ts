@@ -87,7 +87,7 @@ const TABLE: Record<string, Spec> = {
     summary_threshold: num(30),
     summary_keep: num(15),
   }),
-  tasks: shape({ handle_in_dm: bool(false), duties_open_records: bool(true) }),
+  tasks: shape({ handle_in_dm: bool(false), duties_open_records: bool(true), queue_nudge_minutes: num(60) }),
   heartbeat: shape({
     enabled: bool(true),
     every: str('30m'),
@@ -145,13 +145,13 @@ const TABLE: Record<string, Spec> = {
     backend: str('claude'),
   }),
   context_hygiene: shape({
+    clear: shape({ enabled: bool(true), quiet: str('1h'), max_age: str('24h'), min_tokens: num(20000) }),
     compact: shape({ enabled: bool(true), min_context_tokens: num(100000), min_interval: str('4h') }),
   }),
   reflection: shape({ graduation_min_sessions: num(1) }),
   routine_wake_lint: shape({ max_windows: num(6) }),
   doctor: shape({ routine_cost_floor_usd: num(2) }),
   storage_drift: shape({ ignore: arr }),
-  post_close_clear: bool(true),
 };
 
 // For the template-parity test.

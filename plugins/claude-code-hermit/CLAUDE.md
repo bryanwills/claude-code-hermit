@@ -16,7 +16,7 @@ The shipped hermit is main-as-orchestrator: the long-lived main session delegate
 
 Installed state lives in the target project's `.claude-code-hermit/`:
 
-- `sessions/SHELL.md` (current session; the only plan surface) and `sessions/S-NNN-REPORT.md` archives
+- `tasks/T-*.md` commitments, maintained through `scripts/task.ts`
 - `proposals/PROP-NNN-<slug>-HHMMSS.md`
 - `state/` machine state: runtime, alert and reflection state, metrics JSONL, monitor registry
 - `raw/` domain inputs and `compiled/` durable domain outputs (injected at session start). Both flat, no subdirectories; `raw/.archive/` holds expired artifacts. Contract: [plugin-hermit-storage](docs/plugin-hermit-storage.md).
@@ -27,8 +27,8 @@ Installed state lives in the target project's `.claude-code-hermit/`:
 
 A hatched folder can hold more than one session, so every state file has exactly one owner. `startup-context.ts` decides resident-vs-guest once per session and records the verdict with `lib/guest-marker.ts`; hooks read it with `isGuest(stateDir, payload.session_id)` (they run per turn with no model in the loop) and normalize payload IDs through `cc-compat.sessionId`.
 
-- **Resident-owned**: liveness signals, context-reset stamps, operator-activity and open-turn markers, CC-payload snapshots, the session-diff sidecar, channel-control queues. Gate hook writes on the guest verdict; guest prompts skip resident channel-control stages and guest Stops do not drain resident commands. Startup seeds activity only after residency classification. The cost cache `sessions/.status.json` also carries cumulative totals, so any ownership change there must preserve them.
-- **Folder-shared**: the `SHELL.md` Progress Log and the cost log. Any session writes; entries carry provenance (`cc_session_id`, `guest`, the PreCompact breadcrumb) instead of a gate. Progress Log and lifecycle archive/open/reset writes go through the shared SHELL lock in `lib/md-write.ts`; hooks run concurrently, so an unlocked read-modify-write loses updates.
+- **Resident-owned**: liveness signals, context-reset stamps, operator-activity and open-turn markers, CC-payload snapshots, channel-control queues. Gate hook writes on the guest verdict; guest prompts skip resident channel-control stages and guest Stops do not drain resident commands. Startup seeds activity only after residency classification.
+- **Folder-shared**: cost and usage logs retain guest provenance. Task records use the locked `task.ts` writer.
 - **Session-keyed**: anything that must vary per session is keyed by session id, never a singleton.
 
 ## Hatch target routing

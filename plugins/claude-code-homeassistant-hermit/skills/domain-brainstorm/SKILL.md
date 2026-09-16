@@ -110,5 +110,5 @@ Body (150-line cap): ideas that passed (one paragraph each), discarded candidate
 
 Do not tag `foundational` — this is a time-bounded ideation snapshot.
 
-**Zero-emit runs:** skip the artifact entirely. Log one line to SHELL.md Findings:
+**Zero-emit runs:** skip the artifact entirely. Inside an open record's turn, pipe one line into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`; otherwise skip the note:
 `domain-brainstorm: 0 ideas emitted (<reason>)`

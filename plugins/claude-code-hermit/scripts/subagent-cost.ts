@@ -21,7 +21,6 @@ import { dispatchTaskAttribution, readTaskCostRows } from './lib/tasks';
 process.stdout.on('error', () => {});
 
 import fs from 'node:fs';
-import path from 'node:path';
 
 import {
   hermitDir, costLogPath, extractUsage, foldUsageByRequest, turnPromptText,
@@ -35,14 +34,6 @@ import { readSettledConfig } from './lib/config-read';
 
 const HERMIT_DIR = hermitDir();
 const COST_LOG = costLogPath(HERMIT_DIR);
-const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
-
-function readRuntimeSessionId(): string {
-  try {
-    return JSON.parse(fs.readFileSync(RUNTIME_JSON, 'utf-8')).session_id || '';
-  } catch { return ''; }
-}
-
 function sumSubagentTranscript(transcriptPath: string): {
   model: string; inputTokens: number; cacheWriteTokens: number;
   cacheWrite1hTokens: number; cacheReadTokens: number; outputTokens: number;
@@ -160,7 +151,6 @@ process.stdin.on('end', () => {
     const taskAttribution = dispatchTaskAttribution(HERMIT_DIR, readTaskCostRows(HERMIT_DIR), payloadSessionId(payload) ?? '', boundaryAt);
     const entry = buildSubagentCostRow({
       taskAttribution,
-      sessionId: payloadSessionId(payload) || readRuntimeSessionId() || 'unknown',
       source,
       model,
       inputTokens,

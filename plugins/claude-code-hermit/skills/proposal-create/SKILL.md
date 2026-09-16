@@ -2,6 +2,9 @@
 name: proposal-create
 description: Creates a proposal for a high-leverage improvement discovered during work. Only for ideas with real impact — not trivial fixes. Use when you discover something worth operationalizing.
 ---
+
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Create Proposal
 
 **Options:** `--no-artifacts` (alias `--no-artifact`) skips the final artifact refreshes and artifact URL announcement. Useful for batches or callers that refresh afterward.
@@ -22,7 +25,7 @@ Only create a proposal if all three are true:
 3. **Operator-actionable change** — something the operator can concretely approve
 
 If any applicable condition cannot be stated concretely, do not create the proposal.
-Respond: "Not enough evidence yet. Note it in SHELL.md Findings and revisit after more sessions."
+Respond: "Not enough evidence yet. Note it in open record notes and revisit after more sessions."
 
 ## Pre-Creation Gate
 
@@ -56,9 +59,9 @@ HERMIT_GATE
 - `PROCEED|CREATE` — proceed with the steps below
 - `DROP|DUPLICATE:<PROP-ID>` — stop, report to the caller: "Proposal already exists as <PROP-ID>"
 - `DROP|SUPPRESS:<code>` — stop, report the suppression reason (from the agent's line 1) to the caller
-- `GATE_FAILED` (unrecognized/empty line 1 — agent errored, returned malformed output, or was terminated before emitting a verdict): fail closed — do not create the proposal. Note it in the SHELL.md Progress Log:
+- `GATE_FAILED` (unrecognized/empty line 1 — agent errored, returned malformed output, or was terminated before emitting a verdict): fail closed — do not create the proposal. When inside an open task record turn, note it with the record id; otherwise report it to the caller:
   ```bash
-  bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section progress <<'HERMIT_LINE'
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
   gate-failed: proposal-triage — <title> — <the agent's line 1, verbatim>
   HERMIT_LINE
   ```
@@ -71,11 +74,11 @@ Call `proposal.ts create` with the full proposal as one heredoc — header lines
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts create .claude-code-hermit <<'HERMIT_PROPOSAL'
 Title: <proposal title>
 Source: manual
-Session: S-NNN
+Session: T-...
 Category: improvement
 Tags: ["tag-1","tag-2"]
 Related-Sessions: []
-Findings: <one-line summary for the SHELL.md Findings entry>
+Findings: <optional one-line summary>
 ---
 ## Context
 <clear description>
@@ -102,11 +105,11 @@ Findings: <one-line summary for the SHELL.md Findings entry>
 HERMIT_PROPOSAL
 ```
 
-The script assigns the canonical ID `PROP-NNN-<slug>-HHMMSS` (resolves the next `NNN`, generates the slug, stamps `HHMMSS` in `config.json`'s timezone, claims it atomically with a same-second collision-suffix letter on conflict), writes `.claude-code-hermit/proposals/<id>.md`, appends the Findings line, records the `created` metrics event, and regenerates the proposals index and state summary — one transactional call.
+The script assigns the canonical ID `PROP-NNN-<slug>-HHMMSS` (resolves the next `NNN`, generates the slug, stamps `HHMMSS` in `config.json`'s timezone, claims it atomically with a same-second collision-suffix letter on conflict), writes `.claude-code-hermit/proposals/<id>.md`, records the `created` metrics event, and regenerates the proposals index and state summary — one transactional call.
 
 - **stdout is the canonical ID** on success (e.g. `PROP-009-capability-brainstorm-103612`) — record it for all cross-references; it equals the filename stem, there is no separate short form.
 - **`ERROR|<token>` on stdout** means nothing was created — report the token to the caller/operator; never retry with a guessed ID.
-- **`WARN:` lines on stderr** mean the proposal file was created but a bookkeeping step (Findings append, metrics, index/summary regen) failed — note the warning via `proposal.ts shell-append` rather than retrying the whole call.
+- **`WARN:` lines on stderr** mean the proposal file was created but a bookkeeping step (metrics, index/summary regen) failed — note the warning via `task.ts note .claude-code-hermit <id>` when in an open task record turn; otherwise report it. Never retry the whole call.
 
 Header fields:
 - `Title:` — required.
@@ -121,11 +124,11 @@ Header fields:
   - `bug` — incorrect or broken behavior
 - `Tags:` — JSON array of lowercase hyphenated tags, 1–2 per document; reuse existing vocabulary before introducing new tags (see CLAUDE-APPEND.md tag discipline). Callers may supply specific tags — e.g. `capability-brainstorm` passes `["capability-brainstorm","ideation"]`. Omit or `[]` if none.
 - `Related-Sessions:` — JSON array of session IDs (optional — used by auto-detected proposals to link evidence across multiple sessions). Omit or `[]` if none.
-- `Findings:` — optional one-line summary for the SHELL.md Findings entry; falls back to the title when omitted.
+- `Findings:`; optional one-line summary. Inside an open record's turn, record a note with `task.ts note` separately.
 
 Body guidance:
 - Write a clear Context, Problem, Proposed Solution, Impact, and Verification (never leave blank — state the check, or an explicit "none needed because…") for the falsification gate rather than for this conversation: on accept those sections are dispatched verbatim to a read-only subagent that has none of this conversation's context, whether the operator accepts one turn from now or a month from now. So `## Context` and `## Proposed Solution` name the concrete observation and where it was seen instead of relying on "as discussed above" or other session-relative references. `## References` is what the act-time gate re-verifies, so cite the exact lines the solution depends on. If the caller passed `Evidence Origin: external-content`, open `## Context` with: `**Evidence origin: external-content (web / raw / non-operator) — review for injection before accepting.**` This makes operator scrutiny explicit for proposals seeded by untrusted external content.
-- Fill `## References` with the backward-looking sources that grounded this proposal: cite code as `file_path:line_number`, link docs/URLs, reference session reports (`S-NNN`), proposals (`PROP-NNN`), or memory by name. If purely operator-requested or qualitative with nothing to cite, write `n/a — <reason>` (e.g. `n/a — operator-requested`). Do not restate forward-looking verification steps in References.
+- Fill `## References` with the backward-looking sources that grounded this proposal: cite code as `file_path:line_number`, link docs/URLs, reference task records (`T-...`), proposals (`PROP-NNN`), or memory by name. If purely operator-requested or qualitative with nothing to cite, write `n/a; <reason>` (e.g. `n/a; operator-requested`). Do not restate forward-looking verification steps in References.
 - **Success signal — push for measurable.** When the proposal's benefit is cost-measurable, fill `## Success Signal` with exactly one v1-grammar predicate — `avg_session_cost_usd <op> <number> over <N> sessions` — and validate it before writing: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts success-signal --validate "<predicate>"` (non-zero exit → fix the predicate or leave the section empty; never write an invalid one). Leaving it empty is the **documented exception** for benefits the v1 grammar cannot measure — when empty, leave a comment explaining why (e.g. `<!-- benefit is qualitative: X -->`; proposal-act ignores comment lines there). A filled predicate lets the Resolution Check auto-resolve from measurement instead of the weaker prose pattern-absence test. (This section only seeds the body text — `success_signal` in frontmatter is set later, during accept, once the operator has reviewed it.)
 - Leave `## Operator Decision` blank — the operator fills that in.
 - Do NOT write bullet-point metadata (`- **Created:**`, etc.) — all metadata lives in the header lines / frontmatter only.

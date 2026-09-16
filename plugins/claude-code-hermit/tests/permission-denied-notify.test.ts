@@ -16,11 +16,11 @@ const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-her
 const write = (p: string, content: string) => fs.writeFileSync(p, content);
 // The technical assembly (tool + reason) lands maintainer-tier and routes by
 // the general tiered-disclosure policy: maintainer chat when configured,
-// primary chat on a `technical` profile without one, SHELL.md Findings on a
+// primary chat on a `technical` profile without one, watchdog event log on a
 // `non-technical` profile or whenever no channel is reachable (setupWorkdir
 // seeds a `## Findings` section).
-const readFindings = (dir: string) => fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf8');
-const findingsLines = (dir: string) => readFindings(dir).match(/^- \[maintainer alert suppressed\].*$/gm) ?? [];
+const readFindings = (dir: string) => (fs.existsSync(hermit(dir, 'state', 'watchdog-events.jsonl')) ? fs.readFileSync(hermit(dir, 'state', 'watchdog-events.jsonl'), 'utf8') : '');
+const findingsLines = (dir: string) => readFindings(dir).split('\n').filter(Boolean);
 const alertsFile = (dir: string) => hermit(dir, 'state', 'permission-denied-alerts.json');
 const readAlerts = (dir: string) => JSON.parse(fs.readFileSync(alertsFile(dir), 'utf8'));
 const writeAlerts = (dir: string, alerts: object) => {

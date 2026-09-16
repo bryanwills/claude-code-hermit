@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Core 1.4.0 is required for task records and resident startup.
+- HA startup uses `resident-start`; skill artifacts and progress notes attach to open task records.
+
 ## [0.4.15] - 2026-09-12
 
 ### Changed

@@ -1,3 +1,4 @@
+import { mutateTask } from '../scripts/lib/tasks';
 // bun test for scripts/report-export.ts — bundle assembly, redaction,
 // spool/retry/alert, and the CLI transport path (mock webhook via Bun.serve).
 //
@@ -86,7 +87,7 @@ function writeDoctorReport(hermitDir: string): void {
 
 function writeCostIndex(hermitDir: string, overrides: Json = {}): void {
   fs.writeFileSync(statePath(hermitDir, 'cost-index.json'), JSON.stringify({
-    version: 3,
+    version: 4,
     byte_offset: 0,
     total_cost_usd: 12.34,
     total_tokens: 500000,
@@ -114,29 +115,17 @@ function writeAlertStateFixture(hermitDir: string): void {
   }));
 }
 
-function writeSessionReport(hermitDir: string, id = 'S-002'): void {
-  const content = `---
-id: ${id}
-status: completed
-date: 2026-07-04
-duration: 45m
-cost_usd: 1.23
-tokens: 45000
-tags: [dev, telemetry]
-proposals_created: [PROP-001, PROP-002]
-task: TASK-TEXT-MARKER
-escalation: balanced
-operator_turns: 5
-closed_via: operator
----
-body text
-`;
-  fs.writeFileSync(path.join(hermitDir, 'sessions', `${id}-REPORT.md`), content);
+function writeSessionReport(hermitDir: string): void {
+  const record = mutateTask(hermitDir, 'open', undefined, { title: 'TASK-TEXT-MARKER', requester: 'operator', done: 'Verified' }, '') as { id: string };
+  const indexPath = statePath(hermitDir, 'cost-index.json');
+  const index = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, 'utf8')) : { version: 4 };
+  index.by_task = { [record.id]: { '2026-07-04': { cost: 1.23, tokens: 45000 } } };
+  fs.writeFileSync(indexPath, JSON.stringify(index));
+  fs.writeFileSync(path.join(hermitDir, 'sessions', 'S-002-REPORT.md'), '---\nid: S-002\n---\nFrozen archive');
 }
 
 function writeRuntimeFixture(hermitDir: string, overrides: Json = {}): void {
   fs.writeFileSync(statePath(hermitDir, 'runtime.json'), JSON.stringify({
-    session_state: 'idle',
     runtime_mode: 'tmux',
     tmux_session: 'TMUX-SESSION-MARKER',
     last_error: 'LAST-ERROR-MARKER',
@@ -187,10 +176,9 @@ describe('buildBundle: assembly', () => {
     expect(bundle.cost.all_time.total_cost_usd).toBe(12.34);
     expect(bundle.alerts.active).toBe(1);
     expect(bundle.alerts.suppressed).toBe(1);
-    expect(bundle.session.id).toBe('S-002');
-    expect(bundle.session.cost_usd).toBe(1.23);
-    expect(bundle.session.tokens).toBe(45000);
-    expect(bundle.session.proposals_created_count).toBe(2);
+    expect(bundle.tasks).toHaveLength(1);
+    expect(bundle.tasks[0].cost_usd).toBe(1.23);
+    expect(bundle.tasks[0].outcome).toBe('open');
     expect(bundle.runtime.paused).toBe(true);
     expect(bundle.runtime.watchdog.events_last_24h.nudge).toBe(1);
   }));
@@ -201,8 +189,8 @@ describe('buildBundle: assembly', () => {
     expect(bundle.doctor).toBeNull();
     expect(bundle.cost).toBeNull();
     expect(bundle.alerts).toEqual({ active: 0, suppressed: 0, total_ticks: 0 }); // alert-state.json absent = zero alerts, not corrupt
-    expect(bundle.session).toBeNull();
-    expect(bundle.runtime.session_state).toBe('idle');
+    expect(bundle.tasks).toEqual([]);
+    expect(bundle.runtime.execution_state).toBe('unknown');
   }));
 
   test('empty state dir → all-null sections, never throws', withHermitDir((hermitDir) => {
@@ -210,8 +198,8 @@ describe('buildBundle: assembly', () => {
     expect(bundle.doctor).toBeNull();
     expect(bundle.cost).toBeNull();
     expect(bundle.alerts).toEqual({ active: 0, suppressed: 0, total_ticks: 0 });
-    expect(bundle.session).toBeNull();
-    expect(bundle.runtime.session_state).toBeNull();
+    expect(bundle.tasks).toEqual([]);
+    expect(bundle.runtime.execution_state).toBe('unknown');
     expect(bundle.runtime.paused).toBe(false);
   }));
 

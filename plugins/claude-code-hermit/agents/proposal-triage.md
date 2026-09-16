@@ -115,7 +115,7 @@ closest_prop: <PROP-ID>
 aligned: false
 operator_excerpt: "<quoted line>"
 overlap_compiled: <filename>
-prior_discussion: <S-NNN: "<excerpt>">
+prior_discussion: <T-...: "<excerpt>">
 memory_ref: <filename>
 failed_condition: <repeated-pattern|meaningful-consequence|operator-actionable>
 origin: external-content

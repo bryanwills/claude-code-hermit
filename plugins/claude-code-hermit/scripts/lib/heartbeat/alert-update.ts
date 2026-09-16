@@ -6,27 +6,19 @@
 // Zero npm dependencies, Node stdlib only.
 //
 // Fail-safe contract: ANY validation failure or write failure leaves
-// alert-state.json byte-identical, appends one `Heartbeat: evaluation
-// indeterminate` line to SHELL.md Monitoring, and prints one stdout JSON line
+// alert-state.json byte-identical and prints one stdout JSON line
 // with heartbeat_result:"INDETERMINATE" and a reason. The caller (SKILL.md
 // step 5) echoes HEARTBEAT_INDETERMINATE (<reason>) instead of HEARTBEAT_OK.
 // Only a genuinely unparseable input payload exits 1; every other reject path
 // exits 0 (unchanged from before this refactor).
 //
-// On success, appends this tick's monitoring lines to SHELL.md itself and prints
-// one JSON line on stdout: how many landed, the operator notifications derived
-// from this tick's transitions, the self-evaluation entries that crossed a
-// proposal threshold, and the derived heartbeat_result — so side effects are
-// gated on a durable write. The lines were previously handed back for
-// the model to append one Edit at a time; nothing about that needed a model, and
-// each Edit was a full-context call. Sending stays with the caller, which owns the
-// channel.
+// On success, prints notifications, self-evaluation proposals and the verdict.
+// Sending stays with the caller after the durable state write.
 //
 // The eval JSON is read from stdin (not argv) so free-text alert content can't
 // break shell quoting.
 // Usage: bun heartbeat.ts alert-state <state-file-path>   # eval-json on stdin
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { runSelfEval, type SelfEvalProposal } from './self-eval';
 import {
@@ -36,7 +28,6 @@ import {
 } from '../alert-state';
 import { currentHHMM, todayYMD, resolveHermitNowMs } from '../time';
 import { readSettledConfig } from '../config-read';
-import { appendShellLine } from '../md-write';
 import { canonicalChecklistKeys, normalizeItemKey, normalizeCustomKey } from '../heartbeat-items';
 
 type Json = any;
@@ -115,24 +106,11 @@ function resolveFiring(entries: RawFiring[], canonical: Set<string> | null): Fir
   return out;
 }
 
-// Reject path: prints the INDETERMINATE stdout contract and appends one
-// Monitoring line, without touching alert-state.json. Exit code matches
+// Reject path: prints the INDETERMINATE contract without touching alert-state.json. Exit code matches
 // today's contract: 1 only for invalid-json (unparseable payload), 0 for
 // every other reason.
 function indeterminate(reason: string, exitCode: 0 | 1 = 0): never {
-  const config = readSettledConfig(stateDir);
-  const timezone = config.timezone ?? 'UTC';
-  const nowDate = new Date(resolveHermitNowMs());
-  const nowIso = nowDate.toISOString();
-  const hhmm = currentHHMM(timezone, nowDate) ?? nowIso.slice(11, 16);
-  const appendError = appendShellLine(
-    path.join(stateDir, 'sessions'),
-    'Monitoring',
-    `[${hhmm}] Heartbeat: evaluation indeterminate (${reason}) — state untouched.`,
-  );
   process.stdout.write(JSON.stringify({
-    appended: appendError ? 0 : 1,
-    ...(appendError ? { append_error: appendError } : {}),
     notifications: [],
     self_eval_proposals: [],
     heartbeat_result: 'INDETERMINATE',
@@ -202,7 +180,7 @@ function apply(payloadJson: string): void {
   // Dropped silently — no monitoring line, no notification, no resolution ping:
   // those entries carry `detail` but neither `text` nor `suppressed`, so aging
   // them through classifyTick emits a literal "resolved — undefined" into
-  // SHELL.md. doctor-check.ts owns this prefix now, in its own file.
+  // alert state. doctor-check.ts owns this prefix now, in its own file.
   for (const k of Object.keys(classifiable)) {
     if (k.startsWith(DOCTOR_PREFIX)) delete classifiable[k];
   }
@@ -224,7 +202,7 @@ function apply(payloadJson: string): void {
 
   // Structured keys' text bakes in a raw PROP-NNN/MP-… id, which must never
   // reach the operator channel (house channel-voice rule) — silence their
-  // first-observation notification. SHELL.md monitoring lines are unaffected.
+  // first-observation notification. Internal diagnostic lines are unaffected.
   const silentOnNewKeys = new Set(structuredItems.map(i => i.key));
 
   const result = classifyTick({
@@ -245,7 +223,7 @@ function apply(payloadJson: string): void {
   // so classifyTick emits nothing and the digest gate is off by design — the operator
   // is never told their pending questions became unreadable (#764). Notify directly,
   // once per day, for as long as the read keeps failing. Channel-voice split: the
-  // operator gets plain language, the parse error goes to the SHELL.md monitoring line.
+  // operator gets plain language; parser details stay in internal diagnostic lines.
   const shouldNotifyStructuredFailure =
     hasStructuredReadFailure && state.structured_read_failure_notified_date !== today;
   if (shouldNotifyStructuredFailure) {
@@ -284,13 +262,10 @@ function apply(payloadJson: string): void {
   let selfEvalProposals: SelfEvalProposal[] = [];
   if (typeof state.total_ticks === 'number' && state.total_ticks % 20 === 0) {
     try {
-      let shell = '';
-      try { shell = fs.readFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), 'utf-8'); } catch { /* no history */ }
       const evaluated = runSelfEval({
         stateDir,
         prevSelfEval: self_eval,
         alerts,
-        shell,
         today,
       });
       self_eval = evaluated.self_eval;
@@ -313,22 +288,7 @@ function apply(payloadJson: string): void {
   const wrote = writeAlertState(stateFile, updated);
   if (!wrote) indeterminate('write-failed'); // fail-safe: no durable write → emit no side effects
 
-  // Ordered, after the durable write. Every failure mode here is file-level (SHELL.md
-  // unreadable, no ## Monitoring section, write refused), so the first error is the
-  // whole story and retrying the remaining lines would only repeat it. Reported
-  // in-band rather than thrown: alert-state.json is already committed, and the
-  // notifications below matter more than the audit trail.
-  let appended = 0;
-  let appendError: string | null = null;
-  for (const line of result.monitoringLines) {
-    appendError = appendShellLine(path.join(stateDir, 'sessions'), 'Monitoring', line);
-    if (appendError) break;
-    appended++;
-  }
-
   process.stdout.write(JSON.stringify({
-    appended,
-    ...(appendError ? { append_error: appendError } : {}),
     notifications: result.notifications,
     self_eval_proposals: selfEvalProposals,
     // Never OK when a structured pending decision couldn't be verified this tick.

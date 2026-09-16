@@ -1,17 +1,13 @@
 // Tests for the `## <heading>` section grammar in lib/md-write.ts — the single
-// parser every SHELL.md reader and writer goes through. Pure functions, so
+// parser shared by markdown readers and writers. Pure functions, so
 // in-process import is safe (no load-time path resolution).
 //
 // The anchoring cases are the point: before consolidation, six sites located
 // sections with `indexOf('## Task')` or an unanchored `/## Task\n/`, and
 // `'### Task'.indexOf('## Task') === 1` — a `### Task` sub-heading anywhere
-// above the real section hijacked the read, including session-start injection.
+// above the real section hijacked the read, including context injection.
 
 import { describe, test, expect } from 'bun:test';
-import fs from 'node:fs';
-import path from 'node:path';
-import { runScript } from './helpers/run';
-import { setupWorkdir } from './helpers/workdir';
 import {
   findSection,
   extractSection,
@@ -186,93 +182,6 @@ describe('replaceSectionInPlace', () => {
     const out = replaceSectionInPlace(md, 'Task', '\nreplaced\n');
     expect(out).toContain('### Task\nsub body');
     expect(extractSection(out, 'Task')).toBe('replaced\n');
-  });
-});
-
-// End-to-end on the surface that matters most: session-start injection. A model
-// writing a `### Blockers` sub-heading inside the Task body used to make the
-// injected "## Blockers" carry that sub-heading's text instead of the real one.
-describe('startup-context injection is not hijackable by a ### sub-heading', () => {
-  test('injects the real ## Blockers body, not the decoy above it', async () => {
-    const wd = setupWorkdir();
-    try {
-      fs.writeFileSync(path.join(wd.dir, '.claude-code-hermit', 'sessions', 'SHELL.md'), [
-        '# Active Session',
-        '',
-        '## Session Info',
-        '- **ID:** S-001',
-        '',
-        '## Task',
-        'Ship the parser consolidation.',
-        '### Blockers',
-        'DECOY-BLOCKER from a task sub-heading',
-        '',
-        '## Progress Log',
-        '[09:00] Started',
-        '',
-        '## Blockers',
-        'REAL-BLOCKER waiting on review',
-        '',
-        '## Session Summary',
-        '',
-      ].join('\n'));
-
-      const res = await runScript('startup-context.ts', {
-        stdin: '{}',
-        env: { AGENT_DIR: path.join(wd.dir, '.claude-code-hermit'), HERMIT_RESIDENT: '1' },
-      });
-
-      // Anchored: the decoy legitimately appears inside the injected Task body,
-      // and `'### Blockers'` ends with the substring `'## Blockers'` — the very
-      // trap this consolidation removes. Only the emitted `## Blockers` heading
-      // (at a line start) is under test.
-      expect(res.stdout).toMatch(/^## Blockers\nREAL-BLOCKER waiting on review$/m);
-      expect(res.stdout).not.toMatch(/^## Blockers\nDECOY-BLOCKER/m);
-    } finally {
-      wd.cleanup();
-    }
-  });
-});
-
-// Content under a retained placeholder is the steady state after any idle
-// reset, not an edge case — see stripPlaceholders' doc comment in md-write.ts.
-describe('startup-context sees content below a retained placeholder', () => {
-  test('injects Task and Progress Log content written under the template comments', async () => {
-    const wd = setupWorkdir();
-    try {
-      fs.writeFileSync(path.join(wd.dir, '.claude-code-hermit', 'sessions', 'SHELL.md'), [
-        '# Active Session',
-        '',
-        '## Session Info',
-        '- **ID:** S-001',
-        '',
-        '## Task',
-        '<!-- Awaiting next task -->',
-        'REAL-TASK ship the thing',
-        '',
-        '## Progress Log',
-        '<!-- Primary record of work -->',
-        '<!-- Format: [HH:MM] Did X — result/outcome -->',
-        '[09:00] REAL-ENTRY started',
-        '',
-        '## Blockers',
-        '',
-        '## Session Summary',
-        '',
-      ].join('\n'));
-
-      const res = await runScript('startup-context.ts', {
-        stdin: '{}',
-        env: { AGENT_DIR: path.join(wd.dir, '.claude-code-hermit'), HERMIT_RESIDENT: '1' },
-      });
-
-      expect(res.stdout).toContain('REAL-TASK ship the thing');
-      expect(res.stdout).toContain('[09:00] REAL-ENTRY started');
-      expect(res.stdout).not.toContain('Awaiting next task');
-      expect(res.stdout).not.toContain('has no actionable content');
-    } finally {
-      wd.cleanup();
-    }
   });
 });
 

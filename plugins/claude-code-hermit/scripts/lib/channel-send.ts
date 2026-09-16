@@ -19,7 +19,7 @@ import { logMessage, isLoggingEnabled } from './channel-log';
 import { settleConfig, readConfigRaw, readSettledConfig } from './config-read';
 import { readChannelToken } from './channel-token';
 import { recordChannelHealth } from './channel-health';
-import { appendShellLine } from './md-write';
+import { appendJsonlLine } from './append-jsonl';
 
 type Json = any;
 
@@ -30,8 +30,7 @@ export interface SendResult {
   // Set by sendOperatorNotice on the maintainer leg: where the tiered
   // resolution actually landed. Absent on a plain sendToChannel call.
   route?: 'client' | 'maintainer_channel' | 'findings';
-  // True only when route === 'findings' — the notice was written to SHELL.md
-  // Findings instead of crossing a channel.
+  // True only when route === 'findings' — the notice was written to state/watchdog-events.jsonl instead of crossing a channel.
   suppressed?: boolean;
   // Set by sendOperatorNotice on the maintainer leg: did the notice reach its
   // intended destination — a live chat, OR the intended Findings home
@@ -193,7 +192,7 @@ export async function sendToChannel(hermitDir: string, text: string, opts: SendO
  * primary chat; `maintainer` carries technical/spend/ops detail whose `fallback`
  * decides where it goes when no `maintainer_channel_id` is configured
  * (`'client'` = the primary chat for technical profiles, `'primary'` = the
- * primary chat for every profile, `'findings'` = suppressed to SHELL.md).
+ * primary chat for every profile, `'findings'` = suppressed to state/watchdog-events.jsonl).
  * A configured but unreachable maintainer destination always fails closed to
  * Findings. `sensitive` keeps the maintainer text out of the episodic channel log.
  */
@@ -208,14 +207,16 @@ export interface OperatorNoticeResult {
   maintainer?: SendResult;
 }
 
-const FINDINGS_MAX = 300;
-
 export function appendMaintainerFindings(hermitDir: string, text: string): string | null {
-  return appendShellLine(
-    path.join(hermitDir, 'sessions'),
-    'Findings',
-    `- [maintainer alert suppressed] ${text.slice(0, FINDINGS_MAX)}`,
-  );
+  try {
+    return appendJsonlLine(path.join(hermitDir, 'state', 'watchdog-events.jsonl'), JSON.stringify({
+      ts: new Date().toISOString(),
+      action: 'maintainer-notice',
+      reason: text,
+    }));
+  } catch (error: any) {
+    return error.message;
+  }
 }
 
 /**

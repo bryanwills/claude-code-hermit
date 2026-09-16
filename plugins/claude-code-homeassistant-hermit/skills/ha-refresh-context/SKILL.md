@@ -25,7 +25,7 @@ allowed-tools:
 - `.claude-code-hermit/raw/snapshot-ha-normalized-latest.json` — processed entity/service index (fixed name)
 - `.claude-code-hermit/raw/audit-ha-context-refresh-<date>.md` + `audit-ha-context-refresh-latest.md` — audit entry
 
-**House profile (first run or when profile changes):** if new areas, domains, or significant entity changes are observed in step 5, write a durable house profile summary to `.claude-code-hermit/compiled/context-house-profile-<YYYY-MM-DD>.md` with frontmatter `type: context`, `title: "House Profile — <date>"`, `created: <ISO8601>`, `session: <session_id or null>`, `tags: [ha-context, house-profile, foundational]`, `injection_stub: "House profile: <N> areas, <M> entities, <K> automations. Read compiled/context-house-profile-<date>.md for detail."` (fill in the real counts). Append `[[compiled/context-house-profile-<date>]]` to SHELL.md `### Artifacts produced this session` under `## Monitoring`.
+**House profile (first run or when profile changes):** if new areas, domains, or significant entity changes are observed in step 5, write a durable house profile summary to `.claude-code-hermit/compiled/context-house-profile-<YYYY-MM-DD>.md` with frontmatter `type: context`, `title: "House Profile: <date>"`, `created: <ISO8601>`, `task: <T-... for the open record in this turn; omit this field otherwise>`, `tags: [ha-context, house-profile, foundational]`, `injection_stub: "House profile: <N> areas, <M> entities, <K> automations. Read compiled/context-house-profile-<date>.md for detail."` (fill in the real counts). Inside an open record's turn, pipe `[[compiled/context-house-profile-<date>]]` into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`. Otherwise skip the note.
 
 ## When to Use
 

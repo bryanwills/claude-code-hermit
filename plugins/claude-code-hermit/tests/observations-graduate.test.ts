@@ -1,6 +1,6 @@
 // `observations.ts graduate` — the promotion rules reflect step 3b used to walk by
 // hand over the raw ledger. The three that decide whether a pattern becomes a
-// candidate are the ones worth pinning: distinct sessions behind it, at least one
+// candidate are the ones worth pinning: distinct local dates behind it, at least one
 // row newer than the graduation cursor, and origin inherited from any single
 // external-content row.
 //
@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { runPinnedScript } from './helpers/run';
+import { resolveSessionId } from '../scripts/lib/observations';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('hermit-graduate-');
@@ -26,12 +27,12 @@ const LEDGER = [
   // Only the shared sentinel behind it — never a candidate.
   row({ ts: FRESH, pattern: 'ghost pattern', session_id: 'unknown' }),
   row({ ts: FRESH, pattern: 'ghost pattern', session_id: 'unknown' }),
-  // Real sessions, but nothing newer than the cursor.
-  row({ ts: STALE, pattern: 'already promoted', session_id: 'S-001' }),
-  row({ ts: STALE, pattern: 'already promoted', session_id: 'S-002' }),
-  // Two sessions, one fresh row, one of them external-content.
-  row({ ts: STALE, pattern: 'flaky deploy step', session_id: 'S-001', origin: 'own-work' }),
-  row({ ts: FRESH, pattern: 'flaky deploy step', session_id: 'S-002', origin: 'external-content' }),
+  // Real dates, but nothing newer than the cursor.
+  row({ ts: STALE, pattern: 'already promoted', session_id: '2026-06-01' }),
+  row({ ts: STALE, pattern: 'already promoted', session_id: '2026-07-05' }),
+  // Two dates, one fresh row, one of them external-content.
+  row({ ts: STALE, pattern: 'flaky deploy step', session_id: '2026-06-01', origin: 'own-work' }),
+  row({ ts: FRESH, pattern: 'flaky deploy step', session_id: '2026-07-05', origin: 'external-content' }),
   // The unknown sentinel is dropped from the session tally, not from the row count.
   row({ ts: FRESH, pattern: 'flaky deploy step', session_id: 'unknown' }),
   'not json at all',
@@ -57,9 +58,9 @@ async function graduate(stateDir: string, args: string[] = []) {
 }
 
 describe('observations.ts graduate', () => {
-  test('promotes only the fresh multi-session pattern, with the aggregated origin', async () => {
+  test('promotes only the fresh multi-date pattern, with the aggregated origin', async () => {
     expect(await graduate(fixture({ ledger: LEDGER }))).toEqual([
-      { pattern: 'flaky deploy step', sessions: ['S-001', 'S-002'], origin: 'external-content', rows: 3 },
+      { pattern: 'flaky deploy step', sessions: ['2026-06-01', '2026-07-05'], origin: 'external-content', rows: 3 },
     ]);
   });
 
@@ -67,8 +68,8 @@ describe('observations.ts graduate', () => {
     const stateDir = fixture({ ledger: LEDGER });
     expect(await graduate(stateDir, ['--cursor', '2026-05-01T00:00:00Z']))
       .toEqual([
-        { pattern: 'already promoted', sessions: ['S-001', 'S-002'], origin: 'own-work', rows: 2 },
-        { pattern: 'flaky deploy step', sessions: ['S-001', 'S-002'], origin: 'external-content', rows: 3 },
+        { pattern: 'already promoted', sessions: ['2026-06-01', '2026-07-05'], origin: 'own-work', rows: 2 },
+        { pattern: 'flaky deploy step', sessions: ['2026-06-01', '2026-07-05'], origin: 'external-content', rows: 3 },
       ]);
     expect(await graduate(stateDir, ['--cursor', '2026-08-01T00:00:00Z'])).toEqual([]);
   });
@@ -89,9 +90,20 @@ describe('observations.ts graduate', () => {
 
   test('skill-preference-applied rows never promote their own pattern', async () => {
     const ledger = [
-      row({ ts: FRESH, pattern: 'skill-preference:commit', session_id: 'S-001', source: 'skill-preference-applied' }),
-      row({ ts: FRESH, pattern: 'skill-preference:commit', session_id: 'S-002', source: 'skill-preference-applied' }),
+      row({ ts: FRESH, pattern: 'skill-preference:commit', session_id: '2026-06-01', source: 'skill-preference-applied' }),
+      row({ ts: FRESH, pattern: 'skill-preference:commit', session_id: '2026-07-05', source: 'skill-preference-applied' }),
     ].join('\n') + '\n';
     expect(await graduate(fixture({ ledger }))).toEqual([]);
+  });
+});
+
+describe('observation local-date identity', () => {
+  test('the configured timezone supplies the observation date without runtime state', () => {
+    const stateDir = fixture({ ledger: '' });
+    fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify({ timezone: 'Pacific/Kiritimati' }));
+    const expected = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Pacific/Kiritimati', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    expect(resolveSessionId(stateDir)).toBe(expected);
   });
 });

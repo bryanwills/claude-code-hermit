@@ -41,8 +41,8 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('default, typical answer');
   });
 
-  test("'Create a session task' option present", () => {
-    expect(skill).toContain('Create a session task');
+  test("'Queue a task' option present", () => {
+    expect(skill).toContain('Queue a task');
   });
 
   test("'I'll handle it manually' option present", () => {
@@ -73,7 +73,7 @@ describe('proposal-act accept flow', () => {
     expect(line).toContain('## References');
   });
 
-  test('session task always re-verifies the proposal against the current tree', () => {
+  test('queued task always re-verifies the proposal against the current tree', () => {
     const line = lineContaining('re-verify its ## References');
     expect(line).toContain('**(always, first step)**');
     expect(line).toContain('.claude-code-hermit/proposals/PROP-NNN-*.md');
@@ -108,7 +108,7 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('never a shell redirect');
   });
 
-  // Quality-gate (e.5) delegation + NEXT-TASK template assertions.
+  // Quality-gate (e.5) delegation + queued record assertions.
   // The rubric used to be prose here and in the dispatched-subagent prompt, and
   // the two copies diverged; these now guard that the skill *asks* the verb
   // rather than deciding, on every path. Rubric behavior itself is covered by
@@ -129,7 +129,7 @@ describe('proposal-act accept flow', () => {
     expect(skill).toMatch(/`RUN`.*\/simplify/);
   });
 
-  test('NEXT-TASK.md gating still keys on tier != budget', () => {
+  test('queued record gating still keys on tier != budget', () => {
     expect(skill).toMatch(/tier.*budget|budget.*tier/);
   });
 
@@ -144,7 +144,7 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('/simplify with its focus_files as the target');
   });
 
-  test('NEXT-TASK template defers the gate call to the future session', () => {
+  test('queued record defers the gate call to the future session', () => {
     // The queued path cannot run the verb at queue time — no implementation has
     // happened yet, so there is no diff to classify. It hands the call forward.
     expect(skill).toContain('Before committing, run: bun');
@@ -161,7 +161,7 @@ describe('PROP-017 channel-safe approvals', () => {
 
   test('step 4 channel branch queues the three option labels', () => {
     expect(skill).toContain('"implement now"');
-    expect(skill).toContain('"session task"');
+    expect(skill).toContain('"queued task"');
     expect(skill).toContain('"manual"');
   });
 
@@ -199,7 +199,7 @@ describe('step 3c: success_signal', () => {
     expect(skill).toContain('Never block accept');
   });
 
-  test('step 3c: warns on invalid predicate (logs to SHELL.md Findings)', () => {
+  test('step 3c: warns on invalid predicate', () => {
     expect(skill).toContain('success_signal ignored');
   });
 });

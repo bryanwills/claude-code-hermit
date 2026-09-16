@@ -12,7 +12,7 @@ Standing work is what the hermit does without being asked in the moment: routine
 - Routine outcomes: `bun <plugin_root>/scripts/routines.ts health .claude-code-hermit` (JSON; add `--days N` for a longer window). Use `last_fire`, `failure_total`, `last_precheck_error`, `open_attempt`.
 - Watches: `Read state/monitors.runtime.json` for id, description, source, class, started_at.
 - Roles: the `[role` lines already in this turn's context. Hermit-wide ones always apply; a pinned `[role <key>:<chat_id>]` line applies only to that chat (`SKILL.md` § 1b).
-- Current activity: `session_state` in `state/runtime.json` and the Task line of `sessions/SHELL.md`.
+- Current activity: the open-record digest and its execution observation.
 - Health evidence: `Read state/doctor-report.json` only for the "anything to deal with" and "what can you access" shapes. Do not run `doctor-check.ts` from this intent; a live check is the relayed `!doctor` command, which the operator sends.
 
 Never `tail` `state/routine-metrics.jsonl`, the cost log, or the channel log. A field none of these sources records is unknown; say so instead of guessing.

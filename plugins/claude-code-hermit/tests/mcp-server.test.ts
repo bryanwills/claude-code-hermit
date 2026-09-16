@@ -1,3 +1,4 @@
+import { mutateTask } from '../scripts/lib/tasks';
 // Interactive stdio coverage for scripts/mcp-server.ts. runScript() waits for
 // exit on a finite stdin buffer, so these tests drive Bun.spawn with a piped
 // stdin and wait for the matching-id reply line (same arrival-polling pattern
@@ -334,7 +335,6 @@ describe('list_hermits + get_status', () => {
     writeConfig(wd.dir, { agent_name: 'FixtureBot' });
     writeJson(hermit(wd.dir, 'state', 'runtime.json'), {
       runtime_mode: 'tmux',
-      session_state: 'in_progress',
       shutdown_completed_at: null,
     });
     const status = {
@@ -349,6 +349,7 @@ describe('list_hermits + get_status', () => {
       blockers: null,
     };
     writeAged(hermit(wd.dir, 'sessions', '.status.json'), 15, JSON.stringify(status));
+    writeAged(hermit(wd.dir, 'state', '.heartbeat'), 15, '');
 
     const s = McpSession.start(['--roots', wd.dir]);
     try {
@@ -367,12 +368,10 @@ describe('list_hermits + get_status', () => {
       expect(st.runtime).toEqual({
         kind: 'ok',
         runtime_mode: 'tmux',
-        session_state: 'in_progress',
         shutdown_completed_at: null,
       });
-      expect(st.status.session_id).toBe('S-007');
-      expect(st.status.task).toBe('ship the surface');
-      expect(st.status.updated).toBe('2026-09-01T12:00:00.000Z');
+      expect(st.status.tasks).toEqual([]);
+      expect(st.status.execution.state).toBe('unknown');
       expect(st.paused).toBe(false);
       expect(st.resident).toBeNull();
     } finally {
@@ -394,7 +393,7 @@ describe('list_hermits + get_status', () => {
 
       const st = toolBody(await callTool(s, 'get_status', { root: wd.dir }));
       expect(st.runtime).toEqual({ kind: 'missing' });
-      expect(st.status).toBeNull();
+      expect(st.status.tasks).toEqual([]);
       expect(st.resident).toBeNull();
       expect(st.liveness_age_secs).toBeNull();
     } finally {
@@ -442,7 +441,7 @@ describe('list_hermits + get_status', () => {
     const { ident } = writeResident(wd.dir, {
       status: 'idle',
       statusUpdatedAt: 1_700_000_000_000,
-    }, { session_state: 'in_progress' });
+    }, {});
     const s = McpSession.start(['--roots', wd.dir]);
     try {
       await handshake(s);
@@ -603,7 +602,7 @@ describe('get_health, get_brief, get_version', () => {
     try {
       await handshake(s);
       const b = toolBody(await callTool(s, 'get_brief', { root: wd.dir }));
-      expect(b.status.session_id).toBe('S-004');
+      expect(b.status.tasks).toEqual([]);
       expect(b.last_brief.text).toBe('Overnight: shipped the hatch.');
       expect(b.last_brief.generated_at).toBe('2026-09-01T07:00:00.000Z');
       expect(b.last_brief.truncated).toBe(false);
@@ -613,7 +612,7 @@ describe('get_health, get_brief, get_version', () => {
     }
   });
 
-  test('brief falls back to numeric latest report (S-9 < S-10) and UTF-8-safe 16 KiB cap', async () => {
+  test('brief uses task records, ignores frozen reports and caps UTF-8 text', async () => {
     const wd = setupWorkdir();
     tmpdirs.push(wd.dir);
     fs.writeFileSync(hermit(wd.dir, 'sessions', 'S-9-REPORT.md'), '---\nid: S-9\nstatus: completed\n---\nNine.\n');
@@ -622,13 +621,14 @@ describe('get_health, get_brief, get_version', () => {
       hermit(wd.dir, 'sessions', 'S-10-REPORT.md'),
       `---\nid: S-10\nstatus: completed\ntask: later\n---\n${body}\n`,
     );
+    mutateTask(hermit(wd.dir), 'open', undefined, { title: body, requester: 'operator', done: 'Verified' }, '');
     const s = McpSession.start(['--roots', wd.dir]);
     try {
       await handshake(s);
       const b = toolBody(await callTool(s, 'get_brief', { root: wd.dir }));
       expect(b.last_brief).toBeNull();
-      expect(b.report.id).toBe('S-10');
-      expect(b.report.frontmatter.task).toBe('later');
+      expect(b.report.source_path).toContain('/tasks/T-');
+      expect(b.report.outcome).toBe('open');
       expect(b.report.truncated).toBe(true);
       expect(Buffer.byteLength(b.report.summary, 'utf8')).toBeLessThanOrEqual(16 * 1024);
       expect(b.report.summary.includes('\uFFFD')).toBe(false);

@@ -48,9 +48,9 @@ Capture the canonical `deploy-id`, `server-id`, and `site-id` — Step 4 needs t
 
 ### Step 4 — Watch via the hermit watch registry (non-blocking)
 
-Do **not** poll in a foreground Bash call: a real deploy can outlast the Bash tool timeout, which would kill the wait and skip the incident. Arm a hermit watch instead — it runs detached, notifies you on each status change and on the terminal state at zero token cost while quiet, and is tracked in `monitors.runtime.json` (visible via `/claude-code-hermit:watch status`, cancellable via `/claude-code-hermit:watch stop`, and cleaned up at session-close).
+Do **not** poll in a foreground Bash call: a real deploy can outlast the Bash tool timeout, which would kill the wait and skip the incident. Arm a hermit watch instead: it runs detached, notifies you on each status change and on the terminal state at zero token cost while quiet, and is tracked in `monitors.runtime.json` (visible via `/claude-code-hermit:watch status`, cancellable via `/claude-code-hermit:watch stop`, and cleaned up when the watch finishes or is stopped).
 
-**Requires an active hermit session** — `/claude-code-hermit:watch` refuses without one. If there is no session, ask the operator to run `/claude-code-hermit:session` first (or, as a fallback, run `deploy-status` manually).
+**Requires a running resident.** If the resident is unavailable, run `deploy-status` manually.
 
 Resolve `${CLAUDE_PLUGIN_ROOT}` to its **absolute path now** (at skill-execution time): the variable is NOT available inside the watch subprocess. Then arm the watch by invoking `/claude-code-hermit:watch` with this command (substitute the absolute path and the three IDs):
 

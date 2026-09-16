@@ -27,39 +27,15 @@ function withHermitDir(fn: (hermitDir: string) => Promise<void>) {
   };
 }
 
-function writeSessionReport(hermitDir: string, id: string, opts: {
-  status?: string; artifacts?: string[];
-}): void {
-  const now = new Date().toISOString();
-  const status = opts.status ?? 'completed';
-  const artifactsBody = (opts.artifacts ?? []).join('\n');
-  const content = `---
-id: ${id}
-status: ${status}
-date: ${now}
-duration: 30m
-cost_usd: 1.00
-tokens: 1000
-tags: []
-proposals_created: []
-task: "Test task"
-escalation: balanced
-closed_via: operator
----
-# Session Report: ${id}
-
-## Overview
-Test task
-
-## Completed
-Did the thing.
-
-## Artifacts
-${artifactsBody}
-
-## Blockers
-`;
-  fs.writeFileSync(path.join(hermitDir, 'sessions', `${id}-REPORT.md`), content);
+async function writeCompletedTask(hermitDir: string, title: string): Promise<void> {
+  const run = (verb: string, args: string[], stdin = '') => runScript('task.ts', {
+    args: [verb, hermitDir, ...args], stdin, env: { AGENT_DIR: hermitDir },
+  });
+  const opened = await run('open', ['--title', title, '--requester', 'operator', '--done', 'Verified']);
+  expect(opened.exitCode).toBe(0);
+  const id = JSON.parse(opened.stdout).id;
+  expect((await run('block', [id, '--result-stdin'], 'Ready')).exitCode).toBe(0);
+  expect((await run('close', [id, '--by', 'confirmed', '--actor', 'operator', '--result-rev', '1', '--reason-stdin'], 'Accepted')).exitCode).toBe(0);
 }
 
 function readReview(hermitDir: string): { fm: Record<string, any>; body: string } {
@@ -70,58 +46,33 @@ function readReview(hermitDir: string): { fm: Record<string, any>; body: string 
   return { fm, body };
 }
 
-describe('weekly-review.ts — deliverables', () => {
-  test('enumerates ## Artifacts bullets into delivered/delivered_count', withHermitDir(async (hermitDir) => {
-    writeSessionReport(hermitDir, 'S-001', {
-      artifacts: ['- [[compiled/audit-foo-2026-07-09]] — investigated the login bug'],
-    });
-    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
-    expect(r.exitCode).toBe(0);
-    const { fm, body } = readReview(hermitDir);
-    expect(fm.delivered_count).toBe('1');
-    expect(fm.delivered).toEqual(['investigated the login bug']);
-    expect(body).toContain('### Delivered');
-    expect(body).toContain('investigated the login bug');
+describe('weekly-review task records', () => {
+  test('completed records are delivered and include person and duty sections', withHermitDir(async dir => {
+    await writeCompletedTask(dir, 'Investigated the login bug');
+    const result = await runScript('weekly-review.ts', { args: [dir] });
+    expect(result.exitCode).toBe(0);
+    const { fm, body } = readReview(dir);
+    expect(fm.tasks_count).toBe('1');
+    expect(fm.delivered).toEqual(['Investigated the login bug']);
+    expect(body).toContain('### By person');
+    expect(body).toContain('### Duties');
   }));
-
-  test('falls back to the wikilink slug when a bullet has no annotation', withHermitDir(async (hermitDir) => {
-    writeSessionReport(hermitDir, 'S-001', {
-      artifacts: ['- [[compiled/audit-foo-2026-07-09]]'],
-    });
-    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
-    expect(r.exitCode).toBe(0);
-    const { fm } = readReview(hermitDir);
-    expect(fm.delivered).toEqual(['audit-foo-2026-07-09']);
-  }));
-
-  test('omits Delivered section and zeroes the count when no artifacts were produced', withHermitDir(async (hermitDir) => {
-    writeSessionReport(hermitDir, 'S-001', { artifacts: [] });
-    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
-    expect(r.exitCode).toBe(0);
-    const { fm, body } = readReview(hermitDir);
-    expect(fm.delivered_count).toBe('0');
+  test('frozen reports do not count as delivered work', withHermitDir(async dir => {
+    fs.writeFileSync(path.join(dir, 'sessions/S-001-REPORT.md'), '---\nid: S-001\nstatus: completed\n---\nOld work');
+    expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
+    const { fm, body } = readReview(dir);
+    expect(fm.tasks_count).toBe('0');
     expect(fm.delivered).toEqual([]);
     expect(body).not.toContain('### Delivered');
   }));
-
-  test('neutralizes commas in annotations so the frontmatter array parser does not split mid-annotation', withHermitDir(async (hermitDir) => {
-    writeSessionReport(hermitDir, 'S-001', {
-      artifacts: ['- [[compiled/audit-foo-2026-07-09]] — investigated X, wrote Y'],
-    });
-    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
-    expect(r.exitCode).toBe(0);
-    const { fm } = readReview(hermitDir);
-    // One entry, not two — the comma must not have been read as an array separator.
-    expect(fm.delivered.length).toBe(1);
-    expect(fm.delivered[0]).toContain('investigated X; wrote Y');
+  test('neutralizes commas in task titles for frontmatter arrays', withHermitDir(async dir => {
+    await writeCompletedTask(dir, 'Investigated X, wrote Y');
+    expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
+    expect(readReview(dir).fm.delivered).toEqual(['Investigated X; wrote Y']);
   }));
-
-  test('emits open_loops_count in frontmatter for the "Waiting on you" channel section', withHermitDir(async (hermitDir) => {
-    writeSessionReport(hermitDir, 'S-001', { artifacts: [] });
-    const r = await runScript('weekly-review.ts', { args: [hermitDir] });
-    expect(r.exitCode).toBe(0);
-    const { fm } = readReview(hermitDir);
-    expect(fm.open_loops_count).toBe('0');
+  test('keeps open-loop counts', withHermitDir(async dir => {
+    expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
+    expect(readReview(dir).fm.open_loops_count).toBe('0');
   }));
 });
 

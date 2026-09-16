@@ -7,16 +7,18 @@ async function main(): Promise<void> {
   if (!dirArg || !assertStateDir(dirArg)) throw new Error('invalid-state-dir');
   const dir = pinStateDirOrExit(dirArg, 'task');
   const allowed: Record<string, string[]> = {
-    open: ['title', 'requester', 'done', 'requester-name', 'origin-message-id', 'due', 'conversation', 'card', 'owner', 'approver', 'dedupe-key', 'claim'],
-    note: ['actor', 'due', 'card', 'decision', 'approval', 'done', 'clear-waiting'],
+    open: ['note-stdin', 'title', 'requester', 'done', 'requester-name', 'origin-message-id', 'due', 'conversation', 'card', 'owner', 'approver', 'dedupe-key', 'claim', 'check'],
+    note: ['actor', 'due', 'card', 'decision', 'approval', 'done', 'clear-waiting', 'check'],
+    lesson: ['actor'], 'check-snapshot': [],
     block: ['waiting-on', 'result-stdin', 'status-line', 'next'],
     close: ['by', 'actor', 'result-rev', 'reason-stdin', 'claim'], cancel: ['actor', 'reason-stdin'],
-    list: ['open', 'all', 'conversation', 'requester', 'handle', 'id', 'dedupe-key', 'json'], standup: ['json', 'days'],
+    list: ['open', 'all', 'conversation', 'requester', 'handle', 'id', 'dedupe-key', 'json', 'owner', 'with-check', 'limit'], standup: ['json', 'days'],
   };
   if (!allowed[verb]) throw new Error('invalid-verb');
-  const id = ['note', 'block', 'close', 'cancel'].includes(verb) ? args.shift() : undefined;
-  if (['note', 'block', 'close', 'cancel'].includes(verb) && (!id || !TASK_ID.test(id))) throw new Error('invalid-id');
-  const booleans = new Set(['decision', 'clear-waiting', 'result-stdin', 'reason-stdin', 'open', 'all', 'json']);
+  const requiresId = ['note', 'block', 'close', 'cancel', 'lesson', 'check-snapshot'].includes(verb);
+  const id = requiresId ? args.shift() : undefined;
+  if (requiresId && (!id || !TASK_ID.test(id))) throw new Error('invalid-id');
+  const booleans = new Set(['note-stdin', 'decision', 'clear-waiting', 'result-stdin', 'reason-stdin', 'open', 'all', 'json', 'with-check']);
   const flags: TaskFlags = {};
   while (args.length) {
     const token = args.shift()!;
@@ -40,7 +42,7 @@ async function main(): Promise<void> {
     if (!Number.isFinite(days) || days <= 0) throw new Error('invalid-days');
     result = taskStandup(dir, days);
   } else {
-    const input = verb === 'note' || flags['result-stdin'] || flags['reason-stdin'] ? await Bun.stdin.text() : '';
+    const input = verb === 'note' || verb === 'lesson' || flags['note-stdin'] || flags['result-stdin'] || flags['reason-stdin'] ? await Bun.stdin.text() : '';
     result = mutateTask(dir, verb, id, flags, input);
   }
   console.log(JSON.stringify(result));

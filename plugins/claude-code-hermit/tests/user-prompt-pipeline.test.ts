@@ -60,7 +60,7 @@ function setupChannelWorkdir(channelExtra: Record<string, unknown> = {}): Workdi
 function writeRuntime(wd: Workdir, patch: Record<string, unknown>): void {
   const p = hermit(wd.dir, 'state', 'runtime.json');
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify({ version: 1, session_state: 'in_progress', ...patch }));
+  fs.writeFileSync(p, JSON.stringify({ version: 1, ...patch }));
 }
 
 // A shutdown in flight, plus the pane facts a harness command needs — so the
@@ -706,6 +706,40 @@ describe('conversation commands', () => {
       const result = await run(wd, body, 'http://127.0.0.1:1');
       expect(result.stdout).toContain('[bound conversation');
       expect(result.stdout).not.toContain('[conversation command:');
+    }
+  });
+});
+
+
+describe('resident task thread admission', () => {
+  for (const scenario of [
+    { name: 'authorized unmentioned reply passes', task: true, helper: false, user: 'u1', blocked: false },
+    { name: 'unrelated passive chatter stays blocked', task: false, helper: false, user: 'u1', blocked: true },
+    { name: 'unauthorized task reply stays blocked', task: true, helper: false, user: 'stranger', blocked: true },
+    { name: 'helper binding keeps precedence', task: true, helper: true, user: 'u1', blocked: false },
+  ]) test(scenario.name, async () => {
+    const wd = trackedWorkdir();
+    const dir = hermit(wd.dir);
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
+    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { thread: { type: 11, parent_id: 'parent', guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
+    if (scenario.task) {
+      const opened = await runScript('task.ts', { args: ['open', dir, '--owner', 'resident', '--requester', 'discord:u1', '--conversation', 'discord:thread', '--title', 'Thread work', '--done', 'Verified'], cwd: wd.dir });
+      expect(opened.exitCode).toBe(0);
+    }
+    if (scenario.helper) bind(dir, 'discord:thread', { session_name: 'conv-thread', session_id: 'session', worktree: wd.dir });
+    const result = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: `<channel source="discord" chat_id="thread" user="${scenario.user}">continue</channel>` }), cwd: wd.dir,
+    });
+    expect(result.exitCode).toBe(0);
+    if (scenario.blocked) {
+      expect(JSON.parse(result.stdout).decision).toBe('block');
+      expect(result.stdout).not.toContain('[resident task thread');
+    } else if (scenario.helper) {
+      expect(result.stdout).toContain('[bound conversation discord:thread: running');
+      expect(result.stdout).not.toContain('[resident task thread');
+    } else {
+      expect(result.stdout).toContain('[resident task thread discord:thread]');
+      expect(result.stdout).toContain('[channel reply reminder]');
     }
   });
 });

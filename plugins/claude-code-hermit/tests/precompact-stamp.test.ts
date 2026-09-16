@@ -1,7 +1,4 @@
-// precompact-stamp.test.ts — PreCompact hook: stamps SHELL.md's Progress Log with a
-// breadcrumb before Claude Code compacts context, and only ever on a genuine PreCompact
-// payload with a recognized trigger. See scripts/precompact-stamp.ts and
-// scripts/lib/progress-log.ts.
+// PreCompact stamps the resident reset boundary without writing task prose.
 
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
@@ -12,8 +9,8 @@ import { markGuest } from '../scripts/lib/guest-marker';
 
 function makeDir(): string {
   const hermitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-precompact-'));
-  fs.mkdirSync(path.join(hermitDir, 'sessions'), { recursive: true });
-  fs.writeFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), '## Progress Log\n', 'utf-8');
+  fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'), JSON.stringify({ cc_session_id: 'resident' }));
   fs.writeFileSync(path.join(hermitDir, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
   return hermitDir;
 }
@@ -23,37 +20,36 @@ async function runHook(stdin: string, hermitDir: string) {
 }
 
 describe('precompact-stamp: valid PreCompact payloads', () => {
-  test('trigger:"auto" writes a breadcrumb, empty stdout, exit 0', async () => {
+  test('trigger:"auto" stamps the reset boundary, empty stdout, exit 0', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
       const result = await runHook(JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'auto' }), hermitDir);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe('');
-      const shell = fs.readFileSync(shellPath, 'utf-8');
-      expect(shell).toContain('context compacted (auto)');
-      expect(shell).toContain('arc may have unfinished work');
+      const runtimeText = fs.readFileSync(runtimeFile, 'utf-8');
+      expect(JSON.parse(runtimeText).last_context_reset_at).toBeDefined();
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
   });
 
-  test('trigger:"manual" writes a breadcrumb, empty stdout, exit 0', async () => {
+  test('trigger:"manual" stamps the reset boundary, empty stdout, exit 0', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
       const result = await runHook(JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'manual' }), hermitDir);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe('');
-      const shell = fs.readFileSync(shellPath, 'utf-8');
-      expect(shell).toContain('context compacted (manual)');
+      const runtimeText = fs.readFileSync(runtimeFile, 'utf-8');
+      expect(JSON.parse(runtimeText).last_context_reset_at).toBeDefined();
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
   });
 });
 
-// The breadcrumb is prose for the next session; this stamp is what stops the watchdog
+// This stamp stops the watchdog
 // acting on a cost entry that describes the context this compaction just replaced. For an
 // operator-typed or native-auto compaction it is the ONLY signal — the watchdog's own
 // stamps cover the compactions it initiated.
@@ -65,7 +61,7 @@ describe('precompact-stamp: machine-readable reset stamp', () => {
   function seedRuntime(hermitDir: string): void {
     fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
     fs.writeFileSync(runtimePath(hermitDir),
-      JSON.stringify({ session_id: 'S-001', session_state: 'idle' }), 'utf-8');
+      JSON.stringify({ cc_session_id: 'resident' }), 'utf-8');
   }
 
   test('a real compaction stamps last_context_reset_at without disturbing runtime state', async () => {
@@ -77,14 +73,13 @@ describe('precompact-stamp: machine-readable reset stamp', () => {
       expect(result.exitCode).toBe(0);
       const runtime = JSON.parse(fs.readFileSync(runtimePath(hermitDir), 'utf-8'));
       expect(runtime.last_context_reset_at >= before).toBe(true);
-      expect(runtime.session_id).toBe('S-001');       // never fabricates a partial runtime
-      expect(runtime.session_state).toBe('idle');
+      expect(runtime.cc_session_id).toBe('resident');
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
   });
 
-  test('a payload that writes no breadcrumb writes no stamp either', async () => {
+  test('an unrecognized payload writes no reset stamp', async () => {
     const hermitDir = makeDir();
     try {
       seedRuntime(hermitDir);
@@ -96,14 +91,13 @@ describe('precompact-stamp: machine-readable reset stamp', () => {
     }
   });
 
-  test('a missing runtime.json fails open — breadcrumb still written, exit 0', async () => {
-    const hermitDir = makeDir(); // no state/ dir at all
+  test('a missing runtime.json fails open with exit 0', async () => {
+    const hermitDir = makeDir();
+    fs.unlinkSync(runtimePath(hermitDir));
     try {
       const result = await runHook(JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'auto' }), hermitDir);
       expect(result.exitCode).toBe(0);
       expect(fs.existsSync(runtimePath(hermitDir))).toBe(false);
-      const shell = fs.readFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), 'utf-8');
-      expect(shell).toContain('context compacted (auto)');
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -114,12 +108,12 @@ describe('precompact-stamp: no-op on anything that is not a genuine PreCompact p
   test('malformed stdin: no write, no stdout, exit 0', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
-      const before = fs.readFileSync(shellPath, 'utf-8');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
+      const before = fs.readFileSync(runtimeFile, 'utf-8');
       const result = await runHook('not json{{{', hermitDir);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe('');
-      expect(fs.readFileSync(shellPath, 'utf-8')).toBe(before);
+      expect(fs.readFileSync(runtimeFile, 'utf-8')).toBe(before);
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -128,12 +122,12 @@ describe('precompact-stamp: no-op on anything that is not a genuine PreCompact p
   test('empty stdin: no write, no stdout, exit 0', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
-      const before = fs.readFileSync(shellPath, 'utf-8');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
+      const before = fs.readFileSync(runtimeFile, 'utf-8');
       const result = await runHook('', hermitDir);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe('');
-      expect(fs.readFileSync(shellPath, 'utf-8')).toBe(before);
+      expect(fs.readFileSync(runtimeFile, 'utf-8')).toBe(before);
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -142,11 +136,11 @@ describe('precompact-stamp: no-op on anything that is not a genuine PreCompact p
   test('wrong hook_event_name: no write', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
-      const before = fs.readFileSync(shellPath, 'utf-8');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
+      const before = fs.readFileSync(runtimeFile, 'utf-8');
       const result = await runHook(JSON.stringify({ hook_event_name: 'SessionStart', trigger: 'auto' }), hermitDir);
       expect(result.exitCode).toBe(0);
-      expect(fs.readFileSync(shellPath, 'utf-8')).toBe(before);
+      expect(fs.readFileSync(runtimeFile, 'utf-8')).toBe(before);
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -155,11 +149,11 @@ describe('precompact-stamp: no-op on anything that is not a genuine PreCompact p
   test('invalid trigger value: no write', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
-      const before = fs.readFileSync(shellPath, 'utf-8');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
+      const before = fs.readFileSync(runtimeFile, 'utf-8');
       const result = await runHook(JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'bogus' }), hermitDir);
       expect(result.exitCode).toBe(0);
-      expect(fs.readFileSync(shellPath, 'utf-8')).toBe(before);
+      expect(fs.readFileSync(runtimeFile, 'utf-8')).toBe(before);
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -168,28 +162,26 @@ describe('precompact-stamp: no-op on anything that is not a genuine PreCompact p
   test('missing trigger: no write', async () => {
     const hermitDir = makeDir();
     try {
-      const shellPath = path.join(hermitDir, 'sessions', 'SHELL.md');
-      const before = fs.readFileSync(shellPath, 'utf-8');
+      const runtimeFile = path.join(hermitDir, 'state', 'runtime.json');
+      const before = fs.readFileSync(runtimeFile, 'utf-8');
       const result = await runHook(JSON.stringify({ hook_event_name: 'PreCompact' }), hermitDir);
       expect(result.exitCode).toBe(0);
-      expect(fs.readFileSync(shellPath, 'utf-8')).toBe(before);
+      expect(fs.readFileSync(runtimeFile, 'utf-8')).toBe(before);
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
   });
 });
 
-// issue #793 — SHELL.md is one session's narrative, archived as that session's report and
-// read by reflect and the weekly review, so a guest's compaction must say so. The reset
-// stamp is a claim about the RESIDENT's context and is not the guest's to make at all.
+// Guests must not stamp the resident context.
 describe('precompact-stamp: guest session', () => {
   function seedRuntime(hermitDir: string): void {
     fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
     fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'),
-      JSON.stringify({ session_id: 'S-001', session_state: 'idle' }), 'utf-8');
+      JSON.stringify({ cc_session_id: 'resident' }), 'utf-8');
   }
 
-  test('a guest compaction is labeled and never stamps the resident runtime', async () => {
+  test('a guest compaction never stamps the resident runtime', async () => {
     const hermitDir = makeDir();
     try {
       seedRuntime(hermitDir);
@@ -199,8 +191,6 @@ describe('precompact-stamp: guest session', () => {
         hermitDir,
       );
       expect(result.exitCode).toBe(0);
-      const shell = fs.readFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), 'utf-8');
-      expect(shell).toContain('context compacted (auto) — guest session');
       const runtime = JSON.parse(fs.readFileSync(path.join(hermitDir, 'state', 'runtime.json'), 'utf-8'));
       expect(runtime.last_context_reset_at).toBeUndefined();
     } finally {
@@ -208,7 +198,7 @@ describe('precompact-stamp: guest session', () => {
     }
   });
 
-  test('a marker for another session leaves this one unlabeled and stamped', async () => {
+  test('a marker for another session leaves this resident stamped', async () => {
     const hermitDir = makeDir();
     try {
       seedRuntime(hermitDir);
@@ -218,33 +208,10 @@ describe('precompact-stamp: guest session', () => {
         hermitDir,
       );
       expect(result.exitCode).toBe(0);
-      const shell = fs.readFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), 'utf-8');
-      expect(shell).toContain('context compacted (auto)');
-      expect(shell).not.toContain('guest session');
       const runtime = JSON.parse(fs.readFileSync(path.join(hermitDir, 'state', 'runtime.json'), 'utf-8'));
       expect(runtime.last_context_reset_at).toBeDefined();
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('precompact-stamp: fail-open', () => {
-  test('unwritable SHELL.md target does not crash the hook (still exit 0, no stdout)', async () => {
-    // Point AGENT_DIR at a hermit dir whose sessions/SHELL.md path is actually a directory —
-    // an unwritable-as-a-file target — and confirm the hook still exits cleanly.
-    const badDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-precompact-bad-'));
-    fs.mkdirSync(path.join(badDir, 'sessions', 'SHELL.md'), { recursive: true }); // SHELL.md is a directory, not a file
-    fs.writeFileSync(path.join(badDir, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
-    try {
-      const result = await runScript('precompact-stamp.ts', {
-        stdin: JSON.stringify({ hook_event_name: 'PreCompact', trigger: 'auto' }),
-        env: { AGENT_DIR: badDir },
-      });
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toBe('');
-    } finally {
-      fs.rmSync(badDir, { recursive: true, force: true });
     }
   });
 });

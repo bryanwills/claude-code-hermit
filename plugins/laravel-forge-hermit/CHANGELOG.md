@@ -1,5 +1,12 @@
 # Changelog — laravel-forge-hermit
 
+## [Unreleased]
+
+### Changed
+
+- Core 1.4.0 is required for task records and resident startup.
+- Deploy watches use resident readiness and routine registrations omit retired lifecycle fields.
+
 ## [0.0.15] - 2026-09-10
 
 ### Changed

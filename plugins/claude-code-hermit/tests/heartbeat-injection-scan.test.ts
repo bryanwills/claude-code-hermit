@@ -32,8 +32,7 @@ const TAINTED_HEARTBEAT =
 
 const CONFIG = JSON.stringify({ timezone: 'UTC', heartbeat: { clean_recheck_cooldown: null, active_hours: { start: '00:00', end: '24:00' } } });
 
-// Fixed clock for the deterministic-time cases (stale auto-close needs `now` vs
-// last-operator-action). STALE_ACTION is 14h earlier — past the 12h threshold.
+// Fixed clock and old operator activity for deterministic-time cases.
 const NOW = '2026-07-10T12:00:00Z';
 const STALE_ACTION = '2026-07-09T22:00:00Z';
 
@@ -41,7 +40,7 @@ function build(opts: {
   heartbeat: string;
   injectionAlertHash?: string;
   budget?: 'pending' | 'notified';
-  staleInProgress?: boolean;
+  staleOperatorAction?: boolean;
 }): string {
   const dir = freshDir();
   fs.mkdirSync(hermit(dir, 'state'), { recursive: true });
@@ -66,8 +65,8 @@ function build(opts: {
       },
     }));
   }
-  if (opts.staleInProgress) {
-    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_state: 'in_progress' }));
+  if (opts.staleOperatorAction) {
+    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({}));
     fs.writeFileSync(hermit(dir, 'state', 'last-operator-action.json'), JSON.stringify({ at: STALE_ACTION }));
   }
   return dir;
@@ -170,7 +169,7 @@ describe('heartbeat-precheck injection gate (integration)', () => {
 
 // Deterministic operator-safety escalations survive the checklist suspension:
 // a pending budget alert pierces the announced-damper (so the SKILL ALERT branch
-// can deliver it), and a due stale auto-close still fires — neither reads HEARTBEAT.md.
+// can deliver it) without executing a tainted checklist.
 describe('injection gate: safety-gate pass-through under taint', () => {
   const announced = () => contentHash(TAINTED_HEARTBEAT);
 
@@ -184,9 +183,9 @@ describe('injection gate: safety-gate pass-through under taint', () => {
     expect(await verdict(dir)).toBe('SKIP|injection-suspect (announced)');
   });
 
-  test('tainted + announced + 12h stale in-progress session → AUTO_CLOSE', async () => {
-    const dir = build({ heartbeat: TAINTED_HEARTBEAT, injectionAlertHash: announced(), staleInProgress: true });
-    expect(await verdict(dir, false, { HERMIT_NOW: NOW })).toBe('AUTO_CLOSE');
+  test('tainted + announced + stale operator activity stays suspended', async () => {
+    const dir = build({ heartbeat: TAINTED_HEARTBEAT, injectionAlertHash: announced(), staleOperatorAction: true });
+    expect(await verdict(dir, false, { HERMIT_NOW: NOW })).toBe('SKIP|injection-suspect (announced)');
   });
 });
 

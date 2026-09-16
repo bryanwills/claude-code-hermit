@@ -28,6 +28,8 @@ function seedState(dir: string, opts: { timezone?: string; routines?: any[] } = 
   const base = stateArg(dir);
   fs.mkdirSync(path.join(base, 'proposals'), { recursive: true });
   fs.mkdirSync(path.join(base, 'templates'), { recursive: true });
+  fs.mkdirSync(path.join(base, 'sessions'), { recursive: true });
+  fs.writeFileSync(shellPath(dir), 'frozen archive\n');
   fs.copyFileSync(
     path.join(PLUGIN_ROOT, 'state-templates', 'PROPOSAL.md.template'),
     path.join(base, 'templates', 'PROPOSAL.md.template'),
@@ -82,14 +84,14 @@ describe('proposal.ts create', () => {
     expect(r.stdout.trim()).toMatch(/^PROP-008-/);
   }));
 
-  test('session defaults from runtime.json when Session header omitted', withDir(async (dir) => {
+  test('session defaults to null when Session header omitted', withDir(async (dir) => {
     seedState(dir);
-    fs.writeFileSync(path.join(stateArg(dir), 'state', 'runtime.json'), JSON.stringify({ session_id: 'S-042' }));
+    fs.writeFileSync(path.join(stateArg(dir), 'state', 'runtime.json'), JSON.stringify({ cc_session_id: 'resident' }));
     const stdin = heredoc({ Title: 'Session default test' }, MIN_BODY);
     const r = await runProposal(stateArg(dir), ['create'], { stdin });
     const id = r.stdout.trim();
     const content = fs.readFileSync(propPath(dir, id), 'utf-8');
-    expect(content).toContain('session: S-042');
+    expect(content).toContain('session: null');
   }));
 
   test('template missing -> ERROR|template-missing, zero writes', withDir(async (dir) => {
@@ -100,6 +102,14 @@ describe('proposal.ts create', () => {
     expect(r.stdout.trim()).toBe('ERROR|template-missing');
     expect(fs.readdirSync(path.join(stateArg(dir), 'proposals'))).toHaveLength(0);
     expect(metricsLines(dir)).toHaveLength(0);
+  }));
+
+  test('Session header carries an explicit task id', withDir(async (dir) => {
+    seedState(dir);
+    const stdin = heredoc({ Title: 'Task proposal', Session: 'T-20260916-120000' }, MIN_BODY);
+    const result = await runProposal(stateArg(dir), ['create'], { stdin });
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(propPath(dir, result.stdout.trim()), 'utf-8')).toContain('session: T-20260916-120000');
   }));
 
   const invalidCases: Array<[string, Record<string, string>, string, string]> = [
@@ -138,7 +148,7 @@ describe('proposal.ts create', () => {
     }
   }));
 
-  test('SHELL.md deleted -> still succeeds, ID printed, stderr warns', withDir(async (dir) => {
+  test('SHELL.md absent -> creation succeeds without legacy bookkeeping', withDir(async (dir) => {
     seedState(dir);
     fs.rmSync(shellPath(dir));
     const stdin = heredoc({ Title: 'No shell file' }, MIN_BODY);
@@ -146,17 +156,15 @@ describe('proposal.ts create', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toMatch(/^PROP-001-/);
     expect(fs.existsSync(propPath(dir, r.stdout.trim()))).toBe(true);
-    expect(r.stderr).toContain('findings append');
+    expect(r.stderr).not.toContain('findings append');
   }));
 
-  test('Findings line lands inside ## Findings before the next heading', withDir(async (dir) => {
+  test('proposal creation leaves the frozen shell untouched', withDir(async (dir) => {
     seedState(dir);
-    const stdin = heredoc({ Title: 'Findings placement', Findings: 'custom summary' }, MIN_BODY);
-    const r = await runProposal(stateArg(dir), ['create'], { stdin });
-    const id = r.stdout.trim();
-    const shell = fs.readFileSync(shellPath(dir), 'utf-8');
-    const findingsSection = shell.slice(shell.indexOf('## Findings'), shell.indexOf('## Changed'));
-    expect(findingsSection).toContain(`- ${id}: custom summary`);
+    const before = fs.readFileSync(shellPath(dir), 'utf8');
+    const r = await runProposal(stateArg(dir), ['create'], { stdin: heredoc({ Title: 'Record proposal' }, MIN_BODY) });
+    expect(r.exitCode).toBe(0);
+    expect(fs.readFileSync(shellPath(dir), 'utf8')).toBe(before);
   }));
 
   test('created metrics event carries source/category/tags', withDir(async (dir) => {
@@ -609,58 +617,16 @@ describe('proposal.ts state-dir pin', () => {
   }));
 });
 
-describe('proposal.ts shell-append', () => {
-  test('findings and progress appends are section-aware', withDir(async (dir) => {
+describe('retired proposal task and shell verbs', () => {
+  test.each(['shell-append', 'next-task'])('%s is rejected without writing', (verb) => withDir(async (dir) => {
     seedState(dir);
-    await runProposal(stateArg(dir), ['shell-append', '--section', 'findings'], { stdin: 'a finding\n' });
-    await runProposal(stateArg(dir), ['shell-append', '--section', 'progress'], { stdin: '[10:05] did a thing\n' });
-    const shell = fs.readFileSync(shellPath(dir), 'utf-8');
-    const findingsSection = shell.slice(shell.indexOf('## Findings'), shell.indexOf('## Changed'));
-    const progressSection = shell.slice(shell.indexOf('## Progress Log'), shell.indexOf('## Blockers'));
-    expect(findingsSection).toContain('a finding');
-    expect(progressSection).toContain('[10:05] did a thing');
-  }));
-
-  test('missing SHELL.md -> ERROR|shell-unreadable, exit 0', withDir(async (dir) => {
-    seedState(dir);
-    fs.rmSync(shellPath(dir));
-    const r = await runProposal(stateArg(dir), ['shell-append', '--section', 'findings'], { stdin: 'x\n' });
+    const before = fs.readFileSync(shellPath(dir), 'utf8');
+    const r = await runProposal(stateArg(dir), [verb], { stdin: 'retired write' });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('ERROR|shell-unreadable');
-  }));
-
-  test('unknown --section -> ERROR', withDir(async (dir) => {
-    seedState(dir);
-    const r = await runProposal(stateArg(dir), ['shell-append', '--section', 'bogus'], { stdin: 'x\n' });
-    expect(r.stdout.trim()).toBe('ERROR|unknown-section');
-  }));
-});
-
-describe('proposal.ts next-task', () => {
-  function nextTaskPath(dir: string): string {
-    return path.join(stateArg(dir), 'sessions', 'NEXT-TASK.md');
-  }
-
-  test('creates with stdin content', withDir(async (dir) => {
-    seedState(dir);
-    const r = await runProposal(stateArg(dir), ['next-task'], { stdin: '# Next\nDo the thing.\n' });
-    expect(r.stdout.trim()).toBe('OK');
-    expect(fs.readFileSync(nextTaskPath(dir), 'utf-8')).toBe('# Next\nDo the thing.\n');
-  }));
-
-  test('existing file -> ERROR|next-task-exists, file untouched', withDir(async (dir) => {
-    seedState(dir);
-    fs.writeFileSync(nextTaskPath(dir), 'original\n');
-    const r = await runProposal(stateArg(dir), ['next-task'], { stdin: 'overwrite attempt\n' });
-    expect(r.stdout.trim()).toBe('ERROR|next-task-exists');
-    expect(fs.readFileSync(nextTaskPath(dir), 'utf-8')).toBe('original\n');
-  }));
-
-  test('empty stdin -> ERROR', withDir(async (dir) => {
-    seedState(dir);
-    const r = await runProposal(stateArg(dir), ['next-task'], { stdin: '   \n' });
-    expect(r.stdout.trim()).toBe('ERROR|empty-content');
-  }));
+    expect(r.stdout.trim()).toBe('ERROR|unknown-verb');
+    expect(fs.readFileSync(shellPath(dir), 'utf8')).toBe(before);
+    expect(fs.existsSync(path.join(stateArg(dir), 'sessions', 'NEXT-TASK.md'))).toBe(false);
+  })());
 });
 
 describe('proposal.ts routine', () => {

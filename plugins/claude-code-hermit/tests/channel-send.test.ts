@@ -306,7 +306,7 @@ describe('sendOperatorNotice tiering', () => {
     process.env.HERMIT_TELEGRAM_API_URL = url;
     try { return await fn(); } finally { delete process.env.HERMIT_TELEGRAM_API_URL; }
   };
-  const findings = (wd: Workdir) => fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf8');
+  const findings = (wd: Workdir) => (fs.existsSync(hermit(wd.dir, 'state', 'watchdog-events.jsonl')) ? fs.readFileSync(hermit(wd.dir, 'state', 'watchdog-events.jsonl'), 'utf8') : '');
 
   test('fallback:primary + maintainer target hit: same token, route maintainer_channel', async () => {
     const stub = startHttpStub();
@@ -358,10 +358,10 @@ describe('sendOperatorNotice tiering', () => {
     }
   });
 
-  test('Findings append fails when SHELL.md is missing -> ok:false', async () => {
+  test('Findings append fails when event log is unwritable -> ok:false', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir({}, { operator_profile: 'non-technical' });
-    fs.rmSync(hermit(wd.dir, 'sessions', 'SHELL.md'));
+    fs.mkdirSync(hermit(wd.dir, 'state', 'watchdog-events.jsonl'));
     try {
       const res = await withApi(stub.url, () =>
         sendOperatorNotice(hermit(wd.dir), { maintainer: { text: 'X', fallback: 'findings' } }));
@@ -451,7 +451,7 @@ describe('sendOperatorNotice tiering', () => {
 // {delivered,degraded,no_channel,result} stdout contract, not just the routing sendOperatorNotice
 // already owns (covered above).
 describe('channel-send CLI --notice', () => {
-  const findings = (wd: Workdir) => fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf8');
+  const findings = (wd: Workdir) => (fs.existsSync(hermit(wd.dir, 'state', 'watchdog-events.jsonl')) ? fs.readFileSync(hermit(wd.dir, 'state', 'watchdog-events.jsonl'), 'utf8') : '');
   const runNotice = (wd: Workdir, payload: object | string, stub: { url: string }) =>
     runChannelSend({
       args: [hermit(wd.dir), '--notice'],

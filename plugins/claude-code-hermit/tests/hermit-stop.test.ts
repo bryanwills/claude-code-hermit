@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { SCRIPTS_DIR } from './helpers/run';
+import { shutdownReady } from '../scripts/hermit-stop';
 
 // Black-box contract tests for the hermit-stop lifecycle script. Written
 // against the Python implementation first, then flipped to the TS port in the
@@ -40,15 +41,15 @@ function readJson(dir: string, rel: string) {
 // the session "exit" mid-run; every invocation is logged for assertions.
 function installFakeTmux(
   dir: string,
-  opts: { hasSession?: boolean; dieOnSessionClose?: boolean; panePid?: number } = {}
+  opts: { hasSession?: boolean; settleOnEnter?: boolean; panePid?: number } = {}
 ) {
   const bin = path.join(dir, 'fake-bin');
   fs.mkdirSync(bin, { recursive: true });
   const log = path.join(dir, 'tmux.log');
   const aliveMarker = path.join(dir, 'session-alive');
   if (opts.hasSession) fs.writeFileSync(aliveMarker, '1');
-  const dieLine = opts.dieOnSessionClose
-    ? `case "$*" in *session-close*) rm -f '${aliveMarker}' ;; esac`
+  const settleLine = opts.settleOnEnter
+    ? `case "$*" in *Enter*) bun -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({state:"idle",at:new Date().toISOString()}))' '${dir}/.claude-code-hermit/state/execution.json' ;; esac`
     : '';
   // list-panes drives the survivor check: echo the injected pane pid so the
   // stop script captures a real process tree to verify.
@@ -59,7 +60,7 @@ function installFakeTmux(
     path.join(bin, 'tmux'),
     `#!/usr/bin/env bash
 echo "$@" >> '${log}'
-${dieLine}
+${settleLine}
 case "$1" in
   has-session) [ -f '${aliveMarker}' ] && exit 0 || exit 1 ;;
   kill-session) rm -f '${aliveMarker}'; exit 0 ;;
@@ -103,14 +104,13 @@ describe('hermit-stop contract', () => {
     const dir = makeDir();
     try {
       writeConfig(dir);
-      writeRuntime(dir, { runtime_mode: 'interactive', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'interactive' });
       const { bin } = installFakeTmux(dir, { hasSession: false });
       const { exitCode, stdout } = await runStop(dir, [], bin);
       expect(exitCode).toBe(0);
       expect(stdout).toContain('running in interactive mode');
       expect(readJson(dir, '.claude-code-hermit/config.json').always_on).toBe(false);
       // The Stop hook owns the idle transition — stop must not have written it.
-      expect(readJson(dir, '.claude-code-hermit/state/runtime.json').session_state).toBe('in_progress');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -123,7 +123,7 @@ describe('hermit-stop contract', () => {
       // into [] and a corrupt file into full template defaults. Neither may reach
       // disk: stop patches always_on onto the raw object and writes that.
       writeConfig(dir, { routines: { broken: true }, budget: { daily_usd: '5' } });
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
       const { bin } = installFakeTmux(dir, { hasSession: false });
       await runStop(dir, [], bin);
       const after = readJson(dir, '.claude-code-hermit/config.json');
@@ -141,7 +141,7 @@ describe('hermit-stop contract', () => {
     try {
       const p = path.join(dir, '.claude-code-hermit', 'config.json');
       fs.writeFileSync(p, '{"agent_name": "t", "always_on": tru');
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
       const { bin } = installFakeTmux(dir, { hasSession: false });
       await runStop(dir, [], bin);
       expect(fs.readFileSync(p, 'utf-8')).toBe('{"agent_name": "t", "always_on": tru');
@@ -150,19 +150,18 @@ describe('hermit-stop contract', () => {
     }
   });
 
-  test('no session, non-interactive → idle written with cleared transition', async () => {
+  test('no session, non-interactive → shutdown stamped with cleared transition', async () => {
     const dir = makeDir();
     try {
       writeConfig(dir);
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress', transition: 'stopping' });
+      writeRuntime(dir, { runtime_mode: 'tmux', transition: 'stopping' });
       fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'sessions', 'S-001-REPORT.md'), '# r');
       const { bin } = installFakeTmux(dir, { hasSession: false });
       const { exitCode, stdout } = await runStop(dir, [], bin);
       expect(exitCode).toBe(0);
       expect(stdout).toContain('No running session: hermit-test');
-      expect(stdout).toContain('S-001-REPORT.md');
+      expect(fs.existsSync(path.join(dir, '.claude-code-hermit', 'sessions', 'S-001-REPORT.md'))).toBe(true);
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
-      expect(rt.session_state).toBe('idle');
       expect(rt.transition).toBeNull();
       expect(rt.transition_target).toBeNull();
       expect(rt.transition_started_at).toBeNull();
@@ -178,15 +177,14 @@ describe('hermit-stop contract', () => {
     const dir = makeDir();
     try {
       writeConfig(dir);
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
       const { bin, log } = installFakeTmux(dir, { hasSession: true });
       const { exitCode, stdout } = await runStop(dir, ['--force'], bin);
       expect(exitCode).toBe(0);
       expect(stdout).toContain('Force-killing session: hermit-test');
-      expect(stdout).toContain('not closed gracefully');
+      expect(stdout).toContain('resident was force-stopped');
       expect(fs.readFileSync(log, 'utf-8')).toContain('kill-session -t hermit-test');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
-      expect(rt.session_state).toBe('idle');
       expect(rt.last_error).toBe('unclean_shutdown');
       expect(rt.shutdown_requested_at).toBeDefined();
       expect(readJson(dir, '.claude-code-hermit/config.json').always_on).toBe(false);
@@ -195,21 +193,20 @@ describe('hermit-stop contract', () => {
     }
   });
 
-  test('graceful: session-close sent, session exits, no report → unclean recorded', async () => {
+  test('graceful: configured skill settles execution before stop', async () => {
     const dir = makeDir();
     try {
-      writeConfig(dir, { heartbeat: { enabled: true } });
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
-      const { bin, log } = installFakeTmux(dir, { hasSession: true, dieOnSessionClose: true });
-      const { exitCode, stdout } = await runStop(dir, [], bin);
+      writeConfig(dir, { shutdown_skill: '/custom:shutdown' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
+      fs.writeFileSync(path.join(dir, '.claude-code-hermit/state/execution.json'), JSON.stringify({ state: 'idle', at: '2026-01-01T00:00:00Z' }));
+      const { bin, log } = installFakeTmux(dir, { hasSession: true, settleOnEnter: true });
+      const { exitCode } = await runStop(dir, [], bin);
       expect(exitCode).toBe(0);
       const tmuxLog = fs.readFileSync(log, 'utf-8');
-      expect(tmuxLog).toContain('heartbeat stop');
-      expect(tmuxLog).toContain('session-close --shutdown');
-      expect(stdout).toContain('Session exited without generating a report');
+      expect(tmuxLog).toContain('send-keys -t hermit-test /custom:shutdown\nsend-keys -t hermit-test Enter');
+      expect(tmuxLog).toContain('kill-session');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
-      expect(rt.session_state).toBe('idle');
-      expect(rt.last_error).toBe('unclean_shutdown');
+      expect(rt.last_error).toBeNull();
       expect(rt.shutdown_requested_at).toBeDefined();
       expect(rt.shutdown_completed_at).toBeDefined();
     } finally {
@@ -217,11 +214,60 @@ describe('hermit-stop contract', () => {
     }
   }, 20000);
 
+  test('graceful: a running turn ends before the shutdown skill is typed', async () => {
+    const dir = makeDir();
+    try {
+      writeConfig(dir, { shutdown_skill: '/custom:shutdown' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
+      const executionPath = path.join(dir, '.claude-code-hermit/state/execution.json');
+      fs.writeFileSync(executionPath, JSON.stringify({ state: 'in_flight', at: new Date().toISOString() }));
+      const { bin, log } = installFakeTmux(dir, { hasSession: true, settleOnEnter: true });
+      let typedMidTurn = true;
+      const turnEnds = new Promise<void>(resolve => setTimeout(() => {
+        typedMidTurn = fs.existsSync(log) && fs.readFileSync(log, 'utf-8').includes('/custom:shutdown');
+        fs.writeFileSync(executionPath, JSON.stringify({ state: 'idle', at: new Date().toISOString() }));
+        resolve();
+      }, 2500));
+      const { exitCode } = await runStop(dir, [], bin);
+      await turnEnds;
+      expect(typedMidTurn).toBe(false);
+      expect(exitCode).toBe(0);
+      expect(fs.readFileSync(log, 'utf-8')).toContain('send-keys -t hermit-test /custom:shutdown');
+      expect(readJson(dir, '.claude-code-hermit/state/runtime.json').last_error).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20000);
+
+  test('graceful: idle execution needs no shutdown skill', async () => {
+    const dir = makeDir();
+    try {
+      writeConfig(dir);
+      writeRuntime(dir, { runtime_mode: 'tmux' });
+      fs.writeFileSync(path.join(dir, '.claude-code-hermit/state/execution.json'), JSON.stringify({ state: 'idle', at: '2026-01-01T00:00:00Z' }));
+      const { bin, log } = installFakeTmux(dir, { hasSession: true });
+      expect((await runStop(dir, [], bin)).exitCode).toBe(0);
+      expect(fs.readFileSync(log, 'utf-8')).not.toContain('send-keys');
+      expect(readJson(dir, '.claude-code-hermit/state/runtime.json').last_error).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('shutdown boundary rejects active, missing, or stale skill observations', () => {
+    const sentAt = Date.parse('2026-09-16T12:00:00Z');
+    expect(shutdownReady(null, null)).toBe(false);
+    expect(shutdownReady({ state: 'in_flight', at: '2026-09-16T12:00:01Z' }, sentAt)).toBe(false);
+    expect(shutdownReady({ state: 'idle', at: '2026-09-16T12:00:00Z' }, sentAt)).toBe(false);
+    expect(shutdownReady({ state: 'idle', at: '2026-09-16T12:00:01Z' }, sentAt)).toBe(true);
+    expect(shutdownReady({ state: 'idle' }, null)).toBe(true);
+  });
+
   test.if(IS_TS)('lifecycle lock contention → exit 1, no state mutation', async () => {
     const dir = makeDir();
     try {
       writeConfig(dir);
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
       const lock = path.join(dir, '.claude-code-hermit', 'state', '.lifecycle.lock');
       // A real, signalable, same-user holder — a foreign-user pid (EPERM) is no
       // longer treated as a hermit holder, so pid 1 would be taken over.
@@ -232,7 +278,6 @@ describe('hermit-stop contract', () => {
         const { exitCode, stdout } = await runStop(dir, [], bin);
         expect(exitCode).toBe(1);
         expect(stdout).toContain('Another lifecycle operation in progress');
-        expect(readJson(dir, '.claude-code-hermit/state/runtime.json').session_state).toBe('in_progress');
         expect(readJson(dir, '.claude-code-hermit/config.json').always_on).toBe(true);
       } finally {
         holder.kill();
@@ -253,7 +298,7 @@ describe('hermit-stop contract', () => {
     child.unref();
     try {
       writeConfig(dir);
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
       const { bin } = installFakeTmux(dir, { hasSession: true, panePid: child.pid });
       // Error-path bound, not a speed assertion: under `bun test --parallel` the
       // fixture can take seconds to install its TERM trap, and stopping before the
@@ -269,7 +314,6 @@ describe('hermit-stop contract', () => {
       expect(stdout).toContain('survived stop');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
       expect(rt.last_error).toBe('orphaned_process');
-      expect(rt.session_state).not.toBe('idle');
       expect(rt.shutdown_completed_at ?? null).toBeNull();
       expect(rt.shutdown_requested_at).toBeDefined();
     } finally {
@@ -283,7 +327,7 @@ describe('hermit-stop contract', () => {
     const dir = makeDir();
     try {
       writeConfig(dir);
-      writeRuntime(dir, { runtime_mode: 'tmux', session_state: 'in_progress' });
+      writeRuntime(dir, { runtime_mode: 'tmux' });
       // Fresh liveness signal = an instance may still be alive despite no tmux.
       fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-monitor-liveness.json'), '{}');
       const { bin } = installFakeTmux(dir, { hasSession: false });
@@ -292,7 +336,6 @@ describe('hermit-stop contract', () => {
       expect(stdout).toContain('detached claude may still be running');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
       // Lifecycle truth untouched — not marked stopped.
-      expect(rt.session_state).toBe('in_progress');
       expect(rt.shutdown_completed_at ?? null).toBeNull();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

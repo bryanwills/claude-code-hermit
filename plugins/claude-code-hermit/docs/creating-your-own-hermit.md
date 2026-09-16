@@ -89,7 +89,7 @@ description: Deploys the current branch to staging or production.
 3. Run `npm run build`
 4. If production: ask for confirmation
 5. Run `./scripts/deploy-$1.sh`
-6. Update SHELL.md with a deploy entry
+6. Inside an open record's turn, add a deploy entry with `task.ts note <id>`; otherwise skip the note.
 ```
 
 For more on [skills](https://code.claude.com/docs/en/skills), see the Claude Code docs.
@@ -134,7 +134,7 @@ When you're copying the same agents between projects, package them as a [Claude 
 Your hermit handles domain-specific work. Core handles session lifecycle.
 
 ```
-/claude-code-hermit:session-start -> your domain workflow -> /claude-code-hermit:session-close
+/claude-code-hermit:resident-start -> your domain workflow -> task evidence or confirmation
 ```
 
 ### Required files
@@ -166,10 +166,10 @@ Otherwise: run `domain-hatch sync-block <plugin>` through hermit-run. Wrap resid
 
 If your hermit needs to run domain-specific setup on every always-on launch (e.g. connectivity probe, context refresh, pulling a live snapshot), declare a boot skill and wire it via your plugin manifest. Core's `hermit-start.ts` will fire it into the tmux REPL at boot instead of the default `/claude-code-hermit:session`.
 
-1. **Write the boot skill** — a normal skill at `skills/<your>-boot/SKILL.md`. First line of the skill's plan must invoke core session init: `/claude-code-hermit:session-start`. After that, run your domain setup. Example from `claude-code-homeassistant-hermit`:
+1. **Write the boot skill**; a normal skill at `skills/<your>-boot/SKILL.md`. First line of the skill's plan must invoke core session init: `/claude-code-hermit:resident-start`. After that, run your domain setup. Example from `claude-code-homeassistant-hermit`:
 
    ```markdown
-   1. Invoke /claude-code-hermit:session-start
+   1. Invoke /claude-code-hermit:resident-start
    2. Run ${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab boot status --probe
    3. If stale, refresh HA context
    ```
@@ -186,7 +186,7 @@ If your hermit needs to run domain-specific setup on every always-on launch (e.g
 
    Core's `hatch` reads `hermit.boot_skill` when the operator activates your hermit and writes it to the project's `config.json` as a top-level `boot_skill` field. `hermit-start.ts` then substitutes it for the default bootstrap on every launch — local tmux and Docker alike.
 
-**Contract:** your boot skill owns the full bootstrap turn. Core does not call `session-start` before invoking it; your skill must. This keeps composition in the skill layer so core's boot script stays domain-agnostic.
+**Contract:** your boot skill owns the full bootstrap turn. Core does not call `resident-start` before invoking it; your skill must. This keeps composition in the skill layer so core's boot script stays domain-agnostic.
 
 **Opt-out:** omit `hermit.boot_skill` entirely if your hermit has no launch-time setup. Core's default bootstrap (`/claude-code-hermit:session`) runs instead.
 
@@ -326,7 +326,6 @@ Register cadence-driven skills as ordinary routines. Each routine invokes one sk
   "id": "ha-patterns",
   "schedule": "5 9 * * 1",
   "skill": "claude-code-hermit:reflect --check-id ha-patterns --check claude-code-homeassistant-hermit:ha-analyze-patterns",
-  "run_during_waiting": true,
   "enabled": true
 }
 ```

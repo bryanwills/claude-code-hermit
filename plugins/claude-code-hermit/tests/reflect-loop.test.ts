@@ -16,7 +16,6 @@ import { runScript, PLUGIN_ROOT } from './helpers/run';
 
 const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), 'utf-8');
 
-const sessionClose = read('skills', 'session-close', 'SKILL.md');
 // reflect's candidate-processing detail lives in branches.md (the
 // rare-branch procedures file); assert against the combined surface.
 const reflect = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
@@ -27,26 +26,6 @@ const hatch = read('skills', 'hatch', 'SKILL.md');
 const proposalCreate = read('skills', 'proposal-create', 'SKILL.md');
 
 const todayYmd = () => new Date().toISOString().slice(0, 10);
-
-// ── item 1: session-close tooling debrief ───────────────────────────────────
-
-describe('session-close tooling debrief', () => {
-  test('session-close: tooling debrief question present', () => {
-    expect(sessionClose).toContain('What did I build ad-hoc this session');
-  });
-
-  test('session-close: re-derivation debrief question present', () => {
-    expect(sessionClose).toContain('re-derive or re-discover');
-  });
-
-  test('session-close: debrief asks for quantified cost', () => {
-    expect(sessionClose).toContain('quantified cost');
-  });
-
-  test('session-close: debrief feeds procedure-capture Lessons', () => {
-    expect(sessionClose).toContain('procedure-capture recurs on');
-  });
-});
 
 // ── item 2: weekly-review reflect vital-signs ───────────────────────────────
 
@@ -62,42 +41,23 @@ describe('weekly-review reflect vital-signs', () => {
     fs.mkdirSync(path.join(workdir, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(hermitDir, 'config.json'), '{"timezone":"UTC"}\n');
 
-    const TODAY = `${todayYmd()}T12:00:00+00:00`;
     const TODAY_TS = `${todayYmd()}T12:00:00Z`;
-
-    fs.writeFileSync(path.join(hermitDir, 'sessions', 'S-001-REPORT.md'), `---
-id: S-001
-status: completed
-date: ${TODAY}
-cost_usd: 1.50
-tokens: 50000
-tags: []
-operator_turns: 5
-closed_via: operator
----
-## Overview
-Work.
-
-## Progress Log
-- [10:00] reflect (adult) — 2 candidates; verdicts: accept=1 downgrade=0 suppress=1; outcomes: none; suppressed: [cost-spike: no-sessions]
-`);
-
-    fs.writeFileSync(path.join(hermitDir, 'sessions', 'S-002-REPORT.md'), `---
-id: S-002
-status: completed
-date: ${TODAY}
-cost_usd: 0.80
-tokens: 20000
-tags: []
-operator_turns: 3
-closed_via: operator
----
-## Overview
-Work.
-
-## Progress Log
-- [11:00] reflect (quick, post-routine) — 0 candidates; verdicts: accept=0 downgrade=0 suppress=0; outcomes: none
-`);
+    const task = async (verb: string, args: string[], stdin = '') => {
+      const result = await runScript('task.ts', {
+        cwd: workdir, env: { AGENT_DIR: hermitDir }, args: [verb, hermitDir, ...args], stdin,
+      });
+      expect(result.exitCode).toBe(0);
+      return JSON.parse(result.stdout);
+    };
+    for (const lesson of [
+      '- [10:00] reflect (adult) \u2014 2 candidates; verdicts: accept=1 downgrade=0 suppress=1; outcomes: none; suppressed: [cost-spike: no-sessions]',
+      '- [11:00] reflect (quick, post-routine) \u2014 0 candidates; verdicts: accept=0 downgrade=0 suppress=0; outcomes: none',
+    ]) {
+      const { id } = await task('open', ['--title', 'Work', '--requester', 'operator', '--done', 'Verified']);
+      await task('lesson', [id], lesson);
+      await task('block', [id, '--result-stdin'], 'Complete');
+      await task('close', [id, '--by', 'confirmed', '--actor', 'operator', '--result-rev', '1', '--reason-stdin'], 'Verified');
+    }
 
     // micro-queued / micro-resolved are reflect-exclusive (count toward surfaced/accepted).
     // created / responded are shared by non-reflect callers (brainstorm, operator, channel)
@@ -148,8 +108,8 @@ Work.
     expect(review).toContain('suppressed: cost-spike:no-sessions');
   });
 
-  test('weekly-review: regression — sessions_count intact', () => {
-    expect(review).toContain('sessions_count: 2');
+  test('weekly-review: record count includes both closed tasks', () => {
+    expect(review).toContain('tasks_count: 2');
   });
 });
 
@@ -312,7 +272,7 @@ describe('success_signal push + same-area guard', () => {
   });
 
   test('reflect: same-area guard requires tag overlap', () => {
-    expect(reflectRef).toContain('share ≥1 tag');
+    expect(reflectRef).toContain('proposal-title or Evidence keywords');
   });
 });
 
@@ -332,7 +292,7 @@ describe('artifact-cited evidence path', () => {
   });
 
   test('reflect: integrity rule keeps prose self-certification barred', () => {
-    expect(reflect).toContain('must never write the pattern into SHELL.md');
+    expect(reflect).toContain('must never write the pattern into the open task record');
   });
 
   test('reflect: integrity rule gains artifact-cited path', () => {

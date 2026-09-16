@@ -71,18 +71,6 @@ Convert each `HH:MM` to a cron expression for Step 6 (`M H * * *` for daily slot
 
 ---
 
-## Step 4 — Drop routine prompt files
-
-Copy the three routine prompt templates from `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/` into the consumer's `.claude-code-hermit/compiled/`:
-
-- `routine-feed-brief-morning.md`
-- `routine-feed-brief-evening.md`
-- `routine-weekly-digest.md`
-
-For each: Read the source, check the destination (`.claude-code-hermit/compiled/<filename>`). If absent → Write it (`✓ dropped <filename>`). If present → skip (`⊘ skipped <filename> (already present)`).
-
----
-
 ## Step 5 — CLAUDE.md / CLAUDE.local.md inject
 
 **Resolve target file:** Step 1's preflight already returned `target`, `target_file`, `target_default` and `needs_target_question`.
@@ -138,26 +126,20 @@ In the `routines` array, for each of these IDs that is **absent** (by `id`), add
 {
   "id": "feed-brief-morning",
   "schedule": "<morning cron>",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": <morning enabled>,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-feed-brief-morning.md"
+  "skill": "feed-hermit:feed-brief --morning",
+  "enabled": <morning enabled>
 },
 {
   "id": "feed-brief-evening",
   "schedule": "<evening cron>",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": <evening enabled>,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-feed-brief-evening.md"
+  "skill": "feed-hermit:feed-brief --evening",
+  "enabled": <evening enabled>
 },
 {
   "id": "weekly-digest",
   "schedule": "<weekly cron>",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": <weekly enabled>,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-weekly-digest.md"
+  "skill": "feed-hermit:weekly-digest",
+  "enabled": <weekly enabled>
 }
 ```
 
@@ -166,7 +148,7 @@ In the `routines` array, for each of these IDs that is **absent** (by `id`), add
 Merge these entries into `config.routines` by id. Create the array if absent. Append each missing id; skip any existing id, preserving operator edits and all other config fields. No prompt is needed for these read-only analyses.
 
 ```json
-{"id": "source-scout", "schedule": "5 9 1 * *", "skill": "feed-hermit:source-scout --scheduled", "run_during_waiting": true, "enabled": true}
+{"id": "source-scout", "schedule": "5 9 1 * *", "skill": "feed-hermit:source-scout --scheduled", "enabled": true}
 ```
 
 The monthly routine invokes unattended source discovery directly; candidates remain unverified for operator review.
@@ -216,8 +198,7 @@ Installation summary:
   ✓ Prerequisite: claude-code-hermit {base_version} confirmed
   ✓ Registries: feed-sources.md / feed-categories.md / FEEDS.md seeded (or already present){; starter pack applied if opted in}
   ✓ .gitignore: tmp/ covered
-  ✓ config.json: feed block written, _hermit_versions stamped, {K}/3 prompt routines added, source-scout routine registered, briefs archive registered in storage_drift.ignore
-  ✓ Routine prompts: {N}/3 dropped, {M}/3 already present
+  ✓ config.json: feed block written, _hermit_versions stamped, {K}/3 routines added, source-scout routine registered, briefs archive registered in storage_drift.ignore
   ✓ CLAUDE.md: Feed Workflow block injected (or already present)
   ✓ knowledge-schema.md: brief types added (or already present)
 

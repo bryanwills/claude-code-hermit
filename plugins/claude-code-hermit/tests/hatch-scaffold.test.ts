@@ -26,11 +26,11 @@ describe('hatch-scaffold.ts', () => {
     expect(out.operator_existed).toBe(false);
 
     // dirs
-    for (const d of ['sessions', 'proposals', 'templates', 'state', 'raw/.archive', 'compiled', 'bin']) {
+    for (const d of ['tasks', 'proposals', 'templates', 'state', 'raw/.archive', 'compiled', 'bin']) {
       expect(fs.existsSync(path.join(hermit, d))).toBe(true);
     }
     // pristine templates
-    for (const f of ['SHELL.md.template', 'SESSION-REPORT.md.template', 'PROPOSAL.md.template']) {
+    for (const f of ['PROPOSAL.md.template']) {
       expect(fs.existsSync(path.join(hermit, 'templates', f))).toBe(true);
     }
     // bin/ enumerated + executable
@@ -45,9 +45,10 @@ describe('hatch-scaffold.ts', () => {
     for (const f of ['OPERATOR.md', 'HEARTBEAT.md', 'knowledge-schema.md']) {
       expect(fs.existsSync(path.join(hermit, f))).toBe(true);
     }
-    // first boot resumes idle instead of opening a task-less arc
-    expect(fs.readFileSync(path.join(hermit, 'sessions', 'SHELL.md'), 'utf8'))
-      .toBe(fs.readFileSync(path.join(TEMPLATES, 'SHELL.md.template'), 'utf8'));
+    expect(fs.existsSync(path.join(hermit, 'sessions'))).toBe(false);
+    for (const name of ['SHELL.md.template', 'SESSION-REPORT.md.template']) {
+      expect(fs.existsSync(path.join(hermit, 'templates', name))).toBe(false);
+    }
     for (const f of [
       'alert-state.json', 'micro-proposals.json', 'reflection-state.json',
       'routine-metrics.jsonl', 'proposal-metrics.jsonl', 'observations.jsonl',
@@ -75,7 +76,7 @@ describe('hatch-scaffold.ts', () => {
     fs.writeFileSync(path.join(hermit, 'state', 'micro-proposals.json'), '{"custom":true}');
     fs.writeFileSync(path.join(hermit, 'state', 'reflection-state.json'), '{"counters":{"since":"CUSTOM"}}');
     fs.writeFileSync(path.join(hermit, 'sessions', 'SHELL.md'), 'live session\n');
-    // a stale pristine template that SHOULD be refreshed
+    // A retired template must be left untouched.
     fs.writeFileSync(path.join(hermit, 'templates', 'SHELL.md.template'), 'OLD STALE TEMPLATE\n');
 
     const out = await scaffold(dir, true);
@@ -87,8 +88,8 @@ describe('hatch-scaffold.ts', () => {
     expect(JSON.parse(fs.readFileSync(path.join(hermit, 'state', 'reflection-state.json'), 'utf8')).counters.since).toBe('CUSTOM');
     expect(fs.readFileSync(path.join(hermit, 'sessions', 'SHELL.md'), 'utf8')).toBe('live session\n');
 
-    // refreshed to pristine upstream content
-    const pristine = fs.readFileSync(path.join(TEMPLATES, 'SHELL.md.template'), 'utf8');
+    // Retired operator copies remain frozen.
+    const pristine = 'OLD STALE TEMPLATE\n';
     expect(fs.readFileSync(path.join(hermit, 'templates', 'SHELL.md.template'), 'utf8')).toBe(pristine);
 
     expect(fs.existsSync(path.join(hermit, 'state', 'pending-close.json'))).toBe(false);

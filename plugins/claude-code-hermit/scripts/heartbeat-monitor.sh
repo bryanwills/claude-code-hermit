@@ -5,14 +5,13 @@
 #                                  script path called with `--peek <dir>`; the
 #                                  default now prepends heartbeat.ts's verb.
 # Polls `heartbeat.ts precheck` --peek and emits a notification only when the
-# LLM needs to wake up (EVALUATE, AUTO_CLOSE, or ALERT verdict). --peek means
+# LLM needs to wake up (EVALUATE or ALERT verdict). --peek means
 # the polling itself is read-only; the mutating tick happens once when
 # /heartbeat run re-runs precheck inside the EVALUATE handler.
 # First-iteration EVALUATE is suppressed: at cold boot the monitor fires
-# within seconds of session-start (alerts{} empty, checklist unseen), which
-# would trigger a redundant /heartbeat run. AUTO_CLOSE and ALERT are never
-# suppressed — a queued drain or a tainted HEARTBEAT.md must fire immediately
-# regardless of boot state.
+# within seconds of resident-start (alerts{} empty, checklist unseen), which
+# would trigger a redundant /heartbeat run. ALERT is never suppressed: a
+# tainted HEARTBEAT.md must fire immediately regardless of boot state.
 set -u
 INTERVAL="${1:?usage: heartbeat-monitor.sh <interval_seconds> <hermit_state_dir>}"
 HB_DIR="${2:?usage: heartbeat-monitor.sh <interval_seconds> <hermit_state_dir>}"
@@ -25,17 +24,7 @@ else
 fi
 mkdir -p "$HB_DIR/state"
 control_state() {
-  bun -e '
-    const dir = process.argv[1];
-    let control, config, boot;
-    try { control = JSON.parse(await Bun.file(`${dir}/state/heartbeat-monitor.control.json`).text()); } catch {}
-    try { config = JSON.parse(await Bun.file(`${dir}/config.json`).text()); } catch {}
-    try { boot = (await Bun.file(`${dir}/state/.boot-id`).text()).trim() || undefined; } catch {}
-    // An explicit start on a disabled heartbeat lasts for the boot that issued it.
-    const forcedElsewhere = control?.mode === "forced" && (control.boot_id ?? null) !== (boot ?? null);
-    const mode = forcedElsewhere ? "auto" : control?.mode ?? "auto";
-    console.log(mode === "stopped" ? "stopped" : mode === "auto" && config?.heartbeat?.enabled === false ? "disabled" : "active");
-  ' "$HB_DIR"
+  bun "$(dirname "$0")/heartbeat.ts" control-state "$HB_DIR"
 }
 first=1
 while true; do
@@ -52,11 +41,10 @@ while true; do
     && mv "$HB_DIR/state/.heartbeat-liveness.tmp" "$HB_DIR/state/heartbeat-liveness.json" \
     || true
   # Emission grammar is load-bearing: record-operator-action.ts isRoutinePrompt()
-  # drops these lines; tests/auto-close.test.ts drift guard syncs them.
+  # drops these lines; tests/heartbeat-monitor-emissions.test.ts drift guard syncs them.
   case "$verdict" in
     EVALUATE*)
       [[ -n "$first" ]] || echo "HEARTBEAT_EVALUATE" ;;
-    AUTO_CLOSE*)          echo "HEARTBEAT_EVALUATE" ;;
     ALERT*)               echo "HEARTBEAT_EVALUATE" ;;
     OK|SKIP\|*)           : ;;  # silent — designed no-op
     ERROR*)               echo "HEARTBEAT_ERROR: precheck failed" ;;

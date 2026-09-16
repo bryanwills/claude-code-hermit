@@ -2,6 +2,9 @@
 name: reflect
 description: Reflect on recent work and propose improvements if patterns are noticed.
 ---
+
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Reflect
 
 Pause and think about your recent work.
@@ -18,8 +21,8 @@ If `$ARGUMENTS` contains `--quick`:
   ```
   bun ${CLAUDE_PLUGIN_ROOT}/scripts/reflect-precheck.ts .claude-code-hermit ${CLAUDE_PLUGIN_ROOT} --quick --force
   ```
-- **Skip** the cadence precheck (the hash-gate is separate and narrower), cost_spike read, proposal scan, Resolution Check, and Component Health. Bind `$PHASE = adult`. Only the live SHELL.md scan + judge + outcomes path runs.
-- Read SHELL.md `## Findings` and `## Blockers` for actionable patterns. **Only Tier-1 + `Evidence Source: current-session` candidates are eligible.** Candidates needing archived-session evidence or Tier 2/3 defer to the next scheduled reflect — append one ledger row each so the signal survives archival and can graduate:
+- **Skip** the cadence precheck (the hash-gate is separate and narrower), cost_spike read, proposal scan, Resolution Check, and Component Health. Bind `$PHASE = adult`. Only the fresh task-record digest + judge + outcomes path runs.
+- Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task-report.ts .claude-code-hermit --recent --limit 3`; use titles, lessons and waiting reasons for actionable patterns. **Only Tier-1 + `Evidence Source: current-session` candidates are eligible.** Candidates needing archived-session evidence or Tier 2/3 defer to the next scheduled reflect — append one ledger row each so the signal survives archival and can graduate:
   ```bash
   bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit quick-deferral <<'HERMIT_OBSERVATION'
   <candidate-title-slug>
@@ -39,15 +42,23 @@ If `$ARGUMENTS` contains `--quick`:
 
 If `$ARGUMENTS` contains `--check-id` or `--check`, read branches.md § Scheduled checks and follow it exactly, then **stop** (no precheck or numbered steps below). The invocation is `reflect --check-id <id> --check <cmd…>`: everything after `--check` is the skill command, including its arguments, verbatim. A routine owns the cadence and may pin the model for this invocation.
 
+## Judge evidence handoff
+
+For every `claude-code-hermit:reflection-judge` call, include `Task records:` with the fresh
+normalized adapter rows already read, preserving their `source_path`, outcome, title, lessons,
+and waiting reason. Candidate `Sessions:` identifiers for record evidence are task IDs from those
+source paths; the existing evidence-source and return-field names stay compatible. A candidate
+outside that bounded evidence set needs another targeted adapter read, not an archive fallback.
+
 ## Scheduled reflect
 
 1. Determine whether a full run is warranted. With `--precheck-verdict '<verdict>'`: the reflect routine already ran the precheck in bash — use `<verdict>` directly, do **not** re-run it (always `RUN|<phases-json>`; the routine stops on `EMPTY` without loading this skill). Otherwise run it yourself and read the first line:
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/reflect-precheck.ts .claude-code-hermit ${CLAUDE_PLUGIN_ROOT}
    ```
-   - `EMPTY` → nothing due; the precheck already updated `reflection-state.json` and appended the Progress Log line. Emit `reflect: no candidates` and stop.
+   - `EMPTY` → nothing due; the precheck already updated `reflection-state.json`. Emit `reflect: no candidates` and stop.
    - `RUN|<phases-json>` → continue. The JSON lists due phases (`cost_spike`, `behavior`, `resolution_check`, `compute`, `digest`, `newborn`, `observations_fresh`); skip sections for phases not listed. `observations_fresh` means the ledger has rows newer than `last_run_at` — run step 3b even if `compute` is absent.
-2. Read SHELL.md for current context **(fresh read — never reuse a pre-compaction cached value)**.
+2. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task-report.ts .claude-code-hermit --recent --limit 3` for the three most recent done, cancelled or unconfirmed records. Read `task.ts list .claude-code-hermit --open --json` for the execution observation. Read fresh; never fall back to session archives.
 3. If `cost_spike` is listed: the precheck already detected the spike and wrote the row (`cost-spike:<YYYY-MM-DD>` — the measured day, which is **yesterday**, carrying `day_total` and `median_7d` as fields), so there is nothing to read or record here — it graduates via step 3b like any other observation. Do **not** re-read cost-log.jsonl to restate a number the precheck already computed.
 
 3a. **Behavioral digest** — if `behavior` is listed: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/transcript-digest.ts .claude-code-hermit --record-observation` (bounded ~20-line JSON of ground-truth counters — tool failures, tool_rejections by kind, wakes vs productive_wakes, compaction_events, subagent_dispatches; never `Read` a transcript directly). Two uses of the counters:
@@ -65,7 +76,7 @@ If `$ARGUMENTS` contains `--check-id` or `--check`, read branches.md § Schedule
 4. **Phase** — bind `$PHASE` to the `phase` field of the precheck's `<phases-json>` (missing → `adult`, never block). `$PHASE` gates sub-threshold surfacing and the Progress Log annotation.
 5. Rebuild and read the proposals index (metadata only, no file bodies): run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit`, then read `state/proposals-index.json` for each proposal's `id`, `status`, `title`, `source`, `created`, `accepted_date`, `related_sessions` (rows flagged `unparseable` have no frontmatter block; skip them). Also tail the last 100 lines of `state/proposal-metrics.jsonl` (inline, single read): count `responded` and `micro-resolved` events by `action`, `triage-verdict` events by `verdict` — feeds the operator-value and Component Health checks.
 
-6. **Dispatch the eval runner.** Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/reflect/reference.md`. The dispatch prompt carries: this run's `Anchor:` line as its first line (`bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit`; non-zero exit → rerun with the absolute state dir the error names in place of `.claude-code-hermit`, do not dispatch), `plugin_root` (resolved absolute path — `${CLAUDE_PLUGIN_ROOT}` is not substituted in `reference.md`), the precheck `phases-json`, the `last_resolution_check` cursor (from `state/reflection-state.json`), and `session_state` (from `state/runtime.json`; controls the routine check). The `Anchor:` line's `memory_dir` is the auto-memory directory `reference.md` expects under the name `memory-dir`.
+6. **Dispatch the eval runner.** Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/reflect/reference.md`. The dispatch prompt carries: this run's `Anchor:` line as its first line (`bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit`; non-zero exit → rerun with the absolute state dir the error names in place of `.claude-code-hermit`, do not dispatch), `plugin_root` (resolved absolute path — `${CLAUDE_PLUGIN_ROOT}` is not substituted in `reference.md`), the precheck `phases-json`, the `last_resolution_check` cursor (from `state/reflection-state.json`), and the execution observation from `task.ts list` (controls the routine check). The `Anchor:` line's `memory_dir` is the auto-memory directory `reference.md` expects under the name `memory-dir`.
 
    **Failure policy:** null/malformed runner JSON → fail open: skip the apply steps, carry forward empty candidate lists, do not advance the cursor, append `[HH:MM] reflect — analysis-runner failed; introspection-only` to the Progress Log, continue.
 
@@ -79,11 +90,11 @@ If `$ARGUMENTS` contains `--check-id` or `--check`, read branches.md § Schedule
                             "shell_findings_line": "<pre-rendered finding text>"|null } ],
   "routine_candidates": [ { "routine_id": "<id>", "action": "disable|retime|diagnostic",
                             "tier": 1, "schedule": "<new-cron>"|null,
-                            "evidence": "<text>", "sessions": ["<S-NNN>"],
+                            "evidence": "<text>", "sessions": ["<T-...>"],
                             "shell_findings_line": "<pre-rendered>"|null } ],
   "procedure_candidates": [ { "slug": "<slug>", "title": "<title>", "tier": 3,
                               "evidence_source": "archived-session", "evidence_origin": "own-work",
-                              "evidence": "<text>", "sessions": ["<S-NNN>"]|"none",
+                              "evidence": "<text>", "sessions": ["<T-...>"]|"none",
                               "artifact": "<file — value>"|null } ],
   "last_resolution_check": "PROP-NNN|null",
   "last_sparse_nudge": { "PROP-NNN": "<ISO>" }
@@ -91,7 +102,7 @@ If `$ARGUMENTS` contains `--check-id` or `--check`, read branches.md § Schedule
 ```
 <!-- reflect-eval-schema:end -->
 
-   **Apply `resolution_actions`** (housekeeping; exempt from the evidence integrity rule): pipe the runner's `resolution_actions` via a quoted heredoc (model-authored JSON may contain apostrophes) to the transactional apply script — it validates the whole batch before any write (a malformed batch writes nothing), then performs the frontmatter patches, `state/proposal-metrics.jsonl` appends, and SHELL.md `## Findings` appends itself (nudge debounce handled in the runner):
+   **Apply `resolution_actions`** (housekeeping; exempt from the evidence integrity rule): pipe the runner's `resolution_actions` via a quoted heredoc (model-authored JSON may contain apostrophes) to the transactional apply script; it validates the whole batch before any write (a malformed batch writes nothing), then performs the frontmatter patches, `state/proposal-metrics.jsonl` appends itself (nudge debounce handled in the runner):
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-reflection-actions.ts .claude-code-hermit <<'HERMIT_REFLECT_ACTIONS'
    {"resolution_actions": <the runner's resolution_actions array>}
@@ -99,7 +110,7 @@ If `$ARGUMENTS` contains `--check-id` or `--check`, read branches.md § Schedule
    ```
    Parse its single JSON line: `ok === false` or empty stdout → treat as the step-6 failure policy (skip apply, append `[HH:MM] reflect — apply-reflection-actions failed; introspection-only` to the Progress Log, continue). Carry the other four return fields to Candidate processing and State Update.
 
-Now reflect using **inherited context only** (SHELL.md from step 2, cost shape from step 3, behavior digest from step 3a, metrics summary from step 5; the runner handled cross-session file analysis — do not re-read session reports or proposal bodies). Signals: anything recurring or worked around instead of fixed? Spending proportional to the work — could a cheaper model tier have handled it; was context bloat avoidable? Something done manually that a skill covers, or a repeating subtask within the session a subagent could have handled? Value the operator actually uses — high `dismiss`/`rejected` rates from step 5 signal noise (Tier 1 micro-proposal to pare back); a high `expired` rate means poor question timing, not unwanted questions (`moot` is not that signal — it means the linked proposal was resolved, dismissed, or deferred before the answer arrived, so the question stopped applying). The same multi-step procedure in ≥2 sessions with no covering skill (procedure-capture candidate)? If `runtime.json` `session_state` is `idle`, think broader: a recurring check for HEARTBEAT.md, a missing operator preference (memory, or the skill owning the output), a skill/subagent to formalize repeating work, a manual request repeating on a schedule (routine-type candidate; branches.md § Candidate processing has the `Type: routine` Config-block format).
+Now reflect using **inherited context only** (normalized task records from step 2, cost shape from step 3, behavior digest from step 3a, metrics summary from step 5; the runner handled cross-session file analysis — do not re-read session reports or proposal bodies). Signals: anything recurring or worked around instead of fixed? Spending proportional to the work — could a cheaper model tier have handled it; was context bloat avoidable? Something done manually that a skill covers, or a repeating subtask within the session a subagent could have handled? Value the operator actually uses — high `dismiss`/`rejected` rates from step 5 signal noise (Tier 1 micro-proposal to pare back); a high `expired` rate means poor question timing, not unwanted questions (`moot` is not that signal — it means the linked proposal was resolved, dismissed, or deferred before the answer arrived, so the question stopped applying). The same multi-step procedure in ≥2 sessions with no covering skill (procedure-capture candidate)? If the execution observation is `idle`, think broader: a recurring check for HEARTBEAT.md, a missing operator preference (memory, or the skill owning the output), a skill/subagent to formalize repeating work, a manual request repeating on a schedule (routine-type candidate; branches.md § Candidate processing has the `Type: routine` Config-block format).
 
 ## Component Health
 
@@ -110,7 +121,7 @@ Is any skill, agent, or hook underperforming? **Skills:** output consistently co
 Collect **all** candidates first — think-hard observations, step-3b graduations, `routine_candidates` and `procedure_candidates` from the runner, Component Health findings. None → skip to State Update. Any → follow branches.md § Candidate processing exactly (it is normative; this summary is orientation) — read the file now only if step 3b's `skill-correction:*` branch didn't already load it earlier this run:
 
 - **Three-Condition Rule** (repeated pattern + meaningful consequence + operator-actionable change): recurrence is tier-aware — Tier-1 `current-session` needs 1 session; Tier-1 archived and Tier 2/3 need 2+ distinct archived sessions; artifact-cited efficiency/cost candidates cite a **machine-written state file** (`Artifact:` line, `Sessions: none`); procedure capture has an ephemerality exception. Failing candidates go sub-threshold to the ledger.
-- **Gates and routing**: never write a candidate's pattern into SHELL.md before the judge reads it (no self-certification). One `claude-code-hermit:reflection-judge` batch (dedup by title-slug first), then one batched `claude-code-hermit:proposal-triage` call before any queue/create; unrecognized gate output fails closed (`gate-failed` metric + Progress Log note; re-surfaces next cycle). **Track whether anything hit the gate-failed path** — it gates the graduation-cursor write in § State Update. Tier 1/2 → micro-approval queue (`state/micro-proposals.json`); Tier 3 → `/claude-code-hermit:proposal-create`; **`Evidence Origin: external-content` is always Tier 3** (quarantine). Runner `routine_candidates` are Tier 1 (pre-rendered diagnostic `shell_findings_line` entries go straight to Findings, no gates); `procedure_candidates` route through branches.md § Procedure capture (dedup guard, brief, `## Skill Draft`, kill criteria), minus any whose `slug` a `procedure-noticed:<slug>` graduation already carried through that section in step 3b — **except** entries carrying `evidence_source: "settled-memory"` (the runner's ownership signal), which route through branches.md § `skill-preference:*` routing instead: they relocate settled content into a skill that usually already exists, so Procedure capture's dedup guard would suppress them, and they take no procedure brief, no forced Tier 3, and no place in the procedure-capture kill-criteria sample.
+- **Gates and routing**: never write a candidate's pattern into the open task record before the judge reads it (no self-certification). One `claude-code-hermit:reflection-judge` batch (dedup by title-slug first), then one batched `claude-code-hermit:proposal-triage` call before any queue/create; unrecognized gate output fails closed (`gate-failed` metric + Progress Log note; re-surfaces next cycle). **Track whether anything hit the gate-failed path**; it gates the graduation-cursor write in § State Update. Tier 1/2 → micro-approval queue (`state/micro-proposals.json`); Tier 3 → `/claude-code-hermit:proposal-create`; **`Evidence Origin: external-content` is always Tier 3** (quarantine). Runner `routine_candidates` are Tier 1 (pre-rendered diagnostic `shell_findings_line` entries are recorded through `task.ts note` when a record is open, no gates); `procedure_candidates` route through branches.md § Procedure capture (dedup guard, brief, `## Skill Draft`, kill criteria), minus any whose `slug` a `procedure-noticed:<slug>` graduation already carried through that section in step 3b; **except** entries carrying `evidence_source: "settled-memory"` (the runner's ownership signal), which route through branches.md § `skill-preference:*` routing instead: they relocate settled content into a skill that usually already exists, so Procedure capture's dedup guard would suppress them, and they take no procedure brief, no forced Tier 3, and no place in the procedure-capture kill-criteria sample.
 - **Sub-threshold observations** → ledger append with a short stable `pattern` label, `"source":"reflect-noticed"`, `"origin":"own-work"` — or `"origin":"external-content"` when the finding carries an `[origin: external]` marker (copy, never infer). Reuse exact labels; grouping is string equality. Phase surfacing: `newborn` logs `Noticed:` lines, `juvenile` emits a weekly digest (sets `last_digest_at`), `adult` is silent.
 
 ## State Update
@@ -134,8 +145,8 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts \
 
 ## Progress Log Entry (non-empty runs)
 
-On every run reaching this point (not an EMPTY verdict — the precheck logs those), append to SHELL.md `## Progress Log`:
+On every run reaching this point (not an EMPTY verdict), append to the open task record through `task.ts note`:
 
 `[HH:MM] reflect (<phase>) — N candidates; verdicts: accept=A downgrade=D suppress=S; outcomes: <list or "none">`
 
-When suppress>0, append `; suppressed: [<slug>: <code>, ...]` — canonical codes from the judge/triage verdicts (`no-evidence`, `no-sessions`, `weak-recurrence`, `weak-consequence`, `not-actionable`), capped at 3 with `+N more`. When the Component Health `reflection-judge` 2× flag tripped, append `; component-health: reflection-judge suppress-ratio`. `<phase>` is `newborn`/`juvenile`/`adult` (step 4; a missing `phase` field annotates `adult` silently). This is the audit trail — the silent-by-default rule governs operator pings only; the log line always goes in.
+When suppress>0, append `; suppressed: [<slug>: <code>, ...]`; canonical codes from the judge/triage verdicts (`no-evidence`, `no-sessions`, `weak-recurrence`, `weak-consequence`, `not-actionable`), capped at 3 with `+N more`. When the Component Health `reflection-judge` 2× flag tripped, append `; component-health: reflection-judge suppress-ratio`. `<phase>` is `newborn`/`juvenile`/`adult` (step 4; a missing `phase` field annotates `adult` silently). This is the audit trail; the silent-by-default rule governs operator pings only; record the log line only inside an open record's turn.

@@ -62,7 +62,7 @@ See [Config Reference](config-reference.md#recommended_plugins-entry-schema) for
 Periodic plugin checks use ordinary `config.json.routines` entries. For example:
 
 ```json
-{"id":"my-check","schedule":"5 9 * * 1","skill":"claude-code-hermit:reflect --check-id my-check --check my-plugin:my-audit-skill","run_during_waiting":true,"enabled":true}
+{"id":"my-check","schedule":"5 9 * * 1","skill":"claude-code-hermit:reflect --check-id my-check --check my-plugin:my-audit-skill","enabled":true}
 ```
 
 Manage these with `/hermit-settings routines`, then run `/claude-code-hermit:hermit-routines load`. Each fire evaluates that skill's findings through reflection gates; a quiet result creates no proposal. An optional pre-wake gate can skip the wake when a deterministic check finds no work. See [Routine Authoring](routine-authoring.md).

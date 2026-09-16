@@ -16,7 +16,7 @@ don't: *when* a routine needs a scoped skill instead of a broad one, and how to 
 A periodic plugin check is an ordinary routine, for example:
 
 ```json
-{"id":"my-check","schedule":"5 9 * * 1","skill":"claude-code-hermit:reflect --check-id my-check --check my-plugin:my-audit-skill","run_during_waiting":true,"enabled":true}
+{"id":"my-check","schedule":"5 9 * * 1","skill":"claude-code-hermit:reflect --check-id my-check --check my-plugin:my-audit-skill","enabled":true}
 ```
 
 The wrapper invokes exactly that skill, with all arguments after `--check` passed verbatim. Actionable or contextual findings become one candidate with `Evidence Source: scheduled-check/my-check` and `Sessions: none`, routed through judge, triage, and the existing approval path. Quiet results produce no proposal. The routine owns cadence, model pins, and optional pre-wake gating; `scheduled_checks` is only for task-completion checks.
@@ -34,7 +34,7 @@ A routine has a cost signature worth fixing when it:
   (about 3 days for a daily routine, ~3 months for a monthly one). Subagent rows and the turn
   that ingests a subagent-completion notification add cost to the routine without adding a
   fire, so a delegating routine's \$/run reflects its whole delegated cost.
-- Invokes a broad, `/session-start`-style skill that loads a lot of context (recovery matrices,
+- Invokes a broad, `/resident-start`-style skill that loads a lot of context (recovery matrices,
   full state reads, conversational framing) to answer one narrow question ("is there anything to
   do?", "did this threshold cross?", "is this file stale?").
 - Runs at the session model (no `model` override) even though its decision doesn't need the
@@ -48,14 +48,14 @@ produce a report.
 ## The conversion checklist
 
 1. **Author a purpose-built scoped skill** that reads only the state its decision needs, instead
-   of reusing a broad skill built for interactive `/session-start` entry. A scoped skill is small
+   of reusing a broad skill built for interactive `/resident-start` entry. A scoped skill is small
    on purpose — it exists to answer one question, not to onboard a session.
 
 2. **Pin it to haiku** via the routine's optional `model` field
    (`skills/hermit-routines/SKILL.md`, "Model-override substitution"). Setting `model` dispatches the skill to an isolated
    subagent (via the Agent tool) instead of running it in the live session — no session
    conversation is inherited, only filesystem access. Two shipped defaults already do this:
-   `daily-auto-close` and `doctor` are both `"model": "haiku"` in
+   `doctor` is `"model": "haiku"` in
    `state-templates/config.json.template`. Never set `model` on `heartbeat-restart` — its re-arm
    append must run in-session, and `load` ignores the override there regardless.
 
@@ -68,7 +68,7 @@ produce a report.
    decision "is there anything to do here?" can be answered in bash — a file's mtime, a threshold
    comparison, a hash — write a precheck script that prints one token and exits 0, and only load
    the skill body on the branch that needs it. The shipped archetypes:
-   - `scripts/heartbeat.ts precheck` — emits `SKIP|<reason>`, `OK`, `AUTO_CLOSE`, or `EVALUATE`.
+   - `scripts/heartbeat.ts precheck`; emits `SKIP|<reason>`, `OK`, or `EVALUATE`.
      Only `EVALUATE` loads the heartbeat skill body.
    - `scripts/reflect-precheck.ts` — emits `EMPTY` or `RUN|<phases-json>`. On `EMPTY` the precheck itself
      owns the audit trail (updates `reflection-state.json`, appends the Progress Log line) so
@@ -81,14 +81,7 @@ produce a report.
    skip still counts as a run in `routines.ts health`. `WAKE`, a non-zero exit, unparseable output,
    or the timeout (`precheck_timeout_s`, default 30s, max 300) all fire the routine exactly as an
    ungated one would; a failure stamps `precheck-error` with the reason, and the `routine-precheck`
-   doctor check surfaces a gate that has never succeeded. Four builtins ship wired by default:
-   `"precheck": "reflect"` (the reflect cadence check), `"precheck": "doctor"` (SKIP when nothing
-   currently failing is still owed to the operator — the checks and ledger writes run once, as
-   part of the gate itself, not again on wake), and `"precheck": "auto-close"` (SKIP on `queued` or
-   `noop`, WAKE only on an actual `close-now`; on the resting `noop` — idle with no active session
-   — the gate also stamps the daily context-reset marker itself, since the archive path that
-   normally writes it never runs), and `"precheck": "later"` (SKIP unless `state/hypotheses.jsonl`
-   holds a pending claim whose due time has passed).
+   doctor check surfaces a gate that has never succeeded. Three builtins ship: `"precheck": "reflect"` (cadence), `"precheck": "doctor"` (findings owed to the operator), and `"precheck": "later"` (due claims or open records with results and checks).
 
    Rules for the script: **verdict only** — nothing it prints reaches the session, so a gate that
    found work hands nothing over; the skill re-queries its own source using the `ROUTINE_LAST_FIRED`
@@ -129,7 +122,7 @@ Applying the checklist:
 Before, in `config.json`:
 
 ```json
-{ "id": "monthly-revenue", "schedule": "0 8 * * *", "skill": "claude-code-hermit:session-start" }
+{ "id": "monthly-revenue", "schedule": "0 8 * * *", "skill": "claude-code-hermit:resident-start" }
 ```
 
 After — a scoped `-light` skill, haiku-pinned, no session entry:

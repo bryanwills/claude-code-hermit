@@ -6,7 +6,7 @@
 // (proposal-act/SKILL.md's dispatched-subagent prompt and its in-main step e.5)
 // and the two copies had already diverged: the dispatched copy carried no
 // bookkeeping-path filter, so an implementation whose only diff was
-// `sessions/SHELL.md` ran /simplify (~$0.25) on one path and skipped on the
+// `sessions/task records` ran /simplify (~$0.25) on one path and skipped on the
 // other. Both paths now call this, so they cannot disagree.
 //
 // Authoritative inputs are read here, never accepted from the caller — a caller

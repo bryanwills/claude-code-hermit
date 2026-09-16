@@ -24,7 +24,8 @@ import { readAlertState, alertStatePath, telemetryAlertPath, readMergedAlerts, m
 import { isPaused } from './lib/pause';
 import { acquireLock, releaseLock } from './lib/lockfile';
 import { isLoopbackUrl } from './validate-config';
-import { readFrontmatter, globDir } from './lib/frontmatter';
+import { readTaskReports } from './lib/task-report';
+import { readExecution } from './lib/tasks';
 import { safe } from './lib/sanitize';
 import { todayYMD, thisMonthYYYYMM } from './lib/time';
 import { readSettledConfig } from './lib/config-read';
@@ -64,20 +65,6 @@ function ageSecs(ts: string | null | undefined, ref: Date): number | null {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return null;
   return (ref.getTime() - d.getTime()) / 1000;
-}
-
-function coerceNumOrNull(v: Json, parse: (s: string) => number): number | null {
-  if (v === undefined || v === null) return null;
-  const n = typeof v === 'number' ? v : parse(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function numOrNull(v: Json): number | null {
-  return coerceNumOrNull(v, parseFloat);
-}
-
-function intOrNull(v: Json): number | null {
-  return coerceNumOrNull(v, (s) => parseInt(s, 10));
 }
 
 // --- Export state (state/telemetry/last-export.json) ---
@@ -240,30 +227,13 @@ function buildBundle(hermitDir: string, config: Json, opts: BuildOpts = {}): Jso
   };
   if (!redact) alerts.keys = entries.map(([k]) => safe(k));
 
-  let session: Json = null;
-  const reportFiles = globDir(path.join(hermitDir, 'sessions'), /^S-\d+-REPORT\.md$/);
-  if (reportFiles.length > 0) {
-    const fm = readFrontmatter(reportFiles[reportFiles.length - 1]);
-    if (fm) {
-      const proposalsCreated = Array.isArray(fm.proposals_created) ? fm.proposals_created : [];
-      session = {
-        id: fm.id ?? null,
-        status: fm.status ?? null,
-        date: fm.date ?? null,
-        duration: fm.duration ?? null,
-        cost_usd: numOrNull(fm.cost_usd),
-        tokens: intOrNull(fm.tokens),
-        escalation: fm.escalation ?? null,
-        closed_via: fm.closed_via ?? null,
-        proposals_created_count: proposalsCreated.length,
-      };
-      if (!redact) {
-        session.task = fm.task != null ? safe(fm.task) : null;
-        session.tags = Array.isArray(fm.tags) ? fm.tags.map(safe) : null;
-        session.proposals_created = proposalsCreated.map(safe);
-      }
-    }
-  }
+  const tasks = readTaskReports(hermitDir).map(report => ({
+    outcome: report.outcome,
+    opened_at: report.opened_at,
+    closed_at: report.closed_at,
+    cost_usd: report.cost,
+    ...(redact ? {} : { title: safe(report.title), requester: safe(report.requester), due: report.due, waiting_on: report.waiting_on == null ? null : safe(report.waiting_on), lessons: report.lessons.map(safe) }),
+  }));
 
   const runtimeData = readJson(path.join(hermitDir, 'state', 'runtime.json'));
   const pauseStatus = isPaused(hermitDir);
@@ -271,7 +241,7 @@ function buildBundle(hermitDir: string, config: Json, opts: BuildOpts = {}): Jso
   const events = countRecentWatchdogEvents(hermitDir, ref);
 
   const runtime: Json = {
-    session_state: runtimeData?.session_state ?? null,
+    execution_state: readExecution(hermitDir).state,
     runtime_mode: runtimeData?.runtime_mode ?? null,
     paused: pauseStatus.paused,
     paused_until: pauseStatus.until ?? null,
@@ -298,7 +268,7 @@ function buildBundle(hermitDir: string, config: Json, opts: BuildOpts = {}): Jso
     doctor,
     cost,
     alerts,
-    session,
+    tasks,
     runtime,
   };
 }

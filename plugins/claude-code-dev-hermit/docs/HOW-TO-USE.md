@@ -37,7 +37,7 @@ Per `§Branch Discipline` in the injected CLAUDE.md:
 1. Verify clean working tree (`git status --porcelain` empty).
 2. Branch from the first entry of `protected_branches` (defaults to `main`): `git checkout -b <prefix>/<slug> origin/<base>`.
 3. Name the branch `<prefix>/<slug>` where `prefix ∈ {feature, fix, chore, hotfix}`.
-4. Log the creation to `.claude-code-hermit/sessions/SHELL.md`.
+4. Inside an open record's turn, pipe the creation note into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`. Otherwise skip the note.
 
 Then write the code. The CLAUDE.md `§Git Safety` rules apply throughout: feature-branch pushes only, no `--no-verify`, no commits to protected, no force-push. At strict hook profile, `git-push-guard` blocks the dangerous commands at `bash` time.
 

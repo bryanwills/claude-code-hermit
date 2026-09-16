@@ -228,9 +228,9 @@ It installs the plugin (requires [Bun](https://bun.sh)), writes the bot token to
 .claude-code-hermit/bin/hermit-docker up     # hermit recovers and resumes
 ```
 
-`down` triggers a graceful session close before stopping (see [Graceful Shutdown](#graceful-shutdown) below for the exact sequence). On `up`, the hermit reads SHELL.md and the latest archived report to resume with full continuity.
+`down` waits for a graceful execution boundary before stopping (see [Graceful Shutdown](#graceful-shutdown) below for the exact sequence). On `up`, the resident reads execution state and open task records.
 
-To queue work for the hermit to pick up next, use `/claude-code-hermit:proposal-create` followed by `/claude-code-hermit:proposal-act accept <id>`. Accept writes `NEXT-TASK.md`, which drains as soon as the current task finishes (or on the next heartbeat tick if the session is already idle) — it does not wait for a full boot.
+To queue work for the hermit to pick up next, use `/claude-code-hermit:proposal-create` followed by `/claude-code-hermit:proposal-act accept <id>`. Accept opens a queued task record. A close or cancel returns the next runnable record; heartbeat nudges work left queued.
 
 ---
 
@@ -255,30 +255,11 @@ When Docker is running, the attach command is printed automatically.
 
 For complete removal rather than a graceful stop, see [How do I uninstall a hermit?](faq.md#how-do-i-uninstall-a-hermit).
 
-The entrypoint traps SIGTERM (sent by `docker compose down`, `docker stop`, or system shutdown). On signal:
+The entrypoint traps SIGTERM. It sends the configured `shutdown_skill`, if any, then waits within its 30-second timeout until `state/execution.json` is no longer `in_flight`. When a skill was sent, the observation must be newer than that send. `hermit-docker down` uses the same boundary with its existing 60-second timeout before removing the container.
 
-1. Checks if the session is already closed (skips if `hermit-docker down` already handled it)
-2. Sends `/session-close --shutdown` via tmux
-3. Waits up to 30s for the session to archive
-4. Exits cleanly
+## Context clear
 
-This means even a raw `docker compose down` (without `hermit-docker down`) will attempt to archive the session. Use `hermit-docker down` for the full 60s timeout and explicit feedback.
-
-## Auto-Close
-
-Hermit archives the current session via two triggers:
-
-- **12h inactivity** — `heartbeat.ts precheck` checks `last-operator-action.json` on each tick. If the operator has not acted for >12h, it returns the `AUTO_CLOSE` verdict.
-- **Daily midnight with lull** — the `daily-auto-close` routine fires at `0 0 * * *` (local). If the operator is currently active (last action ≤10 min), the routine writes `state/pending-close.json`. The next eligible Monitor-mode 60-second routine poll or heartbeat tick after the operator has been idle >10 min drains the flag, provided no operator turn is open (`state/operator-turn-open.json`, 60-min TTL) and the shared drain backoff (`state/pending-close-drain.json`) has expired — 30 minutes for the routine poll, halved by the heartbeat drainer once `heartbeat.every` reaches 30 minutes so a slow heartbeat retries on its next tick. If the operator was already idle when the routine fired, it closes directly without queueing.
-
-On either trigger:
-
-1. The main-session auto-close path appends `[HH:MM] Heartbeat: auto-closed.` to SHELL.md Monitoring (so the trace lands in the archived report, not the next session).
-2. Invokes `/session-close --auto` — bypasses the operator-summary prompt and skips reflect; the always-on monitors continue.
-3. The report is archived with frontmatter `closed_via: auto`.
-4. `state/pending-close.json` (if present) is removed after archive success.
-
-All auto-archived sessions count as evidence in `reflect`, `weekly-review`, `hermit-health`, and `hermit-evolution` — the prior `closed_via: auto` skip filter was removed so daily-midnight archives (with real operator content) reach those surfaces. The 12h-inactivity trigger and the 10-min lull threshold are not configurable in v1.
+The watchdog clears context at a safe execution boundary when the operator has been quiet for an hour, the context is a day old, or policy changed. The token floor and two-tick quiescence guard still apply. Records never close because time passed.
 
 ## Crash Recovery
 
@@ -286,7 +267,7 @@ Container restarts trigger recovery automatically:
 
 1. Entrypoint re-seeds onboarding bypass and channel symlinks
 2. `hermit-start` launches tmux with Claude Code
-3. SessionStart hook detects the orphaned SHELL.md
+3. The resident reads execution state and open task records
 4. Hermit offers to resume where it left off
 
 `restart: unless-stopped` handles crashes and host reboots. Session state is on disk via the project bind mount, config state persists in the `claude-config` named volume — nothing is lost.

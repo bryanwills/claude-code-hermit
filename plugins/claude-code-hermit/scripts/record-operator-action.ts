@@ -1,12 +1,12 @@
 process.stdout.on('error', () => {});
 
 // UserPromptSubmit + SessionStart hook — records when an operator prompt is received.
-// Writes state/last-operator-action.json so `heartbeat.ts precheck` can gate AUTO_CLOSE
-// on genuine operator silence rather than SHELL.md mtime (which routine writes reset).
+// Writes state/last-operator-action.json so the watchdog can gate context clearing
+// on genuine operator silence rather than state-file mtime (which routine writes reset).
 // The pipeline opens state/operator-turn-open.json at hook exit for kept, non-blocked prompts;
 // direct invocation and --force open it immediately. `routines.ts due` then defers monitor-mode
 // routines only while a real operator turn is in flight; stop-pipeline.ts clears it at Stop
-// (issue #617 — session_state alone starved routines indefinitely because it never resets).
+// The open-turn marker expires so routines cannot remain starved indefinitely.
 //
 // Invocation modes:
 //   (stdin) UserPromptSubmit — JSON payload with `prompt`. Filter applied, write if kept.
@@ -20,9 +20,9 @@ process.stdout.on('error', () => {});
 //   [hermit-routine:…   — cron-delivered routine prompts (hermit-routines/SKILL.md:43-54)
 //   <channel…           — only when the sender fails the channel's `allowed_users` gate;
 //                          recording those would let stranger/bot traffic suppress
-//                          AUTO_CLOSE. An allowlisted sender IS operator activity and is
+//                          context clearing. An allowlisted sender IS operator activity and is
 //                          recorded here (issue #835 — a channel-only conversation left
-//                          the clock frozen, so the midnight post-close /clear fired
+//                          the clock frozen, so /clear fired
 //                          mid-exchange). This hook is the mechanical write site;
 //                          channel-responder/SKILL.md 1d's --force is a fallback.
 //   GUEST_REPORT:…      — a guest session in this folder reporting finished work over the
@@ -75,7 +75,7 @@ function write() {
 }
 
 // Stop that closed an operator turn: the turn's end is operator activity too, so quiet
-// clocks (auto-idle, AUTO_CLOSE lull, watchdog operator-recent) run from when the work
+// clocks (context clearing, watchdog operator-recent) run from when the work
 // the operator asked for finished, not from when the prompt arrived.
 export function recordOperatorTurnEnd(nowMs: number): void {
   writeMarker(TMP_PATH, STATE_PATH, nowMs);
@@ -94,16 +94,16 @@ export function openTurnMarker() {
 // commands ALSO arrive bare (no <command-message> wrapper reaches stdin), so
 // there is no stdin-visible signal to key on: drop exactly our own known
 // injections and count every other prompt as operator activity. Missing the
-// operator is the destructive direction (mid-session /clear, AUTO_CLOSE);
+// operator is the destructive direction (mid-session /clear, context clearing);
 // counting a stray programmatic prompt only delays cleanup.
-// tests/auto-close.test.ts syncs this list against the actual sendKeys call
+// tests/heartbeat-monitor-emissions.test.ts syncs this list against the actual sendKeys call
 // sites — extend it when adding a new injection.
 const INJECTED_EXACT = new Set([
+  '/claude-code-hermit:resident-start',
   '/claude-code-hermit:heartbeat run',
   '/claude-code-hermit:heartbeat start',
   '/claude-code-hermit:heartbeat stop',
   '/claude-code-hermit:hermit-routines load',
-  '/claude-code-hermit:session-close --shutdown',
 ]);
 
 function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
@@ -134,23 +134,23 @@ function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
   // emitter's stdout in an envelope before it reaches this hook —
   //   <task-notification>\n<task-id>…</task-id>
   //   \n<summary>Monitor event: "routine-monitor"</summary>
-  //   \n<event>ROUTINE_DUE [hermit-routine:daily-auto-close]</event>\n…</task-notification>
+  //   \n<event>ROUTINE_DUE [hermit-routine:daily-brief]</event>\n…</task-notification>
   // — so the anchored sentinel rules below never match a delivered one. This is
   // also the ONLY coverage for subagent/background completions, which carry no
   // hermit sentinel at all. Mid-turn arrivals are queued and run the hook
   // individually (CC 2.1.263); notifications still do not count as activity.
   if (t.startsWith('<task-notification')) return true;
   // Monitor emissions in bare form. Deliberately anchored, NOT containment: this
-  // is a live input boundary where a false positive silences an AUTO_CLOSE, so an
+  // is a live input boundary where a false positive silences an context clearing, so an
   // operator prompt that merely quotes a sentinel must still count as activity
-  // (pinned in tests/auto-close.test.ts). lib/trigger-source.ts anchors the same
+  // (pinned in tests/heartbeat-monitor-emissions.test.ts). lib/trigger-source.ts anchors the same
   // grammar too, on the sentinel line a wake delivered; it stays a separate boundary
   // (retrospective cost attribution over stored transcripts, different failure cost),
   // so keep both in sync deliberately rather than treating either as precedent.
   //   heartbeat-monitor.sh:38-43 → "HEARTBEAT_EVALUATE" (bare) | "HEARTBEAT_ERROR: <detail>"
   //   lib/routines/due.ts        → "ROUTINE_DUE [hermit-routine:<id>] ..."
   //   routine-monitor.sh:36      → "ROUTINE_MONITOR_ERROR: <detail>"
-  // tests/auto-close.test.ts monitor-emission drift guard re-derives this list
+  // tests/heartbeat-monitor-emissions.test.ts monitor-emission drift guard re-derives this list
   // from the emitters' source, bare AND envelope-wrapped — extend both together.
   if (t === 'HEARTBEAT_EVALUATE') return true;
   if (t.startsWith('HEARTBEAT_ERROR: ')) return true;
@@ -164,9 +164,9 @@ function isRoutinePrompt(prompt: string, channel?: ChannelGateInputs): boolean {
   // (lib/harness-drain.ts drainHarnessCommand). Prefix-matched, not listed in
   // INJECTED_EXACT, because the argument is runtime-computed: the exact string is
   // `/model <arg>` for whatever arg arrived over the channel. NOTE the drift guard in
-  // tests/auto-close.test.ts only scans *quoted* literals at sendKeys call sites, so a
+  // tests/heartbeat-monitor-emissions.test.ts only scans *quoted* literals at sendKeys call sites, so a
   // template-literal injection like this generates no automatic coverage — the
-  // regression test for these three prefixes is hand-written in auto-close.test.ts.
+  // regression test for these three prefixes is hand-written in heartbeat-monitor-emissions.test.ts.
   if (t.startsWith('/model ') || t.startsWith('/effort ') || t.startsWith('/advisor ')) return true;
   return false;
 }

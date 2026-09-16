@@ -18,6 +18,8 @@ const SKILLS = [
   { name: 'fitness-brief', gates: 0 },
   { name: 'hatch', gates: 0 },
   { name: 'set-rpe', gates: 0 },
+  { name: 'weekly-load-review', gates: 0 },
+  { name: 'monday-planning', gates: 0 },
   { name: 'weekly-coaching-patterns', gates: 0 },
 ];
 
@@ -75,5 +77,16 @@ const gatePath = path.join(PLUGIN_ROOT, 'state-templates/bin/fitness-weekly-patt
 ok('weekly patterns gate template exists', fs.existsSync(gatePath));
 const hatch = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills/hatch/SKILL.md'), 'utf-8');
 ok('hatch installs weekly patterns gate', hatch.includes('install -m 755') && hatch.includes('state-templates/bin/fitness-weekly-patterns-gate'));
+
+const routineEntries = [...hatch.matchAll(/\{\n  "id": "([^"]+)",[\s\S]*?\n\}/g)]
+  .map(([block]) => JSON.parse(block));
+for (const [id, skill] of [
+  ['morning-brief', 'claude-code-fitness-hermit:fitness-brief --morning'],
+  ['evening-brief', 'claude-code-fitness-hermit:fitness-brief --evening'],
+  ['weekly-load-review', 'claude-code-fitness-hermit:weekly-load-review'],
+  ['monday-planning', 'claude-code-fitness-hermit:monday-planning'],
+]) {
+  ok(`${id} invokes its domain skill`, routineEntries.find((entry) => entry.id === id)?.skill === skill);
+}
 
 process.exit(summary() === 0 ? 0 : 1);

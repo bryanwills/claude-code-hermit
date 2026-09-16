@@ -39,8 +39,7 @@ Tests live in `tests/`:
 
 | File                   | Used by                                     | Format                                                                            |
 | ---------------------- | ------------------------------------------- | --------------------------------------------------------------------------------- |
-| `stop-hook-input.json` | cost-tracker, session-diff | JSON with `session_id`, `model`, `input_tokens`, `output_tokens` |
-| `shell-session.md`     | evaluate-session                            | SHELL.md format (copy of a live session)                                          |
+| `stop-hook-input.json` | cost-tracker | JSON with `session_id`, `model`, `input_tokens`, `output_tokens` |
 
 ---
 
@@ -52,13 +51,6 @@ Each hook can be tested in isolation. Stop hooks expect JSON on stdin:
 # cost-tracker (Stop hook — always runs)
 cat tests/fixtures/stop-hook-input.json | bun scripts/cost-tracker.ts
 
-# session-diff (Stop hook — standard/strict profile, self-gated)
-cat tests/fixtures/stop-hook-input.json | \
-  AGENT_HOOK_PROFILE=standard bun scripts/session-diff.ts
-
-# evaluate-session (Stop hook — standard/strict profile)
-echo '{}' | AGENT_HOOK_PROFILE=standard bun scripts/evaluate-session.ts
-
 # check-upgrade (SessionStart hook) — three outcomes, driven by the stamp in
 # .claude-code-hermit/config.json vs the plugin.json at the root you pass:
 #   stamp older  -> ---Upgrade Available---     (run hermit-evolve)
@@ -69,7 +61,7 @@ echo '{}' | AGENT_HOOK_PROFILE=standard bun scripts/evaluate-session.ts
 bash scripts/check-upgrade.sh .
 ```
 
-For hooks that read `.claude-code-hermit/sessions/SHELL.md`, ensure the file exists — see `tests/fixtures/shell-session.md`.
+For record fixtures, use `tests/helpers/tasks.ts`.
 
 ---
 

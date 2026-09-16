@@ -32,8 +32,6 @@ const readSchedule = (dir: string): any => {
 const writeSchedule = (dir: string, value: any) => fs.writeFileSync(schedulePath(dir), JSON.stringify(value));
 const writeConfig = (dir: string, routines: any[]) =>
   fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC', routines }));
-const writeRuntime = (dir: string, sessionState: string) =>
-  fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_state: sessionState }));
 
 /** A gate script at <project>/tools/<name>, executable, with the given body. */
 function writeGate(dir: string, name: string, body: string): string {
@@ -46,7 +44,7 @@ function writeGate(dir: string, name: string, body: string): string {
 
 const ROUTINE = (overrides: any = {}) => ({
   id: 'gated', skill: 'my-plugin:thing', schedule: '0 9 * * *',
-  enabled: true, run_during_waiting: false, ...overrides,
+  enabled: true, ...overrides,
 });
 
 /** The cursor is one hour behind the fire, so every run below has a mark to consume. */
@@ -254,17 +252,6 @@ describe('routine gate — ordering against the other gates', () => {
     }
   };
 
-  test('not run while the session is waiting (non-rdw routine)', withDir(async (dir) => {
-    const rel = counterGate(dir);
-    writeConfig(dir, [ROUTINE({ precheck: rel })]);
-    writeSchedule(dir, PRIMED);
-    writeRuntime(dir, 'waiting');
-
-    await runDue(dir);
-    expect(callCount(dir)).toBe(0);
-    expect(readRows(dir).map((x) => x.event)).toEqual(['skipped-waiting']);
-  }));
-
   test('not run while an operator turn is open, and the fire is not consumed', withDir(async (dir) => {
     const rel = counterGate(dir);
     writeConfig(dir, [ROUTINE({ precheck: rel })]);
@@ -333,7 +320,7 @@ describe('routine gate — reflect provider', () => {
     await runDue(dir);
 
     const r = await runScript('routines.ts', {
-      args: ['precheck', 'reflect', 'false', 'monitor'],
+      args: ['precheck', 'reflect', 'monitor'],
       cwd: dir,
     });
     const lines = r.stdout.trim().split('\n');
@@ -350,7 +337,7 @@ describe('routine gate — reflect provider', () => {
     );
 
     const r = await runScript('routines.ts', {
-      args: ['precheck', 'reflect', 'false', 'monitor'],
+      args: ['precheck', 'reflect', 'monitor'],
       cwd: dir,
     });
     expect(r.stdout.trim()).toBe('PROCEED');
@@ -369,7 +356,7 @@ describe('routine gate — reflect provider', () => {
     );
 
     const r = await runScript('routines.ts', {
-      args: ['precheck', 'reflect', 'false', 'monitor'],
+      args: ['precheck', 'reflect', 'monitor'],
       cwd: dir,
     });
     expect(r.stdout.trim()).toBe('PROCEED');
@@ -418,75 +405,10 @@ describe('routine gate — doctor builtin', () => {
   }), 30000);
 });
 
-describe('routine gate — auto-close builtin', () => {
-  const stateFile = (dir: string, name: string) => hermit(dir, 'state', name);
-  const writeStateJSON = (dir: string, name: string, value: any) =>
-    fs.writeFileSync(stateFile(dir, name), JSON.stringify(value));
-  const AUTO_CLOSE_NOW = '2026-07-15T09:30:00Z';
-  const seed = (dir: string) => {
-    writeConfig(dir, [ROUTINE({ id: 'daily-auto-close', precheck: 'auto-close' })]);
-    writeSchedule(dir, { 'daily-auto-close': { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
-  };
-
-  test('idle, no active session → SKIP, and the gate stamps the daily context reset itself', withDir(async (dir) => {
-    seed(dir);
-    writeStateJSON(dir, 'runtime.json', { session_state: 'idle' });
-
-    const r = await runDue(dir, AUTO_CLOSE_NOW);
-    expect(r.stdout.trim()).toBe('');
-    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
-    expect(fs.existsSync(stateFile(dir, 'pending-close.json'))).toBe(false);
-    const marker = JSON.parse(fs.readFileSync(stateFile(dir, 'clear-requested.json'), 'utf-8'));
-    expect(marker.reason).toBe('daily-boundary');
-  }));
-
-  // A non-resting noop (waiting session, missing/unreadable runtime) leaves live
-  // context in place. Stamping the marker there would have the watchdog read it as
-  // "a close just happened" and `/clear` a session nothing archived.
-  test('a waiting session → SKIP (noop) but NO clear-requested marker', withDir(async (dir) => {
-    // `run_during_waiting` mirrors the shipped daily-auto-close, so the gate — not
-    // due.ts's waiting check — is what decides this fire.
-    writeConfig(dir, [ROUTINE({ id: 'daily-auto-close', precheck: 'auto-close', run_during_waiting: true })]);
-    writeSchedule(dir, { 'daily-auto-close': { last_consumed_mark: '2026-07-15T08:00:00.000Z' } });
-    writeStateJSON(dir, 'runtime.json', { session_state: 'waiting', session_id: 'S-001' });
-
-    const r = await runDue(dir, AUTO_CLOSE_NOW);
-    expect(r.stdout.trim()).toBe('');
-    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
-    expect(fs.existsSync(stateFile(dir, 'clear-requested.json'))).toBe(false);
-  }));
-
-  test('operator active inside the lull → SKIP (queued), no clear-requested marker', withDir(async (dir) => {
-    seed(dir);
-    writeStateJSON(dir, 'runtime.json', { session_state: 'in_progress' });
-    writeStateJSON(dir, 'last-operator-action.json', { at: '2026-07-15T09:25:00Z' }); // 5min lull
-
-    const r = await runDue(dir, AUTO_CLOSE_NOW);
-    expect(r.stdout.trim()).toBe('');
-    expect(readRows(dir).map((x: any) => x.event)).toEqual(['skipped-precheck']);
-    const pending = JSON.parse(fs.readFileSync(stateFile(dir, 'pending-close.json'), 'utf-8'));
-    expect(pending.queued_by).toBe('daily-auto-close');
-    expect(fs.existsSync(stateFile(dir, 'clear-requested.json'))).toBe(false);
-  }));
-
-  test('operator idle beyond the lull → WAKE (close-now)', withDir(async (dir) => {
-    seed(dir);
-    writeStateJSON(dir, 'runtime.json', { session_state: 'in_progress' });
-    writeStateJSON(dir, 'last-operator-action.json', { at: '2026-07-15T09:15:00Z' }); // 15min lull
-
-    const r = await runDue(dir, AUTO_CLOSE_NOW);
-    expect(r.stdout.trim()).toBe('ROUTINE_DUE [hermit-routine:daily-auto-close]');
-    const rows = readRows(dir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ routine_id: 'daily-auto-close', event: 'dispatched', delivery: 'monitor' });
-  }));
-});
-
 describe('precheck validation (pure)', () => {
   test('accepts every builtin and project-relative paths', () => {
     expect(validatePrecheckValue('reflect')).toBeNull();
     expect(validatePrecheckValue('doctor')).toBeNull();
-    expect(validatePrecheckValue('auto-close')).toBeNull();
     expect(validatePrecheckValue('tools/gate.sh')).toBeNull();
   });
 
@@ -508,10 +430,8 @@ describe('precheck validation (pure)', () => {
   test('resolveGate names each builtin without touching the filesystem', () => {
     expect(resolveGate('reflect', '/nonexistent')).toEqual({ kind: 'builtin', name: 'reflect' });
     expect(resolveGate('doctor', '/nonexistent')).toEqual({ kind: 'builtin', name: 'doctor' });
-    expect(resolveGate('auto-close', '/nonexistent')).toEqual({ kind: 'builtin', name: 'auto-close' });
   });
 });
-
 
 test('later builtin skips an empty ledger and wakes once for a past-due claim', withDir(async dir => {
   expect(validatePrecheckValue('later')).toBeNull();

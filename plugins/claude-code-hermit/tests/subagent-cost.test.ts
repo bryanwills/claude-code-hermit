@@ -152,7 +152,7 @@ describe('subagent-cost: happy path — async heartbeat dispatch', () => {
   test('row api_calls is 0', () => expect(rows[0].api_calls).toBe(0));
   test('row estimated_cost_usd is positive', () => expect(rows[0].estimated_cost_usd).toBeGreaterThan(0));
   test('row agent_type matches payload', () => expect(rows[0].agent_type).toBe('claude-code-hermit:skill-eval-runner'));
-  test('row session_id comes from payload', () => expect(rows[0].session_id).toBe('hook-session'));
+  test('row does not carry session_id', () => expect(rows[0]).not.toHaveProperty('session_id'));
 });
 
 // Regression guard for the original ship-blocker: the hook summed payload.transcript_path

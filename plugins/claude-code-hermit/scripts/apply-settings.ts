@@ -74,8 +74,6 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/cost-tracker.ts*)',
   'Bash(bun */scripts/heartbeat.ts precheck*)',
   'Bash(bun */scripts/reflect-precheck.ts*)',
-  'Bash(bun */scripts/archive-shell.ts*)',
-  'Bash(bun */scripts/evaluate-session.ts*)',
   // Verb-scoped: `observe` is the only thing this script does. No space before the
   // trailing `*` — CC 2.1.246 warns at startup on a fully-literal argument following
   // a wildcard-containing one (e.g. `observe *`), so this mirrors the other
@@ -114,7 +112,7 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/apply-settings.ts*)',
   'Bash(bun */scripts/channel-log.ts*)',
   'Bash(bun */scripts/channel-send.ts*)',
-  // The binding store's only writer. channel-responder, watch and session-start all
+  // The binding store's only writer. channel-responder, watch and SessionStart all
   // reach for it on an ordinary inbound message, with no operator present to answer
   // a prompt; the script validates its own key and verbs and pins its state dir
   // because thread-create reads the bot token.
@@ -122,7 +120,6 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/task.ts*)',
   'Bash(bun */scripts/duties.ts*)',
   'Bash(bun */scripts/channel-access.ts*)',
-  'Bash(bun */scripts/session-archive.ts*)',
   'Bash(bun */scripts/routines.ts precheck*)',
   'Bash(bun */scripts/routines.ts finish*)',
   'Bash(bun */scripts/routines.ts cron-registry*)',
@@ -133,7 +130,7 @@ const HERMIT_ALLOW = [
   // deterministic call out of the permission engine.
   'Bash(bun */scripts/routines.ts arm*)',
   'Bash(bun */scripts/heartbeat.ts tick*)',
-  'Bash(bun */scripts/heartbeat.ts ack-next-task*)',
+  'Bash(bun */scripts/heartbeat.ts ack-queue*)',
   'Bash(bun */scripts/heartbeat.ts start-check*)',
   'Bash(bun */scripts/heartbeat.ts start-commit*)',
   'Bash(bun */scripts/heartbeat.ts stop*)',
@@ -141,10 +138,12 @@ const HERMIT_ALLOW = [
   // bin/hermit-run (their own ${CLAUDE_PLUGIN_ROOT} can't reach core's versioned
   // cache dir). Pinned to the two verbs they actually need, not a bare
   // `hermit-run proposal *` — that would also hand them create, patch,
-  // shell-append, next-task and routine, i.e. arbitrary state-dir writes. The
+  // routine, i.e. arbitrary state-dir writes. The
   // space before * is a word boundary: `proposal micro *` matches
   // `proposal micro .claude-code-hermit brief-cycle` but not a
   // `micro…`-prefixed verb.
+  'Bash(.claude-code-hermit/bin/hermit-run task note *)',
+  'Bash(.claude-code-hermit/bin/hermit-run task list *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal micro *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal metrics *)',
   // The shared domain-hatch protocol, pinned per verb for the same reason:
@@ -156,9 +155,8 @@ const HERMIT_ALLOW = [
   'Bash(.claude-code-hermit/bin/hermit-run domain-hatch sync-block *)',
   // The three routes above exist because a domain plugin can't resolve core's
   // path. The ones below exist for a different reason: they are the routes the
-  // model reaches for with no pre-resolved path of its own — the first three ad
-  // hoc mid-session (CLAUDE-APPEND names channel-send and observations, and its
-  // "log it in the Progress Log" rules lead to proposal shell-append), the
+  // model reaches for with no pre-resolved path of its own: channel-send and
+  // observations during a turn, and the
   // rc-server four from the rc-gate skill once the operator invokes it. Their
   // `bun */scripts/*.ts*` twins above are wildcarded-interpreter rules, which
   // auto mode suspends (docs/security.md § Auto-mode Classifier) — so on the
@@ -172,7 +170,6 @@ const HERMIT_ALLOW = [
   // `Bash(bun */scripts/channel-send.ts*)` entry already confers, and no more.
   'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
   'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
-  'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
   // The rc-gate skill's four verbs. The skill is operator-invoked, but the Bash
   // calls it then makes still face the classifier, and their wildcarded twins
   // are suspended there. Every verb is argless, so each grant is exact rather

@@ -15,7 +15,7 @@ This file is read only on the EVALUATE path, once the precheck determines a full
 
 **1. Read inputs fresh** — do not reuse values cached from prior reads in this session.
 - `.claude-code-hermit/HEARTBEAT.md` — the checklist items
-- `.claude-code-hermit/sessions/SHELL.md` — for session `**ID:**`
+- The tick's local date (`today`), used for distinct-day self-evaluation counts
 
 **2. Per-item evaluation.** For each item in HEARTBEAT.md:
 - **Default proposals item** (text references `proposals/` and `status: proposed`): skip it entirely.
@@ -50,7 +50,7 @@ prefix is dropped as a phantom and has no effect.
 
 Each firing item's `text` is a channel-voice one-liner: plain language, the concrete condition first, no
 internal IDs (no `PROP-NNN`, no session IDs, no file paths unless the item itself is about a file). It is
-used verbatim in the SHELL.md monitoring line and, for a brand-new or newly-suppressed alert, in the
+used for a brand-new or newly-suppressed alert in the
 operator notification — write it for that audience, not as a debug note to yourself.
 
 ## Return Schema

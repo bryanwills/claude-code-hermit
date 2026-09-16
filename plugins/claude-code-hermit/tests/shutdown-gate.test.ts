@@ -42,7 +42,7 @@ function setupChannelWorkdir(): Workdir {
 function writeRuntime(wd: Workdir, patch: Record<string, unknown>): void {
   const p = hermit(wd.dir, 'state', 'runtime.json');
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify({ version: 1, session_state: 'in_progress', ...patch }));
+  fs.writeFileSync(p, JSON.stringify({ version: 1, ...patch }));
 }
 
 const PENDING = { shutdown_requested_at: '2026-07-24T09:00:00+0000', shutdown_completed_at: null };

@@ -69,7 +69,7 @@ describe('apply-settings permissions-plan', () => {
   test('reports every canonical entry as missing for an absent target', withTarget(async (target) => {
     const plan = await run(target, 'permissions-plan');
     expect(plan.missing).toEqual(HERMIT_ALLOW);
-    expect(plan.missing).toContain('Bash(bun */scripts/heartbeat.ts ack-next-task*)');
+    expect(plan.missing).toContain('Bash(bun */scripts/heartbeat.ts ack-queue*)');
     expect(plan.obsolete).toEqual([]);
     expect(plan.obsolete_deny).toEqual([]);
   }));
@@ -367,7 +367,8 @@ describe('literal-path hermit-run grants', () => {
   const LITERAL_PATH = [
     'Bash(.claude-code-hermit/bin/hermit-run channel-send *)',
     'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
-    'Bash(.claude-code-hermit/bin/hermit-run proposal shell-append *)',
+    'Bash(.claude-code-hermit/bin/hermit-run task note *)',
+    'Bash(.claude-code-hermit/bin/hermit-run task list *)',
     'Bash(.claude-code-hermit/bin/hermit-run rc-server start)',
     'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
     'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',
@@ -383,6 +384,14 @@ describe('literal-path hermit-run grants', () => {
       expect(HERMIT_ALLOW.some((e: string) => e.includes(`hermit-run later ${verb}`))).toBe(false);
     });
   }
+
+  test('task resolver grants expose only note and list', () => {
+    expect(HERMIT_ALLOW.filter((entry: string) => entry.includes('hermit-run task '))).toEqual([
+      'Bash(.claude-code-hermit/bin/hermit-run task note *)',
+      'Bash(.claude-code-hermit/bin/hermit-run task list *)',
+    ]);
+    expect(HERMIT_ALLOW.some((entry: string) => entry.includes('task-check.ts'))).toBe(false);
+  });
 
   for (const entry of LITERAL_PATH) {
     test(`sealed: ${entry}`, () => {

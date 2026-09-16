@@ -36,6 +36,28 @@ import { safeForLLM } from './lib/sanitize';
 
 type Json = any;
 
+// Versioned migrations preserve unrelated operator settings. The normal persist
+// path validates the complete result and records only the changed leaves.
+const migrations: Record<string, (config: Json) => void> = {
+  '1.4.0': (config) => {
+    unsetPath(config, 'post_close_clear');
+    if (getPath(config, 'context_hygiene.clear') === undefined) {
+      setPath(config, 'context_hygiene.clear', {
+        enabled: true, quiet: '1h', max_age: '24h', min_tokens: 20000,
+      });
+    }
+    if (Array.isArray(config.routines)) {
+      config.routines = config.routines.filter((routine: Json) => routine?.id !== 'daily-auto-close');
+      for (const routine of config.routines) {
+        if (routine && typeof routine === 'object') delete routine.run_during_waiting;
+      }
+    }
+    if (['/claude-code-hermit:session', '/claude-code-hermit:session-start'].includes(config.boot_skill)) { // resident-start migration aliases
+      config.boot_skill = '/claude-code-hermit:resident-start';
+    }
+  },
+};
+
 // Strict read: an existing-but-malformed file must abort, never fall through to {},
 // otherwise the write below would clobber the operator's config with our subset.
 function readTargetJson(filePath: string): Json {
@@ -424,6 +446,17 @@ if (import.meta.main) {
   };
 
   switch (op) {
+    case 'migrate': {
+      const migration = migrations[rest[0]];
+      if (!migration || rest.length !== 1) {
+        console.error('migrate requires a supported version: 1.4.0');
+        process.exit(1);
+      }
+      migration(config);
+      if (JSON.stringify(before) !== JSON.stringify(config)) persist(`settings-migrate:${rest[0]}`);
+      break;
+    }
+
     case 'get': {
       const value = getPath(config, rest[0]);
       console.log(JSON.stringify(value, null, 2));

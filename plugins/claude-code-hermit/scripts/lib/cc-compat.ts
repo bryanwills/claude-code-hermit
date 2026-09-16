@@ -188,7 +188,7 @@ function assertStateDir(argvValue: string): string | null {
 // `subdir` narrows the bound from the whole hermit dir to one branch of it, and
 // is REQUIRED rather than optional on purpose. Containment against the hermit
 // root alone still admits every operator-owned file beside `state/` —
-// OPERATOR.md, sessions/SHELL.md, bin/ — and a caller that
+// OPERATOR.md, sessions/task records, bin/ — and a caller that
 // JSON.parse-with-fallback-then-rewrites (update-reflection-state.ts does
 // exactly that) would overwrite any of them wholesale. An optional parameter on
 // a security-narrowing helper is a footgun: a future caller that omits it

@@ -4,10 +4,10 @@ The continuously running layer inside Claude Code owns lifecycle, scheduling, ch
 
 ## State and lifecycle
 
-- `state/runtime.json` is authoritative for lifecycle; `sessions/SHELL.md` is the single current plan/log surface. Its status prose is not machine state. Auto-close preserves factual work state within a continuing resident lifecycle.
+- `state/runtime.json` owns process lifecycle; `state/execution.json` records harness execution and `tasks/` holds commitments written through `task.ts`.
 - Every state write needs an owner: resident-only, folder-shared, or session-keyed. `scripts/startup-context.ts` classifies residency; hooks use `scripts/lib/guest-marker.ts` and normalize payload session IDs through `scripts/lib/cc-compat.ts`.
-- Guests must not update resident liveness, operator activity, open-turn markers, reset stamps, task snapshots, session-diff state, or channel-control queues. Shared cost/usage records retain guest provenance. The cost cache `sessions/.status.json` also accumulates totals, so changing its ownership must preserve guest accounting.
-- Folder-shared Progress Log writes and lifecycle archive/open/reset operations use the common SHELL lock in `scripts/lib/md-write.ts`; do not add a competing lock or an unlocked read-modify-write path. Native model/operator edits do not acquire this lock.
+- Guests must not update resident liveness, operator activity, open-turn markers, reset stamps, task bindings, or channel-control queues. Shared cost/usage records retain guest provenance.
+- Task record writes use the task writer lock. Do not add an unlocked record mutation path.
 - A registered monitor or old fired event is not liveness. Preserve boot/runtime ownership and real liveness checks when changing startup, recovery, or scheduling. Read [architecture](docs/architecture.md) for the ownership boundaries.
 - Treat `startup-context.ts` as a high-impact hook: preserve guest/resident side effects and startup/resume/clear/compact output contracts, and justify any recurring context injection.
 

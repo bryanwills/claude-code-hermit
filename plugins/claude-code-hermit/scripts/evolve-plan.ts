@@ -77,8 +77,6 @@ interface ClaudeAppendDiffResult {
 
 const MARKER = '<!-- claude-code-hermit: Session Discipline -->';
 const TEMPLATE_FILES = [
-  'SHELL.md.template',
-  'SESSION-REPORT.md.template',
   'PROPOSAL.md.template',
 ];
 

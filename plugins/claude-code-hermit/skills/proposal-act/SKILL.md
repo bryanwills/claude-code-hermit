@@ -1,6 +1,6 @@
 ---
 name: proposal-act
-description: 'Accept, defer, dismiss, or resolve a proposal. For accepted proposals, asks how to proceed: start implementing now, create a session task, or note for manual implementation. Activates on messages like "accept PROP-", "dismiss PROP-", "defer PROP-", "resolve PROP-".'
+description: 'Accept, defer, dismiss, or resolve a proposal. For accepted proposals, asks how to proceed: start implementing now, queue a task, or note for manual implementation. Activates on messages like "accept PROP-", "dismiss PROP-", "defer PROP-", "resolve PROP-".'
 ---
 # Proposal Act
 
@@ -17,7 +17,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 /claude-code-hermit:proposal-act defer PROP-015
 /claude-code-hermit:proposal-act dismiss PROP-012
 /claude-code-hermit:proposal-act resolve PROP-008
-/claude-code-hermit:proposal-act accept PROP-019 --answer "session task"
+/claude-code-hermit:proposal-act accept PROP-019 --answer "queued task"
 ```
 
 The `--answer` form is not typed by an operator — it's how a channel-safe resolution re-enters step 4 after an out-of-band reply (see § Channel re-entry below).
@@ -56,24 +56,24 @@ When the operator accepts a proposal:
 
 1. Resolve the proposal file using the resolution algorithm above, then read it.
 
-2. **Determine what to set.** Read `state/runtime.json` for `session_id` and `session_state` (both used below — `session_state` drives step 4's branch). From the file already read in step 1:
+2. **Determine what to set.** Use the current task record id when this turn belongs to an open record. From the file already read in step 1:
    - `responded`: if currently `false`, plan `--set responded=true` for the patch call below and fire the first-response event now, **before** that patch call, so its summary regen already reflects it:
      ```
      bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts event .claude-code-hermit responded --id=PROP-NNN --action=accept
      ```
      If `responded` is already `true`, skip both (prevents double-counting).
-   - `accepted_in_session`: if `session_id` is non-null, plan `--set accepted_in_session=<session_id>`. If no session is active (`session_id` is null), leave it unset (frontmatter default `null` stays).
+   - `accepted_in_session`: this retained provenance field takes the current task record id, when one exists, via `--set accepted_in_session=<task_id>`. Without a current record, leave it unset.
    - `success_signal` (optional): check whether the body has a `## Success Signal` section with a non-empty predicate line (ignore comment lines starting with `<!--`). If found, validate it:
      ```
      bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts success-signal --validate "<predicate line>"
      ```
-     Exit 0 → plan a stdin `Set: success_signal=<predicate line>` line for the patch call (free text — never argv `--set`). Exit non-zero → plan a `proposal.ts shell-append` warning: `PROP-NNN success_signal ignored: <reason printed by the script>`. No section, or empty/comment-only → leave `success_signal` unset. Never block accept regardless of outcome.
+     Exit 0 → plan a stdin `Set: success_signal=<predicate line>` line for the patch call (free text — never argv `--set`). Exit non-zero → plan a `task.ts note .claude-code-hermit <id>` warning when running inside an open record, otherwise report the warning: `PROP-NNN success_signal ignored: <reason printed by the script>`. No section, or empty/comment-only → leave `success_signal` unset. Never block accept regardless of outcome.
 
 3. **Patch.** One call applies the frontmatter flip, session tracking, success signal, and the Operator Decision timestamp — assembled from what step 2 determined:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts patch .claude-code-hermit <filename> \
        --set status=accepted --set accepted_date=@now \
-       [--set responded=true] [--set accepted_in_session=<session_id>] --stdin <<'HERMIT_PATCH'
+       [--set responded=true] [--set accepted_in_session=<task_id>] --stdin <<'HERMIT_PATCH'
    Decision: Accepted on @now.
    [Set: success_signal=<predicate line>]
    HERMIT_PATCH
@@ -99,7 +99,7 @@ When the operator accepts a proposal:
    **Channel-tagged turn:** do not wait interactively for a reply in this turn. Send the question via the channel reply tool in plain voice with the three options numbered — "Suggestion #N — start now, queue it as a task, or leave it to you?" (derive `#N` per `proposal-list` §4a). AND queue a pending micro-proposal entry:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
-   {"tier":1,"question":"Suggestion #N accepted — how should it be implemented?","options":["implement now","session task","manual"],"on_resolve":"/claude-code-hermit:proposal-act accept PROP-NNN --answer {answer}","proposal_id":"PROP-NNN"}
+   {"tier":1,"question":"Suggestion #N accepted — how should it be implemented?","options":["implement now","queued task","manual"],"on_resolve":"/claude-code-hermit:proposal-act accept PROP-NNN --answer {answer}","proposal_id":"PROP-NNN"}
    HERMIT_MP
    ```
    (the `on_resolve` and `proposal_id` ids stay `PROP-NNN` — internal, never shown; `proposal_id` is what retires this ask automatically if the proposal is resolved, dismissed, or deferred before the operator answers). Then stop — steps 1-3a already ran, so `status: accepted` is a safe resting state until the operator answers (immediately in this same conversational turn, or later via the § Channel re-entry path below). The interactive terminal path below is unchanged.
@@ -107,22 +107,18 @@ When the operator accepts a proposal:
    - **"Start implementing now"** (default, typical answer): run the falsification gate, then handle session lifecycle, then execute in this turn.
      **Falsification gate (runs first, before any session transition).** Verify the proposal is actionable as written with a read-only pass. Skip when the body contains `## Skill Improvement` or `## Skill Draft` — both are skill-authoring, handled in-main (step (e) / the procedure-capture install flow), not a code-edit plan. For `## Skill Draft`, first check that the `source_artifact` path exists and is readable, searching `compiled/` then `compiled/.archive/` for the same basename and reading the archived copy on a match (if the file is missing from both locations or unreadable, REJECT with code `stale-paths` — the procedure brief was removed; the operator should re-run reflect to generate a fresh brief). For `## Skill Improvement`, first resolve the component name to `.claude/skills/<name>/SKILL.md`. `stale-paths` fires only when the target is provably gone: that file is missing **and** `<name>` is not an installed plugin skill (a namespaced `<plugin>:<name>` entry in the available-skills list; a bare `<name>` entry is operator-space or bundled, not a plugin one). A missing file for a name that is still an installed plugin skill is a plugin-shipped-skill improvement, not a stale path: let it through, step (e) routes it to operator space. If the available-skills list is not in context, proceed; step (e)'s operator confirmation guards the override path.
 
-       For any other body, use the native `Plan` agent as the read-only subagent. Read only the returned text; ignore any file it writes under `~/.claude/plans/`. If the agent errors → log a one-line warning to SHELL.md Findings and continue to the session-lifecycle branch. Never block.
+       For any other body, use the native `Plan` agent as the read-only subagent. Read only the returned text; ignore any file it writes under `~/.claude/plans/`. If the agent errors → record a one-line warning with `task.ts note .claude-code-hermit <id>` when working inside an open record, otherwise report it and continue to the record branch. Never block.
 
        Invoke with the proposal's `## Context`, `## Proposed Solution`, and `## References` sections plus this fixed instruction:
-       > "You are a read-only falsification gate. Verify every cited path and symbol against the current code. For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory's .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths. `## References` also carries non-code citations (session reports `S-NNN`, `PROP-NNN`, memory names, URLs, or `n/a — <reason>`) — read those as background context only; never REJECT because one of them is not a file. Return line 1 as exactly: `REJECT: <already-done | partially-done | stale-paths | nonexistent-symbols | too-vague> — <one-line evidence>` or `PROCEED` (+ complete file list to modify). If REJECT, give file:line evidence. Do not produce a build plan for a rejected proposal. Do not write any files."
+       > "You are a read-only falsification gate. Verify every cited path and symbol against the current code. For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory's .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths. `## References` also carries non-code citations (session reports `T-...`, `PROP-NNN`, memory names, URLs, or `n/a; <reason>`); read those as background context only; never REJECT because one of them is not a file. Return line 1 as exactly: `REJECT: <already-done | partially-done | stale-paths | nonexistent-symbols | too-vague>; <one-line evidence>` or `PROCEED` (+ complete file list to modify). If REJECT, give file:line evidence. Do not produce a build plan for a rejected proposal. Do not write any files."
 
        Append the returned line-1 verdict to the proposal's `## Operator Decision` section as provenance, then branch:
-       - `PROCEED` → continue to the session-lifecycle branch below (step (a)). Use the agent's complete file list over any files mentioned in the proposal body.
-       - `REJECT` (stop before any session transition — `session_state` and SHELL.md `Task:` stay untouched):
-         - **Interactive mode** → surface to the operator: *"Falsification gate: [verdict] — [evidence]. Proceed anyway? Y to override / N to re-scope the proposal first."* Y → continue to the session-lifecycle branch below (step (a)). N → stop; status stays `accepted`. Operator re-scopes and re-runs `/proposal-act accept PROP-NNN`.
+       - `PROCEED` → continue to the record branch below (step (a)). Use the agent's complete file list over any files mentioned in the proposal body.
+       - `REJECT` (stop before opening a task record):
+         - **Interactive mode** → surface to the operator: *"Falsification gate: [verdict] — [evidence]. Proceed anyway? Y to override / N to re-scope the proposal first."* Y → continue to the record branch below (step (a)). N → stop; status stays `accepted`. Operator re-scopes and re-runs `/proposal-act accept PROP-NNN`.
          - **Autonomous mode** → do not implement; notify via channel: *"PROP-NNN: falsification check — [evidence]. Reply 'override PROP-NNN' to implement anyway."*
-     a. Use the `session_state` already read from `state/runtime.json` in step 2 to branch.
-     b. **Idle:** pipe `Task: Implement PROP-NNN: <title>` on stdin to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/session-archive.ts open --state-dir=.claude-code-hermit` to transition to `in_progress` and fill SHELL.md Task. Proceed to (e).
-     c. **In progress:** confirm before switching: "Currently working on: <current task>. Switch to PROP-NNN? Y/N".
-        - Yes: append `[HH:MM] switched to PROP-NNN: <title> (prior task: <prior task>)` to SHELL.md `## Progress Log`; overwrite SHELL.md `Task:` field with "Implement PROP-NNN: <title>"; `runtime.json session_state` stays `in_progress`. Proceed to (e).
-        - No: fall back to "Create a session task" below.
-     d. **Waiting:** fall back to "Create a session task" without asking, then notify: "PROP-NNN queued. Session is currently waiting."
+     a. Open a resident-owned task with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit --title "Implement PROP-NNN: <title>" --requester <requester> --done "<proposal verification>" --dedupe-key "proposal:PROP-NNN"`. Use the current operator or channel requester identity and retain the returned record id for notes and results. Existing records remain intact.
+     b. If another runnable record precedes it, leave this record queued and report its handle. Continue immediately only within the operator's instruction to implement now; do not silently replace another commitment.
      e. Implement the proposal. Hermit-only native settings go in operator-owned `.claude-code-hermit/claude-settings.json`; generated launch settings remain config-derived. Hooks and project-wide permissions go in the hatch-resolved settings file — read `target` from `.claude-code-hermit/state/hatch-options.json` (`local` → `.claude/settings.local.json`, `committed` → `.claude/settings.json`); when it is absent, ask `.claude-code-hermit/bin/hermit-run domain-hatch preflight claude-code-hermit` for `target`, or `target_default` when that is null, and map it the same way rather than re-deriving it — its `target_file` is the CLAUDE-APPEND destination, not a settings file. Write those entries there with `Edit`/`Write`, never a shell redirect, or the seeded ask never fires. That native ask is the operator's approval and relays to chat, so the bundled `update-config` skill is not needed for it; a hardened install has the same globs as denies, so report the block instead of routing around it. If the body contains `## Skill Improvement`, resolve the component name to `.claude/skills/<name>/SKILL.md` and author in-main (continues to e.5), branching on whether that file exists. **It exists:** read it before writing, compare each corrected behavior in the body against its current content, and author only behaviors not already present. If every listed behavior is already present, skip e.5 (nothing was written, so there is no diff to clean) but still run e.6 — a defined verification step is the only check on the already-present judgement, and a failure there means the behaviors are not actually present, so do not resolve — then run `/proposal-act resolve PROP-NNN` and tell the operator or channel that the skill was already fixed, writing nothing. **It does not exist** (the gate let it through): never write into the plugin cache and never resurrect a deleted skill — author the improvement as an operator-space override at that path and require the operator's explicit confirmation on the authored file before installing it, exactly as the `## Skill Draft` flow's step 4 does. That confirmation is what authorizes creating a file at a name the operator may have deliberately deleted — declined, or unanswered, means nothing is written. An override is a standalone skill that sits alongside the plugin one rather than merging into it, so author a complete SKILL.md (frontmatter plus the whole behavior it has to carry), not just the corrected fragment. Parse the `source_artifact:` line from the `## Skill Improvement` body; if it is present and the path is readable (search `compiled/` then `compiled/.archive/`), read the brief and use its content as input context for the revision — this anchors the improvement to the skill's original spec. Missing or unreadable anchor: proceed without it (no REJECT — an improve proposal is still actionable without the brief, unlike `## Skill Draft` which hard-rejects stale paths). If the body contains `## Skill Draft`, follow the procedure-capture install flow below (in-main; continues to e.5). Otherwise, dispatch the full implementation tail to the native `general-purpose` agent:
 
         **Dispatch (falsification gate returned PROCEED, no in-main skill handler):**
@@ -196,31 +192,30 @@ When the operator accepts a proposal:
 
          **The quality gate is cleanup, not correctness** — `/simplify` does not check that the proposal works. Correctness is the `## Verification` gate in step (e.6); proposals with no defined verification still resolve, but the skip is recorded.
 
-         Best-effort throughout: if the gate or `/simplify` errors, log a one-line warning to SHELL.md Findings and fall back to skip.
+         Best-effort throughout: if the gate or `/simplify` errors, record a one-line warning with `task.ts note .claude-code-hermit <id>` when working inside an open record, otherwise report it and fall back to skip.
      e.6. **Verification gate** (in-main implementations only — dispatched implementations verify inside the subagent). Read the proposal's `## Verification` section.
          - If it contains real steps (more than the HTML-comment placeholder), perform them now — after the quality gate has applied any `/simplify` edits — before resolving. If a defined step fails, **do not resolve**: report the failure to the operator (or channel in autonomous mode) and stop.
-         - If the section is empty, missing, or contains only its placeholder comment, append `Verification: none defined for PROP-NNN — skipped.` to SHELL.md `## Findings` and proceed. The omission is recorded, not blocked.
+         - If the section is empty, missing, or contains only its placeholder comment, append `Verification: none defined for PROP-NNN: skipped.` with `task.ts note .claude-code-hermit <id>` and proceed. The omission is recorded, not blocked.
 
      f. **(in-main path)** When verifiably done: run `/proposal-act resolve PROP-NNN`, then notify the operator (or channel in autonomous mode) with the tier-appropriate message from (e.5). (Dispatched implementations resolve + notify in the step (e) post-return handling.)
 
-   - **"Create a session task"** → assemble the full NEXT-TASK.md content (Task/Context/Suggested Plan derived from the proposal). The `(always, first step)` bullet below is step `1.` of the Suggested Plan, ahead of the steps derived from the proposal (it gates them, so it is worthless after them) — the derived steps are numbered from `2.`. The remaining bullets append to the end of the Suggested Plan, in order, numbered sequentially after the derived steps (quality-gate bullet is last so `/simplify` reviews any authored skill output):
-       - **(always, first step)** `Read the proposal file at .claude-code-hermit/proposals/PROP-NNN-*.md and re-verify its ## References and ## Proposed Solution against the current tree with bounded reads of the cited file:line ranges, before any edit; delegate only when the citations span more than a handful of files. If the work is already done, run /claude-code-hermit:proposal-act resolve PROP-NNN and implement nothing. For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory's .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths. If the cited paths or symbols no longer exist, report the mismatch to the operator or channel and implement nothing. Either way the session did no implementation work, so close it out through the normal work-done flow instead of leaving it in progress.`
+   - **"Queue a task"** → assemble a record note (Task/Context/Suggested Plan derived from the proposal). The `(always, first step)` bullet below is step `1.` of the Suggested Plan, ahead of the steps derived from the proposal (it gates them, so it is worthless after them) — the derived steps are numbered from `2.`. The remaining bullets append to the end of the Suggested Plan, in order, numbered sequentially after the derived steps (quality-gate bullet is last so `/simplify` reviews any authored skill output):
+       - **(always, first step)** `Read the proposal file at .claude-code-hermit/proposals/PROP-NNN-*.md and re-verify its ## References and ## Proposed Solution against the current tree with bounded reads of the cited file:line ranges, before any edit; delegate only when the citations span more than a handful of files. If the work is already done, run /claude-code-hermit:proposal-act resolve PROP-NNN and implement nothing. For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory's .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths. If the cited paths or symbols no longer exist, report the mismatch to the operator or channel and implement nothing. Either way no implementation was performed: report the finding on the record and use its ordinary evidence or confirmation close path.`
        - **(if the proposal contains `## Skill Improvement`)** `Resolve the component name to .claude/skills/<name>/SKILL.md. If it exists, read it before writing and author only the behaviors from the ## Skill Improvement body that are not already present; if all of them are already present, change nothing and say so. If it does not exist, never write into the plugin cache, and create a file at that name only after the operator explicitly confirms the authored SKILL.md, which must be complete rather than the corrected fragment alone. Use the source_artifact brief only when present, and validate the result.`
-         The guards travel in the bullet because a later `/session-start` consumes the task as ordinary work, so step (e) never runs again.
+         The guards travel in the bullet because the queued-record workflow picks up the task as ordinary work, so step (e) never runs again.
        - **(if the proposal contains `## Skill Draft`)** `Author the SKILL.md from the source_artifact (see ## Skill Draft), present the final SKILL.md to the operator for confirmation, then install it to the install_target only on confirmation.`
        - **(if `quality_gate.tier` in `.claude-code-hermit/config.json` is not `"budget"` — i.e. `"balanced"` or `"quality"`)** `Before committing, run: bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit <this PROP file>. On "action":"RUN", run /simplify with its focus_files as the target, then commit.`
-         The bullet defers the call rather than making it here: at queue time the implementation hasn't happened, so there is no diff to classify. The future session runs the same verb the other two paths run, with no `--files-json` — the working-tree diff is the evidence by then.
+         The bullet defers the call rather than making it here: at queue time the implementation hasn't happened, so there is no diff to classify. The future task turn runs the same verb the other two paths run, with no `--files-json` — the working-tree diff is the evidence by then.
 
-     Then create it — the script's exclusive create makes the "already pending" check atomic (no separate existence pre-check needed):
+     Open the record and then append the prepared note through `task.ts`; never write `tasks/*.md` directly:
      ```bash
-     bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts next-task .claude-code-hermit <<'HERMIT_NEXT_TASK'
-     # Next Task (from PROP-NNN)
-
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit --owner resident --requester <requester> --title "Implement PROP-NNN: <title>" --done "<proposal verification>" --dedupe-key "proposal:PROP-NNN"
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <returned-id> <<'HERMIT_TASK_NOTE'
      ## Task
      [One-line task derived from the proposal's Proposed Solution]
 
      ## Context
-     [Summary of the pattern/problem from the proposal, including Related Sessions]
+     [Summary of the pattern/problem and proposal references]
 
      ## Suggested Plan
      1. [the (always, first step) re-verify bullet from above]
@@ -228,21 +223,20 @@ When the operator accepts a proposal:
      3. [Step derived from Proposed Solution]
      4. Verify the fix resolves the pattern
      [any remaining appended bullets from above, numbered from 5.]
-     HERMIT_NEXT_TASK
+     HERMIT_TASK_NOTE
      ```
-     - `OK` — confirm: "Task prepared. The next `/session-start` will offer this as the default task."
-     - `ERROR|next-task-exists` — another proposal's task is already pending; nothing was written. Status still flips to `accepted` (operator intent is recorded, via the step 3 patch above). Notify: "PROP-NNN accepted. NEXT-TASK is already pending another proposal. Run `/session-start` to consume it first, then re-run `/proposal-act accept PROP-NNN` and pick 'Start implementing now' or manual."
+     Confirm the returned handle and title. Earlier runnable records keep their order; the close/cancel digest and heartbeat handle pickup. On a command failure, report it and leave the proposal accepted without claiming a queued record was created. If open returned an existing record, reuse it without appending a duplicate plan.
 
    - **"I'll handle it manually"** → Just mark accepted. Respond: "Marked as accepted. No further action taken."
 
-5. Notify the operator: "PROP-NNN accepted: [title]". On a channel-tagged turn (Step 0), use plain voice instead, matching the step-4 branch actually taken: **start now** → "Got it — starting on Suggestion #N."; **session task** → "Queued Suggestion #N as a task for the next session."; **manual** → "Marked Suggestion #N as accepted — leaving it to you." (`#N` per `proposal-list` §4a.)
+5. Notify the operator: "PROP-NNN accepted: [title]". On a channel-tagged turn (Step 0), use plain voice instead, matching the step-4 branch actually taken: **start now** → "Got it — starting on Suggestion #N."; **queued task** → "Queued Suggestion #N as a task."; **manual** → "Marked Suggestion #N as accepted — leaving it to you." (`#N` per `proposal-list` §4a.)
 
 ## Channel re-entry (`--answer`)
 
 When invoked as `accept PROP-NNN --answer "<label>"` (channel-responder resolving the micro-proposal entry queued by step 4's channel branch, either later in the same turn or in a fresh session): the proposal's frontmatter `status` is already `accepted` from the original turn, so skip steps 1-3a entirely — do not re-append a duplicate "Accepted on …" timestamp or re-fire the `responded` event. Match `<label>` case-insensitively by prefix against the three step-4 options and jump straight into the matching branch:
 
 - `implement now` → **"Start implementing now"** (falsification gate onward; the autonomous-mode channel notifies specified in that branch apply as usual).
-- `session task` → **"Create a session task"**.
+- `queued task` → **"Queue a task"**.
 - `manual` → **"I'll handle it manually"**.
 
 ## Defer Flow

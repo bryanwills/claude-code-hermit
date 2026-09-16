@@ -14,9 +14,8 @@
 // post-validation write failed) or {"ok":false,"reason":...} with zero writes.
 // Exit 0 always (lib/heartbeat/alert-update.ts pattern); only missing argv exits 1.
 //
-// Durability split: proposal frontmatter patches and metrics appends are the
-// all-or-nothing core; SHELL.md `## Findings` appends are best-effort session
-// notes — a missing SHELL.md or heading lands in `errors`, never aborts.
+// The whole batch validates before writes. Post-validation write failures are
+// reported per proposal; no journal or task record is written here.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +23,7 @@ import { pinStateDirOrExit } from './lib/cc-compat';
 import { listProposalFiles, readFileWithFrontmatter } from './lib/frontmatter';
 import { appendEvent, resolvedEvent } from './lib/proposals/event';
 import { sweepMoot } from './lib/proposals/micro';
-import { writeFileAtomic, patchFrontmatter, appendShellLine, PATCH_KEY_RE } from './lib/md-write';
+import { writeFileAtomic, patchFrontmatter, PATCH_KEY_RE } from './lib/md-write';
 
 type Json = any;
 
@@ -113,10 +112,6 @@ function apply(stateDir: string, stdin: string): Json {
       applied.auto_resolve++;
     } else {
       applied.nudge++;
-    }
-    if (a.shell_findings_line) {
-      const err = appendShellLine(path.join(stateDir, 'sessions'), 'Findings', a.shell_findings_line);
-      if (err) errors.push(`${a.proposal_id}: findings append: ${err}`);
     }
   }
 

@@ -61,7 +61,7 @@ function liveOwner(projectRoot: string, hermitDir: string) {
     const rt = readRuntimeJson(path.join(hermitRoot, 'state')) as Record<string, unknown> | null;
     const mode = rt && typeof rt.runtime_mode === 'string' ? rt.runtime_mode : '';
     if (!mode || mode === 'docker') return null;
-    if (rt?.session_state === 'idle' || rt?.shutdown_completed_at) return null;
+    if (rt?.shutdown_completed_at) return null;
     const ageSecs = sharedLivenessAgeSecs(hermitRoot);
     if (ageSecs === null || ageSecs >= LIVENESS_FRESH_SECS) return null;
     return { mode, ageSecs: Math.round(ageSecs) };

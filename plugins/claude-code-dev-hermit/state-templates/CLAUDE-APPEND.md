@@ -22,11 +22,11 @@ Before starting code changes:
 1. Inspect `git status --porcelain` and preserve unrelated changes. Reuse the task's existing feature branch, or isolate new work in a worktree when changes cannot safely coexist. Ask only when ownership or separation is unclear.
 2. If a new branch is needed, branch from the first entry of `claude-code-dev-hermit.protected_branches` (defaults to `main`), using the fetched `origin/<base>`. Do not switch branches through unrelated changes.
 3. Name it `<prefix>/<kebab-slug>`, prefix from {feature, fix, chore, hotfix} matched at the start of the input, default `feature`.
-4. When you create a branch, append to `.claude-code-hermit/sessions/SHELL.md` Progress Log: `[HH:MM] created branch <name> from <base>`.
+4. When you create a branch inside an open record's turn, pipe a progress line into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`; otherwise skip the note: `[HH:MM] created branch <name> from <base>`.
 
 ## Technical Constraints
 
-Session state (`in_progress`/`waiting`/`idle`/`dead_process`) lives in `.claude-code-hermit/state/runtime.json` (`.session_state`). SHELL.md `Status:` is cosmetic — never parse it for programmatic checks.
+Execution state lives in `.claude-code-hermit/state/execution.json`; commitments live in task records. Use core task commands to read or update records.
 
 Core rules (artifact frontmatter, tag discipline, proposals) apply to all dev work — see the `## Session Discipline (claude-code-hermit)` block above.
 

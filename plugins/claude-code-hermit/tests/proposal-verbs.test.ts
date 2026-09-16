@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
-  verbCreate, verbPatch, verbShellAppend, verbNextTask, verbRoutine,
+  verbCreate, verbPatch, verbRoutine,
   grabHeader, parseStringArray, sectionEndsWithLine,
 } from '../scripts/proposal';
 import { extractSection } from '../scripts/lib/md-write';
@@ -78,12 +78,12 @@ describe('verbCreate grammar', () => {
     expect(fs.readdirSync(path.join(base, 'proposals'))).toEqual([]);
   })());
 
-  test('a bare `Session:` header falls through to runtime.json, not an empty string', withDir(async (dir) => {
+  test('a bare `Session:` header yields null without a runtime session ID', withDir(async (dir) => {
     const base = seed(dir);
-    fs.writeFileSync(path.join(base, 'state', 'runtime.json'), JSON.stringify({ session_id: 'S-042' }));
+    fs.writeFileSync(path.join(base, 'state', 'runtime.json'), JSON.stringify({}));
 
     const id = verbCreate(base, heredoc({ Title: 'x', Session: '' }));
-    expect(fs.readFileSync(path.join(base, 'proposals', `${id}.md`), 'utf-8')).toContain('session: S-042');
+    expect(fs.readFileSync(path.join(base, 'proposals', `${id}.md`), 'utf-8')).toContain('session: null');
   }));
 
   test('an absent Operator Decision section is appended so patch has somewhere to write', withDir(async (dir) => {
@@ -189,38 +189,6 @@ describe('verbPatch grammar', () => {
 });
 
 describe('the remaining write verbs', () => {
-  test('shell-append routes each section to its own heading', withDir(async (dir) => {
-    const base = seed(dir);
-    const sections: Array<[string, string, string]> = [
-      ['findings', 'a finding', 'Findings'],
-      ['progress', 'a progress line', 'Progress Log'],
-      ['monitoring', 'a monitoring line', 'Monitoring'],
-      ['blockers', 'a blocker', 'Blockers'],
-    ];
-    for (const [flag, line] of sections) {
-      expect(verbShellAppend(base, `${line}\n`, ['--section', flag])).toBe('OK');
-    }
-
-    const shell = fs.readFileSync(path.join(base, 'sessions', 'SHELL.md'), 'utf-8');
-    for (const [, line, heading] of sections) {
-      expect(extractSection(shell, heading)).toContain(line);
-    }
-  }));
-
-  test.each([
-    ['unknown section', 'line', ['--section', 'notes'], 'ERROR|unknown-section'],
-    ['blank line', '   \n', ['--section', 'findings'], 'ERROR|empty-line'],
-  ])('shell-append rejects %s', (_name, stdin, args, expected) => withDir(async (dir) => {
-    expect(verbShellAppend(seed(dir), stdin as string, args as string[])).toBe(expected);
-  })());
-
-  test('next-task is exclusive-create — an existing file is left untouched', withDir(async (dir) => {
-    const base = seed(dir);
-    expect(verbNextTask(base, 'first\n')).toBe('OK');
-    expect(verbNextTask(base, 'second\n')).toBe('ERROR|next-task-exists');
-    expect(fs.readFileSync(path.join(base, 'sessions', 'NEXT-TASK.md'), 'utf-8')).toBe('first\n');
-  }));
-
   test('routine upserts by id', withDir(async (dir) => {
     const base = seed(dir);
     const entry = { id: 'daily-brief', schedule: '0 8 * * *', skill: 'brief', enabled: true };

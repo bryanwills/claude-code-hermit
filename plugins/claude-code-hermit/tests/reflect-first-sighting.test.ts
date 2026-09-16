@@ -36,8 +36,6 @@ function makeTmpHermit(overrides: {
   fs.mkdirSync(path.join(dir, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'compiled'), { recursive: true });
 
-  // SHELL.md
-  fs.writeFileSync(path.join(dir, 'sessions', 'SHELL.md'), '## Progress Log\n', 'utf-8');
 
   // reflection-state.json — recent behavior cursor keeps the weekly `behavior`
   // phase quiet for tests that aren't exercising it (the behavior-phase suite
@@ -49,7 +47,7 @@ function makeTmpHermit(overrides: {
   fs.writeFileSync(path.join(stateDir, 'reflection-state.json'), JSON.stringify(reflState), 'utf-8');
 
   // runtime.json
-  const runtime = overrides.runtimeJson ?? { session_state: 'idle', session_id: null };
+  const runtime = overrides.runtimeJson ?? {};
   fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify(runtime), 'utf-8');
 
   // config.json
@@ -122,7 +120,7 @@ describe('reflect-precheck: drift capture', () => {
     }
   });
 
-  test('session_id resolves to "unknown" when runtime.session_id is null', async () => {
+  test('session_id is the local date when runtime has no lifecycle label', async () => {
     const hermitDir = makeTmpHermit({ lastRunAt: null });
     try {
       fs.mkdirSync(path.join(hermitDir, 'reports'));
@@ -131,13 +129,13 @@ describe('reflect-precheck: drift capture', () => {
 
       const rows = readObservations(hermitDir);
       const driftRow = rows.find(r => typeof r.pattern === 'string' && r.pattern.startsWith('storage-drift:'));
-      expect(driftRow?.session_id).toBe('unknown');
+      expect(driftRow?.session_id).toBe(new Date().toISOString().slice(0, 10));
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
   });
 
-  test('session_id resolves to "unknown" when runtime.json is absent', async () => {
+  test('session_id is the local date when runtime.json is absent', async () => {
     const hermitDir = makeTmpHermit({ lastRunAt: null });
     try {
       // Remove runtime.json
@@ -148,13 +146,13 @@ describe('reflect-precheck: drift capture', () => {
 
       const rows = readObservations(hermitDir);
       const driftRow = rows.find(r => typeof r.pattern === 'string' && r.pattern.startsWith('storage-drift:'));
-      expect(driftRow?.session_id).toBe('unknown');
+      expect(driftRow?.session_id).toBe(new Date().toISOString().slice(0, 10));
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
   });
 
-  test('session_id resolves to last-archived S-NNN when runtime.session_id is null', async () => {
+  test('session_id ignores frozen reports and uses the local date', async () => {
     const hermitDir = makeTmpHermit({ lastRunAt: null });
     try {
       fs.writeFileSync(path.join(hermitDir, 'sessions', 'S-010-REPORT.md'), '# S-010\n');
@@ -164,7 +162,7 @@ describe('reflect-precheck: drift capture', () => {
 
       const rows = readObservations(hermitDir);
       const driftRow = rows.find(r => typeof r.pattern === 'string' && r.pattern.startsWith('storage-drift:'));
-      expect(driftRow?.session_id).toBe('S-010');
+      expect(driftRow?.session_id).toBe(new Date().toISOString().slice(0, 10));
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -194,13 +192,13 @@ describe('reflect-precheck: drift capture', () => {
       fs.mkdirSync(path.join(hermitDir, 'reports'));
 
       // First run: session_id = "S-001"
-      const runtime1 = { session_state: 'idle', session_id: 'S-001' };
+      const runtime1 = { cc_session_id: 'first' };
       fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'), JSON.stringify(runtime1), 'utf-8');
       await runPrecheck(hermitDir);
 
       // Second run: session_id = "S-002" (different session). Drift is structural, so the
       // standing pattern is not re-written — otherwise it would flip reflect to RUN every session.
-      const runtime2 = { session_state: 'idle', session_id: 'S-002' };
+      const runtime2 = { cc_session_id: 'second' };
       fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'), JSON.stringify(runtime2), 'utf-8');
       await runPrecheck(hermitDir);
 
@@ -208,7 +206,7 @@ describe('reflect-precheck: drift capture', () => {
         typeof r.pattern === 'string' && r.pattern === 'storage-drift:reports'
       );
       expect(rows.length).toBe(1);
-      expect(rows[0].session_id).toBe('S-001');
+      expect(rows[0].session_id).toBe(new Date().toISOString().slice(0, 10));
     } finally {
       fs.rmSync(hermitDir, { recursive: true, force: true });
     }
@@ -595,11 +593,10 @@ describe('reflect-precheck: cost-spike observation', () => {
     fs.mkdirSync(path.join(hermitDir, 'sessions'), { recursive: true });
     fs.mkdirSync(path.join(project, '.claude'), { recursive: true });
 
-    fs.writeFileSync(path.join(hermitDir, 'sessions', 'SHELL.md'), '## Progress Log\n', 'utf-8');
     fs.writeFileSync(path.join(stateDir, 'reflection-state.json'),
       JSON.stringify({ counters: {}, last_behavior_digest_at: new Date().toISOString() }), 'utf-8');
     fs.writeFileSync(path.join(stateDir, 'runtime.json'),
-      JSON.stringify({ session_state: 'idle', session_id: 'S-900' }), 'utf-8');
+      JSON.stringify({ cc_session_id: 'resident' }), 'utf-8');
     fs.writeFileSync(path.join(hermitDir, 'config.json'), JSON.stringify({ timezone: 'UTC' }), 'utf-8');
     fs.writeFileSync(path.join(stateDir, 'observations.jsonl'), '', 'utf-8');
 
@@ -619,7 +616,7 @@ describe('reflect-precheck: cost-spike observation', () => {
       by_date[day(priorDayCosts.length + 1 - i)] = { cost, tokens: 0, session_ids: [] };
     });
     fs.writeFileSync(path.join(hermitDir, 'state', 'cost-index.json'), JSON.stringify({
-      version: 3, byte_offset: 0, total_cost_usd: 0, total_tokens: 0, total_sessions: 0,
+      version: 4, by_task: {}, byte_offset: 0, total_cost_usd: 0, total_tokens: 0, total_sessions: 0,
       last_session_id: null, by_source: {}, by_date, by_week: {}, by_month: {},
       skipped_corrupt_lines: 0, updated_at: new Date().toISOString(),
     }), 'utf-8');
@@ -637,7 +634,7 @@ describe('reflect-precheck: cost-spike observation', () => {
     expect(spikes[0].pattern).toBe(`cost-spike:${yesterday()}`);
     expect(spikes[0].day_total).toBe(10);
     expect(spikes[0].median_7d).toBe(2);
-    expect(spikes[0].session_id).toBe('S-900');
+    expect(spikes[0].session_id).toBe(new Date().toISOString().slice(0, 10));
     // A measurement has no provenance — the constructor rejects `origin` on this source.
     expect(spikes[0].origin).toBeUndefined();
   });

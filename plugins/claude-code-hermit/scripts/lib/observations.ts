@@ -16,8 +16,7 @@ import path from 'node:path';
 import { appendJsonlLine } from './append-jsonl';
 import { readJson } from './cli';
 import { readSettledConfig } from './config-read';
-import { globDir } from './frontmatter';
-import { utcISOStamp } from './time';
+import { utcISOStamp, todayYMD } from './time';
 
 type Origin = 'own-work' | 'external-content';
 
@@ -57,24 +56,8 @@ function readLedgerRows(ledgerPath: string): Record<string, unknown>[] {
   }
 }
 
-// runtime.json is optional and carries a null session_id between sessions
-// (auto-close / close null it; idle pre-stamps the next S-NNN). Fall back to
-// the last archived report so morning-reflect rows group with the session that
-// just closed. No reports yet (fresh hatch) stays 'unknown'; reflect step 3b
-// does not count that sentinel toward graduation.
-function lastArchivedSessionId(stateDir: string): string {
-  const files = globDir(path.join(stateDir, 'sessions'), /^S-(\d+)-REPORT\.md$/);
-  let max = 0;
-  for (const f of files) {
-    const m = /S-(\d+)-REPORT\.md$/.exec(path.basename(f));
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return max === 0 ? 'unknown' : 'S-' + String(max).padStart(3, '0');
-}
-
 function resolveSessionId(stateDir: string): string {
-  const id = readJson(path.join(stateDir, 'state', 'runtime.json'))?.session_id;
-  return typeof id === 'string' && id ? id : lastArchivedSessionId(stateDir);
+  return todayYMD(readSettledConfig(stateDir).timezone ?? 'UTC');
 }
 
 type RowInput = {

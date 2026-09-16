@@ -1,14 +1,14 @@
+import { readTaskReports } from './lib/task-report';
 // reflect-precheck.ts — determines which reflect phases are due before invoking LLM.
 // Usage: bun reflect-precheck.ts <hermit-state-dir> <plugin-root> [--quick [--force]]
 // Output (stdout, one line): EMPTY  |  RUN|<phases-json>  |  RUN|<sha256-hash> (--quick)
 // <phases-json> carries one boolean per due phase plus `phase`: the install's age bucket
 // (newborn/juvenile/adult) that the skill binds to $PHASE.
 //
-// On EMPTY: this script owns the audit trail — it calls update-reflection-state.ts
-// and appends the mandatory Progress Log line to SHELL.md before exiting.
+// On EMPTY this script updates reflection-state counters before exiting.
 //
 // --quick gates the event-driven `reflect --quick` chain (reflect_after routines) against
-// a content hash of SHELL.md's ## Findings + ## Blockers, isolated from the scheduled
+// a hash of recent record lessons and waiting dependencies, isolated from the scheduled
 // cadence state above (never touches last_run_at/counters). --force (only meaningful with
 // --quick) skips the EMPTY decision entirely and always returns RUN|<hash> — used by manual
 // `/reflect --quick` invocations, which need a deterministic hash to commit after processing,
@@ -20,13 +20,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { currentHHMM, todayYMD, yesterdayYMD } from './lib/time';
+import { todayYMD, yesterdayYMD } from './lib/time';
 import { observationLine, readLedgerRows, resolveSessionId } from './lib/observations';
-import { readFrontmatter, isEmptyAutoArchive } from './lib/frontmatter';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { sha256 } from './lib/hash';
-import { appendToProgressLog } from './lib/progress-log';
-import { extractSection, stripPlaceholders } from './lib/md-write';
 import { pinStateDirOrExit, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { costIndexPath, readCostIndex } from './lib/cost-log';
@@ -50,9 +47,8 @@ if (!stateDirArg) emit('RUN|{}');
 
 // The state dir is not caller-chosen. Reachable through a pre-approved
 // `Bash(bun */scripts/reflect-precheck.ts*)` grant that covers every argument,
-// and this script forwards it on to archive-shell.ts, archive-raw.ts and
-// update-reflection-state.ts, so an unvalidated root would have reached all
-// three. Deliberately a usage error (stderr, exit 1), not a stdout verdict —
+// and forwards it to archive-raw.ts and update-reflection-state.ts, so an
+// unvalidated root would have reached both. Deliberately a usage error (stderr, exit 1), not a stdout verdict —
 // callers branch on the EMPTY|RUN|... grammar.
 const stateDir = pinStateDirOrExit(stateDirArg, 'reflect-precheck.ts');
 
@@ -61,40 +57,15 @@ const readJSON = (p: string): Json => {
   catch { return null; }
 };
 
-// A top-level ## Section of SHELL.md with placeholder comments and blank lines
-// dropped, so a real finding appended under a retained `<!-- ... -->` placeholder
-// still counts. Feeds the --quick content hash, so the normalization (trim each
-// line, drop empties) must stay stable — it decides whether the chain re-fires.
-function extractQuickSection(md: string, name: string): string {
-  return stripPlaceholders(extractSection(md, name) ?? '')
-    .split('\n')
-    .map(l => l.trim())
-    .filter(Boolean)
-    .join('\n');
-}
-
-function logQuickEmpty(stateDir: string): void {
-  const timezone = readSettledConfig(stateDir).timezone ?? 'UTC';
-  const hhmm = currentHHMM(timezone);
-  appendToProgressLog(
-    path.join(stateDir, 'sessions', 'SHELL.md'),
-    `- [${hhmm}] reflect (quick, post-routine) — no new candidates`,
-  );
-}
-
 function runQuickPrecheck(stateDir: string, force: boolean): never {
-  const shellPath = path.join(stateDir, 'sessions', 'SHELL.md');
-  let shellContent = '';
-  try { shellContent = fs.readFileSync(shellPath, 'utf-8'); } catch { /* missing SHELL.md → nothing to scan */ }
-
-  const findings = extractQuickSection(shellContent, 'Findings');
-  const blockers = extractQuickSection(shellContent, 'Blockers');
+  const records = readTaskReports(stateDir).filter(record => record.outcome !== 'open').slice(-3);
+  const findings = records.flatMap(record => record.lessons).join('\n');
+  const blockers = records.filter(record => record.waiting_on).map(record => `${record.title}: ${record.waiting_on}`).join('\n');
   const hash = sha256(`${findings}\n---\n${blockers}`);
 
   if (force) emit('RUN|' + hash);
 
   if (!findings && !blockers) {
-    logQuickEmpty(stateDir);
     emit('EMPTY');
   }
 
@@ -104,7 +75,6 @@ function runQuickPrecheck(stateDir: string, force: boolean): never {
   // No prior cursor (storedHash undefined) never equals a hex hash, so first-run
   // correctly falls through to RUN below without a separate branch.
   if (storedHash === hash) {
-    logQuickEmpty(stateDir);
     emit('EMPTY');
   }
 
@@ -217,44 +187,12 @@ function hasAcceptedProposals(stateDir: string) {
 }
 
 // Short-circuits cheaply: in_progress or missing lastRunAt require no I/O.
-function hasComputeActivity(stateDir: string, lastRunAt: string | null, sessionState: string) {
-  if (sessionState === 'in_progress') return true;
+function hasComputeActivity(stateDir: string, lastRunAt: string | null) {
   if (!lastRunAt) return true;
-
-  const lastRun = new Date(lastRunAt);
-  if (isNaN(lastRun.getTime())) return true;
-
-  try {
-    const sessionsDir = path.join(stateDir, 'sessions');
-    // Exclude empty auto-archives: their auto-close mtime bump would trigger compute
-    // on a report with no operator content. See isEmptyAutoArchive in lib/frontmatter.ts.
-    const reports = fs.readdirSync(sessionsDir)
-      .filter(f => /^S-\d+-REPORT\.md$/.test(f))
-      .filter(f => !isEmptyAutoArchive(readFrontmatter(path.join(sessionsDir, f))));
-    return reports.some(f => {
-      try { return fs.statSync(path.join(sessionsDir, f)).mtime > lastRun; }
-      catch { return false; }
-    });
-  } catch {
-    return false;
-  }
-}
-
-// Returns true when SHELL.md is large enough AND ≥24h has elapsed since the
-// last snapshot. Null last_shell_snapshot_at fires on size alone.
-function isShellSnapshotDue(stateDir: string, runtime: Json) {
-  const SHELL_LINE_THRESHOLD = 400;
-  try {
-    const shellPath = path.join(stateDir, 'sessions', 'SHELL.md');
-    const content = fs.readFileSync(shellPath, 'utf-8');
-    const lines = content.split('\n').length;
-    if (lines < SHELL_LINE_THRESHOLD) return false;
-    const last = runtime.last_shell_snapshot_at;
-    if (!last) return true;
-    return daysSince(last) >= 1;
-  } catch {
-    return false;
-  }
+  const lastRun = Date.parse(lastRunAt);
+  if (!Number.isFinite(lastRun)) return true;
+  return readTaskReports(stateDir).some(record => record.outcome !== 'open'
+    && Date.parse(record.closed_at ?? record.opened_at) > lastRun);
 }
 
 const reflectionStatePath = path.join(stateDir, 'state', 'reflection-state.json');
@@ -265,7 +203,6 @@ const since = counters.since ?? null;
 const phase = computePhase(since);
 
 const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
-const sessionState = runtime.session_state ?? 'idle';
 
 const config = readSettledConfig(stateDir);
 const timezone = config.timezone ?? 'UTC';
@@ -284,7 +221,7 @@ const phases: Record<string, boolean> = {};
 
 // Cheaper checks first: compute (short-circuits on in_progress/null lastRunAt),
 // then resolution_check (reads proposal files), then cost spike (reads cost log).
-if (hasComputeActivity(stateDir, lastRunAt, sessionState)) phases.compute = true;
+if (hasComputeActivity(stateDir, lastRunAt)) phases.compute = true;
 
 const lastResolutionCheck = reflectionState.last_resolution_check ?? null;
 if (hasAcceptedProposals(stateDir) && daysSince(lastResolutionCheck) > 7) {
@@ -315,33 +252,7 @@ if (phase === 'juvenile' && daysSince(reflectionState.last_digest_at) > 7) {
 
 if (phase === 'newborn') phases.newborn = true;
 
-// Run archive synchronously so the LLM (when other phases fire) sees a
-// bounded SHELL.md.
-const archiveDue = isShellSnapshotDue(stateDir, runtime);
-let archiveTaken = false;
 
-if (archiveDue) {
-  if (!pluginRoot) {
-    console.error('[reflect-precheck] archive_due skipped: pluginRoot missing');
-  } else {
-    try {
-      const stdout = execFileSync(process.execPath, [
-        path.join(pluginRoot, 'scripts', 'archive-shell.ts'),
-        '--source=routine',
-        `--state-dir=${stateDir}`,
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
-      try {
-        const result = JSON.parse(stdout.toString().trim());
-        archiveTaken = result && result.archived === true;
-      } catch { /* malformed output → treat as not-archived */ }
-    } catch { /* fail-open */ }
-  }
-}
-
-// Gate on archiveTaken: a failed subprocess shouldn't cost LLM tokens
-// reasoning about a snapshot that never landed.
-const onlyArchive = archiveDue && Object.keys(phases).length === 0;
-if (archiveTaken && !onlyArchive) phases.archive_due = true;
 
 // Run archive-raw.ts on a 7-day debounce so raw/.archive/ is bounded on every hermit
 // regardless of whether weekly-review is configured.
@@ -351,7 +262,7 @@ if (pluginRoot && daysSince(runtime.last_raw_archive_at) >= 7) {
       path.join(pluginRoot, 'scripts', 'archive-raw.ts'),
       stateDir,
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    // Re-read before writing — archive-shell may have updated runtime.json concurrently.
+    // Re-read before writing to preserve concurrent runtime updates.
     const runtimePath = path.join(stateDir, 'state', 'runtime.json');
     const freshRuntime = readJSON(runtimePath) ?? runtime;
     freshRuntime.last_raw_archive_at = new Date().toISOString();
@@ -454,7 +365,7 @@ if (wroteNewRows) {
 
 if (Object.keys(phases).length > 0) emit('RUN|' + JSON.stringify({ ...phases, phase }));
 
-// EMPTY path: update reflection-state.json and append Progress Log line.
+// EMPTY path: update reflection-state.json.
 if (pluginRoot) {
   const updateScript = path.join(pluginRoot, 'scripts', 'update-reflection-state.ts');
   try {
@@ -465,10 +376,5 @@ if (pluginRoot) {
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
   } catch { /* fail-open */ }
 }
-
-const hhmm = currentHHMM(timezone);
-const snapshotSuffix = archiveTaken ? ' (snapshot taken)' : '';
-const logLine = `- [${hhmm}] reflect (${phase}) — 0 candidates; verdicts: accept=0 downgrade=0 suppress=0; outcomes: none${snapshotSuffix}`;
-appendToProgressLog(path.join(stateDir, 'sessions', 'SHELL.md'), logLine);
 
 emit('EMPTY');

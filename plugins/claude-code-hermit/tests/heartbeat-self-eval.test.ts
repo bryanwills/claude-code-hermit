@@ -29,13 +29,6 @@ const CHECKLIST = ['# Heartbeat', '', `- ${NOISY_ITEM}`, `- ${QUIET_ITEM}`]
   .concat(Array.from({ length: 9 }, (_, i) => `- Filler check number ${i + 1}`))
   .join('\n') + '\n';
 
-// Twenty ticks of history; the noisy item is in all of them, the quiet one in none.
-const SHELL = [
-  '# Session', '', '**ID:** S-042', '', '## Monitoring',
-  ...Array.from({ length: 20 }, (_, i) => `[0${(i % 6) + 1}:00] Heartbeat: ${NOISY_ALERT}`),
-  '', '## Session Summary', '',
-].join('\n');
-
 function proposal(fm: Record<string, string>): string {
   return '---\n' + Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n') + '\n---\n# Proposal\n';
 }
@@ -44,10 +37,8 @@ function proposal(fm: Record<string, string>): string {
 function fixture(): string {
   const stateDir = path.join(freshDir(), '.claude-code-hermit');
   fs.mkdirSync(path.join(stateDir, 'proposals'), { recursive: true });
-  fs.mkdirSync(path.join(stateDir, 'sessions'), { recursive: true });
   fs.mkdirSync(path.join(stateDir, 'state'), { recursive: true });
   fs.writeFileSync(path.join(stateDir, 'HEARTBEAT.md'), CHECKLIST);
-  fs.writeFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), SHELL);
   fs.writeFileSync(path.join(stateDir, 'proposals', 'PROP-007-disk-noise-101010.md'), proposal({
     id: 'PROP-007-disk-noise-101010',
     status: 'dismissed',
@@ -57,19 +48,18 @@ function fixture(): string {
   return stateDir;
 }
 
-/** Counters one pass short of every threshold, in a session the entries have not seen. */
+/** Counters one pass short of every threshold, on a date the entries have not seen. */
 const PRIMED = () => ({
-  [NOISY_KEY]: { clean_ticks: 0, noise_ticks: 19, sessions_seen: 3, last_session_id: 'S-041', proposed: true, alert_text: NOISY_ALERT },
-  [QUIET_KEY]: { clean_ticks: 19, noise_ticks: 0, sessions_seen: 2, last_session_id: 'S-041', proposed: false },
-  [WEIGHT_KEY]: { clean_ticks: 19, noise_ticks: 0, sessions_seen: 2, last_session_id: 'S-041', proposed: false },
+  [NOISY_KEY]: { clean_ticks: 0, noise_ticks: 19, sessions_seen: 3, last_session_id: '2026-07-09', proposed: true, alert_text: NOISY_ALERT },
+  [QUIET_KEY]: { clean_ticks: 19, noise_ticks: 0, sessions_seen: 2, last_session_id: '2026-07-09', proposed: false },
+  [WEIGHT_KEY]: { clean_ticks: 19, noise_ticks: 0, sessions_seen: 2, last_session_id: '2026-07-09', proposed: false },
 });
 
-const evaluate = (prevSelfEval: object, stateDir = fixture()) => runSelfEval({
+const evaluate = (prevSelfEval: object, stateDir = fixture(), today = '2026-07-10') => runSelfEval({
   stateDir,
   prevSelfEval,
   alerts: { [NOISY_KEY]: { text: NOISY_ALERT } },
-  shell: fs.readFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), 'utf-8'),
-  today: '2026-07-10',
+  today,
 });
 
 describe('heartbeat self-evaluation', () => {
@@ -80,7 +70,7 @@ describe('heartbeat self-evaluation', () => {
     // A dismissed auto-detected proposal re-opens the item, and the item firing
     // anyway is what the noise counter is for.
     // A firing pass advances the session tally too, or a permanently noisy item — one
-    // that never has a clean pass — could never reach the three-session threshold.
+    // that never has a clean pass — could never reach the three-date threshold.
     expect(byKey[NOISY_KEY]).toEqual({ key: NOISY_KEY, kind: 'noisy', clean_ticks: 0, noise_ticks: 20, sessions_seen: 4 });
     expect(byKey[QUIET_KEY]).toEqual({ key: QUIET_KEY, kind: 'clean', clean_ticks: 20, noise_ticks: 0, sessions_seen: 3 });
     expect(byKey[WEIGHT_KEY]).toMatchObject({ kind: 'weight', clean_ticks: 20, sessions_seen: 3 });
@@ -100,12 +90,19 @@ describe('heartbeat self-evaluation', () => {
     expect(evaluate(first.self_eval).proposals.map(p => p.key)).toEqual([NOISY_KEY]);
   });
 
-  test('fewer than three distinct sessions holds a clean item back', () => {
+  test('fewer than three distinct local dates holds a clean item back', () => {
     const primed = PRIMED();
     primed[QUIET_KEY].sessions_seen = 1;
     const { self_eval, proposals } = evaluate(primed);
     expect(proposals.map(p => p.key)).not.toContain(QUIET_KEY);
     expect(self_eval[QUIET_KEY]).toMatchObject({ clean_ticks: 20, sessions_seen: 2, proposed: false });
+  });
+
+  test('repeated evaluations on one local date count it only once', () => {
+    const first = evaluate({});
+    const second = evaluate(first.self_eval);
+    expect(second.self_eval[QUIET_KEY].sessions_seen).toBe(1);
+    expect(second.self_eval[NOISY_KEY].sessions_seen).toBe(1);
   });
 
   test('a checklist inside the recommended size carries no weight entry', () => {
@@ -118,12 +115,11 @@ describe('heartbeat self-evaluation', () => {
 
   // The noisy threshold is noise_ticks AND sessions_seen, and the item it targets is one
   // that fires every pass — so it has no clean pass to carry its session tally.
-  test('an item that fires every pass still accrues distinct sessions', () => {
+  test('an item that fires every pass still accrues distinct local dates', () => {
     const stateDir = fixture();
     let self_eval: Record<string, unknown> = {};
-    for (const id of ['S-100', 'S-101', 'S-102']) {
-      fs.writeFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), SHELL.replace('S-042', id));
-      ({ self_eval } = evaluate(self_eval, stateDir));
+    for (const date of ['2026-07-10', '2026-07-11', '2026-07-12']) {
+      ({ self_eval } = evaluate(self_eval, stateDir, date));
     }
     expect(self_eval[NOISY_KEY]).toMatchObject({ clean_ticks: 0, noise_ticks: 3, sessions_seen: 3 });
   });
@@ -132,7 +128,7 @@ describe('heartbeat self-evaluation', () => {
     const { self_eval, proposals } = evaluate({});
     expect(proposals).toEqual([]);
     expect(self_eval[QUIET_KEY]).toMatchObject({
-      clean_ticks: 1, noise_ticks: 0, sessions_seen: 1, last_session_id: 'S-042',
+      clean_ticks: 1, noise_ticks: 0, sessions_seen: 1, last_session_id: '2026-07-10',
       first_observed: '2026-07-10', proposed: false,
     });
   });
@@ -218,7 +214,7 @@ describe('self-evaluation uses current alert state', () => {
       stateDir,
       prevSelfEval: { [QUIET_KEY]: { clean_ticks: 19, sessions_seen: 3, alert_text: 'old wording' } },
       alerts: { [QUIET_KEY]: { text: 'new wording', suppressed: true, consecutive_clean: 0 } },
-      shell: '**ID:** S-042\n## Monitoring\n', today: '2026-09-05',
+      today: '2026-09-05',
     });
     expect(self_eval[QUIET_KEY].clean_ticks).toBe(0);
     expect(self_eval[QUIET_KEY].alert_text).toBeUndefined();
@@ -231,7 +227,7 @@ describe('self-evaluation uses current alert state', () => {
   ]) {
     test(`a recovered check is clean despite old monitoring text (${Object.keys(alerts).length} retained alerts)`, () => {
       const { self_eval } = runSelfEval({
-        stateDir: fixture(), prevSelfEval: { [NOISY_KEY]: { alert_text: NOISY_ALERT } }, alerts, shell: SHELL,
+        stateDir: fixture(), prevSelfEval: { [NOISY_KEY]: { alert_text: NOISY_ALERT } }, alerts,
         today: '2026-09-05',
       });
       expect(self_eval[NOISY_KEY].clean_ticks).toBe(1);

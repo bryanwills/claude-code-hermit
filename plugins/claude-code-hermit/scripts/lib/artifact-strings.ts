@@ -34,15 +34,9 @@ export const DEFAULT_STRINGS = {
   status_alerts: 'Needs you',
   status_no_alerts: 'No active alerts.',
 
-  // One label per enum runtime.json actually stores — invented states render as
-  // dead keys, and a real state with no key falls back to the raw enum.
+  // Execution labels, retaining the installed translation keys.
   session_in_progress: 'Working',
   session_idle: 'Idle',
-  session_waiting: 'Waiting on you',
-  session_dead_process: 'Process died',
-  session_suspect_process: 'Process suspect',
-  // Not a stored enum: a derived presence verdict shown instead of "Idle" when
-  // session_state is idle but a shared liveness signal is still fresh.
   session_on_watch: 'On watch',
 
   // Budget-alert synthesis (message-less budget alerts)

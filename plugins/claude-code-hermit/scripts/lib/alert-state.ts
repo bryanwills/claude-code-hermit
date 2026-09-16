@@ -135,8 +135,7 @@ export function mutateOwnedAlerts(p: string, mutator: (alerts: Json) => void): b
 // deriveMicroPendingKeys / deriveProposalPendingKeys below).
 // ---------------------------------------------------------------------------
 
-// `text` is the file surface (SHELL.md monitoring lines) — id-carrying is fine
-// there. `channelText` is the id-free operator-channel label; absent when `text`
+// `text` is an internal diagnostic label and may carry an id. `channelText` is the id-free operator-channel label; absent when `text`
 // is already channel-safe (model-authored keys), read with `?? text`.
 export interface FiringItem { key: string; text: string; channelText?: string; }
 
@@ -159,7 +158,7 @@ export const DOCTOR_PREFIX = 'doctor:';
 
 // Strip internal ids that must never reach the operator channel. The banned set
 // is the closed list in state-templates/CLAUDE-APPEND.md § Channel voice:
-// "No internal IDs (PROP-NNN, S-NNN, MP-…)". Applied only to structured-keyed
+// "No internal IDs (PROP-NNN, task, MP-…)". Applied only to structured-keyed
 // notifications (the sole id-injection path); model text is id-free by the
 // reference.md contract, so it is never scrubbed (no false positives on legit
 // operator text like "S-5 partition"). Collapse the whitespace the removal leaves.
@@ -185,8 +184,8 @@ export function classifyTick(opts: {
   prevLastDigestDate: string | null;
   // Keys whose `text` bakes in a raw internal id (PROP-NNN, MP-…) that must
   // never reach the operator channel (house channel-voice rule) — their
-  // first-observation notification is suppressed. Monitoring lines are
-  // file-only (SHELL.md), so they're unaffected and still show the id.
+  // first-observation notification is suppressed. Returned diagnostic lines
+  // retain ids; the caller does not persist them to task records.
   silentOnNewKeys: Set<string>;
   // False when a structured source-of-truth read was ambiguous this tick: the
   // digest is built over a partial view (frozen entries are excluded upstream),
@@ -237,8 +236,7 @@ export function classifyTick(opts: {
           monitoringLines.push(`[${hhmm}] Heartbeat: ${item.text}`);
         } else if (count === 6) {
           alerts[key] = withChannel({ ...prev, count, consecutive_clean: 0, last_seen: today, text: item.text, suppressed: true }, item);
-          // Monitoring line (SHELL.md, file-only) may reference "above" — the
-          // alert's own line sits directly above it there. The channel
+          // The returned diagnostic follows the alert's own line in this result. The channel
           // notification names the alert id-free instead ("above" has no
           // referent in a channel message).
           monitoringLines.push(`[${hhmm}] Heartbeat: above alert suppressed after 5 fires (first: ${prev.first_seen}). Daily digest only.`);

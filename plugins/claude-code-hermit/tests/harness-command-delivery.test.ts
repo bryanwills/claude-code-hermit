@@ -81,7 +81,6 @@ function seedPendingSwitch(dir: string, command: string, arg: string | null): vo
   fs.writeFileSync(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'UTC' }));
   fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({
     version: 1,
-    session_state: 'in_progress',
     runtime_mode: 'headless',
     tmux_session: 'hermit-test',
     shutdown_requested_at: null,
@@ -491,7 +490,7 @@ describe('Stop hook reset-command delivery', () => {
     expect(fs.readFileSync(log, 'utf-8')).toContain('-l -- /clear');
     expect(fs.existsSync(marker(dir))).toBe(false);
     expect(readRuntime(dir).context_cleared).toBe(true);
-    expect(fs.existsSync(statusCache)).toBe(false);
+    expect(fs.existsSync(statusCache)).toBe(true);
   }));
 
   test('/compact delivers but deliberately leaves the reset bookkeeping alone', withDir(async (dir) => {

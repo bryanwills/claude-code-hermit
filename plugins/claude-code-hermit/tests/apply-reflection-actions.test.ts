@@ -2,9 +2,8 @@
 // eval runner's resolution_actions batch. The contract under test: the WHOLE
 // batch validates before ANY write (a single bad entry means zero writes), the
 // frontmatter patch is line-level (body and unrelated frontmatter stay
-// byte-identical), metrics append to state/proposal-metrics.jsonl, and the
-// SHELL.md Findings append is best-effort (failures land in `errors`, never
-// flip ok or abort the durable writes). Exit code is 0 always.
+// byte-identical), metrics append to state/proposal-metrics.jsonl, and frozen
+// journals stay byte-identical. Exit code is 0 always.
 //
 // Usage: bun test tests/apply-reflection-actions.test.ts   (from the plugin root)
 
@@ -98,7 +97,7 @@ function metricsRows(dir: string): any[] {
 const bodyOf = (content: string) => content.slice(content.indexOf('\n---', 3));
 
 describe('apply-reflection-actions: happy paths', () => {
-  test('auto-resolve patches frontmatter in place, appends metrics + findings', withTmp(async (dir) => {
+  test('auto-resolve patches frontmatter and metrics, preserving frozen journal', withTmp(async (dir) => {
     const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
     expect(result.ok).toBe(true);
     expect(result.applied).toEqual({ auto_resolve: 1, nudge: 0, skip: 0 });
@@ -120,13 +119,10 @@ describe('apply-reflection-actions: happy paths', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ type: 'resolved', proposal_id: 'PROP-042' });
 
-    // Findings line lands inside ## Findings, before the next heading.
-    const shell = fs.readFileSync(shellPath(dir), 'utf-8');
-    expect(shell.indexOf(FINDINGS_LINE)).toBeGreaterThan(shell.indexOf('## Findings'));
-    expect(shell.indexOf(FINDINGS_LINE)).toBeLessThan(shell.indexOf('\n## Monitoring'));
+    expect(fs.readFileSync(shellPath(dir), 'utf-8')).toBe(SHELL_MD);
   }));
 
-  test('nudge appends findings only — no proposal patch, no metrics', withTmp(async (dir) => {
+  test('nudge preserves proposal, metrics and frozen journal', withTmp(async (dir) => {
     const result = await apply(dir, {
       resolution_actions: [{
         proposal_id: 'PROP-042', action: 'nudge',
@@ -137,7 +133,7 @@ describe('apply-reflection-actions: happy paths', () => {
     expect(result.applied).toEqual({ auto_resolve: 0, nudge: 1, skip: 0 });
     expect(fs.readFileSync(proposalPath(dir), 'utf-8')).toBe(PROPOSAL_MD);
     expect(fs.existsSync(metricsPath(dir))).toBe(false);
-    expect(fs.readFileSync(shellPath(dir), 'utf-8')).toContain('PROP-042 nudged');
+    expect(fs.readFileSync(shellPath(dir), 'utf-8')).not.toContain('PROP-042 nudged');
   }));
 
   test('skip writes nothing at all', withTmp(async (dir) => {
@@ -253,18 +249,6 @@ describe('apply-reflection-actions: edges', () => {
     expect(fs.readFileSync(p12, 'utf-8')).toBe(mk('PROP-12'));
   }));
 
-  test('SHELL.md without a ## Findings heading: durable writes land, ok:true with errors', withTmp(async (dir) => {
-    fs.writeFileSync(shellPath(dir), '# Active Session\n\n## Task\nno findings section here\n');
-    const result = await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
-    expect(result.ok).toBe(true);
-    expect(result.applied).toEqual({ auto_resolve: 1, nudge: 0, skip: 0 });
-    expect(result.errors).toBeDefined();
-    expect(result.errors.join(' ')).toContain('Findings');
-    // Durable core still landed: proposal patched, metrics appended.
-    expect(fs.readFileSync(proposalPath(dir), 'utf-8')).toMatch(/^status: resolved$/m);
-    expect(metricsRows(dir)[0]).toMatchObject({ type: 'resolved', proposal_id: 'PROP-042' });
-  }));
-
   // The ledger is line-delimited and every reader parses it line by line inside a
   // bare catch, so a row spilling over more than one physical line would be dropped
   // silently rather than erroring.
@@ -284,18 +268,17 @@ describe('apply-reflection-actions: edges', () => {
     expect(row.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   }));
 
-  // Normalizing the tail to a single newline used to swallow the blank line that
-  // separates ## Findings from the heading after it, gluing the sections together.
-  test('findings append preserves the blank line before the next heading', withTmp(async (dir) => {
+  // Repeated results must never alter the frozen journal.
+  test('repeated applies leave the frozen journal byte-identical', withTmp(async (dir) => {
     await apply(dir, { resolution_actions: [AUTO_RESOLVE] });
     const once = fs.readFileSync(shellPath(dir), 'utf-8');
-    expect(once).toContain(`${FINDINGS_LINE}\n\n## Monitoring`);
+    expect(once).toBe(SHELL_MD);
     // Stable across repeated runs — neither collapsing nor accumulating blank lines.
     await apply(dir, {
       resolution_actions: [{ ...AUTO_RESOLVE, shell_findings_line: '- [reflect] second line' }],
     });
     const twice = fs.readFileSync(shellPath(dir), 'utf-8');
-    expect(twice).toContain(`${FINDINGS_LINE}\n- [reflect] second line\n\n## Monitoring`);
+    expect(twice).toBe(SHELL_MD);
   }));
 
   // patchFrontmatter is exported and the apply pass re-reads from disk, so the

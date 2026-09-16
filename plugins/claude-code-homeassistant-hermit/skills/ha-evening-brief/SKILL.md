@@ -29,7 +29,7 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 3. **Anomalous sensors** — From the live snapshot, identify currently unavailable, stuck, or unexpected-state sensors. Report only what is currently wrong — no baseline diff required.
 
 3a. **Pending updates**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha updates --digest` and capture stdout. Branch on its content (the command always exits 0 — never branch on exit code):
-   - Contains `(skipped:` — log a single line to SHELL.md `## Monitoring` (`updates fetch failed: <detail after "skipped:">`) and omit the `Updates:` section entirely.
+   - Contains `(skipped:`: pipe one line into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` only inside an open record's turn (otherwise skip the note) (`updates fetch failed: <detail after "skipped:">`) and omit the `Updates:` section entirely.
    - Contains `(no updates pending)` — omit the `Updates:` section entirely.
    - Otherwise — render the digest lines as the `Updates:` section, translating tier labels into the operator's language. No proposal-id lookup here (unlike the morning brief).
 
@@ -42,14 +42,11 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
    title: "Evening Brief — <YYYY-MM-DD>"
    type: brief
    created: <ISO8601>
-   session: <session_id from runtime.json, or null if absent>
+   task: <T-... for the open record in this turn; omit this field otherwise>
    tags: [evening-brief, ha]
    ```
-   Then append the following line to `.claude-code-hermit/sessions/SHELL.md` under a `### Artifacts produced this session` subsection in `## Monitoring` (create the subsection if absent):
-   ```
-   - [[compiled/brief-evening-<YYYY-MM-DD>]]
-   ```
-   This citation is lifted into `## Artifacts` when `/claude-code-hermit:session-close` archives the session.
+   Inside an open record's turn, pipe `[[compiled/brief-evening-<YYYY-MM-DD>]]` into
+   `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`. Otherwise skip the note.
 
 ## Output Format
 
@@ -78,6 +75,6 @@ Keep the entire brief under 14 lines (10 when the `Updates:` section is absent �
 
 ## Delivery
 
-- If invoked as a routine, or `config.always_on` is `true` in `.claude-code-hermit/config.json`: deliver the composed brief via the Operator Notification protocol in CLAUDE.md (core resolves the channel and falls back to push / SHELL.md logging when no channel is reachable). The terminal is unmonitored in always-on mode — never gate delivery on `session_state`. For the push-fallback branch, condense to a single line (per § Operator Notification push format): lead with the security verdict (open doors, unlocked, open windows) or `secure`, then any anomaly. Example: `House secure, garage door still open — open CC to view`.
+- If invoked as a routine, or `config.always_on` is `true` in `.claude-code-hermit/config.json`: deliver the composed brief via the Operator Notification protocol in CLAUDE.md (core resolves the channel and falls back to push when no channel is reachable). The terminal is unmonitored in always-on mode. For the push-fallback branch, condense to a single line (per § Operator Notification push format): lead with the security verdict (open doors, unlocked, open windows) or `secure`, then any anomaly. Example: `House secure, garage door still open: open CC to view`.
 - Otherwise (invoked on demand in an interactive session): output to terminal.
 - Never include secrets, tokens, or internal file paths in the brief.

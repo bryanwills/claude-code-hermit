@@ -1,6 +1,7 @@
+import { pendingQueue } from './queue';
 // `heartbeat.ts precheck` — fast-path verdict before the LLM evaluates HEARTBEAT.md.
 // Usage: bun heartbeat.ts precheck [--peek] <hermit-state-dir>
-// Output (stdout, one line): SKIP|<reason>  |  OK  |  AUTO_CLOSE  |  EVALUATE  |  ALERT|<detail>
+// Output (stdout, one line): SKIP|<reason>  |  OK  |  EVALUATE  |  ALERT|<detail>
 // Exit 0 always. Without --peek: writes updated alert-state.json (increments total_ticks).
 // With --peek: read-only — computes the same verdict without any state mutation.
 //
@@ -11,7 +12,6 @@
 //
 // Owner contract (write-field split with SKILL.md):
 //   This script owns: alert-state.json total_ticks, last_micro_corrupt_wake_at;
-//                     pending-close-drain.json (shared with lib/routines/due.ts, non-peek only)
 //   alert-state owns: alert-state.json alerts{}, self_eval{}, last_digest_date, last_clean_eval_at,
 //                     structured_read_failure_notified_date (the `heartbeat.ts alert-state` verb)
 
@@ -27,7 +27,6 @@ import { probeDeclaredCredentials, shadowingCredentialNote } from '../credential
 import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
-import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown, PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES } from '../auto-close';
 
 type Json = any;
 
@@ -41,31 +40,6 @@ const readJSON = (p: string): Json => {
 // the pause-escape gate, the pending-budget gate, and the injection branch.
 export const budgetPending = (dir: string): boolean =>
   Object.values(readMergedAlerts(dir)).some((e: Json) => e?.kind === 'budget' && e.notified === false);
-
-// A task queued by `proposal-act` / `session-start --task` and not yet consumed.
-// Shared by the idle pierce below and the tick's `next_task` composition.
-export const nextTaskQueued = (dir: string): boolean =>
-  fs.existsSync(path.join(dir, 'sessions', 'NEXT-TASK.md'));
-
-// True when an in_progress session has been operator-quiet for >12h (prefers
-// last-operator-action.json, falls back to SHELL.md mtime). Pure read; fail-open
-// to false so a read error never forces a close. Shared by the injection branch
-// (AUTO_CLOSE never reads HEARTBEAT.md, so it survives a tainted checklist) and
-// the 12h AUTO_CLOSE path below.
-function staleAutoCloseDue(dir: string, nowMs: number): boolean {
-  try {
-    const runtime = readJSON(path.join(dir, 'state', 'runtime.json')) ?? {};
-    if ((runtime.session_state ?? 'idle') !== 'in_progress') return false;
-    const lastAction = readJSON(path.join(dir, 'state', 'last-operator-action.json'));
-    if (lastAction && typeof lastAction.at === 'string') {
-      const t = new Date(lastAction.at).getTime();
-      if (!isNaN(t)) return (nowMs - t) / 3600000 > 12;
-    }
-    // Absent/malformed action file → SHELL.md mtime fallback.
-    const mtime = fs.statSync(path.join(dir, 'sessions', 'SHELL.md')).mtime.getTime();
-    return (nowMs - mtime) / 3600000 > 12;
-  } catch { return false; }
-}
 
 // The default HEARTBEAT.md checklist item scans `proposals/` for review-worthy
 // proposals. Its alerts are keyed `proposal-pending:<PROP-NNN>`, NOT the generic
@@ -181,9 +155,7 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
 
   const alertStatePath = path.join(stateDir, 'state', 'alert-state.json');
 
-  // Earliest gate (PROP-015) — ahead of the pending-close drain below, so a
-  // paused hermit also suppresses AUTO_CLOSE, not just the checklist. Read-only:
-  // identical under --peek since it writes nothing.
+  // Pause suppresses all ordinary heartbeat work.
   const pauseStatus = isPaused(stateDir);
   if (pauseStatus.paused) {
     // PROP-016: a budget-triggered pause is itself the enforcement action, so the
@@ -202,60 +174,15 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
     }
   }
 
-  // Settled config, read once. Declared here rather than beside the active-hours gate
-  // below because the pending-close drain — which runs before every other gate — sizes
-  // its cooldown from heartbeat.every. The reader never writes and never throws, so the
-  // paths that emit before that gate only pay one extra small read.
   const config = readSettledConfig(stateDir);
   const hbConfig = config.heartbeat;
 
   // Resolve "now" once: real wall-clock, overridable by HERMIT_NOW for deterministic
-  // tests. Shared by the pending-close drain and the in_progress 12h check below.
+  // tests and the task queue age check.
   let now = Date.now();
   if (process.env.HERMIT_NOW) {
     const d = new Date(process.env.HERMIT_NOW).getTime();
     if (!isNaN(d)) now = d;
-  }
-
-  // Pending-close drain: if the daily-auto-close routine queued a close because the
-  // operator was active at midnight, drain it as soon as a 10-min lull appears.
-  // Runs BEFORE every other gate (HEARTBEAT.md presence, active-hours, 20-tick,
-  // micro-proposal) — the close is the signal, not a notification, and must not
-  // depend on operator-editable HEARTBEAT.md being present.
-  // The verdict itself lives in lib/auto-close.ts so the routine poll (lib/routines/
-  // due.ts) drains on the same terms — this tick is not the only drainer, and is
-  // absent entirely when heartbeat.enabled is false.
-  //
-  // Both guards are shared with that poll. The lull inside pendingCloseDrainDue ages
-  // from prompt submission, so an operator watching a long agent turn reads as away
-  // while still present — the turn marker is what catches that. The cooldown bounds a
-  // close that never completes: without it every tick re-emits, and each emission is a
-  // paid full-context wake. Under --peek the verdict is computed but not stamped, so a
-  // peek never consumes the cooldown the real tick needs.
-  //
-  // Hence the half-interval cap below: a cooldown as long as this poller's own interval
-  // can never expire on the next tick (drainCooldownExpired's note has the derivation),
-  // which is what made a failing close retry only every other tick once heartbeat.every
-  // became 30m (#771). The min() only tightens the shared 30-min ceiling, never widens
-  // it. Config is read live here while the monitor baked its interval in at launch, so
-  // an `every` edited mid-session can diverge from the real poll cadence until the
-  // monitor restarts — bounded, self-healing, and never worse than the old behavior.
-  //
-  // Below a 30-min interval the shipped flat cooldown already expires within a tick or
-  // two, so there is nothing to fix and halving would only shorten the backoff: an
-  // `every` of 5m would re-wake a failing close every 5 min instead of every ~35. A
-  // suppressed tick costs nothing (the peek never wakes the model), so short intervals
-  // keep the flat 30. Also absorbs `every: "0m"`, which would otherwise disable the gate.
-  const everyMin = parseDuration(hbConfig.every, 30 * 60_000) / 60_000;
-  const drainCooldownMin = everyMin < PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
-    ? PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES
-    : Math.min(PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES, everyMin / 2);
-  if (
-    pendingCloseDrainDue(stateDir, now) &&
-    !operatorTurnOpen(stateDir, now) &&
-    drainCooldownExpired(stateDir, now, drainCooldownMin)
-  ) {
-    if (peek || stampDrainCooldown(stateDir, now)) return 'AUTO_CLOSE';
   }
 
   let heartbeatContent: string;
@@ -273,9 +200,7 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
   // (state/injection-alert.json, written by the SKILL.md ALERT branch) keeps
   // it to one alert per file version. Deterministic operator-safety escalations
   // survive the suspension: a pending budget alert pierces the damper (the SKILL
-  // ALERT branch delivers it without reading HEARTBEAT.md), and a due stale
-  // auto-close still fires (AUTO_CLOSE never reads HEARTBEAT.md). One verdict per
-  // tick, budget before the destructive close. Scan errors fall through — never
+  // ALERT branch delivers it without reading HEARTBEAT.md). Scan errors fall through, never
   // block the tick. Pause still pre-empts this (gate at top of file).
   try {
     const hit = scanForInjection(heartbeatContent);
@@ -283,7 +208,6 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
       const hash = sha256(heartbeatContent).slice(0, 8);
       const verdict = `ALERT|injection-suspect:${hash}|${hit.cls} at line ${hit.line}`;
       if (budgetPending(stateDir)) return verdict;
-      if (staleAutoCloseDue(stateDir, now)) return 'AUTO_CLOSE';
       const announced = readJSON(path.join(stateDir, 'state', 'injection-alert.json'));
       if (announced?.hash === hash) return 'SKIP|injection-suspect (announced)';
       return verdict;
@@ -358,28 +282,8 @@ export function runPrecheck(stateDir: string, peek: boolean): string {
   // at all, and the mechanism the pause-escape gate above depends on to actually emit
   // EVALUATE rather than just falling through.
   if (budgetPending(stateDir)) return 'EVALUATE';
-
-  const runtime = readJSON(path.join(stateDir, 'state', 'runtime.json')) ?? {};
-  const sessionState = runtime.session_state ?? 'idle';
-
-  // A queued task on an idle always-on session pierces the damped gates below, the
-  // same way a pending budget alert does: the tick composes `next_task` and the skill
-  // either notifies (conservative) or starts the session. Without this the queue sits
-  // until the next boot.
-  //
-  // Gated on always_on because that is the same condition session-start applies before
-  // it will consume NEXT-TASK.md: an interactive hermit presents the queued task to the
-  // operator instead, leaving the file and the idle state exactly as they were — so an
-  // ungated pierce would re-fire this EVALUATE on every tick for as long as the task
-  // sits there, and each one is a paid full-context wake. Their next boot presents it
-  // anyway, which is the wait this pierce exists to remove for unattended hermits only.
-  if (sessionState === 'idle' && config.always_on === true && nextTaskQueued(stateDir)) return 'EVALUATE';
-
-  // 12h operator-quiet → auto-close.
-  if (sessionState === 'in_progress' && staleAutoCloseDue(stateDir, now)) return 'AUTO_CLOSE';
-
-  // waiting-timeout check requires elapsed computation — delegate to LLM
-  if (sessionState === 'waiting' && hbConfig.waiting_timeout) return 'EVALUATE';
+  // Fail open: a malformed task record must not turn every poll into HEARTBEAT_ERROR.
+  try { if (pendingQueue(stateDir, now)) return 'EVALUATE'; } catch { /* queue unreadable */ }
 
   const alerts: Json = alertState.alerts ?? {};
   const alertValues = Object.values(alerts);

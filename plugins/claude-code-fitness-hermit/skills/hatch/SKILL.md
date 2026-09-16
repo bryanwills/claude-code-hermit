@@ -1,6 +1,6 @@
 ---
 name: hatch
-description: One-time fitness hermit setup. Configures Strava MCP access, drops routine prompt templates, and wires routines into config.json. Run once per project after /claude-code-hermit:hatch.
+description: One-time fitness hermit setup. Configures Strava MCP access, wires domain skills as routines into config.json. Run once per project after /claude-code-hermit:hatch.
 disable-model-invocation: true
 ---
 
@@ -119,23 +119,7 @@ Write the updated `.mcp.json` using the Write tool.
 
 ---
 
-## Step 4 — Drop routine prompt files
-
-Copy the four routine prompt templates from the plugin's `state-templates/compiled/` into the consumer's `.claude-code-hermit/compiled/`.
-
-For each of the four files:
-- `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/routine-fitness-brief-morning.md`
-- `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/routine-fitness-brief-evening.md`
-- `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/routine-weekly-load-review.md`
-- `${CLAUDE_PLUGIN_ROOT}/state-templates/compiled/routine-monday-planning.md`
-
-Read the source file (using Read tool), then check if the destination exists (`.claude-code-hermit/compiled/<filename>`):
-- **Does not exist** → write it using Write tool. Report: `✓ dropped <filename>`.
-- **Already exists** → skip (do not overwrite operator edits). Report: `⊘ skipped <filename> (already present)`.
-
----
-
-### Step 4b: Install the weekly patterns gate
+## Step 4: Install the weekly patterns gate
 
 Install the shipped gate into the consumer project, always overwriting the previous gate:
 
@@ -214,34 +198,26 @@ In the `routines` array, check for each of these four IDs. For any that are **ab
 {
   "id": "morning-brief",
   "schedule": "30 7 * * *",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": true,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-fitness-brief-morning.md"
+  "skill": "claude-code-fitness-hermit:fitness-brief --morning",
+  "enabled": true
 },
 {
   "id": "evening-brief",
   "schedule": "30 21 * * *",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": true,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-fitness-brief-evening.md"
+  "skill": "claude-code-fitness-hermit:fitness-brief --evening",
+  "enabled": true
 },
 {
   "id": "weekly-load-review",
   "schedule": "0 18 * * 0",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": true,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-weekly-load-review.md"
+  "skill": "claude-code-fitness-hermit:weekly-load-review",
+  "enabled": true
 },
 {
   "id": "monday-planning",
   "schedule": "30 9 * * 1",
-  "skill": "claude-code-hermit:session-start",
-  "enabled": true,
-  "run_during_waiting": true,
-  "prompt_file": "compiled/routine-monday-planning.md"
+  "skill": "claude-code-fitness-hermit:monday-planning",
+  "enabled": true
 }
 ```
 
@@ -250,7 +226,7 @@ In the `routines` array, check for each of these four IDs. For any that are **ab
 Merge these entries into `config.routines` by id. Create the array if absent. Append each missing id; skip any existing id, preserving operator edits and all other config fields. No prompt is needed for these read-only analyses.
 
 ```json
-{"id": "weekly-coaching-patterns", "schedule": "5 9 * * 1", "skill": "claude-code-hermit:reflect --check-id weekly-coaching-patterns --check claude-code-fitness-hermit:weekly-coaching-patterns", "run_during_waiting": true, "enabled": true, "precheck": ".claude-code-hermit/bin/fitness-weekly-patterns-gate", "precheck_timeout_s": 60}
+{"id": "weekly-coaching-patterns", "schedule": "5 9 * * 1", "skill": "claude-code-hermit:reflect --check-id weekly-coaching-patterns --check claude-code-fitness-hermit:weekly-coaching-patterns", "enabled": true, "precheck": ".claude-code-hermit/bin/fitness-weekly-patterns-gate", "precheck_timeout_s": 60}
 ```
 
 The weekly routine checks for a trend before waking. Findings pass through reflection gates into the proposal pipeline.
@@ -275,10 +251,9 @@ Installation summary:
   ✓ .env: all four Strava credentials present
   ✓ .mcp.json: strava server entry written (or was already present)
   ✓ .gitignore: .mcp.json and .env covered
-  ✓ Routine prompts: {N}/4 dropped, {M}/4 already present
   ✓ CLAUDE.md: Fitness Workflow block injected (or was already present)
   ✓ knowledge-schema.md: fitness types added (or were already present)
-  ✓ config.json: _hermit_versions stamped, {K}/4 prompt routines added, weekly-coaching-patterns routine registered with precheck
+  ✓ config.json: _hermit_versions stamped, {K}/4 routines added, weekly-coaching-patterns routine registered with precheck
 
 Manual steps remaining:
   - Restart Claude Code so the `strava` MCP server loads from .mcp.json

@@ -7,10 +7,9 @@ import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { isGuest } from '../guest-marker';
 import { pidAlive } from '../lockfile';
-import { appendShellLine } from '../md-write';
 import { bootMismatch, waitForFirstTick } from '../monitor-health';
 import { readBootId } from '../routines/registry';
-import { currentHHMMOrUTC, resolveHermitNowMs } from '../time';
+import { resolveHermitNowMs } from '../time';
 import { hasStartedRegistration, heartbeatCommand, heartbeatHealth, heartbeatInterval } from './monitor-cmd';
 
 type Json = any;
@@ -56,8 +55,7 @@ export function prepareHeartbeatArm(hermitDir: string, config: Json): string[] {
 
 /**
  * Records a heartbeat Monitor registration: waits for the first liveness tick,
- * writes `state/heartbeat-monitor.runtime.json`, appends the SHELL.md Monitoring
- * line, and returns the result line for the caller to print. This module stays the
+ * writes `state/heartbeat-monitor.runtime.json` and returns the result line for the caller to print. This module stays the
  * sole writer of that runtime file — `arm commit --heartbeat` calls in here rather
  * than writing it itself.
  */
@@ -89,13 +87,6 @@ export async function commitHeartbeatArm(
   });
 
   if (!live) return 'DEAD|liveness-absent';
-  const hhmm = currentHHMMOrUTC(config?.timezone ?? 'UTC', new Date(nowMs));
-  const appendError = appendShellLine(
-    path.join(hermitDir, 'sessions'),
-    'Monitoring',
-    `[${hhmm}] Heartbeat: monitor registered (interval: ${config?.heartbeat?.every ?? `${interval}s`}) — liveness confirmed by /hermit-doctor heartbeat check`,
-  );
-  if (appendError) console.error(`[heartbeat] ${appendError}`);
   return `OK|registered|interval=${interval}`;
 }
 

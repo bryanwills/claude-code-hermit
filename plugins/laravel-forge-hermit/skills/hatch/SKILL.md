@@ -159,7 +159,7 @@ Re-read `.claude-code-hermit/config.json` now — the wizard has been running si
 Merge these entries into `config.routines` by id. Create the array if absent. Append each missing id; skip any existing id, preserving operator edits and all other config fields. No prompt is needed for these read-only analyses.
 
 ```json
-{"id": "forge-failed-deploys", "schedule": "5 9 * * *", "skill": "claude-code-hermit:reflect --check-id forge-failed-deploys --check laravel-forge-hermit:forge-failed-deploys", "run_during_waiting": true, "enabled": true}
+{"id": "forge-failed-deploys", "schedule": "5 9 * * *", "skill": "claude-code-hermit:reflect --check-id forge-failed-deploys --check laravel-forge-hermit:forge-failed-deploys", "enabled": true}
 ```
 
 Each routine owns its cadence and passes findings through reflection gates into the proposal pipeline.

@@ -61,7 +61,7 @@ function readRuntimeJson(stateDir?: string): Json | null {
  * only branch on "do I have state?" — but a caller deciding whether it may
  * WRITE lifecycle state must not treat a corrupt or unreadable record as an
  * empty slot: overwriting it destroys the only copy of transition/last_error
- * markers that session-start recovery reads.
+ * markers that SessionStart recovery reads.
  */
 type RuntimeRead =
   | { kind: 'ok'; data: Json }

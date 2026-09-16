@@ -21,10 +21,6 @@ export function setupWorkdir(): Workdir {
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'sessions'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude-code-hermit', 'state'), { recursive: true });
   fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
-  fs.copyFileSync(
-    path.join(fixturesDir, 'shell-session.md'),
-    path.join(dir, '.claude-code-hermit', 'sessions', 'SHELL.md'),
-  );
   fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'OPERATOR.md'), '');
   return {
     dir,

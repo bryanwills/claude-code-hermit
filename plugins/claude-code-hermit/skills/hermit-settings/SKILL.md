@@ -32,7 +32,6 @@ On a channel-tagged turn, every free-form `Ask:` prompt below is delivered via t
 /claude-code-hermit:hermit-settings watchdog       — scheduler_enabled, enable/disable, stale_factor, wedge_floor, escalate_after, operator_grace, context hygiene compaction
 /claude-code-hermit:hermit-settings routines        — manage scheduled routines (add/edit/remove/enable/disable)
 /claude-code-hermit:hermit-settings env              — view/edit environment variables
-/claude-code-hermit:hermit-settings compact          — configure SHELL.md compaction thresholds
 /claude-code-hermit:hermit-settings docker           — view Docker packages (read-only); edit recommended plugins
 /claude-code-hermit:hermit-settings scheduled-checks    — manage scheduled plugin skill checks
 /claude-code-hermit:hermit-settings boot-skill       — view/clear/change the always-on boot skill
@@ -260,7 +259,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     1. morning      30 8 * * *     claude-code-hermit:brief --morning    enabled   —
     2. evening      30 22 * * *    claude-code-hermit:brief --evening    enabled   —
     3. reflect      0 9 * * *      claude-code-hermit:reflect            enabled   reflect
-    4. weekly-deps  0 9 * * 1      claude-code-hermit:session-start ...  disabled  tools/deps-gate.sh
+    4. weekly-deps  0 9 * * 1      claude-code-hermit:task list  disabled  tools/deps-gate.sh
 
   (or "No routines configured" if empty)
   Gate = the routine's `precheck`, run by the routine monitor before it wakes the session;
@@ -318,23 +317,6 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   - If input is `remove <KEY>`: `unset env.<KEY>`
   - If input is `<KEY> <VALUE>`: `set env.<KEY> '"<VALUE>"'` — env values must stay **strings**, and `set` JSON-parses its argument, so a bare `20000` would land as a number and reach the launch overlay as one.
 - Note: "Env changes reach the session through the launch overlay at the next `hermit-start`. Restart the hermit to apply them."
-
-**If argument is "compact":**
-- Show current `compact` values from config.json:
-  ```
-  SHELL.md Compaction (config.json compact → session-archive.ts idle transition)
-
-    monitoring_threshold    30    (compact when Monitoring exceeds this many lines)
-    monitoring_keep         20    (keep this many recent entries after compacting)
-    summary_threshold       30    (compact when Session Summary exceeds this many lines)
-    summary_keep            15    (keep this many recent entries after compacting)
-  ```
-- Ask: "Change a threshold? (e.g., 'monitoring_threshold 50', 'summary_keep 20', or 'done') [done]"
-- Loop until operator says "done", "skip", or presses Enter:
-  - Validate: value must be a positive integer
-  - Validate: `*_keep` must not exceed its corresponding `*_threshold` (setting keep equal to threshold effectively disables compaction for that section)
-  - `set compact.<key> <value>`
-- Note: "Compaction runs at each idle transition (task completion). No restart needed."
 
 **If argument is "docker":**
 - Show current `docker.packages` list (read-only):

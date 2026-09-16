@@ -39,7 +39,7 @@ beforeEach(() => {
   );
   fs.writeFileSync(
     path.join(hermit, 'state', 'runtime.json'),
-    JSON.stringify({ version: 1, session_state: 'in_progress', runtime_mode: 'tmux' }),
+    JSON.stringify({ version: 1, runtime_mode: 'tmux' }),
   );
 });
 
