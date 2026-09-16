@@ -164,7 +164,7 @@ Otherwise: run `domain-hatch sync-block <plugin>` through hermit-run. Wrap resid
 
 ### Custom boot skill
 
-If your hermit needs to run domain-specific setup on every always-on launch (e.g. connectivity probe, context refresh, pulling a live snapshot), declare a boot skill and wire it via your plugin manifest. Core's `hermit-start.ts` will fire it into the tmux REPL at boot instead of the default `/claude-code-hermit:session`.
+If your hermit needs to run domain-specific setup on every always-on launch (e.g. connectivity probe, context refresh, pulling a live snapshot), declare a boot skill and wire it via your plugin manifest. Core's `hermit-start.ts` will fire it into the tmux REPL at boot instead of the default `/claude-code-hermit:resident-start`.
 
 1. **Write the boot skill**; a normal skill at `skills/<your>-boot/SKILL.md`. First line of the skill's plan must invoke core session init: `/claude-code-hermit:resident-start`. After that, run your domain setup. Example from `claude-code-homeassistant-hermit`:
 
@@ -188,7 +188,7 @@ If your hermit needs to run domain-specific setup on every always-on launch (e.g
 
 **Contract:** your boot skill owns the full bootstrap turn. Core does not call `resident-start` before invoking it; your skill must. This keeps composition in the skill layer so core's boot script stays domain-agnostic.
 
-**Opt-out:** omit `hermit.boot_skill` entirely if your hermit has no launch-time setup. Core's default bootstrap (`/claude-code-hermit:session`) runs instead.
+**Opt-out:** omit `hermit.boot_skill` entirely if your hermit has no launch-time setup. Core's default bootstrap (`/claude-code-hermit:resident-start`) runs instead.
 
 **Operator override:** operators can change or clear the boot skill via `/claude-code-hermit:hermit-settings boot-skill` — useful if they install multiple domain hermits and need to pick one, or want to temporarily disable domain bootstrap.
 

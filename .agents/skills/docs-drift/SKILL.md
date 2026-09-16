@@ -197,6 +197,11 @@ Propose an edit only when a reader would be factually misled:
 - **Borderline:** reader impact is unclear. Report it separately with a
   one-line rationale and no proposed edit.
 
+This marketplace ships as a research preview. Removed operator surfaces are
+deleted from documentation. Do not propose a Legacy section, leftover config
+keys in examples, "legacy configuration" labels, or dual current/old
+descriptions. State the present surface only.
+
 Do not pad findings.
 
 ## Step 5 — Report and wait for approval
@@ -245,7 +250,8 @@ After the user approves:
    Never edit a tag.
 2. Match each document's existing style. Keep edits succinct: prefer one
    sentence or one table-cell correction, and do not restate a full policy when
-   its established term or canonical link is enough.
+   its established term or canonical link is enough. Delete a removed surface;
+   do not relabel it as leftover, compatibility, or legacy support.
 3. Re-read the changed passages and run `git diff --check`.
 4. Do not add a changelog entry for documentation-only edits; repository
    guidance explicitly excludes them.

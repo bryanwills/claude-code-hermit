@@ -96,7 +96,7 @@ If the list is non-empty:
 - Present the candidates and ask: "Activate a hermit for this project?"
 - If the operator selects one: record the full entry from `detected_hermits` as `activated_hermit` (carries `plugin`, `id`, `marketplace_name`, `installPath`).
   - Read `<activated_hermit.installPath>/state-templates/CLAUDE-APPEND.md` and append it to the target project's CLAUDE.md (after the core append in step 5).
-  - Read `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json`: if it declares a `hermit.boot_skill` field (e.g. `"/claude-code-homeassistant-hermit:ha-boot"`), record it for step 5 to write as `boot_skill` in `config.json`. This replaces the default `/claude-code-hermit:session` bootstrap so the domain hermit's custom boot logic fires on every always-on launch. If the field is absent, leave `boot_skill` unset (core behavior).
+  - Read `<activated_hermit.installPath>/.claude-plugin/hermit-meta.json`: if it declares a `hermit.boot_skill` field (e.g. `"/claude-code-homeassistant-hermit:ha-boot"`), record it for step 5 to write as `boot_skill` in `config.json`. This replaces the default `/claude-code-hermit:resident-start` bootstrap so the domain hermit's custom boot logic fires on every always-on launch. If the field is absent, leave `boot_skill` unset (core behavior).
   - Step 5 sends `activated_hermit.plugin` as `slug` together with the `boot_skill` above in the `hatch-config.ts` answers payload. Do not read the sibling's `plugin.json` version — core does not stamp `_hermit_versions` for an activated hermit.
 - If the list is empty or the operator declines: skip.
 
@@ -221,7 +221,7 @@ For routines — if Yes: use the config defaults (`active_hours.start = 08:00`, 
 - `{"id":"evening","schedule":"30 22 * * *","skill":"claude-code-hermit:brief --evening","enabled":true}`
 - Always add (regardless of routine choice): `{"id":"heartbeat-restart","schedule":"0 4 * * *","skill":"claude-code-hermit:hermit-routines load","enabled":true}`
 - If no routines: still add heartbeat-restart to the `routines` array (it's infrastructure, not a user routine)
-- **Routines auto-register only on always-on launches via `hermit-start.ts`** (as one persistent routine monitor; CronCreate fallback where Monitor is unavailable). Interactive `/session` users who want routines active in interactive mode must run `/claude-code-hermit:hermit-routines load` themselves. Mention this once at the end of hatch if the operator is running interactively.
+- **Routines auto-register only on always-on launches via `hermit-start.ts`** (as one persistent routine monitor; CronCreate fallback where Monitor is unavailable). Interactive users who want routines active in interactive mode must run `/claude-code-hermit:hermit-routines load` themselves. Mention this once at the end of hatch if the operator is running interactively.
 - Keep the template's `"precheck": "reflect"` on the reflect routine: it is the wake gate, and it is what keeps a day with nothing to reflect on from waking the session at all.
 - If the operator wants a custom routine beyond the morning/evening defaults, point them at [Routine Authoring](../../docs/routine-authoring.md) for the cost-conscious authoring pattern (scoped skill, haiku pin, a `precheck` wake gate with its optional `precheck_timeout_s`) rather than hand-deriving it.
 
@@ -629,11 +629,11 @@ Ask both questions in one `AskUserQuestion` call.
 questions: [
   {
     header: "Deployment",
-    question: "How will you run hermit?",
+    question: "How will you run the agent?",
     options: [
       { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; the watchdog scheduler installs on first boot (opt out with watchdog.scheduler_enabled: false)" },
       { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
-      { label: "Interactive", description: "Just trying it. /session in your terminal" }
+      { label: "Interactive", description: "Just trying it, right here in your terminal" }
     ]
   },
   {

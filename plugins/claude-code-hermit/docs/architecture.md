@@ -14,10 +14,9 @@ A Claude Code plugin that turns any Claude Code instance into a self-improving p
  +-------------------------------|----------------------------------+
                                  |
  +-------------------------------v----------------------------------+
- |                    LAYER 2: SESSION LAYER                        |
- |   tasks/T-*.md <-- durable commitments                               |
- |   tasks/T-*.md           <-- commitment records               |
- |   Lifecycle:  start --> work --> close --> archive                |
+ |                    LAYER 2: TASK RECORDS                         |
+ |   tasks/T-*.md           <-- durable commitments                  |
+ |   Lifecycle:  open --> work --> check/confirm/cancel              |
  +-------------------------------|----------------------------------+
                                  |
  +-------------------------------v----------------------------------+
@@ -33,7 +32,7 @@ A Claude Code plugin that turns any Claude Code instance into a self-improving p
                                  |
  +-------------------------------v----------------------------------+
  |                    LAYER 5: REPO ARTIFACTS                       |
- |   CLAUDE.md - OPERATOR.md - sessions/ - proposals/ - templates/  |
+ |   CLAUDE.md - OPERATOR.md - TASKS.md - tasks/ - proposals/        |
  +-----------------------------------------------------------------+
 ```
 
@@ -142,9 +141,8 @@ your-project/
 │   ├── tasks/T-*.md
 │   ├── proposals/PROP-NNN.md
 │   ├── compiled/review-weekly-YYYY-Www.md  # Weekly review reports (weekly-review.ts; type: review)
-│   ├── templates/
 │   ├── state/                        # Runtime observations (agent-owned, not operator-configured)
-│   │   ├── runtime.json              # Session state: in_progress/waiting/idle, plus the session stamp (config_dir, env_auth, inbox_socket, session_pid) and requested peer_name
+│   │   ├── runtime.json              # Process stamp (config_dir, env_auth, inbox_socket, session_pid, peer_name); execution is state/execution.json
 │   │   ├── alert-state.json          # Alert dedup state + self-eval evidence (heartbeat-owned)
 │   │   ├── reflection-state.json     # Last reflection timestamp (reflect-owned)
 │   │   ├── channel-activity.json     # Last channel interaction timestamp (channel-hook-owned)
@@ -321,7 +319,7 @@ Hermit provides the **timing infrastructure** (when to reflect), the **proposal 
 Morning routine (configurable time, default: active hours start + 30m): brief, proposal review, priority check, pending micro-proposals surfaced.
 Evening routine (configurable time, default: active hours end - 30m): task outcomes, reflection, preparation for tomorrow.
 
-Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor tool is available, one native plugin monitor started by the activation skill evaluates every enabled routine's schedule outside the session ; a skipped fire costs zero model tokens, and routines due in the same poll batch into one wake. Eligibility gating defers only while an operator turn is genuinely open (a Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) ; coarser than CronCreate's harness turn-level idle gate: a routine wake can still interject into an active conversation, but a session merely left `in_progress` no longer starves routines. `heartbeat-restart` stays a CronCreate **re-arm anchor**, firing daily at 4am to re-invoke `load` (re-arming the monitor) and, unless `heartbeat.enabled` is explicitly false, activate the native heartbeat monitor. Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`), `load` falls back to per-routine CronCreate registrations, idle-gated at the harness turn level and re-armed daily by the same anchor before the 7-day expiry cliff.
+Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor tool is available, one native plugin monitor started by the activation skill evaluates every enabled routine's schedule outside the session ; a skipped fire costs zero model tokens, and routines due in the same poll batch into one wake. Eligibility gating defers only while an operator turn is genuinely open (a Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) ; coarser than CronCreate's harness turn-level idle gate: a routine wake can still interject into an active conversation. `heartbeat-restart` stays a CronCreate **re-arm anchor**, firing daily at 4am to re-invoke `load` (re-arming the monitor) and, unless `heartbeat.enabled` is explicitly false, activate the native heartbeat monitor. Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`), `load` falls back to per-routine CronCreate registrations, idle-gated at the harness turn level and re-armed daily by the same anchor before the 7-day expiry cliff.
 
 ### Scheduling ownership boundaries
 

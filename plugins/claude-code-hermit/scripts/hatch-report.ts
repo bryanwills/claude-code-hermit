@@ -218,12 +218,12 @@ export function renderFinal(o: Observed, deployment: string): string {
   } else if (deployment === 'tmux') {
     // This is the only shell command here; ! makes it runnable in the current session.
     steps.push('`!.claude-code-hermit/bin/hermit-start` — boot the always-on session');
-    consequence = `The hermit is not awake until step ${steps.length} finishes.`;
+    consequence = `The agent is not awake until step ${steps.length} finishes.`;
     if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
   } else {
     if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
-    steps.push('`/claude-code-hermit:session` — start working');
-    consequence = `No session is open until step ${steps.length} finishes.`;
+    steps.push('`/claude-code-hermit:resident-start` — start the agent');
+    consequence = `The agent is not running until step ${steps.length} finishes.`;
   }
   steps.forEach((s, i) => out.push(`${i + 1}. ${s}`));
   out.push('');

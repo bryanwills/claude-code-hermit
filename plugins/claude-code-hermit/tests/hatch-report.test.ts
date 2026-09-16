@@ -134,8 +134,11 @@ describe('final next-steps keys off deployment', () => {
     expect(renderFinal(observe(hatched()), 'tmux')).toContain('bin/hermit-start');
   });
 
-  test('interactive points at /session', () => {
-    expect(renderFinal(observe(hatched()), 'interactive')).toContain(':session');
+  test('interactive points at resident-start', () => {
+    const out = renderFinal(observe(hatched()), 'interactive');
+    expect(out).toContain('resident-start` — start the agent');
+    expect(out).toContain('The agent is not running until step');
+    expect(out).not.toContain(':session');
   });
 
   test('channel-setup appears only when a channel is configured', () => {

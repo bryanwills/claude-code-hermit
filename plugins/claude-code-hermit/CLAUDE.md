@@ -21,7 +21,7 @@ Installed state lives in the target project's `.claude-code-hermit/`:
 - `state/` machine state: runtime, alert and reflection state, metrics JSONL, monitor registry
 - `raw/` domain inputs and `compiled/` durable domain outputs (injected at session start). Both flat, no subdirectories; `raw/.archive/` holds expired artifacts. Contract: [plugin-hermit-storage](docs/plugin-hermit-storage.md).
 - `knowledge-schema.md`, `config.json`, and `OPERATOR.md` (operator-curated: draft changes, confirm before writing; hard-blocked in always-on mode)
-- `bin/` lifecycle scripts, `docker/`, `HEARTBEAT.md`, `SESSION-REPORT.md`, `templates/`; the full set is `state-templates/`
+- `bin/` lifecycle scripts, `docker/`, `HEARTBEAT.md`, `TASKS.md`; the full set is `state-templates/`
 
 ### State ownership under residency
 
